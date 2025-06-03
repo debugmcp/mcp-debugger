@@ -1,0 +1,11 @@
+blank_issues_enabled: false # Users must select a template
+contact_links:
+  - name: Project README
+    url: https://github.com/debugmcp/mcp-debugger/blob/main/README.md # Placeholder URL, update after repo creation
+    about: Please check the main README for general information and FAQs.
+  - name: Documentation
+    url: https://github.com/debugmcp/mcp-debugger/tree/main/docs # Placeholder URL
+    about: For detailed documentation, usage guides, and examples.
+  # - name: GitHub Discussions (Q&A) # Enable once Discussions are set up (Item I-1)
+  #   url: https://github.com/debugmcp/mcp-debugger/discussions/categories/q-a # Placeholder URL
+  #   about: Please ask and answer questions here.

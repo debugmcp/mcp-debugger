@@ -1,0 +1,37 @@
+[project]
+name = "debug-mcp-server-launcher"
+version = "0.1.0"
+description = "Launcher for debug-mcp-server. This package ensures debugpy is installed and provides instructions to run the main server (Node.js or Docker)."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Your Name/Org", email = "your@email.com" } # Placeholder, user should update
+]
+keywords = ["mcp", "dap", "debugger", "debugpy", "ai-agent", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License", # Assuming MIT, will match LICENSE file
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+dependencies = [
+  "debugpy>=1.8.14" 
+]
+
+[project.urls]
+Homepage = "https://github.com/your-repo/debug-mcp-server" # Placeholder
+Repository = "https://github.com/your-repo/debug-mcp-server" # Placeholder
+
+[project.scripts]
+debug-mcp-server = "debug_mcp_launcher.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

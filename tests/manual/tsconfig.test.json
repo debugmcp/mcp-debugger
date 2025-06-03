@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..", 
+    "outDir": "./build", 
+    "module": "NodeNext", // Ensure this is compatible with your Node version and package.json type
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true, // Already in main, but good to have
+    "esModuleInterop": true, // Already in main
+    "resolveJsonModule": true, // Already in main
+    "allowSyntheticDefaultImports": true // Already in main
+    // No need to repeat "target", "strict", etc. as they are inherited
+  },
+  "include": [
+    "./**/*.ts", 
+    "../../src/**/*.ts" 
+  ],
+  "exclude": [
+    "../../node_modules",
+    "../../build" 
+  ]
+}
