@@ -1,221 +1,220 @@
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-import type { ExecException } from 'child_process'; 
-// Import types from the source file for consistency
-import type { PythonDetectionResult, RunCmd } from '../../../src/utils/python-utils';
+/**
+ * Unit tests for Python utilities
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { promisify } from 'util';
+import { exec as execCallback } from 'child_process';
+import type { RunCmd } from '../../../src/utils/python-utils.js';
 
-// Interface representing the module structure we get from dynamic import,
-// matching the refactored signatures in src/utils/python-utils.ts
-interface PythonUtilsModule {
-  detectPythonAndDebugpy: (runCmd?: RunCmd, pythonCmdOverride?: string) => Promise<PythonDetectionResult>;
-  installDebugpy: (pythonExecutablePath: string, runCmd?: RunCmd) => Promise<boolean>;
-  getPythonHelpMessage: () => string;
-}
-
-type ExecCallback = (error: ExecException | null, stdout: string, stderr: string) => void;
-
-// Define the mock for exec. This will be used by jest.unstable_mockModule.
-// Use a generic jest.Mock type to avoid issues with __promisify__ property.
-const execMock = jest.fn();
-
-// Mock 'child_process' before any imports that might use it.
-// This must be at the top level and use `await`.
-await jest.unstable_mockModule('child_process', () => ({
-  __esModule: true, // Important for ESM mocks
-  // Spread actual module if other exports are needed and should be real,
-  // but for python-utils, only 'exec' is used.
-  // ...jest.requireActual('child_process'),
-  exec: execMock,
+// Mock child_process before importing python-utils
+vi.mock('child_process', () => ({
+  exec: vi.fn()
 }));
 
-// Dynamically import the module under test AFTER the mock is in place.
-// All functions from python-utils will be properties of this 'pythonUtilsModule' object.
-const pythonUtilsModule = await import('../../../src/utils/python-utils') as PythonUtilsModule;
-import { promisify } from 'node:util'; // Import promisify for tests
-
-// Helper to create the mock function for exec, matching the RunCmd interface
-// The actual exec function from child_process has multiple overloads,
-// but promisify typically uses the (command, options?, callback) or (command, callback) signature.
-// Our RunCmd interface is (command: string): Promise<{ stdout: string; stderr: string }>,
-// so the mock for the underlying callback version should be:
-// (command: string, callback: (error, stdout, stderr))
-// or (command: string, options: object, callback: (error, stdout, stderr))
-
-const createCallbackMock = (stdout: string, stderr: string, error?: Error | null) => {
-  // This function is the implementation for our callback-style execMock
-  return (cmd: string, optionsOrCallback: any, callback?: ExecCallback) => {
-    // cb here is the actual callback that node's promisify will provide to execMock
-    const cbInternal = (typeof optionsOrCallback === 'function' ? optionsOrCallback : callback) as 
-      (err: ExecException | null, resultValue?: { stdout: string, stderr: string }) => void;
-
-    if (error) {
-      // When execMock's callback is called with an error, the promisified version will reject.
-      cbInternal(error as ExecException, undefined);
-    } else {
-      // When execMock's callback is called with (null, value), promisified version resolves to 'value'.
-      // We want 'value' to be { stdout, stderr } to match RunCmd interface.
-      cbInternal(null, { stdout, stderr });
-    }
-    return {} as any; // Simulate ChildProcess return, not strictly needed for promisify
-  };
-};
+// Import after mocking
+const { detectPythonAndDebugpy, installDebugpy, getPythonHelpMessage } = 
+  await import('../../../src/utils/python-utils.js');
 
 describe('Python Utilities', () => {
+  const mockExec = execCallback as any;
   const defaultPythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  let originalEnv: string | undefined;
 
   beforeEach(() => {
-    execMock.mockReset();
-    // Default implementation: calls back with an error.
-    // Specific tests will override this with mockImplementationOnce.
-    execMock.mockImplementation(createCallbackMock('', 'Default mock error stderr', new Error('Unhandled execMock call')) as any);
+    vi.clearAllMocks();
+    originalEnv = process.env.MCP_PYTHON_CMD;
+    delete process.env.MCP_PYTHON_CMD;
+  });
+
+  afterEach(() => {
+    if (originalEnv !== undefined) {
+      process.env.MCP_PYTHON_CMD = originalEnv;
+    } else {
+      delete process.env.MCP_PYTHON_CMD;
+    }
   });
 
   describe('detectPythonAndDebugpy', () => {
-    it('should detect Python and debugpy if default python command is valid', async () => {
-      execMock
-        .mockImplementationOnce(createCallbackMock('Python 3.9.0', '') as any) // python --version
-        .mockImplementationOnce(createCallbackMock('', '') as any); // python -c "import debugpy"
+    it('should detect Python and debugpy if both are available', async () => {
+      // Create a custom runCmd that will be passed to the function
+      const mockRunCmd = vi.fn()
+        .mockResolvedValueOnce({ stdout: 'Python 3.9.0', stderr: '' }) // python --version
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }); // python -c "import debugpy"
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      const result = await pythonUtilsModule.detectPythonAndDebugpy(runCmdForTest);
-      expect(result.pythonPath).toBe(defaultPythonCmd);
-      expect(result.pythonVersion).toBe('Python 3.9.0');
-      expect(result.debugpyAvailable).toBe(true);
-      expect(result.error).toBe('');
-      expect(execMock).toHaveBeenCalledTimes(2);
-      expect(execMock).toHaveBeenNthCalledWith(1, `${defaultPythonCmd} --version`, expect.any(Function));
-      expect(execMock).toHaveBeenNthCalledWith(2, `${defaultPythonCmd} -c "import debugpy"`, expect.any(Function));
+      const result = await detectPythonAndDebugpy(mockRunCmd);
+
+      expect(result).toEqual({
+        pythonPath: defaultPythonCmd,
+        pythonVersion: 'Python 3.9.0',
+        debugpyAvailable: true,
+        error: ''
+      });
+
+      expect(mockRunCmd).toHaveBeenCalledTimes(2);
+      expect(mockRunCmd).toHaveBeenCalledWith(`${defaultPythonCmd} --version`);
+      expect(mockRunCmd).toHaveBeenCalledWith(`${defaultPythonCmd} -c "import debugpy"`);
     });
 
-    it('should use pythonCmdOverride if provided and valid', async () => {
-      const overrideCmd = 'custompython';
-      execMock
-        .mockImplementationOnce(createCallbackMock('Python 3.10.0 (custom)', '') as any) // custompython --version
-        .mockImplementationOnce(createCallbackMock('', '') as any); // custompython -c "import debugpy"
+    it('should use pythonCmdOverride if provided', async () => {
+      const customPython = '/usr/local/bin/python3.10';
+      const mockRunCmd = vi.fn()
+        .mockResolvedValueOnce({ stdout: 'Python 3.10.5', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' });
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      const result = await pythonUtilsModule.detectPythonAndDebugpy(runCmdForTest, overrideCmd);
-      expect(result.pythonPath).toBe(overrideCmd);
-      expect(result.pythonVersion).toBe('Python 3.10.0 (custom)');
+      const result = await detectPythonAndDebugpy(mockRunCmd, customPython);
+
+      expect(result.pythonPath).toBe(customPython);
+      expect(result.pythonVersion).toBe('Python 3.10.5');
       expect(result.debugpyAvailable).toBe(true);
-      expect(result.error).toBe('');
-      expect(execMock).toHaveBeenCalledTimes(2);
+      expect(mockRunCmd).toHaveBeenCalledWith(`${customPython} --version`);
     });
-    
-    it('should detect Python but not debugpy if debugpy import fails', async () => {
-      execMock
-        .mockImplementationOnce(createCallbackMock('Python 3.8.5', '') as any) // python --version
-        .mockImplementationOnce(createCallbackMock('', 'Error from mock', new Error('ModuleNotFoundError')) as any); // python -c "import debugpy" (fails)
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      const result = await pythonUtilsModule.detectPythonAndDebugpy(runCmdForTest);
+    it('should use MCP_PYTHON_CMD environment variable if set', async () => {
+      process.env.MCP_PYTHON_CMD = '/opt/python/bin/python';
+      
+      const mockRunCmd = vi.fn()
+        .mockResolvedValueOnce({ stdout: 'Python 3.11.0', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      const result = await detectPythonAndDebugpy(mockRunCmd);
+
+      expect(result.pythonPath).toBe('/opt/python/bin/python');
+      expect(mockRunCmd).toHaveBeenCalledWith('/opt/python/bin/python --version');
+    });
+
+    it('should detect Python but not debugpy if debugpy is not installed', async () => {
+      const mockRunCmd = vi.fn()
+        .mockResolvedValueOnce({ stdout: 'Python 3.8.10', stderr: '' })
+        .mockRejectedValueOnce(new Error('ModuleNotFoundError: No module named debugpy'));
+
+      const result = await detectPythonAndDebugpy(mockRunCmd);
+
       expect(result.pythonPath).toBe(defaultPythonCmd);
-      expect(result.pythonVersion).toBe('Python 3.8.5');
+      expect(result.pythonVersion).toBe('Python 3.8.10');
       expect(result.debugpyAvailable).toBe(false);
       expect(result.error).toContain('debugpy not found');
-      expect(execMock).toHaveBeenCalledTimes(2);
     });
 
-    it('should return error if Python version check fails', async () => {
-      execMock.mockImplementation(createCallbackMock('', 'Error from mock', new Error('Command not found')) as any);
+    it('should return error if Python is not found', async () => {
+      const mockRunCmd = vi.fn()
+        .mockRejectedValueOnce(new Error('Command not found: python'));
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      const result = await pythonUtilsModule.detectPythonAndDebugpy(runCmdForTest);
-      expect(result.pythonPath).toBe('');
-      expect(result.pythonVersion).toBe('');
-      expect(result.debugpyAvailable).toBe(false);
-      expect(result.error).toContain(`Python command '${defaultPythonCmd}' not found or failed`);
-      expect(execMock).toHaveBeenCalledTimes(1); // Only one attempt for version
+      const result = await detectPythonAndDebugpy(mockRunCmd);
+
+      expect(result).toEqual({
+        pythonPath: '',
+        pythonVersion: '',
+        debugpyAvailable: false,
+        error: expect.stringContaining(`Python command '${defaultPythonCmd}' not found`)
+      });
+
+      expect(mockRunCmd).toHaveBeenCalledTimes(1);
     });
 
-    it('should use MCP_PYTHON_CMD environment variable if pythonCmdOverride is not provided', async () => {
-      const originalEnvVar = process.env.MCP_PYTHON_CMD;
-      const envPythonCmd = 'env_python';
-      process.env.MCP_PYTHON_CMD = envPythonCmd;
+    it('should use default runCmd if not provided', async () => {
+      // Mock the exec function to simulate successful Python detection
+      (mockExec as any).mockImplementation((cmd: string, callback: any) => {
+        if (cmd.includes('--version')) {
+          callback(null, 'Python 3.9.7', '');
+        } else if (cmd.includes('import debugpy')) {
+          callback(null, '', '');
+        }
+      });
 
-      execMock
-        .mockImplementationOnce(createCallbackMock('Python 3.11.0 (env)', '') as any) // env_python --version
-        .mockImplementationOnce(createCallbackMock('', '') as any); // env_python -c "import debugpy"
+      const result = await detectPythonAndDebugpy();
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      // Call detectPythonAndDebugpy without pythonCmdOverride, so it uses process.env
-      const result = await pythonUtilsModule.detectPythonAndDebugpy(runCmdForTest); 
-      
-      expect(result.pythonPath).toBe(envPythonCmd);
-      expect(result.pythonVersion).toBe('Python 3.11.0 (env)');
+      expect(result.pythonPath).toBe(defaultPythonCmd);
+      expect(result.pythonVersion).toBe('Python 3.9.7');
       expect(result.debugpyAvailable).toBe(true);
-      expect(execMock).toHaveBeenCalledTimes(2);
-
-      // Restore original environment variable
-      if (originalEnvVar === undefined) {
-        delete process.env.MCP_PYTHON_CMD;
-      } else {
-        process.env.MCP_PYTHON_CMD = originalEnvVar;
-      }
     });
   });
 
   describe('installDebugpy', () => {
-    const testPythonPath = 'my/python/path';
-    it('should return true if debugpy installs successfully, and log stderr warnings', async () => {
-      execMock
-        .mockImplementationOnce(createCallbackMock('Successfully installed debugpy', 'PIP_WARNING_TEST_MESSAGE') as any) // pip install with stderr
-        .mockImplementationOnce(createCallbackMock('', '') as any); // import debugpy (verify)
+    it('should install debugpy successfully', async () => {
+      const pythonPath = '/usr/bin/python3';
+      const mockRunCmd = vi.fn()
+        .mockResolvedValueOnce({ 
+          stdout: 'Successfully installed debugpy-1.6.0', 
+          stderr: 'WARNING: pip is out of date' 
+        })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }); // verification
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      const success = await pythonUtilsModule.installDebugpy(testPythonPath, runCmdForTest);
-      expect(success).toBe(true);
-      expect(execMock).toHaveBeenNthCalledWith(1, `${testPythonPath} -m pip install debugpy`, expect.any(Function));
-      expect(execMock).toHaveBeenNthCalledWith(2, `${testPythonPath} -c "import debugpy"`, expect.any(Function));
-      expect(execMock).toHaveBeenCalledTimes(2);
+      const result = await installDebugpy(pythonPath, mockRunCmd);
+
+      expect(result).toBe(true);
+      expect(mockRunCmd).toHaveBeenCalledTimes(2);
+      expect(mockRunCmd).toHaveBeenCalledWith(`${pythonPath} -m pip install debugpy`);
+      expect(mockRunCmd).toHaveBeenCalledWith(`${pythonPath} -c "import debugpy"`);
     });
 
     it('should return false if pip install fails', async () => {
-      execMock.mockImplementationOnce(createCallbackMock('', 'pip error', new Error('pip install failed')) as any);
+      const pythonPath = '/usr/bin/python3';
+      const mockRunCmd = vi.fn()
+        .mockRejectedValueOnce(new Error('pip: command not found'));
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      const success = await pythonUtilsModule.installDebugpy(testPythonPath, runCmdForTest);
-      expect(success).toBe(false);
-      expect(execMock).toHaveBeenCalledTimes(1);
+      const result = await installDebugpy(pythonPath, mockRunCmd);
+
+      expect(result).toBe(false);
+      expect(mockRunCmd).toHaveBeenCalledTimes(1);
     });
 
-    it('should return false if verification after install fails', async () => {
-      execMock
-        .mockImplementationOnce(createCallbackMock('Successfully installed debugpy', '') as any) // pip install success
-        .mockImplementationOnce(createCallbackMock('', 'import error', new Error('import failed')) as any); // import debugpy (verify fails)
+    it('should return false if verification fails after install', async () => {
+      const pythonPath = '/usr/bin/python3';
+      const mockRunCmd = vi.fn()
+        .mockResolvedValueOnce({ stdout: 'Successfully installed debugpy', stderr: '' })
+        .mockRejectedValueOnce(new Error('ModuleNotFoundError'));
 
-      const runCmdForTest = promisify(execMock as any) as RunCmd;
-      const success = await pythonUtilsModule.installDebugpy(testPythonPath, runCmdForTest);
-      expect(success).toBe(false);
-      expect(execMock).toHaveBeenCalledTimes(2);
+      const result = await installDebugpy(pythonPath, mockRunCmd);
+
+      expect(result).toBe(false);
+      expect(mockRunCmd).toHaveBeenCalledTimes(2);
     });
 
     it('should return false if pythonExecutablePath is empty', async () => {
-      const runCmdForTest = promisify(execMock as any) as RunCmd; // Though execMock won't be called
-      const success = await pythonUtilsModule.installDebugpy('', runCmdForTest);
-      expect(success).toBe(false);
-      expect(execMock).not.toHaveBeenCalled();
+      const mockRunCmd = vi.fn();
+
+      const result = await installDebugpy('', mockRunCmd);
+
+      expect(result).toBe(false);
+      expect(mockRunCmd).not.toHaveBeenCalled();
+    });
+
+    it('should use default runCmd if not provided', async () => {
+      const pythonPath = '/usr/bin/python3';
+      
+      // Mock the exec function for default runCmd
+      (mockExec as any).mockImplementation((cmd: string, callback: any) => {
+        if (cmd.includes('pip install')) {
+          callback(null, 'Successfully installed debugpy', '');
+        } else if (cmd.includes('import debugpy')) {
+          callback(null, '', '');
+        }
+      });
+
+      const result = await installDebugpy(pythonPath);
+
+      expect(result).toBe(true);
     });
   });
 
   describe('getPythonHelpMessage', () => {
-    it('should return a non-empty help string', () => {
-      // This function does not use exec.
-      const message = pythonUtilsModule.getPythonHelpMessage();
-      expect(message).toBeDefined();
-      expect(message.length).toBeGreaterThan(0);
-      expect(message).toContain('Python Requirements');
-      expect(message).toContain('pip install debugpy');
-    });
-  });
+    it('should return a comprehensive help message', () => {
+      const message = getPythonHelpMessage();
 
-  describe('getPythonHelpMessage', () => {
-    it('should return a non-empty help string', () => {
-      // This function does not use exec, so no mocking needed for it.
-      const message = pythonUtilsModule.getPythonHelpMessage();
       expect(message).toBeDefined();
-      expect(message.length).toBeGreaterThan(0);
+      expect(typeof message).toBe('string');
+      expect(message.length).toBeGreaterThan(100);
       expect(message).toContain('Python Requirements');
+      expect(message).toContain('debugpy');
       expect(message).toContain('pip install debugpy');
+      expect(message).toContain('MCP_PYTHON_CMD');
+    });
+
+    it('should include platform-specific default Python command', () => {
+      const message = getPythonHelpMessage();
+      const expectedDefault = process.platform === 'win32' ? 'python' : 'python3';
+      
+      expect(message).toContain(expectedDefault);
     });
   });
 });

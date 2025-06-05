@@ -1,6 +1,7 @@
 /**
  * Test utilities for Debug MCP Server tests
  */
+import { EventEmitter } from 'events';
 import { DebugLanguage, SessionState, DebugSession } from '../../src/session/models.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -52,13 +53,59 @@ export async function waitForCondition(
 }
 
 /**
+ * Wait for an event to be emitted
+ * 
+ * @param emitter - Event emitter to listen on
+ * @param event - Event name to wait for
+ * @param timeout - Timeout in milliseconds
+ * @returns Promise that resolves with event arguments
+ */
+export function waitForEvent<T extends any[]>(
+  emitter: EventEmitter,
+  event: string,
+  timeout = 5000
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      emitter.removeListener(event, handler);
+      reject(new Error(`Timeout waiting for event: ${event}`));
+    }, timeout);
+    
+    const handler = (...args: any[]) => {
+      clearTimeout(timer);
+      resolve(args as T);
+    };
+    
+    emitter.once(event, handler);
+  });
+}
+
+/**
+ * Wait for multiple events in sequence
+ * 
+ * @param emitter - Event emitter to listen on
+ * @param events - Array of event names to wait for in sequence
+ * @param timeout - Timeout for each event
+ * @returns Promise that resolves when all events have been emitted
+ */
+export async function waitForEvents(
+  emitter: EventEmitter,
+  events: string[],
+  timeout = 5000
+): Promise<void> {
+  for (const event of events) {
+    await waitForEvent(emitter, event, timeout);
+  }
+}
+
+/**
  * Create a mock event emitter for testing
  */
 export function createMockEventEmitter() {
   const listeners: Record<string, Array<(...args: any[]) => void>> = {};
   
   return {
-    on: jest.fn((event: string, callback: (...args: any[]) => void) => {
+    on: vi.fn((event: string, callback: (...args: any[]) => void) => {
       if (!listeners[event]) {
         listeners[event] = [];
       }
@@ -66,7 +113,24 @@ export function createMockEventEmitter() {
       listeners[event].push(callback);
     }),
     
-    emit: jest.fn((event: string, ...args: any[]) => {
+    once: vi.fn((event: string, callback: (...args: any[]) => void) => {
+      const wrappedCallback = (...args: any[]) => {
+        callback(...args);
+        // Remove the listener after first call
+        const index = listeners[event]?.indexOf(wrappedCallback);
+        if (index !== undefined && index !== -1) {
+          listeners[event].splice(index, 1);
+        }
+      };
+      
+      if (!listeners[event]) {
+        listeners[event] = [];
+      }
+      
+      listeners[event].push(wrappedCallback);
+    }),
+    
+    emit: vi.fn((event: string, ...args: any[]) => {
       const eventListeners = listeners[event] || [];
       
       eventListeners.forEach(listener => {
@@ -74,7 +138,7 @@ export function createMockEventEmitter() {
       });
     }),
     
-    removeListener: jest.fn((event: string, callback: (...args: any[]) => void) => {
+    removeListener: vi.fn((event: string, callback: (...args: any[]) => void) => {
       if (!listeners[event]) {
         return;
       }
@@ -84,6 +148,14 @@ export function createMockEventEmitter() {
       if (index !== -1) {
         listeners[event].splice(index, 1);
       }
+    }),
+    
+    removeAllListeners: vi.fn((event?: string) => {
+      if (event) {
+        delete listeners[event];
+      } else {
+        Object.keys(listeners).forEach(key => delete listeners[key]);
+      }
     })
   };
 }
@@ -92,10 +164,10 @@ export function createMockEventEmitter() {
  * Mock a function that returns a promise
  * 
  * @param returnValue - Value to return from the mock
- * @returns A jest mock function
+ * @returns A vitest mock function
  */
 export function mockAsyncFunction<T>(returnValue: T) {
-  return jest.fn().mockResolvedValue(returnValue);
+  return vi.fn().mockResolvedValue(returnValue);
 }
 
 /**
@@ -138,4 +210,142 @@ export function cleanupTempTestFiles(): void {
   if (fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Create a delay promise
+ * 
+ * @param ms - Milliseconds to delay
+ * @returns Promise that resolves after the delay
+ */
+export function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Run a function with a timeout
+ * 
+ * @param fn - Function to run
+ * @param timeout - Timeout in milliseconds
+ * @returns Promise that rejects if timeout is reached
+ */
+export function withTimeout<T>(fn: () => Promise<T>, timeout: number): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(`Operation timed out after ${timeout}ms`)), timeout)
+    )
+  ]);
+}
+
+// ===== NEW HELPERS FOR FAKE PROCESS IMPLEMENTATIONS =====
+
+import { FakeProxyProcessLauncher, FakeProcess } from '../implementations/test/fake-process-launcher.js';
+import { ProxyManager } from '../../src/proxy/proxy-manager.js';
+import { IFileSystem, ILogger } from '../../src/interfaces/external-dependencies.js';
+import { vi } from 'vitest';
+
+/**
+ * Create a fake proxy process with common proxy behavior
+ * @returns A configured fake process
+ */
+export function createFakeProxyProcess(): FakeProcess {
+  const process = new FakeProcess();
+  
+  // Set up common proxy behavior
+  process.on('message', (msg: any) => {
+    if (typeof msg === 'string') {
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed.cmd === 'terminate') {
+          process.simulateExit(0);
+        }
+      } catch {
+        // Not JSON, ignore
+      }
+    }
+  });
+  
+  return process;
+}
+
+/**
+ * Set up a ProxyManager test with all fakes configured
+ * @returns Test setup with proxy manager and all dependencies
+ */
+export function setupProxyManagerTest() {
+  const fakeLauncher = new FakeProxyProcessLauncher();
+  const mockLogger: ILogger = {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn()
+  };
+  const mockFileSystem: IFileSystem = {
+    pathExists: vi.fn().mockResolvedValue(true),
+    ensureDir: vi.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    remove: vi.fn(),
+    copy: vi.fn(),
+    outputFile: vi.fn(),
+    exists: vi.fn(),
+    mkdir: vi.fn(),
+    readdir: vi.fn(),
+    stat: vi.fn(),
+    unlink: vi.fn(),
+    rmdir: vi.fn(),
+    ensureDirSync: vi.fn()
+  } as any;
+  
+  const proxyManager = new ProxyManager(
+    fakeLauncher,
+    mockFileSystem,
+    mockLogger
+  );
+  
+  return {
+    proxyManager,
+    fakeLauncher,
+    mockLogger,
+    mockFileSystem
+  };
+}
+
+/**
+ * Create a mock logger for testing
+ * @returns Mock logger with vitest mocks
+ */
+export function createMockLogger(): ILogger {
+  return {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn()
+  };
+}
+
+/**
+ * Create a mock file system for testing
+ * @returns Mock file system with vitest mocks
+ */
+export function createMockFileSystem(): IFileSystem {
+  return {
+    pathExists: vi.fn().mockResolvedValue(true),
+    ensureDir: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue(''),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    remove: vi.fn().mockResolvedValue(undefined),
+    copy: vi.fn().mockResolvedValue(undefined),
+    outputFile: vi.fn().mockResolvedValue(undefined),
+    exists: vi.fn().mockResolvedValue(true),
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    readdir: vi.fn().mockResolvedValue([]),
+    stat: vi.fn().mockResolvedValue({ isDirectory: () => false, isFile: () => true }),
+    unlink: vi.fn().mockResolvedValue(undefined),
+    rmdir: vi.fn().mockResolvedValue(undefined),
+    ensureDirSync: vi.fn(),
+    createWriteStream: vi.fn(),
+    createReadStream: vi.fn()
+  } as any;
 }

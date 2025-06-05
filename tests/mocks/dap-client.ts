@@ -5,7 +5,7 @@
  * This provides a consistent mock implementation for the DAP client
  * used throughout the debugger tests.
  */
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 import { EventEmitter } from 'events';
 
 // Events tracked by the client
@@ -35,9 +35,9 @@ export type DapEvent =
  */
 export class MockDapClient extends EventEmitter {
   // Client methods
-  public connect = jest.fn().mockResolvedValue(undefined);
-  public disconnect = jest.fn().mockResolvedValue(undefined);
-  public sendRequest = jest.fn().mockResolvedValue({});
+  public connect = vi.fn().mockResolvedValue(undefined);
+  public disconnect = vi.fn().mockResolvedValue(undefined);
+  public sendRequest = vi.fn().mockResolvedValue({});
   
   // Event handlers
   private eventHandlers: Map<string, Function[]> = new Map();
@@ -46,7 +46,7 @@ export class MockDapClient extends EventEmitter {
     super();
     
     // Create a wrapper around the on method to track registered handlers
-    this.on = jest.fn().mockImplementation((event: string, handler: Function) => {
+    this.on = vi.fn().mockImplementation((event: string, handler: Function) => {
       if (!this.eventHandlers.has(event)) {
         this.eventHandlers.set(event, []);
       }
@@ -63,7 +63,7 @@ export class MockDapClient extends EventEmitter {
     this.connect.mockReset();
     this.disconnect.mockReset();
     this.sendRequest.mockReset();
-    (this.on as jest.Mock).mockClear();
+    (this.on as any).mockClear();
     
     // Clear all registered event handlers
     this.eventHandlers.clear();
@@ -128,7 +128,7 @@ export const resetMockDapClient = (): void => {
   mockDapClient.reset();
 };
 
-// Export default for use with jest.mock
+// Export default for use with vi.mock
 export default {
-  DebugAdapterClient: jest.fn().mockImplementation(() => mockDapClient)
+  DebugAdapterClient: vi.fn().mockImplementation(() => mockDapClient)
 };

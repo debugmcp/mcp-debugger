@@ -1,0 +1,4378 @@
+{
+  "tasks": [
+    {
+      "priority": 1,
+      "file": "src/proxy/dap-proxy.ts",
+      "currentCoverage": 0,
+      "targetCoverage": 80,
+      "testsNeeded": [
+        {
+          "method": "(anonymous_0)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_1)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_2)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_3)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "processParentMessage",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_5)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_6)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "sendToParent",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "handleCommandFromParent",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "startDebugpyAdapterAndSequence",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_10)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_11)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_12)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_13)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_14)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_15)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "setupDapEventHandlers",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_17)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_18)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_19)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_20)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_21)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_22)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_23)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_24)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_25)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_26)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "shutdown",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_28)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_29)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_30)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_31)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_32)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_33)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_34)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_35)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_36)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 3 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 3 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 4 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 4 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 9 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 9 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 10 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 10 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 69 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 69 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 75 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 75 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 75 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 75 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 77 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 77 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 77 (type: binary-expr, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 82 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 82 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 86 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 86 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 87 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 87 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 88 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 88 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 90 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 90 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 94 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 94 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 99 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 99 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 101 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 101 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 101 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 101 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 106 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 106 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 107 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 107 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 122 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 122 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: binary-expr, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 127 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 127 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 127 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 127 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 127 (type: binary-expr, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 139 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 139 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 149 (type: switch, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 149 (type: switch, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 149 (type: switch, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 149 (type: switch, path 3)",
+          "scenarios": [
+            "Test branch path 3"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 158 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 158 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 167 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 167 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 173 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 173 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 177 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 177 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 183 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 183 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 184 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 184 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 185 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 185 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 198 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 198 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 211 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 211 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 226 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 226 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 233 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 233 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 245 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 245 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 245 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 245 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 245 (type: binary-expr, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 272 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 272 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 281 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 281 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 286 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 286 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 286 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 286 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 322 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 322 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 340 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 340 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 341 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 341 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 344 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 344 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 364 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 364 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 364 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 364 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 373 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 373 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 375 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 375 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 378 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 378 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 386 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 386 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 387 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 387 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 396 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 396 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 396 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 396 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 407 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 407 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 407 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 407 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 427 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 427 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 428 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 428 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 478 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 478 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 484 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 484 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 500 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 500 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 510 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 510 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 520 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 520 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 528 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 528 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 528 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 528 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 531 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 531 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 538 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 538 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 548 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 548 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 568 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 568 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 569 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 569 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 574 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 574 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 575 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 575 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 580 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 580 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 585 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 585 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 590 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 590 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        }
+      ],
+      "estimatedTests": 197,
+      "complexity": "high"
+    },
+    {
+      "priority": 1,
+      "file": "src/proxy/minimal-dap.ts",
+      "currentCoverage": 0,
+      "targetCoverage": 80,
+      "testsNeeded": [
+        {
+          "method": "(anonymous_0)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_1)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_2)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_3)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_4)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_5)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_6)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_7)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_8)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_9)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_10)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_11)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_12)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_13)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 50 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 50 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 57 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 57 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 66 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 66 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 85 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 85 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 91 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 91 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 93 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 93 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 95 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 95 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 98 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 98 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 104 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 104 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 117 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 117 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 125 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 139 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 139 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 146 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 146 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 155 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 155 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 162 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 162 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 162 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 162 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 175 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 175 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        }
+      ],
+      "estimatedTests": 50,
+      "complexity": "high"
+    },
+    {
+      "priority": 1,
+      "file": "src/proxy/proxy-manager.ts",
+      "currentCoverage": 0,
+      "targetCoverage": 80,
+      "testsNeeded": [
+        {
+          "method": "(anonymous_0)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_1)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_2)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_3)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_4)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_5)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_6)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_7)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_8)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_9)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_10)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_11)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_12)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_13)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_14)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_15)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_16)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_17)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_18)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_19)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_20)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_21)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_22)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_23)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_24)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_25)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_26)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_27)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_28)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_29)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_30)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_31)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 145 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 145 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 175 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 175 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 175 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 175 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 232 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 232 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 232 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 232 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 248 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 248 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 280 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 280 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 280 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 280 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 311 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 311 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 320 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 320 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 335 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 335 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 340 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 340 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 349 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 349 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 349 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 349 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 357 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 357 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 387 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 387 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 395 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 395 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 400 (type: switch, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 400 (type: switch, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 400 (type: switch, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 400 (type: switch, path 3)",
+          "scenarios": [
+            "Test branch path 3"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 422 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 422 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 428 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 428 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 432 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 432 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 443 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 443 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 450 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 450 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 451 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 451 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 453 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 453 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 460 (type: switch, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 460 (type: switch, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 460 (type: switch, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 460 (type: switch, path 3)",
+          "scenarios": [
+            "Test branch path 3"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 460 (type: switch, path 4)",
+          "scenarios": [
+            "Test branch path 4"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 463 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 463 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 464 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 464 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 489 (type: switch, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 489 (type: switch, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 489 (type: switch, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 489 (type: switch, path 3)",
+          "scenarios": [
+            "Test branch path 3"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 489 (type: switch, path 4)",
+          "scenarios": [
+            "Test branch path 4"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 489 (type: switch, path 5)",
+          "scenarios": [
+            "Test branch path 5"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 504 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 504 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 514 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 514 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 514 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 514 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 527 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 527 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        }
+      ],
+      "estimatedTests": 107,
+      "complexity": "high"
+    },
+    {
+      "priority": 1,
+      "file": "src/implementations/process-launcher-impl.ts",
+      "currentCoverage": 4.55,
+      "targetCoverage": 80,
+      "testsNeeded": [
+        {
+          "method": "(anonymous_0)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_1)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_2)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_3)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_4)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_5)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_6)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_7)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_8)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_9)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_10)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_11)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_12)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_13)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_14)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_16)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_18)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_19)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_20)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_21)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_22)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_23)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_24)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_25)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_26)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_27)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_28)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_29)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_30)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_32)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_33)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_34)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_35)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_36)",
+          "scenarios": [
+            "happy path",
+            "error cases",
+            "edge cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 115 (type: default-arg, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 119 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 119 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 141 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 141 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 151 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 151 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 186 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 186 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 186 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 186 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 186 (type: binary-expr, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 188 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 188 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 198 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 198 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 211 (type: default-arg, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 212 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 212 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 241 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 241 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 245 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 245 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        }
+      ],
+      "estimatedTests": 57,
+      "complexity": "high"
+    },
+    {
+      "priority": 3,
+      "file": "src/server.ts",
+      "currentCoverage": 52.26,
+      "targetCoverage": 80,
+      "testsNeeded": [
+        {
+          "method": "(anonymous_10)",
+          "scenarios": [
+            "happy path",
+            "error cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_14)",
+          "scenarios": [
+            "happy path",
+            "error cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_15)",
+          "scenarios": [
+            "happy path",
+            "error cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_17)",
+          "scenarios": [
+            "happy path",
+            "error cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_18)",
+          "scenarios": [
+            "happy path",
+            "error cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_19)",
+          "scenarios": [
+            "happy path",
+            "error cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "method": "(anonymous_20)",
+          "scenarios": [
+            "happy path",
+            "error cases"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 55 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 136 (type: switch, path 4)",
+          "scenarios": [
+            "Test branch path 4"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 136 (type: switch, path 8)",
+          "scenarios": [
+            "Test branch path 8"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 136 (type: switch, path 9)",
+          "scenarios": [
+            "Test branch path 9"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 136 (type: switch, path 11)",
+          "scenarios": [
+            "Test branch path 11"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 136 (type: switch, path 12)",
+          "scenarios": [
+            "Test branch path 12"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 136 (type: switch, path 13)",
+          "scenarios": [
+            "Test branch path 13"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 136 (type: switch, path 14)",
+          "scenarios": [
+            "Test branch path 14"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 156 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 181 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 242 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 242 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 244 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 257 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 257 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 267 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 277 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 287 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 297 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 297 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 310 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 310 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 333 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 333 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 333 (type: binary-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 333 (type: binary-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 333 (type: binary-expr, path 2)",
+          "scenarios": [
+            "Test branch path 2"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 361 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 361 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 367 (type: cond-expr, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 367 (type: cond-expr, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 368 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 368 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 375 (type: if, path 0)",
+          "scenarios": [
+            "Test branch path 0"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        },
+        {
+          "branch": "Line 375 (type: if, path 1)",
+          "scenarios": [
+            "Test branch path 1"
+          ],
+          "mockRequirements": [
+            "To be determined"
+          ]
+        }
+      ],
+      "estimatedTests": 42,
+      "complexity": "medium"
+    }
+  ],
+  "summary": {
+    "totalFiles": 22,
+    "filesNeedingTests": 10,
+    "estimatedTotalTests": 453,
+    "quickWins": 0
+  }
+}

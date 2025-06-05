@@ -1,4 +1,4 @@
-import { jest, describe, test, expect, beforeAll, afterAll } from '@jest/globals'; 
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { DebugSessionInfo, StackFrame, Variable } from '../../src/session/models'; 
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import { spawn, ChildProcess } from 'child_process';
@@ -91,9 +91,6 @@ describe('Python Debugging Workflow - Integration Test', () => {
   const scriptPath = 'tests/fixtures/python/debug_test_simple.py'; // Relative to project root
   const breakpointLine = 14; // Line 'c = a + b' in debug_test_simple.py
 
-  // Increase timeout for this integration test suite
-  jest.setTimeout(60000); // 60 seconds
-
   beforeAll(async () => {
     await startTestServer();
   });
@@ -102,7 +99,7 @@ describe('Python Debugging Workflow - Integration Test', () => {
     await stopTestServer();
   });
 
-  test('should complete a full debug session and inspect local variables', async () => {
+  it('should complete a full debug session and inspect local variables', async () => {
     if (!client) { // Check if client was initialized
       throw new Error("MCP Client not initialized. Cannot run test.");
     }
@@ -141,9 +138,9 @@ describe('Python Debugging Workflow - Integration Test', () => {
     let breakpointRawResult = await client.callTool({ name: 'set_breakpoint', arguments: { sessionId, file: scriptPath, line: breakpointLine } });
     const breakpointResult = parseToolResult(breakpointRawResult);
     expect(breakpointResult.success).toBe(true);
-    // Normalize path separators for cross-platform compatibility
-    const normalizedBreakpointFile = breakpointResult.file ? breakpointResult.file.replace(/\\/g, '/') : '';
-    expect(normalizedBreakpointFile).toBe(scriptPath);
+    // Convert absolute path to relative and normalize separators
+    const relativePath = path.relative(process.cwd(), breakpointResult.file).replace(/\\/g, '/');
+    expect(relativePath).toBe(scriptPath);
     expect(breakpointResult.line).toBe(breakpointLine);
     console.log(`[Test] Set breakpoint at ${scriptPath}:${breakpointLine}`);
 
@@ -169,9 +166,8 @@ describe('Python Debugging Workflow - Integration Test', () => {
     expect(stackTraceResult.stackFrames.length).toBeGreaterThanOrEqual(1);
     
     const topFrame = stackTraceResult.stackFrames[0] as StackFrame;
-    // Normalize file path from stack frame as well
-    const normalizedTopFrameFile = topFrame.file ? topFrame.file.replace(/\\/g, '/') : '';
-    expect(normalizedTopFrameFile).toContain(scriptPath); // Use toContain as debugpy might return absolute path
+    // Use toContain for file path as debugpy returns absolute paths
+    expect(topFrame.file).toContain('debug_test_simple.py');
     expect(topFrame.name).toBe('sample_function'); 
     expect(topFrame.line).toBe(breakpointLine);
     const frameId = topFrame.id;
@@ -214,7 +210,7 @@ describe('Python Debugging Workflow - Integration Test', () => {
     console.log(`[Test] Closed session: ${sessionId}`);
   });
 
-  test('should perform a dry run for start_debugging and log the command', async () => {
+  it('should perform a dry run for start_debugging and log the command', async () => {
     if (!client) {
       throw new Error("MCP Client not initialized. Cannot run test.");
     }
@@ -264,5 +260,5 @@ describe('Python Debugging Workflow - Integration Test', () => {
     // Clean up the dry run session
     await client.callTool({ name: 'close_debug_session', arguments: { sessionId: dryRunSessionId } });
     console.log(`[Test] Closed dry run session: ${dryRunSessionId}`);
-  }); // Timeout will be inherited from describe block's jest.setTimeout
-});
+  });
+}, { timeout: 60000 }); // 60 seconds timeout for the entire suite

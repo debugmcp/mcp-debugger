@@ -1,13 +1,13 @@
 // @ts-nocheck
 /**
- * Jest Setup File
+ * Vitest Setup File
  * 
  * This file is run before each test file and is used to:
  * - Configure global test settings
  * - Set up global mocks
  * - Initialize test environments
  */
-import { jest, beforeAll, afterEach, afterAll } from '@jest/globals';
+import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import { PortRange, portManager } from './utils/port-manager';
 
 // Add type declarations for global test helpers
@@ -31,15 +31,14 @@ globalThis.testPortManager = portManager;
 
 // Reset test states before each test file
 beforeAll(() => {
-  // Increase timeout for all tests
-  jest.setTimeout(30000); 
+  // Timeout is set in vitest.config.ts
   portManager.reset();
 });
 
 // Reset test states after each test
 afterEach(() => {
-  jest.resetAllMocks();
-  jest.restoreAllMocks();
+  vi.resetAllMocks();
+  vi.restoreAllMocks();
 });
 
 // Clean up after all tests

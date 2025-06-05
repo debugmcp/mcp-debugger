@@ -5,33 +5,46 @@
  * This provides consistent mock implementations for child_process functions
  * used throughout the tests.
  */
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 import { EventEmitter } from 'events';
 
 /**
- * Mock for a spawned process
+ * Mock for a spawned process with IPC support
  */
-class MockChildProcess extends EventEmitter {
-  // Stream mocks
-  public stdout = new EventEmitter();
-  public stderr = new EventEmitter();
+export class MockChildProcess extends EventEmitter {
+  // Stream mocks - these need to be proper stream-like objects
+  public stdin: NodeJS.WritableStream | null = null;
+  public stdout: NodeJS.ReadableStream | null = new EventEmitter() as any;
+  public stderr: NodeJS.ReadableStream | null = new EventEmitter() as any;
   
   // Process methods
-  public kill = jest.fn().mockImplementation(() => true);
+  public kill = vi.fn().mockImplementation(() => true);
+  public send = vi.fn().mockImplementation((message: any) => {
+    // By default, send returns true to indicate success
+    return true;
+  });
   
   // Process properties
   public pid: number;
+  public killed: boolean = false;
   
   constructor(pid = Math.floor(Math.random() * 10000)) {
     super();
     this.pid = pid;
+    
+    // Update killed status when kill is called
+    this.kill.mockImplementation((signal?: string) => {
+      this.killed = true;
+      return true;
+    });
   }
   
   /**
    * Helper to simulate process exit
    */
-  simulateExit(code: number = 0): void {
-    this.emit('close', code);
+  simulateExit(code: number = 0, signal?: string): void {
+    this.emit('exit', code, signal);
+    this.emit('close', code, signal);
   }
   
   /**
@@ -56,6 +69,13 @@ class MockChildProcess extends EventEmitter {
   }
   
   /**
+   * Helper to simulate IPC message from child process
+   */
+  simulateMessage(message: any): void {
+    this.emit('message', message);
+  }
+  
+  /**
    * Reset all mock event listeners
    */
   reset(): void {
@@ -63,15 +83,17 @@ class MockChildProcess extends EventEmitter {
     this.stdout.removeAllListeners();
     this.stderr.removeAllListeners();
     this.kill.mockClear();
+    this.send.mockClear();
+    this.killed = false;
   }
 }
 
 class ChildProcessMock {
   // Mock function implementations
-  public spawn = jest.fn();
-  public exec = jest.fn();
-  public execSync = jest.fn();
-  public fork = jest.fn();
+  public spawn = vi.fn();
+  public exec = vi.fn();
+  public execSync = vi.fn();
+  public fork = vi.fn();
   
   // Track created mock processes
   private mockProcesses: MockChildProcess[] = [];
@@ -259,13 +281,70 @@ class ChildProcessMock {
       return childProcess;
     });
   }
+  
+  /**
+   * Configure spawn to simulate a proxy process with IPC support
+   */
+  setupProxySpawnMock(options: {
+    respondToInit?: boolean,
+    initDelay?: number,
+    simulateError?: boolean
+  } = {}): MockChildProcess {
+    const {
+      respondToInit = true,
+      initDelay = 50,
+      simulateError = false
+    } = options;
+    
+    let mockProcess: MockChildProcess | null = null;
+    
+    this.spawn.mockImplementation((command: string, args: string[] = [], spawnOptions = {}) => {
+      mockProcess = new MockChildProcess();
+      this.mockProcesses.push(mockProcess);
+      
+      if (respondToInit) {
+        // Listen for init message and respond
+        mockProcess.send.mockImplementation((message: any) => {
+          if (typeof message === 'string') {
+            try {
+              const parsed = JSON.parse(message);
+              if (parsed.cmd === 'init') {
+                setTimeout(() => {
+                  if (simulateError) {
+                    mockProcess!.simulateMessage({
+                      type: 'error',
+                      sessionId: parsed.sessionId,
+                      message: 'Failed to initialize proxy'
+                    });
+                  } else {
+                    mockProcess!.simulateMessage({
+                      type: 'status',
+                      sessionId: parsed.sessionId,
+                      status: 'adapter_configured_and_launched'
+                    });
+                  }
+                }, initDelay);
+              }
+            } catch (e) {
+              // Invalid JSON
+            }
+          }
+          return true;
+        });
+      }
+      
+      return mockProcess;
+    });
+    
+    // Return a getter function that will return the mock process once created
+    return {
+      get: () => mockProcess
+    };
+  }
 }
 
 // Export a singleton instance
 export const childProcessMock = new ChildProcessMock();
-
-// Export the MockChildProcess class for test code to create mock processes
-export { MockChildProcess };
 
 // Export the mock functions for direct use
 export const {
@@ -275,7 +354,7 @@ export const {
   fork
 } = childProcessMock;
 
-// Export the module mock for use with jest.mock
+// Export the module mock for use with vi.mock
 export default {
   spawn,
   exec,

@@ -1,22 +1,22 @@
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 import { EventEmitter } from 'events';
 
 const mockNetServer = {
-  listen: jest.fn((port: number, callback?: () => void) => {
+  listen: vi.fn((port: number, callback?: () => void) => {
     if (callback) callback();
     return mockNetServer;
   }),
-  close: jest.fn((callback?: (err?: Error) => void) => {
+  close: vi.fn((callback?: (err?: Error) => void) => {
     if (callback) callback();
     return mockNetServer;
   }),
-  on: jest.fn(),
-  unref: jest.fn(),
-  address: jest.fn(() => ({ port: 12345, family: 'IPv4', address: '127.0.0.1' })),
+  on: vi.fn(),
+  unref: vi.fn(),
+  address: vi.fn(() => ({ port: 12345, family: 'IPv4', address: '127.0.0.1' })),
 };
 
 const netMock = {
-  createServer: jest.fn(() => mockNetServer),
+  createServer: vi.fn(() => mockNetServer),
   // Add other net functions if they are used and need mocking
 };
 

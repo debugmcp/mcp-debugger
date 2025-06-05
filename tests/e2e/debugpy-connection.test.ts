@@ -9,6 +9,7 @@
  * 2. Set breakpoints and control execution
  * 3. Retrieve variables and evaluate expressions
  */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
