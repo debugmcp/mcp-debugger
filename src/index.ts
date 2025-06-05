@@ -24,6 +24,20 @@ const { version } = packageJson;
 
 const logger = createLogger('debug-mcp:cli');
 
+// Global error handlers for the main server process
+process.on('uncaughtException', (err: Error, origin: string) => {
+  logger.error(`[Server UNCAUGHT_EXCEPTION] Origin: ${origin}`, { errorName: err.name, errorMessage: err.message, errorStack: err.stack });
+  // Optionally, try to gracefully shutdown server if possible, then exit
+  process.exit(1); // Ensure process exits on uncaught exception
+});
+
+process.on('unhandledRejection', (reason: any, promise: Promise<unknown>) => {
+  logger.error('[Server UNHANDLED_REJECTION] Reason:', { reason });
+  logger.error('[Server UNHANDLED_REJECTION] Promise:', { promise });
+  // Optionally, try to gracefully shutdown server if possible, then exit
+  process.exit(1); // Ensure process exits on unhandled rejection
+});
+
 // Parse command line arguments
 const program = new Command();
 

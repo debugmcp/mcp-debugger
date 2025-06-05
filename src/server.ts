@@ -11,8 +11,10 @@ import {
   McpError,
   ServerResult, 
 } from '@modelcontextprotocol/sdk/types.js';
-import { createLogger, LoggerOptions } from './utils/logger.js';
-import { SessionManager } from './session/session-manager.js';
+import { createLogger } from './utils/logger.js';
+import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
+import { createProductionDependencies } from './container/dependencies.js';
+import { ContainerConfig } from './container/types.js';
 import { 
     DebugSessionInfo, 
     // SessionState, // Unused
@@ -45,23 +47,32 @@ export class DebugMcpServer {
 
   constructor(options: DebugMcpServerOptions = {}) {
     this.constructorOptions = options; // Store options
-    this.logger = createLogger('debug-mcp:server', {
-      level: options.logLevel,
-      file: options.logFile
-    });
+    
+    // Create container configuration from options
+    const containerConfig: ContainerConfig = {
+      logLevel: options.logLevel,
+      logFile: options.logFile,
+      sessionLogDirBase: options.logFile ? path.dirname(options.logFile) + '/sessions' : undefined
+    };
+    
+    // Create all dependencies
+    const dependencies = createProductionDependencies(containerConfig);
+    
+    // Use the logger from dependencies
+    this.logger = dependencies.logger;
+    this.logger.info('[DebugMcpServer Constructor] Main server logger instance assigned.');
 
     this.server = new Server(
       { name: 'debug-mcp-server', version: '0.1.0' },
       { capabilities: { tools: {} } }
     );
 
-    const sessionLogDirBase = options.logFile ? path.dirname(options.logFile) + '/sessions' : undefined;
-    // Pass logger options to SessionManager
-    const sessionManagerLoggerOptions: LoggerOptions = {
-      level: this.constructorOptions.logLevel,
-      file: this.constructorOptions.logFile
+    // Create SessionManager with modern constructor
+    const sessionManagerConfig: SessionManagerConfig = {
+      logDirBase: containerConfig.sessionLogDirBase
     };
-    this.sessionManager = new SessionManager(sessionManagerLoggerOptions, sessionLogDirBase);
+    
+    this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
 
     this.registerTools();
     this.server.onerror = (error) => {
@@ -317,11 +328,12 @@ export class DebugMcpServer {
   private async handleGetStackTrace(args: { sessionId: string }): Promise<ServerResult> {
     try {
       const session = this.sessionManager.getSession(args.sessionId);
-      // currentThreadId is now on session.currentRun
-      if (!session || !session.currentRun || !session.currentRun.currentThreadId) {
-          throw new McpError(McpErrorCode.InvalidRequest, "Cannot get stack trace: no active run, thread, or session not found/paused.");
+      // Get current thread ID from ProxyManager
+      const currentThreadId = session?.proxyManager?.getCurrentThreadId();
+      if (!session || !session.proxyManager || !currentThreadId) {
+          throw new McpError(McpErrorCode.InvalidRequest, "Cannot get stack trace: no active proxy, thread, or session not found/paused.");
       }
-      const stackFrames: StackFrame[] = await this.sessionManager.getStackTrace(args.sessionId, session.currentRun.currentThreadId);
+      const stackFrames: StackFrame[] = await this.sessionManager.getStackTrace(args.sessionId, currentThreadId);
       return { content: [{ type: 'text', text: JSON.stringify({ success: true, stackFrames, count: stackFrames.length }) }] };
     } catch (error) {
       this.logger.error('Failed to get stack trace', { error });

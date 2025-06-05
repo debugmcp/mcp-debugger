@@ -212,11 +212,11 @@ async function startDebugpyAdapterAndSequence(payload: ProxyInitPayload) {
       loggerInstance.warn(`[Proxy DRY_RUN] Dry run enabled. Would execute: ${fullAdapterCommand}`);
       loggerInstance.warn(`[Proxy DRY_RUN] Script to debug: ${scriptPath}`);
       sendToParent({ type: 'status', status: 'dry_run_complete', command: fullAdapterCommand, script: scriptPath, sessionId: currentSessionId });
-      loggerInstance.info('[Proxy DRY_RUN] Delaying exit for 100ms to ensure message delivery.');
+      loggerInstance.info('[Proxy DRY_RUN] Delaying exit for 500ms to ensure message delivery.');
       setTimeout(() => {
         loggerInstance.info('[Proxy DRY_RUN] Exiting now after delay.');
         process.exit(0); 
-      }, 100);
+      }, 500); // Increased delay
       return; 
     }
     

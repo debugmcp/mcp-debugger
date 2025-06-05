@@ -25,7 +25,9 @@ export interface LoggerOptions {
  * @returns A configured winston logger instance
  */
 export function createLogger(namespace: string, options: LoggerOptions = {}): WinstonLoggerType {
-  const level = options.level || 'info';
+  // Default to 'warn' in test environment, 'info' otherwise, unless overridden by options.level
+  const defaultLevel = process.env.NODE_ENV === 'test' ? 'warn' : 'info';
+  const level = options.level || defaultLevel;
   
   // Set up transports
   const transports: winston.transport[] = [
@@ -61,21 +63,35 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     console.error(`[Logger Init Error] Failed to ensure log directory for ${logFilePath}:`, e);
   }
 
-  transports.push(
-    new winston.transports.File({
-      filename: logFilePath, // Always log to a file
-      format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json() // Ensures structured logging in the file
-      )
-    })
-  );
+  try {
+    transports.push(
+      new winston.transports.File({
+        filename: logFilePath, // Always log to a file
+        format: winston.format.combine(
+          winston.format.timestamp(),
+          winston.format.json() // Ensures structured logging in the file
+        )
+      })
+    );
+  } catch (fileTransportError) {
+    console.error(`[Logger Init Error] Failed to create file transport for ${logFilePath}:`, fileTransportError);
+    // Proceed without file transport if it fails
+  }
   
   // Create and return the logger
-  return winston.createLogger({
+  const logger = winston.createLogger({
     level,
     transports,
     defaultMeta: { namespace },
     exitOnError: false // Explicitly set to false
   });
+
+  // Add an error handler to the logger itself to catch issues with transports
+  logger.on('error', (error: Error) => {
+    console.error('[Winston Logger Internal Error] Failed to write to a transport:', error);
+    // Potentially, one could try to remove the failing transport or take other recovery actions here,
+    // but for now, just logging to console is a good first step.
+  });
+
+  return logger;
 }

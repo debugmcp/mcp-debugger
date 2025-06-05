@@ -1,6 +1,16 @@
 /**
  * Session-related data models
  */
+import { DebugProtocol } from '@vscode/debugprotocol';
+
+/**
+ * Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
+ */
+export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
+  stopOnEntry?: boolean;
+  justMyCode?: boolean;
+  // Add other common custom arguments here if needed, e.g., console, cwd, env
+}
 
 /**
  * Supported debugger languages
