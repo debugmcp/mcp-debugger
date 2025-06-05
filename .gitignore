@@ -44,3 +44,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+
+# Test results and analysis files
+test-results*.json
+coverage-analysis-details.json
+test-refactor-summary.json
+
+# Temporary migration scripts
+migrate-to-vitest.js
+fix-test-imports.cjs
+analyze-test-results.cjs
+
+# Coverage analysis temporary files
+coverage-analysis-details.json
