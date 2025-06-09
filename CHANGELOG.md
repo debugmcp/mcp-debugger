@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2025-01-09
+
+### Breaking Changes
+
+- SessionManager constructor changed to use dependency injection (backward compatibility maintained but deprecated)
+- Removed ActiveDebugRun type in favor of ProxyManager architecture
+
+### Added
+
+- **Vitest Migration**: Complete migration from Jest to Vitest for native ESM support (10-20x faster test execution)
+- **Dependency Injection**: Comprehensive dependency injection system with factories for all major components
+- **Error Handling**: Centralized error messages module with user-friendly timeout explanations
+- **Proxy Architecture**: Three-layer proxy architecture (core/worker/entry) for better separation of concerns
+- **Functional Core**: Pure functional DAP handling logic with no side effects
+- **Documentation**:
+  - Comprehensive developer documentation in `docs/development/`
+  - Architecture diagrams and patterns guide in `docs/architecture/` and `docs/patterns/`
+  - LLM collaboration journey documentation
+- **Test Utilities**: Extensive test helper functions and mock factories
+
+### Changed
+
+- **Test Coverage**: Increased from <20% to >90% with 657 passing tests (up from 355)
+- **SessionManager**: Reduced complexity by 40% through ProxyManager delegation
+- **Code Organization**: Improved separation of concerns with clear module boundaries
+- **Event Management**: Proper lifecycle management with cleanup on session close
+
+### Fixed
+
+- Memory leak in event handlers (proper cleanup in closeSession)
+- Race condition in dry run (replaced hardcoded timeout with event-based coordination)
+- Unhandled promise rejections in tests
+- Enhanced timeout error messages for better debugging
+
+### Removed
+
+- Jest test runner and all Jest-related dependencies
+- Obsolete test files and configurations
+- python-utils.ts (functionality integrated elsewhere)
+- Various deprecated provider and protocol files
+
 ## [0.1.0] - 2025-05-27
 
 ### Added
