@@ -19,6 +19,7 @@ import {
 import { ISessionStoreFactory } from '../../src/factories/session-store-factory.js';
 import { MockSessionStoreFactory } from '../../src/factories/session-store-factory.js';
 import { MockProxyManagerFactory } from '../../src/factories/proxy-manager-factory.js';
+import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
 import { createLogger } from '../../src/utils/logger.js';
 
 /**
@@ -53,13 +54,14 @@ export async function createTestDependencies(): Promise<Dependencies> {
   
   // Note: These will be imported from tests/implementations/test/ after we move them
   const { FakeProcessLauncher, FakeProxyProcessLauncher, FakeDebugTargetLauncher } = 
-    await import('../implementations/test/fake-process-launcher.js');
+    await import('../implementations/test/fake-process-launcher.ts');
   
   const processLauncher = new FakeProcessLauncher();
   const proxyProcessLauncher = new FakeProxyProcessLauncher();
   const debugTargetLauncher = new FakeDebugTargetLauncher();
   
   const proxyManagerFactory = new MockProxyManagerFactory();
+  proxyManagerFactory.createFn = () => new MockProxyManager();
   const sessionStoreFactory = new MockSessionStoreFactory();
   
   return {
@@ -91,6 +93,7 @@ export function createMockDependencies(): Dependencies {
   const debugTargetLauncher = createMockDebugTargetLauncher();
   
   const proxyManagerFactory = new MockProxyManagerFactory();
+  proxyManagerFactory.createFn = () => new MockProxyManager();
   const sessionStoreFactory = new MockSessionStoreFactory();
   
   return {

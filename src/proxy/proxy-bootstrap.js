@@ -62,10 +62,14 @@ if (process.env.MCP_SERVER_CWD) {
 
 (async () => {
   try {
-    logBootstrapActivity('Attempting to dynamically import dap-proxy.js...');
-    // dap-proxy.js is expected to be in the same directory as this bootstrap script in the build output.
-    await import('./dap-proxy.js'); 
-    logBootstrapActivity('Dynamic import of dap-proxy.js appears to have succeeded.');
+    // Set environment variable to explicitly signal proxy mode
+    process.env.DAP_PROXY_WORKER = 'true';
+    logBootstrapActivity('Setting DAP_PROXY_WORKER environment variable to indicate proxy mode.');
+    
+    logBootstrapActivity('Attempting to dynamically import dap-proxy-entry.js...');
+    // dap-proxy-entry.js is expected to be in the same directory as this bootstrap script in the build output.
+    await import('./dap-proxy-entry.js'); 
+    logBootstrapActivity('Dynamic import of dap-proxy-entry.js appears to have succeeded.');
   } catch (e) {
     const errorMessage = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack}` : String(e);
     logBootstrapActivity(`ERROR during dynamic import or execution of dap-proxy.js: ${errorMessage}`);

@@ -19,6 +19,7 @@ import {
   isValidProxyMessage,
   DAPSessionState
 } from '../dap-core/index.js';
+import { ErrorMessages } from '../utils/error-messages.js';
 
 /**
  * Configuration for starting a proxy
@@ -200,7 +201,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Wait for initialization or dry run completion
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Proxy initialization timeout'));
+        reject(new Error(ErrorMessages.proxyInitTimeout(30)));
       }, 30000);
 
       const cleanup = () => {
@@ -310,7 +311,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       setTimeout(() => {
         if (this.pendingDapRequests.has(requestId)) {
           this.pendingDapRequests.delete(requestId);
-          reject(new Error(`Timeout waiting for DAP response: ${command}`));
+          reject(new Error(ErrorMessages.dapRequestTimeout(command, 35)));
         }
       }, 35000);
     });

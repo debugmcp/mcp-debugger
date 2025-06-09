@@ -10,7 +10,6 @@ import { createLogger } from '../utils/logger.js';
 import { 
   Breakpoint, SessionState, Variable, StackFrame, DebugLanguage, DebugSessionInfo 
 } from './models.js'; 
-import { DebugResult } from '../debugger/provider.js';
 import { SessionStore, ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
@@ -27,6 +26,7 @@ import {
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager, ProxyConfig } from '../proxy/proxy-manager.js';
 import { IDebugTargetLauncher } from '../interfaces/process-interfaces.js';
+import { ErrorMessages } from '../utils/error-messages.js';
 
 // Type for the spawn function
 type SpawnFunctionType = typeof actualSpawn;
@@ -36,6 +36,14 @@ interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArgume
   stopOnEntry?: boolean;
   justMyCode?: boolean;
   // Add other common custom arguments here if needed, e.g., console, cwd, env
+}
+
+// Define DebugResult interface (previously imported from provider.js)
+interface DebugResult {
+  success: boolean;
+  state: SessionState;
+  error?: string;
+  data?: any;
 }
 
 // ManagedSession is now imported from session-store.ts
@@ -58,7 +66,15 @@ export interface SessionManagerDependencies {
 export interface SessionManagerConfig {
   logDirBase?: string;
   defaultDapLaunchArgs?: Partial<CustomLaunchRequestArguments>;
+  dryRunTimeoutMs?: number;
 }
+
+// Helper to check if the first argument is SessionManagerConfig (for new API)
+function isSessionManagerConfig(arg: SessionManagerConfig | LoggerOptions): arg is SessionManagerConfig {
+  // A simple check; refine if needed. Assumes LoggerOptions won't have these specific keys.
+  return typeof arg === 'object' && arg !== null && ('logDirBase' in arg || 'defaultDapLaunchArgs' in arg || 'dryRunTimeoutMs' in arg);
+}
+
 
 export class SessionManager {
   private sessionStore: SessionStore;
@@ -71,88 +87,32 @@ export class SessionManager {
   private debugTargetLauncher: IDebugTargetLauncher;
 
   private defaultDapLaunchArgs: Partial<CustomLaunchRequestArguments>;
+  private dryRunTimeoutMs: number;
+  
+  // WeakMap to store event handlers for cleanup
+  private sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: any[]) => void>>();
 
   /**
-   * Modern constructor with full dependency injection
+   * Constructor with full dependency injection
    */
   constructor(
     config: SessionManagerConfig,
     dependencies: SessionManagerDependencies
-  );
-  
-  /**
-   * @deprecated Use constructor with SessionManagerConfig and SessionManagerDependencies instead
-   * This constructor will be removed in the next major version
-   */
-  constructor(
-    loggerOptions: LoggerOptions,
-    logDirBase?: string,
-    spawnFnOverride?: SpawnFunctionType
-  );
-  
-  // Implementation that handles both signatures
-  constructor(
-    configOrLoggerOptions: SessionManagerConfig | LoggerOptions = {},
-    dependenciesOrLogDirBase?: SessionManagerDependencies | string,
-    spawnFnOverride?: SpawnFunctionType
   ) {
-    // Check if using new API
-    if (dependenciesOrLogDirBase && typeof dependenciesOrLogDirBase === 'object' && 'fileSystem' in dependenciesOrLogDirBase) {
-      // New API
-      const config = configOrLoggerOptions as SessionManagerConfig;
-      const dependencies = dependenciesOrLogDirBase as SessionManagerDependencies;
-      
-      this.logger = dependencies.logger;
-      this.fileSystem = dependencies.fileSystem;
-      this.networkManager = dependencies.networkManager;
-      this.proxyManagerFactory = dependencies.proxyManagerFactory;
-      this.sessionStoreFactory = dependencies.sessionStoreFactory;
-      this.debugTargetLauncher = dependencies.debugTargetLauncher;
-      
-      this.sessionStore = this.sessionStoreFactory.create();
-      this.logDirBase = config.logDirBase || path.join(os.tmpdir(), 'debug-mcp-server', 'sessions');
-      this.defaultDapLaunchArgs = config.defaultDapLaunchArgs || {
-        stopOnEntry: true,
-        justMyCode: true
-      };
-    } else {
-      // Old API - deprecated
-      const loggerOptions = configOrLoggerOptions as LoggerOptions;
-      const logDirBase = dependenciesOrLogDirBase as string | undefined;
-      
-      // Create dependencies inline (temporary backward compatibility)
-      this.logger = createLogger('debug-mcp:session-manager', loggerOptions);
-      
-      // Lazy load implementation classes only when using deprecated constructor
-      const { FileSystemImpl, ProcessManagerImpl, NetworkManagerImpl } = require('../implementations/index.js');
-      const { ProcessLauncherImpl, ProxyProcessLauncherImpl, DebugTargetLauncherImpl } = require('../implementations/index.js');
-      const { ProxyManager } = require('../proxy/proxy-manager.js');
-      const { SessionStoreFactory } = require('../factories/session-store-factory.js');
-      const { ProxyManagerFactory } = require('../factories/proxy-manager-factory.js');
-      
-      this.fileSystem = new FileSystemImpl();
-      const processManager = new ProcessManagerImpl();
-      this.networkManager = new NetworkManagerImpl();
-      
-      const processLauncher = new ProcessLauncherImpl(processManager);
-      const proxyProcessLauncher = new ProxyProcessLauncherImpl(processLauncher);
-      this.debugTargetLauncher = new DebugTargetLauncherImpl(processLauncher, this.networkManager);
-      
-      this.proxyManagerFactory = new ProxyManagerFactory(
-        proxyProcessLauncher,
-        this.fileSystem,
-        this.logger
-      );
-      
-      this.sessionStoreFactory = new SessionStoreFactory();
-      this.sessionStore = this.sessionStoreFactory.create();
-      
-      this.logDirBase = logDirBase || path.join(os.tmpdir(), 'debug-mcp-server', 'sessions');
-      this.defaultDapLaunchArgs = {
-        stopOnEntry: true,
-        justMyCode: true
-      };
-    }
+    this.logger = dependencies.logger;
+    this.fileSystem = dependencies.fileSystem;
+    this.networkManager = dependencies.networkManager;
+    this.proxyManagerFactory = dependencies.proxyManagerFactory;
+    this.sessionStoreFactory = dependencies.sessionStoreFactory;
+    this.debugTargetLauncher = dependencies.debugTargetLauncher;
+    
+    this.sessionStore = this.sessionStoreFactory.create();
+    this.logDirBase = config.logDirBase || path.join(os.tmpdir(), 'debug-mcp-server', 'sessions');
+    this.defaultDapLaunchArgs = config.defaultDapLaunchArgs || {
+      stopOnEntry: true,
+      justMyCode: true
+    };
+    this.dryRunTimeoutMs = config.dryRunTimeoutMs || 10000;
     
     this.fileSystem.ensureDirSync(this.logDirBase);
     this.logger.info(`[SessionManager] Initialized. Session logs will be stored in: ${this.logDirBase}`);
@@ -255,9 +215,11 @@ export class SessionManager {
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void {
     const sessionId = session.id;
+    const handlers = new Map<string, (...args: any[]) => void>();
 
-    // Handle stopped events
-    proxyManager.on('stopped', (threadId: number, reason: string) => {
+    // Named function for stopped event
+    const handleStopped = (threadId: number, reason: string) => {
+      this.logger.debug(`[SessionManager] 'stopped' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
       
       // Handle auto-continue for stopOnEntry=false
@@ -269,60 +231,129 @@ export class SessionManager {
       } else {
         this._updateSessionState(session, SessionState.PAUSED);
       }
-    });
+    };
+    proxyManager.on('stopped', handleStopped);
+    handlers.set('stopped', handleStopped);
 
-    // Handle continued events
-    proxyManager.on('continued', () => {
+    // Named function for continued event
+    const handleContinued = () => {
+      this.logger.debug(`[SessionManager] 'continued' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Continued event`);
       this._updateSessionState(session, SessionState.RUNNING);
-    });
+    };
+    proxyManager.on('continued', handleContinued);
+    handlers.set('continued', handleContinued);
 
-    // Handle terminated/exited events
-    proxyManager.on('terminated', () => {
+    // Named function for terminated event
+    const handleTerminated = () => {
+      this.logger.debug(`[SessionManager] 'terminated' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Terminated event`);
       this._updateSessionState(session, SessionState.STOPPED);
+      
+      // Clean up listeners since proxy is gone
+      this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;
-    });
+    };
+    proxyManager.on('terminated', handleTerminated);
+    handlers.set('terminated', handleTerminated);
 
-    proxyManager.on('exited', () => {
+    // Named function for exited event
+    const handleExited = () => {
+      this.logger.debug(`[SessionManager] 'exited' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exited event`);
       this._updateSessionState(session, SessionState.STOPPED);
       session.proxyManager = undefined;
-    });
+    };
+    proxyManager.on('exited', handleExited);
+    handlers.set('exited', handleExited);
 
-    // Handle adapter configured
-    proxyManager.on('adapter-configured', () => {
+    // Named function for adapter configured event
+    const handleAdapterConfigured = () => {
+      this.logger.debug(`[SessionManager] 'adapter-configured' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Adapter configured`);
       if (!effectiveLaunchArgs.stopOnEntry) {
         this._updateSessionState(session, SessionState.RUNNING);
       }
-    });
+    };
+    proxyManager.on('adapter-configured', handleAdapterConfigured);
+    handlers.set('adapter-configured', handleAdapterConfigured);
 
-    // Handle dry run complete
-    proxyManager.on('dry-run-complete', (command: string, script: string) => {
+    // Named function for dry run complete event
+    const handleDryRunComplete = (command: string, script: string) => {
+      this.logger.debug(`[SessionManager] 'dry-run-complete' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Dry run complete: ${command} ${script}`);
       this._updateSessionState(session, SessionState.STOPPED);
-      session.proxyManager = undefined;
-    });
+      // Don't clear proxyManager yet if we have a dry run handler waiting
+      if (!(session as any)._dryRunHandlerSetup) {
+        session.proxyManager = undefined;
+      }
+    };
+    proxyManager.on('dry-run-complete', handleDryRunComplete);
+    handlers.set('dry-run-complete', handleDryRunComplete);
 
-    // Handle errors
-    proxyManager.on('error', (error: Error) => {
+    // Named function for error event
+    const handleError = (error: Error) => {
+      this.logger.debug(`[SessionManager] 'error' event handler called for session ${sessionId}`);
       this.logger.error(`[ProxyManager ${sessionId}] Error:`, error);
       this._updateSessionState(session, SessionState.ERROR);
       session.proxyManager = undefined;
-    });
+    };
+    proxyManager.on('error', handleError);
+    handlers.set('error', handleError);
 
-    // Handle exit
-    proxyManager.on('exit', (code: number | null, signal?: string) => {
+    // Named function for exit event
+    const handleExit = (code: number | null, signal?: string) => {
+      this.logger.debug(`[SessionManager] 'exit' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}`);
       if (session.state !== SessionState.STOPPED && session.state !== SessionState.ERROR) {
         this._updateSessionState(session, SessionState.ERROR);
       }
+      
+      // Clean up listeners since proxy is gone
+      this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;
-    });
+    };
+    proxyManager.on('exit', handleExit);
+    handlers.set('exit', handleExit);
+
+    // Store handlers in WeakMap
+    this.sessionEventHandlers.set(session, handlers);
+    this.logger.debug(`[SessionManager] Attached ${handlers.size} event handlers for session ${sessionId}`);
   }
 
   
+  private cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
+    // Safety check to prevent double cleanup
+    if (!this.sessionEventHandlers.has(session)) {
+      this.logger.debug(`[SessionManager] Cleanup already performed for session ${session.id}`);
+      return;
+    }
+
+    const handlers = this.sessionEventHandlers.get(session);
+    if (!handlers) {
+      this.logger.debug(`[SessionManager] No handlers found for session ${session.id}`);
+      return;
+    }
+    
+    let removedCount = 0;
+    let failedCount = 0;
+    
+    handlers.forEach((handler, eventName) => {
+      try {
+        this.logger.debug(`[SessionManager] Removing ${eventName} listener for session ${session.id}`);
+        proxyManager.removeListener(eventName, handler);
+        removedCount++;
+      } catch (error) {
+        this.logger.error(`[SessionManager] Failed to remove ${eventName} listener for session ${session.id}:`, error);
+        failedCount++;
+        // Continue cleanup despite errors
+      }
+    });
+    
+    this.logger.info(`[SessionManager] Cleanup complete for session ${session.id}: ${removedCount} removed, ${failedCount} failed`);
+    this.sessionEventHandlers.delete(session);
+  }
+
   private async findFreePort(): Promise<number> {
     return this.networkManager.findFreePort();
   }
@@ -337,6 +368,44 @@ export class SessionManager {
     this.sessionStore.updateState(session.id, newState);
   }
 
+  /**
+   * Helper method to wait for dry run completion with timeout
+   */
+  private async waitForDryRunCompletion(
+    session: ManagedSession, 
+    timeoutMs: number
+  ): Promise<boolean> {
+    let handler: (() => void) | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    
+    try {
+      return await Promise.race([
+        new Promise<boolean>((resolve) => {
+          handler = () => {
+            this.logger.info(`[SessionManager] Dry run completion event received for session ${session.id}`);
+            resolve(true);
+          };
+          this.logger.info(`[SessionManager] Setting up dry-run-complete listener for session ${session.id}`);
+          session.proxyManager?.once('dry-run-complete', handler);
+        }),
+        new Promise<boolean>((resolve) => {
+          timeoutId = setTimeout(() => {
+            this.logger.warn(`[SessionManager] Dry run timeout after ${timeoutMs}ms for session ${session.id}`);
+            resolve(false);
+          }, timeoutMs);
+        })
+      ]);
+    } finally {
+      // Clean up immediately
+      if (handler && session.proxyManager) {
+        this.logger.info(`[SessionManager] Removing dry-run-complete listener for session ${session.id}`);
+        session.proxyManager.removeListener('dry-run-complete', handler);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
 
   async startDebugging(
     sessionId: string, 
@@ -355,35 +424,59 @@ export class SessionManager {
     
     this._updateSessionState(session, SessionState.INITIALIZING); 
     try {
+      // For dry run, start the proxy and wait for completion
+      if (dryRunSpawn) {
+        // Mark that we're setting up a dry run handler
+        (session as any)._dryRunHandlerSetup = true;
+        
+        // Start the proxy manager
+        await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+        this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
+        
+        // Check if already completed before waiting
+        const refreshedSession = this._getSessionById(sessionId);
+        this.logger.info(`[SessionManager] Checking state after start: ${refreshedSession.state}`);
+        if (refreshedSession.state === SessionState.STOPPED) {
+          this.logger.info(`[SessionManager] Dry run already completed for session ${sessionId}`);
+          delete (session as any)._dryRunHandlerSetup;
+          return { 
+            success: true, 
+            state: SessionState.STOPPED,
+            data: { dryRun: true, message: "Dry run spawn command logged by proxy." } 
+          };
+        }
+        
+        // Wait for completion with timeout
+        this.logger.info(`[SessionManager] Waiting for dry run completion with timeout ${this.dryRunTimeoutMs}ms`);
+        const dryRunCompleted = await this.waitForDryRunCompletion(refreshedSession, this.dryRunTimeoutMs);
+        delete (session as any)._dryRunHandlerSetup;
+        
+        if (dryRunCompleted) {
+          this.logger.info(`[SessionManager] Dry run completed for session ${sessionId}, final state: ${refreshedSession.state}`);
+          return { 
+            success: true, 
+            state: SessionState.STOPPED,
+            data: { dryRun: true, message: "Dry run spawn command logged by proxy." } 
+          };
+        } else {
+          // Timeout occurred
+          const finalSession = this._getSessionById(sessionId);
+          this.logger.error(
+            `[SessionManager] Dry run timeout for session ${sessionId}. ` +
+            `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`
+          );
+          return { 
+            success: false, 
+            error: `Dry run timed out after ${this.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`, 
+            state: finalSession.state 
+          };
+        }
+      }
+      
+      // Normal (non-dry-run) flow
       // Start the proxy manager
       await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
-      
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
-      
-      // For dry run, wait for it to complete
-      if (dryRunSpawn) {
-        return new Promise((resolve) => {
-          const handler = () => {
-            this.logger.info(`[SessionManager] Dry run completed for session ${sessionId}`);
-            resolve({ 
-              success: true, 
-              state: session.state, 
-              data: { dryRun: true, message: "Dry run spawn command logged by proxy." } 
-            });
-          };
-          session.proxyManager?.once('dry-run-complete', handler);
-          
-          // Timeout after 10 seconds
-          setTimeout(() => {
-            session.proxyManager?.removeListener('dry-run-complete', handler);
-            resolve({ 
-              success: false, 
-              error: 'Dry run timeout', 
-              state: session.state 
-            });
-          }, 10000);
-        });
-      }
       
       // Wait for adapter to be configured or first stop event
       const waitForReady = new Promise<void>((resolve) => {
@@ -414,6 +507,7 @@ export class SessionManager {
             resolved = true;
             session.proxyManager?.removeListener('stopped', handleStopped);
             session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+            this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
             resolve();
           }
         }, 30000);
@@ -514,7 +608,11 @@ export class SessionManager {
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped event`);
-          resolve({ success: false, error: 'Step timeout', state: session.state });
+          resolve({ 
+            success: false, 
+            error: ErrorMessages.stepTimeout(5), 
+            state: session.state 
+          });
         }, 5000);
         
         session.proxyManager?.once('stopped', () => {
@@ -561,7 +659,11 @@ export class SessionManager {
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           this.logger.warn(`[SM stepInto ${sessionId}] Timeout waiting for stopped event`);
-          resolve({ success: false, error: 'Step timeout', state: session.state });
+          resolve({ 
+            success: false, 
+            error: ErrorMessages.stepTimeout(5), 
+            state: session.state 
+          });
         }, 5000);
         
         session.proxyManager?.once('stopped', () => {
@@ -608,7 +710,11 @@ export class SessionManager {
       return new Promise((resolve) => {
         const timeout = setTimeout(() => {
           this.logger.warn(`[SM stepOut ${sessionId}] Timeout waiting for stopped event`);
-          resolve({ success: false, error: 'Step timeout', state: session.state });
+          resolve({ 
+            success: false, 
+            error: ErrorMessages.stepTimeout(5), 
+            state: session.state 
+          });
         }, 5000);
         
         session.proxyManager?.once('stopped', () => {
@@ -780,12 +886,22 @@ export class SessionManager {
     this.logger.info(`Closing debug session: ${sessionId}. Active proxy: ${session.proxyManager ? 'yes' : 'no'}`);
     
     if (session.proxyManager) {
+      // Always cleanup listeners first
+      try {
+        this.cleanupProxyEventHandlers(session, session.proxyManager);
+      } catch (cleanupError) {
+        this.logger.error(`[SessionManager] Critical error during listener cleanup for session ${sessionId}:`, cleanupError);
+        // Continue with session closure despite cleanup errors
+      }
+      
+      // Then stop the proxy
       try {
         await session.proxyManager.stop();
-        session.proxyManager = undefined;
       } catch (error: unknown) { 
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`[SessionManager] Error stopping proxy for session ${sessionId}:`, message);
+      } finally {
+        session.proxyManager = undefined;
       }
     }
     
@@ -801,5 +917,12 @@ export class SessionManager {
       await this.closeSession(session.id);
     }
     this.logger.info('All debug sessions closed');
+  }
+
+  /**
+   * @internal - This is for testing only, do not use in production
+   */
+  public _testOnly_cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
+    return this.cleanupProxyEventHandlers(session, proxyManager);
   }
 }

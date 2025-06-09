@@ -47,6 +47,7 @@ __pycache__/
 
 # Test results and analysis files
 test-results*.json
+test-output.txt
 coverage-analysis-details.json
 test-refactor-summary.json
 

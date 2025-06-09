@@ -9,7 +9,7 @@
  * 2. Set breakpoints and control execution
  * 3. Retrieve variables and evaluate expressions
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
@@ -88,7 +88,10 @@ describe('MCP Server connecting to debugpy', () => {
               break;
             }
           }
-        } catch (e) { /* Ignore connection errors */ }
+        } catch (e) { 
+          // Connection error - let it propagate
+          throw e;
+        }
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
@@ -258,7 +261,11 @@ print(f"Fibonacci(5) = {result}")
         try {
           await stat(tempScriptPath); 
           await rm(tempScriptPath); 
-        } catch (e) { /* Ignore error */ }
+        } catch (e) { 
+          console.error('Error during stat/rm cleanup:', e);
+          // Re-throw to expose cleanup issues
+          throw e;
+        }
       }
       if (debugSessionId) {
         await mcpSdkClient.callTool({ name: 'close_debug_session', arguments: { sessionId: debugSessionId } });

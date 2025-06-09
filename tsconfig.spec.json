@@ -11,7 +11,7 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "types": ["jest", "node"],
+    "types": ["vitest/globals", "node"],
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

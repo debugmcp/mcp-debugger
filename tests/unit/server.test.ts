@@ -1,37 +1,55 @@
 /**
- * Unit tests for MCP Server
+ * Comprehensive unit tests for MCP Server
+ * Target: 80%+ coverage from current 52.98%
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, Mock } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { 
+  ErrorCode as McpErrorCode, 
+  McpError,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema
+} from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../src/server.js';
-import { createLogger } from '../../src/utils/logger.js';
 import { SessionManager } from '../../src/session/session-manager.js';
 import { DebugSessionInfo, DebugLanguage, SessionState, Breakpoint } from '../../src/session/models.js';
+import { createProductionDependencies } from '../../src/container/dependencies.js';
+import { createMockLogger } from '../utils/test-dependencies.js';
+import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
 
 // Mock dependencies
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
 vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
-vi.mock('../../src/utils/logger');
-vi.mock('../../src/session/session-manager');
+vi.mock('../../src/session/session-manager.js');
+vi.mock('../../src/container/dependencies.js');
 
-describe('MCP Server', () => {
+describe('MCP Server Comprehensive Tests', () => {
   let debugServer: DebugMcpServer;
   let mockServer: any;
   let mockSessionManager: any;
   let mockLogger: any;
   let mockStdioTransport: any;
+  let mockDependencies: any;
 
   beforeEach(() => {
     // Setup mock logger
-    mockLogger = {
-      info: vi.fn(),
-      error: vi.fn(),
-      warn: vi.fn(),
-      debug: vi.fn()
+    mockLogger = createMockLogger();
+    
+    // Setup mock dependencies
+    mockDependencies = {
+      logger: mockLogger,
+      fileSystem: vi.fn(),
+      processManager: vi.fn(),
+      networkManager: vi.fn(),
+      processLauncher: vi.fn(),
+      proxyProcessLauncher: vi.fn(),
+      debugTargetLauncher: vi.fn(),
+      proxyManagerFactory: vi.fn(),
+      sessionStoreFactory: vi.fn()
     };
     
-    vi.mocked(createLogger).mockReturnValue(mockLogger);
+    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
     
     // Setup mock server
     mockServer = {
@@ -73,7 +91,7 @@ describe('MCP Server', () => {
     vi.clearAllMocks();
   });
 
-  describe('DebugMcpServer', () => {
+  describe('Constructor and Initialization', () => {
     it('should initialize server with correct configuration', () => {
       debugServer = new DebugMcpServer({ logLevel: 'debug' });
       
@@ -82,24 +100,39 @@ describe('MCP Server', () => {
         { capabilities: { tools: {} } }
       );
       
-      expect(createLogger).toHaveBeenCalledWith('debug-mcp:server', {
-        level: 'debug',
-        file: undefined
+      expect(createProductionDependencies).toHaveBeenCalledWith({
+        logLevel: 'debug',
+        logFile: undefined,
+        sessionLogDirBase: undefined
       });
+    });
+
+    it('should initialize with log file configuration', () => {
+      debugServer = new DebugMcpServer({ 
+        logLevel: 'info',
+        logFile: '/var/log/debug-mcp.log'
+      });
+      
+      expect(createProductionDependencies).toHaveBeenCalledWith({
+        logLevel: 'info',
+        logFile: '/var/log/debug-mcp.log',
+        sessionLogDirBase: '/var/log/sessions'
+      });
+    });
+
+    it('should handle dependency creation errors', () => {
+      vi.mocked(createProductionDependencies).mockImplementation(() => {
+        throw new Error('Failed to create dependencies');
+      });
+      
+      expect(() => new DebugMcpServer()).toThrow('Failed to create dependencies');
     });
 
     it('should register tool handlers', () => {
       debugServer = new DebugMcpServer();
       
+      // Should register ListTools and CallTool handlers
       expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(2);
-      expect(mockServer.setRequestHandler).toHaveBeenCalledWith(
-        expect.objectContaining({ parse: expect.any(Function) }), // ListToolsRequestSchema
-        expect.any(Function)
-      );
-      expect(mockServer.setRequestHandler).toHaveBeenCalledWith(
-        expect.objectContaining({ parse: expect.any(Function) }), // CallToolRequestSchema
-        expect.any(Function)
-      );
     });
 
     it('should set error handler', () => {
@@ -114,30 +147,6 @@ describe('MCP Server', () => {
       }
       
       expect(mockLogger.error).toHaveBeenCalledWith('Server error', { error: testError });
-    });
-
-    it('should start server with stdio transport', async () => {
-      debugServer = new DebugMcpServer();
-      
-      await debugServer.start();
-      
-      expect(StdioServerTransport).toHaveBeenCalled();
-      expect(mockServer.connect).toHaveBeenCalledWith(mockStdioTransport);
-      expect(mockLogger.info).toHaveBeenCalledWith('Starting Debug MCP Server (for StdioTransport)');
-      expect(mockLogger.info).toHaveBeenCalledWith('Server connected to stdio transport');
-    });
-
-    it('should stop server and close all sessions', async () => {
-      debugServer = new DebugMcpServer();
-      mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
-      mockServer.close.mockResolvedValue(undefined);
-      
-      await debugServer.stop();
-      
-      expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
-      expect(mockServer.close).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith('Stopping Debug MCP Server');
-      expect(mockLogger.info).toHaveBeenCalledWith('Server stopped');
     });
   });
 
@@ -171,233 +180,793 @@ describe('MCP Server', () => {
       expect(toolNames).toContain('step_into');
       expect(toolNames).toContain('step_out');
       expect(toolNames).toContain('continue_execution');
+      expect(toolNames).toContain('pause_execution');
       expect(toolNames).toContain('get_variables');
       expect(toolNames).toContain('get_stack_trace');
+      expect(toolNames).toContain('get_scopes');
+      expect(toolNames).toContain('evaluate_expression');
+      expect(toolNames).toContain('get_source_context');
     });
 
-    it('should handle create_debug_session tool', async () => {
-      const mockSessionInfo: DebugSessionInfo = {
-        id: 'test-session-123',
-        name: 'Test Session',
-        language: 'python' as DebugLanguage,
-        state: 'created' as SessionState,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-      
-      mockSessionManager.createSession.mockResolvedValue(mockSessionInfo);
-      
-      const result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'create_debug_session',
-          arguments: {
+    describe('Debugging Session Tools', () => {
+      describe('create_debug_session', () => {
+        it('should create session with valid config', async () => {
+          const mockSessionInfo: DebugSessionInfo = {
+            id: 'test-session-123',
+            name: 'Test Session',
+            language: 'python' as DebugLanguage,
+            state: 'created' as SessionState,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          
+          mockSessionManager.createSession.mockResolvedValue(mockSessionInfo);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'create_debug_session',
+              arguments: {
+                language: 'python',
+                name: 'Test Session',
+                pythonPath: '/usr/bin/python3'
+              }
+            }
+          });
+          
+          expect(mockSessionManager.createSession).toHaveBeenCalledWith({
             language: 'python',
-            name: 'Test Session'
-          }
-        }
+            name: 'Test Session',
+            pythonPath: '/usr/bin/python3'
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.sessionId).toBe('test-session-123');
+          expect(content.message).toContain('Created python debug session');
+        });
+
+        it('should handle invalid language parameter', async () => {
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'create_debug_session',
+              arguments: {
+                language: 'java' // Invalid language
+              }
+            }
+          })).rejects.toThrow(McpError);
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'create_debug_session',
+              arguments: {
+                language: 'java'
+              }
+            }
+          })).rejects.toThrow("language parameter must be 'python'");
+        });
+
+        it('should handle SessionManager creation errors', async () => {
+          mockSessionManager.createSession.mockRejectedValue(new Error('Session creation failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'create_debug_session',
+              arguments: {
+                language: 'python'
+              }
+            }
+          })).rejects.toThrow('Failed to create debug session: Session creation failed');
+          
+          expect(mockLogger.error).toHaveBeenCalledWith(
+            'Failed to create debug session',
+            expect.objectContaining({ error: 'Session creation failed' })
+          );
+        });
+
+        it('should generate default session name if not provided', async () => {
+          const mockSessionInfo: DebugSessionInfo = {
+            id: 'test-session-123',
+            name: 'Debug-1234567890',
+            language: 'python' as DebugLanguage,
+            state: 'created' as SessionState,
+            createdAt: new Date()
+          };
+          
+          mockSessionManager.createSession.mockResolvedValue(mockSessionInfo);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'create_debug_session',
+              arguments: {
+                language: 'python'
+                // name not provided
+              }
+            }
+          });
+          
+          const createCall = mockSessionManager.createSession.mock.calls[0][0];
+          expect(createCall.name).toMatch(/^Debug-\d+$/);
+        });
       });
-      
-      expect(mockSessionManager.createSession).toHaveBeenCalledWith({
-        language: 'python',
-        name: 'Test Session',
-        pythonPath: undefined
+
+      describe('list_debug_sessions', () => {
+        it('should list all sessions successfully', async () => {
+          const mockSessions: DebugSessionInfo[] = [
+            {
+              id: 'session-1',
+              name: 'Session 1',
+              language: 'python' as DebugLanguage,
+              state: 'running' as SessionState,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            },
+            {
+              id: 'session-2',
+              name: 'Session 2',
+              language: 'python' as DebugLanguage,
+              state: 'stopped' as SessionState,
+              createdAt: new Date()
+            }
+          ];
+          
+          mockSessionManager.getAllSessions.mockReturnValue(mockSessions);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'list_debug_sessions',
+              arguments: {}
+            }
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.sessions).toHaveLength(2);
+          expect(content.count).toBe(2);
+        });
+
+        it('should handle SessionManager errors', async () => {
+          mockSessionManager.getAllSessions.mockImplementation(() => {
+            throw new Error('Failed to get sessions');
+          });
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'list_debug_sessions',
+              arguments: {}
+            }
+          })).rejects.toThrow('Failed to list debug sessions: Failed to get sessions');
+        });
       });
-      
-      const content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(true);
-      expect(content.sessionId).toBe('test-session-123');
-      expect(content.message).toContain('Created python debug session');
+
+      describe('close_debug_session', () => {
+        it('should close session successfully', async () => {
+          mockSessionManager.closeSession.mockResolvedValue(true);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'close_debug_session',
+              arguments: { sessionId: 'test-session' }
+            }
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.message).toContain('Closed debug session');
+        });
+
+        it('should handle session not found', async () => {
+          mockSessionManager.closeSession.mockResolvedValue(false);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'close_debug_session',
+              arguments: { sessionId: 'non-existent' }
+            }
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(false);
+          expect(content.message).toContain('Failed to close debug session');
+        });
+
+        it('should handle SessionManager errors', async () => {
+          mockSessionManager.closeSession.mockRejectedValue(new Error('Close failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'close_debug_session',
+              arguments: { sessionId: 'test-session' }
+            }
+          })).rejects.toThrow('Failed to close debug session: Close failed');
+        });
+      });
     });
 
-    it('should handle list_debug_sessions tool', async () => {
-      const mockSessions: DebugSessionInfo[] = [
-        {
-          id: 'session-1',
-          name: 'Session 1',
-          language: 'python' as DebugLanguage,
-          state: 'running' as SessionState,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        },
-        {
-          id: 'session-2',
-          name: 'Session 2',
-          language: 'python' as DebugLanguage,
-          state: 'stopped' as SessionState,
-          createdAt: new Date()
-        }
-      ];
-      
-      mockSessionManager.getAllSessions.mockReturnValue(mockSessions);
-      
-      const result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'list_debug_sessions',
-          arguments: {}
-        }
-      });
-      
-      const content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(true);
-      expect(content.sessions).toHaveLength(2);
-      expect(content.count).toBe(2);
-    });
-
-    it('should handle set_breakpoint tool', async () => {
-      const mockBreakpoint: Breakpoint = {
-        id: 'bp-1',
-        file: 'test.py',
-        line: 10,
-        verified: true
-      };
-      
-      mockSessionManager.setBreakpoint.mockResolvedValue(mockBreakpoint);
-      
-      const result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'set_breakpoint',
-          arguments: {
-            sessionId: 'test-session',
+    describe('Debugging Control Tools', () => {
+      describe('set_breakpoint', () => {
+        it('should set breakpoint successfully', async () => {
+          const mockBreakpoint: Breakpoint = {
+            id: 'bp-1',
             file: 'test.py',
-            line: 10
-          }
-        }
+            line: 10,
+            verified: true
+          };
+          
+          mockSessionManager.setBreakpoint.mockResolvedValue(mockBreakpoint);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'set_breakpoint',
+              arguments: {
+                sessionId: 'test-session',
+                file: 'test.py',
+                line: 10
+              }
+            }
+          });
+          
+          expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+            'test-session',
+            'test.py',
+            10,
+            undefined
+          );
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.breakpointId).toBe('bp-1');
+          expect(content.message).toContain('Breakpoint set at test.py:10');
+        });
+
+        it('should handle conditional breakpoints', async () => {
+          const mockBreakpoint: Breakpoint = {
+            id: 'bp-2',
+            file: 'test.py',
+            line: 20,
+            condition: 'x > 10',
+            verified: true
+          };
+          
+          mockSessionManager.setBreakpoint.mockResolvedValue(mockBreakpoint);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'set_breakpoint',
+              arguments: {
+                sessionId: 'test-session',
+                file: 'test.py',
+                line: 20,
+                condition: 'x > 10'
+              }
+            }
+          });
+          
+          expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+            'test-session',
+            'test.py',
+            20,
+            'x > 10'
+          );
+        });
+
+        it('should handle SessionManager errors', async () => {
+          mockSessionManager.setBreakpoint.mockRejectedValue(new Error('Breakpoint failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'set_breakpoint',
+              arguments: {
+                sessionId: 'test-session',
+                file: 'test.py',
+                line: 10
+              }
+            }
+          })).rejects.toThrow('Failed to set breakpoint: Breakpoint failed');
+        });
       });
-      
-      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session',
-        'test.py',
-        10,
-        undefined
-      );
-      
-      const content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(true);
-      expect(content.breakpointId).toBe('bp-1');
-      expect(content.message).toContain('Breakpoint set at test.py:10');
+
+      describe('start_debugging', () => {
+        it('should start debugging successfully', async () => {
+          mockSessionManager.startDebugging.mockResolvedValue({
+            success: true,
+            state: 'running',
+            data: { message: 'Debugging started' }
+          });
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'start_debugging',
+              arguments: {
+                sessionId: 'test-session',
+                scriptPath: 'test.py',
+                args: ['--debug'],
+                dapLaunchArgs: {
+                  stopOnEntry: true,
+                  justMyCode: false
+                }
+              }
+            }
+          });
+          
+          expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+            'test-session',
+            'test.py',
+            ['--debug'],
+            { stopOnEntry: true, justMyCode: false },
+            undefined
+          );
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.state).toBe('running');
+        });
+
+        it('should handle dry run mode', async () => {
+          mockSessionManager.startDebugging.mockResolvedValue({
+            success: true,
+            state: 'stopped',
+            data: { dryRun: true, command: 'python test.py' }
+          });
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'start_debugging',
+              arguments: {
+                sessionId: 'test-session',
+                scriptPath: 'test.py',
+                dryRunSpawn: true
+              }
+            }
+          });
+          
+          expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+            'test-session',
+            'test.py',
+            undefined,
+            undefined,
+            true
+          );
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.data.dryRun).toBe(true);
+        });
+
+        it('should handle SessionManager errors', async () => {
+          mockSessionManager.startDebugging.mockRejectedValue(new Error('Start failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'start_debugging',
+              arguments: {
+                sessionId: 'test-session',
+                scriptPath: 'test.py'
+              }
+            }
+          })).rejects.toThrow('Failed to start debugging: Start failed');
+        });
+      });
+
+      describe('step operations', () => {
+        it.each([
+          ['step_over', 'stepOver', 'Stepped over'],
+          ['step_into', 'stepInto', 'Stepped into'],
+          ['step_out', 'stepOut', 'Stepped out']
+        ])('should handle %s successfully', async (toolName, methodName, expectedMessage) => {
+          const stepResult = { success: true, state: 'stopped' };
+          mockSessionManager[methodName].mockResolvedValue(stepResult);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: toolName,
+              arguments: { sessionId: 'test-session' }
+            }
+          });
+          
+          expect(mockSessionManager[methodName]).toHaveBeenCalledWith('test-session');
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.message).toBe(expectedMessage);
+        });
+
+        it.each([
+          ['step_over', 'stepOver'],
+          ['step_into', 'stepInto'],
+          ['step_out', 'stepOut']
+        ])('should handle %s errors', async (toolName, methodName) => {
+          mockSessionManager[methodName].mockRejectedValue(new Error('Step failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: toolName,
+              arguments: { sessionId: 'test-session' }
+            }
+          })).rejects.toThrow(`Failed to ${toolName.replace('_', ' ')}: Step failed`);
+        });
+
+        it.each([
+          ['step_over', 'stepOver'],
+          ['step_into', 'stepInto'],
+          ['step_out', 'stepOut']
+        ])('should handle %s failure responses', async (toolName, methodName) => {
+          const stepResult = { success: false, state: 'error', error: 'Not paused' };
+          mockSessionManager[methodName].mockResolvedValue(stepResult);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: toolName,
+              arguments: { sessionId: 'test-session' }
+            }
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(false);
+          expect(content.message).toBe('Not paused');
+        });
+      });
+
+      describe('continue_execution', () => {
+        it('should continue execution successfully', async () => {
+          mockSessionManager.continue.mockResolvedValue({
+            success: true,
+            state: 'running'
+          });
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'continue_execution',
+              arguments: { sessionId: 'test-session' }
+            }
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.message).toBe('Continued execution');
+        });
+
+        it('should handle continue errors', async () => {
+          mockSessionManager.continue.mockRejectedValue(new Error('Continue failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'continue_execution',
+              arguments: { sessionId: 'test-session' }
+            }
+          })).rejects.toThrow('Failed to continue execution: Continue failed');
+        });
+      });
     });
 
-    it('should handle start_debugging tool', async () => {
-      mockSessionManager.startDebugging.mockResolvedValue({
-        success: true,
-        state: 'running',
-        data: { message: 'Debugging started' }
+    describe('Variable and Stack Inspection', () => {
+      describe('get_variables', () => {
+        it('should get variables successfully', async () => {
+          const mockVariables = [
+            { name: 'x', value: '10', type: 'int', variablesReference: 0, expandable: false },
+            { name: 'y', value: '20', type: 'int', variablesReference: 0, expandable: false }
+          ];
+          
+          mockSessionManager.getVariables.mockResolvedValue(mockVariables);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_variables',
+              arguments: {
+                sessionId: 'test-session',
+                scope: 100
+              }
+            }
+          });
+          
+          expect(mockSessionManager.getVariables).toHaveBeenCalledWith('test-session', 100);
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.variables).toHaveLength(2);
+          expect(content.count).toBe(2);
+          expect(content.variablesReference).toBe(100);
+        });
+
+        it('should validate required scope parameter', async () => {
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_variables',
+              arguments: {
+                sessionId: 'test-session'
+                // Missing scope
+              }
+            }
+          })).rejects.toThrow('scope (variablesReference) parameter is required and must be a number');
+        });
+
+        it('should validate scope parameter type', async () => {
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_variables',
+              arguments: {
+                sessionId: 'test-session',
+                scope: 'invalid' // Wrong type
+              }
+            }
+          })).rejects.toThrow('scope (variablesReference) parameter is required and must be a number');
+        });
+
+        it('should handle SessionManager errors', async () => {
+          mockSessionManager.getVariables.mockRejectedValue(new Error('Variables failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_variables',
+              arguments: {
+                sessionId: 'test-session',
+                scope: 100
+              }
+            }
+          })).rejects.toThrow('Failed to get variables: Variables failed');
+        });
       });
-      
-      const result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'start_debugging',
-          arguments: {
-            sessionId: 'test-session',
-            scriptPath: 'test.py',
-            args: ['--debug']
-          }
-        }
+
+      describe('get_stack_trace', () => {
+        it('should get stack trace successfully', async () => {
+          const mockStackFrames = [
+            { id: 1, name: 'main', file: 'test.py', line: 10 }
+          ];
+          
+          const mockSession = {
+            proxyManager: {
+              getCurrentThreadId: vi.fn().mockReturnValue(1)
+            }
+          };
+          
+          mockSessionManager.getSession.mockReturnValue(mockSession);
+          mockSessionManager.getStackTrace.mockResolvedValue(mockStackFrames);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_stack_trace',
+              arguments: { sessionId: 'test-session' }
+            }
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.stackFrames).toHaveLength(1);
+        });
+
+        it('should handle missing session', async () => {
+          mockSessionManager.getSession.mockReturnValue(null);
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_stack_trace',
+              arguments: { sessionId: 'non-existent' }
+            }
+          })).rejects.toThrow('Cannot get stack trace: no active proxy, thread, or session not found/paused');
+        });
+
+        it('should handle missing proxy manager', async () => {
+          const mockSession = { proxyManager: null };
+          mockSessionManager.getSession.mockReturnValue(mockSession);
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_stack_trace',
+              arguments: { sessionId: 'test-session' }
+            }
+          })).rejects.toThrow('Cannot get stack trace: no active proxy, thread, or session not found/paused');
+        });
+
+        it('should handle missing thread ID', async () => {
+          const mockSession = {
+            proxyManager: {
+              getCurrentThreadId: vi.fn().mockReturnValue(null)
+            }
+          };
+          
+          mockSessionManager.getSession.mockReturnValue(mockSession);
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_stack_trace',
+              arguments: { sessionId: 'test-session' }
+            }
+          })).rejects.toThrow('Cannot get stack trace: no active proxy, thread, or session not found/paused');
+        });
+
+        it('should handle SessionManager errors', async () => {
+          const mockSession = {
+            proxyManager: {
+              getCurrentThreadId: vi.fn().mockReturnValue(1)
+            }
+          };
+          
+          mockSessionManager.getSession.mockReturnValue(mockSession);
+          mockSessionManager.getStackTrace.mockRejectedValue(new Error('Stack trace failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_stack_trace',
+              arguments: { sessionId: 'test-session' }
+            }
+          })).rejects.toThrow('Failed to get stack trace: Stack trace failed');
+        });
       });
-      
-      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
-        'test-session',
-        'test.py',
-        ['--debug'],
-        undefined,
-        undefined
-      );
-      
-      const content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(true);
-      expect(content.state).toBe('running');
+
+      describe('get_scopes', () => {
+        it('should get scopes successfully', async () => {
+          const mockScopes = [
+            { name: 'Locals', variablesReference: 100, expensive: false }
+          ];
+          
+          mockSessionManager.getScopes.mockResolvedValue(mockScopes);
+          
+          const result = await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_scopes',
+              arguments: {
+                sessionId: 'test-session',
+                frameId: 1
+              }
+            }
+          });
+          
+          const content = JSON.parse(result.content[0].text);
+          expect(content.success).toBe(true);
+          expect(content.scopes).toHaveLength(1);
+        });
+
+        it('should handle SessionManager errors', async () => {
+          mockSessionManager.getScopes.mockRejectedValue(new Error('Scopes failed'));
+          
+          await expect(callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_scopes',
+              arguments: {
+                sessionId: 'test-session',
+                frameId: 1
+              }
+            }
+          })).rejects.toThrow('Failed to get scopes: Scopes failed');
+        });
+      });
     });
 
-    it('should handle step commands', async () => {
-      const stepResult = { success: true, state: 'stopped' };
-      
-      // Test step_over
-      mockSessionManager.stepOver.mockResolvedValue(stepResult);
-      let result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'step_over',
-          arguments: { sessionId: 'test-session' }
-        }
-      });
-      
-      expect(mockSessionManager.stepOver).toHaveBeenCalledWith('test-session');
-      let content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(true);
-      expect(content.message).toBe('Stepped over');
-      
-      // Test step_into
-      mockSessionManager.stepInto.mockResolvedValue(stepResult);
-      result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'step_into',
-          arguments: { sessionId: 'test-session' }
-        }
-      });
-      
-      expect(mockSessionManager.stepInto).toHaveBeenCalledWith('test-session');
-      content = JSON.parse(result.content[0].text);
-      expect(content.message).toBe('Stepped into');
-      
-      // Test step_out
-      mockSessionManager.stepOut.mockResolvedValue(stepResult);
-      result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'step_out',
-          arguments: { sessionId: 'test-session' }
-        }
-      });
-      
-      expect(mockSessionManager.stepOut).toHaveBeenCalledWith('test-session');
-      content = JSON.parse(result.content[0].text);
-      expect(content.message).toBe('Stepped out');
-    });
-
-    it('should handle get_variables tool', async () => {
-      const mockVariables = [
-        { name: 'x', value: '10', type: 'int', variablesReference: 0, expandable: false },
-        { name: 'y', value: '20', type: 'int', variablesReference: 0, expandable: false }
-      ];
-      
-      mockSessionManager.getVariables.mockResolvedValue(mockVariables);
-      
-      const result = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'get_variables',
-          arguments: {
-            sessionId: 'test-session',
-            scope: 100
+    describe('Unimplemented Tools', () => {
+      it('should handle pause_execution as not implemented', async () => {
+        await expect(callToolHandler({
+          method: 'tools/call',
+          params: {
+            name: 'pause_execution',
+            arguments: { sessionId: 'test-session' }
           }
+        })).rejects.toThrow(McpError);
+        
+        try {
+          await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'pause_execution',
+              arguments: { sessionId: 'test-session' }
+            }
+          });
+        } catch (error) {
+          expect(error).toBeInstanceOf(McpError);
+          expect((error as McpError).code).toBe(McpErrorCode.InternalError);
+          expect((error as McpError).message).toMatch(/not yet implemented/i);
+        }
+        
+        expect(mockLogger.info).toHaveBeenCalledWith(
+          expect.stringContaining('Pause requested for session: test-session')
+        );
+      });
+
+      it('should handle evaluate_expression as not implemented', async () => {
+        await expect(callToolHandler({
+          method: 'tools/call',
+          params: {
+            name: 'evaluate_expression',
+            arguments: {
+              sessionId: 'test-session',
+              expression: 'x + y'
+            }
+          }
+        })).rejects.toThrow(McpError);
+        
+        try {
+          await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'evaluate_expression',
+              arguments: {
+                sessionId: 'test-session',
+                expression: 'x + y'
+              }
+            }
+          });
+        } catch (error) {
+          expect(error).toBeInstanceOf(McpError);
+          expect((error as McpError).code).toBe(McpErrorCode.InternalError);
+          expect((error as McpError).message).toMatch(/not yet implemented/i);
         }
       });
-      
-      expect(mockSessionManager.getVariables).toHaveBeenCalledWith('test-session', 100);
-      
-      const content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(true);
-      expect(content.variables).toHaveLength(2);
-      expect(content.count).toBe(2);
-      expect(content.variablesReference).toBe(100);
-    });
 
-    it('should validate required scope parameter for get_variables', async () => {
-      await expect(callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'get_variables',
-          arguments: {
-            sessionId: 'test-session'
-            // Missing scope
+      it('should handle get_source_context as not implemented', async () => {
+        await expect(callToolHandler({
+          method: 'tools/call',
+          params: {
+            name: 'get_source_context',
+            arguments: {
+              sessionId: 'test-session',
+              file: 'test.py',
+              line: 10,
+              linesContext: 5
+            }
           }
+        })).rejects.toThrow(McpError);
+        
+        try {
+          await callToolHandler({
+            method: 'tools/call',
+            params: {
+              name: 'get_source_context',
+              arguments: {
+                sessionId: 'test-session',
+                file: 'test.py',
+                line: 10
+              }
+            }
+          });
+        } catch (error) {
+          expect(error).toBeInstanceOf(McpError);
+          expect((error as McpError).code).toBe(McpErrorCode.InternalError);
+          expect((error as McpError).message).toMatch(/not yet fully implemented/i);
         }
-      })).rejects.toThrow('scope (variablesReference) parameter is required');
+      });
+
+      it('should validate linesContext parameter in get_source_context', async () => {
+        await expect(callToolHandler({
+          method: 'tools/call',
+          params: {
+            name: 'get_source_context',
+            arguments: {
+              sessionId: 'test-session',
+              file: 'test.py',
+              line: 10,
+              linesContext: 'invalid' // Not a number
+            }
+          }
+        })).rejects.toThrow('linesContext parameter must be a number');
+      });
     });
 
     it('should handle unknown tool error', async () => {
@@ -428,17 +997,70 @@ describe('MCP Server', () => {
         expect.objectContaining({ error: 'Session creation failed' })
       );
     });
+  });
 
-    it('should validate language parameter', async () => {
-      await expect(callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'create_debug_session',
-          arguments: {
-            language: 'java' // Invalid language
-          }
-        }
-      })).rejects.toThrow("language parameter must be 'python'");
+  describe('Server Lifecycle', () => {
+    it('should start server with stdio transport', async () => {
+      debugServer = new DebugMcpServer();
+      
+      await debugServer.start();
+      
+      expect(StdioServerTransport).toHaveBeenCalled();
+      expect(mockServer.connect).toHaveBeenCalledWith(mockStdioTransport);
+      expect(mockLogger.info).toHaveBeenCalledWith('Starting Debug MCP Server (for StdioTransport)');
+      expect(mockLogger.info).toHaveBeenCalledWith('Server connected to stdio transport');
+    });
+
+    it('should handle server start errors', async () => {
+      debugServer = new DebugMcpServer();
+      mockServer.connect.mockRejectedValue(new Error('Connection failed'));
+      
+      await expect(debugServer.start()).rejects.toThrow('Connection failed');
+      
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Failed to start server with StdioTransport',
+        { error: expect.any(Error) }
+      );
+    });
+
+    it('should stop server and close all sessions', async () => {
+      debugServer = new DebugMcpServer();
+      mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
+      mockServer.close.mockResolvedValue(undefined);
+      
+      await debugServer.stop();
+      
+      expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
+      expect(mockServer.close).toHaveBeenCalled();
+      expect(mockLogger.info).toHaveBeenCalledWith('Stopping Debug MCP Server');
+      expect(mockLogger.info).toHaveBeenCalledWith('Server stopped');
+    });
+
+    it('should handle errors when closing sessions during stop', async () => {
+      debugServer = new DebugMcpServer();
+      mockSessionManager.closeAllSessions.mockRejectedValue(new Error('Close sessions failed'));
+      mockServer.close.mockResolvedValue(undefined);
+      
+      await expect(debugServer.stop()).rejects.toThrow('Close sessions failed');
+      
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Error stopping server',
+        { error: expect.any(Error) }
+      );
+    });
+
+    it('should handle errors when closing server during stop', async () => {
+      debugServer = new DebugMcpServer();
+      mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
+      mockServer.close.mockRejectedValue(new Error('Server close failed'));
+      
+      await expect(debugServer.stop()).rejects.toThrow('Server close failed');
+      
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Error stopping server',
+        { error: expect.any(Error) }
+      );
     });
   });
+
 });

@@ -25,9 +25,9 @@ export interface LoggerOptions {
  * @returns A configured winston logger instance
  */
 export function createLogger(namespace: string, options: LoggerOptions = {}): WinstonLoggerType {
-  // Default to 'warn' in test environment, 'info' otherwise, unless overridden by options.level
-  const defaultLevel = process.env.NODE_ENV === 'test' ? 'warn' : 'info';
-  const level = options.level || defaultLevel;
+  // Default to 'info' unless overridden by options.level
+  // REMOVED TEST ENVIRONMENT ANTI-PATTERN: Logger should behave the same in all environments
+  const level = options.level || 'info';
   
   // Set up transports
   const transports: winston.transport[] = [

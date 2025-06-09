@@ -17,7 +17,8 @@ import { vi } from 'vitest';
 import { SessionManager, SessionManagerConfig, SessionManagerDependencies } from '../../src/session/session-manager.js';
 import { SessionStore } from '../../src/session/session-store.js';
 import { createTestDependencies, createMockDependencies } from './test-dependencies.js';
-import { MockProxyManagerFactory, MockProxyManager } from '../../src/factories/proxy-manager-factory.js';
+import { MockProxyManagerFactory } from '../../src/factories/proxy-manager-factory.js';
+import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
 import { MockSessionStoreFactory, MockSessionStore } from '../../src/factories/session-store-factory.js';
 
 /**
@@ -81,16 +82,23 @@ export function createMockProxyManager(config: {
 } = {}): MockProxyManager {
   const mockProxyManager = new MockProxyManager();
   
-  if (config.sessionId) {
-    mockProxyManager.sessionId = config.sessionId;
+  // The MockProxyManager will set these internally when start() is called
+  // or when simulateStopped() is called
+  if (config.isRunning) {
+    // Simulate a started state with minimal config
+    mockProxyManager.start({ 
+      sessionId: config.sessionId || 'test-session',
+      pythonPath: 'python',
+      adapterHost: 'localhost',
+      adapterPort: 5678,
+      logDir: '/tmp/logs',
+      scriptPath: 'test.py'
+    });
   }
   
-  if (config.isRunning !== undefined) {
-    mockProxyManager.isRunningState = config.isRunning;
-  }
-  
-  if (config.currentThreadId !== undefined) {
-    mockProxyManager.currentThreadId = config.currentThreadId;
+  if (config.currentThreadId !== undefined && config.currentThreadId !== null) {
+    // Use the simulateStopped method to set the thread ID
+    mockProxyManager.simulateStopped(config.currentThreadId, 'entry');
   }
   
   return mockProxyManager;
@@ -113,6 +121,9 @@ export async function createTestSessionManagerWithProxyManager(
   
   // Override the factory's create method to return our specific mock
   mockFactory.create = vi.fn().mockReturnValue(mockProxyManager);
+  
+  // Configure the factory to use our mock proxy manager
+  mockFactory.createFn = () => mockProxyManager;
   
   const { sessionManager, deps } = await createTestSessionManager({
     ...overrides,
@@ -186,8 +197,7 @@ export function simulateProxyManagerLifecycle(mockProxyManager: MockProxyManager
     mockProxyManager.emit('adapter-configured');
     
     if (stopOnEntry) {
-      mockProxyManager.currentThreadId = threadId;
-      mockProxyManager.emit('stopped', threadId, 'entry');
+      mockProxyManager.simulateStopped(threadId, 'entry');
     }
   }, 10);
 }

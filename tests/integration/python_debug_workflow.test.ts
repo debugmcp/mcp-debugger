@@ -261,4 +261,4 @@ describe('Python Debugging Workflow - Integration Test', () => {
     await client.callTool({ name: 'close_debug_session', arguments: { sessionId: dryRunSessionId } });
     console.log(`[Test] Closed dry run session: ${dryRunSessionId}`);
   });
-}, { timeout: 60000 }); // 60 seconds timeout for the entire suite
+}, 60000); // 60 seconds timeout for the entire suite

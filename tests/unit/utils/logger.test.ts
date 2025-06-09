@@ -139,14 +139,16 @@ describe('Logger', () => {
       });
     });
 
-    it('should use warn level in test environment', () => {
+    it('should use info level even in test environment', () => {
       process.env.NODE_ENV = 'test';
       
       const logger = createLogger('test-module');
 
+      // FIXED: Logger no longer changes behavior based on test environment
+      // This test was updated to reflect the removal of the test environment anti-pattern
       expect(winston.createLogger).toHaveBeenCalledWith(
         expect.objectContaining({
-          level: 'warn'
+          level: 'info' // Now always defaults to 'info' regardless of environment
         })
       );
     });

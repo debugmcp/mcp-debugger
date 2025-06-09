@@ -6,6 +6,69 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./tests/jest.setupAfterEnv.ts'],
+    // Reporter configuration
+    reporters: process.env.CI ? ['dot'] : ['default'],
+    outputFile: {
+      json: './test-results.json'
+    },
+    // Console filtering for noise reduction
+    onConsoleLog(log: string, type: 'stdout' | 'stderr'): boolean | void {
+      // Whitelist - Always show important patterns
+      const importantPatterns = [
+        'FAIL', 
+        'Error:', 
+        'AssertionError', 
+        'Expected', 
+        'Received', 
+        'Test suite failed',
+        'TypeError',
+        'ReferenceError'
+      ];
+      if (importantPatterns.some(pattern => log.includes(pattern))) {
+        return true;
+      }
+      
+      // Noise patterns to filter
+      const noisePatterns = [
+        'vite:', 
+        'webpack', 
+        '[HMR]', 
+        'Download the', 
+        'Debugger listening', 
+        'Waiting for the debugger',
+        'Python path:', 
+        'spawn', 
+        '[esbuild]', 
+        'transforming',
+        'node_modules',
+        'has been externalized',
+        '[MCP Server]',
+        '[debug-mcp]',
+        '[ProxyManager',
+        '[SessionManager]',
+        '[SM _updateSessionState',
+        'stdout |',
+        'stderr |',
+        '2025-', // Date timestamps
+        '[info]',
+        '[debug]',
+        '[warn]'
+      ];
+      
+      if (noisePatterns.some(pattern => log.includes(pattern))) {
+        return false;
+      }
+      
+      // In test files, allow user's console.log statements
+      if (log.includes('.test.') || log.includes('.spec.')) {
+        return true;
+      }
+      
+      // Default: suppress stdout info/debug, keep stderr
+      return type === 'stderr';
+    },
+    // Disable file parallelism for cleaner output
+    fileParallelism: false,
     coverage: {
       provider: 'istanbul', // Changed from 'v8' to 'istanbul'
       reporter: ['text', 'json', 'html', 'json-summary'], // Added 'json-summary' for coverage-summary.json
@@ -18,7 +81,10 @@ export default defineConfig({
         'src/proxy/proxy-bootstrap.js',
         '**/*.d.ts',
         '**/*.test.ts',
-        '**/*.spec.ts'
+        '**/*.spec.ts',
+        // Type-only files - no executable code
+        'src/container/types.ts',
+        'src/dap-core/types.ts'
       ],
       include: ['src/**/*.ts']
     },
