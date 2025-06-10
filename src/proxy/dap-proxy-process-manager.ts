@@ -3,7 +3,6 @@
  */
 
 import { ChildProcess } from 'child_process';
-import path from 'path';
 import {
   IProcessSpawner,
   ILogger,

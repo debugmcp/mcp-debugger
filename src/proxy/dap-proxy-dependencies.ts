@@ -39,11 +39,11 @@ export function createProductionDependencies(): DapProxyDependencies {
     },
     
     dapClientFactory: {
-      create: (host: string, port: number) => new MinimalDapClient(host, port) as any
+      create: (host: string, port: number) => new MinimalDapClient(host, port) as any // eslint-disable-line @typescript-eslint/no-explicit-any -- MinimalDapClient implements IDapClient but has type compatibility issues
     },
     
     messageSender: {
-      send: (message: any) => {
+      send: (message: unknown) => {
         if (process.send) {
           process.send(message);
         } else {
@@ -59,10 +59,10 @@ export function createProductionDependencies(): DapProxyDependencies {
  */
 export function createConsoleLogger(): ILogger {
   return {
-    info: (...args: any[]) => console.error('[INFO]', ...args),
-    error: (...args: any[]) => console.error('[ERROR]', ...args),
-    debug: (...args: any[]) => console.error('[DEBUG]', ...args),
-    warn: (...args: any[]) => console.error('[WARN]', ...args)
+    info: (...args: unknown[]) => console.error('[INFO]', ...args),
+    error: (...args: unknown[]) => console.error('[ERROR]', ...args),
+    debug: (...args: unknown[]) => console.error('[DEBUG]', ...args),
+    warn: (...args: unknown[]) => console.error('[WARN]', ...args)
   };
 }
 
@@ -71,7 +71,7 @@ export function createConsoleLogger(): ILogger {
  */
 export function setupGlobalErrorHandlers(
   logger: ILogger,
-  messageSender: { send: (msg: any) => void },
+  messageSender: { send: (msg: unknown) => void },
   shutdownFn: () => Promise<void>,
   getCurrentSessionId: () => string | null
 ): void {
@@ -85,7 +85,7 @@ export function setupGlobalErrorHandlers(
     shutdownFn().finally(() => process.exit(1));
   });
 
-  process.on('unhandledRejection', (reason: any, promise: Promise<unknown>) => {
+  process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
     logger.error('[Proxy Worker UNHANDLED_REJECTION] Reason:', reason, 'Promise:', promise);
     messageSender.send({
       type: 'error',

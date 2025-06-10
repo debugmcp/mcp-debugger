@@ -16,8 +16,7 @@ import {
   setAdapterConfigured,
   setCurrentThreadId,
   getPendingRequest,
-  removePendingRequest,
-  clearPendingRequests
+  removePendingRequest
 } from './state.js';
 
 /**
@@ -164,8 +163,10 @@ function handleDapEvent(
 
   switch (message.event) {
     case 'stopped':
-      const threadId = message.body?.threadId;
-      const reason = message.body?.reason || 'unknown';
+      // Type guard for stopped event body
+      const body = message.body as { threadId?: number; reason?: string } | undefined;
+      const threadId = body?.threadId;
+      const reason = body?.reason || 'unknown';
       if (threadId) {
         newState = setCurrentThreadId(state, threadId);
       }
@@ -204,7 +205,7 @@ function handleDapEvent(
       // Forward unknown events as generic DAP events
       commands.push({
         type: 'emitEvent',
-        event: 'dap-event' as any,
+        event: 'dap-event',
         args: [message.event, message.body]
       });
   }
@@ -246,6 +247,6 @@ export function isValidProxyMessage(message: unknown): message is ProxyMessage {
     return false;
   }
   
-  const msg = message as any;
+  const msg = message as { sessionId?: unknown; type?: unknown };
   return typeof msg.sessionId === 'string' && typeof msg.type === 'string';
 }

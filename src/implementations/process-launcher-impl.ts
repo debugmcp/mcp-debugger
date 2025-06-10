@@ -23,7 +23,7 @@ import path from 'path';
 class ProcessAdapter extends EventEmitter implements IProcess {
   private _exitCode: number | null = null;
   private _signalCode: string | null = null;
-  protected childProcessListeners: Array<{ event: string; listener: (...args: any[]) => void }> = [];
+  protected childProcessListeners: Array<{ event: string; listener: (...args: any[]) => void }> = []; // eslint-disable-line @typescript-eslint/no-explicit-any
   
   constructor(protected childProcess: IChildProcess) {
     super();
@@ -47,7 +47,7 @@ class ProcessAdapter extends EventEmitter implements IProcess {
       this.emit('spawn');
     };
     
-    const messageHandler = (message: any) => {
+    const messageHandler = (message: unknown) => {
       this.emit('message', message);
     };
     
@@ -103,7 +103,7 @@ class ProcessAdapter extends EventEmitter implements IProcess {
     return this._signalCode;
   }
   
-  send(message: any): boolean {
+  send(message: unknown): boolean {
     return this.childProcess.send(message);
   }
   
@@ -213,7 +213,7 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   private setupErrorHandling(): void {
     // Override error handling to support DAP spec
     // Note: We must handle errors to prevent Node.js from throwing unhandled errors
-    this.on('error', (error) => {
+    this.on('error', () => {
       if (this.initializationState === 'waiting') {
         // Both reject promise AND emit event (DAP spec requirement)
         // The failInitialization will reject the promise, but the error event
@@ -230,10 +230,11 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
       this.initializationReject = reject;
       
       // Set up message handler
-      const messageHandler = (message: any) => {
-        if (message?.type === 'status' && 
-            (message.status === 'adapter_configured_and_launched' || 
-             message.status === 'dry_run_complete')) {
+      const messageHandler = (message: unknown) => {
+        const msg = message as { type?: string; status?: string } | null;
+        if (msg?.type === 'status' && 
+            (msg.status === 'adapter_configured_and_launched' || 
+             msg.status === 'dry_run_complete')) {
           this.completeInitialization();
         }
       };
@@ -285,7 +286,7 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
     }
   }
   
-  private handleEarlyExit(code: number | null, signal: string | null): void {
+  private handleEarlyExit(): void {
     if (this.initializationState === 'waiting' && this.initializationReject) {
       // Only reject if someone is waiting for initialization
       this.failInitialization(new Error('Proxy process exited before initialization'));
@@ -401,7 +402,7 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     delete processEnv.JEST_WORKER_ID;
     
     const options: IProcessOptions = {
-      stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any,
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions IPC compatibility
       env: processEnv
     };
     

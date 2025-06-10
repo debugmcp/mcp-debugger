@@ -6,7 +6,6 @@
  * that handles the debug proxy process.
  */
 import { v4 as uuidv4 } from 'uuid';
-import { createLogger } from '../utils/logger.js'; 
 import { 
   Breakpoint, SessionState, Variable, StackFrame, DebugLanguage, DebugSessionInfo 
 } from './models.js'; 
@@ -14,9 +13,7 @@ import { SessionStore, ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
 import os from 'os';
-import { spawn as actualSpawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { LoggerOptions } from '../utils/logger.js'; 
 import { 
   IFileSystem, 
   INetworkManager, 
@@ -27,9 +24,6 @@ import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager, ProxyConfig } from '../proxy/proxy-manager.js';
 import { IDebugTargetLauncher } from '../interfaces/process-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
-
-// Type for the spawn function
-type SpawnFunctionType = typeof actualSpawn;
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -43,7 +37,7 @@ interface DebugResult {
   success: boolean;
   state: SessionState;
   error?: string;
-  data?: any;
+  data?: unknown;
 }
 
 // ManagedSession is now imported from session-store.ts
@@ -69,13 +63,6 @@ export interface SessionManagerConfig {
   dryRunTimeoutMs?: number;
 }
 
-// Helper to check if the first argument is SessionManagerConfig (for new API)
-function isSessionManagerConfig(arg: SessionManagerConfig | LoggerOptions): arg is SessionManagerConfig {
-  // A simple check; refine if needed. Assumes LoggerOptions won't have these specific keys.
-  return typeof arg === 'object' && arg !== null && ('logDirBase' in arg || 'defaultDapLaunchArgs' in arg || 'dryRunTimeoutMs' in arg);
-}
-
-
 export class SessionManager {
   private sessionStore: SessionStore;
   private logDirBase: string;
@@ -90,7 +77,7 @@ export class SessionManager {
   private dryRunTimeoutMs: number;
   
   // WeakMap to store event handlers for cleanup
-  private sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: any[]) => void>>();
+  private sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: unknown[]) => void>>();
 
   /**
    * Constructor with full dependency injection
@@ -215,7 +202,7 @@ export class SessionManager {
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void {
     const sessionId = session.id;
-    const handlers = new Map<string, (...args: any[]) => void>();
+    const handlers = new Map<string, (...args: any[]) => void>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- Event handlers require flexible argument signatures to support various event types
 
     // Named function for stopped event
     const handleStopped = (threadId: number, reason: string) => {
@@ -284,7 +271,8 @@ export class SessionManager {
       this.logger.info(`[ProxyManager ${sessionId}] Dry run complete: ${command} ${script}`);
       this._updateSessionState(session, SessionState.STOPPED);
       // Don't clear proxyManager yet if we have a dry run handler waiting
-      if (!(session as any)._dryRunHandlerSetup) {
+      const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
+      if (!sessionWithSetup._dryRunHandlerSetup) {
         session.proxyManager = undefined;
       }
     };
@@ -427,7 +415,8 @@ export class SessionManager {
       // For dry run, start the proxy and wait for completion
       if (dryRunSpawn) {
         // Mark that we're setting up a dry run handler
-        (session as any)._dryRunHandlerSetup = true;
+        const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
+        sessionWithSetup._dryRunHandlerSetup = true;
         
         // Start the proxy manager
         await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
@@ -438,7 +427,7 @@ export class SessionManager {
         this.logger.info(`[SessionManager] Checking state after start: ${refreshedSession.state}`);
         if (refreshedSession.state === SessionState.STOPPED) {
           this.logger.info(`[SessionManager] Dry run already completed for session ${sessionId}`);
-          delete (session as any)._dryRunHandlerSetup;
+          delete sessionWithSetup._dryRunHandlerSetup;
           return { 
             success: true, 
             state: SessionState.STOPPED,
@@ -449,7 +438,7 @@ export class SessionManager {
         // Wait for completion with timeout
         this.logger.info(`[SessionManager] Waiting for dry run completion with timeout ${this.dryRunTimeoutMs}ms`);
         const dryRunCompleted = await this.waitForDryRunCompletion(refreshedSession, this.dryRunTimeoutMs);
-        delete (session as any)._dryRunHandlerSetup;
+        delete sessionWithSetup._dryRunHandlerSetup;
         
         if (dryRunCompleted) {
           this.logger.info(`[SessionManager] Dry run completed for session ${sessionId}, final state: ${refreshedSession.state}`);

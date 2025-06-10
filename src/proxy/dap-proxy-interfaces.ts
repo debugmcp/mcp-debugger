@@ -27,7 +27,7 @@ export interface DapCommandPayload {
   cmd: 'dap';
   requestId: string;
   dapCommand: string;
-  dapArgs?: any;
+  dapArgs?: unknown;
   sessionId: string;
 }
 
@@ -43,7 +43,7 @@ export type ParentCommand = ProxyInitPayload | DapCommandPayload | TerminatePayl
 export interface ProxyMessage {
   type: 'status' | 'dapResponse' | 'dapEvent' | 'error';
   sessionId: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface StatusMessage extends ProxyMessage {
@@ -59,7 +59,7 @@ export interface DapResponseMessage extends ProxyMessage {
   type: 'dapResponse';
   requestId: string;
   success: boolean;
-  body?: any;
+  body?: unknown;
   response?: DebugProtocol.Response;
   error?: string;
 }
@@ -67,7 +67,7 @@ export interface DapResponseMessage extends ProxyMessage {
 export interface DapEventMessage extends ProxyMessage {
   type: 'dapEvent';
   event: string;
-  body: any;
+  body: unknown;
 }
 
 export interface ErrorMessage extends ProxyMessage {
@@ -81,10 +81,10 @@ export interface ErrorMessage extends ProxyMessage {
  * Logger interface for dependency injection
  */
 export interface ILogger {
-  info(message: string, ...args: any[]): void;
-  error(message: string, ...args: any[]): void;
-  debug(message: string, ...args: any[]): void;
-  warn(message: string, ...args: any[]): void;
+  info(message: string, ...args: unknown[]): void;
+  error(message: string, ...args: unknown[]): void;
+  debug(message: string, ...args: unknown[]): void;
+  warn(message: string, ...args: unknown[]): void;
 }
 
 /**
@@ -107,11 +107,11 @@ export interface IProcessSpawner {
  */
 export interface IDapClient {
   connect(): Promise<void>;
-  sendRequest<T = any>(command: string, args?: any): Promise<T>;
+  sendRequest<T = unknown>(command: string, args?: unknown): Promise<T>;
   disconnect(): void;
-  on(event: string, handler: (...args: any[]) => void): void;
-  off(event: string, handler: (...args: any[]) => void): void;
-  once(event: string, handler: (...args: any[]) => void): void;
+  on(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
+  off(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
+  once(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
   removeAllListeners(): void;
 }
 
@@ -126,7 +126,7 @@ export interface IDapClientFactory {
  * Message sender abstraction for IPC communication
  */
 export interface IMessageSender {
-  send(message: any): void;
+  send(message: unknown): void;
 }
 
 /**
@@ -217,7 +217,7 @@ export interface ExtendedLaunchArgs extends DebugProtocol.LaunchRequestArguments
   cwd?: string;
   console?: string;
   justMyCode?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**

@@ -11,7 +11,6 @@ import { MessageParser } from './dap-proxy-message-parser.js';
 import { 
   DapProxyDependencies,
   ILogger,
-  IMessageSender,
   ParentCommand, 
   ProxyState 
 } from './dap-proxy-interfaces.js';
@@ -41,7 +40,7 @@ export class ProxyRunner {
   private worker: DapProxyWorker;
   private logger: ILogger;
   private rl?: readline.Interface;
-  private messageHandler?: (message: any) => Promise<void>;
+  private messageHandler?: (message: unknown) => Promise<void>;
   private isRunning = false;
 
   constructor(
@@ -165,7 +164,7 @@ export class ProxyRunner {
   private setupIPCCommunication(processMessage: (message: string) => Promise<void>): void {
     this.logger.info('[ProxyRunner] Setting up IPC communication');
     
-    this.messageHandler = async (message: any) => {
+    this.messageHandler = async (message: unknown) => {
       this.logger.debug('[ProxyRunner] IPC message received');
       
       if (typeof message === 'string') {
@@ -227,7 +226,7 @@ export class ProxyRunner {
     });
 
     // Unhandled rejection handler
-    process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+    process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
       this.logger.error('[ProxyRunner] Unhandled rejection:', { reason, promise });
       const sessionId = getCurrentSessionId() || 'unknown';
       

@@ -5,12 +5,12 @@
 
 import { ChildProcess } from 'child_process';
 import path from 'path';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import {
   DapProxyDependencies,
   ParentCommand,
   ProxyInitPayload,
   DapCommandPayload,
-  TerminatePayload,
   IDapClient,
   ILogger,
   ProxyState,
@@ -374,7 +374,7 @@ export class DapProxyWorker {
 
   // Message sending helpers
 
-  private sendStatus(status: string, extra: Record<string, any> = {}): void {
+  private sendStatus(status: string, extra: Record<string, unknown> = {}): void {
     const message: StatusMessage = {
       type: 'status',
       status,
@@ -384,18 +384,21 @@ export class DapProxyWorker {
     this.dependencies.messageSender.send(message);
   }
 
-  private sendDapResponse(requestId: string, success: boolean, response?: any, error?: string): void {
+  private sendDapResponse(requestId: string, success: boolean, response?: unknown, error?: string): void {
     const message: DapResponseMessage = {
       type: 'dapResponse',
       requestId,
       success,
       sessionId: this.currentSessionId || 'unknown',
-      ...(success ? { body: response?.body, response } : { error })
+      ...(success && response ? { 
+        body: (response as DebugProtocol.Response).body, 
+        response: response as DebugProtocol.Response 
+      } : { error })
     };
     this.dependencies.messageSender.send(message);
   }
 
-  private sendDapEvent(event: string, body: any): void {
+  private sendDapEvent(event: string, body: unknown): void {
     const message: DapEventMessage = {
       type: 'dapEvent',
       event,

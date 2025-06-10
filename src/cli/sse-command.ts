@@ -5,9 +5,14 @@ import { IncomingMessage, ServerResponse } from 'http';
 import { DebugMcpServer } from '../server.js';
 import { SSEOptions } from './setup.js';
 
+export interface ServerFactoryOptions {
+  logLevel?: string;
+  logFile?: string;
+}
+
 export interface SSECommandDependencies {
   logger: WinstonLoggerType;
-  serverFactory: (options: any) => DebugMcpServer;
+  serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
   exitProcess?: (code: number) => void;
 }
 
@@ -167,7 +172,7 @@ export function createSSEApp(
   });
 
   // Expose the transports map for graceful shutdown
-  (app as any).sseTransports = sseTransports;
+  (app as any).sseTransports = sseTransports; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   return app;
 }
@@ -197,7 +202,7 @@ export async function handleSSECommand(
       logger.info('Shutting down SSE server...');
       
       // Close all SSE connections
-      const sseTransports = (app as any).sseTransports as Map<string, SessionData>;
+      const sseTransports = (app as any).sseTransports as Map<string, SessionData> | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (sseTransports) {
         sseTransports.forEach(({ transport, server }) => {
           transport.close();

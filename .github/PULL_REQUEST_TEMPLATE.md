@@ -1,45 +1,61 @@
-## Description
+## 📋 Description
 
-Please include a summary of the change and which issue is fixed (if any). Please also include relevant motivation and context. List any dependencies that are required for this change.
+Please include a summary of the changes and which issue is fixed. Include relevant motivation and context.
 
-Fixes # (issue)
+Fixes # (issue number)
 
-## Type of change
+## 🔄 Type of Change
 
 Please delete options that are not relevant.
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] This change requires a documentation update
-- [ ] Refactor (code cleanup, performance improvements, etc.)
-- [ ] Build/CI related changes
-- [ ] Other (please describe):
+- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
+- [ ] ✨ New feature (non-breaking change which adds functionality)
+- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] 📚 Documentation update
+- [ ] 🧹 Code refactoring
+- [ ] ⚡ Performance improvement
+- [ ] 🧪 Test improvement
 
-## How Has This Been Tested?
+## ✅ Checklist
 
-Please describe the tests that you ran to verify your changes. Provide instructions so we can reproduce. Please also list any relevant details for your test configuration.
+- [ ] My code follows the style guidelines of this project
+- [ ] I have performed a self-review of my own code
+- [ ] I have commented my code, particularly in hard-to-understand areas
+- [ ] I have made corresponding changes to the documentation
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix is effective or that my feature works
+- [ ] New and existing unit tests pass locally with my changes
+- [ ] Any dependent changes have been merged and published in downstream modules
 
-- [ ] Test A
-- [ ] Test B
+## 🧪 Testing
+
+Please describe the tests that you ran to verify your changes. Provide instructions so we can reproduce.
+
+```bash
+# Example test command
+npm test
+```
 
 **Test Configuration**:
-* OS:
-* Node version:
-* Python version:
-* Other relevant environment details:
+- OS: [e.g., Ubuntu 22.04]
+- Node version: [e.g., 20.11.0]
+- Python version: [e.g., 3.11.5]
 
-## Checklist:
+## 📸 Screenshots (if applicable)
 
-- [ ] My code follows the style guidelines of this project (ESLint, Prettier).
-- [ ] I have performed a self-review of my own code.
-- [ ] I have commented my code, particularly in hard-to-understand areas.
-- [ ] I have made corresponding changes to the documentation.
-- [ ] My changes generate no new warnings.
-- [ ] I have added tests that prove my fix is effective or that my feature works.
-- [ ] New and existing unit tests pass locally with my changes.
-- [ ] Any dependent changes have been merged and published in downstream modules.
+If your changes include UI updates or visual debugging improvements, please add screenshots.
 
-## Screenshots (if applicable)
+## 🔗 Related Issues
 
-(If your change has a visual component, please include screenshots here.)
+Link any related issues here:
+- Related to #
+- Depends on #
+- Blocks #
+
+## 📝 Additional Notes
+
+Any additional information that reviewers should know.
+
+---
+
+**Reviewer:** @debugmcpdev

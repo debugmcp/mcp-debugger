@@ -13,8 +13,13 @@ import { handleStdioCommand } from './cli/stdio-command.js';
 import { handleSSECommand } from './cli/sse-command.js';
 import { getVersion } from './cli/version.js';
 
+export interface ServerOptions {
+  logLevel?: string;
+  logFile?: string;
+}
+
 // Factory function for creating server instances
-export function createDebugMcpServer(options: any): DebugMcpServer {
+export function createDebugMcpServer(options: ServerOptions): DebugMcpServer {
   return new DebugMcpServer(options);
 }
 

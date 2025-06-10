@@ -25,7 +25,7 @@ export interface ContainerConfig {
    * Additional logger options
    */
   loggerOptions?: {
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 

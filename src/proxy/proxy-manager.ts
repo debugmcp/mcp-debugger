@@ -2,7 +2,6 @@
  * ProxyManager - Handles spawning and communication with debug proxy processes
  */
 import { EventEmitter } from 'events';
-import { ChildProcess } from 'child_process';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -12,7 +11,6 @@ import {
   ILogger
 } from '../interfaces/external-dependencies.js';
 import { IProxyProcessLauncher, IProxyProcess } from '../interfaces/process-interfaces.js';
-import { CustomLaunchRequestArguments } from '../session/models.js';
 import { 
   createInitialState, 
   handleProxyMessage, 
@@ -43,7 +41,7 @@ export interface ProxyConfig {
  */
 export interface ProxyManagerEvents {
   // DAP events
-  'stopped': (threadId: number, reason: string, data?: any) => void;
+  'stopped': (threadId: number, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
   'continued': () => void;
   'terminated': () => void;
   'exited': () => void;
@@ -56,6 +54,7 @@ export interface ProxyManagerEvents {
   // Status events
   'dry-run-complete': (command: string, script: string) => void;
   'adapter-configured': () => void;
+  'dap-event': (event: string, body: unknown) => void;
 }
 
 /**
@@ -66,7 +65,7 @@ export interface IProxyManager extends EventEmitter {
   stop(): Promise<void>;
   sendDapRequest<T extends DebugProtocol.Response>(
     command: string, 
-    args?: any
+    args?: unknown
   ): Promise<T>;
   isRunning(): boolean;
   getCurrentThreadId(): number | null;
@@ -93,7 +92,7 @@ type ProxyDapEventMessage = {
   type: 'dapEvent'; 
   sessionId: string; 
   event: string; 
-  body?: any; 
+  body?: unknown; 
   data?: unknown 
 };
 
@@ -103,7 +102,7 @@ type ProxyDapResponseMessage = {
   requestId: string; 
   success: boolean; 
   response?: DebugProtocol.Response; 
-  body?: any; 
+  body?: unknown; 
   error?: string;
   data?: unknown;
 };
@@ -112,7 +111,7 @@ type ProxyErrorMessage = {
   type: 'error'; 
   sessionId: string; 
   message: string; 
-  data?: any 
+  data?: unknown 
 };
 
 type ProxyMessage = ProxyStatusMessage | ProxyDapEventMessage | ProxyDapResponseMessage | ProxyErrorMessage;
@@ -276,7 +275,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   async sendDapRequest<T extends DebugProtocol.Response>(
     command: string, 
-    args?: any
+    args?: unknown
   ): Promise<T> {
     if (!this.proxyProcess || !this.isInitialized) {
       throw new Error('Proxy not initialized');
@@ -404,7 +403,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
             break;
             
           case 'emitEvent':
-            this.emit(command.event as any, ...command.args);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event args must support variable argument counts, any[] required for spread operator
+            this.emit(command.event as keyof ProxyManagerEvents, ...(command.args as [any, any]));
             break;
             
           case 'killProcess':
@@ -449,7 +449,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.pendingDapRequests.delete(message.requestId);
 
     if (message.success) {
-      pending.resolve(message.response || message.body);
+      pending.resolve((message.response || message.body) as DebugProtocol.Response);
     } else {
       pending.reject(new Error(message.error || `DAP request '${pending.command}' failed`));
     }
@@ -460,12 +460,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     switch (message.event) {
       case 'stopped':
-        const threadId = message.body?.threadId;
-        const reason = message.body?.reason || 'unknown';
+        const stoppedBody = message.body as { threadId?: number; reason?: string } | undefined;
+        const threadId = stoppedBody?.threadId || 0;
+        const reason = stoppedBody?.reason || 'unknown';
         if (threadId) {
           this.currentThreadId = threadId;
         }
-        this.emit('stopped', threadId, reason, message.body);
+        this.emit('stopped', threadId, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
         break;
       
       case 'continued':
@@ -482,7 +483,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       
       // Forward other events as generic DAP events
       default:
-        this.emit('dap-event' as any, message.event, message.body);
+        this.emit('dap-event', message.event, message.body);
     }
   }
 

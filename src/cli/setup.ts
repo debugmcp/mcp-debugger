@@ -11,8 +11,8 @@ export interface SSEOptions {
   logFile?: string;
 }
 
-export type StdioHandler = (options: StdioOptions, command?: any) => Promise<void>;
-export type SSEHandler = (options: SSEOptions, command?: any) => Promise<void>;
+export type StdioHandler = (options: StdioOptions, command?: Command) => Promise<void>;
+export type SSEHandler = (options: SSEOptions, command?: Command) => Promise<void>;
 
 export function createCLI(name: string, description: string, version: string): Command {
   const program = new Command();

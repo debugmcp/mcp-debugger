@@ -1,3 +1,7 @@
+/* eslint-disable no-console */
+// This file runs in the proxy process before TypeScript types are available.
+// console.error is used intentionally for debugging proxy startup.
+
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

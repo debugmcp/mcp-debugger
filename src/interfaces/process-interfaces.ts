@@ -15,7 +15,7 @@ export interface IProcess extends EventEmitter {
   stdout: NodeJS.ReadableStream | null;
   stderr: NodeJS.ReadableStream | null;
   
-  send(message: any): boolean;
+  send(message: unknown): boolean;
   kill(signal?: string): boolean;
   
   // Lifecycle state
@@ -40,7 +40,7 @@ export interface IProcessOptions {
   cwd?: string;
   env?: Record<string, string>;
   shell?: boolean;
-  stdio?: any; // Keep flexible for IPC support
+  stdio?: any; // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions compatibility
   detached?: boolean;
 }
 

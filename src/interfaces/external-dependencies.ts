@@ -5,8 +5,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { ChildProcess as NodeChildProcess, SpawnOptions } from 'child_process';
-import { Server as NetServer } from 'net';
+import { SpawnOptions } from 'child_process';
 import { Stats } from 'fs';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 
@@ -42,7 +41,7 @@ export interface IChildProcess extends EventEmitter {
   pid?: number;
   killed: boolean;
   kill(signal?: string): boolean;
-  send(message: any): boolean;
+  send(message: unknown): boolean;
   stdin: NodeJS.WritableStream | null;
   stdout: NodeJS.ReadableStream | null;
   stderr: NodeJS.ReadableStream | null;
@@ -82,10 +81,10 @@ export interface IServer extends EventEmitter {
  * Standard logging methods used throughout the codebase
  */
 export interface ILogger {
-  info(message: string, meta?: any): void;
-  error(message: string, meta?: any): void;
-  debug(message: string, meta?: any): void;
-  warn(message: string, meta?: any): void;
+  info(message: string, meta?: unknown): void;
+  error(message: string, meta?: unknown): void;
+  debug(message: string, meta?: unknown): void;
+  warn(message: string, meta?: unknown): void;
 }
 
 /**
@@ -115,7 +114,7 @@ export type PartialDependencies = Partial<IDependencies>;
  * Factory interfaces for creating dependencies
  */
 export interface ILoggerFactory {
-  createLogger(name: string, options?: any): ILogger;
+  createLogger(name: string, options?: Record<string, unknown>): ILogger;
 }
 
 export interface IChildProcessFactory {

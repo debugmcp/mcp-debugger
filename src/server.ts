@@ -11,7 +11,6 @@ import {
   McpError,
   ServerResult, 
 } from '@modelcontextprotocol/sdk/types.js';
-import { createLogger } from './utils/logger.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import { createProductionDependencies } from './container/dependencies.js';
 import { ContainerConfig } from './container/types.js';

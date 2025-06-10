@@ -30,9 +30,9 @@ export interface DAPSessionState {
  */
 export type DAPCommand = 
   | { type: 'sendToClient'; message: DebugProtocol.Response | DebugProtocol.Event }
-  | { type: 'sendToProxy'; command: any }
-  | { type: 'log'; level: 'info' | 'error' | 'warn' | 'debug'; message: string; data?: any }
-  | { type: 'emitEvent'; event: string; args: any[] }
+  | { type: 'sendToProxy'; command: Record<string, unknown> }
+  | { type: 'log'; level: 'info' | 'error' | 'warn' | 'debug'; message: string; data?: unknown }
+  | { type: 'emitEvent'; event: string; args: unknown[] }
   | { type: 'killProcess' };
 
 /**
@@ -56,7 +56,7 @@ export type ProxyDapEventMessage = {
   type: 'dapEvent'; 
   sessionId: string; 
   event: string; 
-  body?: any; 
+  body?: unknown; 
   data?: unknown 
 };
 
@@ -66,7 +66,7 @@ export type ProxyDapResponseMessage = {
   requestId: string; 
   success: boolean; 
   response?: DebugProtocol.Response; 
-  body?: any; 
+  body?: unknown; 
   error?: string;
   data?: unknown;
 };
@@ -75,7 +75,7 @@ export type ProxyErrorMessage = {
   type: 'error'; 
   sessionId: string; 
   message: string; 
-  data?: any 
+  data?: unknown 
 };
 
 export type ProxyMessage = ProxyStatusMessage | ProxyDapEventMessage | ProxyDapResponseMessage | ProxyErrorMessage;

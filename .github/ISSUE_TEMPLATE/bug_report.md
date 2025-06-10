@@ -1,38 +1,68 @@
 ---
-name: Bug Report
+name: Bug report
 about: Create a report to help us improve
-title: "[BUG] Brief description of bug"
+title: '[BUG] '
 labels: bug
-assignees: ''
+assignees: debugmcpdev
 
 ---
 
-**Describe the bug**
+## 🐛 Bug Description
+
 A clear and concise description of what the bug is.
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
+## 📋 Steps to Reproduce
+
+1. Set up mcp-debugger with '...'
+2. Run command '...'
+3. Set breakpoint at '...'
 4. See error
 
-**Expected behavior**
+## 🤔 Expected Behavior
+
 A clear and concise description of what you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+## 💥 Actual Behavior
 
-**Environment (please complete the following information):**
- - OS: [e.g. iOS]
- - Node.js version: [e.g. 18.x]
- - Python version (if relevant): [e.g. 3.10.x]
- - `debug-mcp-server` version: [e.g. 0.1.0, or commit SHA if from source]
- - Browser (if applicable): [e.g. chrome, safari]
- - MCP Client (if applicable, e.g. Claude Desktop version, LangChain):
+What actually happened instead.
 
-**Additional context**
-Add any other context about the problem here. This could include:
-- Relevant logs from the `debug-mcp-server` console.
-- The Python script you were trying to debug.
-- Configuration of your MCP client.
+## 📸 Screenshots/Logs
+
+If applicable, add screenshots or debug logs to help explain your problem.
+
+```
+Paste any relevant error messages or logs here
+```
+
+## 🌍 Environment
+
+- **OS**: [e.g., Windows 11, Ubuntu 22.04, macOS 13]
+- **Node.js version**: [e.g., 20.11.0]
+- **Python version**: [e.g., 3.11.5]
+- **mcp-debugger version**: [e.g., 0.9.0]
+- **Installation method**: [Docker/npm/built from source]
+- **MCP client**: [e.g., Claude Desktop, custom client]
+
+## 📝 Additional Context
+
+Add any other context about the problem here. For example:
+- Was this working before?
+- Does it happen consistently?
+- Any workarounds you've found?
+
+## 🔍 Debug Information
+
+<details>
+<summary>Click to expand debug info</summary>
+
+If possible, run with debug logging enabled and paste the output:
+
+```bash
+# For STDIO mode
+DEBUG=* mcp-debugger
+
+# For Docker
+docker run -e DEBUG=* debugmcp/mcp-debugger:0.9.0
+```
+
+</details>

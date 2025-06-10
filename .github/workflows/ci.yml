@@ -1,155 +1,101 @@
-name: Node.js CI & Lint
+name: CI
 
 on:
   push:
-    branches: [ main ] # Or your default branch, e.g., master
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ] # Or your default branch
+    branches: [ main ]
 
 jobs:
-  build_and_test:
-    name: Build, Lint & Test on ${{ matrix.os }}
+  build-and-test:
+    name: Build and Test
     runs-on: ${{ matrix.os }}
+    
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
         node-version: [20.x]
         python-version: ['3.11']
-
+    
     steps:
-    - name: Checkout repository
+    - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Set up Node.js ${{ matrix.node-version }}
+    
+    - name: Setup Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-
-    - name: Set up Python ${{ matrix.python-version }}
+    
+    - name: Setup Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install debugpy
+    
+    - name: Install Node dependencies
+      run: npm ci
+    
+    - name: Build project
+      run: npm run build
+    
+    - name: Run linting
+      run: npm run lint
+    
+    - name: Run tests with coverage
+      run: npm run test:coverage:quiet
+      env:
+        CI: true
+    
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      if: matrix.os == 'ubuntu-latest'
+      with:
+        name: coverage-report
+        path: coverage/
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: matrix.os == 'ubuntu-latest'
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage/coverage-final.json
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+    
     - name: Install dependencies
       run: npm ci
+    
+    - name: Run ESLint
+      run: npm run lint
 
-    - name: Build the project
-      run: npm run build
-
-    - name: Run linters
-      run: npm run lint # Ensure this script fails on lint errors
-
-    - name: Run tests
-      run: npm test
-      # Note: The 'set NODE_OPTIONS=--experimental-vm-modules' in package.json scripts
-      # might need adjustment for cross-platform compatibility in GHA.
-      # For Linux/macOS, it would be 'export NODE_OPTIONS=--experimental-vm-modules && jest'
-      # A cross-platform way to set env vars in npm scripts is using 'cross-env' package,
-      # or handle it within the GHA workflow yml if scripts are OS-specific.
-      # For now, assuming 'npm test' as defined will be attempted.
-      # If 'set' causes issues on Linux, this step might need OS-conditional commands.
-
-  publish_docker:
-    name: Publish Docker image to Docker Hub
+  test-summary:
+    name: Test Summary
+    needs: build-and-test
     runs-on: ubuntu-latest
-    needs: build_and_test # Ensure build and tests pass before publishing
-    # Only run on pushes to main branch that are version tags (e.g., v0.1.0)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: always()
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Extract version from tag
-        id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/v}
-        # For newer GHA: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-        # Using older ::set-output for broader compatibility for now.
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: |
-            debugmcp/debug-mcp-server:${{ steps.get_version.outputs.VERSION }}
-            debugmcp/debug-mcp-server:latest
-          # Add labels from Dockerfile, or define them here if preferred
-          # labels: |
-          #   org.opencontainers.image.source=https://github.com/your-repo/debug-mcp-server
-          #   org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
-          #   org.opencontainers.image.description=Run-time step-through debugging for LLM agents. MCP server for Python debugging via DAP (debugpy).
-          # Since labels are in Dockerfile, this is not strictly needed here unless overriding.
-
-  publish_pypi:
-    name: Publish Python launcher to PyPI
-    runs-on: ubuntu-latest
-    needs: build_and_test # Ensure build and tests pass before publishing
-    # Only run on pushes to main branch that are version tags (e.g., v0.1.0)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11' # Or your preferred Python version for publishing
-
-      - name: Install build dependencies
-        run: python -m pip install --upgrade build twine
-
-      - name: Build Python package
-        run: |
-          mkdir ./python_artifacts
-          python -m build --outdir ./python_artifacts .
-        # This builds sdist and wheel into ./python_artifacts/
-        # This avoids conflict with the Node.js `dist/` directory.
-
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__ # For PyPI, use API token as password
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload ./python_artifacts/*
-        # Uploads only the Python-specific artifacts.
-
-  create_release_artifacts:
-    name: Create Release Artifacts
-    runs-on: ubuntu-latest
-    needs: build_and_test # Ensure build and tests pass
-    # Only run on pushes to main branch that are version tags (e.g., v0.1.0)
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        # We need the build artifacts, so we need to run build again or get them from a previous job.
-        # Since `build_and_test` already runs `npm run build`, and `dist` is committed (as per D-1),
-        # the checked out code should already contain the `dist` folder if the tag was made after build & commit.
-        # If `dist` is not committed, we'd need to rebuild or pass artifacts.
-        # Assuming `dist` is committed as per D-1 for now.
-
-      - name: Archive dist directory
-        run: |
-          if [ -d "dist" ]; then
-            zip -r dist.zip ./dist
-          else
-            echo "Error: dist directory not found. Cannot create dist.zip."
-            exit 1
-          fi
-      
-      - name: Upload dist.zip artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-zip
-          path: dist.zip
-          retention-days: 7 # Keep for 7 days, adjust as needed
+    - name: Check test results
+      run: |
+        echo "✅ CI pipeline completed"
+        echo "Check the test results in the build-and-test job"

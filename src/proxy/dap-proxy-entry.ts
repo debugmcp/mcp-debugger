@@ -13,8 +13,7 @@
 import { ProxyRunner, detectExecutionMode, shouldAutoExecute } from './dap-proxy-core.js';
 import { 
   createProductionDependencies, 
-  createConsoleLogger,
-  setupGlobalErrorHandlers 
+  createConsoleLogger
 } from './dap-proxy-dependencies.js';
 
 // Detect execution mode

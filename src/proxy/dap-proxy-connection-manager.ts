@@ -94,12 +94,12 @@ export class DapConnectionManager {
     client: IDapClient,
     handlers: {
       onInitialized?: () => void | Promise<void>;
-      onOutput?: (body: any) => void;
-      onStopped?: (body: any) => void;
-      onContinued?: (body: any) => void;
-      onThread?: (body: any) => void;
-      onExited?: (body: any) => void;
-      onTerminated?: (body: any) => void;
+      onOutput?: (body: DebugProtocol.OutputEvent['body']) => void;
+      onStopped?: (body: DebugProtocol.StoppedEvent['body']) => void;
+      onContinued?: (body: DebugProtocol.ContinuedEvent['body']) => void;
+      onThread?: (body: DebugProtocol.ThreadEvent['body']) => void;
+      onExited?: (body: DebugProtocol.ExitedEvent['body']) => void;
+      onTerminated?: (body: DebugProtocol.TerminatedEvent['body']) => void;
       onError?: (err: Error) => void;
       onClose?: () => void;
     }

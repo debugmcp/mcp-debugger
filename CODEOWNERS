@@ -1,0 +1,31 @@
+# CODEOWNERS for mcp-debugger
+# This file defines code ownership for automatic PR review assignments
+
+# Global owners - will be requested for review on all changes
+* @debugmcpdev
+
+# Python-specific files
+*.py @debugmcpdev
+/debug_mcp_launcher/ @debugmcpdev
+/examples/python/ @debugmcpdev
+/examples/python_simple_swap/ @debugmcpdev
+
+# Core server files
+/src/ @debugmcpdev
+
+# Documentation
+/docs/ @debugmcpdev
+*.md @debugmcpdev
+
+# CI/CD and configuration
+/.github/ @debugmcpdev
+Dockerfile @debugmcpdev
+docker-*.sh @debugmcpdev
+docker-*.cmd @debugmcpdev
+package.json @debugmcpdev
+tsconfig.json @debugmcpdev
+vitest.config.ts @debugmcpdev
+eslint.config.js @debugmcpdev
+
+# Test files
+/tests/ @debugmcpdev

@@ -17,7 +17,7 @@ export function setupErrorHandlers(dependencies: ErrorHandlerDependencies): void
     exitProcess(1);
   });
 
-  process.on('unhandledRejection', (reason: any, promise: Promise<unknown>) => {
+  process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
     logger.error('[Server UNHANDLED_REJECTION] Reason:', { reason });
     logger.error('[Server UNHANDLED_REJECTION] Promise:', { promise });
     exitProcess(1);
