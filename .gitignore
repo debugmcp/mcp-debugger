@@ -61,3 +61,6 @@ analyze-test-results.cjs
 
 # Coverage analysis temporary files
 coverage-analysis-details.json
+
+# Manual tests (may be outdated)
+tests/manual/

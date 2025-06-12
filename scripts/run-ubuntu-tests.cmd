@@ -5,7 +5,7 @@ REM Approach: bind-mount the repository read-only, then copy it to /tmp inside
 REM           the container to avoid NTFS permission issues (EACCES) on node_modules.
 REM
 REM Prerequisite (one-time):
-REM     docker build -f test-ubuntu.dockerfile -t mcp-debugger-ci .
+REM     docker build -f docker/test-ubuntu.dockerfile -t mcp-debugger-ci .
 REM
 REM Usage:
 REM     scripts\run-ubuntu-tests.cmd

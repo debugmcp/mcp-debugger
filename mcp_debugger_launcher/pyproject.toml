@@ -30,7 +30,7 @@ Homepage = "https://github.com/your-repo/debug-mcp-server" # Placeholder
 Repository = "https://github.com/your-repo/debug-mcp-server" # Placeholder
 
 [project.scripts]
-debug-mcp-server = "debug_mcp_launcher.cli:main"
+debug-mcp-server = "mcp_debugger_launcher.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

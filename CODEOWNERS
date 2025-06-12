@@ -6,7 +6,7 @@
 
 # Python-specific files
 *.py @debugmcpdev
-/debug_mcp_launcher/ @debugmcpdev
+/mcp_debugger_launcher/ @debugmcpdev
 /examples/python/ @debugmcpdev
 /examples/python_simple_swap/ @debugmcpdev
 
