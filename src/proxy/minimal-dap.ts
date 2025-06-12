@@ -10,7 +10,14 @@ export class MinimalDapClient extends EventEmitter {
   private socket: net.Socket | null = null;
   private buffer = '';
   private seq = 1;
-  private pendingRequests = new Map<number, { resolve: (response: DebugProtocol.Response) => void, reject: (error: Error) => void }>();
+  private pendingRequests = new Map<
+    number,
+    {
+      resolve: (response: DebugProtocol.Response) => void;
+      reject: (error: Error) => void;
+      timer: NodeJS.Timeout;
+    }
+  >();
   private host: string;
   private port: number;
   private isDisconnectingOrDisconnected = false; // Added flag
@@ -92,6 +99,7 @@ export class MinimalDapClient extends EventEmitter {
           const response = message as DebugProtocol.Response;
           if (this.pendingRequests.has(response.request_seq)) {
             const promise = this.pendingRequests.get(response.request_seq)!;
+            clearTimeout(promise.timer);
             if (response.success) {
               promise.resolve(response);
             } else {
@@ -140,46 +148,59 @@ export class MinimalDapClient extends EventEmitter {
     this.socket.write(header + json);
 
     return new Promise<T>((resolve, reject) => {
-      this.pendingRequests.set(requestSeq, { resolve: resolve as (value: DebugProtocol.Response) => void, reject });
-      // Optional: Add timeout for requests
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pendingRequests.has(requestSeq)) {
           this.pendingRequests.delete(requestSeq);
           reject(new Error(`DAP request '${command}' (seq ${requestSeq}) timed out`));
         }
       }, 30000); // 30s timeout
+
+      this.pendingRequests.set(requestSeq, {
+        resolve: resolve as (value: DebugProtocol.Response) => void,
+        reject,
+        timer
+      });
     });
   }
 
   public disconnect(): void {
+    this.shutdown('DAP client disconnected');
+  }
+
+  /**
+   * Shutdown the DAP client, rejecting all pending requests and disposing resources.
+   * This method is idempotent.
+   */
+  public shutdown(reason = 'dap client shutdown'): void {
     if (this.isDisconnectingOrDisconnected) {
-      logger.info('[MinimalDapClient] Disconnect already in progress or completed.');
+      logger.info('[MinimalDapClient] Shutdown already in progress or completed.');
       return;
     }
     this.isDisconnectingOrDisconnected = true;
-    logger.info('[MinimalDapClient] Disconnecting...');
+    logger.info(`[MinimalDapClient] Shutdown initiated. Reason: ${reason}`);
 
+    // Close socket if needed
     if (this.socket && !this.socket.destroyed) {
       this.socket.end(() => {
         logger.info('[MinimalDapClient] Socket ended gracefully.');
       });
-      // Ensure the socket is eventually destroyed, even if 'end' callback doesn't fire quickly or at all.
-      // A common pattern is to call destroy() after end() or in a timeout.
-      // For robustness, we can call destroy directly.
-      this.socket.destroy(); 
+      this.socket.destroy();
       logger.info('[MinimalDapClient] Socket destroyed.');
     }
-    this.socket = null; // Nullify the socket reference
+    this.socket = null;
 
-    // Reject pending requests
+    // Reject and clear all pending requests
     if (this.pendingRequests.size > 0) {
-      logger.info(`[MinimalDapClient] Rejecting ${this.pendingRequests.size} pending DAP requests.`);
-      this.pendingRequests.forEach(p => p.reject(new Error('DAP client disconnected')));
+      logger.info(`[MinimalDapClient] Rejecting ${this.pendingRequests.size} pending requests on shutdown.`);
+      this.pendingRequests.forEach(({ reject, timer }) => {
+        clearTimeout(timer);
+        reject(new Error(reason));
+      });
       this.pendingRequests.clear();
     }
 
-    // Remove all event listeners to prevent memory leaks and late event handling
+    // Remove listeners
     logger.info('[MinimalDapClient] Removing all event listeners.');
-    this.removeAllListeners(); 
+    this.removeAllListeners();
   }
 }

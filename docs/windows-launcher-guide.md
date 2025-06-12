@@ -99,17 +99,17 @@ When configuring your MCP settings file:
 
 1. **Simple Path (Recommended)**:
 ```json
-"command": "c:/Users/johnf/Dropbox/projects/250106 AGENTS/debug-mcp-server/simple-run.cmd"
+"command": "C:\\path\\to\\debug-mcp-server\\simple-run.cmd"
 ```
 
 2. **With Quotes (For complex paths)**:
 ```json
-"command": "\"c:/Users/johnf/Dropbox/projects/250106 AGENTS/debug-mcp-server/run-debug-server.cmd\""
+"command": "\"C:\\Program Files\\mcp-debugger\\run-debug-server.cmd\""
 ```
 
 3. **Direct node invocation**:
 ```json
-"command": "node \"c:/Users/johnf/Dropbox/projects/250106 AGENTS/debug-mcp-server/direct-launch.js\""
+"command": "node \"C:\\workspace\\debug-mcp-server\\direct-launch.js\""
 ```
 
 ## Troubleshooting Approach

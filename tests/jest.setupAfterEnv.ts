@@ -10,10 +10,6 @@
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import { PortRange, portManager } from './utils/port-manager';
 
-// Set logger to ERROR level during tests to reduce noise
-process.env.LOG_LEVEL = 'error';
-process.env.DEBUG_MCP_LOG_LEVEL = 'error';
-
 // Add type declarations for global test helpers
 declare global {
   var __dirname: string;

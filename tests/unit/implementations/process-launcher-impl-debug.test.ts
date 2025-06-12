@@ -156,7 +156,7 @@ describe('DebugTargetLauncherImpl', () => {
       );
     });
 
-    it('should handle Windows paths correctly', async () => {
+    it.skipIf(process.platform !== 'win32')('should handle Windows paths correctly', async () => {
       const scriptPath = 'C:\\Users\\test\\script.py';
       const args = ['--verbose'];
 

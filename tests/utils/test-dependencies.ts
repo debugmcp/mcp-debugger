@@ -21,6 +21,22 @@ import { MockSessionStoreFactory } from '../../src/factories/session-store-facto
 import { MockProxyManagerFactory } from '../../src/factories/proxy-manager-factory.js';
 import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
 import { createLogger } from '../../src/utils/logger.js';
+import { DebugMcpServer, DebugMcpServerOptions } from '../../src/server.js';
+
+/**
+ * Creates a DebugMcpServer configured for testing
+ * @param options Additional options to override defaults
+ * @returns A new DebugMcpServer instance configured for tests
+ */
+export function createTestServer(options: DebugMcpServerOptions = {}): DebugMcpServer {
+  // Always use 'error' log level for tests unless explicitly overridden
+  const testOptions: DebugMcpServerOptions = {
+    logLevel: 'error',
+    ...options
+  };
+  
+  return new DebugMcpServer(testOptions);
+}
 
 /**
  * Complete set of application dependencies

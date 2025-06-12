@@ -2,7 +2,7 @@
  * Unit tests for DapProxyWorker
  */
 
-import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { ChildProcess } from 'child_process';
 import { DapProxyWorker } from '../../../src/proxy/dap-proxy-worker.js';
 import {
@@ -37,6 +37,10 @@ describe('DapProxyWorker', () => {
       connect: vi.fn().mockResolvedValue(undefined),
       sendRequest: vi.fn().mockResolvedValue({ body: {} }),
       disconnect: vi.fn(),
+      shutdown: vi.fn().mockImplementation((reason?: string) => {
+        // Mock implementation that mimics the real shutdown behavior
+        // In a real implementation, this would reject pending requests
+      }),
       on: vi.fn(),
       off: vi.fn(),
       once: vi.fn(),
@@ -74,6 +78,20 @@ describe('DapProxyWorker', () => {
     };
 
     worker = new DapProxyWorker(mockDependencies);
+  });
+
+  afterEach(async () => {
+    // Ensure worker is properly shut down after each test
+    // This prevents any lingering timers or connections
+    if (worker.getState() !== ProxyState.TERMINATED) {
+      await worker.shutdown();
+    }
+    
+    // Clear all timers to prevent any lingering timeouts
+    vi.clearAllTimers();
+    
+    // Reset all mocks
+    vi.clearAllMocks();
   });
 
   describe('initialization', () => {
@@ -419,6 +437,7 @@ describe('DapProxyWorker', () => {
       );
 
       // Verify shutdown was called
+      expect(mockDapClient.shutdown).toHaveBeenCalledWith('worker shutdown');
       expect(mockDapClient.disconnect).toHaveBeenCalled();
     });
   });

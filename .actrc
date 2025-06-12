@@ -1,0 +1,15 @@
+# Act configuration for mcp-debugger project
+# Maps GitHub Actions runners to appropriate container images
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+-P ubuntu-22.04=catthehacker/ubuntu:act-22.04
+-P ubuntu-20.04=catthehacker/ubuntu:act-20.04
+-P windows-latest=catthehacker/ubuntu:act-latest
+
+# Container architecture for consistency
+--container-architecture linux/amd64
+
+# Remove containers after completion
+--rm
+
+# Memory allocation to prevent OOM errors
+--container-options "--memory=4g"

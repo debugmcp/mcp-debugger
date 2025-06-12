@@ -38,7 +38,8 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       });
       
       const managedSession = sessionManager.getSession(session.id);
-      expect(managedSession?.pythonPath).toBe('python');
+      const expectedDefault = process.platform === 'win32' ? 'python' : 'python3';
+      expect(managedSession?.pythonPath).toBe(expectedDefault);
     });
 
     it('should generate unique session IDs', async () => {

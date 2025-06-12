@@ -101,7 +101,8 @@ describe('SessionStore', () => {
       const session = store.createSession(params);
       const managedSession = store.get(session.id);
 
-      expect(managedSession?.pythonPath).toBe('python');
+       const expectedDefault = process.platform === 'win32' ? 'python' : 'python3';
+       expect(managedSession?.pythonPath).toBe(expectedDefault);
 
       // Restore original value
       if (originalPythonPath) {

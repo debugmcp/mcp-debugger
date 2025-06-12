@@ -24,6 +24,7 @@ import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager, ProxyConfig } from '../proxy/proxy-manager.js';
 import { IDebugTargetLauncher } from '../interfaces/process-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
+import { findPythonExecutable } from '../utils/python-utils.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -153,16 +154,28 @@ export class SessionManager {
     const absoluteScriptPath = path.resolve(projectRoot, scriptPath);
     this.logger.info(`[SessionManager] Resolved script path: ${absoluteScriptPath}`);
 
+    // Resolve Python path with intelligent detection
     let resolvedPythonPath: string;
     const pythonPathFromSession = session.pythonPath!;
+    
     if (path.isAbsolute(pythonPathFromSession)) {
+      // Absolute path provided - use as-is
       resolvedPythonPath = pythonPathFromSession;
     } else if (['python', 'python3', 'py'].includes(pythonPathFromSession.toLowerCase())) {
-      resolvedPythonPath = pythonPathFromSession; 
+      // Common Python commands - use auto-detection
+      try {
+        resolvedPythonPath = await findPythonExecutable(pythonPathFromSession, this.logger);
+        this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedPythonPath}`);
+      } catch (error) {
+        this.logger.error(`[SessionManager] Failed to find Python executable:`, error);
+        throw error;
+      }
     } else {
+      // Relative path - resolve from project root
       resolvedPythonPath = path.resolve(projectRoot, pythonPathFromSession);
     }
-    this.logger.info(`[SessionManager] Resolved python path: ${resolvedPythonPath}`);
+    
+    this.logger.info(`[SessionManager] Using Python path: ${resolvedPythonPath}`);
 
     // Merge launch args
     const effectiveLaunchArgs = {

@@ -13,6 +13,9 @@ import {
   Breakpoint 
 } from './models.js';
 
+// Platform-aware default Python command
+const DEFAULT_PYTHON = process.platform === 'win32' ? 'python' : 'python3';
+
 /**
  * Parameters for creating a new debug session
  */
@@ -60,7 +63,7 @@ export class SessionStore {
       createdAt: new Date(), 
       updatedAt: new Date(), 
       breakpoints: new Map<string, Breakpoint>(), 
-      pythonPath: explicitPythonPath || process.env.PYTHON_PATH || 'python',
+      pythonPath: explicitPythonPath || process.env.PYTHON_PATH || DEFAULT_PYTHON,
       proxyManager: undefined, 
     };
     

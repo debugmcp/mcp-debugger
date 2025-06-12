@@ -12,7 +12,7 @@ This guide provides solutions for common issues you might encounter when setting
 
 1. Verify the command path in your MCP settings:
    ```json
-   "command": "c:/Users/johnf/Dropbox/projects/250106 AGENTS/debug-mcp-server/run-debug-server.cmd"
+   "command": "C:\\path\\to\\debug-mcp-server\\run-debug-server.cmd"
    ```
    Ensure this points to the correct location of your script.
 

@@ -109,6 +109,11 @@ export interface IDapClient {
   connect(): Promise<void>;
   sendRequest<T = unknown>(command: string, args?: unknown): Promise<T>;
   disconnect(): void;
+  /**
+   * Reject all pending requests, clear timers, dispose resources.
+   * Should be idempotent.
+   */
+  shutdown(reason?: string): void;
   on(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
   off(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
   once(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any

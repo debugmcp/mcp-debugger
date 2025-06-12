@@ -54,7 +54,7 @@ The STDIO transport is more reliable and is already configured:
 "mcp-debugger": {
   "transportType": "stdio",
   "command": "node",
-  "args": ["C:/Users/johnf/Dropbox/projects/250106 AGENTS/debug-mcp-server/dist/index.js"]
+  "args": ["C:\\path\\to\\debug-mcp-server\\dist\\index.js"]
 }
 ```
 

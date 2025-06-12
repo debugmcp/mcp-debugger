@@ -19,6 +19,9 @@ build/
 .env.local
 .env.*.local
 
+# Personal configuration files that might be created
+**/personal-config.json
+
 # Logs
 logs/
 sessions/

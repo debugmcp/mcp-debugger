@@ -31,9 +31,18 @@
     "test:verbose": "vitest run --reporter=verbose",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
+    "check:personal-paths": "node scripts/check-personal-paths.cjs",
+    "check:all-personal-paths": "node scripts/check-all-personal-paths.cjs",
     "postbuild": "node -e \"require('fs-extra').copySync('src/proxy/proxy-bootstrap.js', 'dist/proxy/proxy-bootstrap.js', { overwrite: true })\"",
-    "prepare": "npm run build",
-    "clean": "rimraf dist"
+    "prepare": "husky",
+    "clean": "rimraf dist",
+    "act:check": "scripts\\act-runner.cmd --version",
+    "act:lint": "scripts\\act-runner.cmd -j lint",
+    "act:test": "scripts\\act-runner.cmd -W .github/workflows/ci.yml -j build-and-test --matrix os:ubuntu-latest",
+    "act:test:all": "scripts\\act-runner.cmd -j build-and-test",
+    "act:full": "scripts\\act-runner.cmd",
+    "act:list": "scripts\\act-runner.cmd -l",
+    "act:debug": "scripts\\act-runner.cmd -j build-and-test --verbose"
   },
   "keywords": [
     "mcp",
@@ -89,6 +98,7 @@
     "fetch-mock": "^12.5.2",
     "glob": "^11.0.2",
     "globals": "^16.1.0",
+    "husky": "^9.1.7",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.1",
     "typescript": "^5.2.2",

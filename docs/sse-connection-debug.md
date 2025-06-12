@@ -96,4 +96,4 @@ The MCP SDK's SSE transport implementation might expect a different message form
 
 Debug logs are saved to: `logs/debug-mcp-server.log`
 
-Session-specific logs are saved to: `C:\Users\johnf\AppData\Local\Temp\debug-mcp-server\sessions\`
+Session-specific logs are saved to: `%LOCALAPPDATA%\Temp\debug-mcp-server\sessions\` (Windows) or `/tmp/debug-mcp-server/sessions/` (Unix)

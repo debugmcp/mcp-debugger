@@ -19,12 +19,102 @@ import { existsSync as nativeNodeExistsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { findPythonExecutable } from '../../src/utils/python-utils.js';
+
+// Mock the python-utils module
+vi.mock('../../src/utils/python-utils.js', () => ({
+  findPythonExecutable: vi.fn()
+}));
 
 const exec = promisify(execCallback);
 const TEST_TIMEOUT = 60000;
 
 let mcpSdkClient: Client | null = null;
+let debugpyProcess: ChildProcess | null = null;
+let mcpProcess: ChildProcess | null = null;
 const projectRoot = process.cwd();
+
+// Centralized cleanup function
+async function cleanup() {
+  console.log('[e2e-teardown] Starting cleanup process...');
+  
+  // Close all debug sessions first to ensure DAP clients are cleaned up
+  if (mcpSdkClient) {
+    try {
+      console.log('[e2e-teardown] Listing and closing all active debug sessions...');
+      const listCall = await mcpSdkClient.callTool({ 
+        name: 'list_debug_sessions', 
+        arguments: {} 
+      });
+      const listResponse = parseSdkToolResult(listCall);
+      
+      if (listResponse.sessions && listResponse.sessions.length > 0) {
+        console.log(`[e2e-teardown] Found ${listResponse.sessions.length} active sessions to close`);
+        for (const session of listResponse.sessions) {
+          try {
+            console.log(`[e2e-teardown] Closing session ${session.id} (${session.name})`);
+            await mcpSdkClient.callTool({
+              name: 'close_debug_session',
+              arguments: { sessionId: session.id }
+            });
+          } catch (e) {
+            console.error(`[e2e-teardown] Error closing session ${session.id}:`, e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[e2e-teardown] Error listing/closing debug sessions:', e);
+    }
+  }
+  
+  // Close MCP SDK client
+  if (mcpSdkClient) {
+    try {
+      await mcpSdkClient.close();
+      console.log('[e2e-teardown] MCP SDK client closed successfully.');
+    } catch (e) {
+      console.error('[e2e-teardown] Error closing SDK client:', e);
+    }
+    mcpSdkClient = null;
+  }
+  
+  // Kill MCP process
+  if (mcpProcess) {
+    try {
+      mcpProcess.kill();
+      console.log('[e2e-teardown] MCP process killed.');
+    } catch (e) {
+      console.error('[e2e-teardown] Error killing MCP process:', e);
+    }
+    mcpProcess = null;
+  }
+  
+  // Kill debugpy process
+  if (debugpyProcess) {
+    try {
+      debugpyProcess.kill();
+      console.log('[e2e-teardown] Debugpy process killed.');
+    } catch (e) {
+      console.error('[e2e-teardown] Error killing debugpy process:', e);
+    }
+    debugpyProcess = null;
+  }
+  
+  // Allow time for sockets to close properly
+  console.log('[e2e-teardown] Waiting for sockets to close...');
+  await new Promise(resolve => setTimeout(resolve, 500));
+  console.log('[e2e-teardown] Cleanup completed.');
+}
+
+// Helper function to parse SDK tool results
+const parseSdkToolResult = (rawResult: ServerResult) => {
+  const contentArray = (rawResult as any).content;
+  if (!contentArray || !Array.isArray(contentArray) || contentArray.length === 0 || contentArray[0].type !== 'text') {
+    console.error("Invalid ServerResult structure received from SDK:", rawResult);
+    throw new Error('Invalid ServerResult structure from SDK or missing text content');
+  }
+  return JSON.parse(contentArray[0].text);
+};
 
 async function startDebugpyServer(port = 5679): Promise<ChildProcess> {
   let serverScriptPath = path.join(projectRoot, 'tests', 'fixtures', 'python', 'debugpy_server.py');
@@ -35,7 +125,14 @@ async function startDebugpyServer(port = 5679): Promise<ChildProcess> {
   } else {
     console.log(`[E2E SETUP INFO] Script confirmed by nativeNodeExistsSync: ${serverScriptPath}`);
   }
-  const pythonProcess = spawn('python', ['-u', serverScriptPath, '--port', port.toString(), '--no-wait'], { stdio: 'pipe' });
+  
+  // Determine python executable for the current platform
+  //   • On Windows runners the alias `python` usually resolves correctly
+  //   • On Linux/macOS we must call `python3`
+  const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
+  console.log(`[E2E SETUP INFO] Using Python executable: ${pythonPath}`);
+  
+  const pythonProcess = spawn(pythonPath, ['-u', serverScriptPath, '--port', port.toString(), '--no-wait'], { stdio: 'pipe' });
   pythonProcess.stdout?.on('data', (data) => console.log(`[DebugPy Server] ${data.toString().trim()}`));
   pythonProcess.stderr?.on('data', (data) => console.error(`[DebugPy Server Error] ${data.toString().trim()}`));
   return new Promise((resolve, reject) => {
@@ -65,11 +162,11 @@ async function startMcpServer(): Promise<ChildProcess> {
 }
 
 describe('MCP Server connecting to debugpy', () => {
-  let debugpyProcess: ChildProcess | null = null;
-  let mcpProcess: ChildProcess | null = null;
-  
   beforeAll(async () => {
     try {
+      // Configure the mock for the test environment
+      vi.mocked(findPythonExecutable).mockResolvedValue(process.platform === 'win32' ? 'python' : 'python3');
+      
       debugpyProcess = await startDebugpyServer();
       mcpProcess = await startMcpServer(); 
 
@@ -104,21 +201,16 @@ describe('MCP Server connecting to debugpy', () => {
       await mcpSdkClient.connect(transport);
       console.log('[E2E Test] MCP SDK Client connected via SSE.');
     } catch (error) {
-      console.error('Error starting servers, polling health, or connecting SDK client:', error);
-      if (mcpSdkClient) await mcpSdkClient.close().catch(e => console.error("Error closing SDK client during setup failure", e));
-      mcpProcess?.kill();
-      debugpyProcess?.kill();
+      console.error('[E2E Setup] Error during setup:', error);
+      // Use centralized cleanup function
+      await cleanup();
       throw error;
     }
   }, TEST_TIMEOUT);
   
   afterAll(async () => {
-    if (mcpSdkClient) {
-      await mcpSdkClient.close().catch(e => console.error("Error closing SDK client", e));
-    }
-    mcpProcess?.kill();
-    debugpyProcess?.kill();
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Use centralized cleanup function
+    await cleanup();
   });
 
   const parseSdkToolResult = (rawResult: ServerResult) => {
@@ -190,39 +282,77 @@ print(f"Fibonacci(5) = {result}")
 `;
       await writeFile(tempScriptPath, scriptContent.trim()); 
       
-      const breakpointCall = await mcpSdkClient.callTool({
-        name: 'set_breakpoint',
-        arguments: { sessionId: debugSessionId, file: tempScriptPath, line: 4 } // Breakpoint after sleep
-      });
-      const breakpointResponse = parseSdkToolResult(breakpointCall);
-      expect(breakpointResponse.success).toBe(true);
-
+      // Start debugging first, then set breakpoints
+      console.log('[E2E] Starting debug session...');
       const debugCall = await mcpSdkClient.callTool({
         name: 'start_debugging',
         arguments: { 
           sessionId: debugSessionId, 
           scriptPath: tempScriptPath,
-          dapLaunchArgs: { stopOnEntry: false } 
+          dapLaunchArgs: { stopOnEntry: true } // Stop on entry to ensure debugger is ready
         }
       });
       const debugResponse = parseSdkToolResult(debugCall);
       expect(debugResponse.success).toBe(true);
       
-      // Wait longer to allow script to run past sleep and hit breakpoint
-      await new Promise(resolve => setTimeout(resolve, 5000)); 
+      // Wait a bit for the debugger to be ready
+      console.log('[E2E] Waiting for debugger to be ready...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
-      const stackTraceCall = await mcpSdkClient.callTool({ name: 'get_stack_trace', arguments: { sessionId: debugSessionId } });
-      const stackTraceResponse = parseSdkToolResult(stackTraceCall);
-      expect(stackTraceResponse.success).toBe(true);
-      expect(stackTraceResponse.stackFrames.length).toBeGreaterThan(0);
+      // Now set the breakpoint
+      console.log('[E2E] Setting breakpoint...');
+      try {
+        const breakpointCall = await mcpSdkClient.callTool({
+          name: 'set_breakpoint',
+          arguments: { sessionId: debugSessionId, file: tempScriptPath, line: 4 } // Breakpoint after sleep
+        });
+        const breakpointResponse = parseSdkToolResult(breakpointCall);
+        expect(breakpointResponse.success).toBe(true);
+      } catch (error) {
+        console.error('[E2E] Error setting breakpoint:', error);
+        throw error;
+      }
       
-      const topFrame = stackTraceResponse.stackFrames[0];
-      // Expect to be paused at the print statement after sleep
-      expect(topFrame.file).toBe(tempScriptPath); // Use topFrame.file
-      expect(topFrame.line).toBe(4); 
-      // We can also check the name if desired, it should be <module>
-      expect(topFrame.name).toBe('<module>');
-      const frameId = topFrame.id;
+      // Continue execution from the entry point
+      console.log('[E2E] Continuing execution...');
+      try {
+        const continueCall = await mcpSdkClient.callTool({
+          name: 'continue_execution',
+          arguments: { sessionId: debugSessionId }
+        });
+        const continueResponse = parseSdkToolResult(continueCall);
+        expect(continueResponse.success).toBe(true);
+      } catch (error) {
+        console.error('[E2E] Error continuing execution:', error);
+        throw error;
+      }
+      
+      // Wait for the script to hit the breakpoint
+      console.log('[E2E] Waiting for breakpoint to be hit...');
+      await new Promise(resolve => setTimeout(resolve, 3000)); 
+      
+      // Get the stack trace
+      console.log('[E2E] Getting stack trace...');
+      try {
+        const stackTraceCall = await mcpSdkClient.callTool({ 
+          name: 'get_stack_trace', 
+          arguments: { sessionId: debugSessionId } 
+        });
+        const stackTraceResponse = parseSdkToolResult(stackTraceCall);
+        expect(stackTraceResponse.success).toBe(true);
+        expect(stackTraceResponse.stackFrames.length).toBeGreaterThan(0);
+        
+        const topFrame = stackTraceResponse.stackFrames[0];
+        // Expect to be paused at the print statement after sleep
+        expect(topFrame.file).toBe(tempScriptPath); // Use topFrame.file
+        expect(topFrame.line).toBe(4); 
+        // We can also check the name if desired, it should be <module>
+        expect(topFrame.name).toBe('<module>');
+        const frameId = topFrame.id;
+      } catch (error) {
+        console.error('[E2E] Error getting stack trace:', error);
+        throw error;
+      }
 
       // Since we are at module level, 'n' won't be in locals.
       // Check for 'result' or 'fibonacci' function object if needed, or skip variable check here.

@@ -11,6 +11,7 @@ describe('DapConnectionManager', () => {
   let mockDapClient: {
     connect: MockInstance;
     disconnect: MockInstance;
+    shutdown: MockInstance;
     sendRequest: MockInstance;
     on: MockInstance;
     off: MockInstance;
@@ -50,6 +51,10 @@ describe('DapConnectionManager', () => {
     mockDapClient = {
       connect: vi.fn(),
       disconnect: vi.fn(),
+      shutdown: vi.fn().mockImplementation((reason?: string) => {
+        // Mock implementation that mimics the real shutdown behavior
+        // In a real implementation, this would reject pending requests
+      }),
       sendRequest: vi.fn(),
       on: vi.fn(),
       off: vi.fn(),

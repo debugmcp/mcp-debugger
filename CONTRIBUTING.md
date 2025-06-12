@@ -82,6 +82,37 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 
 7. **Create a Pull Request** from your fork to our `main` branch
 
+## 🔒 Privacy Guidelines
+
+**IMPORTANT**: Never commit personal information to the repository. This includes:
+
+- Personal file paths (e.g., `C:\path\to\` or `/path/to/`)
+- Personal email addresses (project emails like `debug@sycamore.llc` are okay)
+- Cloud storage paths with personal folders
+- Any other personally identifiable information
+
+### Pre-commit Hook
+
+We have a pre-commit hook that automatically checks for personal information patterns. If detected, your commit will be blocked with instructions on how to fix it.
+
+### How to Handle Paths
+
+When documenting or writing examples, always use generic paths like:
+- `/path/to/project`
+- `C:\path\to\project`
+- `~/workspace/project`
+
+### Testing the Privacy Check
+
+You can manually run the privacy check:
+```bash
+# Check staged files (what pre-commit does)
+npm run check:personal-paths
+
+# Check all files in the repository
+npm run check:all-personal-paths
+```
+
 ## 🎨 Code Style
 
 We use ESLint and Prettier to maintain consistent code style.

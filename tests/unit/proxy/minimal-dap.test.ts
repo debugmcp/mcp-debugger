@@ -68,6 +68,10 @@ describe('MinimalDapClient', () => {
   });
 
   afterEach(() => {
+    // Shut down the client to clear any pending timers
+    if (client) {
+      client.shutdown();
+    }
     vi.restoreAllMocks();
   });
 
@@ -240,7 +244,12 @@ describe('MinimalDapClient', () => {
       await client.connect();
 
       const args = { source: { path: 'test.py' }, breakpoints: [] };
-      client.sendRequest('setBreakpoints', args);
+      // Don't await - we're testing the request format, not the response
+      // But we need to handle the promise to avoid unhandled rejection
+      const requestPromise = client.sendRequest('setBreakpoints', args);
+      
+      // Handle the promise but don't await it yet
+      requestPromise.catch(() => {}); // Prevent unhandled rejection
 
       expect(mockSocket.write).toHaveBeenCalled();
       const writeCall = mockSocket.write.mock.calls[0][0];

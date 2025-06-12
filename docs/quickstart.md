@@ -1,176 +1,234 @@
-# Quickstart: debug-mcp-server
+# Quickstart: mcp-debugger
 
-This guide will help you get started with `debug-mcp-server` quickly.
+This guide will help you get started with `mcp-debugger` quickly, using real examples from testing conducted on 2025-06-11.
 
 ## Prerequisites
 
-- For Docker: Docker installed and running.
-- For Node.js/npx: Node.js (v16+) and npm installed.
-- For Python debugging: Python (3.8+) and `debugpy` installed in the target Python environment. (The `debug-mcp-server-launcher` PyPI package can help ensure `debugpy` is available).
+- **Node.js** (v16+) and npm installed
+- **Python** (3.8+) with `debugpy` installed
+- **MCP Client** (Claude Desktop, or custom implementation)
+
+## Installation
+
+### Option 1: Using npm (when published)
+
+```bash
+npm install -g mcp-debugger
+```
+
+### Option 2: From Source
+
+```bash
+git clone https://github.com/debugmcp/mcp-debugger.git
+cd mcp-debugger
+npm install
+npm run build
+```
 
 ## Running the Server
 
-There are several ways to run the `debug-mcp-server`:
+### For MCP Clients (Recommended)
 
-### 1. Using Docker (Recommended)
+Add to your MCP client configuration (e.g., Claude Desktop):
 
-This is the easiest way to get started.
+```json
+{
+  "mcpServers": {
+    "mcp-debugger": {
+      "command": "node",
+      "args": ["C:/path/to/mcp-debugger/dist/index.js", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
+      "disabled": false,
+      "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
+    }
+  }
+}
+```
 
-- **Pull the latest image:**
-  ```bash
-  docker pull debugmcp/debug-mcp-server:latest
-  ```
-  *(Note: Replace `debugmcp/debug-mcp-server` with the correct Docker Hub repository if different.)*
-
-- **Run the server:**
-  The server listens on port 3000 by default for MCP commands.
-  ```bash
-  docker run -p 3000:3000 debugmcp/debug-mcp-server:latest
-  ```
-  You can pass command-line arguments to the server inside the Docker container if needed:
-  ```bash
-  docker run -p 3000:3000 debugmcp/debug-mcp-server:latest http --port 3000 --log-level info
-  ```
-
-### 2. Using NPX (Requires Node.js & npm)
-
-If the `mcp-debugger` package is published to npm, you can run it directly using `npx`:
+### Command Line Options
 
 ```bash
-npx mcp-debugger http --port 3000
+# Run with debugging output
+node dist/index.js --log-level debug --log-file ./logs/debug.log
+
+# Run in quiet mode
+node dist/index.js --log-level error
 ```
-*(This assumes the `mcp-debugger` package name on npm. Adjust if different.)*
 
-### 3. Running from Cloned Repository (Requires Node.js & npm)
+## Quick Example: Debug a Python Script
 
-- **Clone the repository:**
-  ```bash
-  git clone https://github.com/your-repo/debug-mcp-server.git 
-  cd debug-mcp-server
-  ```
-  *(Note: Replace with the actual repository URL.)*
+Let's debug a simple Python script with a bug:
 
-- **Install dependencies:**
-  ```bash
-  npm install
-  ```
+### 1. Create a Test Script
 
-- **Run the server:**
-  ```bash
-  npm start -- http --port 3000 
-  ```
-  Or for development with auto-reloading (using `ts-node`):
-  ```bash
-  npm run dev -- http --port 3000
-  ```
-
-## Agent Integration Example (Conceptual LangChain Tool)
-
-Here's a conceptual example of how you might integrate `debug-mcp-server` tools into an AI agent framework like LangChain. This assumes the `debug-mcp-server` is running and accessible at `http://localhost:3000`.
+Save this as `buggy_math.py`:
 
 ```python
-from langchain_core.tools import BaseTool
-from typing import Type, Any
-from pydantic import BaseModel, Field
-import requests # Or any HTTP client library
+def calculate_average(numbers):
+    total = 0
+    for num in numbers:
+        total += num
+    # Bug: dividing by wrong value
+    average = total / len(numbers) + 1  
+    return average
 
-# --- Define Pydantic models for tool inputs ---
-class CreateDebugSessionInput(BaseModel):
-    language: str = Field(description="The programming language of the script to debug (e.g., 'python').")
-    name: str = Field(description="A descriptive name for the debug session.")
-
-class SetBreakpointInput(BaseModel):
-    sessionId: str = Field(description="The ID of the debug session.")
-    file: str = Field(description="The absolute path to the file where the breakpoint should be set.")
-    line: int = Field(description="The line number for the breakpoint.")
-
-class StartDebuggingInput(BaseModel):
-    sessionId: str = Field(description="The ID of the debug session.")
-    scriptPath: str = Field(description="The absolute path to the script to start debugging.")
-    args: list[str] = Field(default_factory=list, description="Optional arguments for the script.")
-
-# ... (add more input models for other tools like step_over, get_variables, etc.)
-
-class DebugMCPTool(BaseTool):
-    name: str = "DebugMCPTool" # Generic name, specific tools below
-    description: str = "A tool to interact with the Debug MCP Server."
-    # args_schema: Type[BaseModel] = None # This will be set by specific tools
-
-    _mcp_server_url: str = "http://localhost:3000/mcp" # Configurable
-
-    def _make_mcp_request(self, method_name: str, params: dict, mcp_session_id: str = None) -> Any:
-        headers = {"Content-Type": "application/json"}
-        if mcp_session_id:
-            headers["mcp-session-id"] = mcp_session_id
-        
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "CallTool", # MCP SDK's CallTool method
-            "params": {
-                "name": method_name, # The actual MCP tool name
-                "arguments": params
-            },
-            "id": "langchain-tool-request" # A unique ID
-        }
-        try:
-            response = requests.post(self._mcp_server_url, json=payload, headers=headers)
-            response.raise_for_status()
-            json_response = response.json()
-            if json_response.get("error"):
-                raise Exception(f"MCP Server Error: {json_response['error']}")
-            # The actual tool result is in json_response['result']
-            # It might be a JSON string itself, requiring another parse
-            return json_response.get("result") 
-        except requests.RequestException as e:
-            return f"HTTP Request Error: {e}"
-        except Exception as e:
-            return f"Error processing MCP response: {e}"
-
-    def _run(self, *args: Any, **kwargs: Any) -> Any:
-        # This base tool shouldn't be called directly.
-        # Subclasses will implement this.
-        raise NotImplementedError("This base tool should not be called directly.")
-
-# --- Specific Tool Implementations ---
-
-class CreateDebugSessionTool(DebugMCPTool):
-    name: str = "create_debug_session"
-    description: str = "Creates a new debug session for a specified language."
-    args_schema: Type[BaseModel] = CreateDebugSessionInput
-
-    def _run(self, language: str, name: str) -> Any:
-        return self._make_mcp_request(self.name, {"language": language, "name": name})
-
-class SetBreakpointTool(DebugMCPTool):
-    name: str = "set_breakpoint"
-    description: str = "Sets a breakpoint in a file for a given debug session."
-    args_schema: Type[BaseModel] = SetBreakpointInput
-
-    def _run(self, sessionId: str, file: str, line: int) -> Any:
-        # Assuming the MCP session ID is managed externally or passed via run_manager
-        # For simplicity, not handling mcp-session-id header here, but a real tool would.
-        return self._make_mcp_request(self.name, {"sessionId": sessionId, "file": file, "line": line})
-        
-class StartDebuggingTool(DebugMCPTool):
-    name: str = "start_debugging"
-    description: str = "Starts debugging a script in the specified session."
-    args_schema: Type[BaseModel] = StartDebuggingInput
-
-    def _run(self, sessionId: str, scriptPath: str, args: list[str] = None) -> Any:
-        params = {"sessionId": sessionId, "scriptPath": scriptPath}
-        if args:
-            params["args"] = args
-        return self._make_mcp_request(self.name, params)
-
-# Example usage (conceptual)
-# tools = [CreateDebugSessionTool(), SetBreakpointTool(), StartDebuggingTool()]
-# agent = initialize_agent(tools, llm, agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-# agent.run("Create a Python debug session named 'my_test', set a breakpoint at line 5 of 'myscript.py', then start debugging it.")
+numbers = [10, 20, 30, 40, 50]
+result = calculate_average(numbers)
+print(f"Average: {result}")
 ```
 
-This example provides a basic structure. A real LangChain integration would involve more robust error handling, managing the `mcp-session-id` for HTTP sessions, and potentially more sophisticated parsing of tool responses.
-The `debug-mcp-server` also supports a STDIN/STDOUT transport which might be preferable for some agent integrations if running the server as a subprocess.
+### 2. Start a Debug Session
+
+```json
+// Tool: create_debug_session
+{
+  "language": "python",
+  "name": "Debug Math Bug"
+}
+// Response:
+{
+  "success": true,
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Created python debug session: Debug Math Bug"
+}
+```
+
+### 3. Set a Breakpoint
+
+```json
+// Tool: set_breakpoint
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "file": "buggy_math.py",
+  "line": 6
+}
+// Response:
+{
+  "success": true,
+  "breakpointId": "bp-123456",
+  "file": "C:\\path\\to\\buggy_math.py",
+  "line": 6,
+  "verified": false,
+  "message": "Breakpoint set at C:\\path\\to\\buggy_math.py:6"
+}
+```
+
+### 4. Start Debugging
+
+```json
+// Tool: start_debugging
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "scriptPath": "buggy_math.py"
+}
+// Response:
+{
+  "success": true,
+  "state": "paused",
+  "message": "Debugging started for buggy_math.py. Current state: paused",
+  "data": {
+    "message": "Debugging started for buggy_math.py. Current state: paused",
+    "reason": "breakpoint"
+  }
+}
+```
+
+### 5. Inspect Variables
+
+First, get the stack trace:
+
+```json
+// Tool: get_stack_trace
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
+}
+// Response shows we're in calculate_average function
+```
+
+Then get scopes:
+
+```json
+// Tool: get_scopes
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "frameId": 1
+}
+// Response:
+{
+  "success": true,
+  "scopes": [
+    {
+      "name": "Locals",
+      "variablesReference": 3,
+      "expensive": false,
+      "presentationHint": "locals"
+    }
+  ]
+}
+```
+
+Finally, inspect the variables:
+
+```json
+// Tool: get_variables
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "scope": 3
+}
+// Response:
+{
+  "success": true,
+  "variables": [
+    {"name": "numbers", "value": "[10, 20, 30, 40, 50]", "type": "list"},
+    {"name": "total", "value": "150", "type": "int"},
+    {"name": "average", "value": "31.0", "type": "float"}
+  ]
+}
+```
+
+### 6. Clean Up
+
+```json
+// Tool: close_debug_session
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
+}
+// Response:
+{
+  "success": true,
+  "message": "Closed debug session: 550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+## Key Points to Remember
+
+1. **Session IDs are UUIDs** - Always save the sessionId from create_debug_session
+2. **Get scopes before variables** - You need the variablesReference, not the frame ID
+3. **Breakpoints need executable lines** - Avoid comments and blank lines
+4. **Sessions can terminate** - Handle errors gracefully
+
+## What's Next?
+
+- Read the [Tool Reference](./tool-reference.md) for complete API documentation
+- See [Usage Guide](./usage.md) for more complex debugging scenarios
+- Check [Troubleshooting](./troubleshooting.md) if you encounter issues
+
+## Troubleshooting Quick Tips
+
+### MCP Server Not Found
+- Ensure the path in your MCP config is absolute
+- Check that the server was built (`npm run build`)
+- Verify Node.js is in your PATH
+
+### Python Debugging Not Working
+- Install debugpy: `pip install debugpy`
+- Ensure Python is in your PATH
+- Use absolute paths for script files
+
+### Session Terminated Unexpectedly
+- Check the log file for errors
+- Ensure the Python script exists
+- Verify breakpoints are on executable lines
 
 ---
 
-For more detailed API documentation and advanced usage, please refer to the main project [README.md](../README.md) and other documents in this `docs` folder.
+*For more detailed information, see the full [documentation](./README.md).*

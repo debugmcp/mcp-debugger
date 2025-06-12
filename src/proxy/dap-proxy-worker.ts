@@ -356,6 +356,11 @@ export class DapProxyWorker {
     // Clear request tracking
     this.requestTracker.clear();
 
+    // Reject any in-flight DAP requests and clear timers immediately
+    if (this.dapClient) {
+      this.dapClient.shutdown('worker shutdown');
+    }
+
     // Disconnect DAP client
     if (this.connectionManager && this.dapClient) {
       await this.connectionManager.disconnect(this.dapClient);

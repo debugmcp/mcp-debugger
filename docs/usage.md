@@ -1,6 +1,6 @@
-# Using the Debug MCP Server
+# Using the mcp-debugger
 
-This document describes how to use the Debug MCP Server with Large Language Models (LLMs) for step-through debugging.
+This document describes how to use the mcp-debugger with Large Language Models (LLMs) for step-through debugging, based on real testing conducted on 2025-06-11.
 
 ## Installation
 
@@ -12,227 +12,346 @@ This document describes how to use the Debug MCP Server with Large Language Mode
 ### Installing from NPM
 
 ```bash
-npm install -g debug-mcp-server
+npm install -g mcp-debugger
 ```
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/yourusername/debug-mcp-server.git
-cd debug-mcp-server
+git clone https://github.com/debugmcp/mcp-debugger.git
+cd mcp-debugger
 npm install
 npm run build
 ```
 
 ## Configuration
 
-### VS Code Plugin Configuration
+### MCP Client Configuration
 
-Add the server to your MCP settings in VS Code:
+Add the server to your MCP settings:
 
 ```json
 {
   "mcpServers": {
-    "debug": {
-      "command": "debug-mcp-server",
+    "mcp-debugger": {
+      "command": "node",
+      "args": ["C:/path/to/mcp-debugger/dist/index.js", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
       "disabled": false,
-      "autoApprove": []
+      "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
     }
   }
 }
 ```
 
-## Available Tools
+## Complete Debugging Workflow Example
 
-The Debug MCP Server provides the following tools:
+Here's a real example of debugging a Python script with a bug:
 
-### create_debug_session
+### The Buggy Script
 
-Create a new debugging session.
+```python
+# swap_vars.py
+def swap_variables(a, b):
+    print(f"Initial values: a = {a}, b = {b}")
+    a = b  # Bug: 'a' loses its original value here
+    b = a  # Bug: 'b' gets the new value of 'a' (which is original 'b')
+    print(f"Swapped values: a = {a}, b = {b}")
+    return a, b
 
-**Parameters**:
-- `language` (required): The programming language to debug (currently only `python` is supported)
-- `name` (optional): A name for the debug session
+def main():
+    x = 10
+    y = 20
+    print("Starting variable swap demo...")
+    swapped_x, swapped_y = swap_variables(x, y)
+    
+    if swapped_x == 20 and swapped_y == 10:
+        print("Swap successful!")
+    else:
+        print(f"Swap NOT successful. Expected x=20, y=10 but got x={swapped_x}, y={swapped_y}")
 
-**Example**:
+if __name__ == "__main__":
+    main()
+```
+
+### Step 1: Create a Debug Session
+
 ```json
+// Tool: create_debug_session
+// Request:
 {
   "language": "python",
-  "name": "My Debug Session"
+  "name": "Investigate Swap Bug"
+}
+// Response:
+{
+  "success": true,
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "message": "Created python debug session: Investigate Swap Bug"
 }
 ```
 
-**Returns**:
+### Step 2: Set Breakpoints
+
+Set a breakpoint where the bug occurs:
+
 ```json
+// Tool: set_breakpoint
+// Request:
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "file": "swap_vars.py",
+  "line": 4
+}
+// Response:
 {
   "success": true,
-  "sessionId": "session-uuid",
-  "message": "Created python debug session: My Debug Session"
+  "breakpointId": "28e06119-619e-43c0-b029-339cec2615df",
+  "file": "C:\\path\\to\\swap_vars.py",
+  "line": 4,
+  "verified": false,
+  "message": "Breakpoint set at C:\\path\\to\\swap_vars.py:4"
 }
 ```
 
-### list_debug_sessions
+### Step 3: Start Debugging
 
-Lists all active debugging sessions.
-
-**Parameters**: None
-
-**Returns**:
 ```json
+// Tool: start_debugging
+// Request:
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "scriptPath": "swap_vars.py"
+}
+// Response:
 {
   "success": true,
-  "sessions": [
+  "state": "paused",
+  "message": "Debugging started for swap_vars.py. Current state: paused",
+  "data": {
+    "message": "Debugging started for swap_vars.py. Current state: paused",
+    "reason": "breakpoint"
+  }
+}
+```
+
+### Step 4: Inspect the Stack
+
+```json
+// Tool: get_stack_trace
+// Request:
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7"
+}
+// Response:
+{
+  "success": true,
+  "stackFrames": [
     {
-      "id": "session-uuid",
-      "name": "My Debug Session",
-      "language": "python",
-      "state": "ready",
-      "createdAt": "2025-04-30T12:30:00.000Z",
-      "updatedAt": "2025-04-30T12:30:00.000Z"
+      "id": 3,
+      "name": "swap_variables",
+      "file": "C:\\path\\to\\swap_vars.py",
+      "line": 4,
+      "column": 1
+    },
+    {
+      "id": 4,
+      "name": "main",
+      "file": "C:\\path\\to\\swap_vars.py",
+      "line": 13,
+      "column": 1
+    },
+    {
+      "id": 2,
+      "name": "<module>",
+      "file": "C:\\path\\to\\swap_vars.py",
+      "line": 21,
+      "column": 1
     }
   ],
-  "count": 1
+  "count": 3
 }
 ```
 
-### set_breakpoint
+### Step 5: Get Variable Scopes
 
-Set a breakpoint in a debugging session.
-
-**Parameters**:
-- `sessionId` (required): The ID of the debug session
-- `file` (required): Path to the file to set the breakpoint in
-- `line` (required): Line number to set the breakpoint on (1-based)
-- `condition` (optional): Conditional expression for the breakpoint
-
-**Example**:
 ```json
+// Tool: get_scopes
+// Request:
 {
-  "sessionId": "session-uuid",
-  "file": "path/to/script.py",
-  "line": 10,
-  "condition": "x > 5"
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "frameId": 3
 }
-```
-
-**Returns**:
-```json
+// Response:
 {
   "success": true,
-  "breakpointId": "breakpoint-uuid",
-  "file": "path/to/script.py",
-  "line": 10,
-  "verified": true,
-  "message": "Breakpoint set at path/to/script.py:10"
+  "scopes": [
+    {
+      "name": "Locals",
+      "variablesReference": 5,
+      "expensive": false,
+      "presentationHint": "locals",
+      "source": {}
+    },
+    {
+      "name": "Globals",
+      "variablesReference": 6,
+      "expensive": false,
+      "source": {}
+    }
+  ]
 }
 ```
 
-### start_debugging
+### Step 6: Inspect Variables Before the Bug
 
-Start debugging a script.
-
-**Parameters**:
-- `sessionId` (required): The ID of the debug session
-- `scriptPath` (required): Path to the script to debug
-- `args` (optional): Array of command line arguments
-
-**Example**:
 ```json
+// Tool: get_variables
+// Request:
 {
-  "sessionId": "session-uuid",
-  "scriptPath": "path/to/script.py",
-  "args": ["--option", "value"]
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "scope": 5
+}
+// Response:
+{
+  "success": true,
+  "variables": [
+    {"name": "a", "value": "10", "type": "int", "variablesReference": 0, "expandable": false},
+    {"name": "b", "value": "20", "type": "int", "variablesReference": 0, "expandable": false}
+  ],
+  "count": 2,
+  "variablesReference": 5
 }
 ```
 
-**Returns**:
+### Step 7: Step Through the Bug
+
 ```json
+// Tool: step_over
+// Request:
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7"
+}
+// Response:
+{
+  "success": true,
+  "state": "paused",
+  "message": "Stepped over"
+}
+```
+
+### Step 8: Check Variables After First Assignment
+
+```json
+// Tool: get_variables
+// Request:
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "scope": 5
+}
+// Response:
+{
+  "success": true,
+  "variables": [
+    {"name": "a", "value": "20", "type": "int", "variablesReference": 0, "expandable": false},
+    {"name": "b", "value": "20", "type": "int", "variablesReference": 0, "expandable": false}
+  ],
+  "count": 2,
+  "variablesReference": 5
+}
+```
+
+Now we can see the bug! After `a = b`, both variables have the value 20.
+
+### Step 9: Continue Execution
+
+```json
+// Tool: continue_execution
+// Request:
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7"
+}
+// Response:
 {
   "success": true,
   "state": "running",
-  "message": "Started debugging path/to/script.py"
+  "message": "Continued execution"
 }
 ```
 
-### close_debug_session
+### Step 10: Close the Session
 
-Close a debugging session.
-
-**Parameters**:
-- `sessionId` (required): The ID of the debug session
-
-**Example**:
 ```json
+// Tool: close_debug_session
+// Request:
 {
-  "sessionId": "session-uuid"
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7"
 }
-```
-
-**Returns**:
-```json
+// Response:
 {
   "success": true,
-  "message": "Closed debug session: session-uuid"
+  "message": "Closed debug session: a4d1acc8-84a8-44fe-a13e-28628c5b33c7"
 }
 ```
 
-## Workflow Example
+## Important Implementation Details
 
-Here's an example of how an LLM might use the Debug MCP Server to debug a Python script:
+### Session IDs
+- All session IDs are UUIDs in the format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+- Sessions can terminate unexpectedly, always check if a session exists before operations
 
-1. Create a debug session:
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="create_debug_session",
-  arguments={
-    "language": "python",
-    "name": "Example Debugging"
-  }
-)
-```
+### Variable Scope References
+- The `variablesReference` from `get_scopes` is what you pass to `get_variables`
+- This is NOT the same as the frame ID from `get_stack_trace`
+- Common mistake: Using frame ID instead of variablesReference
 
-2. Set a breakpoint where the bug might be:
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="set_breakpoint",
-  arguments={
-    "sessionId": "the-session-id",
-    "file": "buggy_script.py",
-    "line": 25
-  }
-)
-```
+### Breakpoint Behavior
+- Breakpoints always show `"verified": false` until debugging starts
+- Avoid setting breakpoints on non-executable lines (comments, blank lines)
+- Best lines for breakpoints: assignments, function calls, conditionals
 
-3. Start debugging the script:
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="start_debugging",
-  arguments={
-    "sessionId": "the-session-id",
-    "scriptPath": "buggy_script.py"
-  }
-)
-```
+### File Paths
+- The server converts relative paths to absolute paths
+- Responses always include the full absolute path
+- Use forward slashes (/) or escaped backslashes (\\\\) in JSON
 
-4. After examining variables and execution state, close the session:
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="close_debug_session",
-  arguments={
-    "sessionId": "the-session-id"
-  }
-)
-```
+## Common Errors and Solutions
 
-## Future Enhancements
+### "Managed session not found"
+```json
+{
+  "code": -32603,
+  "message": "MCP error -32603: Failed to continue execution: Managed session not found: {sessionId}"
+}
+```
+**Solution**: The session has terminated. Create a new session.
 
-- Support for additional programming languages (JavaScript, Java, C++, etc.)
-- Variable inspection and manipulation
-- Step over/into/out operations
-- Stack trace navigation
-- Conditional breakpoints 
-- Debug REPL for expression evaluation
+### Invalid Scope Reference
+```json
+{
+  "code": -32602,
+  "message": "scope (variablesReference) parameter is required and must be a number"
+}
+```
+**Solution**: Use the `variablesReference` from `get_scopes`, not the frame ID.
+
+## Unimplemented Features
+
+The following tools are defined but not yet implemented:
+
+1. **pause_execution**: Returns "Pause execution not yet implemented with proxy"
+2. **evaluate_expression**: Returns "Evaluate expression not yet implemented with proxy"
+3. **get_source_context**: Returns "Get source context not yet fully implemented with proxy"
+
+See [Roadmap.md](../Roadmap.md) for implementation timeline.
+
+## Best Practices
+
+1. **Always create a session first** - No debugging operations work without an active session
+2. **Check the stack trace** - Understand where you are in the code before inspecting variables
+3. **Get scopes before variables** - You need the variablesReference to inspect variables
+4. **Handle errors gracefully** - Sessions can terminate, files might not exist
+5. **Use meaningful session names** - Helps when debugging multiple scripts
+
+---
+
+*Last updated: 2025-06-11 based on actual testing*
