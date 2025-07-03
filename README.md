@@ -293,6 +293,20 @@ npm run build
 npm test
 ```
 
+### Running Container Tests Locally
+
+We use [Act](https://github.com/nektos/act) to run GitHub Actions workflows locally:
+
+```bash
+# Build the Docker image first
+docker build -t mcp-debugger:local .
+
+# Run tests with Act (use WSL2 on Windows)
+act -j build-and-test --matrix os:ubuntu-latest
+```
+
+See [tests/README.md](./tests/README.md) for detailed testing instructions.
+
 ## 📊 Project Status
 
 - ✅ **Production Ready**: v0.9.0 with comprehensive test coverage

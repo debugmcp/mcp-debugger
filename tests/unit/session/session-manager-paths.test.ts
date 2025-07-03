@@ -39,17 +39,18 @@ describe('SessionManager - Path Resolution', () => {
       });
       
       const windowsPaths = [
-        'C:\\Users\\test\\file.py',
-        'C:/Users/test/file.py',
-        'D:\\Projects\\debug\\test.py'
+        { path: 'C:\\Users\\test\\file.py', expectedFile: 'file.py' },
+        { path: 'C:/Users/test/file.py', expectedFile: 'file.py' },
+        { path: 'D:\\Projects\\debug\\test.py', expectedFile: 'test.py' }
       ];
       
-      for (const testPath of windowsPaths) {
+      for (const { path: testPath, expectedFile } of windowsPaths) {
         const bp = await sessionManager.setBreakpoint(session.id, testPath, 10);
         
-        // Fix the test assertion
-        expect(path.isAbsolute(bp.file)).toBe(true);
-        expect(bp.file).toContain(path.basename(testPath));
+        // SessionManager passes through paths without modification
+        // So the breakpoint file should match the input path
+        expect(bp.file).toBe(testPath);
+        expect(bp.file).toContain(expectedFile);
       }
     });
 

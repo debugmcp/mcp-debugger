@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { PathTranslator } from '../../src/utils/path-translator.js';
+import { createWindowsPathUtils, createPosixPathUtils } from '../mocks/mock-path-utils.js';
 
 // Mock only the logger, not PathTranslator
 vi.mock('../../src/utils/logger', () => ({
@@ -39,11 +41,11 @@ describe('Container Path Translation Integration', () => {
     Object.defineProperty(process, 'platform', { value: platform });
   };
 
-  const createServer = async () => {
+  const createServer = async (options?: { pathTranslator?: PathTranslator }) => {
     // Dynamically import DebugMcpServer to ensure it picks up current environment
     vi.resetModules();
     const { DebugMcpServer } = await import('../../src/server.js');
-    server = new DebugMcpServer();
+    server = new DebugMcpServer(options || {});
     
     // Mock the sessionManager's internal methods that interact with the proxy
     // to prevent actual process spawning and focus on path translation logic
@@ -167,40 +169,91 @@ describe('Container Path Translation Integration', () => {
   });
 
   describe('Non-Container Environment', () => {
-    beforeEach(async () => {
-      // Ensure we're not in container mode
-      delete process.env.MCP_CONTAINER;
-      delete process.env.MCP_HOST_WORKSPACE;
-      await createServer();
+    describe('on Windows', () => {
+      beforeEach(async () => {
+        setPlatform('win32');
+        delete process.env.MCP_CONTAINER;
+        delete process.env.MCP_HOST_WORKSPACE;
+        
+        // Create a custom PathTranslator with Windows behavior
+        const mockFileSystem = {
+          existsSync: vi.fn().mockReturnValue(true),
+          // ... other filesystem methods
+        };
+        const mockLogger = {
+          info: vi.fn(),
+          debug: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+        };
+        const mockEnvironment = {
+          get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? undefined : undefined),
+          getAll: vi.fn(() => ({})),
+          getCurrentWorkingDirectory: vi.fn(() => 'C:\\Users\\john\\project')
+        };
+        const pathUtils = createWindowsPathUtils();
+        const pathTranslator = new PathTranslator(mockFileSystem as any, mockLogger as any, mockEnvironment as any, pathUtils);
+        
+        await createServer({ pathTranslator });
+      });
+
+      it('should pass through Windows paths without translation for set_breakpoint', async () => {
+        const filePath = 'C:\\Users\\john\\project\\src\\main.py';
+        const result = await server.setBreakpoint('test-session-id', filePath, 10);
+        expect(result.file).toBe(filePath);
+        expect(result.line).toBe(10);
+        expect(result.verified).toBe(true);
+        expect(server['sessionManager'].setBreakpoint).toHaveBeenCalledWith(
+          'test-session-id',
+          filePath,
+          10,
+          undefined
+        );
+      });
     });
 
-    it('should pass through paths without translation for set_breakpoint', async () => {
-      const filePath = 'C:\\Users\\john\\project\\src\\main.py';
-      const result = await server.setBreakpoint('test-session-id', filePath, 10);
-      expect(result.file).toBe(filePath);
-      expect(result.line).toBe(10);
-      expect(result.verified).toBe(true);
-      expect(server['sessionManager'].setBreakpoint).toHaveBeenCalledWith(
-        'test-session-id',
-        filePath,
-        10,
-        undefined
-      );
-    });
+    describe('on Linux', () => {
+      beforeEach(async () => {
+        setPlatform('linux');
+        delete process.env.MCP_CONTAINER;
+        delete process.env.MCP_HOST_WORKSPACE;
+        
+        // Create a custom PathTranslator with Linux behavior
+        const mockFileSystem = {
+          existsSync: vi.fn().mockReturnValue(true),
+          // ... other filesystem methods
+        };
+        const mockLogger = {
+          info: vi.fn(),
+          debug: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+        };
+        const mockEnvironment = {
+          get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? undefined : undefined),
+          getAll: vi.fn(() => ({})),
+          getCurrentWorkingDirectory: vi.fn(() => '/home/user/project')
+        };
+        const pathUtils = createPosixPathUtils();
+        const pathTranslator = new PathTranslator(mockFileSystem as any, mockLogger as any, mockEnvironment as any, pathUtils);
+        
+        await createServer({ pathTranslator });
+      });
 
-    it('should pass through paths without translation for start_debugging', async () => {
-      const scriptPath = '/home/user/project/scripts/run.py';
-      const result = await server.startDebugging('test-session-id', scriptPath);
-      expect(result.success).toBe(true);
-      expect(result.state).toBe('RUNNING');
-      expect(result.data.translatedPath).toBe(scriptPath);
-      expect(server['sessionManager'].startDebugging).toHaveBeenCalledWith(
-        'test-session-id',
-        scriptPath,
-        undefined,
-        undefined,
-        undefined
-      );
+      it('should pass through Unix paths without translation for start_debugging', async () => {
+        const scriptPath = '/home/user/project/scripts/run.py';
+        const result = await server.startDebugging('test-session-id', scriptPath);
+        expect(result.success).toBe(true);
+        expect(result.state).toBe('RUNNING');
+        expect(result.data.translatedPath).toBe(scriptPath);
+        expect(server['sessionManager'].startDebugging).toHaveBeenCalledWith(
+          'test-session-id',
+          scriptPath,
+          undefined,
+          undefined,
+          undefined
+        );
+      });
     });
   });
 

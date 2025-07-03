@@ -1,15 +1,34 @@
 # Act configuration for mcp-debugger project
-# Maps GitHub Actions runners to appropriate container images
+# 
+# WORKFLOW DIFFERENCES:
+# - CI workflow: Runs on every push/PR for continuous integration
+# - Release workflow: Only runs on version tags (e.g., v1.0.0) for publishing
+#
+# To run a specific workflow, use:
+#   act -W .github/workflows/ci.yml -j build-and-test --matrix os:ubuntu-latest
+#   act -W .github/workflows/release.yml -j build-and-test
+
+# Maps GitHub Actions runners to local container image
 -P ubuntu-latest=catthehacker/ubuntu:act-latest
--P ubuntu-22.04=catthehacker/ubuntu:act-22.04
--P ubuntu-20.04=catthehacker/ubuntu:act-20.04
+-P ubuntu-22.04=catthehacker/ubuntu:act-latest
+-P ubuntu-20.04=catthehacker/ubuntu:act-latest
 -P windows-latest=catthehacker/ubuntu:act-latest
 
-# Container architecture for consistency
+# CRITICAL: Bind mount workspace for Docker volume operations
+--bind
+
+# Container architecture for consistency (especially important for Apple Silicon)
 --container-architecture linux/amd64
 
 # Remove containers after completion
 --rm
 
-# Memory allocation to prevent OOM errors
---container-options "--memory=4g"
+# Container options (includes privileged mode and memory allocation)
+--container-options --privileged
+--container-options --memory=4g
+
+# Use local images without pulling from registry
+--pull=false
+
+# Default to CI workflow (most common use case)
+-W .github/workflows/ci.yml

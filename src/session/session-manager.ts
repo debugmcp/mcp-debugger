@@ -27,6 +27,7 @@ import { IDebugTargetLauncher } from '../interfaces/process-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { findPythonExecutable } from '../utils/python-utils.js';
 import { PathTranslator } from '../utils/path-translator.js';
+import { IPathUtils } from '../interfaces/path-utils.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -56,6 +57,7 @@ export interface SessionManagerDependencies {
   sessionStoreFactory: ISessionStoreFactory;
   debugTargetLauncher: IDebugTargetLauncher;
   environment: IEnvironment;
+  pathUtils: IPathUtils;
 }
 
 /**
@@ -97,7 +99,7 @@ export class SessionManager {
     this.proxyManagerFactory = dependencies.proxyManagerFactory;
     this.sessionStoreFactory = dependencies.sessionStoreFactory;
     this.debugTargetLauncher = dependencies.debugTargetLauncher;
-    this.pathTranslator = new PathTranslator(this.fileSystem, this.logger, dependencies.environment);
+    this.pathTranslator = new PathTranslator(this.fileSystem, this.logger, dependencies.environment, dependencies.pathUtils);
     
     this.sessionStore = this.sessionStoreFactory.create();
     this.logDirBase = config.logDirBase || path.join(os.tmpdir(), 'debug-mcp-server', 'sessions');

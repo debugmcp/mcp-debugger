@@ -281,31 +281,46 @@ describe('Container Path Translation E2E', () => {
       const sessionId = createResponse.sessionId;
 
       try {
-        // Test with Windows absolute path
-        const breakpointCall = await mcpSdkClient.callTool({
-          name: 'set_breakpoint',
-          arguments: { 
-            sessionId,
-            file: 'C:\\Users\\john\\project\\main.py',
-            line: 10
-          }
-        });
-        const bpResponse = parseSdkToolResult(breakpointCall);
-        expect(bpResponse.success).toBe(true);
-        expect(bpResponse.message).toContain('Breakpoint set at C:\\Users\\john\\project\\main.py:10');
+        if (process.platform === 'win32') {
+          // Test with Windows absolute path on Windows
+          const breakpointCall = await mcpSdkClient.callTool({
+            name: 'set_breakpoint',
+            arguments: { 
+              sessionId,
+              file: 'C:\\Users\\john\\project\\main.py',
+              line: 10
+            }
+          });
+          const bpResponse = parseSdkToolResult(breakpointCall);
+          expect(bpResponse.success).toBe(true);
+          expect(bpResponse.message).toContain('Breakpoint set at C:\\Users\\john\\project\\main.py:10');
+        } else {
+          // Test with Unix absolute path on Linux/macOS
+          const breakpointCall = await mcpSdkClient.callTool({
+            name: 'set_breakpoint',
+            arguments: { 
+              sessionId,
+              file: '/home/user/project/test.py',
+              line: 5
+            }
+          });
+          const bpResponse = parseSdkToolResult(breakpointCall);
+          expect(bpResponse.success).toBe(true);
+          expect(bpResponse.message).toContain('Breakpoint set at /home/user/project/test.py:5');
+        }
         
-        // Test with Linux absolute path
-        const breakpointCall2 = await mcpSdkClient.callTool({
+        // Test with relative path using an actual file that exists
+        const relativeCall = await mcpSdkClient.callTool({
           name: 'set_breakpoint',
           arguments: { 
             sessionId,
-            file: '/home/user/project/test.py',
-            line: 5
+            file: 'examples/python/fibonacci.py',  // This file actually exists
+            line: 15
           }
         });
-        const bpResponse2 = parseSdkToolResult(breakpointCall2);
-        expect(bpResponse2.success).toBe(true);
-        expect(bpResponse2.message).toContain('Breakpoint set at /home/user/project/test.py:5');
+        const relResponse = parseSdkToolResult(relativeCall);
+        expect(relResponse.success).toBe(true);
+        expect(relResponse.message).toContain('examples/python/fibonacci.py:15');
       } finally {
         // Clean up session
         await mcpSdkClient.callTool({

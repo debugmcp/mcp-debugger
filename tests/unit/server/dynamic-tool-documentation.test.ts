@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { DebugMcpServer, DebugMcpServerOptions } from '../../../src/server.js';
 import { PathTranslator } from '../../../src/utils/path-translator.js';
 import type { ILogger, IFileSystem, IEnvironment } from '../../../src/interfaces/external-dependencies.js';
+import { createWindowsPathUtils, createPosixPathUtils } from '../../mocks/mock-path-utils.js';
 
 // Mock dependencies
 vi.mock('../../../src/container/dependencies.js', () => ({
@@ -19,6 +20,14 @@ vi.mock('../../../src/container/dependencies.js', () => ({
     environment: {
       get: vi.fn(),
       getCurrentWorkingDirectory: vi.fn()
+    },
+    pathUtils: {
+      isAbsolute: vi.fn(),
+      resolve: vi.fn(),
+      join: vi.fn(),
+      dirname: vi.fn(),
+      basename: vi.fn(),
+      sep: '/'
     },
     processLauncher: {
       spawn: vi.fn()
@@ -137,7 +146,8 @@ describe('Dynamic Tool Documentation', () => {
         warn: vi.fn()
       } as unknown as ILogger;
 
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment);
+      const mockPathUtils = process.platform === 'win32' ? createWindowsPathUtils() : createPosixPathUtils();
+      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
       const options: DebugMcpServerOptions = {
         pathTranslator
       };
@@ -190,7 +200,8 @@ describe('Dynamic Tool Documentation', () => {
       
       (mockEnvironment.getCurrentWorkingDirectory as Mock).mockReturnValue(longCwd);
       
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment);
+      const mockPathUtils = process.platform === 'win32' ? createWindowsPathUtils() : createPosixPathUtils();
+      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
       server = new DebugMcpServer({ pathTranslator });
       
       const tools = await getToolsFromServer(server);
@@ -209,7 +220,8 @@ describe('Dynamic Tool Documentation', () => {
       
       (mockEnvironment.getCurrentWorkingDirectory as Mock).mockReturnValue(specialCwd);
       
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment);
+      const mockPathUtils = process.platform === 'win32' ? createWindowsPathUtils() : createPosixPathUtils();
+      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
       server = new DebugMcpServer({ pathTranslator });
       
       const tools = await getToolsFromServer(server);
@@ -240,7 +252,8 @@ describe('Dynamic Tool Documentation', () => {
         warn: vi.fn()
       } as unknown as ILogger;
 
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment);
+      const mockPathUtils = createPosixPathUtils(); // Always use Posix in container mode
+      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
       const options: DebugMcpServerOptions = {
         pathTranslator
       };
@@ -323,7 +336,8 @@ describe('Dynamic Tool Documentation', () => {
         warn: vi.fn()
       } as unknown as ILogger;
 
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment);
+      const mockPathUtils = createPosixPathUtils();
+      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
       server = new DebugMcpServer({ pathTranslator });
 
       const tools = await getToolsFromServer(server);
@@ -360,7 +374,8 @@ describe('Dynamic Tool Documentation', () => {
         warn: vi.fn()
       } as unknown as ILogger;
 
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment);
+      const mockPathUtils = createPosixPathUtils();
+      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
       server = new DebugMcpServer({ pathTranslator });
 
       const tools = await getToolsFromServer(server);

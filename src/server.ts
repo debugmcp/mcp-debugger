@@ -186,7 +186,7 @@ export class DebugMcpServer {
     };
     
     this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
-    this.pathTranslator = options.pathTranslator || new PathTranslator(dependencies.fileSystem, dependencies.logger, dependencies.environment); // Pass fileSystem, logger, and environment
+    this.pathTranslator = options.pathTranslator || new PathTranslator(dependencies.fileSystem, dependencies.logger, dependencies.environment, dependencies.pathUtils); // Pass fileSystem, logger, environment, and pathUtils
 
     this.registerTools();
     this.server.onerror = (error) => {

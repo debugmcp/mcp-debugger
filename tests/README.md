@@ -2,9 +2,66 @@
 
 This guide provides information about how to run tests and how to structure new tests for the Debug MCP Server.
 
-## Running Tests
+## Running Tests Locally with Act
 
-The project uses Jest as the testing framework. There are several scripts available to run tests:
+For running GitHub Actions workflows locally (especially container tests), we use [Act](https://github.com/nektos/act).
+
+### Prerequisites for Container Tests
+
+1. **Docker**: Ensure Docker is installed and running
+2. **Act**: Install Act following the [official instructions](https://github.com/nektos/act#installation)
+3. **Docker Image**: Build the MCP debugger Docker image:
+   ```bash
+   docker build -t mcp-debugger:local .
+   ```
+
+### Platform-Specific Requirements
+
+#### Windows Requirements
+- **CRITICAL**: Run Act inside WSL2 (required for Docker operations)
+- Ensure Docker Desktop WSL2 integration is enabled
+- Open WSL2 terminal and run Act from there
+- Do NOT run Act from Windows CMD/PowerShell
+
+#### Apple Silicon (M1/M2) Requirements
+- The `.actrc` file already includes `--container-architecture linux/amd64`
+- Alternatively, build multi-arch images for `mcp-debugger:local`
+
+### Running Tests with Act
+
+With the updated `.actrc` configuration, Act will:
+- Use your local `catthehacker/ubuntu:act-latest` image
+- Default to the CI workflow (to avoid running both workflows)
+- Not pull images from the registry
+
+```bash
+# Simple commands (using helper scripts):
+./scripts/act-test.sh ci      # Linux/macOS
+scripts\act-test.cmd ci        # Windows
+
+# Run CI workflow tests (default)
+act -j build-and-test --matrix os:ubuntu-latest
+
+# Run only E2E tests
+./scripts/act-test.sh e2e
+
+# Run Release workflow tests
+act -W .github/workflows/release.yml -j build-and-test
+```
+
+**Note**: The CI workflow runs on every push/PR, while the Release workflow only runs when you create version tags (e.g., `v1.0.0`).
+
+### Act Configuration
+
+The project includes an `.actrc` file with optimized settings:
+- Uses full Docker-enabled runner images (`catthehacker/ubuntu:full-22.04`)
+- Enables `--bind` for proper volume mounting
+- Enables `--privileged` for Docker daemon access
+- Sets container architecture for cross-platform compatibility
+
+## Running Tests Directly
+
+The project uses Jest/Vitest as the testing framework. There are several scripts available to run tests:
 
 ### Run All Tests
 
@@ -134,6 +191,32 @@ Focus on improving coverage in critical areas like:
 ## Debugging Tests
 
 For debugging failing tests:
-- Use the `--debug` flag with Jest
+- Use the `--debug` flag with Jest/Vitest
 - Add console logs in tests (they will appear in test output)
 - Examine the log files in the `logs/` directory
+
+### Debugging Container Tests
+
+When container tests fail:
+1. Check if the Docker image exists: `docker images | grep mcp-debugger`
+2. Verify Act environment: `echo $ACT` (should be "true" when running in Act)
+3. Check Docker daemon access: `docker ps`
+4. Review container logs in test output
+
+### Common Container Test Issues
+
+1. **"Script path not found" errors**: Usually indicates volume mount issues
+   - Ensure `.actrc` includes `--bind` flag
+   - Check that paths are relative, not absolute
+
+2. **"spawn node ENOENT" errors**: Node.js not found in PATH
+   - The Python discovery test now handles Act environment automatically
+   - For other tests, ensure proper PATH configuration
+
+3. **Docker command failures**: Docker not available in Act container
+   - Ensure using `catthehacker/ubuntu:full-*` images (not `act-*` variants)
+   - Verify `--privileged` flag is set
+
+## Alternative: Testcontainers
+
+If Act proves problematic for your environment, consider using the [Testcontainers](https://testcontainers.com/) library as an alternative approach for container-based testing.

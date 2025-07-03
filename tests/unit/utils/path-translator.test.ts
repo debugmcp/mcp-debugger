@@ -1,6 +1,6 @@
 import { PathTranslator } from '../../../src/utils/path-translator';
 import { IFileSystem, ILogger, IEnvironment } from '../../../src/interfaces/external-dependencies';
-import path from 'path';
+import { createWindowsPathUtils, createPosixPathUtils } from '../../mocks/mock-path-utils';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 describe('PathTranslator', () => {
@@ -60,24 +60,26 @@ describe('PathTranslator', () => {
       it('should resolve relative paths from current working directory', () => {
         const cwd = 'C:\\Users\\user\\myproject';
         const mockEnv = createWindowsMockEnvironment(false, cwd);
-        const existingFiles = [
-          path.resolve(cwd, 'src\\file.py'),
-          path.resolve(cwd, 'test.py')
+        const mockPathUtils = createWindowsPathUtils();
+        const expectedFiles = [
+          'C:\\Users\\user\\myproject\\src\\file.py',
+          'C:\\Users\\user\\myproject\\test.py'
         ];
-        mockFileSystem = createMockFileSystem(existingFiles);
+        mockFileSystem = createMockFileSystem(expectedFiles);
         
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         // Test various relative paths
-        expect(translator.translatePath('src\\file.py')).toBe(path.resolve(cwd, 'src\\file.py'));
-        expect(translator.translatePath('.\\src\\file.py')).toBe(path.resolve(cwd, 'src\\file.py'));
-        expect(translator.translatePath('test.py')).toBe(path.resolve(cwd, 'test.py'));
+        expect(translator.translatePath('src\\file.py')).toBe('C:\\Users\\user\\myproject\\src\\file.py');
+        expect(translator.translatePath('.\\src\\file.py')).toBe('C:\\Users\\user\\myproject\\src\\file.py');
+        expect(translator.translatePath('test.py')).toBe('C:\\Users\\user\\myproject\\test.py');
       });
 
       it('should return absolute paths unchanged', () => {
         const mockEnv = createWindowsMockEnvironment(false);
+        const mockPathUtils = createWindowsPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         const absolutePath = 'C:\\absolute\\path\\to\\file.py';
         expect(translator.translatePath(absolutePath)).toBe(absolutePath);
@@ -89,12 +91,13 @@ describe('PathTranslator', () => {
       it('should handle forward slashes in relative paths correctly', () => {
         const cwd = 'C:\\project';
         const mockEnv = createWindowsMockEnvironment(false, cwd);
-        const expectedPath = path.resolve(cwd, 'src/file.py');
+        const mockPathUtils = createWindowsPathUtils();
+        const expectedPath = 'C:\\project\\src\\file.py';
         mockFileSystem = createMockFileSystem([expectedPath]);
         
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
-        // Windows path.resolve handles forward slashes correctly
+        // Windows handles forward slashes correctly
         expect(translator.translatePath('./src/file.py')).toBe(expectedPath);
         expect(translator.translatePath('src/file.py')).toBe(expectedPath);
       });
@@ -102,12 +105,13 @@ describe('PathTranslator', () => {
       it('should throw error with helpful message when file not found', () => {
         const cwd = 'C:\\workspace';
         const mockEnv = createWindowsMockEnvironment(false, cwd);
+        const mockPathUtils = createWindowsPathUtils();
         mockFileSystem = createMockFileSystem([]); // No files exist
         
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         const relativePath = 'missing\\file.py';
-        const expectedPath = path.resolve(cwd, relativePath);
+        const expectedPath = 'C:\\workspace\\missing\\file.py';
         
         expect(() => translator.translatePath(relativePath)).toThrow(
           expect.objectContaining({
@@ -127,24 +131,26 @@ describe('PathTranslator', () => {
       it('should resolve relative paths from current working directory', () => {
         const cwd = '/home/user/myproject';
         const mockEnv = createLinuxMockEnvironment(false, cwd);
-        const existingFiles = [
-          path.resolve(cwd, 'src/file.py'),
-          path.resolve(cwd, 'test.py')
+        const mockPathUtils = createPosixPathUtils();
+        const expectedFiles = [
+          '/home/user/myproject/src/file.py',
+          '/home/user/myproject/test.py'
         ];
-        mockFileSystem = createMockFileSystem(existingFiles);
+        mockFileSystem = createMockFileSystem(expectedFiles);
         
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         // Test various relative paths
-        expect(translator.translatePath('src/file.py')).toBe(path.resolve(cwd, 'src/file.py'));
-        expect(translator.translatePath('./src/file.py')).toBe(path.resolve(cwd, 'src/file.py'));
-        expect(translator.translatePath('test.py')).toBe(path.resolve(cwd, 'test.py'));
+        expect(translator.translatePath('src/file.py')).toBe('/home/user/myproject/src/file.py');
+        expect(translator.translatePath('./src/file.py')).toBe('/home/user/myproject/src/file.py');
+        expect(translator.translatePath('test.py')).toBe('/home/user/myproject/test.py');
       });
 
       it('should return absolute paths unchanged', () => {
         const mockEnv = createLinuxMockEnvironment(false);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         const absolutePath = '/absolute/path/to/file.py';
         expect(translator.translatePath(absolutePath)).toBe(absolutePath);
@@ -156,12 +162,13 @@ describe('PathTranslator', () => {
       it('should throw error with helpful message when file not found', () => {
         const cwd = '/home/user/project';
         const mockEnv = createLinuxMockEnvironment(false, cwd);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]); // No files exist
         
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         const relativePath = 'missing/file.py';
-        const expectedPath = path.resolve(cwd, relativePath);
+        const expectedPath = '/home/user/project/missing/file.py';
         
         expect(() => translator.translatePath(relativePath)).toThrow(
           expect.objectContaining({
@@ -179,28 +186,32 @@ describe('PathTranslator', () => {
 
     describe('common host behavior', () => {
       it('should handle empty string input', () => {
-        const cwd = process.platform === 'win32' ? 'C:\\project' : '/home/user/project';
-        const mockEnv = process.platform === 'win32' 
+        const isWindows = process.platform === 'win32';
+        const cwd = isWindows ? 'C:\\project' : '/home/user/project';
+        const mockEnv = isWindows 
           ? createWindowsMockEnvironment(false, cwd)
           : createLinuxMockEnvironment(false, cwd);
+        const mockPathUtils = isWindows ? createWindowsPathUtils() : createPosixPathUtils();
         mockFileSystem = createMockFileSystem([cwd]); // CWD exists
         
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         // Empty string should resolve to CWD
         expect(translator.translatePath('')).toBe(cwd);
       });
 
       it('should handle just a filename with no path', () => {
-        const cwd = process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
-        const mockEnv = process.platform === 'win32'
+        const isWindows = process.platform === 'win32';
+        const cwd = isWindows ? 'C:\\workspace' : '/workspace';
+        const mockEnv = isWindows
           ? createWindowsMockEnvironment(false, cwd)
           : createLinuxMockEnvironment(false, cwd);
+        const mockPathUtils = isWindows ? createWindowsPathUtils() : createPosixPathUtils();
         const filename = 'script.py';
-        const expectedPath = path.resolve(cwd, filename);
+        const expectedPath = isWindows ? 'C:\\workspace\\script.py' : '/workspace/script.py';
         mockFileSystem = createMockFileSystem([expectedPath]);
         
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         expect(translator.translatePath(filename)).toBe(expectedPath);
       });
@@ -211,8 +222,9 @@ describe('PathTranslator', () => {
     describe('relative path handling', () => {
       it('should map relative paths to /workspace', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         // Various relative path formats
         expect(translator.translatePath('src/file.py')).toBe('/workspace/src/file.py');
@@ -223,8 +235,9 @@ describe('PathTranslator', () => {
 
       it('should normalize Windows backslashes to forward slashes in container', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         // Windows-style paths should be normalized
         expect(translator.translatePath('src\\subfolder\\file.py')).toBe('/workspace/src/subfolder/file.py');
@@ -234,8 +247,9 @@ describe('PathTranslator', () => {
 
       it('should handle mixed separators correctly', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         expect(translator.translatePath('src/subfolder\\file.py')).toBe('/workspace/src/subfolder/file.py');
         expect(translator.translatePath('path\\to/mixed\\file.py')).toBe('/workspace/path/to/mixed/file.py');
@@ -243,8 +257,9 @@ describe('PathTranslator', () => {
 
       it('should handle empty string by returning /workspace', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         expect(translator.translatePath('')).toBe('/workspace');
       });
@@ -253,8 +268,9 @@ describe('PathTranslator', () => {
     describe('absolute path rejection', () => {
       it('should reject Windows absolute paths with clear error', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         const windowsAbsolutePaths = ['C:\\project\\file.py', 'D:\\temp\\data.txt', 'E:\\'];
         
@@ -281,8 +297,9 @@ describe('PathTranslator', () => {
 
       it('should reject Linux absolute paths with clear error', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         const linuxAbsolutePaths = ['/home/user/file.py', '/opt/app/data.txt', '/etc/config'];
         
@@ -311,8 +328,9 @@ describe('PathTranslator', () => {
     describe('workspace path handling', () => {
       it('should return paths already starting with /workspace unchanged', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         const workspacePaths = [
           '/workspace/src/file.py',
@@ -327,8 +345,9 @@ describe('PathTranslator', () => {
 
       it('should handle /workspace with additional path segments', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         expect(translator.translatePath('/workspace/deep/nested/path/file.py')).toBe('/workspace/deep/nested/path/file.py');
       });
@@ -337,8 +356,9 @@ describe('PathTranslator', () => {
     describe('error messages', () => {
       it('should provide context about container mode in error messages', () => {
         const mockEnv = createLinuxMockEnvironment(true);
+        const mockPathUtils = createPosixPathUtils();
         mockFileSystem = createMockFileSystem([]);
-        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+        translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
         
         // Test Windows absolute path error
         try {
@@ -370,8 +390,9 @@ describe('PathTranslator', () => {
   describe('edge cases', () => {
     it('should handle paths with multiple dots correctly', () => {
       const mockEnv = createLinuxMockEnvironment(true);
+      const mockPathUtils = createPosixPathUtils();
       mockFileSystem = createMockFileSystem([]);
-      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
       
       expect(translator.translatePath('../../file.py')).toBe('/workspace/../../file.py');
       expect(translator.translatePath('./../src/file.py')).toBe('/workspace/../src/file.py');
@@ -379,8 +400,9 @@ describe('PathTranslator', () => {
 
     it('should handle paths with trailing slashes', () => {
       const mockEnv = createLinuxMockEnvironment(true);
+      const mockPathUtils = createPosixPathUtils();
       mockFileSystem = createMockFileSystem([]);
-      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
       
       expect(translator.translatePath('src/')).toBe('/workspace/src/');
       expect(translator.translatePath('src\\')).toBe('/workspace/src/');
@@ -388,8 +410,9 @@ describe('PathTranslator', () => {
 
     it('should handle UNC paths as absolute paths in container mode', () => {
       const mockEnv = createLinuxMockEnvironment(true);
+      const mockPathUtils = createPosixPathUtils();
       mockFileSystem = createMockFileSystem([]);
-      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
       
       expect(() => translator.translatePath('\\\\server\\share\\file.py')).toThrow(
         expect.objectContaining({
@@ -402,9 +425,10 @@ describe('PathTranslator', () => {
   describe('logging behavior', () => {
     it('should log initialization details', () => {
       const mockEnv = createLinuxMockEnvironment(true);
+      const mockPathUtils = createPosixPathUtils();
       mockFileSystem = createMockFileSystem([]);
       
-      new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+      new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
       
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('PathTranslator initialized')
@@ -413,8 +437,9 @@ describe('PathTranslator', () => {
 
     it('should log path translation in debug mode', () => {
       const mockEnv = createLinuxMockEnvironment(true);
+      const mockPathUtils = createPosixPathUtils();
       mockFileSystem = createMockFileSystem([]);
-      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv);
+      translator = new PathTranslator(mockFileSystem, mockLogger, mockEnv, mockPathUtils);
       
       translator.translatePath('src/file.py');
       

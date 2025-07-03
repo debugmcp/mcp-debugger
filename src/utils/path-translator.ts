@@ -1,16 +1,23 @@
-import path from 'path';
 import { IFileSystem, ILogger, IEnvironment } from '../interfaces/external-dependencies.js';
+import { IPathUtils } from '../interfaces/path-utils.js';
 
 export class PathTranslator {
   private isContainer: boolean;
   private logger: ILogger;
   private fileSystem: IFileSystem;
   private environment: IEnvironment;
+  private pathUtils: IPathUtils;
 
-  constructor(fileSystem: IFileSystem, logger: ILogger, environment: IEnvironment) {
+  constructor(
+    fileSystem: IFileSystem, 
+    logger: ILogger, 
+    environment: IEnvironment,
+    pathUtils: IPathUtils
+  ) {
     this.fileSystem = fileSystem;
     this.logger = logger;
     this.environment = environment;
+    this.pathUtils = pathUtils;
     this.isContainer = this.environment.get('MCP_CONTAINER') === 'true';
     
     // Test expects "PathTranslator initialized" to be contained in the message
@@ -38,7 +45,7 @@ export class PathTranslator {
     
     if (!this.isContainer) {
       // Host mode: resolve relative paths from CWD, use absolute paths as-is
-      if (path.isAbsolute(inputPath)) {
+      if (this.pathUtils.isAbsolute(inputPath)) {
         return inputPath;
       }
       
@@ -49,8 +56,8 @@ export class PathTranslator {
       
       const cwd = this.environment.getCurrentWorkingDirectory();
       
-      // Use path.resolve to get the expected behavior
-      const resolvedPath = path.resolve(cwd, inputPath);
+      // Use pathUtils.resolve to get the expected behavior
+      const resolvedPath = this.pathUtils.resolve(cwd, inputPath);
       
       // Check if file exists
       if (!this.fileSystem.existsSync(resolvedPath)) {
@@ -80,10 +87,21 @@ export class PathTranslator {
       return normalizedPath;
     }
     
-    // Reject absolute paths in container mode
-    if (path.isAbsolute(inputPath)) {
+    // OS-agnostic absolute path detection for container mode
+    const isWindowsAbsolute = /^[A-Za-z]:[\\\/]/.test(inputPath);
+    const isUNCPath = /^\\\\/.test(inputPath);
+    const isUnixAbsolute = normalizedPath.startsWith('/') && !normalizedPath.startsWith('/workspace');
+    
+    // Reject all types of absolute paths in container mode
+    if (isWindowsAbsolute || isUNCPath || isUnixAbsolute || this.pathUtils.isAbsolute(inputPath)) {
+      const pathType = isWindowsAbsolute ? 'Windows ' : 
+                      isUNCPath ? 'UNC ' : 
+                      isUnixAbsolute ? 'Unix ' : '';
+      
+      this.logger.debug(`Rejected absolute path in container mode: ${inputPath} (type: ${pathType.trim() || 'detected by pathUtils.isAbsolute'})`);
+      
       throw new Error(
-        `Absolute paths are not supported in container mode.\n` +
+        `Absolute ${pathType}paths are not supported in container mode.\n` +
         `Path provided: ${inputPath}\n` +
         `Please use relative paths (they will be resolved from /workspace).`
       );

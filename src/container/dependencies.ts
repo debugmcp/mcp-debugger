@@ -29,6 +29,8 @@ import { ProcessEnvironment } from '../implementations/environment-impl.js';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { SessionStoreFactory } from '../factories/session-store-factory.js';
 import { ProxyManagerFactory } from '../factories/proxy-manager-factory.js';
+import { IPathUtils } from '../interfaces/path-utils.js';
+import { NodePathUtils } from '../implementations/path-utils-impl.js';
 
 /**
  * Complete set of application dependencies
@@ -40,6 +42,7 @@ export interface Dependencies {
   networkManager: INetworkManager;
   logger: ILogger;
   environment: IEnvironment;
+  pathUtils: IPathUtils;
   
   // Process launchers
   processLauncher: IProcessLauncher;
@@ -69,6 +72,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   const fileSystem = new FileSystemImpl();
   const processManager = new ProcessManagerImpl();
   const networkManager = new NetworkManagerImpl();
+  const pathUtils = new NodePathUtils();
   
   // Create process launchers
   const processLauncher = new ProcessLauncherImpl(processManager);
@@ -90,6 +94,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
     networkManager,
     logger,
     environment,
+    pathUtils,
     processLauncher,
     proxyProcessLauncher,
     debugTargetLauncher,

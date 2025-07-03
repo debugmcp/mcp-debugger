@@ -67,6 +67,34 @@ describe('MCP Server Comprehensive Tests', () => {
         get: vi.fn((key: string) => process.env[key]),
         getAll: vi.fn(() => ({ ...process.env })),
         getCurrentWorkingDirectory: vi.fn(() => process.cwd())
+      },
+      pathUtils: {
+        isAbsolute: vi.fn((p: string) => {
+          // Mock platform-appropriate behavior
+          if (process.platform === 'win32') {
+            return /^[A-Za-z]:[\\\/]/.test(p) || /^\\\\/.test(p);
+          } else {
+            return p.startsWith('/');
+          }
+        }),
+        resolve: vi.fn((...args: string[]) => {
+          // Simple mock implementation
+          return args.join('/').replace(/\/+/g, '/');
+        }),
+        join: vi.fn((...args: string[]) => args.join('/')),
+        dirname: vi.fn((p: string) => {
+          const lastSlash = p.lastIndexOf('/');
+          return lastSlash === -1 ? '.' : p.substring(0, lastSlash);
+        }),
+        basename: vi.fn((p: string, ext?: string) => {
+          const lastSlash = p.lastIndexOf('/');
+          const base = lastSlash === -1 ? p : p.substring(lastSlash + 1);
+          if (ext && base.endsWith(ext)) {
+            return base.substring(0, base.length - ext.length);
+          }
+          return base;
+        }),
+        sep: '/'
       }
     };
     
