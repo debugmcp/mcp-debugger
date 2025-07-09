@@ -24,15 +24,12 @@ import {
 } from './session/models.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
-import { PathTranslator } from './utils/path-translator.js';
-
 /**
  * Configuration options for the Debug MCP Server
  */
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
-  pathTranslator?: PathTranslator;
 }
 
 /**
@@ -76,7 +73,6 @@ export class DebugMcpServer {
   private sessionManager: SessionManager;
   private logger;
   private constructorOptions: DebugMcpServerOptions;
-  private pathTranslator: PathTranslator;
   private supportedLanguages: string[] = [];
 
   // Get supported languages from adapter registry
@@ -168,11 +164,11 @@ export class DebugMcpServer {
     dryRunSpawn?: boolean
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
     this.validateSession(sessionId);
-    const translatedScriptPath = this.pathTranslator.translatePath(scriptPath);
-    this.logger.info(`[DebugMcpServer.startDebugging] Original scriptPath: ${scriptPath}, Translated scriptPath: ${translatedScriptPath}`);
+    // Pass path unchanged - let OS/containers/debug adapters handle it naturally
+    this.logger.info(`[DebugMcpServer.startDebugging] Using scriptPath as provided: ${scriptPath}`);
     const result = await this.sessionManager.startDebugging(
       sessionId, 
-      translatedScriptPath, 
+      scriptPath, 
       args, 
       dapLaunchArgs, 
       dryRunSpawn
@@ -186,9 +182,9 @@ export class DebugMcpServer {
 
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
-    const translatedFile = this.pathTranslator.translatePath(file);
-    this.logger.info(`[DebugMcpServer.setBreakpoint] Original file: ${file}, Translated file: ${translatedFile}`);
-    return this.sessionManager.setBreakpoint(sessionId, translatedFile, line, condition);
+    // Pass path unchanged - let OS/containers/debug adapters handle it naturally
+    this.logger.info(`[DebugMcpServer.setBreakpoint] Using file path as provided: ${file}`);
+    return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -271,7 +267,6 @@ export class DebugMcpServer {
     };
     
     this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
-    this.pathTranslator = options.pathTranslator || new PathTranslator(dependencies.fileSystem, dependencies.logger, dependencies.environment, dependencies.pathUtils); // Pass fileSystem, logger, environment, and pathUtils
 
     this.registerTools();
     this.server.onerror = (error) => {
@@ -308,16 +303,12 @@ export class DebugMcpServer {
   }
 
   private getPathDescription(parameterName: string): string {
-    const isContainer = this.pathTranslator.isContainerMode();
-    // Get workspace root from PathTranslator to respect dependency injection
-    const cwd = this.pathTranslator.getWorkspaceRoot();
+    // Hands-off approach: provide simple, generic path guidance
+    // Let OS/containers/debug adapters handle paths naturally
+    const cwd = process.cwd();
+    const examplePath = path.join(cwd, 'src', 'main.py').replace(/\\/g, '/');
     
-    if (isContainer) {
-      return `Path to the ${parameterName} (relative to /workspace mount point). Example: 'src/main.py'`;
-    } else {
-      const examplePath = path.join(cwd, 'src', 'main.py').replace(/\\/g, '/');
-      return `Path to the ${parameterName} (absolute or relative to server's working directory: ${cwd}). Examples: 'src/main.py' or '${examplePath}'`;
-    }
+    return `Path to the ${parameterName}. Use absolute paths or paths relative to current working directory (${cwd}). Examples: 'src/main.py' or '${examplePath}'`;
   }
 
   private registerTools(): void {
