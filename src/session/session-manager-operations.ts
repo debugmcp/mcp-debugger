@@ -83,11 +83,9 @@ export class SessionManagerOperations extends SessionManagerData {
       resolvedPythonPath = path.resolve(projectRoot, pythonPathFromSession);
     }
 
-    // In container mode, Python executables are system binaries and should NOT be translated
-    // Only user script paths need translation, not the Python interpreter itself
-    if (this.pathTranslator.isContainerMode()) {
-      this.logger.info(`[SessionManager] Container mode: Using Python path as-is (system binary): ${resolvedPythonPath}`);
-    }
+    // Hands-off approach: Use Python path as-is regardless of environment
+    // Let OS/containers handle path resolution naturally
+    this.logger.info(`[SessionManager] Using Python path as-is: ${resolvedPythonPath}`);
     
     this.logger.info(`[SessionManager] Using Python path: ${resolvedPythonPath}`);
 
