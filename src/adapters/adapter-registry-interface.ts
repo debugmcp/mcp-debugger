@@ -113,7 +113,6 @@ export interface AdapterDependencies {
   fileSystem: IFileSystem;
   logger: ILogger;
   environment: IEnvironment;
-  pathUtils: IPathUtils;
   processLauncher: IProcessLauncher;
   networkManager?: INetworkManager;
 }
@@ -311,6 +310,5 @@ export type ActiveAdapterMap = Map<string, Set<IDebugAdapter>>;
 import type { IFileSystem } from '../interfaces/external-dependencies.js';
 import type { ILogger } from '../interfaces/external-dependencies.js';
 import type { IEnvironment } from '../interfaces/external-dependencies.js';
-import type { IPathUtils } from '../interfaces/path-utils.js';
 import type { IProcessLauncher } from '../interfaces/process-interfaces.js';
 import type { INetworkManager } from '../interfaces/external-dependencies.js';
