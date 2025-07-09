@@ -121,7 +121,7 @@ export class DapProxyWorker {
       );
 
       // Validate script path exists
-      // Note: The server-level PathTranslator already resolves relative paths to absolute paths
+      // Note: Paths are passed through unchanged - let OS/containers handle path resolution naturally
       const scriptExists = await this.dependencies.fileSystem.pathExists(payload.scriptPath);
       if (!scriptExists) {
         throw new Error(`Script path not found: ${payload.scriptPath}`);
