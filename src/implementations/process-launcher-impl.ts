@@ -316,8 +316,8 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   }
   
   sendCommand(command: object): void {
-    const messageStr = JSON.stringify(command);
-    this.send(messageStr);
+    // Send object directly - Node.js IPC will handle serialization
+    this.send(command);
   }
   
   async waitForInitialization(timeout: number = 30000): Promise<void> {

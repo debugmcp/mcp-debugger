@@ -31,6 +31,11 @@ import { SessionStoreFactory } from '../factories/session-store-factory.js';
 import { ProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import { IPathUtils } from '../interfaces/path-utils.js';
 import { NodePathUtils } from '../implementations/path-utils-impl.js';
+import { IAdapterRegistry } from '../adapters/adapter-registry-interface.js';
+import { AdapterRegistry } from '../adapters/adapter-registry.js';
+import { MockAdapterFactory } from '../adapters/mock/mock-adapter-factory.js';
+import { PythonAdapterFactory } from '../adapters/python/python-adapter-factory.js';
+import { DebugLanguage } from '../session/models.js';
 
 /**
  * Complete set of application dependencies
@@ -52,6 +57,9 @@ export interface Dependencies {
   // Factories
   proxyManagerFactory: IProxyManagerFactory;
   sessionStoreFactory: ISessionStoreFactory;
+  
+  // Adapter support
+  adapterRegistry: IAdapterRegistry;
 }
 
 /**
@@ -88,6 +96,21 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   
   const sessionStoreFactory = new SessionStoreFactory();
   
+  // Create adapter registry with validation disabled during registration
+  // Validation will happen when actually creating adapter instances
+  const adapterRegistry = new AdapterRegistry({
+    validateOnRegister: false,
+    allowOverride: false
+  });
+  
+  // Register Python adapter for real Python debugging
+  const pythonAdapterFactory = new PythonAdapterFactory();
+  adapterRegistry.register(DebugLanguage.PYTHON, pythonAdapterFactory);
+  
+  // Register mock adapter for testing purposes
+  const mockAdapterFactory = new MockAdapterFactory();
+  adapterRegistry.register(DebugLanguage.MOCK, mockAdapterFactory);
+  
   return {
     fileSystem,
     processManager,
@@ -99,6 +122,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
     proxyProcessLauncher,
     debugTargetLauncher,
     proxyManagerFactory,
-    sessionStoreFactory
+    sessionStoreFactory,
+    adapterRegistry
   };
 }

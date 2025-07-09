@@ -29,19 +29,28 @@ let defaultLogger: WinstonLoggerType | null = null;
 export function createLogger(namespace: string, options: LoggerOptions = {}): WinstonLoggerType {
   const level = options.level || 'info';
   
-  const transports: winston.transport[] = [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.timestamp(),
-        winston.format.printf(({ timestamp, level, message, ...rest }) => {
-          return `${timestamp} [${level}] [${namespace}]: ${message} ${
-            Object.keys(rest).length ? JSON.stringify(rest, null, 2) : ''
-          }`;
-        })
-      )
-    })
-  ];
+  const transports: winston.transport[] = [];
+  
+  // In stdio mode, we MUST NOT write to stdout as it corrupts the MCP protocol
+  // Check if we're running in stdio mode by looking for specific command line args
+  const isStdioMode = process.argv.includes('stdio');
+  
+  if (!isStdioMode) {
+    // Only add console transport when NOT in stdio mode
+    transports.push(
+      new winston.transports.Console({
+        format: winston.format.combine(
+          winston.format.colorize(),
+          winston.format.timestamp(),
+          winston.format.printf(({ timestamp, level, message, ...rest }) => {
+            return `${timestamp} [${level}] [${namespace}]: ${message} ${
+              Object.keys(rest).length ? JSON.stringify(rest, null, 2) : ''
+            }`;
+          })
+        )
+      })
+    );
+  }
   
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
@@ -55,7 +64,10 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
       fs.mkdirSync(logDir, { recursive: true });
     }
   } catch (e) {
-    console.error(`[Logger Init Error] Failed to ensure log directory for ${logFilePath}:`, e);
+    // In stdio mode, we must not write to console as it corrupts MCP protocol
+    if (!isStdioMode) {
+      console.error(`[Logger Init Error] Failed to ensure log directory for ${logFilePath}:`, e);
+    }
   }
 
   try {
@@ -69,7 +81,10 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
       })
     );
   } catch (fileTransportError) {
-    console.error(`[Logger Init Error] Failed to create file transport for ${logFilePath}:`, fileTransportError);
+    // In stdio mode, we must not write to console as it corrupts MCP protocol
+    if (!isStdioMode) {
+      console.error(`[Logger Init Error] Failed to create file transport for ${logFilePath}:`, fileTransportError);
+    }
   }
   
   const logger = winston.createLogger({
@@ -80,7 +95,10 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
   });
 
   logger.on('error', (error: Error) => {
-    console.error('[Winston Logger Internal Error] Failed to write to a transport:', error);
+    // In stdio mode, we must not write to console as it corrupts MCP protocol
+    if (!isStdioMode) {
+      console.error('[Winston Logger Internal Error] Failed to write to a transport:', error);
+    }
   });
 
   // If this is the root logger, set it as the default

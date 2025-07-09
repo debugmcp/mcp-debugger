@@ -5,12 +5,13 @@
 import { IProxyManager, ProxyManager } from '../proxy/proxy-manager.js';
 import { IProxyProcessLauncher } from '../interfaces/process-interfaces.js';
 import { IFileSystem, ILogger } from '../interfaces/external-dependencies.js';
+import { IDebugAdapter } from '../adapters/debug-adapter-interface.js';
 
 /**
  * Interface for ProxyManager factory
  */
 export interface IProxyManagerFactory {
-  create(): IProxyManager;
+  create(adapter?: IDebugAdapter): IProxyManager;
 }
 
 /**
@@ -23,8 +24,9 @@ export class ProxyManagerFactory implements IProxyManagerFactory {
     private logger: ILogger
   ) {}
   
-  create(): IProxyManager {
+  create(adapter?: IDebugAdapter): IProxyManager {
     return new ProxyManager(
+      adapter || null,  // Pass adapter or null if not provided
       this.proxyProcessLauncher,
       this.fileSystem,
       this.logger
@@ -39,11 +41,13 @@ export class ProxyManagerFactory implements IProxyManagerFactory {
  */
 export class MockProxyManagerFactory implements IProxyManagerFactory {
   public createdManagers: IProxyManager[] = [];
-  public createFn?: () => IProxyManager;
+  public createFn?: (adapter?: IDebugAdapter) => IProxyManager;
+  public lastAdapter?: IDebugAdapter;
   
-  create(): IProxyManager {
+  create(adapter?: IDebugAdapter): IProxyManager {
+    this.lastAdapter = adapter;  // Track the adapter for testing
     if (this.createFn) {
-      const manager = this.createFn();
+      const manager = this.createFn(adapter);
       this.createdManagers.push(manager);
       return manager;
     }

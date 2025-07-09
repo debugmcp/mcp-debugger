@@ -1,0 +1,565 @@
+/**
+ * Debug operations for session management including starting, stepping,
+ * continuing, and breakpoint management.
+ */
+import { v4 as uuidv4 } from 'uuid';
+import { Breakpoint, SessionState, SessionLifecycleState } from './models.js'; 
+import { ManagedSession } from './session-store.js';
+import { DebugProtocol } from '@vscode/debugprotocol'; 
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { ProxyConfig } from '../proxy/proxy-config.js';
+import { ErrorMessages } from '../utils/error-messages.js';
+import { findPythonExecutable } from '../utils/python-utils.js';
+import { SessionManagerData } from './session-manager-data.js';
+import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
+import { AdapterConfig } from '../adapters/debug-adapter-interface.js';
+
+/**
+ * Debug operations functionality for session management
+ */
+export class SessionManagerOperations extends SessionManagerData {
+  protected async startProxyManager(
+    session: ManagedSession, 
+    scriptPath: string, 
+    scriptArgs?: string[], 
+    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, 
+    dryRunSpawn?: boolean
+  ): Promise<void> {
+    const sessionId = session.id;
+
+    // Create session log directory
+    const sessionLogDir = path.join(this.logDirBase, sessionId, `run-${Date.now()}`);
+    this.logger.info(`[SessionManager] Ensuring session log directory: ${sessionLogDir}`);
+    try {
+      await this.fileSystem.ensureDir(sessionLogDir);
+      const dirExists = await this.fileSystem.pathExists(sessionLogDir);
+      if (!dirExists) {
+        throw new Error(`Log directory ${sessionLogDir} could not be created`);
+      }
+    } catch (err: unknown) { 
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[SessionManager] Failed to create log directory:`, err);
+      throw new Error(`Failed to create session log directory: ${message}`);
+    }
+
+    // Get free port for adapter
+    const adapterPort = await this.findFreePort();
+
+    // Resolve paths
+    const projectRoot = path.resolve(fileURLToPath(import.meta.url), '../../../'); // Path to the MCP debugger server's root
+    
+    const initialBreakpoints = Array.from(session.breakpoints.values()).map(bp => {
+        // Breakpoint file path is already translated by server.ts before reaching here
+        return {
+            file: bp.file, // Use the already translated path
+            line: bp.line, 
+            condition: bp.condition
+        };
+    });
+    
+    // scriptPath is already translated by server.ts before reaching here
+    const translatedScriptPath = scriptPath; 
+    this.logger.info(`[SessionManager] Using translated script path: ${translatedScriptPath}`);
+
+    // Resolve Python path with intelligent detection
+    let resolvedPythonPath: string;
+    const pythonPathFromSession = session.pythonPath!;
+    
+    if (path.isAbsolute(pythonPathFromSession)) {
+      // Absolute path provided - use as-is
+      resolvedPythonPath = pythonPathFromSession;
+    } else if (['python', 'python3', 'py'].includes(pythonPathFromSession.toLowerCase())) {
+      // Common Python commands - use auto-detection without preferredPath
+      try {
+        resolvedPythonPath = await findPythonExecutable(undefined, this.logger);
+        this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedPythonPath}`);
+      } catch (error) {
+        this.logger.error(`[SessionManager] Failed to find Python executable:`, error);
+        throw error;
+      }
+    } else {
+      // Relative path - resolve from project root (MCP server's root)
+      resolvedPythonPath = path.resolve(projectRoot, pythonPathFromSession);
+    }
+
+    // In container mode, Python executables are system binaries and should NOT be translated
+    // Only user script paths need translation, not the Python interpreter itself
+    if (this.pathTranslator.isContainerMode()) {
+      this.logger.info(`[SessionManager] Container mode: Using Python path as-is (system binary): ${resolvedPythonPath}`);
+    }
+    
+    this.logger.info(`[SessionManager] Using Python path: ${resolvedPythonPath}`);
+
+    // Merge launch args
+    const effectiveLaunchArgs = {
+      ...this.defaultDapLaunchArgs,
+      ...(dapLaunchArgs || {}),
+    };
+
+    // Create the adapter for this language
+    const adapterConfig: AdapterConfig = {
+      sessionId,
+      executablePath: resolvedPythonPath,
+      adapterHost: '127.0.0.1',
+      adapterPort,
+      logDir: sessionLogDir,
+      scriptPath: translatedScriptPath,
+      scriptArgs,
+      launchConfig: effectiveLaunchArgs
+    };
+    
+    const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
+    
+    // Build adapter command using the adapter
+    const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
+
+    // Create ProxyConfig
+    const proxyConfig: ProxyConfig = {
+      sessionId,
+      language: session.language,  // Add language from session
+      pythonPath: resolvedPythonPath,
+      adapterHost: '127.0.0.1',
+      adapterPort,
+      logDir: sessionLogDir,
+      scriptPath: translatedScriptPath, // Use the already translated script path
+      scriptArgs,
+      stopOnEntry: effectiveLaunchArgs.stopOnEntry,
+      justMyCode: effectiveLaunchArgs.justMyCode,
+      initialBreakpoints,
+      dryRunSpawn: dryRunSpawn === true,
+      adapterCommand // Pass the adapter command
+    };
+
+    // Create and start ProxyManager with the adapter
+    const proxyManager = this.proxyManagerFactory.create(adapter);
+    session.proxyManager = proxyManager;
+
+    // Set up event handlers
+    this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs);
+
+    // Start the proxy
+    await proxyManager.start(proxyConfig);
+  }
+
+  /**
+   * Helper method to wait for dry run completion with timeout
+   */
+  private async waitForDryRunCompletion(
+    session: ManagedSession, 
+    timeoutMs: number
+  ): Promise<boolean> {
+    let handler: (() => void) | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    
+    try {
+      return await Promise.race([
+        new Promise<boolean>((resolve) => {
+          handler = () => {
+            this.logger.info(`[SessionManager] Dry run completion event received for session ${session.id}`);
+            resolve(true);
+          };
+          this.logger.info(`[SessionManager] Setting up dry-run-complete listener for session ${session.id}`);
+          session.proxyManager?.once('dry-run-complete', handler);
+        }),
+        new Promise<boolean>((resolve) => {
+          timeoutId = setTimeout(() => {
+            this.logger.warn(`[SessionManager] Dry run timeout after ${timeoutMs}ms for session ${session.id}`);
+            resolve(false);
+          }, timeoutMs);
+        })
+      ]);
+    } finally {
+      // Clean up immediately
+      if (handler && session.proxyManager) {
+        this.logger.info(`[SessionManager] Removing dry-run-complete listener for session ${session.id}`);
+        session.proxyManager.removeListener('dry-run-complete', handler);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  async startDebugging(
+    sessionId: string, 
+    scriptPath: string, 
+    scriptArgs?: string[], 
+    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, 
+    dryRunSpawn?: boolean
+  ): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+    this.logger.info(`Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`, dapLaunchArgs);
+
+    if (session.proxyManager) {
+      this.logger.warn(`[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`);
+      await this.closeSession(sessionId); 
+    }
+    
+    // Update to INITIALIZING state and set lifecycle to ACTIVE
+    this._updateSessionState(session, SessionState.INITIALIZING);
+    
+    // Explicitly set lifecycle state to ACTIVE when starting debugging
+    this.sessionStore.update(sessionId, {
+      sessionLifecycle: SessionLifecycleState.ACTIVE
+    });
+    this.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
+    
+    try {
+      // For dry run, start the proxy and wait for completion
+      if (dryRunSpawn) {
+        // Mark that we're setting up a dry run handler
+        const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
+        sessionWithSetup._dryRunHandlerSetup = true;
+        
+        // Start the proxy manager
+        await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+        this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
+        
+        // Check if already completed before waiting
+        const refreshedSession = this._getSessionById(sessionId);
+        this.logger.info(`[SessionManager] Checking state after start: ${refreshedSession.state}`);
+        if (refreshedSession.state === SessionState.STOPPED) {
+          this.logger.info(`[SessionManager] Dry run already completed for session ${sessionId}`);
+          delete sessionWithSetup._dryRunHandlerSetup;
+          return { 
+            success: true, 
+            state: SessionState.STOPPED,
+            data: { dryRun: true, message: "Dry run spawn command logged by proxy." } 
+          };
+        }
+        
+        // Wait for completion with timeout
+        this.logger.info(`[SessionManager] Waiting for dry run completion with timeout ${this.dryRunTimeoutMs}ms`);
+        const dryRunCompleted = await this.waitForDryRunCompletion(refreshedSession, this.dryRunTimeoutMs);
+        delete sessionWithSetup._dryRunHandlerSetup;
+        
+        if (dryRunCompleted) {
+          this.logger.info(`[SessionManager] Dry run completed for session ${sessionId}, final state: ${refreshedSession.state}`);
+          return { 
+            success: true, 
+            state: SessionState.STOPPED,
+            data: { dryRun: true, message: "Dry run spawn command logged by proxy." } 
+          };
+        } else {
+          // Timeout occurred
+          const finalSession = this._getSessionById(sessionId);
+          this.logger.error(
+            `[SessionManager] Dry run timeout for session ${sessionId}. ` +
+            `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`
+          );
+          return { 
+            success: false, 
+            error: `Dry run timed out after ${this.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`, 
+            state: finalSession.state 
+          };
+        }
+      }
+      
+      // Normal (non-dry-run) flow
+      // Start the proxy manager
+      await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+      this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
+      
+      // Wait for adapter to be configured or first stop event
+      const waitForReady = new Promise<void>((resolve) => {
+        let resolved = false;
+        
+        const handleStopped = () => {
+          if (!resolved) {
+            resolved = true;
+            this.logger.info(`[SessionManager] Session ${sessionId} stopped on entry`);
+            resolve();
+          }
+        };
+        
+        const handleConfigured = () => {
+          if (!resolved && !dapLaunchArgs?.stopOnEntry) {
+            resolved = true;
+            this.logger.info(`[SessionManager] Session ${sessionId} running (stopOnEntry=false)`);
+            resolve();
+          }
+        };
+        
+        session.proxyManager?.once('stopped', handleStopped);
+        session.proxyManager?.once('adapter-configured', handleConfigured);
+        
+        // Timeout after 30 seconds
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            session.proxyManager?.removeListener('stopped', handleStopped);
+            session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+            this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
+            resolve();
+          }
+        }, 30000);
+      });
+      
+      await waitForReady;
+      
+      // Re-fetch session to get the most up-to-date state
+      const finalSession = this._getSessionById(sessionId);
+      const finalState = finalSession.state;
+      
+      this.logger.info(`[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`);
+      
+      return { 
+        success: true, 
+        state: finalState, 
+        data: { 
+          message: `Debugging started for ${scriptPath}. Current state: ${finalState}`,
+          reason: finalState === SessionState.PAUSED ? (dapLaunchArgs?.stopOnEntry ? 'entry' : 'breakpoint') : undefined,
+          stopOnEntrySuccessful: dapLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
+        } 
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : 'No stack available';
+      
+      this.logger.error(`[SessionManager] Error during startDebugging for session ${sessionId}: ${errorMessage}. Stack: ${errorStack}`);
+      
+      this._updateSessionState(session, SessionState.ERROR);
+      
+      if (session.proxyManager) {
+        await session.proxyManager.stop();
+        session.proxyManager = undefined;
+      }
+      
+      return { success: false, error: errorMessage, state: session.state };
+    }
+  }
+  
+  async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
+    const session = this._getSessionById(sessionId);
+    const bpId = uuidv4();
+
+    // The file path is already translated by server.ts before reaching here
+    // No need for projectRoot resolution here.
+    const translatedFilePath = file; 
+    this.logger.info(`[SessionManager setBreakpoint] Using translated file path "${translatedFilePath}" for session ${sessionId}`);
+
+    const newBreakpoint: Breakpoint = { id: bpId, file: translatedFilePath, line, condition, verified: false };
+
+    if (!session.breakpoints) session.breakpoints = new Map();
+    session.breakpoints.set(bpId, newBreakpoint);
+    this.logger.info(`[SessionManager] Breakpoint ${bpId} queued for ${file}:${line} in session ${sessionId}.`);
+
+    if (session.proxyManager && session.proxyManager.isRunning() && (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)) {
+      try {
+          this.logger.info(`[SessionManager] Active proxy for session ${sessionId}, sending breakpoint ${bpId}.`);
+          const response = await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', { 
+              source: { path: newBreakpoint.file }, 
+              breakpoints: [{ line: newBreakpoint.line, condition: newBreakpoint.condition }]
+          });
+          if (response && response.body && response.body.breakpoints && response.body.breakpoints.length > 0) {
+              const bpInfo = response.body.breakpoints[0]; 
+              newBreakpoint.verified = bpInfo.verified;
+              newBreakpoint.line = bpInfo.line || newBreakpoint.line; 
+              this.logger.info(`[SessionManager] Breakpoint ${bpId} sent and response received. Verified: ${newBreakpoint.verified}`);
+              
+              // Log breakpoint verification with structured logging
+              if (newBreakpoint.verified) {
+                this.logger.info('debug:breakpoint', {
+                  event: 'verified',
+                  sessionId: sessionId,
+                  sessionName: session.name,
+                  breakpointId: bpId,
+                  file: newBreakpoint.file,
+                  line: newBreakpoint.line,
+                  verified: true,
+                  timestamp: Date.now()
+                });
+              }
+          }
+      } catch (error) {
+          this.logger.error(`[SessionManager] Error sending setBreakpoint to proxy for session ${sessionId}:`, error);
+      }
+    }
+    return newBreakpoint;
+  }
+
+  async stepOver(sessionId: string): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+    const threadId = session.proxyManager?.getCurrentThreadId();
+    this.logger.info(`[SM stepOver ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
+    
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      return { success: false, error: 'No active debug run', state: session.state };
+    }
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SM stepOver ${sessionId}] Not paused. State: ${session.state}`);
+      return { success: false, error: 'Not paused', state: session.state };
+    }
+    if (!threadId) {
+      this.logger.warn(`[SM stepOver ${sessionId}] No current thread ID.`);
+      return { success: false, error: 'No current thread ID', state: session.state };
+    }
+    
+    this.logger.info(`[SM stepOver ${sessionId}] Sending DAP 'next' for threadId ${threadId}`);
+    
+    try {
+      // Send step request
+      await session.proxyManager.sendDapRequest('next', { threadId });
+      
+      // Update state to running
+      this._updateSessionState(session, SessionState.RUNNING);
+      
+      // Wait for stopped event
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped event`);
+          resolve({ 
+            success: false, 
+            error: ErrorMessages.stepTimeout(5), 
+            state: session.state 
+          });
+        }, 5000);
+        
+        session.proxyManager?.once('stopped', () => {
+          clearTimeout(timeout);
+          this.logger.info(`[SM stepOver ${sessionId}] Step completed. Current state: ${session.state}`);
+          resolve({ success: true, state: session.state, data: { message: "Step over completed." } });
+        });
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[SM stepOver ${sessionId}] Error during step:`, error);
+      this._updateSessionState(session, SessionState.ERROR);
+      return { success: false, error: errorMessage, state: session.state };
+    }
+  }
+
+  async stepInto(sessionId: string): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+    const threadId = session.proxyManager?.getCurrentThreadId();
+    this.logger.info(`[SM stepInto ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
+    
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      return { success: false, error: 'No active debug run', state: session.state };
+    }
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SM stepInto ${sessionId}] Not paused. State: ${session.state}`);
+      return { success: false, error: 'Not paused', state: session.state };
+    }
+    if (!threadId) {
+      this.logger.warn(`[SM stepInto ${sessionId}] No current thread ID.`);
+      return { success: false, error: 'No current thread ID', state: session.state };
+    }
+    
+    this.logger.info(`[SM stepInto ${sessionId}] Sending DAP 'stepIn' for threadId ${threadId}`);
+    
+    try {
+      // Send step request
+      await session.proxyManager.sendDapRequest('stepIn', { threadId });
+      
+      // Update state to running
+      this._updateSessionState(session, SessionState.RUNNING);
+      
+      // Wait for stopped event
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          this.logger.warn(`[SM stepInto ${sessionId}] Timeout waiting for stopped event`);
+          resolve({ 
+            success: false, 
+            error: ErrorMessages.stepTimeout(5), 
+            state: session.state 
+          });
+        }, 5000);
+        
+        session.proxyManager?.once('stopped', () => {
+          clearTimeout(timeout);
+          this.logger.info(`[SM stepInto ${sessionId}] Step completed. Current state: ${session.state}`);
+          resolve({ success: true, state: session.state, data: { message: "Step into completed." } });
+        });
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[SM stepInto ${sessionId}] Error during step:`, error);
+      this._updateSessionState(session, SessionState.ERROR);
+      return { success: false, error: errorMessage, state: session.state };
+    }
+  }
+
+  async stepOut(sessionId: string): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+    const threadId = session.proxyManager?.getCurrentThreadId();
+    this.logger.info(`[SM stepOut ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
+    
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      return { success: false, error: 'No active debug run', state: session.state };
+    }
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SM stepOut ${sessionId}] Not paused. State: ${session.state}`);
+      return { success: false, error: 'Not paused', state: session.state };
+    }
+    if (!threadId) {
+      this.logger.warn(`[SM stepOut ${sessionId}] No current thread ID.`);
+      return { success: false, error: 'No current thread ID', state: session.state };
+    }
+    
+    this.logger.info(`[SM stepOut ${sessionId}] Sending DAP 'stepOut' for threadId ${threadId}`);
+    
+    try {
+      // Send step request
+      await session.proxyManager.sendDapRequest('stepOut', { threadId });
+      
+      // Update state to running
+      this._updateSessionState(session, SessionState.RUNNING);
+      
+      // Wait for stopped event
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          this.logger.warn(`[SM stepOut ${sessionId}] Timeout waiting for stopped event`);
+          resolve({ 
+            success: false, 
+            error: ErrorMessages.stepTimeout(5), 
+            state: session.state 
+          });
+        }, 5000);
+        
+        session.proxyManager?.once('stopped', () => {
+          clearTimeout(timeout);
+          this.logger.info(`[SM stepOut ${sessionId}] Step completed. Current state: ${session.state}`);
+          resolve({ success: true, state: session.state, data: { message: "Step out completed." } });
+        });
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[SM stepOut ${sessionId}] Error during step:`, error);
+      this._updateSessionState(session, SessionState.ERROR);
+      return { success: false, error: errorMessage, state: session.state };
+    }
+  }
+
+  async continue(sessionId: string): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+    const threadId = session.proxyManager?.getCurrentThreadId();
+    this.logger.info(`[SessionManager continue] Called for session ${sessionId}. Current state: ${session.state}, ThreadID: ${threadId}`);
+    
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      this.logger.warn(`[SessionManager continue] No active debug run for session ${sessionId}.`);
+      return { success: false, error: 'No active debug run', state: session.state };
+    }
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SessionManager continue] Session ${sessionId} not paused. State: ${session.state}.`);
+      return { success: false, error: 'Not paused', state: session.state };
+    }
+    if (!threadId) {
+      this.logger.warn(`[SessionManager continue] No current thread ID for session ${sessionId}.`);
+      return { success: false, error: 'No current thread ID', state: session.state };
+    }
+    
+    try {
+      this.logger.info(`[SessionManager continue] Sending DAP 'continue' for session ${sessionId}, threadId ${threadId}.`);
+      await session.proxyManager.sendDapRequest('continue', { threadId });
+      this._updateSessionState(session, SessionState.RUNNING);
+      this.logger.info(`[SessionManager continue] DAP 'continue' sent, session ${sessionId} state updated to RUNNING.`);
+      return { success: true, state: session.state };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`);
+      throw error; 
+    }
+  }
+}

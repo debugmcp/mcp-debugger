@@ -17,10 +17,41 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
  */
 export enum DebugLanguage {
   PYTHON = 'python',
+  MOCK = 'mock',  // Mock adapter for testing
 }
 
 /**
- * Debug session state
+ * Session lifecycle state - represents the session's existence
+ */
+export enum SessionLifecycleState {
+  /** Session is created but not initialized */
+  CREATED = 'created',
+  /** Session is active and can accept debug operations */
+  ACTIVE = 'active',
+  /** Session has been terminated and cannot accept operations */
+  TERMINATED = 'terminated'
+}
+
+/**
+ * Execution state - represents the debugger's execution state
+ * Only meaningful when SessionLifecycleState is ACTIVE
+ */
+export enum ExecutionState {
+  /** Debug adapter is initializing */
+  INITIALIZING = 'initializing',
+  /** Program is running */
+  RUNNING = 'running',
+  /** Program is paused (at breakpoint, step, etc.) */
+  PAUSED = 'paused',
+  /** Program has terminated but session is still active */
+  TERMINATED = 'terminated',
+  /** Debug adapter encountered an error */
+  ERROR = 'error'
+}
+
+/**
+ * Debug session state (legacy - for backward compatibility)
+ * @deprecated Use SessionLifecycleState and ExecutionState instead
  */
 export enum SessionState {
   /** Session is created but not initialized */
@@ -37,6 +68,54 @@ export enum SessionState {
   STOPPED = 'stopped',
   /** Session encountered an error */
   ERROR = 'error'
+}
+
+/**
+ * Maps legacy SessionState to new state model
+ */
+export function mapLegacyState(legacyState: SessionState): { lifecycle: SessionLifecycleState; execution?: ExecutionState } {
+  switch (legacyState) {
+    case SessionState.CREATED:
+      return { lifecycle: SessionLifecycleState.CREATED };
+    case SessionState.INITIALIZING:
+    case SessionState.READY:
+      return { lifecycle: SessionLifecycleState.ACTIVE, execution: ExecutionState.INITIALIZING };
+    case SessionState.RUNNING:
+      return { lifecycle: SessionLifecycleState.ACTIVE, execution: ExecutionState.RUNNING };
+    case SessionState.PAUSED:
+      return { lifecycle: SessionLifecycleState.ACTIVE, execution: ExecutionState.PAUSED };
+    case SessionState.STOPPED:
+      return { lifecycle: SessionLifecycleState.TERMINATED };
+    case SessionState.ERROR:
+      return { lifecycle: SessionLifecycleState.ACTIVE, execution: ExecutionState.ERROR };
+  }
+}
+
+/**
+ * Maps new state model to legacy SessionState
+ */
+export function mapToLegacyState(lifecycle: SessionLifecycleState, execution?: ExecutionState): SessionState {
+  if (lifecycle === SessionLifecycleState.CREATED) {
+    return SessionState.CREATED;
+  }
+  if (lifecycle === SessionLifecycleState.TERMINATED) {
+    return SessionState.STOPPED;
+  }
+  // ACTIVE state - check execution state
+  switch (execution) {
+    case ExecutionState.INITIALIZING:
+      return SessionState.INITIALIZING;
+    case ExecutionState.RUNNING:
+      return SessionState.RUNNING;
+    case ExecutionState.PAUSED:
+      return SessionState.PAUSED;
+    case ExecutionState.TERMINATED:
+      return SessionState.STOPPED;
+    case ExecutionState.ERROR:
+      return SessionState.ERROR;
+    default:
+      return SessionState.READY;
+  }
 }
 
 /**
@@ -77,8 +156,12 @@ export interface DebugSession {
   language: DebugLanguage;
   /** Session name */
   name: string;
-  /** Session state */
+  /** Session state (legacy) */
   state: SessionState;
+  /** Session lifecycle state */
+  sessionLifecycle: SessionLifecycleState;
+  /** Execution state */
+  executionState?: ExecutionState;
   /** Current file */
   currentFile?: string;
   /** Current line */

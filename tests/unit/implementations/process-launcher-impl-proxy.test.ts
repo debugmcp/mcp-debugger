@@ -140,7 +140,7 @@ describe('ProxyProcessAdapter', () => {
       const command = { type: 'start', config: { port: 5678 } };
       proxyProcess.sendCommand(command);
 
-      expect(mockChildProcess.send).toHaveBeenCalledWith(JSON.stringify(command));
+      expect(mockChildProcess.send).toHaveBeenCalledWith(command);
     });
 
     it('should handle complex command objects', () => {
@@ -162,7 +162,7 @@ describe('ProxyProcessAdapter', () => {
       };
       proxyProcess.sendCommand(complexCommand);
 
-      expect(mockChildProcess.send).toHaveBeenCalledWith(JSON.stringify(complexCommand));
+      expect(mockChildProcess.send).toHaveBeenCalledWith(complexCommand);
     });
   });
 

@@ -20,8 +20,13 @@ import {
   ErrorMessage
 } from './dap-proxy-interfaces.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
-import { DebugpyAdapterManager } from './dap-proxy-process-manager.js';
+import { GenericAdapterManager, DebugpyAdapterManager } from './dap-proxy-adapter-manager.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
+import { 
+  validateProxyInitPayload, 
+  validateAdapterCommand,
+  logAdapterCommandValidation 
+} from '../utils/type-guards.js';
 
 export class DapProxyWorker {
   private logger: ILogger | null = null;
@@ -31,7 +36,7 @@ export class DapProxyWorker {
   private currentInitPayload: ProxyInitPayload | null = null;
   private state: ProxyState = ProxyState.UNINITIALIZED;
   private requestTracker: CallbackRequestTracker;
-  private processManager: DebugpyAdapterManager | null = null;
+  private processManager: GenericAdapterManager | null = null;
   private connectionManager: DapConnectionManager | null = null;
 
   constructor(private dependencies: DapProxyDependencies) {
@@ -80,8 +85,11 @@ export class DapProxyWorker {
       throw new Error(`Invalid state for init: ${this.state}`);
     }
 
+    // Validate payload structure
+    const validatedPayload = validateProxyInitPayload(payload);
+    
     this.state = ProxyState.INITIALIZING;
-    this.currentInitPayload = payload;
+    this.currentInitPayload = validatedPayload;
 
     try {
       // Create logger
@@ -91,11 +99,22 @@ export class DapProxyWorker {
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
 
       // Create managers with logger
-      this.processManager = new DebugpyAdapterManager(
-        this.dependencies.processSpawner,
-        this.logger,
-        this.dependencies.fileSystem
-      );
+      // Use generic adapter manager if adapter command is provided, otherwise fall back to Python
+      if (payload.adapterCommand) {
+        this.processManager = new GenericAdapterManager(
+          this.dependencies.processSpawner,
+          this.logger,
+          this.dependencies.fileSystem
+        );
+      } else {
+        // Backward compatibility - use Python adapter manager
+        this.processManager = new DebugpyAdapterManager(
+          this.dependencies.processSpawner,
+          this.logger,
+          this.dependencies.fileSystem
+        );
+      }
+      
       this.connectionManager = new DapConnectionManager(
         this.dependencies.dapClientFactory,
         this.logger
@@ -128,12 +147,27 @@ export class DapProxyWorker {
    * Handle dry run mode
    */
   private handleDryRun(payload: ProxyInitPayload): void {
-    const { command, args } = this.processManager!.buildSpawnCommand(
-      payload.pythonPath,
-      payload.adapterHost,
-      payload.adapterPort,
-      payload.logDir
-    );
+    let command: string;
+    let args: string[];
+    
+    if (payload.adapterCommand) {
+      // Use provided adapter command
+      command = payload.adapterCommand.command;
+      args = payload.adapterCommand.args;
+    } else if (this.processManager instanceof DebugpyAdapterManager) {
+      // Use Python-specific command building
+      const spawnCommand = this.processManager.buildSpawnCommand(
+        payload.pythonPath,
+        payload.adapterHost,
+        payload.adapterPort,
+        payload.logDir
+      );
+      command = spawnCommand.command;
+      args = spawnCommand.args;
+    } else {
+      throw new Error('Cannot determine adapter command for dry run');
+    }
+    
     const fullCommand = `${command} ${args.join(' ')}`;
     
     this.logger!.warn(`[Worker DRY_RUN] Would execute: ${fullCommand}`);
@@ -151,12 +185,52 @@ export class DapProxyWorker {
    */
   private async startDebugpyAdapterAndConnect(payload: ProxyInitPayload): Promise<void> {
     // Spawn adapter process
-    const spawnResult = await this.processManager!.spawn({
-      pythonPath: payload.pythonPath,
-      host: payload.adapterHost,
-      port: payload.adapterPort,
-      logDir: payload.logDir
-    });
+    let spawnResult;
+    
+    if (payload.adapterCommand) {
+      // Validate adapter command with detailed logging
+      try {
+        const validatedCommand = validateAdapterCommand(payload.adapterCommand, 'proxy-worker-init');
+        logAdapterCommandValidation(validatedCommand, 'proxy-worker-init', true, {
+          pythonPath: payload.pythonPath,
+          scriptPath: payload.scriptPath
+        });
+        
+        this.logger!.info('[Worker] Adapter command validated successfully:', {
+          command: validatedCommand.command,
+          argsLength: validatedCommand.args.length,
+          hasEnv: !!validatedCommand.env
+        });
+      } catch (validationError) {
+        logAdapterCommandValidation(payload.adapterCommand, 'proxy-worker-init', false, {
+          error: validationError instanceof Error ? validationError.message : String(validationError),
+          rawPayload: payload
+        });
+        throw validationError;
+      }
+      
+      // Use validated adapter command
+      const validatedCommand = validateAdapterCommand(payload.adapterCommand, 'proxy-worker-spawn');
+      
+      spawnResult = await this.processManager!.spawn({
+        command: validatedCommand.command,
+        args: validatedCommand.args,
+        host: payload.adapterHost,
+        port: payload.adapterPort,
+        logDir: payload.logDir,
+        env: validatedCommand.env
+      });
+    } else if (this.processManager instanceof DebugpyAdapterManager) {
+      // Use Python-specific spawning
+      spawnResult = await this.processManager.spawnDebugpy({
+        pythonPath: payload.pythonPath,
+        host: payload.adapterHost,
+        port: payload.adapterPort,
+        logDir: payload.logDir
+      });
+    } else {
+      throw new Error('Cannot determine how to spawn adapter');
+    }
 
     this.adapterProcess = spawnResult.process;
     this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);

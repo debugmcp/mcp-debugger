@@ -8,6 +8,7 @@ import { EventEmitter } from 'events';
 import { SpawnOptions } from 'child_process';
 import { Stats } from 'fs';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
+import type { IDebugAdapter } from '../adapters/debug-adapter-interface.js';
 
 /**
  * File system operations interface
@@ -92,7 +93,7 @@ export interface ILogger {
  * Proxy manager factory interface
  */
 export interface IProxyManagerFactory {
-  create(): IProxyManager;
+  create(adapter?: IDebugAdapter): IProxyManager;
 }
 
 /**

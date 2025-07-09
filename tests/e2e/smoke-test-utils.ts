@@ -28,6 +28,46 @@ export const parseSdkToolResult = (rawResult: ServerResult): ParsedToolResult =>
 };
 
 /**
+ * Call MCP tool and handle errors gracefully
+ */
+export async function callToolSafely(
+  mcpClient: Client,
+  toolName: string,
+  args: Record<string, unknown>
+): Promise<ParsedToolResult> {
+  try {
+    const result = await mcpClient.callTool({
+      name: toolName,
+      arguments: args
+    });
+    return parseSdkToolResult(result);
+  } catch (error) {
+    // MCP errors have various formats
+    const err = error as Error & { code?: string | number; data?: unknown };
+    
+    // Handle different error formats
+    if (err.code || 
+        err.message?.includes('MCP error') || 
+        err.message?.includes('Session') ||
+        err.message?.includes('not found') ||
+        err.message?.includes('closed')) {
+      return {
+        success: false,
+        message: err.message || 'Unknown MCP error',
+        error: err.code
+      };
+    }
+    
+    // For any other error, assume it's an MCP-related error
+    console.log('[callToolSafely] Caught error:', err.message);
+    return {
+      success: false,
+      message: err.message || 'Unknown error'
+    };
+  }
+}
+
+/**
  * Execute common debug sequence for smoke tests
  */
 export async function executeDebugSequence(

@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🧪 Running tests before push to ensure code quality..."
+echo "💡 This prevents broken code from being pushed to GitHub."
+echo ""
+
+# Run the full test suite
+npm test
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "✅ All tests passed! Push will proceed."
+    echo "🚀 Code quality maintained for GitHub repository."
+else
+    echo ""
+    echo "❌ Tests failed! Push blocked to prevent broken code on GitHub."
+    echo "💡 Fix failing tests or use 'git push --no-verify' for emergency pushes."
+    echo "🔧 You can still make local commits for WIP - tests only run on push."
+    exit 1
+fi

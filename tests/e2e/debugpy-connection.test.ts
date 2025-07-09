@@ -112,7 +112,7 @@ const parseSdkToolResult = (rawResult: ServerResult) => {
 };
 
 async function startDebugpyServer(port = 5679): Promise<ChildProcess> {
-  let serverScriptPath = path.join(projectRoot, 'tests', 'fixtures', 'python', 'debugpy_server.py');
+  const serverScriptPath = path.join(projectRoot, 'tests', 'fixtures', 'python', 'debugpy_server.py');
   console.log(`Starting debugpy server using ${serverScriptPath} on port ${port}`);
   if (!nativeNodeExistsSync(serverScriptPath)) { 
     console.error(`[E2E SETUP ERROR] Script not found by nativeNodeExistsSync: ${serverScriptPath}`);

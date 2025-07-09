@@ -21,8 +21,11 @@ describe('STDIO Command Handler', () => {
       level: 'info'
     } as any;
 
-    // Create mock server
+    // Create mock server with proper structure
     mockServer = {
+      server: {
+        connect: vi.fn().mockResolvedValue(undefined)
+      },
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined)
     } as any;

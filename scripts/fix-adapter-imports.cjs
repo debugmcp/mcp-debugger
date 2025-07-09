@@ -1,0 +1,42 @@
+const fs = require('fs');
+const path = require('path');
+
+const adapterTestFiles = [
+  'tests/core/unit/adapters/adapter-registry.test.ts',
+  'tests/core/unit/adapters/mock-adapter.test.ts'
+];
+
+const importReplacements = [
+  // Source imports need one more ../
+  { from: /from '\.\.\/\.\.\/src\//g, to: "from '../../../../src/" },
+  // Test utils imports need one more ../
+  { from: /from '\.\.\/test-utils\//g, to: "from '../../../test-utils/" },
+  // Direct test-utils path
+  { from: /from '\.\.\/\.\.\/test-utils\//g, to: "from '../../../test-utils/" },
+  // Mocks imports
+  { from: /from '\.\.\/mocks\//g, to: "from '../../../test-utils/mocks/" }
+];
+
+adapterTestFiles.forEach(filePath => {
+  if (fs.existsSync(filePath)) {
+    let content = fs.readFileSync(filePath, 'utf8');
+    let modified = false;
+
+    importReplacements.forEach(({ from, to }) => {
+      const newContent = content.replace(from, to);
+      if (newContent !== content) {
+        content = newContent;
+        modified = true;
+      }
+    });
+
+    if (modified) {
+      fs.writeFileSync(filePath, content);
+      console.log(`✅ Updated imports in ${path.basename(filePath)}`);
+    } else {
+      console.log(`ℹ️  No changes needed in ${path.basename(filePath)}`);
+    }
+  } else {
+    console.log(`⚠️  File not found: ${filePath}`);
+  }
+});

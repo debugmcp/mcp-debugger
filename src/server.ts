@@ -1,8 +1,9 @@
+
 /**
  * Debug MCP Server - Main Server Implementation
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+// StdioServerTransport is used in index.ts, not here
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -18,7 +19,8 @@ import {
     Variable, 
     StackFrame, 
     DebugLanguage,
-    Breakpoint 
+    Breakpoint,
+    SessionLifecycleState 
 } from './session/models.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
@@ -34,13 +36,25 @@ export interface DebugMcpServerOptions {
 }
 
 /**
+ * Language metadata for supported languages
+ */
+interface LanguageMetadata {
+  id: string;
+  displayName: string;
+  version: string;
+  requiresExecutable: boolean;
+  defaultExecutable?: string;
+}
+
+/**
  * Tool arguments interface
  */
 interface ToolArguments {
   sessionId?: string;
   language?: string;
   name?: string;
-  pythonPath?: string;
+  pythonPath?: string;  // Keep for backward compatibility during transition
+  executablePath?: string;  // New generic parameter
   file?: string;
   line?: number;
   condition?: string;
@@ -63,18 +77,80 @@ export class DebugMcpServer {
   private logger;
   private constructorOptions: DebugMcpServerOptions;
   private pathTranslator: PathTranslator;
+  private supportedLanguages: string[] = [];
+
+  // Get supported languages from adapter registry
+  private getSupportedLanguages(): string[] {
+    const adapterRegistry = this.getAdapterRegistry();
+    return adapterRegistry.getSupportedLanguages();
+  }
+
+  // Get language metadata for all supported languages
+  private getLanguageMetadata(): LanguageMetadata[] {
+    const adapterRegistry = this.getAdapterRegistry();
+    const languages = adapterRegistry.getSupportedLanguages();
+    
+    // Map to metadata - in future, this info will come from adapter registry
+    return languages.map((lang: string) => {
+      switch (lang) {
+        case 'python':
+          return {
+            id: 'python',
+            displayName: 'Python',
+            version: '1.0.0',
+            requiresExecutable: true,
+            defaultExecutable: 'python'
+          };
+        case 'mock':
+          return {
+            id: 'mock',
+            displayName: 'Mock',
+            version: '1.0.0',
+            requiresExecutable: false
+          };
+        default:
+          return {
+            id: lang,
+            displayName: lang.charAt(0).toUpperCase() + lang.slice(1),
+            version: '1.0.0',
+            requiresExecutable: true
+          };
+      }
+    });
+  }
+
+  /**
+   * Validate session exists and is not terminated
+   */
+  private validateSession(sessionId: string): void {
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) {
+      throw new McpError(McpErrorCode.InvalidParams, `Session not found: ${sessionId}`);
+    }
+    // Check the new lifecycle state instead of legacy state
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new McpError(McpErrorCode.InvalidRequest, `Session is terminated: ${sessionId}`);
+    }
+  }
 
   // Public methods to expose SessionManager functionality for testing/external use
-  public async createDebugSession(params: { language: DebugLanguage; name?: string; pythonPath?: string; }): Promise<DebugSessionInfo> {
-    if (params.language !== 'python') { 
-      throw new McpError(McpErrorCode.InvalidParams, "language parameter must be 'python'");
+  public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
+    // Validate language support
+    const adapterRegistry = this.getAdapterRegistry();
+    if (!adapterRegistry.isLanguageSupported(params.language)) {
+      const supported = adapterRegistry.getSupportedLanguages();
+      throw new McpError(
+        McpErrorCode.InvalidParams, 
+        `Language '${params.language}' is not supported. Available languages: ${supported.join(', ')}`
+      );
     }
-    const name = params.name || `Debug-${Date.now()}`;
+    
+    const name = params.name || `${params.language}-debug-${Date.now()}`;
     try {
       const sessionInfo: DebugSessionInfo = await this.sessionManager.createSession({
         language: params.language as DebugLanguage,
         name: name,
-        pythonPath: params.pythonPath 
+        executablePath: params.executablePath  // Use executablePath for consistency
       });
       return sessionInfo;
     } catch (error) {
@@ -91,6 +167,7 @@ export class DebugMcpServer {
     dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>, 
     dryRunSpawn?: boolean
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
+    this.validateSession(sessionId);
     const translatedScriptPath = this.pathTranslator.translatePath(scriptPath);
     this.logger.info(`[DebugMcpServer.startDebugging] Original scriptPath: ${scriptPath}, Translated scriptPath: ${translatedScriptPath}`);
     const result = await this.sessionManager.startDebugging(
@@ -108,16 +185,19 @@ export class DebugMcpServer {
   }
 
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
+    this.validateSession(sessionId);
     const translatedFile = this.pathTranslator.translatePath(file);
     this.logger.info(`[DebugMcpServer.setBreakpoint] Original file: ${file}, Translated file: ${translatedFile}`);
     return this.sessionManager.setBreakpoint(sessionId, translatedFile, line, condition);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
+    this.validateSession(sessionId);
     return this.sessionManager.getVariables(sessionId, variablesReference);
   }
 
   public async getStackTrace(sessionId: string): Promise<StackFrame[]> {
+    this.validateSession(sessionId);
     const session = this.sessionManager.getSession(sessionId);
     const currentThreadId = session?.proxyManager?.getCurrentThreadId();
     if (!session || !session.proxyManager || !currentThreadId) {
@@ -127,10 +207,12 @@ export class DebugMcpServer {
   }
 
   public async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {
+    this.validateSession(sessionId);
     return this.sessionManager.getScopes(sessionId, frameId);
   }
 
   public async continueExecution(sessionId: string): Promise<boolean> {
+    this.validateSession(sessionId);
     const result = await this.sessionManager.continue(sessionId);
     if (!result.success) {
       throw new Error(result.error || 'Failed to continue execution');
@@ -139,6 +221,7 @@ export class DebugMcpServer {
   }
 
   public async stepOver(sessionId: string): Promise<boolean> {
+    this.validateSession(sessionId);
     const result = await this.sessionManager.stepOver(sessionId);
     if (!result.success) {
       throw new Error(result.error || 'Failed to step over');
@@ -147,6 +230,7 @@ export class DebugMcpServer {
   }
 
   public async stepInto(sessionId: string): Promise<boolean> {
+    this.validateSession(sessionId);
     const result = await this.sessionManager.stepInto(sessionId);
     if (!result.success) {
       throw new Error(result.error || 'Failed to step into');
@@ -155,6 +239,7 @@ export class DebugMcpServer {
   }
 
   public async stepOut(sessionId: string): Promise<boolean> {
+    this.validateSession(sessionId);
     const result = await this.sessionManager.stepOut(sessionId);
     if (!result.success) {
       throw new Error(result.error || 'Failed to step out');
@@ -239,13 +324,24 @@ export class DebugMcpServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       this.logger.debug('Handling ListToolsRequest');
       
+      // Get supported languages dynamically - deferred until request time
+      let supportedLanguages: string[];
+      try {
+        supportedLanguages = this.getSupportedLanguages();
+      } catch (error) {
+        // Fallback if adapter registry isn't ready
+        supportedLanguages = ['python', 'mock'];
+        this.logger.warn('Adapter registry not ready, using default languages', { error });
+      }
+      
       // Generate dynamic descriptions for path parameters
       const fileDescription = this.getPathDescription('source file');
       const scriptPathDescription = this.getPathDescription('script');
       
       return {
         tools: [
-          { name: 'create_debug_session', description: 'Create a new debugging session', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: ['python'] }, name: { type: 'string' }, pythonPath: {type: 'string'}, host: {type: 'string'}, port: {type: 'number'} }, required: ['language'] } },
+          { name: 'create_debug_session', description: 'Create a new debugging session', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'} }, required: ['language'] } },
+          { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' } }, required: ['sessionId', 'file', 'line'] } },
           { name: 'start_debugging', description: 'Start debugging a script', inputSchema: { 
@@ -305,7 +401,7 @@ export class DebugMcpServer {
               const sessionInfo = await this.createDebugSession({
                 language: (args.language || 'python') as DebugLanguage,
                 name: args.name,
-                pythonPath: args.pythonPath
+                executablePath: args.executablePath || args.pythonPath  // Support both for now
               });
               
               // Log session creation
@@ -328,37 +424,65 @@ export class DebugMcpServer {
               if (!args.sessionId || !args.file || args.line === undefined) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
               }
-              const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition);
               
-              // Log breakpoint event
-              this.logger.info('debug:breakpoint', {
-                event: 'set',
-                sessionId: args.sessionId,
-                sessionName: this.getSessionName(args.sessionId),
-                breakpointId: breakpoint.id,
-                file: breakpoint.file,
-                line: breakpoint.line,
-                verified: breakpoint.verified,
-                timestamp: Date.now()
-              });
-              
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: true, breakpointId: breakpoint.id, file: breakpoint.file, line: breakpoint.line, verified: breakpoint.verified, message: `Breakpoint set at ${breakpoint.file}:${breakpoint.line}` }) }] };
+              try {
+                const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition);
+                
+                // Log breakpoint event
+                this.logger.info('debug:breakpoint', {
+                  event: 'set',
+                  sessionId: args.sessionId,
+                  sessionName: this.getSessionName(args.sessionId),
+                  breakpointId: breakpoint.id,
+                  file: breakpoint.file,
+                  line: breakpoint.line,
+                  verified: breakpoint.verified,
+                  timestamp: Date.now()
+                });
+                
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, breakpointId: breakpoint.id, file: breakpoint.file, line: breakpoint.line, verified: breakpoint.verified, message: `Breakpoint set at ${breakpoint.file}:${breakpoint.line}` }) }] };
+              } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof McpError && 
+                    (error.message.includes('terminated') || 
+                     error.message.includes('closed') || 
+                     error.message.includes('not found'))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else {
+                  // Re-throw unexpected errors
+                  throw error;
+                }
+              }
               break;
             }
             case 'start_debugging': {
               if (!args.sessionId || !args.scriptPath) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
               }
-              const debugResult = await this.startDebugging(args.sessionId, args.scriptPath, args.args, args.dapLaunchArgs, args.dryRunSpawn);
-              const responsePayload: Record<string, unknown> = {
-                success: debugResult.success,
-                state: debugResult.state,
-                message: debugResult.error ? debugResult.error : (debugResult.data as Record<string, unknown>)?.message || `Operation status for ${args.scriptPath}`,
-              };
-              if (debugResult.data) {
-                responsePayload.data = debugResult.data;
+              
+              try {
+                const debugResult = await this.startDebugging(args.sessionId, args.scriptPath, args.args, args.dapLaunchArgs, args.dryRunSpawn);
+                const responsePayload: Record<string, unknown> = {
+                  success: debugResult.success,
+                  state: debugResult.state,
+                  message: debugResult.error ? debugResult.error : (debugResult.data as Record<string, unknown>)?.message || `Operation status for ${args.scriptPath}`,
+                };
+                if (debugResult.data) {
+                  responsePayload.data = debugResult.data;
+                }
+                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+              } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof McpError && 
+                    (error.message.includes('terminated') || 
+                     error.message.includes('closed') || 
+                     error.message.includes('not found'))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message, state: 'stopped' }) }] };
+                } else {
+                  // Re-throw unexpected errors
+                  throw error;
+                }
               }
-              result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
               break;
             }
             case 'close_debug_session': {
@@ -389,23 +513,57 @@ export class DebugMcpServer {
               if (!args.sessionId) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
               }
-              let stepResult: boolean;
-              if (toolName === 'step_over') {
-                stepResult = await this.stepOver(args.sessionId);
-              } else if (toolName === 'step_into') {
-                stepResult = await this.stepInto(args.sessionId);
-              } else {
-                stepResult = await this.stepOut(args.sessionId);
+              
+              try {
+                let stepResult: boolean;
+                if (toolName === 'step_over') {
+                  stepResult = await this.stepOver(args.sessionId);
+                } else if (toolName === 'step_into') {
+                  stepResult = await this.stepInto(args.sessionId);
+                } else {
+                  stepResult = await this.stepOut(args.sessionId);
+                }
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: stepResult, message: stepResult ? `Stepped ${toolName.replace('step_', '')}` : `Failed to ${toolName.replace('_', ' ')}` }) }] };
+              } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof McpError && 
+                    (error.message.includes('terminated') || 
+                     error.message.includes('closed') || 
+                     error.message.includes('not found'))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else if (error instanceof Error) {
+                  // Handle other expected errors (like "Failed to step over")
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else {
+                  // Re-throw unexpected errors
+                  throw error;
+                }
               }
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: stepResult, message: stepResult ? `Stepped ${toolName.replace('step_', '')}` : `Failed to ${toolName.replace('_', ' ')}` }) }] };
               break;
             }
             case 'continue_execution': {
               if (!args.sessionId) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
               }
-              const continueResult = await this.continueExecution(args.sessionId);
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' }) }] };
+              
+              try {
+                const continueResult = await this.continueExecution(args.sessionId);
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' }) }] };
+              } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof McpError && 
+                    (error.message.includes('terminated') || 
+                     error.message.includes('closed') || 
+                     error.message.includes('not found'))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else if (error instanceof Error) {
+                  // Handle other expected errors
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else {
+                  // Re-throw unexpected errors
+                  throw error;
+                }
+              }
               break;
             }
             case 'pause_execution': {
@@ -416,41 +574,84 @@ export class DebugMcpServer {
               if (!args.sessionId || args.scope === undefined) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
               }
-              const variables = await this.getVariables(args.sessionId, args.scope);
               
-              // Log variable inspection (truncate large values)
-              const truncatedVars = variables.map(v => ({
-                name: v.name,
-                type: v.type,
-                value: v.value.length > 200 ? v.value.substring(0, 200) + '... (truncated)' : v.value
-              }));
-              
-              this.logger.info('debug:variables', {
-                sessionId: args.sessionId,
-                sessionName: this.getSessionName(args.sessionId),
-                variablesReference: args.scope,
-                variableCount: variables.length,
-                variables: truncatedVars.slice(0, 10), // Log first 10 variables
-                timestamp: Date.now()
-              });
-              
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope }) }] };
+              try {
+                const variables = await this.getVariables(args.sessionId, args.scope);
+                
+                // Log variable inspection (truncate large values)
+                const truncatedVars = variables.map(v => ({
+                  name: v.name,
+                  type: v.type,
+                  value: v.value.length > 200 ? v.value.substring(0, 200) + '... (truncated)' : v.value
+                }));
+                
+                this.logger.info('debug:variables', {
+                  sessionId: args.sessionId,
+                  sessionName: this.getSessionName(args.sessionId),
+                  variablesReference: args.scope,
+                  variableCount: variables.length,
+                  variables: truncatedVars.slice(0, 10), // Log first 10 variables
+                  timestamp: Date.now()
+                });
+                
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope }) }] };
+              } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof McpError && 
+                    (error.message.includes('terminated') || 
+                     error.message.includes('closed') || 
+                     error.message.includes('not found'))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else {
+                  // Re-throw unexpected errors
+                  throw error;
+                }
+              }
               break;
             }
             case 'get_stack_trace': {
               if (!args.sessionId) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
               }
-              const stackFrames = await this.getStackTrace(args.sessionId);
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: true, stackFrames, count: stackFrames.length }) }] };
+              
+              try {
+                const stackFrames = await this.getStackTrace(args.sessionId);
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, stackFrames, count: stackFrames.length }) }] };
+              } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof McpError && 
+                    (error.message.includes('terminated') || 
+                     error.message.includes('closed') || 
+                     error.message.includes('not found') ||
+                     error.message.includes('Cannot get stack trace'))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else {
+                  // Re-throw unexpected errors
+                  throw error;
+                }
+              }
               break;
             }
             case 'get_scopes': {
               if (!args.sessionId || args.frameId === undefined) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
               }
-              const scopes = await this.getScopes(args.sessionId, args.frameId);
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: true, scopes }) }] };
+              
+              try {
+                const scopes = await this.getScopes(args.sessionId, args.frameId);
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, scopes }) }] };
+              } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof McpError && 
+                    (error.message.includes('terminated') || 
+                     error.message.includes('closed') || 
+                     error.message.includes('not found'))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else {
+                  // Re-throw unexpected errors
+                  throw error;
+                }
+              }
               break;
             }
             case 'evaluate_expression': {
@@ -459,6 +660,10 @@ export class DebugMcpServer {
             }
             case 'get_source_context': {
               result = await this.handleGetSourceContext(args as { sessionId: string; file: string; line: number; linesContext?: number });
+              break;
+            }
+            case 'list_supported_languages': {
+              result = await this.handleListSupportedLanguages();
               break;
             }
             default:
@@ -540,12 +745,9 @@ export class DebugMcpServer {
   }
 
   private async handleGetSourceContext(args: { sessionId: string, file: string, line: number, linesContext?: number }): Promise<ServerResult> {
-    const linesContext = args.linesContext !== undefined ? Number(args.linesContext) : 5;
-    if (isNaN(linesContext)) {
-      throw new McpError(McpErrorCode.InvalidParams, 'linesContext parameter must be a number');
-    }
     try {
-      throw new McpError(McpErrorCode.InternalError, "Get source context not yet fully implemented with proxy.");
+      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${args.file}, line: ${args.line}`);
+      throw new McpError(McpErrorCode.InternalError, "Get source context not yet implemented with proxy.");
     } catch (error) {
       this.logger.error('Failed to get source context', { error });
       if (error instanceof McpError) throw error;
@@ -553,27 +755,33 @@ export class DebugMcpServer {
     }
   }
 
-  async start(): Promise<void> {
-    this.logger.info('Starting Debug MCP Server (for StdioTransport)');
+  private async handleListSupportedLanguages(): Promise<ServerResult> {
     try {
-      const transport = new StdioServerTransport();
-      await this.server.connect(transport);
-      this.logger.info('Server connected to stdio transport');
+      const languages = this.getLanguageMetadata();
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, languages, count: languages.length }) }] };
     } catch (error) {
-      this.logger.error('Failed to start server with StdioTransport', { error });
-      throw error;
+      this.logger.error('Failed to list supported languages', { error });
+      throw new McpError(McpErrorCode.InternalError, `Failed to list supported languages: ${(error as Error).message}`);
     }
   }
 
-  async stop(): Promise<void> {
-    this.logger.info('Stopping Debug MCP Server');
-    try {
-      await this.sessionManager.closeAllSessions();
-      await this.server.close();
-      this.logger.info('Server stopped');
-    } catch (error) {
-      this.logger.error('Error stopping server', { error });
-      throw error;
-    }
+  /**
+   * Public methods for server lifecycle management
+   */
+  public async start(): Promise<void> {
+    // For MCP servers, start is handled by transport
+    this.logger.info('Debug MCP Server started');
+  }
+
+  public async stop(): Promise<void> {
+    await this.sessionManager.closeAllSessions();
+    this.logger.info('Debug MCP Server stopped');
+  }
+
+  /**
+   * Get adapter registry from session manager
+   */
+  public getAdapterRegistry() {
+    return this.sessionManager.adapterRegistry;
   }
 }

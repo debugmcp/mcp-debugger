@@ -18,23 +18,8 @@ import {
   DAPSessionState
 } from '../dap-core/index.js';
 import { ErrorMessages } from '../utils/error-messages.js';
-
-/**
- * Configuration for starting a proxy
- */
-export interface ProxyConfig {
-  sessionId: string;
-  pythonPath: string;
-  adapterHost: string;
-  adapterPort: number;
-  logDir: string;
-  scriptPath: string;
-  scriptArgs?: string[];
-  stopOnEntry?: boolean;
-  justMyCode?: boolean;
-  initialBreakpoints?: Array<{ file: string; line: number; condition?: string }>;
-  dryRunSpawn?: boolean;
-}
+import { ProxyConfig } from './proxy-config.js';
+import { IDebugAdapter } from '../adapters/debug-adapter-interface.js';
 
 /**
  * Events emitted by ProxyManager
@@ -135,6 +120,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private stderrBuffer: string[] = [];
 
   constructor(
+    private adapter: IDebugAdapter | null,  // Optional adapter for language-agnostic support
     private proxyProcessLauncher: IProxyProcessLauncher,
     private fileSystem: IFileSystem,
     private logger: ILogger
@@ -152,6 +138,35 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     
     // Initialize functional core state
     this.dapState = createInitialState(config.sessionId);
+    
+    // Handle backward compatibility for pythonPath
+    let executablePath: string | undefined = config.executablePath;
+    if (!executablePath && config.pythonPath) {
+      this.logger.warn(
+        `[ProxyManager] DEPRECATION WARNING: 'pythonPath' is deprecated. ` +
+        `Use 'executablePath' instead. This will be removed in v3.0.0`
+      );
+      executablePath = config.pythonPath;
+    }
+    
+    // Use adapter to validate environment and resolve executable if available
+    if (this.adapter) {
+      // Validate environment first
+      const validation = await this.adapter.validateEnvironment();
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid environment for ${this.adapter.language}: ${validation.errors[0].message}`
+        );
+      }
+      
+      // Resolve executable path if not provided
+      if (!executablePath) {
+        executablePath = await this.adapter.resolveExecutablePath();
+        this.logger.info(`[ProxyManager] Adapter resolved executable path: ${executablePath}`);
+      }
+    } else if (!executablePath) {
+      throw new Error('No executable path provided and no adapter available to resolve it');
+    }
     
     // Find proxy bootstrap script
     const proxyScriptPath = await this.findProxyScript();
@@ -186,10 +201,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.setupEventHandlers();
 
     // Send initialization command
-    this.sendCommand({
+    // Note: Still sending as pythonPath to proxy for backward compatibility
+    // The proxy will need to be updated in a future task to use executablePath
+    const initCommand = {
       cmd: 'init',
       sessionId: config.sessionId,
-      pythonPath: config.pythonPath,
+      pythonPath: executablePath,  // Using resolved executable path
       adapterHost: config.adapterHost,
       adapterPort: config.adapterPort,
       logDir: config.logDir,
@@ -198,8 +215,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       stopOnEntry: config.stopOnEntry,
       justMyCode: config.justMyCode,
       initialBreakpoints: config.initialBreakpoints,
-      dryRunSpawn: config.dryRunSpawn
+      dryRunSpawn: config.dryRunSpawn,
+      // Pass adapter command info for language-agnostic adapter spawning
+      adapterCommand: config.adapterCommand
+    };
+    
+    // Debug log the command being sent
+    this.logger.info(`[ProxyManager] Sending init command with adapterCommand:`, {
+      hasAdapterCommand: !!config.adapterCommand,
+      adapterCommand: config.adapterCommand ? {
+        command: config.adapterCommand.command,
+        args: config.adapterCommand.args,
+        hasEnv: !!config.adapterCommand.env
+      } : null
     });
+    
+    this.sendCommand(initCommand);
 
     // Wait for initialization or dry run completion
     return new Promise((resolve, reject) => {

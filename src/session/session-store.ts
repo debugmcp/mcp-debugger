@@ -8,7 +8,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { 
   DebugLanguage, 
-  SessionState, 
+  SessionState,
+  SessionLifecycleState,
+  ExecutionState,
   DebugSessionInfo,
   Breakpoint 
 } from './models.js';
@@ -22,7 +24,8 @@ const DEFAULT_PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 export interface CreateSessionParams {
   language: DebugLanguage;
   name?: string;
-  pythonPath?: string;
+  pythonPath?: string;  // @deprecated - use executablePath
+  executablePath?: string;  // Language-agnostic executable path
 }
 
 import { IProxyManager } from '../proxy/proxy-manager.js';
@@ -31,9 +34,13 @@ import { IProxyManager } from '../proxy/proxy-manager.js';
  * Internal session representation with full details
  */
 export interface ManagedSession extends DebugSessionInfo {
-  pythonPath?: string;
+  pythonPath?: string;  // @deprecated - use executablePath
+  executablePath?: string;  // Language-agnostic executable path
   proxyManager?: IProxyManager;
   breakpoints: Map<string, Breakpoint>;
+  // New state model fields
+  sessionLifecycle: SessionLifecycleState;
+  executionState?: ExecutionState;
 }
 
 /**
@@ -47,12 +54,22 @@ export class SessionStore {
    * Creates a new debug session
    */
   createSession(params: CreateSessionParams): DebugSessionInfo {
-    const { language, name, pythonPath: explicitPythonPath } = params;
+    const { language, name, pythonPath, executablePath } = params;
     const sessionId = uuidv4();
     const sessionName = name || `session-${sessionId.substring(0, 8)}`;
     
-    if (language !== DebugLanguage.PYTHON) { 
-      throw new Error(`Language '${language}' is not supported. Only '${DebugLanguage.PYTHON}' is currently implemented.`);
+    // Validate language
+    if (!Object.values(DebugLanguage).includes(language)) {
+      throw new Error(`Language '${language}' is not supported. Only 'python' is currently implemented.`);
+    }
+    
+    // Use executablePath if provided, fall back to pythonPath for backward compatibility
+    // For Python, provide a default if not specified. For Mock, leave undefined if not specified.
+    let effectiveExecutablePath: string | undefined;
+    if (language === DebugLanguage.PYTHON) {
+      effectiveExecutablePath = executablePath || pythonPath || process.env.PYTHON_PATH || DEFAULT_PYTHON;
+    } else {
+      effectiveExecutablePath = executablePath || pythonPath;
     }
     
     const session: ManagedSession = {
@@ -63,8 +80,12 @@ export class SessionStore {
       createdAt: new Date(), 
       updatedAt: new Date(), 
       breakpoints: new Map<string, Breakpoint>(), 
-      pythonPath: explicitPythonPath || process.env.PYTHON_PATH || DEFAULT_PYTHON,
-      proxyManager: undefined, 
+      pythonPath: effectiveExecutablePath,  // Keep for backward compatibility
+      executablePath: effectiveExecutablePath,
+      proxyManager: undefined,
+      // Initialize new state model
+      sessionLifecycle: SessionLifecycleState.CREATED,
+      executionState: undefined,
     };
     
     this.sessions.set(sessionId, session);

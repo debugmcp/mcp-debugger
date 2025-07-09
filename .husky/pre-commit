@@ -1,2 +1,8 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Check for personal information in staged files
 node scripts/check-personal-paths.cjs
-npm test
+
+echo "✅ Pre-commit checks passed. Personal information check completed."
+echo "💡 Note: Tests will run before push to ensure code quality on GitHub."

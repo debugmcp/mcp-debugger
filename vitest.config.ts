@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['./tests/jest.setupAfterEnv.ts'],
+    setupFiles: ['./tests/vitest.setup.ts'],
     // Reporter configuration
     reporters: process.env.CI ? ['dot'] : ['default'],
     outputFile: {

@@ -1,111 +1,145 @@
+#!/usr/bin/env python3
 """
-Debugpy Server Fixture
+Simple debugpy server for testing MCP Server debugpy connections.
+This file simulates a minimal debugpy server that listens for DAP connections.
+"""
 
-This module provides a proper debugpy server implementation for testing the MCP server.
-It demonstrates the correct pattern where:
-1. This script starts debugpy in listening mode
-2. The MCP server connects to this debugpy instance as a DAP client
-"""
 import sys
-import os
 import time
-import argparse
+import signal
+import socket
+import json
 
-try:
-    import debugpy
-    print(f"Debugpy imported successfully (version: {debugpy.__version__})")
-except ImportError as e:
-    print(f"Failed to import debugpy: {e}")
-    sys.exit(1)
+def signal_handler(sig, frame):
+    """Handle graceful shutdown"""
+    print("Shutting down debugpy server...")
+    sys.exit(0)
 
-# Default configuration
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 5679  # Using a different port to avoid conflicts
-
-def start_debugpy_server(host=DEFAULT_HOST, port=DEFAULT_PORT, wait_for_client=True):
-    """
-    Start a debugpy server in listening mode
+def send_dap_response(conn, request_id, command, body=None):
+    """Send a DAP response"""
+    response = {
+        "seq": request_id + 1,
+        "type": "response",
+        "request_seq": request_id,
+        "success": True,
+        "command": command
+    }
+    if body:
+        response["body"] = body
     
-    Args:
-        host: Host to listen on
-        port: Port to listen on
-        wait_for_client: Whether to wait for a client to connect
-        
-    Returns:
-        True if server started successfully, False otherwise
-    """
-    print(f"Starting debugpy server at {host}:{port}")
+    message = json.dumps(response)
+    header = f"Content-Length: {len(message)}\r\n\r\n"
+    conn.sendall((header + message).encode())
+
+def handle_connection(conn, addr):
+    """Handle a single DAP connection"""
+    print(f"Connection from {addr}")
+    buffer = b""
     
     try:
-        # Start the debugpy server - this is the correct usage pattern
-        debugpy.listen((host, port))
-        print("Debugpy server is listening!")
-        
-        # Enable wait_for_client to pause until the MCP server connects
-        if wait_for_client:
-            print("Waiting for client to connect...")
-            debugpy.wait_for_client()
-            print("Client connected to debugpy server!")
-        
-        return True
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+                
+            buffer += data
+            
+            # Parse DAP messages (simplified)
+            while b"\r\n\r\n" in buffer:
+                header_end = buffer.find(b"\r\n\r\n") + 4
+                header = buffer[:header_end].decode()
+                
+                # Extract content length
+                content_length = 0
+                for line in header.split("\r\n"):
+                    if line.startswith("Content-Length:"):
+                        content_length = int(line.split(":")[1].strip())
+                        break
+                
+                if len(buffer) >= header_end + content_length:
+                    # We have a complete message
+                    message_bytes = buffer[header_end:header_end + content_length]
+                    buffer = buffer[header_end + content_length:]
+                    
+                    try:
+                        message = json.loads(message_bytes.decode())
+                        command = message.get("command", "")
+                        seq = message.get("seq", 0)
+                        
+                        print(f"Received command: {command}")
+                        
+                        # Handle basic DAP commands
+                        if command == "initialize":
+                            send_dap_response(conn, seq, "initialize", {
+                                "supportsConfigurationDoneRequest": True,
+                                "supportsFunctionBreakpoints": False,
+                                "supportsConditionalBreakpoints": True,
+                                "supportsEvaluateForHovers": True,
+                                "supportsStepBack": False,
+                                "supportsSetVariable": True,
+                                "supportsRestartFrame": False,
+                                "supportsStepInTargetsRequest": False,
+                                "supportsModulesRequest": True,
+                                "supportsRestartRequest": False,
+                                "supportsExceptionOptions": True,
+                                "supportsExceptionInfoRequest": True,
+                                "supportsTerminateRequest": True
+                            })
+                        elif command == "launch":
+                            send_dap_response(conn, seq, "launch")
+                        elif command == "configurationDone":
+                            send_dap_response(conn, seq, "configurationDone")
+                        elif command == "threads":
+                            send_dap_response(conn, seq, "threads", {
+                                "threads": [{"id": 1, "name": "MainThread"}]
+                            })
+                        elif command == "disconnect":
+                            send_dap_response(conn, seq, "disconnect")
+                            break
+                        else:
+                            # Generic response for other commands
+                            send_dap_response(conn, seq, command)
+                    
+                    except json.JSONDecodeError:
+                        print(f"Failed to parse message: {message_bytes}")
+                else:
+                    # Need more data
+                    break
+                    
     except Exception as e:
-        print(f"Error starting debugpy server: {e}")
-        return False
+        print(f"Connection error: {e}")
+    finally:
+        conn.close()
+        print(f"Connection closed for {addr}")
 
-def fibonacci(n):
-    """A simple Fibonacci function for debugging"""
-    print(f"Calculating Fibonacci for n={n}")
+def main():
+    """Main server loop"""
+    if len(sys.argv) > 1:
+        port = int(sys.argv[1])
+    else:
+        port = 5678
     
-    if n <= 0:
-        return 0
-    elif n == 1:
-        return 1
+    # Set up signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
-    a, b = 0, 1
-    for _ in range(1, n):
-        a, b = b, a + b
+    # Create server socket
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", port))
+    server.listen(5)
     
-    result = b
-    print(f"Fibonacci({n}) = {result}")
-    return result
-
-def run_fibonacci_test():
-    """Run a simple fibonacci test with a breakpoint"""
-    # Set a breakpoint programmatically
-    debugpy.breakpoint()
-    print("Hit breakpoint")
+    print(f"Debugpy test server listening on port {port}...")
     
-    # Run some simple code that can be debugged
-    fibonacci(10)
-    
-    print("Script execution completed")
-    return True
+    try:
+        while True:
+            conn, addr = server.accept()
+            handle_connection(conn, addr)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
+        print("Server closed")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Debugpy server for testing")
-    parser.add_argument("--host", default=DEFAULT_HOST, help="Host to listen on")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to listen on")
-    parser.add_argument("--no-wait", action="store_true", help="Don't wait for client connection")
-    parser.add_argument("--run-test", action="store_true", help="Run the fibonacci test")
-    
-    args = parser.parse_args()
-    
-    success = start_debugpy_server(args.host, args.port, not args.no_wait)
-    if not success:
-        sys.exit(1)
-    
-    if args.run_test:
-        run_fibonacci_test()
-    else:
-        # Keep the script running indefinitely
-        print("Running in server mode. Press Ctrl+C to exit...")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("Server stopped.")
-    
-    # Keep the script running for a bit to allow time for debugging
-    print("Waiting before exit...")
-    time.sleep(5)
-    print("Exiting")
+    main()

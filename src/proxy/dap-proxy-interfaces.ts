@@ -21,6 +21,12 @@ export interface ProxyInitPayload {
   justMyCode?: boolean;
   initialBreakpoints?: { file: string; line: number; condition?: string }[];
   dryRunSpawn?: boolean;
+  // Adapter command info for language-agnostic adapter spawning
+  adapterCommand?: {
+    command: string;
+    args: string[];
+    env?: Record<string, string>;
+  };
 }
 
 export interface DapCommandPayload {
