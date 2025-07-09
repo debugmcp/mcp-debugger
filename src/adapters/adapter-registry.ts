@@ -261,7 +261,6 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       fileSystem: deps.fileSystem,
       logger: deps.logger,
       environment: deps.environment,
-      pathUtils: deps.pathUtils,
       processLauncher: deps.processLauncher,
       networkManager: deps.networkManager,
     };
