@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
-import { DebugMcpServer, DebugMcpServerOptions } from '../../../../src/server.js';
-import { PathTranslator } from '../../../../src/utils/path-translator.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { DebugMcpServer } from '../../../../src/server.js';
 import type { ILogger, IFileSystem, IEnvironment } from '../../../../src/interfaces/external-dependencies.js';
-import { createWindowsPathUtils, createPosixPathUtils } from '../../../test-utils/mocks/mock-path-utils.js';
 
 // Mock dependencies
 vi.mock('../../../../src/container/dependencies.js', () => ({
@@ -20,14 +18,6 @@ vi.mock('../../../../src/container/dependencies.js', () => ({
     environment: {
       get: vi.fn(),
       getCurrentWorkingDirectory: vi.fn()
-    },
-    pathUtils: {
-      isAbsolute: vi.fn(),
-      resolve: vi.fn(),
-      join: vi.fn(),
-      dirname: vi.fn(),
-      basename: vi.fn(),
-      sep: '/'
     },
     processLauncher: {
       spawn: vi.fn()
@@ -124,13 +114,11 @@ describe('Dynamic Tool Documentation', () => {
   let mockFileSystem: IFileSystem;
   let mockLogger: ILogger;
 
-  describe('Host Mode', () => {
-    const testCwd = process.platform === 'win32' ? 'C:\\Users\\test\\project' : '/home/test/project';
-
+  describe('Hands-off Path Approach', () => {
     beforeEach(() => {
       mockEnvironment = {
         get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? undefined : undefined) as (key: string) => string | undefined,
-        getCurrentWorkingDirectory: vi.fn().mockReturnValue(testCwd),
+        getCurrentWorkingDirectory: vi.fn().mockReturnValue(process.cwd()),
         getAll: vi.fn().mockReturnValue({})
       } as unknown as IEnvironment;
 
@@ -146,16 +134,10 @@ describe('Dynamic Tool Documentation', () => {
         warn: vi.fn()
       } as unknown as ILogger;
 
-      const mockPathUtils = process.platform === 'win32' ? createWindowsPathUtils() : createPosixPathUtils();
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
-      const options: DebugMcpServerOptions = {
-        pathTranslator
-      };
-
-      server = new DebugMcpServer(options);
+      server = new DebugMcpServer();
     });
 
-    it('should include CWD in set_breakpoint file description', async () => {
+    it('should provide generic path guidance in set_breakpoint file description', async () => {
       const tools = await getToolsFromServer(server);
       
       const setBreakpointTool = tools.find(t => t.name === 'set_breakpoint');
@@ -163,13 +145,11 @@ describe('Dynamic Tool Documentation', () => {
       
       const fileDescription = setBreakpointTool!.inputSchema.properties.file.description;
       expect(fileDescription).toBeDefined();
-      expect(fileDescription).toContain(`server's working directory: ${testCwd}`);
-      expect(fileDescription).toContain('Examples:');
-      expect(fileDescription).toContain('src/main.py');
-      expect(fileDescription).toContain(testCwd);
+      expect(fileDescription).toContain('Path to the source file');
+      expect(fileDescription).toContain('Use absolute paths or paths relative to your current working directory');
     });
 
-    it('should include CWD in start_debugging scriptPath description', async () => {
+    it('should provide generic path guidance in start_debugging scriptPath description', async () => {
       const tools = await getToolsFromServer(server);
       
       const startDebuggingTool = tools.find(t => t.name === 'start_debugging');
@@ -177,12 +157,11 @@ describe('Dynamic Tool Documentation', () => {
       
       const scriptPathDescription = startDebuggingTool!.inputSchema.properties.scriptPath.description;
       expect(scriptPathDescription).toBeDefined();
-      expect(scriptPathDescription).toContain(`server's working directory: ${testCwd}`);
-      expect(scriptPathDescription).toContain('Examples:');
-      expect(scriptPathDescription).toContain('src/main.py');
+      expect(scriptPathDescription).toContain('Path to the script to debug');
+      expect(scriptPathDescription).toContain('Use absolute paths or paths relative to your current working directory');
     });
 
-    it('should include CWD in get_source_context file description', async () => {
+    it('should provide generic path guidance in get_source_context file description', async () => {
       const tools = await getToolsFromServer(server);
       
       const getSourceContextTool = tools.find(t => t.name === 'get_source_context');
@@ -190,113 +169,11 @@ describe('Dynamic Tool Documentation', () => {
       
       const fileDescription = getSourceContextTool!.inputSchema.properties.file.description;
       expect(fileDescription).toBeDefined();
-      expect(fileDescription).toContain(`server's working directory: ${testCwd}`);
+      expect(fileDescription).toContain('Path to the source file');
+      expect(fileDescription).toContain('Use absolute paths or paths relative to your current working directory');
     });
 
-    it('should handle long CWD paths without breaking formatting', async () => {
-      const longCwd = process.platform === 'win32' 
-        ? 'C:\\Very\\Long\\Path\\That\\Goes\\On\\And\\On\\And\\On\\project'
-        : '/very/long/path/that/goes/on/and/on/and/on/project';
-      
-      (mockEnvironment.getCurrentWorkingDirectory as Mock).mockReturnValue(longCwd);
-      
-      const mockPathUtils = process.platform === 'win32' ? createWindowsPathUtils() : createPosixPathUtils();
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
-      server = new DebugMcpServer({ pathTranslator });
-      
-      const tools = await getToolsFromServer(server);
-      
-      const setBreakpointTool = tools.find(t => t.name === 'set_breakpoint');
-      const fileDescription = setBreakpointTool!.inputSchema.properties.file.description;
-      
-      expect(fileDescription).toContain(longCwd);
-      expect(fileDescription).toBeTypeOf('string');
-    });
-
-    it('should handle special characters in CWD', async () => {
-      const specialCwd = process.platform === 'win32' 
-        ? 'C:\\Users\\test\\my project (2024)'
-        : '/home/test/my project (2024)';
-      
-      (mockEnvironment.getCurrentWorkingDirectory as Mock).mockReturnValue(specialCwd);
-      
-      const mockPathUtils = process.platform === 'win32' ? createWindowsPathUtils() : createPosixPathUtils();
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
-      server = new DebugMcpServer({ pathTranslator });
-      
-      const tools = await getToolsFromServer(server);
-      
-      const setBreakpointTool = tools.find(t => t.name === 'set_breakpoint');
-      const fileDescription = setBreakpointTool!.inputSchema.properties.file.description;
-      
-      expect(fileDescription).toContain(specialCwd);
-    });
-  });
-
-  describe('Container Mode', () => {
-    beforeEach(() => {
-      mockEnvironment = {
-        get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? 'true' : undefined) as (key: string) => string | undefined,
-        getCurrentWorkingDirectory: vi.fn().mockReturnValue('/workspace'),
-        getAll: vi.fn().mockReturnValue({ 'MCP_CONTAINER': 'true' })
-      } as unknown as IEnvironment;
-
-      mockFileSystem = {
-        existsSync: vi.fn().mockReturnValue(true)
-      } as unknown as IFileSystem;
-
-      mockLogger = {
-        info: vi.fn(),
-        debug: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn()
-      } as unknown as ILogger;
-
-      const mockPathUtils = createPosixPathUtils(); // Always use Posix in container mode
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
-      const options: DebugMcpServerOptions = {
-        pathTranslator
-      };
-
-      server = new DebugMcpServer(options);
-    });
-
-    it('should mention /workspace in set_breakpoint file description', async () => {
-      const tools = await getToolsFromServer(server);
-      
-      const setBreakpointTool = tools.find(t => t.name === 'set_breakpoint');
-      expect(setBreakpointTool).toBeDefined();
-      
-      const fileDescription = setBreakpointTool!.inputSchema.properties.file.description;
-      expect(fileDescription).toContain('relative to /workspace mount point');
-      expect(fileDescription).not.toContain('absolute');
-      expect(fileDescription).toContain("Example: 'src/main.py'");
-    });
-
-    it('should mention /workspace in start_debugging scriptPath description', async () => {
-      const tools = await getToolsFromServer(server);
-      
-      const startDebuggingTool = tools.find(t => t.name === 'start_debugging');
-      expect(startDebuggingTool).toBeDefined();
-      
-      const scriptPathDescription = startDebuggingTool!.inputSchema.properties.scriptPath.description;
-      expect(scriptPathDescription).toBeDefined();
-      expect(scriptPathDescription).toContain('relative to /workspace mount point');
-      expect(scriptPathDescription).not.toContain('absolute');
-    });
-
-    it('should mention /workspace in get_source_context file description', async () => {
-      const tools = await getToolsFromServer(server);
-      
-      const getSourceContextTool = tools.find(t => t.name === 'get_source_context');
-      expect(getSourceContextTool).toBeDefined();
-      
-      const fileDescription = getSourceContextTool!.inputSchema.properties.file.description;
-      expect(fileDescription).toBeDefined();
-      expect(fileDescription).toContain('relative to /workspace mount point');
-    });
-
-    it('should not include absolute path examples in container mode', async () => {
+    it('should not include specific working directory paths in descriptions', async () => {
       const tools = await getToolsFromServer(server);
       
       const toolsWithPaths = ['set_breakpoint', 'start_debugging', 'get_source_context'];
@@ -308,38 +185,16 @@ describe('Dynamic Tool Documentation', () => {
         pathProperties.forEach(prop => {
           if (tool?.inputSchema.properties[prop]?.description) {
             const description = tool.inputSchema.properties[prop].description;
-            expect(description).not.toMatch(/[A-Z]:\\/); // No Windows absolute paths
-            expect(description).not.toMatch(/^\/[^w]/); // No Unix absolute paths except /workspace
+            // Should not contain specific directory paths
+            expect(description).not.toMatch(/C:\\/); // No Windows paths
+            expect(description).not.toMatch(/\/home\//); // No specific Unix paths
+            expect(description).not.toMatch(/\/workspace/); // No container-specific paths
           }
         });
       });
     });
-  });
 
-  describe('Consistency', () => {
     it('should use consistent terminology across all path descriptions', async () => {
-      // Test in host mode
-      mockEnvironment = {
-        get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? undefined : undefined) as (key: string) => string | undefined,
-        getCurrentWorkingDirectory: vi.fn().mockReturnValue('/test/project'),
-        getAll: vi.fn().mockReturnValue({})
-      } as unknown as IEnvironment;
-
-      mockFileSystem = {
-        existsSync: vi.fn().mockReturnValue(true)
-      } as unknown as IFileSystem;
-
-      mockLogger = {
-        info: vi.fn(),
-        debug: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn()
-      } as unknown as ILogger;
-
-      const mockPathUtils = createPosixPathUtils();
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
-      server = new DebugMcpServer({ pathTranslator });
-
       const tools = await getToolsFromServer(server);
 
       // Check that set_breakpoint and get_source_context use "source file"
@@ -353,13 +208,40 @@ describe('Dynamic Tool Documentation', () => {
       const startDebuggingTool = tools.find(t => t.name === 'start_debugging');
       expect(startDebuggingTool!.inputSchema.properties.scriptPath.description).toContain('script');
     });
+
+    it('should provide simple, clear path guidance without complex examples', async () => {
+      const tools = await getToolsFromServer(server);
+      
+      const toolsWithPaths = tools.filter(t => 
+        ['set_breakpoint', 'start_debugging', 'get_source_context'].includes(t.name)
+      );
+
+      toolsWithPaths.forEach(tool => {
+        if (tool.name === 'set_breakpoint') {
+          const description = tool.inputSchema.properties.file.description;
+          expect(typeof description).toBe('string');
+          expect(description?.length).toBeGreaterThan(0);
+          expect(description).toContain('relative to your current working directory');
+        } else if (tool.name === 'start_debugging') {
+          const description = tool.inputSchema.properties.scriptPath.description;
+          expect(typeof description).toBe('string');
+          expect(description?.length).toBeGreaterThan(0);
+          expect(description).toContain('relative to your current working directory');
+        } else if (tool.name === 'get_source_context') {
+          const description = tool.inputSchema.properties.file.description;
+          expect(typeof description).toBe('string');
+          expect(description?.length).toBeGreaterThan(0);
+          expect(description).toContain('relative to your current working directory');
+        }
+      });
+    });
   });
 
   describe('MCP Response Serialization', () => {
-    it('should properly serialize dynamic descriptions in the MCP response', async () => {
+    beforeEach(() => {
       mockEnvironment = {
         get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? undefined : undefined) as (key: string) => string | undefined,
-        getCurrentWorkingDirectory: vi.fn().mockReturnValue('/test/project'),
+        getCurrentWorkingDirectory: vi.fn().mockReturnValue(process.cwd()),
         getAll: vi.fn().mockReturnValue({})
       } as unknown as IEnvironment;
 
@@ -374,10 +256,10 @@ describe('Dynamic Tool Documentation', () => {
         warn: vi.fn()
       } as unknown as ILogger;
 
-      const mockPathUtils = createPosixPathUtils();
-      const pathTranslator = new PathTranslator(mockFileSystem, mockLogger, mockEnvironment, mockPathUtils);
-      server = new DebugMcpServer({ pathTranslator });
+      server = new DebugMcpServer();
+    });
 
+    it('should properly serialize generic descriptions in the MCP response', async () => {
       const tools = await getToolsFromServer(server);
 
       // Verify the response structure
