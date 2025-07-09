@@ -19,8 +19,6 @@ import {
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { IDebugTargetLauncher } from '../interfaces/process-interfaces.js';
-import { PathTranslator } from '../utils/path-translator.js';
-import { IPathUtils } from '../interfaces/path-utils.js';
 import { IAdapterRegistry } from '../adapters/adapter-registry-interface.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -49,7 +47,6 @@ export interface SessionManagerDependencies {
   sessionStoreFactory: ISessionStoreFactory;
   debugTargetLauncher: IDebugTargetLauncher;
   environment: IEnvironment;
-  pathUtils: IPathUtils;
   adapterRegistry: IAdapterRegistry;
 }
 
@@ -74,7 +71,6 @@ export class SessionManagerCore {
   protected proxyManagerFactory: IProxyManagerFactory;
   protected sessionStoreFactory: ISessionStoreFactory;
   protected debugTargetLauncher: IDebugTargetLauncher;
-  protected pathTranslator: PathTranslator;
   public adapterRegistry: IAdapterRegistry;
 
   protected defaultDapLaunchArgs: Partial<CustomLaunchRequestArguments>;
@@ -96,7 +92,6 @@ export class SessionManagerCore {
     this.proxyManagerFactory = dependencies.proxyManagerFactory;
     this.sessionStoreFactory = dependencies.sessionStoreFactory;
     this.debugTargetLauncher = dependencies.debugTargetLauncher;
-    this.pathTranslator = new PathTranslator(this.fileSystem, this.logger, dependencies.environment, dependencies.pathUtils);
     this.adapterRegistry = dependencies.adapterRegistry;
     
     this.sessionStore = this.sessionStoreFactory.create();
