@@ -4,7 +4,7 @@
   <img src="assets/logo.png" alt="MCP Debugger Logo - A stylized circuit board with debug breakpoints" width="400" height="400">
 </div>
 
-**MCP server for step-through debugging – give your AI agents debugging superpowers** 🚀
+**MCP server for multi-language debugging – give your AI agents debugging superpowers** 🚀
 
 [![CI](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-90%25+-brightgreen.svg)](./COVERAGE_SUMMARY.md)
@@ -14,7 +14,9 @@
 
 ## 🎯 Overview
 
-mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of Python scripts using the Debug Adapter Protocol (DAP).
+mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
+
+> **🆕 Version 0.10.0**: Now supports multiple languages through a clean adapter pattern! Start with Python, extend to any language.
 
 > 🎬 **Demo Video**: See the debugger in action!
 > 
@@ -31,9 +33,11 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 
 ## ✨ Key Features
 
+- 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
+- 🧪 **Mock adapter for testing** – Test without external dependencies
 - 🔄 **STDIO and SSE transport modes** – Works with any MCP client
-- 🧪 **>90% test coverage** – Battle-tested with 657+ passing tests
+- 📊 **99.5% test coverage** – Battle-tested with 808+ passing tests
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
 
@@ -59,7 +63,7 @@ Add to your MCP settings configuration:
 ### Using Docker
 
 ```bash
-docker run -v $(pwd):/workspace debugmcp/mcp-debugger:0.9.0
+docker run -v $(pwd):/workspace debugmcp/mcp-debugger:0.10.0
 ```
 
 ### Using npm
@@ -87,7 +91,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",
+  "language": "python",  // or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -137,6 +141,32 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 > ![Multi-session Debugging](assets/screenshots/multi-session.png)
 > *Managing multiple debug sessions simultaneously*
 > -->
+
+## 🏗️ Architecture: The Adapter Pattern
+
+Version 0.10.0 introduces a clean adapter pattern that separates language-agnostic core functionality from language-specific implementations:
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│ MCP Client  │────▶│ SessionManager│────▶│ AdapterRegistry │
+└─────────────┘     └──────────────┘     └─────────────────┘
+                            │                      │
+                            ▼                      ▼
+                    ┌──────────────┐      ┌─────────────────┐
+                    │ ProxyManager │◀─────│ Language Adapter│
+                    └──────────────┘      └─────────────────┘
+                                                   │
+                                          ┌────────┴────────┐
+                                          │                 │
+                                    ┌─────▼──────┐   ┌─────▼──────┐
+                                    │Python      │   │Mock        │
+                                    │Adapter     │   │Adapter     │
+                                    └────────────┘   └────────────┘
+```
+
+### Adding Language Support
+
+Want to add debugging support for your favorite language? Check out the [Adapter Development Guide](./docs/architecture/adapter-development-guide.md)!
 
 ## 💡 Example: Debugging Python Code
 
@@ -276,9 +306,12 @@ Then get the local variables:
 
 - 📘 [Tool Reference](./docs/tool-reference.md) – Complete API documentation
 - 🚦 [Getting Started Guide](./docs/getting-started.md) – First-time setup
+- 🏗️ [Architecture Overview](./docs/architecture/README.md) – Multi-language design
+- 🔧 [Adapter Development](./docs/architecture/adapter-development-guide.md) – Add new languages
+- 📊 [API Reference](./docs/architecture/api-reference.md) – Detailed interface docs
+- 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading from v0.9.x
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
-- 🏗️ [Architecture](./docs/architecture/system-overview.md) – Technical deep-dive
 
 ## 🤝 Contributing
 
@@ -309,8 +342,10 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.9.0 with comprehensive test coverage
-- 🚧 **Coming Soon**: Expression evaluation, conditional breakpoints
+- ✅ **Production Ready**: v0.10.0 with multi-language support
+- ✅ **808+ tests** with 99.5% success rate
+- ✅ **Clean architecture** with adapter pattern
+- 🚧 **Coming Soon**: Node.js, Go, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
 
 See [Roadmap.md](./Roadmap.md) for planned features.
@@ -328,4 +363,4 @@ Built with:
 
 ---
 
-**Give your AI the power to debug like a developer!** 🎯
+**Give your AI the power to debug like a developer – in any language!** 🎯
