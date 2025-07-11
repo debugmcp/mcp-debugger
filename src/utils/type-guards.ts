@@ -33,7 +33,7 @@ export function isValidAdapterCommand(obj: unknown): obj is AdapterCommand {
   
   // Optional env must be a record of strings if present
   if (cmd.env !== undefined) {
-    if (!cmd.env || typeof cmd.env !== 'object') {
+    if (!cmd.env || typeof cmd.env !== 'object' || Array.isArray(cmd.env)) {
       return false;
     }
     

@@ -23,11 +23,32 @@ function npm {
         # Set CI mode to prevent dynamic updates
         $env:CI = 'true'
         
-        # Since npm test runs test:unit && test:integration, we need to run vitest directly
-        # Run all tests with TAP reporter and filter output
-        $inFailure = $false
-        $skipDepth = 0
-        & npm.cmd run test:coverage -- --reporter=tap 2>&1 | ForEach-Object {
+        # Check if specific test files were provided
+        $testArgs = @()
+        if ($args.Count -gt 1) {
+            # Collect all arguments after 'test'
+            $foundTest = $false
+            foreach ($arg in $args) {
+                if ($foundTest) {
+                    $testArgs += $arg
+                }
+                if ($arg -eq 'test' -or ($arg -eq 'run' -and $args[1] -eq 'test')) {
+                    $foundTest = $true
+                }
+            }
+        }
+        
+        # Build the command
+        if ($testArgs.Count -gt 0) {
+            # Run specific test files with coverage
+            $testFiles = $testArgs -join ' '
+            Write-Host "[LLM Mode] Running specific tests: $testFiles" -ForegroundColor Yellow
+            & npm.cmd test @testArgs 2>&1
+        } else {
+            # Run all tests with TAP reporter and filter output
+            $inFailure = $false
+            $skipDepth = 0
+            & npm.cmd run test:coverage -- --reporter=tap 2>&1 | ForEach-Object {
             # Always show TAP header, test plan
             if ($_ -match '^TAP version' -or $_ -match '^\d+\.\.\d+$' -or $_ -match '^#') {
                 $_
@@ -67,6 +88,7 @@ function npm {
             # Pass through empty lines and terminal prompt
             elseif ($_ -eq '' -or $_ -match '^;Cwd=' -or $_ -match '^PS ') {
                 $_
+            }
             }
         }
     }
