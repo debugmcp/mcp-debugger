@@ -11,30 +11,32 @@ import {
   executeDebugSequence,
   isDockerAvailable,
   ensureDockerImage,
-  getVolumeMount
+  getVolumeMount,
+  generateContainerName,
+  cleanupDocker,
+  getContainerLogs
 } from './smoke-test-utils.js';
 import { ensureDir, writeFile, remove } from 'fs-extra';
 
-const TEST_TIMEOUT = 60000; // 60 seconds for container tests
+const TEST_TIMEOUT = 120000; // 120 seconds for container tests (increased to allow for Docker operations)
 const DOCKER_IMAGE = 'mcp-debugger:local';
 
 let mcpSdkClient: Client | null = null;
+let activeContainerName: string | null = null;
 const projectRoot = process.cwd();
 
+// Project testing philosophy: Tests should fail loudly when dependencies are unavailable
+// rather than being silently skipped. This ensures we're aware of missing requirements.
 describe('MCP Server E2E Container Smoke Test', () => {
-  let dockerAvailable = false;
-
   beforeAll(async () => {
-    // Check if Docker is available
-    dockerAvailable = await isDockerAvailable();
-    if (!dockerAvailable) {
-      console.log('[Container Smoke Test] Docker not available, tests will be skipped');
-    }
+    // Docker availability will be checked in each test
+    // This allows us to provide specific error messages per test
+    console.log(`[Container Smoke Test] Starting test suite at ${new Date().toISOString()}`);
   });
 
   // Ensure cleanup even if test fails
-  afterEach(async () => {
-    console.log('[Container Smoke Test] Cleaning up...');
+  afterEach(async function() {
+    console.log(`[Container Smoke Test] Cleaning up at ${new Date().toISOString()}...`);
     
     // Close MCP client
     if (mcpSdkClient) {
@@ -46,40 +48,61 @@ describe('MCP Server E2E Container Smoke Test', () => {
       }
       mcpSdkClient = null;
     }
-  });
+    
+    // Clean up any Docker containers
+    if (activeContainerName) {
+      try {
+        await cleanupDocker(activeContainerName);
+        console.log(`[Container Smoke Test] Cleaned up container: ${activeContainerName}`);
+      } catch (e) {
+        console.error(`[Container Smoke Test] Error cleaning up container ${activeContainerName}:`, e);
+      }
+      activeContainerName = null;
+    }
+  }, 30000); // 30 second timeout for cleanup
 
-  // TODO: Re-enable after fixing Act/Docker-in-Docker issues
-  // This test fails in Act due to Docker operations being slower than expected
-  it.skip('should successfully debug fibonacci.py in containerized server', async function() {
+  it('should successfully debug fibonacci.py in containerized server', async function() {
+    console.log(`\n[Container Smoke Test] TEST START: fibonacci.py test at ${new Date().toISOString()}`);
+    
+    // Check Docker availability first
+    const dockerAvailable = await isDockerAvailable();
     if (!dockerAvailable) {
-      this.skip();
-      return;
+      throw new Error('Docker is required for this test but is not available. Please install Docker and ensure it is running.');
     }
 
     let debugSessionId: string | undefined;
+    const startTime = Date.now();
     
     try {
       // 1. Build Docker image if needed
+      console.log(`[${Date.now() - startTime}ms] Building Docker image...`);
       await ensureDockerImage(DOCKER_IMAGE);
+      console.log(`[${Date.now() - startTime}ms] Docker image ready`);
       
       // 2. Create MCP client and connect using stdio transport with docker run
-      console.log('[Container Smoke Test] Creating MCP client with Docker transport...');
+      console.log(`[${Date.now() - startTime}ms] Creating MCP client with Docker transport...`);
       mcpSdkClient = new Client({ 
         name: "e2e-container-smoke-test-client", 
         version: "0.1.0" 
       });
+      
+      // Generate unique container name
+      activeContainerName = generateContainerName('mcp-fibonacci-test');
+      console.log(`[${Date.now() - startTime}ms] Using container name: ${activeContainerName}`);
       
       // Mount examples directory
       const examplesMount = getVolumeMount(
         path.join(projectRoot, 'examples'),
         '/workspace/examples'
       );
+      console.log(`[${Date.now() - startTime}ms] Volume mount: ${examplesMount}`);
       
       // Use docker run directly in StdioClientTransport
       const transport = new StdioClientTransport({
         command: 'docker',
         args: [
           'run', '--rm', '-i',
+          '--name', activeContainerName,
           '-v', examplesMount,
           '-e', 'MCP_CONTAINER=true',
           '-e', `MCP_HOST_WORKSPACE=${projectRoot}`,
@@ -88,11 +111,12 @@ describe('MCP Server E2E Container Smoke Test', () => {
         ]
       });
       
-      console.log('[Container Smoke Test] Connecting to containerized MCP server...');
+      console.log(`[${Date.now() - startTime}ms] Connecting to containerized MCP server...`);
       await mcpSdkClient.connect(transport);
-      console.log('[Container Smoke Test] MCP SDK Client connected via stdio to container.');
+      console.log(`[${Date.now() - startTime}ms] MCP SDK Client connected via stdio to container.`);
 
       // 3. Execute debug sequence with relative path (container mode)
+      console.log(`[${Date.now() - startTime}ms] Starting debug sequence...`);
       const relativeFibonacciPath = 'examples/python/fibonacci.py';
       const result = await executeDebugSequence(
         mcpSdkClient,
@@ -102,10 +126,20 @@ describe('MCP Server E2E Container Smoke Test', () => {
       
       expect(result.success).toBe(true);
       debugSessionId = result.sessionId;
-      console.log('[Container Smoke Test] Debug sequence completed successfully.');
+      console.log(`[${Date.now() - startTime}ms] Debug sequence completed successfully.`);
       
     } catch (error) {
-      console.error('[Container Smoke Test] Unexpected error during test execution:', error);
+      console.error(`[${Date.now() - startTime}ms] Unexpected error during test execution:`, error);
+      
+      // Capture container logs for debugging
+      if (activeContainerName) {
+        try {
+          const logs = await getContainerLogs(activeContainerName);
+          console.error(`[Container Smoke Test] Container logs:\n${logs}`);
+        } catch (logError) {
+          console.error('[Container Smoke Test] Could not retrieve container logs:', logError);
+        }
+      }
       
       // Check if it's a docker issue
       if (error instanceof Error && error.message.includes('docker')) {
@@ -127,23 +161,25 @@ describe('MCP Server E2E Container Smoke Test', () => {
         }
       }
     }
-  }, TEST_TIMEOUT);
+  }, { timeout: TEST_TIMEOUT });
 
   // Test that absolute paths are rejected in container mode
-  // TODO: Re-enable after fixing Act/Docker-in-Docker volume mount issues
-  // This test fails in Act due to complex volume mount path resolution
-  it.skip('should reject absolute paths in container mode', async function() {
+  it('should reject absolute paths in container mode', async function() {
+    console.log(`\n[Container Smoke Test] TEST START: absolute path rejection test at ${new Date().toISOString()}`);
+    
+    // Check Docker availability first
+    const dockerAvailable = await isDockerAvailable();
     if (!dockerAvailable) {
-      this.skip();
-      return;
+      throw new Error('Docker is required for this test but is not available. Please install Docker and ensure it is running.');
     }
 
     const tempTestDir = path.join(os.tmpdir(), 'mcp-container-test-' + Date.now());
     let debugSessionId: string | undefined;
+    const startTime = Date.now();
     
     try {
       // 1. Create a temporary test directory with a Python script
-      console.log(`[Container Smoke Test] Creating temp test directory: ${tempTestDir}`);
+      console.log(`[${Date.now() - startTime}ms] Creating temp test directory: ${tempTestDir}`);
       await ensureDir(tempTestDir);
       
       const testScript = `
@@ -157,20 +193,26 @@ print(f"x = {x}")
       await writeFile(testScriptPath, testScript.trim());
       
       // 2. Create MCP client with temp directory mounted
-      console.log('[Container Smoke Test] Creating MCP client with temp directory mount...');
+      console.log(`[${Date.now() - startTime}ms] Creating MCP client with temp directory mount...`);
       mcpSdkClient = new Client({ 
         name: "e2e-container-path-test-client", 
         version: "0.1.0" 
       });
       
+      // Generate unique container name
+      activeContainerName = generateContainerName('mcp-path-test');
+      console.log(`[${Date.now() - startTime}ms] Using container name: ${activeContainerName}`);
+      
       // Mount temp directory at /workspace (not /workspace/temp-test)
       const tempMount = getVolumeMount(tempTestDir, '/workspace');
+      console.log(`[${Date.now() - startTime}ms] Volume mount: ${tempMount}`);
       
       // Use docker run directly in StdioClientTransport
       const transport = new StdioClientTransport({
         command: 'docker',
         args: [
           'run', '--rm', '-i',
+          '--name', activeContainerName,
           '-v', tempMount,
           '-e', 'MCP_CONTAINER=true',
           '-e', `MCP_HOST_WORKSPACE=${tempTestDir}`,
@@ -179,12 +221,12 @@ print(f"x = {x}")
         ]
       });
       
-      console.log('[Container Smoke Test] Connecting to containerized MCP server...');
+      console.log(`[${Date.now() - startTime}ms] Connecting to containerized MCP server...`);
       await mcpSdkClient.connect(transport);
-      console.log('[Container Smoke Test] Connected to container.');
+      console.log(`[${Date.now() - startTime}ms] Connected to container.`);
       
       // 3. Create debug session
-      console.log('[Container Smoke Test] Creating debug session...');
+      console.log(`[${Date.now() - startTime}ms] Creating debug session...`);
       const createCall = await mcpSdkClient.callTool({
         name: 'create_debug_session',
         arguments: { language: 'python', name: 'Container Path Test Session' }
@@ -194,7 +236,7 @@ print(f"x = {x}")
       debugSessionId = createResponse.sessionId;
       
       // 4. Set breakpoint using absolute host path (should be rejected)
-      console.log('[Container Smoke Test] Setting breakpoint with absolute host path (expecting rejection)...');
+      console.log(`[${Date.now() - startTime}ms] Setting breakpoint with absolute host path (expecting rejection)...`);
       try {
         const breakpointCall = await mcpSdkClient.callTool({
           name: 'set_breakpoint',
@@ -217,7 +259,7 @@ print(f"x = {x}")
       }
       
       // 5. Now test with a relative path (should work)
-      console.log('[Container Smoke Test] Setting breakpoint with relative path...');
+      console.log(`[${Date.now() - startTime}ms] Setting breakpoint with relative path...`);
       const relativeBreakpointCall = await mcpSdkClient.callTool({
         name: 'set_breakpoint',
         arguments: { 
@@ -238,7 +280,7 @@ print(f"x = {x}")
       console.log(`  - Expected container full path: /workspace/test_container.py`);
       
       // 6. Start debugging with relative path
-      console.log('[Container Smoke Test] Starting debugging with relative path...');
+      console.log(`[${Date.now() - startTime}ms] Starting debugging with relative path...`);
       console.log('[Container Smoke Test] Test expectations:');
       console.log('  - Container mode is enabled (MCP_CONTAINER=true)');
       console.log(`  - Host temp directory: ${tempTestDir}`);
@@ -278,7 +320,18 @@ print(f"x = {x}")
       console.log('[Container Smoke Test] ✅ SUCCESS: Relative path handling works correctly in container mode');
       
     } catch (error) {
-      console.error('[Container Smoke Test] Error during path translation test:', error);
+      console.error(`[${Date.now() - startTime}ms] Error during path translation test:`, error);
+      
+      // Capture container logs for debugging
+      if (activeContainerName) {
+        try {
+          const logs = await getContainerLogs(activeContainerName);
+          console.error(`[Container Smoke Test] Container logs:\n${logs}`);
+        } catch (logError) {
+          console.error('[Container Smoke Test] Could not retrieve container logs:', logError);
+        }
+      }
+      
       throw error;
     } finally {
       // Cleanup
@@ -303,5 +356,5 @@ print(f"x = {x}")
         }
       }
     }
-  }, TEST_TIMEOUT);
+  }, { timeout: TEST_TIMEOUT });
 });

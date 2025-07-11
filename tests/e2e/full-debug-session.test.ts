@@ -250,9 +250,8 @@ describe('Full Debug Session E2E', () => {
 
   // Test each language configuration
   Object.entries(testConfigs).forEach(([langName, config]) => {
-    const describeFn = config.requiresRuntime ? describe.skipIf(!process.env.SKIP_PYTHON_TESTS) : describe;
-    
-    describeFn(`${langName} debugging`, () => {
+    describe(`${langName} debugging`, () => {
+      // TODO: Add tags when Vitest supports them properly: ['@requires-python', '@requires-real-debugpy']
       it('should complete full debugging workflow', async () => {
         console.log(`\n[E2E Full Debug] Testing ${langName} debugging workflow...`);
         const eventRecorder = new EventRecorder();
@@ -431,11 +430,19 @@ describe('Full Debug Session E2E', () => {
         // Final continue to exit (if not already exited)
         const currentState = await waitForSessionState(mcpClient!, sessionId, 'paused', { timeout: 100 });
         if (currentState) {
+          console.log(`[E2E Full Debug] Session still paused, continuing to completion...`);
           await continueExecution(sessionId);
-          await waitForSessionState(mcpClient!, sessionId, 'stopped', {
+          
+          // Wait for either stopped or terminated state
+          const result = await smartWaitAfterOperation(mcpClient!, sessionId, 'continue', {
             timeout: DEFAULT_TIMEOUT,
             eventRecorder
           });
+          
+          console.log(`[E2E Full Debug] Final continue result: ${JSON.stringify(result)}`);
+          expect(result.success).toBe(true);
+        } else {
+          console.log(`[E2E Full Debug] Session already completed`);
         }
         
         await closeDebugSession(sessionId);

@@ -151,29 +151,36 @@ export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
       ...args
     ];
     
-    const process = this.processLauncher.launch(
+    // In container mode, use /workspace as the working directory
+    // (files are mounted there, not in /app where the container starts)
+    // In normal mode, use the script's directory for backwards compatibility
+    const cwd = process.env.MCP_CONTAINER === 'true' 
+      ? '/workspace' 
+      : path.dirname(scriptPath);
+    
+    const debugProcess = this.processLauncher.launch(
       pythonPath,
       debugArgs,
-      { cwd: path.dirname(scriptPath) }
+      { cwd }
     );
     
     return {
-      process,
+      process: debugProcess,
       debugPort: port,
       terminate: async () => {
         return new Promise((resolve) => {
-          if (process.killed) {
+          if (debugProcess.killed) {
             resolve();
             return;
           }
           
-          process.once('exit', () => resolve());
-          process.kill('SIGTERM');
+          debugProcess.once('exit', () => resolve());
+          debugProcess.kill('SIGTERM');
           
           // Force kill after timeout
           setTimeout(() => {
-            if (!process.killed) {
-              process.kill('SIGKILL');
+            if (!debugProcess.killed) {
+              debugProcess.kill('SIGKILL');
             }
             resolve();
           }, 5000);

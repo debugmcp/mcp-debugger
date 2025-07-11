@@ -338,6 +338,7 @@ class MockDebugAdapterProcess {
     // If stopOnEntry is set, send a stopped event
     if (args.stopOnEntry) {
       setTimeout(() => {
+        this.log(`Sending stopped event for stopOnEntry`);
         this.sendEvent({
           seq: 0,
           type: 'event',
@@ -351,6 +352,47 @@ class MockDebugAdapterProcess {
       }, 100);
     } else {
       this.isRunning = true;
+      this.log(`Running without stopOnEntry, will hit first breakpoint`);
+      // Simulate running to first breakpoint
+      setTimeout(() => {
+        const allBreakpoints = Array.from(this.breakpoints.entries())
+          .flatMap(([path, bps]) => bps.map(bp => ({ path, ...bp })))
+          .filter(bp => bp.line !== undefined)
+          .sort((a, b) => (a.line || 0) - (b.line || 0));
+        
+        if (allBreakpoints.length > 0) {
+          const firstBreakpoint = allBreakpoints[0];
+          this.currentLine = firstBreakpoint.line || 1;
+          this.isRunning = false;
+          this.log(`Hit first breakpoint at line ${this.currentLine}`);
+          this.sendEvent({
+            seq: 0,
+            type: 'event',
+            event: 'stopped',
+            body: {
+              reason: 'breakpoint',
+              threadId: 1,
+              allThreadsStopped: true
+            }
+          } as DebugProtocol.StoppedEvent);
+        } else {
+          this.log(`No breakpoints set, program would run to completion`);
+          this.sendEvent({
+            seq: 0,
+            type: 'event',
+            event: 'terminated'
+          } as DebugProtocol.TerminatedEvent);
+          
+          this.sendEvent({
+            seq: 0,
+            type: 'event',
+            event: 'exited',
+            body: {
+              exitCode: 0
+            }
+          } as DebugProtocol.ExitedEvent);
+        }
+      }, 200);
     }
   }
   
@@ -517,13 +559,18 @@ class MockDebugAdapterProcess {
         .filter(bp => bp.line !== undefined)
         .sort((a, b) => (a.line || 0) - (b.line || 0));
       
+      this.log(`Continue from line ${this.currentLine}. All breakpoints: ${allBreakpoints.map(bp => bp.line).join(', ')}`);
+      
       // Find next breakpoint after current line
       const nextBreakpoint = allBreakpoints.find(bp => (bp.line || 0) > this.currentLine);
+      
+      this.log(`Next breakpoint after line ${this.currentLine}: ${nextBreakpoint ? nextBreakpoint.line : 'none'}`);
       
       if (nextBreakpoint && nextBreakpoint.line) {
         // Hit the next breakpoint
         this.isRunning = false;
         this.currentLine = nextBreakpoint.line;
+        this.log(`Stopping at breakpoint on line ${this.currentLine}`);
         this.sendEvent({
           seq: 0,
           type: 'event',
@@ -536,6 +583,7 @@ class MockDebugAdapterProcess {
         } as DebugProtocol.StoppedEvent);
       } else {
         // No more breakpoints - program terminated
+        this.log(`No more breakpoints after line ${this.currentLine}, terminating program`);
         this.sendEvent({
           seq: 0,
           type: 'event',

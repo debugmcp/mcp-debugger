@@ -7,14 +7,14 @@ import { fileURLToPath } from 'url';
 // DO NOT mock Python discovery - we want to test the real implementation
 // This test should fail on Windows if python3 is the Microsoft Store redirect
 
-describe('Python Discovery - Real Implementation Test', { tag: '@requires-python' }, () => {
+describe('Python Discovery - Real Implementation Test @requires-python', () => {
   let client: Client | null = null;
 
   beforeAll(async () => {
     const currentFileURL = import.meta.url;
     const currentFilePath = fileURLToPath(currentFileURL);
     const currentDirName = path.dirname(currentFilePath);
-    const serverScriptPath = path.resolve(currentDirName, '../../dist/index.js');
+    const serverScriptPath = path.resolve(currentDirName, '../../../../dist/index.js');
 
     client = new Client({
       name: "python-discovery-test-client",

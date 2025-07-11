@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { DebugSessionInfo, StackFrame, Variable } from '../../../src/session/models'; 
+import { DebugSessionInfo, StackFrame, Variable } from '../../../../src/session/models';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
@@ -19,7 +19,7 @@ async function startTestServer(): Promise<void> {
     const currentFilePath = fileURLToPath(currentFileURL);
     const currentDirName = path.dirname(currentFilePath);
     // Path to the server's main executable JS file
-    const serverScriptPath = path.resolve(currentDirName, '../../dist/index.js');
+    const serverScriptPath = path.resolve(currentDirName, '../../../../dist/index.js');
     console.log(`[Test Setup] Server script path for SDK StdioClientTransport: ${serverScriptPath}`); 
 
     client = new Client({
@@ -86,10 +86,10 @@ async function stopTestServer(): Promise<void> {
 // Helper to introduce delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-describe('Python Debugging Workflow - Integration Test', { tag: '@requires-python' }, () => {
+describe('Python Debugging Workflow - Integration Test @requires-python', () => {
   let sessionId: string;
   const scriptPath = path.resolve('tests/fixtures/python/debug_test_simple.py'); // Absolute path
-  const breakpointLine = 14; // Line 'c = a + b' in debug_test_simple.py
+  const breakpointLine = 13; // Line 'c = a + b' in debug_test_simple.py
 
   beforeAll(async () => {
     await startTestServer();

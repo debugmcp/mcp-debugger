@@ -114,10 +114,14 @@ def handle_connection(conn, addr):
 
 def main():
     """Main server loop"""
-    if len(sys.argv) > 1:
-        port = int(sys.argv[1])
-    else:
-        port = 5678
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Mock debugpy server for testing')
+    parser.add_argument('--port', type=int, default=5678, help='Port to listen on')
+    parser.add_argument('--no-wait', action='store_true', help='Do not wait for connections (compatibility flag)')
+    
+    args = parser.parse_args()
+    port = args.port
     
     # Set up signal handler
     signal.signal(signal.SIGINT, signal_handler)
@@ -130,6 +134,7 @@ def main():
     server.listen(5)
     
     print(f"Debugpy test server listening on port {port}...")
+    print("Debugpy server is listening!")
     
     try:
         while True:

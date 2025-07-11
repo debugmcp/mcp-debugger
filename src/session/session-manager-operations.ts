@@ -62,32 +62,36 @@ export class SessionManagerOperations extends SessionManagerData {
     const translatedScriptPath = scriptPath; 
     this.logger.info(`[SessionManager] Using translated script path: ${translatedScriptPath}`);
 
-    // Resolve Python path with intelligent detection
-    let resolvedPythonPath: string;
-    const pythonPathFromSession = session.pythonPath!;
+    // Resolve executable path based on language
+    let resolvedExecutablePath: string;
     
-    if (path.isAbsolute(pythonPathFromSession)) {
-      // Absolute path provided - use as-is
-      resolvedPythonPath = pythonPathFromSession;
-    } else if (['python', 'python3', 'py'].includes(pythonPathFromSession.toLowerCase())) {
-      // Common Python commands - use auto-detection without preferredPath
-      try {
-        resolvedPythonPath = await findPythonExecutable(undefined, this.logger);
-        this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedPythonPath}`);
-      } catch (error) {
-        this.logger.error(`[SessionManager] Failed to find Python executable:`, error);
-        throw error;
+    if (session.language === 'python') {
+      // Python-specific path resolution
+      const pythonPathFromSession = session.pythonPath!;
+      
+      if (path.isAbsolute(pythonPathFromSession)) {
+        // Absolute path provided - use as-is
+        resolvedExecutablePath = pythonPathFromSession;
+      } else if (['python', 'python3', 'py'].includes(pythonPathFromSession.toLowerCase())) {
+        // Common Python commands - use auto-detection without preferredPath
+        try {
+          resolvedExecutablePath = await findPythonExecutable(undefined, this.logger);
+          this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedExecutablePath}`);
+        } catch (error) {
+          this.logger.error(`[SessionManager] Failed to find Python executable:`, error);
+          throw error;
+        }
+      } else {
+        // Relative path - resolve from project root (MCP server's root)
+        resolvedExecutablePath = path.resolve(projectRoot, pythonPathFromSession);
       }
+      
+      this.logger.info(`[SessionManager] Using Python path: ${resolvedExecutablePath}`);
     } else {
-      // Relative path - resolve from project root (MCP server's root)
-      resolvedPythonPath = path.resolve(projectRoot, pythonPathFromSession);
+      // For non-Python languages (like mock), use a generic executable path
+      resolvedExecutablePath = session.pythonPath || process.execPath; // Use node as fallback for mock
+      this.logger.info(`[SessionManager] Using ${session.language} executable: ${resolvedExecutablePath}`);
     }
-
-    // Hands-off approach: Use Python path as-is regardless of environment
-    // Let OS/containers handle path resolution naturally
-    this.logger.info(`[SessionManager] Using Python path as-is: ${resolvedPythonPath}`);
-    
-    this.logger.info(`[SessionManager] Using Python path: ${resolvedPythonPath}`);
 
     // Merge launch args
     const effectiveLaunchArgs = {
@@ -98,7 +102,7 @@ export class SessionManagerOperations extends SessionManagerData {
     // Create the adapter for this language
     const adapterConfig: AdapterConfig = {
       sessionId,
-      executablePath: resolvedPythonPath,
+      executablePath: resolvedExecutablePath,
       adapterHost: '127.0.0.1',
       adapterPort,
       logDir: sessionLogDir,
@@ -116,7 +120,7 @@ export class SessionManagerOperations extends SessionManagerData {
     const proxyConfig: ProxyConfig = {
       sessionId,
       language: session.language,  // Add language from session
-      pythonPath: resolvedPythonPath,
+      pythonPath: resolvedExecutablePath,
       adapterHost: '127.0.0.1',
       adapterPort,
       logDir: sessionLogDir,

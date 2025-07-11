@@ -189,12 +189,25 @@ export class DapConnectionManager {
     stopOnEntry: boolean = true,
     justMyCode: boolean = true
   ): Promise<void> {
+    // In container mode, ensure absolute path and use /workspace as cwd
+    let programPath = scriptPath;
+    let workingDir = path.dirname(scriptPath);
+    
+    if (process.env.MCP_CONTAINER === 'true') {
+      // Convert relative path to absolute in container
+      if (!path.isAbsolute(scriptPath)) {
+        programPath = path.join('/workspace', scriptPath);
+      }
+      // Always use /workspace as cwd in container mode
+      workingDir = '/workspace';
+    }
+    
     const launchArgs = {
-      program: scriptPath,
+      program: programPath,
       stopOnEntry,
       noDebug: false,
       args: scriptArgs,
-      cwd: path.dirname(scriptPath),
+      cwd: workingDir,
       console: "internalConsole",
       justMyCode,
     };

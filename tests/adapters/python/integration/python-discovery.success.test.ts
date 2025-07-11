@@ -7,9 +7,9 @@ import { fileURLToPath } from 'url';
 
 const logger = getLogger();
 
-describe('Python Discovery - Success Scenarios', { tag: '@requires-python' }, () => {
+describe('Python Discovery - Success Scenarios', () => {
   let sessionId: string | undefined;
-  const scriptPath = path.resolve(fileURLToPath(import.meta.url), '../../../examples/python/fibonacci.py');
+  const scriptPath = path.resolve(fileURLToPath(import.meta.url), '../../../../../examples/python/fibonacci.py');
 
   beforeAll(async () => {
     // Ensure the logger is configured for tests if needed

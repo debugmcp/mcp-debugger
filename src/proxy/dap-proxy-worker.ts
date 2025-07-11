@@ -121,8 +121,13 @@ export class DapProxyWorker {
       );
 
       // Validate script path exists
-      // Note: Paths are passed through unchanged - let OS/containers handle path resolution naturally
-      const scriptExists = await this.dependencies.fileSystem.pathExists(payload.scriptPath);
+      // In container mode, check relative to /workspace
+      let scriptToCheck = payload.scriptPath;
+      if (process.env.MCP_CONTAINER === 'true' && !path.isAbsolute(payload.scriptPath)) {
+        scriptToCheck = path.join('/workspace', payload.scriptPath);
+      }
+      
+      const scriptExists = await this.dependencies.fileSystem.pathExists(scriptToCheck);
       if (!scriptExists) {
         throw new Error(`Script path not found: ${payload.scriptPath}`);
       }

@@ -305,10 +305,10 @@ export class DebugMcpServer {
   private getPathDescription(parameterName: string): string {
     // Hands-off approach: provide simple, generic path guidance
     // Let OS/containers/debug adapters handle paths naturally
-    const cwd = process.cwd();
-    const examplePath = path.join(cwd, 'src', 'main.py').replace(/\\/g, '/');
-    
-    return `Path to the ${parameterName}. Use absolute paths or paths relative to current working directory (${cwd}). Examples: 'src/main.py' or '${examplePath}'`;
+    if (parameterName === 'script') {
+      return `Path to the script to debug. Use absolute paths or paths relative to your current working directory`;
+    }
+    return `Path to the ${parameterName}. Use absolute paths or paths relative to your current working directory`;
   }
 
   private registerTools(): void {
