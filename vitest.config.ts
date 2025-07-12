@@ -84,7 +84,9 @@ export default defineConfig({
         '**/*.spec.ts',
         // Type-only files - no executable code
         'src/container/types.ts',
-        'src/dap-core/types.ts'
+        'src/dap-core/types.ts',
+        // Mock adapter process - tested via e2e tests, runs as separate process
+        'src/adapters/mock/mock-adapter-process.ts'
       ],
       include: ['src/**/*.ts']
     },
