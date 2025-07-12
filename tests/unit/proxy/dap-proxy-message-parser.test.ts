@@ -16,7 +16,7 @@ describe('MessageParser', () => {
       const command = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -32,7 +32,7 @@ describe('MessageParser', () => {
       const command = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -102,7 +102,7 @@ describe('MessageParser', () => {
       const payload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -125,7 +125,7 @@ describe('MessageParser', () => {
       const payload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -138,14 +138,14 @@ describe('MessageParser', () => {
 
     it('should throw on missing required fields', () => {
       const requiredFields = [
-        'sessionId', 'pythonPath', 'adapterHost', 'logDir', 'scriptPath'
+        'sessionId', 'executablePath', 'adapterHost', 'logDir', 'scriptPath'
       ];
 
       requiredFields.forEach(field => {
         const payload: any = {
           cmd: 'init',
           sessionId: 'test-session',
-          pythonPath: '/usr/bin/python3',
+          executablePath: '/usr/bin/python3',
           adapterHost: 'localhost',
           adapterPort: 5678,
           logDir: '/tmp/logs',
@@ -165,7 +165,7 @@ describe('MessageParser', () => {
         const payload = {
           cmd: 'init',
           sessionId: 'test-session',
-          pythonPath: '/usr/bin/python3',
+          executablePath: '/usr/bin/python3',
           adapterHost: 'localhost',
           adapterPort: port as any,
           logDir: '/tmp/logs',
@@ -190,7 +190,7 @@ describe('MessageParser', () => {
         const payload = {
           cmd: 'init',
           sessionId: 'test-session',
-          pythonPath: '/usr/bin/python3',
+          executablePath: '/usr/bin/python3',
           adapterHost: 'localhost',
           adapterPort: 5678,
           logDir: '/tmp/logs',
@@ -217,7 +217,7 @@ describe('MessageParser', () => {
         const payload = {
           cmd: 'init',
           sessionId: 'test-session',
-          pythonPath: '/usr/bin/python3',
+          executablePath: '/usr/bin/python3',
           adapterHost: 'localhost',
           adapterPort: 5678,
           logDir: '/tmp/logs',

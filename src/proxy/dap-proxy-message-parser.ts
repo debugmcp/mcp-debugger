@@ -65,7 +65,7 @@ export class MessageParser {
 
     // Required string fields
     const requiredStrings = [
-      'sessionId', 'pythonPath', 'adapterHost', 'logDir', 'scriptPath'
+      'sessionId', 'executablePath', 'adapterHost', 'logDir', 'scriptPath'
     ];
     
     for (const field of requiredStrings) {

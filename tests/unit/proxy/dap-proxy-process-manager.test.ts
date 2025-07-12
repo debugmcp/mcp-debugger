@@ -3,7 +3,7 @@
  * Tests debugpy adapter process management including spawning, shutdown, and validation
  */
 import { describe, it, expect, vi, beforeEach, afterEach, MockInstance } from 'vitest';
-import { DebugpyAdapterManager } from '../../../src/proxy/dap-proxy-process-manager.js';
+import { DebugpyAdapterManager } from '../../../src/proxy/dap-proxy-adapter-manager.js';
 import {
   IProcessSpawner,
   ILogger,
@@ -143,16 +143,16 @@ describe('DebugpyAdapterManager', () => {
     });
   });
 
-  describe('spawn', () => {
-    const defaultConfig: AdapterConfig = {
-      pythonPath: '/usr/bin/python3',
+  describe('spawnDebugpy', () => {
+    const defaultConfig = {
+      pythonPath: '/usr/bin/python3',  // This is internally mapped to executablePath
       host: 'localhost',
       port: 5678,
       logDir: '/var/log/debugpy'
     };
 
     it('should successfully spawn with valid config', async () => {
-      const result = await manager.spawn(defaultConfig);
+      const result = await manager.spawnDebugpy(defaultConfig);
 
       expect(mockFileSystem.ensureDir).toHaveBeenCalledWith(defaultConfig.logDir);
       expect(mockProcessSpawner.spawn).toHaveBeenCalledWith(
@@ -172,13 +172,13 @@ describe('DebugpyAdapterManager', () => {
     });
 
     it('should spawn with custom cwd and env', async () => {
-      const customConfig: AdapterConfig = {
+      const customConfig = {
         ...defaultConfig,
         cwd: '/custom/working/dir',
         env: { ...process.env, CUSTOM_VAR: 'value' }
       };
 
-      await manager.spawn(customConfig);
+      await manager.spawnDebugpy(customConfig);
 
       expect(mockProcessSpawner.spawn).toHaveBeenCalledWith(
         expect.any(String),
@@ -193,7 +193,7 @@ describe('DebugpyAdapterManager', () => {
     it('should use MCP_SERVER_CWD environment variable if set', async () => {
       process.env.MCP_SERVER_CWD = '/mcp/custom/path';
 
-      await manager.spawn(defaultConfig);
+      await manager.spawnDebugpy(defaultConfig);
 
       expect(mockProcessSpawner.spawn).toHaveBeenCalledWith(
         expect.any(String),
@@ -207,19 +207,19 @@ describe('DebugpyAdapterManager', () => {
     it('should handle spawn failure with no PID returned', async () => {
       mockChildProcess.pid = undefined;
 
-      await expect(manager.spawn(defaultConfig))
-        .rejects.toThrow('Failed to spawn debugpy adapter process or get PID');
+      await expect(manager.spawnDebugpy(defaultConfig))
+        .rejects.toThrow('Failed to spawn adapter process or get PID');
     });
 
     it('should handle spawn returning null process', async () => {
       (mockProcessSpawner.spawn as any).mockReturnValue(null as any);
 
-      await expect(manager.spawn(defaultConfig))
-        .rejects.toThrow('Failed to spawn debugpy adapter process or get PID');
+      await expect(manager.spawnDebugpy(defaultConfig))
+        .rejects.toThrow('Failed to spawn adapter process or get PID');
     });
 
     it('should verify unref() is called (line 93)', async () => {
-      await manager.spawn(defaultConfig);
+      await manager.spawnDebugpy(defaultConfig);
 
       expect(mockChildProcess.unref).toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -233,11 +233,11 @@ describe('DebugpyAdapterManager', () => {
         throw spawnError;
       });
 
-      await expect(manager.spawn(defaultConfig)).rejects.toThrow('Spawn failed');
+      await expect(manager.spawnDebugpy(defaultConfig)).rejects.toThrow('Spawn failed');
     });
 
     it('should set up process handlers after spawn', async () => {
-      await manager.spawn(defaultConfig);
+      await manager.spawnDebugpy(defaultConfig);
 
       expect(mockChildProcess.on).toHaveBeenCalledWith('error', expect.any(Function));
       expect(mockChildProcess.on).toHaveBeenCalledWith('exit', expect.any(Function));
@@ -246,7 +246,7 @@ describe('DebugpyAdapterManager', () => {
 
   describe('setupProcessHandlers', () => {
     it('should log process errors (line 114)', async () => {
-      await manager.spawn({
+      await manager.spawnDebugpy({
         pythonPath: 'python',
         host: 'localhost',
         port: 5678,
@@ -268,7 +268,7 @@ describe('DebugpyAdapterManager', () => {
     });
 
     it('should log process exit with code and signal (line 118)', async () => {
-      await manager.spawn({
+      await manager.spawnDebugpy({
         pythonPath: 'python',
         host: 'localhost',
         port: 5678,
@@ -408,150 +408,13 @@ describe('DebugpyAdapterManager', () => {
     });
   });
 
-  describe('validatePythonPath', () => {
-    it('should validate Python path by executing python --version (lines 145-171)', async () => {
-      const mockValidateProcess = {
-        on: vi.fn((event: string, handler: Function) => {
-          if (event === 'exit') {
-            // Simulate successful exit
-            setTimeout(() => handler(0), 0);
-          }
-          return mockValidateProcess;
-        }),
-        stdout: null,
-        stderr: null
-      };
-      (mockProcessSpawner.spawn as any).mockReturnValue(mockValidateProcess as any);
-
-      const result = await manager.validatePythonPath('/usr/bin/python3');
-
-      expect(mockProcessSpawner.spawn).toHaveBeenCalledWith(
-        '/usr/bin/python3',
-        ['--version'],
-        { stdio: 'ignore' }
-      );
-      expect(result).toBe(true);
-    });
-
-    it('should return false for invalid Python path', async () => {
-      const mockValidateProcess = {
-        on: vi.fn((event: string, handler: Function) => {
-          if (event === 'exit') {
-            // Simulate failed exit
-            setTimeout(() => handler(1), 0);
-          }
-          return mockValidateProcess;
-        })
-      };
-      (mockProcessSpawner.spawn as any).mockReturnValue(mockValidateProcess as any);
-
-      const result = await manager.validatePythonPath('/invalid/python');
-
-      expect(result).toBe(false);
-    });
-
-    it('should handle spawn errors during validation', async () => {
-      const mockValidateProcess = {
-        on: vi.fn((event: string, handler: Function) => {
-          if (event === 'error') {
-            // Simulate spawn error
-            setTimeout(() => handler(new Error('spawn ENOENT')), 0);
-          }
-          return mockValidateProcess;
-        })
-      };
-      (mockProcessSpawner.spawn as any).mockReturnValue(mockValidateProcess as any);
-
-      const result = await manager.validatePythonPath('/nonexistent/python');
-
-      expect(result).toBe(false);
-    });
-
-    it('should handle different exit codes', async () => {
-      const testCases = [
-        { code: 0, expected: true },
-        { code: 1, expected: false },
-        { code: 127, expected: false },
-        { code: -1, expected: false }
-      ];
-
-      for (const { code, expected } of testCases) {
-        const mockValidateProcess = {
-          on: vi.fn((event: string, handler: Function) => {
-            if (event === 'exit') {
-              setTimeout(() => handler(code), 0);
-            }
-            return mockValidateProcess;
-          })
-        };
-        (mockProcessSpawner.spawn as any).mockReturnValue(mockValidateProcess as any);
-
-        const result = await manager.validatePythonPath('/usr/bin/python');
-        expect(result).toBe(expected);
-      }
-    });
-
-    it('should handle both error and exit events', async () => {
-      const mockValidateProcess = {
-        on: vi.fn((event: string, handler: Function) => {
-          if (event === 'error') {
-            // Error happens first
-            setTimeout(() => handler(new Error('spawn error')), 0);
-          } else if (event === 'exit') {
-            // Exit happens later (should be ignored)
-            setTimeout(() => handler(0), 10);
-          }
-          return mockValidateProcess;
-        })
-      };
-      (mockProcessSpawner.spawn as any).mockReturnValue(mockValidateProcess as any);
-
-      const result = await manager.validatePythonPath('/usr/bin/python');
-
-      expect(result).toBe(false);
-    });
-
-    it('should handle spawn throwing exceptions', async () => {
-      (mockProcessSpawner.spawn as any).mockImplementation(() => {
-        throw new Error('Spawn failed');
-      });
-
-      const result = await manager.validatePythonPath('/bad/python');
-
-      expect(result).toBe(false);
-    });
-
-    it('should handle timeout/hanging processes', async () => {
-      vi.useFakeTimers();
-
-      const mockValidateProcess = {
-        on: vi.fn(() => mockValidateProcess) // Never calls handlers
-      };
-      (mockProcessSpawner.spawn as any).mockReturnValue(mockValidateProcess as any);
-
-      const validationPromise = manager.validatePythonPath('/hanging/python');
-
-      // Advance time significantly
-      await vi.advanceTimersByTimeAsync(10000);
-
-      // Force the promise to resolve by triggering error handler
-      const errorHandler = (mockValidateProcess.on as any).mock.calls
-        .find((call: any) => call[0] === 'error')?.[1];
-      if (errorHandler) {
-        errorHandler(new Error('timeout'));
-      }
-
-      const result = await validationPromise;
-      expect(result).toBe(false);
-
-      vi.useRealTimers();
-    });
-  });
+  // Note: validatePythonPath method was removed in the new implementation
+  // These tests are no longer applicable
 
   describe('integration scenarios', () => {
     it('should handle full lifecycle: spawn, error, and shutdown', async () => {
       // Spawn process
-      const spawnResult = await manager.spawn({
+      const spawnResult = await manager.spawnDebugpy({
         pythonPath: '/usr/bin/python3',
         host: 'localhost',
         port: 5678,
@@ -581,7 +444,7 @@ describe('DebugpyAdapterManager', () => {
 
     it('should handle multiple spawn attempts with same manager', async () => {
       // First spawn
-      const firstResult = await manager.spawn({
+      const firstResult = await manager.spawnDebugpy({
         pythonPath: 'python',
         host: 'localhost',
         port: 5678,
@@ -590,7 +453,7 @@ describe('DebugpyAdapterManager', () => {
 
       // Second spawn with different config
       mockChildProcess.pid = 54321;
-      const secondResult = await manager.spawn({
+      const secondResult = await manager.spawnDebugpy({
         pythonPath: 'python3',
         host: '0.0.0.0',
         port: 5679,
