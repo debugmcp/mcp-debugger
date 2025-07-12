@@ -162,7 +162,7 @@ export class DapProxyWorker {
     } else if (this.processManager instanceof DebugpyAdapterManager) {
       // Use Python-specific command building
       const spawnCommand = this.processManager.buildSpawnCommand(
-        payload.pythonPath,
+        payload.executablePath,
         payload.adapterHost,
         payload.adapterPort,
         payload.logDir
@@ -197,7 +197,7 @@ export class DapProxyWorker {
       try {
         const validatedCommand = validateAdapterCommand(payload.adapterCommand, 'proxy-worker-init');
         logAdapterCommandValidation(validatedCommand, 'proxy-worker-init', true, {
-          pythonPath: payload.pythonPath,
+          executablePath: payload.executablePath,
           scriptPath: payload.scriptPath
         });
         
@@ -228,7 +228,7 @@ export class DapProxyWorker {
     } else if (this.processManager instanceof DebugpyAdapterManager) {
       // Use Python-specific spawning
       spawnResult = await this.processManager.spawnDebugpy({
-        pythonPath: payload.pythonPath,
+        pythonPath: payload.executablePath,
         host: payload.adapterHost,
         port: payload.adapterPort,
         logDir: payload.logDir

@@ -377,15 +377,13 @@ describe('SessionStoreFactory', () => {
       const complexParams: CreateSessionParams = {
         language: DebugLanguage.PYTHON,
         name: 'complex-session',
-        pythonPath: '/legacy/python', // deprecated field
         executablePath: '/usr/bin/python3.9'
       };
 
       store.createSession(complexParams);
       
-      // Should track exact parameters including deprecated fields
+      // Should track exact parameters
       expect(store.createSessionCalls[0].params).toEqual(complexParams);
-      expect(store.createSessionCalls[0].params.pythonPath).toBe('/legacy/python');
       expect(store.createSessionCalls[0].params.executablePath).toBe('/usr/bin/python3.9');
     });
   });

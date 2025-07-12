@@ -53,16 +53,16 @@ describe('SessionStore', () => {
       expect(session.name).toBe('My Debug Session');
     });
 
-    it('should create a session with custom python path', () => {
+    it('should create a session with custom executable path', () => {
       const params: CreateSessionParams = {
         language: DebugLanguage.PYTHON,
-        pythonPath: '/usr/bin/python3'
+        executablePath: '/usr/bin/python3'
       };
 
       const session = store.createSession(params);
       const managedSession = store.get(session.id);
 
-      expect(managedSession?.pythonPath).toBe('/usr/bin/python3');
+      expect(managedSession?.executablePath).toBe('/usr/bin/python3');
     });
 
     it('should use environment python path if not provided', () => {
@@ -76,7 +76,7 @@ describe('SessionStore', () => {
       const session = store.createSession(params);
       const managedSession = store.get(session.id);
 
-      expect(managedSession?.pythonPath).toBe('/opt/python/bin/python');
+      expect(managedSession?.executablePath).toBe('/opt/python/bin/python');
 
       // Restore original value
       if (originalPythonPath) {
@@ -98,7 +98,7 @@ describe('SessionStore', () => {
       const managedSession = store.get(session.id);
 
        const expectedDefault = process.platform === 'win32' ? 'python' : 'python3';
-       expect(managedSession?.pythonPath).toBe(expectedDefault);
+       expect(managedSession?.executablePath).toBe(expectedDefault);
 
       // Restore original value
       if (originalPythonPath) {
@@ -182,14 +182,14 @@ describe('SessionStore', () => {
 
       store.update(created.id, {
         name: 'Updated Name',
-        pythonPath: '/new/python/path'
+        executablePath: '/new/python/path'
       });
 
       const updated = store.get(created.id);
       expect(updated).toBeDefined();
       if (!updated) throw new Error('Session should exist');
       expect(updated.name).toBe('Updated Name');
-      expect(updated.pythonPath).toBe('/new/python/path');
+      expect(updated.executablePath).toBe('/new/python/path');
       expect(updated.updatedAt).toBeDefined();
       expect(updated.updatedAt!.getTime()).toBeGreaterThan(originalUpdatedAt.getTime());
     });
@@ -284,14 +284,14 @@ describe('SessionStore', () => {
     it('should not expose internal session data', () => {
       const params: CreateSessionParams = {
         language: DebugLanguage.PYTHON,
-        pythonPath: '/custom/python'
+        executablePath: '/custom/python'
       };
       store.createSession(params);
 
       const sessions = store.getAll();
       
-      // DebugSessionInfo should not include pythonPath or proxyManager
-      expect(sessions[0]).not.toHaveProperty('pythonPath');
+      // DebugSessionInfo should not include executablePath or proxyManager
+      expect(sessions[0]).not.toHaveProperty('executablePath');
       expect(sessions[0]).not.toHaveProperty('proxyManager');
     });
   });
@@ -300,14 +300,14 @@ describe('SessionStore', () => {
     it('should return all sessions with full data', () => {
       const params: CreateSessionParams = {
         language: DebugLanguage.PYTHON,
-        pythonPath: '/custom/python'
+        executablePath: '/custom/python'
       };
       store.createSession(params);
 
       const sessions = store.getAllManaged();
 
       expect(sessions).toHaveLength(1);
-      expect(sessions[0].pythonPath).toBe('/custom/python');
+      expect(sessions[0].executablePath).toBe('/custom/python');
       expect(sessions[0].proxyManager).toBeUndefined();
     });
   });

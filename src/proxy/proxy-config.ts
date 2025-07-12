@@ -8,8 +8,8 @@ import { DebugLanguage } from '../session/models.js';
  */
 export interface ProxyConfig {
   sessionId: string;
-  language: DebugLanguage;        // New field to specify which language
-  executablePath?: string;        // Renamed from pythonPath, now optional (adapter can discover)
+  language: DebugLanguage;        // Language to specify which debugger to use
+  executablePath?: string;        // Optional - adapter can discover if not provided
   adapterHost: string;
   adapterPort: number;
   logDir: string;
@@ -26,15 +26,4 @@ export interface ProxyConfig {
     args: string[];
     env?: Record<string, string>;
   };
-  
-  // Deprecated - for backward compatibility only
-  pythonPath?: string;            // @deprecated Use executablePath instead
-}
-
-/**
- * Legacy ProxyConfig for backward compatibility
- * @deprecated This type will be removed in v3.0.0
- */
-export interface LegacyProxyConfig extends Omit<ProxyConfig, 'language' | 'executablePath'> {
-  pythonPath: string;
 }

@@ -103,7 +103,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -134,7 +134,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -164,7 +164,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -185,7 +185,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -215,7 +215,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -313,7 +313,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -349,7 +349,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',
@@ -430,7 +430,7 @@ describe('DapProxyWorker', () => {
       const initPayload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python3',
+        executablePath: '/usr/bin/python3',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/tmp/logs',

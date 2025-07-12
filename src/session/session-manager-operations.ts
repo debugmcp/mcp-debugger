@@ -67,12 +67,12 @@ export class SessionManagerOperations extends SessionManagerData {
     
     if (session.language === 'python') {
       // Python-specific path resolution
-      const pythonPathFromSession = session.pythonPath!;
+      const executablePathFromSession = session.executablePath!;
       
-      if (path.isAbsolute(pythonPathFromSession)) {
+      if (path.isAbsolute(executablePathFromSession)) {
         // Absolute path provided - use as-is
-        resolvedExecutablePath = pythonPathFromSession;
-      } else if (['python', 'python3', 'py'].includes(pythonPathFromSession.toLowerCase())) {
+        resolvedExecutablePath = executablePathFromSession;
+      } else if (['python', 'python3', 'py'].includes(executablePathFromSession.toLowerCase())) {
         // Common Python commands - use auto-detection without preferredPath
         try {
           resolvedExecutablePath = await findPythonExecutable(undefined, this.logger);
@@ -83,13 +83,13 @@ export class SessionManagerOperations extends SessionManagerData {
         }
       } else {
         // Relative path - resolve from project root (MCP server's root)
-        resolvedExecutablePath = path.resolve(projectRoot, pythonPathFromSession);
+        resolvedExecutablePath = path.resolve(projectRoot, executablePathFromSession);
       }
       
       this.logger.info(`[SessionManager] Using Python path: ${resolvedExecutablePath}`);
     } else {
       // For non-Python languages (like mock), use a generic executable path
-      resolvedExecutablePath = session.pythonPath || process.execPath; // Use node as fallback for mock
+      resolvedExecutablePath = session.executablePath || process.execPath; // Use node as fallback for mock
       this.logger.info(`[SessionManager] Using ${session.language} executable: ${resolvedExecutablePath}`);
     }
 
@@ -120,7 +120,7 @@ export class SessionManagerOperations extends SessionManagerData {
     const proxyConfig: ProxyConfig = {
       sessionId,
       language: session.language,  // Add language from session
-      pythonPath: resolvedExecutablePath,
+      executablePath: resolvedExecutablePath,
       adapterHost: '127.0.0.1',
       adapterPort,
       logDir: sessionLogDir,

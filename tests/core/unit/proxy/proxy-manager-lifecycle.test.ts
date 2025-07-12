@@ -85,7 +85,7 @@ describe('ProxyManager - Lifecycle', () => {
       const initCommand = fakeProxy?.sentCommands[0] as any;
       expect(initCommand.cmd).toBe('init');
       expect(initCommand.sessionId).toBe(defaultConfig.sessionId);
-      expect(initCommand.pythonPath).toBe(defaultConfig.executablePath);  // proxy still expects pythonPath
+      expect(initCommand.executablePath).toBe(defaultConfig.executablePath);
       expect(initCommand.adapterHost).toBe(defaultConfig.adapterHost);
       expect(initCommand.adapterPort).toBe(defaultConfig.adapterPort);
       expect(initCommand.scriptPath).toBe(defaultConfig.scriptPath);

@@ -139,17 +139,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Initialize functional core state
     this.dapState = createInitialState(config.sessionId);
     
-    // Handle backward compatibility for pythonPath
-    let executablePath: string | undefined = config.executablePath;
-    if (!executablePath && config.pythonPath) {
-      this.logger.warn(
-        `[ProxyManager] DEPRECATION WARNING: 'pythonPath' is deprecated. ` +
-        `Use 'executablePath' instead. This will be removed in v3.0.0`
-      );
-      executablePath = config.pythonPath;
-    }
-    
     // Use adapter to validate environment and resolve executable if available
+    let executablePath: string | undefined = config.executablePath;
     if (this.adapter) {
       // Validate environment first
       const validation = await this.adapter.validateEnvironment();
@@ -201,12 +192,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.setupEventHandlers();
 
     // Send initialization command
-    // Note: Still sending as pythonPath to proxy for backward compatibility
-    // The proxy will need to be updated in a future task to use executablePath
     const initCommand = {
       cmd: 'init',
       sessionId: config.sessionId,
-      pythonPath: executablePath,  // Using resolved executable path
+      executablePath: executablePath,  // Using resolved executable path
       adapterHost: config.adapterHost,
       adapterPort: config.adapterPort,
       logDir: config.logDir,

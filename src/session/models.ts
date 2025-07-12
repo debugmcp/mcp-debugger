@@ -126,8 +126,8 @@ export interface SessionConfig {
   language: DebugLanguage;
   /** Session name */
   name: string;
-  /** Optional Python executable path, if language is Python */
-  pythonPath?: string;
+  /** Optional executable path for the language runtime */
+  executablePath?: string;
 }
 
 /**

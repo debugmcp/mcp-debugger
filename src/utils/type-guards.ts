@@ -98,7 +98,7 @@ export function validateProxyInitPayload(payload: unknown): ProxyInitPayload {
   
   // Check required fields
   const requiredFields = [
-    'cmd', 'sessionId', 'pythonPath', 'adapterHost', 
+    'cmd', 'sessionId', 'executablePath', 'adapterHost', 
     'adapterPort', 'logDir', 'scriptPath'
   ];
   

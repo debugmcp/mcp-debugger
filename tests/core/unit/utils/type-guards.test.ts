@@ -258,7 +258,7 @@ describe('Type Guards', () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python',
+        executablePath: '/usr/bin/python',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/logs',
@@ -272,7 +272,7 @@ describe('Type Guards', () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python',
+        executablePath: '/usr/bin/python',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/logs',
@@ -290,7 +290,7 @@ describe('Type Guards', () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
-        pythonPath: '/usr/bin/python',
+        executablePath: '/usr/bin/python',
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/logs',
@@ -306,7 +306,7 @@ describe('Type Guards', () => {
     const validPayload: ProxyInitPayload = {
       cmd: 'init',
       sessionId: 'test-session',
-      pythonPath: '/usr/bin/python',
+      executablePath: '/usr/bin/python',
       adapterHost: 'localhost',
       adapterPort: 5678,
       logDir: '/logs',
@@ -331,7 +331,7 @@ describe('Type Guards', () => {
 
     it('should throw for missing required fields', () => {
       const requiredFields = [
-        'cmd', 'sessionId', 'pythonPath', 'adapterHost', 
+        'cmd', 'sessionId', 'executablePath', 'adapterHost', 
         'adapterPort', 'logDir', 'scriptPath'
       ];
       

@@ -153,7 +153,7 @@ export class DebugpyAdapterManager extends GenericAdapterManager {
   /**
    * Build the command and arguments for spawning debugpy adapter
    */
-  buildSpawnCommand(pythonPath: string, host: string, port: number, logDir: string): {
+  buildSpawnCommand(executablePath: string, host: string, port: number, logDir: string): {
     command: string;
     args: string[];
   } {
@@ -165,7 +165,7 @@ export class DebugpyAdapterManager extends GenericAdapterManager {
     ];
 
     return {
-      command: pythonPath,
+      command: executablePath,
       args
     };
   }
@@ -174,7 +174,7 @@ export class DebugpyAdapterManager extends GenericAdapterManager {
    * Spawn the debugpy adapter process (backward compatibility)
    */
   async spawnDebugpy(config: {
-    pythonPath: string;
+    pythonPath: string;  // Keep parameter name for backward compatibility with proxy-worker
     host: string;
     port: number;
     logDir: string;
@@ -182,7 +182,7 @@ export class DebugpyAdapterManager extends GenericAdapterManager {
     env?: NodeJS.ProcessEnv;
   }): Promise<AdapterSpawnResult> {
     const { command, args } = this.buildSpawnCommand(
-      config.pythonPath,
+      config.pythonPath,  // Will be the executablePath value passed from proxy-worker
       config.host,
       config.port,
       config.logDir

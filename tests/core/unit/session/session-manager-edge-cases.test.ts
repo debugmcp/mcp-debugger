@@ -32,22 +32,21 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
   });
 
   describe('Session Creation Edge Cases', () => {
-    it('should use provided python path as executable path', async () => {
+    it('should use provided executable path', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       const managedSession = sessionManager.getSession(session.id);
-      // pythonPath and executablePath are the same field
-      expect(managedSession?.pythonPath).toBe('python');
+      expect(managedSession?.executablePath).toBe('python');
     });
 
     it('should generate unique session IDs', async () => {
       const sessions = await Promise.all([
-        sessionManager.createSession({ language: DebugLanguage.MOCK, pythonPath: 'python' }),
-        sessionManager.createSession({ language: DebugLanguage.MOCK, pythonPath: 'python' }),
-        sessionManager.createSession({ language: DebugLanguage.MOCK, pythonPath: 'python' })
+        sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' }),
+        sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' }),
+        sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' })
       ]);
       
       const ids = sessions.map(s => s.id);
@@ -58,7 +57,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should set default session name if not provided', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       // SessionStore generates IDs like 'session-<short-uuid>'
@@ -70,7 +69,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should throw error when continue DAP request fails', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -91,7 +90,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle errors in getVariables gracefully', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -115,7 +114,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle missing response body in getVariables', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -139,7 +138,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle errors in getStackTrace gracefully', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -163,7 +162,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle missing response body in getStackTrace', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -187,7 +186,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle no effective thread ID in getStackTrace', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -210,7 +209,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle errors in getScopes gracefully', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -234,7 +233,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle missing scopes in response', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -262,7 +261,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle errors when stopping proxy during closeSession', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -293,7 +292,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     it('should handle closeSession when proxy is already undefined', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       // Don't start debugging, so no proxy manager

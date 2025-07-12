@@ -1,11 +1,11 @@
 # mcp-debugger Migration Guide
 
-> **⚠️ DRAFT DOCUMENTATION**  
-> This migration guide is based on mcp-debugger v0.10.0 architecture changes.
+> **📌 UPDATED DOCUMENTATION**  
+> This migration guide reflects the complete removal of backward compatibility with `pythonPath` parameter.
 
 ## Overview
 
-Version 0.10.0 introduces a major architectural change: the transformation from a Python-specific debugger to a multi-language debugging platform using the adapter pattern. This guide helps you migrate from older versions.
+The mcp-debugger has undergone a major architectural change: the transformation from a Python-specific debugger to a multi-language debugging platform using the adapter pattern. This version removes all backward compatibility with the old `pythonPath` parameter.
 
 ## What Changed
 
@@ -51,7 +51,7 @@ Version 0.10.0 introduces a major architectural change: the transformation from 
 }
 ```
 
-**Backward Compatibility**: `pythonPath` is still accepted but deprecated. It will be mapped to `executablePath` internally.
+**⚠️ Breaking Change**: `pythonPath` is no longer supported. You must use `executablePath`.
 
 #### Language Support
 
@@ -98,9 +98,9 @@ Launch configurations remain mostly the same, but are now processed through lang
 
 ### For Existing Python Users
 
-If you're using mcp-debugger for Python debugging, minimal changes are needed:
+If you're using mcp-debugger for Python debugging, you **must** update your code:
 
-1. **Update parameter names** (optional):
+1. **Update parameter names** (required):
    ```diff
    - "pythonPath": "/usr/bin/python3"
    + "executablePath": "/usr/bin/python3"
@@ -228,25 +228,24 @@ sessionManager.on('pythonStarted', handler);
 sessionManager.on('adapterConnected', handler);
 ```
 
-## Deprecation Warnings
+## Removed Features
 
-### Deprecated in v0.10.0
+### Removed in Current Version
 
 1. **`pythonPath` parameter**
-   - Status: Deprecated, but still functional
+   - Status: **REMOVED**
    - Alternative: Use `executablePath`
-   - Removal: Planned for v1.0.0
+   - Migration: Required - update all references
 
-2. **Python-specific error codes**
-   - Status: Mapped to generic codes
-   - Alternative: Use `AdapterErrorCode` enum
-   - Removal: Planned for v1.0.0
+2. **Session migration utilities**
+   - Status: **REMOVED** 
+   - The `session-migration.ts` file has been deleted
+   - All code must use the new parameter names
 
-### Deprecation Timeline
-
-- **v0.10.0** (Current): Deprecation warnings added
-- **v0.11.0**: Deprecation warnings become more prominent
-- **v1.0.0**: Deprecated features removed
+3. **Backward compatibility layer**
+   - Status: **REMOVED**
+   - No automatic mapping from `pythonPath` to `executablePath`
+   - Direct updates required
 
 ## Common Migration Issues
 
@@ -254,13 +253,13 @@ sessionManager.on('adapterConnected', handler);
 
 **Problem**: TypeScript error when using old parameter name.
 
-**Solution**: Update to `executablePath` or add type assertion:
+**Solution**: Update to `executablePath` (only option):
 ```typescript
-// Option 1: Update parameter
+// Required change
 { executablePath: "/usr/bin/python3" }
 
-// Option 2: Type assertion (temporary)
-{ pythonPath: "/usr/bin/python3" } as any
+// This will NO LONGER work:
+// { pythonPath: "/usr/bin/python3" }  // ❌ ERROR
 ```
 
 ### Issue 2: "Language 'node' not supported"
@@ -296,7 +295,7 @@ import { SessionManager } from 'mcp-debugger';
 // Test that existing Python debugging still works
 const session = await mcp.createDebugSession({
   language: 'python',
-  executablePath: '/usr/bin/python3'  // Or pythonPath for compatibility
+  executablePath: '/usr/bin/python3'  // MUST use executablePath
 });
 
 await mcp.startDebugging({
@@ -377,9 +376,9 @@ See the [Adapter Development Guide](./architecture/adapter-development-guide.md)
 The v0.10.0 migration is designed to be smooth for existing Python users while opening the door for multi-language support. Most code will continue to work with minimal changes, and the deprecation timeline gives you plenty of time to update.
 
 Key takeaways:
-- `pythonPath` → `executablePath` (but old name still works)
+- `pythonPath` → `executablePath` (old name no longer works - update required)
 - Python debugging functionality unchanged
 - New adapter pattern enables multi-language support
-- Deprecation warnings help you prepare for v1.0.0
+- Clean architecture without backward compatibility baggage
 
 Welcome to the future of multi-language debugging with mcp-debugger!

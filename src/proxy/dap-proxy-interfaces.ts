@@ -11,7 +11,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 export interface ProxyInitPayload {
   cmd: 'init';
   sessionId: string;
-  pythonPath: string;
+  executablePath: string;
   adapterHost: string;
   adapterPort: number;
   logDir: string;
@@ -150,10 +150,10 @@ export interface ILoggerFactory {
 // ===== Configuration Types =====
 
 /**
- * Configuration for spawning the debugpy adapter
+ * Configuration for spawning the debug adapter
  */
 export interface AdapterConfig {
-  pythonPath: string;
+  executablePath: string;
   host: string;
   port: number;
   logDir: string;

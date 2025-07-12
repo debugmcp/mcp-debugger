@@ -50,8 +50,7 @@ interface ToolArguments {
   sessionId?: string;
   language?: string;
   name?: string;
-  pythonPath?: string;  // Keep for backward compatibility during transition
-  executablePath?: string;  // New generic parameter
+  executablePath?: string;  // Language-agnostic executable path
   file?: string;
   line?: number;
   condition?: string;
@@ -279,9 +278,9 @@ export class DebugMcpServer {
    */
   private sanitizeRequest(args: Record<string, unknown>): Record<string, unknown> {
     const sanitized = { ...args };
-    // Remove absolute paths from pythonPath
-    if (sanitized.pythonPath && typeof sanitized.pythonPath === 'string' && path.isAbsolute(sanitized.pythonPath)) {
-      sanitized.pythonPath = '<absolute-path>';
+    // Remove absolute paths from executablePath
+    if (sanitized.executablePath && typeof sanitized.executablePath === 'string' && path.isAbsolute(sanitized.executablePath)) {
+      sanitized.executablePath = '<absolute-path>';
     }
     // Truncate long arrays
     if (sanitized.args && Array.isArray(sanitized.args) && sanitized.args.length > 5) {
@@ -392,7 +391,7 @@ export class DebugMcpServer {
               const sessionInfo = await this.createDebugSession({
                 language: (args.language || 'python') as DebugLanguage,
                 name: args.name,
-                executablePath: args.executablePath || args.pythonPath  // Support both for now
+                executablePath: args.executablePath
               });
               
               // Log session creation
@@ -400,7 +399,7 @@ export class DebugMcpServer {
                 sessionId: sessionInfo.id,
                 sessionName: sessionInfo.name,
                 language: sessionInfo.language,
-                pythonPath: args.pythonPath,
+                executablePath: args.executablePath,
                 timestamp: Date.now()
               });
               

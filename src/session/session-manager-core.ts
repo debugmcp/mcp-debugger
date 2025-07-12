@@ -106,13 +106,11 @@ export class SessionManagerCore {
     this.logger.info(`[SessionManager] Initialized. Session logs will be stored in: ${this.logDirBase}`);
   }
 
-  async createSession(params: { language: DebugLanguage; name?: string; pythonPath?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
-    // Support both pythonPath and executablePath for backward compatibility
+  async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
     const createParams = {
       language: params.language,
       name: params.name,
-      pythonPath: params.pythonPath || params.executablePath,
-      executablePath: params.executablePath || params.pythonPath
+      executablePath: params.executablePath
     };
     const sessionInfo = this.sessionStore.createSession(createParams);
     this.logger.info(`[SessionManager] Created new session: ${sessionInfo.name} (ID: ${sessionInfo.id}), state: ${sessionInfo.state}`);
