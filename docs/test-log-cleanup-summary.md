@@ -54,4 +54,4 @@ import { findPythonExecutable } from '../../src/utils/python-utils';
 import { createMockLogger } from '../utils/test-dependencies';
 
 const logger = createMockLogger(); // Mock logger that doesn't output
-const pythonPath = await findPythonExecutable(undefined, logger);
+const executablePath = await findPythonExecutable(undefined, logger);

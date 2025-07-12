@@ -210,7 +210,7 @@ sequenceDiagram
 1. Create IDebugAdapter interface ✅
 2. Create IAdapterRegistry interface
 3. Create mock adapter for testing
-4. Update types to use `executablePath` instead of `pythonPath`
+4. ✅ Update types to use `executablePath` instead of `pythonPath` (COMPLETED)
 
 ### Phase 2: Mock Implementation
 1. Implement MockDebugAdapter
@@ -299,36 +299,20 @@ sequenceDiagram
 
 ## MCP Tool Changes
 
-### Current Tool Signature
+### Current Tool Signature (As of 2025-07-12)
 ```json
 {
   "name": "create_debug_session",
   "inputSchema": {
     "properties": {
       "language": { "enum": ["python"] },
-      "pythonPath": { "type": "string" }
+      "executablePath": { "type": "string" }
     }
   }
 }
 ```
 
-### New Tool Signature
-```json
-{
-  "name": "create_debug_session",
-  "inputSchema": {
-    "properties": {
-      "language": { "enum": ["python", "node", "go"] },
-      "executablePath": { "type": "string" },
-      "pythonPath": { 
-        "type": "string",
-        "deprecated": true,
-        "description": "Deprecated. Use executablePath instead."
-      }
-    }
-  }
-}
-```
+**Note**: The `pythonPath` parameter has been completely removed. There is no backward compatibility - all clients must use `executablePath`.
 
 ### Session Creation Flow
 

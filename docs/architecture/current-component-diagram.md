@@ -48,12 +48,12 @@ sequenceDiagram
     
     C->>S: create_debug_session(language='python')
     S->>S: Validate language === 'python' ❌
-    S->>SM: createSession({language, pythonPath})
+    S->>SM: createSession({language, executablePath})
     SM->>SS: createSession()
-    SS->>SS: Set default pythonPath
+    SS->>SS: Set default executablePath
     SM->>PU: findPythonExecutable() ❌
     PU-->>SM: Python path
-    SM->>SM: Store Python path ❌
+    SM->>SM: Store executable path ❌
     SM-->>S: SessionInfo
     S-->>C: {sessionId, success}
     
@@ -146,14 +146,14 @@ graph LR
 ```
 1. Client Request
    └─> language: 'python' (hardcoded enum value)
-   └─> pythonPath?: string (optional)
+   └─> executablePath?: string (optional)
 
 2. Server Validation
    └─> if (language !== 'python') throw ❌
 
 3. SessionManager Processing
-   └─> Resolve Python path (platform-specific) ❌
-   └─> Store in session.pythonPath ❌
+   └─> Resolve executable path (platform-specific) ❌
+   └─> Store in session.executablePath ❌
 
 4. SessionStore
    └─> Default to env.PYTHON_PATH or 'python'/'python3' ❌
@@ -162,7 +162,7 @@ graph LR
 ### Configuration Data Flow
 ```
 ProxyConfig {
-  pythonPath: string      ❌ Language-specific field
+  executablePath: string  ❌ Language-specific field
   adapterHost: string
   adapterPort: number
   scriptPath: string

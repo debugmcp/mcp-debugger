@@ -38,8 +38,8 @@ LOW (Peripheral):
 - **Lines 114-196**: Python path resolution logic
   ```typescript
   // Line 166-168: Hardcoded Python detection
-  } else if (['python', 'python3', 'py'].includes(pythonPathFromSession.toLowerCase())) {
-    resolvedPythonPath = await findPythonExecutable(undefined, this.logger);
+  } else if (['python', 'python3', 'py'].includes(executablePathFromSession.toLowerCase())) {
+    resolvedExecutablePath = await findPythonExecutable(undefined, this.logger);
   ```
 - **Line 183**: Python-specific comment about container mode
 - **Line 834**: Error messages mentioning Python/debugpy
@@ -93,15 +93,15 @@ Entire file (167 lines) is Python-specific:
 
 **src/session/models.ts**
 - Line 18: `DebugLanguage.PYTHON = 'python'` (only value!)
-- Lines 48-49: `pythonPath?: string` in SessionConfig
+- Lines 48-49: `executablePath?: string` in SessionConfig
 
 **src/proxy/proxy-manager.ts**
-- Lines 35-36: `pythonPath: string` in ProxyConfig
+- Lines 35-36: `executablePath: string` in ProxyConfig
 
 **src/session/session-store.ts**
 - Line 3: `DEFAULT_PYTHON` platform-specific constant
-- Line 46: `pythonPath?: string` in CreateSessionParams
-- Line 64: Default Python path logic
+- Line 46: `executablePath?: string` in CreateSessionParams
+- Line 64: Default executable path logic
 
 ### 2. Interface Definitions
 
@@ -109,7 +109,7 @@ Entire file (167 lines) is Python-specific:
 - Lines 21-28: `IDebugTargetLauncher.launchPythonDebugTarget()`
 
 **src/proxy/dap-proxy-interfaces.ts**
-- `pythonPath` in multiple interfaces
+- `executablePath` in multiple interfaces
 
 ## Peripheral Components
 
@@ -186,8 +186,8 @@ Entire file (167 lines) is Python-specific:
 ## Anti-Patterns to Avoid in Refactoring
 
 1. **Language-Specific Parameters in Core Interfaces**
-   - Current: `pythonPath` in SessionConfig
-   - Better: `executablePath` or language-specific config object
+   - Current: `executablePath` in SessionConfig (now language-agnostic)
+   - ✅ Already improved from previous `pythonPath`
 
 2. **Hardcoded Language Checks**
    - Current: `if (language !== 'python')`

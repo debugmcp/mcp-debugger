@@ -1,5 +1,7 @@
 # Task 2.2: SessionManager Adapter Pattern Refactoring - Summary
 
+> **⚠️ SUPERSEDED**: This document describes a temporary backward compatibility approach that has been completely removed as of 2025-07-12. The `pythonPath` parameter has been permanently replaced with `executablePath` throughout the codebase with no backward compatibility. See the migration guide for current information.
+
 ## 🎯 Objective Achieved
 Successfully refactored SessionManager from Python-specific implementation to language-agnostic by integrating the adapter pattern infrastructure created in Task 2.1.
 

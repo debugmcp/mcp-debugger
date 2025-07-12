@@ -65,7 +65,7 @@ This guide provides solutions for common issues you might encounter when setting
    - Unix: `export PYTHON_PATH=/path/to/python`
 
 3. Specify Python path directly in the debug session:
-   - When creating a debug session through Claude, specify the pythonPath
+   - When creating a debug session through Claude, specify the executablePath
 
 ### debugpy Not Found or Installation Fails
 

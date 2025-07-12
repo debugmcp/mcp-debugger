@@ -178,7 +178,7 @@ Logged when a new debug session is created.
   "sessionId": "abc-123-def-456",
   "sessionName": "My Debug Session",
   "language": "python",
-  "pythonPath": "/usr/bin/python3",
+  "executablePath": "/usr/bin/python3",
   "timestamp": 1736180090123
 }
 ```
@@ -265,7 +265,7 @@ To prevent excessively large log entries:
    ```
 
 3. **Request/Response objects**: Exclude sensitive fields
-   - Remove `pythonPath` absolute paths
+   - Remove `executablePath` absolute paths
    - Exclude environment variables
    - Sanitize file paths to relative when possible
 

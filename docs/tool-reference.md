@@ -35,7 +35,7 @@ Creates a new debugging session.
 **Parameters:**
 - `language` (string, required): The programming language to debug. Currently only `"python"` is supported.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"Debug-{timestamp}"`.
-- `pythonPath` (string, optional): Path to Python interpreter.
+- `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 - `host` (string, optional): Host for remote debugging *(not implemented)*.
 - `port` (number, optional): Port for remote debugging *(not implemented)*.
 

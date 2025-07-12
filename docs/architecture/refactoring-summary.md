@@ -28,9 +28,9 @@ The mcp-debugger underwent a major architectural refactoring over 27+ tasks, tra
 - **Goal**: Update MCP tool definitions for multi-language support
 - **Changes**:
   - Added `executablePath` parameter (replacing `pythonPath`)
-  - Maintained backward compatibility
+  - ~~Maintained backward compatibility~~ **UPDATE (2025-07-12)**: Backward compatibility removed
   - Updated tool schemas and documentation
-- **Result**: Language-agnostic API with migration path
+- **Result**: Language-agnostic API ~~with migration path~~
 
 ### Phase 3: Adapter Implementation (Tasks 3.1-6)
 
@@ -188,9 +188,9 @@ class SessionManager {
 ## Migration Impact
 
 ### Backward Compatibility
-- `pythonPath` parameter still works (deprecated)
+- ~~`pythonPath` parameter still works (deprecated)~~ **UPDATE (2025-07-12)**: Removed, use `executablePath`
 - All Python functionality preserved
-- Smooth migration path to v1.0
+- ~~Smooth migration path to v1.0~~ **Breaking change**: Direct migration required
 
 ### New Capabilities
 - Support for multiple languages
@@ -254,7 +254,7 @@ Key achievements:
 - ✅ 0 production ESLint errors
 - ✅ 12K+ lines of code removed
 - ✅ Complete type safety
-- ✅ Backward compatibility maintained
+- ✅ ~~Backward compatibility maintained~~ **UPDATE**: Breaking change implemented
 - ✅ Ready for new language adapters
 
 The refactoring sets a solid foundation for the future of multi-language debugging with mcp-debugger.

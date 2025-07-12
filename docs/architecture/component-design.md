@@ -35,7 +35,7 @@ SessionManager is the central orchestrator for all debug sessions. It implements
 ```typescript
 class SessionManager {
   // Session lifecycle
-  async createSession(params: { language: DebugLanguage; name?: string; pythonPath?: string; }): Promise<DebugSessionInfo>
+  async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo>
   async startDebugging(sessionId: string, scriptPath: string, scriptArgs?: string[], dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, dryRunSpawn?: boolean): Promise<DebugResult>
   async closeSession(sessionId: string): Promise<boolean>
   async closeAllSessions(): Promise<void>
