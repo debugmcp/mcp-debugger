@@ -9,7 +9,7 @@ WORKDIR /workspace
 
 # Copy package files and install ALL dependencies (including dev)
 COPY package.json package-lock.json ./
-RUN npm ci --silent
+RUN npm ci --silent --ignore-scripts
 
 # Copy source files
 COPY tsconfig.json ./
