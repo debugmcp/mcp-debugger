@@ -46,13 +46,11 @@ jobs:
     - name: Run linting
       run: npm run lint
     
-    # Use test:ci which skips Docker tests
+    # Use test:ci-no-python which excludes Python and e2e tests
     - name: Run tests with coverage
-      run: npm run test:ci
+      run: npm run test:ci-no-python
       env:
         CI: true
-        SKIP_DOCKER_TESTS: true
-        SKIP_PYTHON_TESTS: true
     
     - name: Upload coverage reports
       uses: actions/upload-artifact@v4

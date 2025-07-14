@@ -25,6 +25,7 @@
     "test:no-python": "cross-env SKIP_PYTHON_TESTS=true npm test",
     "test:no-docker": "cross-env SKIP_DOCKER_TESTS=true npm test",
     "test:ci": "npm run test:no-docker",
+    "test:ci-no-python": "npm run build && vitest run --exclude '**/e2e/**' --exclude '**/adapters/python/**'",
     "test:core": "vitest run tests/core",
     "test:python": "vitest run tests/adapters/python",
     "test:e2e:smoke": "vitest run tests/e2e/mcp-server-smoke*.test.ts",
