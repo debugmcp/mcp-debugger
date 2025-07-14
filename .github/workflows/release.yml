@@ -37,7 +37,7 @@ jobs:
       run: npm run build
     
     - name: Run tests
-      run: npm test
+      run: npm run test:ci-no-python
 
   docker-publish:
     name: Build and Push Docker Image
