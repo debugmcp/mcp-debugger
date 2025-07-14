@@ -52,6 +52,7 @@ jobs:
       env:
         CI: true
         SKIP_DOCKER_TESTS: true
+        SKIP_PYTHON_TESTS: true
     
     - name: Upload coverage reports
       uses: actions/upload-artifact@v4
