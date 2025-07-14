@@ -13,7 +13,7 @@ This document lists all the GitHub Secrets that need to be configured for the CI
 **Purpose:** Used by the release workflow to push Docker images to Docker Hub.
 
 **Setup:**
-1. Go to https://github.com/debugmcpdev/mcp-debugger/settings/secrets/actions
+1. Go to https://github.com/debugmcp/mcp-debugger/settings/secrets/actions
 2. Click "New repository secret"
 3. Add `DOCKER_USERNAME` with the Docker Hub username (debugmcp)
 4. Add `DOCKER_PASSWORD` with the Docker Hub password or access token
@@ -61,7 +61,7 @@ This document lists all the GitHub Secrets that need to be configured for the CI
 **Purpose:** Upload test coverage reports to Codecov for coverage badges.
 
 **Setup:**
-1. Add the repository at https://codecov.io/gh/debugmcpdev/mcp-debugger
+1. Add the repository at https://codecov.io/gh/debugmcp/mcp-debugger
 2. Copy the upload token
 3. Add as `CODECOV_TOKEN` in GitHub Secrets
 
@@ -73,13 +73,13 @@ This document lists all the GitHub Secrets that need to be configured for the CI
 
 After adding secrets:
 1. The CI workflow will run automatically on push (currently failing due to missing secrets)
-2. Go to Actions tab: https://github.com/debugmcpdev/mcp-debugger/actions
+2. Go to Actions tab: https://github.com/debugmcp/mcp-debugger/actions
 3. Re-run the failed workflow to verify it passes
 4. The release workflow will trigger when pushing tags (e.g., v0.9.0)
 
 ## Current Status
 
-- ✅ Repository created: https://github.com/debugmcpdev/mcp-debugger
+- ✅ Repository created: https://github.com/debugmcp/mcp-debugger
 - ✅ Code pushed to main branch
 - ✅ Tag v0.9.0-beta pushed
 - ✅ Secrets configured (Docker, PyPI, Codecov)

@@ -2,30 +2,30 @@
 # This file defines code ownership for automatic PR review assignments
 
 # Global owners - will be requested for review on all changes
-* @debugmcpdev
+* @debugmcp
 
 # Python-specific files
-*.py @debugmcpdev
-/mcp_debugger_launcher/ @debugmcpdev
-/examples/python/ @debugmcpdev
-/examples/python_simple_swap/ @debugmcpdev
+*.py @debugmcp
+/mcp_debugger_launcher/ @debugmcp
+/examples/python/ @debugmcp
+/examples/python_simple_swap/ @debugmcp
 
 # Core server files
-/src/ @debugmcpdev
+/src/ @debugmcp
 
 # Documentation
-/docs/ @debugmcpdev
-*.md @debugmcpdev
+/docs/ @debugmcp
+*.md @debugmcp
 
 # CI/CD and configuration
-/.github/ @debugmcpdev
-Dockerfile @debugmcpdev
-docker-*.sh @debugmcpdev
-docker-*.cmd @debugmcpdev
-package.json @debugmcpdev
-tsconfig.json @debugmcpdev
-vitest.config.ts @debugmcpdev
-eslint.config.js @debugmcpdev
+/.github/ @debugmcp
+Dockerfile @debugmcp
+docker-*.sh @debugmcp
+docker-*.cmd @debugmcp
+package.json @debugmcp
+tsconfig.json @debugmcp
+vitest.config.ts @debugmcp
+eslint.config.js @debugmcp
 
 # Test files
-/tests/ @debugmcpdev
+/tests/ @debugmcp

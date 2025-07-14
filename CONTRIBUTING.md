@@ -263,7 +263,7 @@ could leave the session in an invalid state.
    - Add screenshots/demos for UI changes
 
 3. **Review Process**:
-   - PRs require at least one review from @debugmcpdev
+   - PRs require at least one review from @debugmcp
    - Address all review comments
    - Keep discussions professional and constructive
    - Be patient - reviews may take a few days

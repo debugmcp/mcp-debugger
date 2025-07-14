@@ -10,6 +10,7 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
+    "prepare": "npm run build",
     "prebuild": "rimraf dist",
     "build": "tsc && npm run postbuild",
     "build:clean": "npm run clean && npm run build",
@@ -43,7 +44,6 @@
     "check:personal-paths": "node scripts/check-personal-paths.cjs",
     "check:all-personal-paths": "node scripts/check-all-personal-paths.cjs",
     "postbuild": "node scripts/copy-proxy-files.cjs",
-    "prepare": "husky",
     "clean": "rimraf dist",
     "act:check": "scripts\\act-runner.cmd --version",
     "act:lint": "scripts\\act-runner.cmd -j lint",
