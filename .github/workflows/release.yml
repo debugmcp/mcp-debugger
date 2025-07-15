@@ -183,7 +183,7 @@ jobs:
           
           **npm:**
           ```bash
-          npm install -g mcp-debugger@${{ steps.changelog.outputs.VERSION }}
+          npm install -g @debugmcp/mcp-debugger@${{ steps.changelog.outputs.VERSION }}
           ```
           
           **PyPI:**

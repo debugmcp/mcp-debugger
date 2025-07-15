@@ -1,5 +1,5 @@
 {
-  "name": "mcp-debugger",
+  "name": "@debugmcp/mcp-debugger",
   "version": "0.10.0",
   "description": "Run-time step-through debugging for LLM agents.",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
