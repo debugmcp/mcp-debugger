@@ -2,7 +2,6 @@
  * DAP connection management utilities
  */
 
-import path from 'path';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import {
   IDapClient,
@@ -189,29 +188,26 @@ export class DapConnectionManager {
     stopOnEntry: boolean = true,
     justMyCode: boolean = true
   ): Promise<void> {
-    // In container mode, ensure absolute path and use /workspace as cwd
-    let programPath = scriptPath;
-    let workingDir = path.dirname(scriptPath);
+    // DIAGNOSTIC: Log the incoming scriptPath
+    this.logger.info('[ConnectionManager] DIAGNOSTIC: Received scriptPath:', scriptPath);
+    this.logger.info('[ConnectionManager] DIAGNOSTIC: scriptPath type:', typeof scriptPath);
+    this.logger.info('[ConnectionManager] DIAGNOSTIC: scriptPath length:', scriptPath.length);
     
-    if (process.env.MCP_CONTAINER === 'true') {
-      // Convert relative path to absolute in container
-      if (!path.isAbsolute(scriptPath)) {
-        programPath = path.join('/workspace', scriptPath);
-      }
-      // Always use /workspace as cwd in container mode
-      workingDir = '/workspace';
-    }
-    
+    // Pass paths exactly as provided - no manipulation
     const launchArgs = {
-      program: programPath,
+      program: scriptPath,
       stopOnEntry,
       noDebug: false,
       args: scriptArgs,
-      cwd: workingDir,
+      // Don't set cwd - let debugpy use its inherited working directory
       console: "internalConsole",
       justMyCode,
     };
 
+    // DIAGNOSTIC: Log the launch args object before sending
+    this.logger.info('[ConnectionManager] DIAGNOSTIC: launchArgs object:', JSON.stringify(launchArgs, null, 2));
+    this.logger.info('[ConnectionManager] DIAGNOSTIC: launchArgs.program value:', launchArgs.program);
+    
     this.logger.info('[ConnectionManager] Sending "launch" request to adapter with args:', launchArgs);
     await client.sendRequest('launch', launchArgs);
     this.logger.info('[ConnectionManager] DAP "launch" request sent.');

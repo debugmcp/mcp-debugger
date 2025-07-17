@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-90%25+-brightgreen.svg)](./COVERAGE_SUMMARY.md)
-[![npm version](https://img.shields.io/npm/v/mcp-debugger.svg)](https://www.npmjs.com/package/mcp-debugger)
+[![npm version](https://img.shields.io/npm/v/@debugmcp/mcp-debugger.svg)](https://www.npmjs.com/package/@debugmcp/mcp-debugger)
 [![Docker Pulls](https://img.shields.io/docker/pulls/debugmcp/mcp-debugger.svg)](https://hub.docker.com/r/debugmcp/mcp-debugger)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -69,8 +69,13 @@ docker run -v $(pwd):/workspace debugmcp/mcp-debugger:0.10.0
 ### Using npm
 
 ```bash
-npm install -g mcp-debugger
+npm install -g @debugmcp/mcp-debugger
 mcp-debugger --help
+```
+
+Or use without installation via npx:
+```bash
+npx @debugmcp/mcp-debugger --help
 ```
 
 > 📸 **Screenshot**: *MCP Integration in Action*

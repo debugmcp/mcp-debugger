@@ -1,11 +1,14 @@
 # Stage 1: Build and bundle the TypeScript application
 FROM node:20-slim AS builder
 
+# Set application directory
 WORKDIR /app
 
 # Add container marker
 ENV MCP_CONTAINER=true
-WORKDIR /workspace
+
+# Cache busting argument - changes this will invalidate all subsequent layers
+ARG CACHEBUST=1
 
 # Copy package files and install ALL dependencies (including dev)
 COPY package.json package-lock.json ./
@@ -22,9 +25,18 @@ RUN npm run build --silent
 # Bundle the application into a single file
 RUN node scripts/bundle.js
 
+# Debug: List files after bundling to ensure bundle.cjs exists
+RUN echo "=== Listing dist directory after bundling ===" && \
+    ls -la dist/ && \
+    echo "=== Checking for bundle.cjs ===" && \
+    ls -la dist/bundle.cjs && \
+    echo "=== Bundle size ===" && \
+    du -h dist/bundle.cjs
+
 # Stage 2: Create minimal runtime image
 FROM python:3.11-alpine
 
+# Set application directory
 WORKDIR /app
 
 # Set container marker for runtime
@@ -35,8 +47,8 @@ RUN apk add --no-cache nodejs && \
     pip3 install --no-cache-dir debugpy>=1.8.14
 
 # Copy the bundled application, all dist files for proxy dependencies, and package.json
-COPY --from=builder /workspace/dist/ ./dist/
-COPY --from=builder /workspace/package.json ./package.json
+COPY --from=builder /app/dist/ /app/dist/
+COPY --from=builder /app/package.json /app/package.json
 
 # Expose ports
 EXPOSE 3000 5679

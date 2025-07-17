@@ -120,19 +120,8 @@ export class DapProxyWorker {
         this.logger
       );
 
-      // Validate script path exists
-      // In container mode, check relative to /workspace
-      let scriptToCheck = payload.scriptPath;
-      if (process.env.MCP_CONTAINER === 'true' && !path.isAbsolute(payload.scriptPath)) {
-        scriptToCheck = path.join('/workspace', payload.scriptPath);
-      }
-      
-      const scriptExists = await this.dependencies.fileSystem.pathExists(scriptToCheck);
-      if (!scriptExists) {
-        throw new Error(`Script path not found: ${payload.scriptPath}`);
-      }
-
-      this.logger.info(`[Worker] Script path validated: ${payload.scriptPath}`);
+      // No path validation - let debugpy handle it
+      this.logger.info(`[Worker] Script path to debug: ${payload.scriptPath}`);
 
       // Handle dry run
       if (payload.dryRunSpawn) {
@@ -144,7 +133,12 @@ export class DapProxyWorker {
       await this.startDebugpyAdapterAndConnect(payload);
     } catch (error) {
       this.state = ProxyState.UNINITIALIZED;
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger?.error(`[Worker] Critical initialization error: ${message}`, error);
+      // For any initialization error, ensure we shut down
+      await this.shutdown();
+      // Exit the process to trigger the 'exit' event in ProxyManager
+      process.exit(1);
     }
   }
 
@@ -265,6 +259,12 @@ export class DapProxyWorker {
       await this.connectionManager!.initializeSession(this.dapClient, payload.sessionId);
 
       // Send launch request
+      // DIAGNOSTIC: Log the scriptPath before sending to connection manager
+      this.logger!.info('[Worker] DIAGNOSTIC: About to send launch request with scriptPath:', payload.scriptPath);
+      this.logger!.info('[Worker] DIAGNOSTIC: scriptPath type:', typeof payload.scriptPath);
+      this.logger!.info('[Worker] DIAGNOSTIC: scriptPath length:', payload.scriptPath.length);
+      this.logger!.info('[Worker] DIAGNOSTIC: Full payload object:', JSON.stringify(payload, null, 2));
+      
       await this.connectionManager!.sendLaunchRequest(
         this.dapClient,
         payload.scriptPath,

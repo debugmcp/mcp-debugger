@@ -162,12 +162,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Find proxy bootstrap script
     const proxyScriptPath = await this.findProxyScript();
     
-    // Prepare environment
-    // In container environments, use /app as the working directory to avoid double slash issues
-    const projectRootForEnv = process.env.MCP_CONTAINER === 'true' 
-      ? '/app' 
-      : path.resolve(fileURLToPath(import.meta.url), '../../../');
-    const env = { ...process.env, MCP_SERVER_CWD: projectRootForEnv };
+    // Use environment as-is without any path manipulation
+    // Filter out undefined values to satisfy TypeScript
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
 
     this.logger.info(`[ProxyManager] Spawning proxy for session ${config.sessionId}. Path: ${proxyScriptPath}`);
     

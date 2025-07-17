@@ -90,10 +90,10 @@ describe('MCP Server E2E Container Smoke Test', () => {
       activeContainerName = generateContainerName('mcp-fibonacci-test');
       console.log(`[${Date.now() - startTime}ms] Using container name: ${activeContainerName}`);
       
-      // Mount examples directory
+      // Mount examples directory at a safe location
       const examplesMount = getVolumeMount(
         path.join(projectRoot, 'examples'),
-        '/workspace/examples'
+        '/workspace/host-examples'
       );
       console.log(`[${Date.now() - startTime}ms] Volume mount: ${examplesMount}`);
       
@@ -117,7 +117,7 @@ describe('MCP Server E2E Container Smoke Test', () => {
 
       // 3. Execute debug sequence with relative path (container mode)
       console.log(`[${Date.now() - startTime}ms] Starting debug sequence...`);
-      const relativeFibonacciPath = 'examples/python/fibonacci.py';
+      const relativeFibonacciPath = 'host-examples/python/fibonacci.py';
       const result = await executeDebugSequence(
         mcpSdkClient,
         relativeFibonacciPath,
@@ -163,9 +163,9 @@ describe('MCP Server E2E Container Smoke Test', () => {
     }
   }, { timeout: TEST_TIMEOUT });
 
-  // Test that absolute paths are rejected in container mode
-  it('should reject absolute paths in container mode', async function() {
-    console.log(`\n[Container Smoke Test] TEST START: absolute path rejection test at ${new Date().toISOString()}`);
+  // Test path handling in container mode
+  it('should handle paths naturally in container mode', async function() {
+    console.log(`\n[Container Smoke Test] TEST START: path handling test at ${new Date().toISOString()}`);
     
     // Check Docker availability first
     const dockerAvailable = await isDockerAvailable();
@@ -203,8 +203,8 @@ print(f"x = {x}")
       activeContainerName = generateContainerName('mcp-path-test');
       console.log(`[${Date.now() - startTime}ms] Using container name: ${activeContainerName}`);
       
-      // Mount temp directory at /workspace (not /workspace/temp-test)
-      const tempMount = getVolumeMount(tempTestDir, '/workspace');
+      // Mount temp directory at /workspace/test-mount to avoid overwriting the app
+      const tempMount = getVolumeMount(tempTestDir, '/workspace/test-mount');
       console.log(`[${Date.now() - startTime}ms] Volume mount: ${tempMount}`);
       
       // Use docker run directly in StdioClientTransport
@@ -235,28 +235,10 @@ print(f"x = {x}")
       expect(createResponse.sessionId).toBeDefined();
       debugSessionId = createResponse.sessionId;
       
-      // 4. Set breakpoint using absolute host path (should be rejected)
-      console.log(`[${Date.now() - startTime}ms] Setting breakpoint with absolute host path (expecting rejection)...`);
-      try {
-        const breakpointCall = await mcpSdkClient.callTool({
-          name: 'set_breakpoint',
-          arguments: { 
-            sessionId: debugSessionId, 
-            file: testScriptPath,  // Absolute host path
-            line: 3 
-          }
-        });
-        const breakpointResponse = parseSdkToolResult(breakpointCall);
-        
-        // If we get here without an error, the test should fail
-        expect(breakpointResponse.success).toBe(false);
-        expect(breakpointResponse.error).toContain('Absolute paths are not supported in container mode');
-        console.log('[Container Smoke Test] Absolute path correctly rejected with error:', breakpointResponse.error);
-      } catch (error) {
-        // This is expected - absolute paths should cause an error
-        console.log('[Container Smoke Test] Absolute path rejected as expected:', error);
-        expect(error).toBeDefined();
-      }
+      // 4. With "hands-off" approach, we pass paths through - container handles them
+      console.log(`[${Date.now() - startTime}ms] Testing path handling with hands-off approach...`);
+      console.log('[Container Smoke Test] Note: We no longer pre-validate paths');
+      console.log('[Container Smoke Test] Paths are passed through and handled by the container/debugpy');
       
       // 5. Now test with a relative path (should work)
       console.log(`[${Date.now() - startTime}ms] Setting breakpoint with relative path...`);
@@ -264,7 +246,7 @@ print(f"x = {x}")
         name: 'set_breakpoint',
         arguments: { 
           sessionId: debugSessionId, 
-          file: 'test_container.py',  // Relative path
+          file: 'test-mount/test_container.py',  // Path relative to /workspace
           line: 3 
         }
       });
@@ -275,26 +257,26 @@ print(f"x = {x}")
       // 5.5. Log debug information about paths
       console.log('[Container Smoke Test] Container mount info:');
       console.log(`  - Host path: ${tempTestDir}`);
-      console.log(`  - Container path: /workspace`);
-      console.log(`  - Script relative path: test_container.py`);
-      console.log(`  - Expected container full path: /workspace/test_container.py`);
+      console.log(`  - Container path: /workspace/test-mount`);
+      console.log(`  - Script relative path: test-mount/test_container.py`);
+      console.log(`  - Expected container full path: /workspace/test-mount/test_container.py`);
       
       // 6. Start debugging with relative path
       console.log(`[${Date.now() - startTime}ms] Starting debugging with relative path...`);
       console.log('[Container Smoke Test] Test expectations:');
       console.log('  - Container mode is enabled (MCP_CONTAINER=true)');
       console.log(`  - Host temp directory: ${tempTestDir}`);
-      console.log('  - Container mount point: /workspace');
+      console.log('  - Container mount point: /workspace/test-mount');
       console.log('  - File created: test_container.py');
-      console.log('  - Using relative path: test_container.py');
+      console.log('  - Using relative path: test-mount/test_container.py');
       console.log('  - Expected behavior: Server should resolve relative path from /workspace');
-      console.log('  - Expected full path in container: /workspace/test_container.py');
+      console.log('  - Expected full path in container: /workspace/test-mount/test_container.py');
       
       const debugCall = await mcpSdkClient.callTool({
         name: 'start_debugging',
         arguments: {
           sessionId: debugSessionId,
-          scriptPath: 'test_container.py',  // Relative path
+          scriptPath: 'test-mount/test_container.py',  // Path relative to /workspace
           dapLaunchArgs: { stopOnEntry: false }
         }
       });

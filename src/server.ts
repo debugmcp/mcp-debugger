@@ -163,8 +163,13 @@ export class DebugMcpServer {
     dryRunSpawn?: boolean
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
     this.validateSession(sessionId);
-    // Pass path unchanged - let OS/containers/debug adapters handle it naturally
-    this.logger.info(`[DebugMcpServer.startDebugging] Using scriptPath as provided: ${scriptPath}`);
+    
+    // In container mode, prepend /workspace/ to the path
+    if (process.env.MCP_CONTAINER === 'true') {
+      scriptPath = `/workspace/${scriptPath}`;
+    }
+    
+    this.logger.info(`[DebugMcpServer.startDebugging] Using scriptPath: ${scriptPath}`);
     const result = await this.sessionManager.startDebugging(
       sessionId, 
       scriptPath, 
@@ -181,8 +186,13 @@ export class DebugMcpServer {
 
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
-    // Pass path unchanged - let OS/containers/debug adapters handle it naturally
-    this.logger.info(`[DebugMcpServer.setBreakpoint] Using file path as provided: ${file}`);
+    
+    // In container mode, prepend /workspace/ to the path
+    if (process.env.MCP_CONTAINER === 'true') {
+      file = `/workspace/${file}`;
+    }
+    
+    this.logger.info(`[DebugMcpServer.setBreakpoint] Using file path: ${file}`);
     return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
   }
 
@@ -736,7 +746,13 @@ export class DebugMcpServer {
 
   private async handleGetSourceContext(args: { sessionId: string, file: string, line: number, linesContext?: number }): Promise<ServerResult> {
     try {
-      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${args.file}, line: ${args.line}`);
+      // In container mode, prepend /workspace/ to the path
+      let file = args.file;
+      if (process.env.MCP_CONTAINER === 'true') {
+        file = `/workspace/${file}`;
+      }
+      
+      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${file}, line: ${args.line}`);
       throw new McpError(McpErrorCode.InternalError, "Get source context not yet implemented with proxy.");
     } catch (error) {
       this.logger.error('Failed to get source context', { error });

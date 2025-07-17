@@ -279,7 +279,7 @@ export async function dockerImageExists(imageName: string): Promise<boolean> {
 /**
  * Build Docker image if needed
  */
-export async function ensureDockerImage(imageName: string, forceBuild: boolean = true): Promise<void> {
+export async function ensureDockerImage(imageName: string, forceBuild: boolean = false): Promise<void> {
   const exists = await dockerImageExists(imageName);
   
   if (exists && !forceBuild) {
@@ -289,7 +289,7 @@ export async function ensureDockerImage(imageName: string, forceBuild: boolean =
   
   console.log(`[Smoke Test] Building Docker image ${imageName}...`);
   const buildResult = await execWithTimeout(
-    `docker build --no-cache -t ${imageName} .`,
+    `docker build -t ${imageName} .`,
     120000 // 2 minutes timeout for build
   );
   

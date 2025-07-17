@@ -78,7 +78,10 @@ async function bundle() {
       minify: false, // Keep readable for debugging
       sourcemap: 'inline',
       metafile: true,
-      logLevel: 'info'
+      logLevel: 'info',
+      // Ensure we don't mangle any strings or identifiers
+      keepNames: true,
+      charset: 'utf8'
     });
 
     // Analyze proxy bundle

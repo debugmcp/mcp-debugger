@@ -9,6 +9,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { 
   waitForSessionState, 
+  waitForAnyState,
   EventRecorder,
   PYTHON_TIMEOUT
 } from './test-event-utils.js';
@@ -196,6 +197,7 @@ describe('Error Scenarios E2E', () => {
     
     it('should handle invalid script path for debugging', async () => {
       console.log('\n[E2E Error Scenarios] Testing invalid script path...');
+      const eventRecorder = new EventRecorder();
       
       // Create a valid session
       const createResponse = await mcpClient!.callTool({
@@ -216,9 +218,28 @@ describe('Error Scenarios E2E', () => {
       });
       const debugResult = parseSdkToolResult(debugResponse);
       
-      expect(debugResult.success).toBe(false);
-      console.log('[E2E Error Scenarios] Correctly rejected invalid script path');
-    });
+      // With "hands-off" approach, the start_debugging call might succeed initially
+      // but the session should transition to error state when debugpy can't find the file
+      if (debugResult.success) {
+        console.log('[E2E Error Scenarios] start_debugging returned success, waiting for error state...');
+        
+        // Wait for the session to transition to error state OR stopped state (terminated)
+        const result = await waitForAnyState(mcpClient!, sessionId, ['error', 'stopped'], {
+          timeout: 20000,  // Increased timeout for Python error reporting
+          eventRecorder
+        });
+        
+        expect(result.success).toBe(true);
+        console.log(`[E2E Error Scenarios] Session transitioned to '${result.state}' state due to invalid script path`);
+        
+        // Either error or stopped state is acceptable
+        expect(['error', 'stopped']).toContain(result.state);
+      } else {
+        // If it failed immediately, that's also acceptable
+        console.log('[E2E Error Scenarios] start_debugging immediately rejected invalid script path:', debugResult.message);
+        expect(debugResult.message).toBeDefined();
+      }
+    }, 60000); // Increase timeout further as Python operations can be slow
   });
 
   describe('Debug Operation Errors', () => {

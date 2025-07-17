@@ -14,7 +14,6 @@ import {
   IProxyProcess
 } from '../interfaces/process-interfaces.js';
 import { IProcessManager, IChildProcess, INetworkManager } from '../interfaces/external-dependencies.js';
-import path from 'path';
 
 /**
  * Adapter to wrap IChildProcess as IProcess
@@ -151,17 +150,10 @@ export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
       ...args
     ];
     
-    // In container mode, use /workspace as the working directory
-    // (files are mounted there, not in /app where the container starts)
-    // In normal mode, use the script's directory for backwards compatibility
-    const cwd = process.env.MCP_CONTAINER === 'true' 
-      ? '/workspace' 
-      : path.dirname(scriptPath);
-    
+    // No cwd manipulation - let the process inherit the current working directory
     const debugProcess = this.processLauncher.launch(
       pythonPath,
-      debugArgs,
-      { cwd }
+      debugArgs
     );
     
     return {
@@ -410,7 +402,8 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     
     const options: IProcessOptions = {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions IPC compatibility
-      env: processEnv
+      env: processEnv,
+      cwd: process.cwd() // Ensure proxy runs from the MCP server's working directory
     };
     
     const launchedProcess = this.processLauncher.launch(

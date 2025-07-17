@@ -60,21 +60,23 @@ export class GenericAdapterManager {
     const fullCommand = `${command} ${args.join(' ')}`;
     this.logger.info(`[AdapterManager] Spawning adapter: ${fullCommand}`);
     
-    // Determine working directory
-    const preferredCwd = cwd || process.env.MCP_SERVER_CWD || process.cwd();
-    
-    // Spawn options
-    const spawnOptions = {
+    // Spawn options - no cwd manipulation, inherit from parent
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Need dynamic cwd property
+    const spawnOptions: any = {
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'] as ('ignore' | 'pipe' | 'inherit' | 'ipc' | number)[],
-      cwd: preferredCwd,
       env: env || process.env,
       detached: true
     };
 
+    // Only set cwd if explicitly provided
+    if (cwd) {
+      spawnOptions.cwd = cwd;
+    }
+
     this.logger.info('[AdapterManager] Spawn configuration:', {
       command: command,
       args: args,
-      cwd: spawnOptions.cwd,
+      cwd: cwd || 'inherited',
       envVars: Object.keys(spawnOptions.env || {}).length
     });
 

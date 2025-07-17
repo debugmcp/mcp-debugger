@@ -160,7 +160,6 @@ describe('DebugpyAdapterManager', () => {
         ['-m', 'debugpy.adapter', '--host', 'localhost', '--port', '5678', '--log-dir', '/var/log/debugpy'],
         expect.objectContaining({
           stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-          cwd: expect.any(String),
           env: process.env,
           detached: true
         })
@@ -171,10 +170,9 @@ describe('DebugpyAdapterManager', () => {
       });
     });
 
-    it('should spawn with custom cwd and env', async () => {
+    it('should spawn with custom env', async () => {
       const customConfig = {
         ...defaultConfig,
-        cwd: '/custom/working/dir',
         env: { ...process.env, CUSTOM_VAR: 'value' }
       };
 
@@ -184,22 +182,7 @@ describe('DebugpyAdapterManager', () => {
         expect.any(String),
         expect.any(Array),
         expect.objectContaining({
-          cwd: '/custom/working/dir',
           env: expect.objectContaining({ CUSTOM_VAR: 'value' })
-        })
-      );
-    });
-
-    it('should use MCP_SERVER_CWD environment variable if set', async () => {
-      process.env.MCP_SERVER_CWD = '/mcp/custom/path';
-
-      await manager.spawnDebugpy(defaultConfig);
-
-      expect(mockProcessSpawner.spawn).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(Array),
-        expect.objectContaining({
-          cwd: '/mcp/custom/path'
         })
       );
     });

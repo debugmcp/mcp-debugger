@@ -155,31 +155,8 @@ describe('DapProxyWorker', () => {
       );
     });
 
-    // Test removed: Path validation is now handled by PathTranslator at the server level
-    // The proxy worker only validates that the path exists, not whether it's absolute
-
-    it('should validate script path exists', async () => {
-      mockDependencies.fileSystem.pathExists = vi.fn().mockResolvedValue(false);
-
-      const initPayload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        executablePath: '/usr/bin/python3',
-        adapterHost: 'localhost',
-        adapterPort: 5678,
-        logDir: '/tmp/logs',
-        scriptPath: '/home/user/nonexistent.py'
-      };
-
-      await worker.handleCommand(initPayload);
-
-      expect(messageSendSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'error',
-          message: expect.stringContaining('Script path not found')
-        })
-      );
-    });
+    // Test removed: Path validation is removed as part of "hands-off" approach
+    // We let debugpy handle path validation and provide natural error messages
 
     it('should handle dry run mode', async () => {
       const initPayload: ProxyInitPayload = {

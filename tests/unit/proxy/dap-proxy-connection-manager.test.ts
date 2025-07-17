@@ -145,8 +145,8 @@ describe('DapConnectionManager', () => {
     });
 
     it('should handle temporary error events during connection', async () => {
-      let tempErrorHandler: Function | undefined;
-      mockDapClient.on.mockImplementation((event: string, handler: Function) => {
+      let tempErrorHandler: ((error: Error) => void) | undefined;
+      mockDapClient.on.mockImplementation((event: string, handler: (error: Error) => void) => {
         if (event === 'error') {
           tempErrorHandler = handler;
         }
@@ -439,7 +439,6 @@ describe('DapConnectionManager', () => {
         stopOnEntry: true,
         noDebug: false,
         args: [],
-        cwd: '/path/to',
         console: 'internalConsole',
         justMyCode: true
       });
@@ -461,7 +460,6 @@ describe('DapConnectionManager', () => {
         stopOnEntry: false,
         noDebug: false,
         args: ['--arg1', 'value1'],
-        cwd: '/path/to',
         console: 'internalConsole',
         justMyCode: false
       });

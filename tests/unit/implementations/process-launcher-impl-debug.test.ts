@@ -103,7 +103,7 @@ describe('DebugTargetLauncherImpl', () => {
           scriptPath,
           '--arg1', 'value1'
         ],
-        { cwd: '/path/to' }
+        undefined
       );
       
       expect(target.debugPort).toBe(5678);
@@ -132,7 +132,7 @@ describe('DebugTargetLauncherImpl', () => {
           '--wait-for-client',
           scriptPath
         ],
-        { cwd: '/home/user' }
+        undefined
       );
       
       expect(target.debugPort).toBe(9999);
@@ -152,7 +152,7 @@ describe('DebugTargetLauncherImpl', () => {
       expect(processManager.spawn).toHaveBeenCalledWith(
         customPython,
         expect.arrayContaining(['-m', 'debugpy']),
-        expect.any(Object)
+        undefined
       );
     });
 
@@ -169,7 +169,7 @@ describe('DebugTargetLauncherImpl', () => {
       expect(processManager.spawn).toHaveBeenCalledWith(
         'python',
         expect.any(Array),
-        { cwd: 'C:\\Users\\test' }
+        undefined
       );
     });
 
@@ -230,7 +230,7 @@ describe('DebugTargetLauncherImpl', () => {
           '--config', 'config.json',
           '--debug'
         ],
-        { cwd: '/workspace' }
+        undefined
       );
     });
   });
@@ -372,7 +372,7 @@ describe('DebugTargetLauncherImpl', () => {
       expect(processManager.spawn).toHaveBeenCalledWith(
         'python',
         expect.any(Array),
-        { cwd: '.' } // path.dirname('script.py') returns '.'
+        undefined
       );
     });
 
@@ -394,7 +394,7 @@ describe('DebugTargetLauncherImpl', () => {
           '/path with spaces/my script.py',
           '--arg with space'
         ],
-        { cwd: '/path with spaces' }
+        undefined
       );
     });
   });
