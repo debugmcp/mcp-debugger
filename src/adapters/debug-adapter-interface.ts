@@ -115,18 +115,6 @@ export interface IDebugAdapter extends EventEmitter {
    */
   getDefaultLaunchConfig(): Partial<GenericLaunchConfig>;
   
-  // ===== Path Translation =====
-  
-  /**
-   * Translate script path for language-specific requirements
-   */
-  translateScriptPath(scriptPath: string, context: PathContext): string;
-  
-  /**
-   * Translate breakpoint file path for language-specific requirements
-   */
-  translateBreakpointPath(filePath: string, context: PathContext): string;
-  
   // ===== DAP Protocol Operations =====
   
   /**
@@ -293,14 +281,6 @@ export interface LanguageSpecificLaunchConfig extends GenericLaunchConfig {
   [key: string]: unknown;
 }
 
-/**
- * Path translation context
- */
-export interface PathContext {
-  isContainer: boolean;
-  workspaceRoot: string;
-  platform: NodeJS.Platform;
-}
 
 /**
  * Debug features enumeration (from DAP spec)

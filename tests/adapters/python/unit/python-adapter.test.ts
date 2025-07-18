@@ -212,57 +212,6 @@ describe('PythonDebugAdapter', { tag: '@requires-python' }, () => {
     });
   });
 
-  describe('path translation', () => {
-    it('should handle module execution paths', () => {
-      const context = {
-        isContainer: false,
-        workspaceRoot: '/workspace',
-        platform: 'linux' as const
-      };
-      
-      const result = adapter.translateScriptPath('-m mypackage.module', context);
-      expect(result).toBe('-m mypackage.module');
-    });
-
-    it('should resolve relative Python file paths', () => {
-      const context = {
-        isContainer: false,
-        workspaceRoot: process.platform === 'win32' ? 'C:\\workspace' : '/workspace',
-        platform: process.platform as 'win32' | 'darwin' | 'linux'
-      };
-      
-      const result = adapter.translateScriptPath('src/main.py', context);
-      
-      // On Windows, path.resolve returns Windows-style paths
-      if (process.platform === 'win32') {
-        expect(result).toBe('C:\\workspace\\src\\main.py');
-      } else {
-        expect(result).toBe('/workspace/src/main.py');
-      }
-    });
-
-    it('should handle absolute paths', () => {
-      const context = {
-        isContainer: false,
-        workspaceRoot: '/workspace',
-        platform: 'linux' as const
-      };
-      
-      const result = adapter.translateScriptPath('/absolute/path/script.py', context);
-      expect(result).toBe('/absolute/path/script.py');
-    });
-
-    it('should convert backslashes to forward slashes for breakpoints', () => {
-      const context = {
-        isContainer: false,
-        workspaceRoot: 'C:\\workspace',
-        platform: 'win32' as const
-      };
-      
-      const result = adapter.translateBreakpointPath('C:\\workspace\\src\\main.py', context);
-      expect(result).toBe('C:/workspace/src/main.py');
-    });
-  });
 
   describe('feature support', () => {
     it('should support Python-specific debug features', () => {

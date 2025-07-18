@@ -77,7 +77,6 @@ describe('ProxyManager - Lifecycle', () => {
       expect(fakeLauncher.launchedProxies).toHaveLength(1);
       const launchCall = fakeLauncher.launchedProxies[0];
       expect(launchCall.sessionId).toBe(defaultConfig.sessionId);
-      expect(launchCall.env?.MCP_SERVER_CWD).toBeDefined();
 
       // Verify initialization command was sent
       const fakeProxy = fakeLauncher.getLastLaunchedProxy();

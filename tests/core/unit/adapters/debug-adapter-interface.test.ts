@@ -16,7 +16,6 @@ import {
   AdapterConfig,
   GenericLaunchConfig,
   LanguageSpecificLaunchConfig,
-  PathContext,
   FeatureRequirement,
   AdapterCapabilities,
   ExceptionBreakpointFilter
@@ -330,31 +329,6 @@ describe('debug-adapter-interface', () => {
       });
     });
 
-    describe('PathContext', () => {
-      it('should create path context for container', () => {
-        const context: PathContext = {
-          isContainer: true,
-          workspaceRoot: '/workspace',
-          platform: 'linux'
-        };
-        
-        expect(context.isContainer).toBe(true);
-        expect(context.workspaceRoot).toBe('/workspace');
-        expect(context.platform).toBe('linux');
-      });
-
-      it('should create path context for Windows', () => {
-        const context: PathContext = {
-          isContainer: false,
-          workspaceRoot: 'C:\\Users\\test\\project',
-          platform: 'win32'
-        };
-        
-        expect(context.isContainer).toBe(false);
-        expect(context.workspaceRoot).toBe('C:\\Users\\test\\project');
-        expect(context.platform).toBe('win32');
-      });
-    });
 
     describe('FeatureRequirement', () => {
       it('should create dependency requirement', () => {

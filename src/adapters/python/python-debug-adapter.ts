@@ -22,7 +22,6 @@ import {
   AdapterConfig,
   GenericLaunchConfig,
   LanguageSpecificLaunchConfig,
-  PathContext,
   DebugFeature,
   FeatureRequirement,
   AdapterCapabilities,
@@ -337,42 +336,6 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       env: {},
       cwd: process.cwd()
     };
-  }
-  
-  // ===== Path Translation =====
-  
-  translateScriptPath(scriptPath: string, context: PathContext): string {
-    // Handle module execution (-m flag)
-    if (scriptPath.startsWith('-m ')) {
-      return scriptPath; // Return as-is for module execution
-    }
-    
-    // Handle absolute paths
-    if (path.isAbsolute(scriptPath)) {
-      return scriptPath;
-    }
-    
-    // Resolve relative paths from workspace root
-    // Use path.resolve to handle cross-platform paths correctly
-    return path.resolve(context.workspaceRoot, scriptPath);
-  }
-  
-  translateBreakpointPath(filePath: string, context: PathContext): string {
-    // Python uses forward slashes even on Windows
-    let translatedPath = filePath.replace(/\\/g, '/');
-    
-    // Handle container paths
-    if (context.isContainer) {
-      // Container paths are already handled by path translation layer
-      return translatedPath;
-    }
-    
-    // Ensure absolute path for breakpoints
-    if (!path.isAbsolute(filePath)) {
-      translatedPath = path.resolve(context.workspaceRoot, filePath).replace(/\\/g, '/');
-    }
-    
-    return translatedPath;
   }
   
   // ===== DAP Protocol Operations =====

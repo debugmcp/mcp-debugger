@@ -46,7 +46,6 @@ describe('Proxy Startup Integration', () => {
     const cleanEnv = { ...process.env };
     delete cleanEnv.NODE_ENV;
     delete cleanEnv.VITEST;
-    cleanEnv.MCP_SERVER_CWD = process.cwd();
     
     // Spawn the proxy with IPC
     proxy = spawn('node', [proxyPath], {

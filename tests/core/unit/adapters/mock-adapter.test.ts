@@ -226,25 +226,6 @@ describe('MockDebugAdapter', () => {
     });
   });
 
-  describe('path translation', () => {
-    it('should not modify script paths', () => {
-      const scriptPath = '/path/to/script.js';
-      const context = { isContainer: false, workspaceRoot: '/workspace', platform: 'linux' as NodeJS.Platform };
-      
-      const translated = adapter.translateScriptPath(scriptPath, context);
-      
-      expect(translated).toBe(scriptPath);
-    });
-
-    it('should not modify breakpoint paths', () => {
-      const filePath = '/path/to/file.js';
-      const context = { isContainer: false, workspaceRoot: '/workspace', platform: 'linux' as NodeJS.Platform };
-      
-      const translated = adapter.translateBreakpointPath(filePath, context);
-      
-      expect(translated).toBe(filePath);
-    });
-  });
 
   describe('DAP operations', () => {
     beforeEach(async () => {

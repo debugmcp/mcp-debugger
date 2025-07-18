@@ -17,7 +17,6 @@ describe('Python Discovery - Success Scenarios', () => {
     
     // Ensure we're using the compiled version by setting the working directory
     const projectRoot = path.resolve(fileURLToPath(import.meta.url), '../../../');
-    process.env.MCP_SERVER_CWD = projectRoot;
     
     // Start the debug server explicitly for these tests
     await debugServer.start();

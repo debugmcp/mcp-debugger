@@ -18,7 +18,6 @@ import {
   AdapterConfig,
   GenericLaunchConfig,
   LanguageSpecificLaunchConfig,
-  PathContext,
   DebugFeature,
   FeatureRequirement,
   AdapterCapabilities,
@@ -339,20 +338,6 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
       env: {},
       cwd: process.cwd()
     };
-  }
-  
-  // ===== Path Translation =====
-  
-  translateScriptPath(scriptPath: string, _context: PathContext): string {
-    // Mock adapter doesn't need path translation
-    void _context; // Explicitly ignore
-    return scriptPath;
-  }
-  
-  translateBreakpointPath(filePath: string, _context: PathContext): string {
-    // Mock adapter doesn't need path translation
-    void _context; // Explicitly ignore
-    return filePath;
   }
   
   // ===== DAP Protocol Operations =====

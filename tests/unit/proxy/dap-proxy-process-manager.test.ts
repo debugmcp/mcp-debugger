@@ -56,7 +56,6 @@ describe('DebugpyAdapterManager', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
-    delete process.env.MCP_SERVER_CWD;
   });
 
   describe('buildSpawnCommand', () => {
