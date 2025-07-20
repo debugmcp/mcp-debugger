@@ -1,0 +1,2 @@
+[console_scripts]
+debug-mcp-server = mcp_debugger_launcher.cli:main
