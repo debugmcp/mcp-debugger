@@ -14,7 +14,7 @@ except ImportError:
     from detectors import RuntimeDetector
 
 # Package version - should match pyproject.toml
-__version__ = "0.10.1"
+__version__ = "0.11.0"
 
 def print_runtime_status(runtimes: dict, verbose: bool = False):
     """Print the status of available runtimes."""
