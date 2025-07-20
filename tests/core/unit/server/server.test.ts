@@ -15,6 +15,7 @@ import { DebugSessionInfo, DebugLanguage, SessionState, Breakpoint } from '../..
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import { createMockLogger } from '../../../test-utils/helpers/test-dependencies.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
+import path from 'path';
 
 // Mock dependencies
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -162,15 +163,19 @@ describe('MCP Server Comprehensive Tests', () => {
     });
 
     it('should initialize with log file configuration', () => {
+      const logFile = '/var/log/debug-mcp.log';
       debugServer = new DebugMcpServer({ 
         logLevel: 'info',
-        logFile: '/var/log/debug-mcp.log'
+        logFile: logFile
       });
+      
+      // The expected sessionLogDirBase should be platform-specific
+      const expectedSessionLogDirBase = path.resolve(path.dirname(logFile), 'sessions');
       
       expect(createProductionDependencies).toHaveBeenCalledWith({
         logLevel: 'info',
-        logFile: '/var/log/debug-mcp.log',
-        sessionLogDirBase: '/var/log/sessions'
+        logFile: logFile,
+        sessionLogDirBase: expectedSessionLogDirBase
       });
     });
 
