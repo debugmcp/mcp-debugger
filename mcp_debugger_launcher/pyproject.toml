@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = { file = "LICENSE" }
 authors = [
-  { name = "Your Name/Org", email = "your@email.com" } # Placeholder, user should update
+  { name = "debugmcp", email = "debug@sycamore.llc" }
 ]
 keywords = ["mcp", "dap", "debugger", "debugpy", "ai-agent", "llm"]
 classifiers = [
@@ -22,12 +22,13 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-  "debugpy>=1.8.14" 
+  "debugpy>=1.8.14",
+  "click>=8.0.0"
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-repo/debug-mcp-server" # Placeholder
-Repository = "https://github.com/your-repo/debug-mcp-server" # Placeholder
+Homepage = "https://github.com/debugmcp/mcp-debugger"
+Repository = "https://github.com/debugmcp/mcp-debugger"
 
 [project.scripts]
 debug-mcp-server = "mcp_debugger_launcher.cli:main"
