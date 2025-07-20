@@ -258,7 +258,7 @@ export class DebugMcpServer {
     const containerConfig: ContainerConfig = {
       logLevel: options.logLevel,
       logFile: options.logFile,
-      sessionLogDirBase: options.logFile ? path.dirname(options.logFile) + '/sessions' : undefined
+      sessionLogDirBase: options.logFile ? path.resolve(path.dirname(options.logFile), 'sessions') : undefined
     };
     
     const dependencies = createProductionDependencies(containerConfig);
