@@ -142,6 +142,8 @@ jobs:
     name: Create GitHub Release
     needs: [docker-publish, pypi-publish, npm-publish]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Grant permission to create releases
     
     steps:
     - name: Checkout code
@@ -162,36 +164,46 @@ jobs:
         echo "$CHANGELOG" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
     
-    - name: Create Release
-      uses: actions/create-release@v1
+    - name: Create Release with GitHub CLI
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ steps.changelog.outputs.VERSION }}
-        body: |
-          ## 🎉 Release ${{ steps.changelog.outputs.VERSION }}
-          
-          ${{ steps.changelog.outputs.CHANGELOG }}
-          
-          ### 📦 Installation
-          
-          **Docker:**
-          ```bash
-          docker pull debugmcp/mcp-debugger:${{ steps.changelog.outputs.VERSION }}
-          ```
-          
-          **npm:**
-          ```bash
-          npm install -g @debugmcp/mcp-debugger@${{ steps.changelog.outputs.VERSION }}
-          ```
-          
-          **PyPI:**
-          ```bash
-          pip install mcp-debugger==${{ steps.changelog.outputs.VERSION }}
-          ```
-          
-          ### 📚 Documentation
-          See the [README](https://github.com/debugmcp/mcp-debugger#readme) for usage instructions.
-        draft: false
-        prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+      run: |
+        # Create the release body in a file
+        cat << 'EOF' > release_notes.md
+        ## 🎉 Release ${{ steps.changelog.outputs.VERSION }}
+        
+        ${{ steps.changelog.outputs.CHANGELOG }}
+        
+        ### 📦 Installation
+        
+        **Docker:**
+        ```bash
+        docker pull debugmcp/mcp-debugger:${{ steps.changelog.outputs.VERSION }}
+        ```
+        
+        **npm:**
+        ```bash
+        npm install -g @debugmcp/mcp-debugger@${{ steps.changelog.outputs.VERSION }}
+        ```
+        
+        **PyPI:**
+        ```bash
+        pip install debug-mcp-server-launcher==${{ steps.changelog.outputs.VERSION }}
+        ```
+        
+        ### 📚 Documentation
+        See the [README](https://github.com/debugmcp/mcp-debugger#readme) for usage instructions.
+        EOF
+        
+        # Determine if this is a prerelease
+        if [[ "${{ github.ref_name }}" == *"-beta"* ]] || [[ "${{ github.ref_name }}" == *"-alpha"* ]]; then
+          PRERELEASE_FLAG="--prerelease"
+        else
+          PRERELEASE_FLAG=""
+        fi
+        
+        # Create the release using GitHub CLI
+        gh release create "${{ github.ref_name }}" \
+          --title "Release ${{ steps.changelog.outputs.VERSION }}" \
+          --notes-file release_notes.md \
+          $PRERELEASE_FLAG
