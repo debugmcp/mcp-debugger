@@ -385,9 +385,31 @@ export class DapProxyWorker {
       // Complete tracking
       this.requestTracker.complete(payload.requestId);
 
-      // Log setBreakpoints response
+      // Log setBreakpoints response with full details
       if (payload.dapCommand === 'setBreakpoints') {
         this.logger!.info(`[Worker] Response from adapter for 'setBreakpoints':`, response);
+        
+        // TEMPORARY DEBUG: Log complete response structure
+        console.error('[DEBUG-DAP] Full setBreakpoints response:', JSON.stringify(response, null, 2));
+        
+        // Log individual breakpoint details if available
+        if (response && typeof response === 'object' && 'body' in response) {
+          const typedResponse = response as DebugProtocol.SetBreakpointsResponse;
+          const body = typedResponse.body;
+          if (body && body.breakpoints && Array.isArray(body.breakpoints)) {
+            body.breakpoints.forEach((bp: DebugProtocol.Breakpoint, index: number) => {
+              console.error(`[DEBUG-DAP] Breakpoint ${index}:`, {
+                id: bp.id,
+                verified: bp.verified,
+                message: bp.message,
+                line: bp.line,
+                column: bp.column,
+                source: bp.source,
+                instructionReference: bp.instructionReference
+              });
+            });
+          }
+        }
       }
 
       // Send response

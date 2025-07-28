@@ -1095,53 +1095,6 @@ describe('MCP Server Comprehensive Tests', () => {
         }
       });
 
-      it('should handle get_source_context as not implemented', async () => {
-        await expect(callToolHandler({
-          method: 'tools/call',
-          params: {
-            name: 'get_source_context',
-            arguments: {
-              sessionId: 'test-session',
-              file: 'test.py',
-              line: 10,
-              linesContext: 5
-            }
-          }
-        })).rejects.toThrow(McpError);
-        
-        try {
-          await callToolHandler({
-            method: 'tools/call',
-            params: {
-              name: 'get_source_context',
-              arguments: {
-                sessionId: 'test-session',
-                file: 'test.py',
-                line: 10
-              }
-            }
-          });
-        } catch (error) {
-          expect(error).toBeInstanceOf(McpError);
-          expect((error as McpError).code).toBe(McpErrorCode.InternalError);
-          expect((error as McpError).message).toMatch(/not yet implemented/i);
-        }
-      });
-
-      it('should validate linesContext parameter in get_source_context', async () => {
-        await expect(callToolHandler({
-          method: 'tools/call',
-          params: {
-            name: 'get_source_context',
-            arguments: {
-              sessionId: 'test-session',
-              file: 'test.py',
-              line: 10,
-              linesContext: 'invalid' // Not a number
-            }
-          }
-        })).rejects.toThrow(/not yet implemented/i);
-      });
     });
 
     it('should handle unknown tool error', async () => {

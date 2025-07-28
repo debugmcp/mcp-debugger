@@ -144,6 +144,8 @@ export interface Breakpoint {
   condition?: string;
   /** Whether the breakpoint is verified */
   verified: boolean;
+  /** Validation message from DAP adapter */
+  message?: string;
 }
 
 /**

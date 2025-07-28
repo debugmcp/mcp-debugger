@@ -82,8 +82,30 @@ export class DapConnectionManager {
     };
 
     this.logger.info('[ConnectionManager] Sending DAP "initialize" request');
-    await client.sendRequest('initialize', initializeArgs);
+    const initResponse = await client.sendRequest('initialize', initializeArgs);
     this.logger.info('[ConnectionManager] DAP "initialize" request sent and response received.');
+    
+    // TEMPORARY DEBUG: Log capabilities to check for breakpointLocations support
+    console.error('[DEBUG-DAP] Initialize response capabilities:', JSON.stringify(initResponse, null, 2));
+    if (initResponse && typeof initResponse === 'object' && 'body' in initResponse) {
+      const typedResponse = initResponse as DebugProtocol.InitializeResponse;
+      const capabilities = typedResponse.body;
+      if (capabilities) {
+        console.error('[DEBUG-DAP] Breakpoint-related capabilities:', {
+          supportsBreakpointLocationsRequest: capabilities.supportsBreakpointLocationsRequest,
+          supportsConditionalBreakpoints: capabilities.supportsConditionalBreakpoints,
+          supportsHitConditionalBreakpoints: capabilities.supportsHitConditionalBreakpoints,
+          supportsLogPoints: capabilities.supportsLogPoints,
+          supportsDataBreakpoints: capabilities.supportsDataBreakpoints,
+          supportsFunctionBreakpoints: capabilities.supportsFunctionBreakpoints,
+          supportsInstructionBreakpoints: capabilities.supportsInstructionBreakpoints,
+          supportsExceptionInfoRequest: capabilities.supportsExceptionInfoRequest,
+          supportsExceptionOptions: capabilities.supportsExceptionOptions,
+          supportsExceptionConditions: (capabilities as unknown as Record<string, unknown>).supportsExceptionConditions,
+          supportsExceptionFilterOptions: capabilities.supportsExceptionFilterOptions
+        });
+      }
+    }
   }
 
   /**

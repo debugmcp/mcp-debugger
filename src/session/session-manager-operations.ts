@@ -50,17 +50,17 @@ export class SessionManagerOperations extends SessionManagerData {
     const projectRoot = path.resolve(fileURLToPath(import.meta.url), '../../../'); // Path to the MCP debugger server's root
     
     const initialBreakpoints = Array.from(session.breakpoints.values()).map(bp => {
-        // Breakpoint file path is already translated by server.ts before reaching here
+        // Breakpoint file path has been validated by server.ts before reaching here
         return {
-            file: bp.file, // Use the already translated path
+            file: bp.file, // Use the validated path
             line: bp.line, 
             condition: bp.condition
         };
     });
     
-    // scriptPath is already translated by server.ts before reaching here
+    // scriptPath has been validated by server.ts before reaching here
     const translatedScriptPath = scriptPath; 
-    this.logger.info(`[SessionManager] Using translated script path: ${translatedScriptPath}`);
+    this.logger.info(`[SessionManager] Using validated script path: ${translatedScriptPath}`);
 
     // Resolve executable path based on language
     let resolvedExecutablePath: string;
@@ -336,12 +336,10 @@ export class SessionManagerOperations extends SessionManagerData {
     const session = this._getSessionById(sessionId);
     const bpId = uuidv4();
 
-    // The file path is already translated by server.ts before reaching here
-    // No need for projectRoot resolution here.
-    const translatedFilePath = file; 
-    this.logger.info(`[SessionManager setBreakpoint] Using translated file path "${translatedFilePath}" for session ${sessionId}`);
+    // The file path has been validated and translated by server.ts before reaching here
+    this.logger.info(`[SessionManager setBreakpoint] Using validated file path "${file}" for session ${sessionId}`);
 
-    const newBreakpoint: Breakpoint = { id: bpId, file: translatedFilePath, line, condition, verified: false };
+    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, verified: false };
 
     if (!session.breakpoints) session.breakpoints = new Map();
     session.breakpoints.set(bpId, newBreakpoint);
@@ -357,8 +355,9 @@ export class SessionManagerOperations extends SessionManagerData {
           if (response && response.body && response.body.breakpoints && response.body.breakpoints.length > 0) {
               const bpInfo = response.body.breakpoints[0]; 
               newBreakpoint.verified = bpInfo.verified;
-              newBreakpoint.line = bpInfo.line || newBreakpoint.line; 
-              this.logger.info(`[SessionManager] Breakpoint ${bpId} sent and response received. Verified: ${newBreakpoint.verified}`);
+              newBreakpoint.line = bpInfo.line || newBreakpoint.line;
+              newBreakpoint.message = bpInfo.message; // Capture validation message
+              this.logger.info(`[SessionManager] Breakpoint ${bpId} sent and response received. Verified: ${newBreakpoint.verified}${bpInfo.message ? `, Message: ${bpInfo.message}` : ''}`);
               
               // Log breakpoint verification with structured logging
               if (newBreakpoint.verified) {

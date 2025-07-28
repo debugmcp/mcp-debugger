@@ -1,13 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDebugSession, startDebugging, closeDebugSession, debugServer } from '../../../test-utils/helpers/session-helpers';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { DebugLanguage } from '../../../../src/session/models';
 
-describe('Python Discovery - Failure Scenario', { tag: '@requires-python' }, () => {
+describe('Python Discovery - Failure Scenario', () => {
   let sessionId: string | undefined;
   let originalPath: string | undefined;
-  const scriptPath = path.resolve(fileURLToPath(import.meta.url), '../../../examples/python/fibonacci.py');
+  const scriptPath = path.join(process.cwd(), 'examples/python/fibonacci.py');
 
   beforeAll(async () => {
     // Save original PATH

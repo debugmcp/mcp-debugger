@@ -177,27 +177,27 @@ describe('Error Scenarios E2E', () => {
       const sessionId = createResult.sessionId!;
       debugSessionIds.push(sessionId);
       
-      // Try to set breakpoint in non-existent file
-      const breakpointResponse = await mcpClient!.callTool({
-        name: 'set_breakpoint',
-        arguments: {
-          sessionId,
-          file: path.join(process.cwd(), 'tests/fixtures/debug-scripts/does-not-exist.py'),
-          line: 4
-        }
-      });
-      const breakpointResult = parseSdkToolResult(breakpointResponse);
-      
-      // Breakpoint might be set but not verified, or might fail entirely
-      if (breakpointResult.success) {
-        expect(breakpointResult.verified).toBe(false);
+      // Try to set breakpoint in non-existent file - should throw error
+      try {
+        await mcpClient!.callTool({
+          name: 'set_breakpoint',
+          arguments: {
+            sessionId,
+            file: path.join(process.cwd(), 'tests/fixtures/debug-scripts/does-not-exist.py'),
+            line: 4
+          }
+        });
+        // If we get here, the test should fail
+        expect(true).toBe(false);
+      } catch (error: any) {
+        // Expected to throw MCP error with file validation message
+        expect(error.message).toContain('File not found');
+        console.log('[E2E Error Scenarios] Correctly rejected non-existent file for breakpoint');
       }
-      console.log('[E2E Error Scenarios] Handled non-existent file for breakpoint');
     });
     
     it('should handle invalid script path for debugging', async () => {
       console.log('\n[E2E Error Scenarios] Testing invalid script path...');
-      const eventRecorder = new EventRecorder();
       
       // Create a valid session
       const createResponse = await mcpClient!.callTool({
@@ -208,38 +208,23 @@ describe('Error Scenarios E2E', () => {
       const sessionId = createResult.sessionId!;
       debugSessionIds.push(sessionId);
       
-      // Try to start debugging with non-existent script
-      const debugResponse = await mcpClient!.callTool({
-        name: 'start_debugging',
-        arguments: {
-          sessionId,
-          scriptPath: path.join(process.cwd(), 'tests/fixtures/debug-scripts/does-not-exist.py')
-        }
-      });
-      const debugResult = parseSdkToolResult(debugResponse);
-      
-      // With "hands-off" approach, the start_debugging call might succeed initially
-      // but the session should transition to error state when debugpy can't find the file
-      if (debugResult.success) {
-        console.log('[E2E Error Scenarios] start_debugging returned success, waiting for error state...');
-        
-        // Wait for the session to transition to error state OR stopped state (terminated)
-        const result = await waitForAnyState(mcpClient!, sessionId, ['error', 'stopped'], {
-          timeout: 20000,  // Increased timeout for Python error reporting
-          eventRecorder
+      // Try to start debugging with non-existent script - should throw error immediately
+      try {
+        await mcpClient!.callTool({
+          name: 'start_debugging',
+          arguments: {
+            sessionId,
+            scriptPath: path.join(process.cwd(), 'tests/fixtures/debug-scripts/does-not-exist.py')
+          }
         });
-        
-        expect(result.success).toBe(true);
-        console.log(`[E2E Error Scenarios] Session transitioned to '${result.state}' state due to invalid script path`);
-        
-        // Either error or stopped state is acceptable
-        expect(['error', 'stopped']).toContain(result.state);
-      } else {
-        // If it failed immediately, that's also acceptable
-        console.log('[E2E Error Scenarios] start_debugging immediately rejected invalid script path:', debugResult.message);
-        expect(debugResult.message).toBeDefined();
+        // If we get here, the test should fail
+        expect(true).toBe(false);
+      } catch (error: any) {
+        // Expected to throw MCP error with file validation message
+        expect(error.message).toContain('File not found');
+        console.log('[E2E Error Scenarios] Correctly rejected invalid script path');
       }
-    }, 60000); // Increase timeout further as Python operations can be slow
+    });
   });
 
   describe('Debug Operation Errors', () => {

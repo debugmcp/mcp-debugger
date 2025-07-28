@@ -24,6 +24,9 @@ import {
 } from './session/models.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
+import { PathValidator, createPathValidator } from './utils/path-validator.js';
+import { LineReader, createLineReader } from './utils/line-reader.js';
+
 /**
  * Configuration options for the Debug MCP Server
  */
@@ -73,6 +76,8 @@ export class DebugMcpServer {
   private logger;
   private constructorOptions: DebugMcpServerOptions;
   private supportedLanguages: string[] = [];
+  private pathValidator: PathValidator;
+  private lineReader: LineReader;
 
   // Get supported languages from adapter registry
   private getSupportedLanguages(): string[] {
@@ -164,15 +169,16 @@ export class DebugMcpServer {
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
     this.validateSession(sessionId);
     
-    // In container mode, prepend /workspace/ to the path
-    if (process.env.MCP_CONTAINER === 'true') {
-      scriptPath = `/workspace/${scriptPath}`;
+    // Validate script path
+    const validation = await this.pathValidator.validateFilePath(scriptPath);
+    if (!validation.isValid) {
+      throw new McpError(McpErrorCode.InvalidParams, validation.errorMessage || `Invalid script path: ${scriptPath}`);
     }
     
-    this.logger.info(`[DebugMcpServer.startDebugging] Using scriptPath: ${scriptPath}`);
+    this.logger.info(`[DebugMcpServer.startDebugging] Validated script path: ${validation.resolvedPath}`);
     const result = await this.sessionManager.startDebugging(
       sessionId, 
-      scriptPath, 
+      validation.resolvedPath, 
       args, 
       dapLaunchArgs, 
       dryRunSpawn
@@ -187,13 +193,14 @@ export class DebugMcpServer {
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
     
-    // In container mode, prepend /workspace/ to the path
-    if (process.env.MCP_CONTAINER === 'true') {
-      file = `/workspace/${file}`;
+    // Validate file path
+    const validation = await this.pathValidator.validateFilePath(file);
+    if (!validation.isValid) {
+      throw new McpError(McpErrorCode.InvalidParams, validation.errorMessage || `Invalid file path: ${file}`);
     }
     
-    this.logger.info(`[DebugMcpServer.setBreakpoint] Using file path: ${file}`);
-    return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
+    this.logger.info(`[DebugMcpServer.setBreakpoint] Validated file path: ${validation.resolvedPath}`);
+    return this.sessionManager.setBreakpoint(sessionId, validation.resolvedPath, line, condition);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -265,6 +272,19 @@ export class DebugMcpServer {
     
     this.logger = dependencies.logger;
     this.logger.info('[DebugMcpServer Constructor] Main server logger instance assigned.');
+
+    // Create path validator
+    this.pathValidator = createPathValidator(
+      dependencies.fileSystem,
+      dependencies.environment,
+      this.logger
+    );
+
+    // Create line reader
+    this.lineReader = createLineReader(
+      dependencies.fileSystem,
+      this.logger
+    );
 
     this.server = new Server(
       { name: 'debug-mcp-server', version: '0.1.0' },
@@ -373,7 +393,7 @@ export class DebugMcpServer {
           { name: 'get_stack_trace', description: 'Get stack trace', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
           { name: 'evaluate_expression', description: 'Evaluate expression (Not Implemented)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' } }, required: ['sessionId', 'expression'] } },
-          { name: 'get_source_context', description: 'Get source context (Not Implemented)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number' }, linesContext: { type: 'number' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'get_source_context', description: 'Get source context around a specific line in a file', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number to get context for' }, linesContext: { type: 'number', description: 'Number of lines before and after to include (default: 5)' } }, required: ['sessionId', 'file', 'line'] } },
         ],
       };
     });
@@ -440,16 +460,51 @@ export class DebugMcpServer {
                   timestamp: Date.now()
                 });
                 
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, breakpointId: breakpoint.id, file: breakpoint.file, line: breakpoint.line, verified: breakpoint.verified, message: `Breakpoint set at ${breakpoint.file}:${breakpoint.line}` }) }] };
+                // Try to get line context for the breakpoint
+                let context;
+                try {
+                  const lineContext = await this.lineReader.getLineContext(
+                    breakpoint.file,
+                    breakpoint.line,
+                    { contextLines: 2 }
+                  );
+                  
+                  if (lineContext) {
+                    context = {
+                      lineContent: lineContext.lineContent,
+                      surrounding: lineContext.surrounding
+                    };
+                  }
+                } catch (contextError) {
+                  // Log but don't fail if we can't get context
+                  this.logger.debug('Could not get line context for breakpoint', { 
+                    file: breakpoint.file, 
+                    line: breakpoint.line, 
+                    error: contextError 
+                  });
+                }
+                
+                result = { content: [{ type: 'text', text: JSON.stringify({ 
+                  success: true, 
+                  breakpointId: breakpoint.id, 
+                  file: breakpoint.file, 
+                  line: breakpoint.line, 
+                  verified: breakpoint.verified, 
+                  message: breakpoint.message || `Breakpoint set at ${breakpoint.file}:${breakpoint.line}`,
+                  // Only add warning if there's a message from debugpy (indicating a problem)
+                  warning: breakpoint.message || undefined,
+                  // Include context if available
+                  context: context || undefined
+                }) }] };
               } catch (error) {
-                // Handle validation errors specifically
+                // Handle session state errors specifically
                 if (error instanceof McpError && 
                     (error.message.includes('terminated') || 
                      error.message.includes('closed') || 
-                     error.message.includes('not found'))) {
+                     (error.message.includes('not found') && error.message.includes('Session')))) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
                 } else {
-                  // Re-throw unexpected errors
+                  // Re-throw all other errors (including file validation errors)
                   throw error;
                 }
               }
@@ -472,14 +527,14 @@ export class DebugMcpServer {
                 }
                 result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
               } catch (error) {
-                // Handle validation errors specifically
+                // Handle session state errors specifically
                 if (error instanceof McpError && 
                     (error.message.includes('terminated') || 
                      error.message.includes('closed') || 
-                     error.message.includes('not found'))) {
+                     (error.message.includes('not found') && error.message.includes('Session')))) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message, state: 'stopped' }) }] };
                 } else {
-                  // Re-throw unexpected errors
+                  // Re-throw all other errors (including file validation errors)
                   throw error;
                 }
               }
@@ -746,14 +801,63 @@ export class DebugMcpServer {
 
   private async handleGetSourceContext(args: { sessionId: string, file: string, line: number, linesContext?: number }): Promise<ServerResult> {
     try {
-      // In container mode, prepend /workspace/ to the path
-      let file = args.file;
-      if (process.env.MCP_CONTAINER === 'true') {
-        file = `/workspace/${file}`;
+      // Validate session
+      this.validateSession(args.sessionId);
+      
+      // Validate file path
+      const validation = await this.pathValidator.validateFilePath(args.file);
+      if (!validation.isValid) {
+        throw new McpError(McpErrorCode.InvalidParams, validation.errorMessage || `Invalid file path: ${args.file}`);
       }
       
-      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${file}, line: ${args.line}`);
-      throw new McpError(McpErrorCode.InternalError, "Get source context not yet implemented with proxy.");
+      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${validation.resolvedPath}, line: ${args.line}`);
+      
+      // Get line context using the line reader
+      const contextLines = args.linesContext ?? 5; // Default to 5 lines of context
+      const lineContext = await this.lineReader.getLineContext(
+        validation.resolvedPath,
+        args.line,
+        { contextLines }
+      );
+      
+      if (!lineContext) {
+        // File might be binary or unreadable
+        return { 
+          content: [{ 
+            type: 'text', 
+            text: JSON.stringify({ 
+              success: false, 
+              error: 'Could not read source context. File may be binary or inaccessible.',
+              file: validation.resolvedPath,
+              line: args.line
+            }) 
+          }] 
+        };
+      }
+      
+      // Log source context request
+      this.logger.info('debug:source_context', {
+        sessionId: args.sessionId,
+        sessionName: this.getSessionName(args.sessionId),
+        file: validation.resolvedPath,
+        line: args.line,
+        contextLines: contextLines,
+        timestamp: Date.now()
+      });
+      
+      return { 
+        content: [{ 
+          type: 'text', 
+          text: JSON.stringify({ 
+            success: true,
+            file: validation.resolvedPath,
+            line: args.line,
+            lineContent: lineContext.lineContent,
+            surrounding: lineContext.surrounding,
+            contextLines: contextLines
+          }) 
+        }] 
+      };
     } catch (error) {
       this.logger.error('Failed to get source context', { error });
       if (error instanceof McpError) throw error;
