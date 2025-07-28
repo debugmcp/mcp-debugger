@@ -22,7 +22,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [get_scopes](#get_scopes)
    - [get_variables](#get_variables)
    - [evaluate_expression](#evaluate_expression) *(Not Implemented)*
-   - [get_source_context](#get_source_context) *(Not Implemented)*
+   - [get_source_context](#get_source_context)
 
 ---
 
@@ -134,7 +134,17 @@ Sets a breakpoint in a source file.
   "file": "C:\\path\\to\\debug-mcp-server\\examples\\python_simple_swap\\swap_vars.py",
   "line": 9,
   "verified": false,
-  "message": "Breakpoint set at C:\\path\\to\\debug-mcp-server\\examples\\python_simple_swap\\swap_vars.py:9"
+  "message": "Breakpoint set at C:\\path\\to\\debug-mcp-server\\examples\\python_simple_swap\\swap_vars.py:9",
+  "context": {
+    "lineContent": "    a = b  # Bug: loses original value of 'a'",
+    "surrounding": [
+      { "line": 7, "content": "def swap_variables(a, b):" },
+      { "line": 8, "content": "    \"\"\"This function is supposed to swap two variables.\"\"\"" },
+      { "line": 9, "content": "    a = b  # Bug: loses original value of 'a'" },
+      { "line": 10, "content": "    b = a  # Bug: 'b' gets the new value of 'a', not the original" },
+      { "line": 11, "content": "    return a, b" }
+    ]
+  }
 }
 ```
 
@@ -418,23 +428,51 @@ Gets variables within a scope.
 
 ---
 
-### get_source_context ❌
+### get_source_context
 
-**Status:** Not Implemented
+Gets source code context around a specific line in a file.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
-- `file` (string, required): Path to the source file.
-- `line` (number, required): Center line for context.
-- `linesContext` (number, optional): Number of lines of context to retrieve.
+- `file` (string, required): Path to the source file (absolute or relative to project root).
+- `line` (number, required): Line number to get context for (1-indexed).
+- `linesContext` (number, optional): Number of lines before and after to include (default: 5).
 
-**Error Response:**
+**Response:**
 ```json
 {
-  "code": -32603,
-  "message": "MCP error -32603: Get source context not yet fully implemented with proxy."
+  "success": true,
+  "file": "C:\\path\\to\\script.py",
+  "line": 15,
+  "lineContent": "    result = calculate_sum(x, y)",
+  "surrounding": [
+    { "line": 12, "content": "def main():" },
+    { "line": 13, "content": "    x = 10" },
+    { "line": 14, "content": "    y = 20" },
+    { "line": 15, "content": "    result = calculate_sum(x, y)" },
+    { "line": 16, "content": "    print(f\"Result: {result}\")" },
+    { "line": 17, "content": "    return result" },
+    { "line": 18, "content": "" }
+  ],
+  "contextLines": 3
 }
 ```
+
+**Example:**
+```json
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "file": "test_script.py",
+  "line": 25,
+  "linesContext": 3
+}
+```
+
+**Notes:**
+- Useful for AI agents to understand code structure without reading entire files
+- Returns the requested line content and surrounding context
+- Handles file boundaries gracefully (won't return lines before 1 or after EOF)
+- Uses efficient line reading with LRU caching for performance
 
 ---
 
@@ -474,4 +512,4 @@ All tools follow consistent error patterns:
 
 ---
 
-*Last updated: 2025-06-11 based on actual testing with mcp-debugger v0.9.0*
+*Last updated: 2025-07-28 based on actual testing with mcp-debugger v0.12.0*

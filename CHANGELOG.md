@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2025-07-28
+
+### Added
+
+- **Path validation** to prevent crashes from non-existent files - immediate feedback instead of cryptic "[WinError 267]" errors
+- **Line context in `set_breakpoint` responses** - enables AI agents to make intelligent breakpoint placement decisions
+- **`get_source_context` tool implementation** - previously unimplemented tool now provides source code exploration capabilities
+- **Efficient line reading with LRU caching** - optimized file access for repeated operations on the same files
+
+### Fixed
+
+- Cryptic "[WinError 267] The directory name is invalid" crashes when debugging with non-existent files
+- Silent acceptance of invalid breakpoints - now provides immediate validation feedback
+- Missing implementation of `get_source_context` tool
+
+### Changed
+
+- `set_breakpoint` now returns immediate feedback for missing files with clear error messages
+- Improved error messages throughout - all file-related errors now include resolved paths and helpful context
+- `set_breakpoint` responses now include optional `context` field with line content and surrounding code
+
+## [0.11.2] - 2025-01-14
+
+### Fixed
+
+- PyPI package deployment workflow - fixed invalid classifier format that was preventing successful uploads
+- npm package deployment - added missing provenance configuration for trusted publishing
+
+### Changed
+
+- Updated Python package classifiers to use standard PyPI format
+- Enhanced CI/CD workflows for more reliable multi-platform releases
+
+## [0.11.1] - 2025-01-13
+
+### Fixed
+
+- Release workflow to use correct secret name for PyPI deployment
+- Documentation references to old package names
+
+## [0.11.0] - 2025-01-13
+
+### Breaking Changes
+
+- Package renamed from `debug-mcp-server` to `@debugmcp/mcp-debugger` on npm
+- Python launcher renamed to `debug-mcp-server-launcher` on PyPI
+- Docker image moved to `debugmcp/mcp-debugger` on Docker Hub
+
+### Added
+
+- Official organization structure under `debugmcp` namespace
+- Multi-platform Docker builds (amd64, arm64)
+- Comprehensive deployment documentation
+
+### Fixed
+
+- CI/CD workflows for seamless releases across all platforms
+
 ## [0.10.0] - 2025-06-24
 
 ### Added

@@ -40,6 +40,8 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 📊 **99.5% test coverage** – Battle-tested with 808+ passing tests
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
+- 🛡️ **Path validation** – Prevents crashes from non-existent files
+- 📝 **AI-aware line context** – Intelligent breakpoint placement with code context
 
 ## 🚀 Quick Start
 
@@ -135,7 +137,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `close_debug_session` | Close a session | ✅ Implemented |
 | `pause_execution` | Pause running execution | ❌ Not Implemented |
 | `evaluate_expression` | Evaluate expressions | ❌ Not Implemented |
-| `get_source_context` | Get source code context | ❌ Not Implemented |
+| `get_source_context` | Get source code context | ✅ Implemented |
 
 > 📸 **Screenshot**: *Multi-Session Debugging*
 > 
@@ -316,6 +318,7 @@ Then get the local variables:
 - 📊 [API Reference](./docs/architecture/api-reference.md) – Detailed interface docs
 - 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading from v0.9.x
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
+- 🤖 [AI Integration Guide](./docs/ai-integration.md) – Leverage AI-friendly features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
 ## 🤝 Contributing

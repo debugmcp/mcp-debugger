@@ -1,9 +1,48 @@
 # mcp-debugger Migration Guide
 
 > **📌 UPDATED DOCUMENTATION**  
-> This migration guide reflects the complete removal of backward compatibility with `pythonPath` parameter.
+> This migration guide covers changes through v0.12.0, including the major UX improvements.
 
-## Overview
+## What's New in v0.12.0
+
+### 🎉 Major UX Improvements (Backward Compatible)
+
+The v0.12.0 release adds several AI-friendly features that enhance the debugging experience without breaking existing code:
+
+1. **Path Validation**: No more cryptic crashes! File paths are now validated before operations.
+   - `set_breakpoint` and `start_debugging` now validate files exist
+   - Clear error messages instead of "[WinError 267]" crashes
+   - Shows resolved paths and working directory context
+
+2. **Line Context in Breakpoints**: The `set_breakpoint` response now includes an optional `context` field:
+   ```json
+   {
+     "success": true,
+     "breakpointId": "...",
+     "context": {
+       "lineContent": "    result = a + b",
+       "surrounding": [
+         { "line": 10, "content": "def add(a, b):" },
+         { "line": 11, "content": "    result = a + b" },
+         { "line": 12, "content": "    return result" }
+       ]
+     }
+   }
+   ```
+
+3. **`get_source_context` Tool**: Previously unimplemented, now fully functional:
+   ```json
+   {
+     "sessionId": "...",
+     "file": "script.py",
+     "line": 50,
+     "linesContext": 5  // Optional, default: 5
+   }
+   ```
+
+**No Migration Required**: All v0.12.0 features are additive and backward compatible. Your existing code will continue to work, and you can adopt the new features at your convenience.
+
+## Overview (v0.10.0 Architecture Change)
 
 The mcp-debugger has undergone a major architectural change: the transformation from a Python-specific debugger to a multi-language debugging platform using the adapter pattern. This version removes all backward compatibility with the old `pythonPath` parameter.
 

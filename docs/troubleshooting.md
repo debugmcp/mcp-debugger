@@ -92,6 +92,51 @@ This guide provides solutions for common issues you might encounter when setting
    - On Unix systems, you might need sudo
    - On Windows, try running as Administrator
 
+## Path Resolution
+
+### Understanding How Paths Are Resolved
+
+**Problem**: File paths in debugging tools are resolved differently depending on your MCP client.
+
+**Key Concept**: File paths are resolved relative to your MCP client's working directory, not the debugger's location.
+
+**Solutions by Client**:
+
+1. **VS Code with Cline**:
+   - Paths resolve from VS Code's working directory
+   - Check your workspace folder in VS Code
+   - Example: If VS Code is open in `C:\projects\myapp`, then `test.py` resolves to `C:\projects\myapp\test.py`
+
+2. **Claude Desktop**:
+   - Paths resolve from the desktop client's directory
+   - This may vary by OS and installation method
+
+3. **Other MCP Clients**:
+   - Check your client's documentation for working directory behavior
+
+**Best Practices**:
+
+1. **Use Absolute Paths**: To avoid confusion, always use absolute paths:
+   ```json
+   {
+     "file": "C:/Users/user/projects/myapp/test.py",
+     "line": 10
+   }
+   ```
+
+2. **Check Error Messages**: The debugger now provides helpful context in errors:
+   ```
+   File not found: 'test.py'
+   Resolved path: 'C:\Users\user\AppData\Local\Programs\Microsoft VS Code\test.py'
+   Container mode: false
+   Suggestion: Check that the file exists and the path is correct
+   Note: Relative paths are resolved from: C:\Users\user\AppData\Local\Programs\Microsoft VS Code
+   ```
+
+3. **Container Mode**: When running in Docker, paths are prefixed with `/workspace/`:
+   - Host: `test.py` → Container: `/workspace/test.py`
+   - The debugger handles this translation automatically
+
 ## Debugging Session Issues
 
 ### Breakpoints Not Hit
