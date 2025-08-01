@@ -5,6 +5,9 @@ node_modules/
 dist/
 build/
 
+# Bundled adapters (downloaded during build)
+bundled-adapters/
+
 # IDE files
 .vscode/*
 !.vscode/extensions.json
