@@ -1,14 +1,15 @@
-# Task 21: Path Handling Refactor - "Hands-Off" Approach Summary
+# Task 21 + Continuation: TRUE HANDS-OFF Path Handling - Complete Scrub
 
 ## Overview
-Successfully implemented a complete "hands-off" approach to path handling, removing all path manipulation logic from the MCP debugger and letting paths pass through unchanged to debugpy and the underlying OS.
+**UPDATED**: Task 21 was incomplete. The actual complete "hands-off" implementation removes ALL path manipulation logic, including the PathValidator. This was completed in a subsequent scrubbing operation that eliminated the complex cross-platform path handling that was causing test failures and "prompt injection" documentation conflicts.
 
 ## Changes Made
 
-### 1. Core Path Infrastructure Removed
-- Removed all path handling logic from core components
-- Eliminated path validation and transformation
-- Let debugpy handle paths naturally
+### 1. COMPLETE Path Infrastructure Removal
+- ❌ **DELETED**: `src/utils/path-validator.ts` (374 lines of cross-platform complexity)  
+- ❌ **DELETED**: All path manipulation, normalization, Windows drive letter detection
+- ✅ **REPLACED**: With `SimpleFileChecker` - ONLY file existence checking
+- ✅ **TRUE POLICY**: Pass all paths unchanged to debug adapter
 
 ### 2. Implementation Changes
 

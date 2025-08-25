@@ -3,6 +3,8 @@ services:
   mcp-debugger:
     # image: mcp-debugger:local
     build: . # Build from the Dockerfile in the current directory
+    mem_limit: 512m
+    cpus: "0.5"
     stdin_open: true
     tty: true
     volumes:

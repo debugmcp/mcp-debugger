@@ -1,5 +1,8 @@
 # Line Context Feature Implementation Summary
 
+> **⚠️ ARCHIVED DOCUMENTATION**  
+> References to `PathValidator` in this document are outdated. The project now uses a **TRUE HANDS-OFF** approach with `SimpleFileChecker` for existence validation only.
+
 ## Overview
 Successfully implemented line context functionality for the MCP debugger, enabling AI agents to make intelligent decisions about breakpoint placement and providing source context for debugging operations.
 

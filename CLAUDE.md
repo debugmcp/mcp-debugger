@@ -99,6 +99,22 @@ npm run act:test:all # Run all test jobs
 npm run act:full     # Run full CI workflow
 ```
 
+## Path Handling Policy 🚨 CRITICAL
+
+**The project uses a TRUE HANDS-OFF approach to path handling:**
+
+1. **Accept all paths as-is** - No interpretation of Windows vs Linux paths
+2. **File existence check only** - For immediate LLM UX feedback (`SimpleFileChecker`)
+3. **Container mode: Simple prefix** - Only `/workspace/` prepend for existence checks  
+4. **Pass original paths unchanged** - To debug adapter (debugpy handles path resolution)
+5. **No cross-platform logic** - Avoids unsolvable edge cases and complexity
+
+**Key Files:**
+- `src/utils/simple-file-checker.ts` - Only path-related logic (existence checking)
+- `src/server.ts` - Uses SimpleFileChecker for validation, passes original paths to SessionManager
+
+**Rationale:** Cross-platform path handling is theoretically impossible due to ambiguous edge cases. The debug adapter and OS know best how to handle paths for their environment.
+
 ## Architecture Overview
 
 The codebase follows a layered architecture with dependency injection:

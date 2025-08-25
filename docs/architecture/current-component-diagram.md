@@ -29,11 +29,11 @@ graph TD
 | Component | Responsibility | Python Coupling | Refactoring Priority |
 |-----------|---------------|-----------------|---------------------|
 | **server.ts** | MCP protocol handling, tool registration | LOW - Language validation only | MEDIUM |
-| **SessionManager** | Session lifecycle, debugging orchestration | **CRITICAL** - Python path resolution, debugpy assumptions | **HIGH** |
+| **SessionManager** | Session lifecycle, debugging orchestration | LOW - No path manipulation, hands-off approach | **HIGH** |
 | **ProxyManager** | Process spawning, DAP communication | **CRITICAL** - Hardcoded debugpy commands | **HIGH** |
 | **SessionStore** | Session state persistence | LOW - Python defaults | LOW |
 | **python-utils.ts** | Python executable discovery | **CRITICAL** - Entirely Python-specific | Keep as-is |
-| **PathTranslator** | Container/host path translation | NONE - Language agnostic | NONE |
+| **SimpleFileChecker** | File existence validation only | NONE - Language agnostic | NONE |
 | **DebugpyAdapterManager** | debugpy process management | **CRITICAL** - debugpy specific | Replace with adapters |
 
 ## Session Creation Sequence

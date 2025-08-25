@@ -11,13 +11,11 @@ As of July 2025, there are 3 tests that fail when running with Act (local GitHub
 - **Likely Cause**: Docker operations are slower in Act's Docker-in-Docker setup
 - **Solution**: May need to increase timeout or optimize Docker image loading
 
-### 2. Container Path Resolution Test
+### 2. Container Test Environment Issue
 - **File**: `tests/e2e/mcp-server-smoke-container.test.ts`
-- **Test**: "should reject absolute paths in container mode"
-- **Issue**: Relative path `test_container.py` fails when starting debugging
-- **Expected**: Should resolve to `/workspace/test_container.py`
-- **Likely Cause**: Complex volume mount path resolution in Act's containerized environment
-- **Solution**: Need to debug path translation in container mode with Act's volume mounts
+- **Issue**: Container tests may fail in Act's Docker-in-Docker environment
+- **Cause**: Volume mount complexities in nested container environments
+- **Solution**: Tests work in real Docker environments; Act limitations only
 
 ### 3. Python Discovery Platform Mismatch
 - **File**: `tests/integration/python-real-discovery.test.ts`

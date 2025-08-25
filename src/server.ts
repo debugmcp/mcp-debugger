@@ -24,7 +24,7 @@ import {
 } from './session/models.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
-import { PathValidator, createPathValidator } from './utils/path-validator.js';
+import { SimpleFileChecker, createSimpleFileChecker } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 
 /**
@@ -76,7 +76,7 @@ export class DebugMcpServer {
   private logger;
   private constructorOptions: DebugMcpServerOptions;
   private supportedLanguages: string[] = [];
-  private pathValidator: PathValidator;
+  private fileChecker: SimpleFileChecker;
   private lineReader: LineReader;
 
   // Get supported languages from adapter registry
@@ -169,16 +169,17 @@ export class DebugMcpServer {
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
     this.validateSession(sessionId);
     
-    // Validate script path
-    const validation = await this.pathValidator.validateFilePath(scriptPath);
-    if (!validation.isValid) {
-      throw new McpError(McpErrorCode.InvalidParams, validation.errorMessage || `Invalid script path: ${scriptPath}`);
+    // Check script file exists for immediate feedback (hands-off: no path manipulation)
+    const fileCheck = await this.fileChecker.checkExists(scriptPath);
+    if (!fileCheck.exists) {
+      throw new McpError(McpErrorCode.InvalidParams, 
+        `Script file not found: '${scriptPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
     }
     
-    this.logger.info(`[DebugMcpServer.startDebugging] Validated script path: ${validation.resolvedPath}`);
+    this.logger.info(`[DebugMcpServer.startDebugging] Script file exists: ${scriptPath}`);
     const result = await this.sessionManager.startDebugging(
       sessionId, 
-      validation.resolvedPath, 
+      scriptPath, 
       args, 
       dapLaunchArgs, 
       dryRunSpawn
@@ -193,14 +194,15 @@ export class DebugMcpServer {
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
     
-    // Validate file path
-    const validation = await this.pathValidator.validateFilePath(file);
-    if (!validation.isValid) {
-      throw new McpError(McpErrorCode.InvalidParams, validation.errorMessage || `Invalid file path: ${file}`);
+    // Check file exists for immediate feedback (hands-off: no path manipulation)
+    const fileCheck = await this.fileChecker.checkExists(file);
+    if (!fileCheck.exists) {
+      throw new McpError(McpErrorCode.InvalidParams, 
+        `Breakpoint file not found: '${file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
     }
     
-    this.logger.info(`[DebugMcpServer.setBreakpoint] Validated file path: ${validation.resolvedPath}`);
-    return this.sessionManager.setBreakpoint(sessionId, validation.resolvedPath, line, condition);
+    this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${file}`);
+    return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -273,8 +275,8 @@ export class DebugMcpServer {
     this.logger = dependencies.logger;
     this.logger.info('[DebugMcpServer Constructor] Main server logger instance assigned.');
 
-    // Create path validator
-    this.pathValidator = createPathValidator(
+    // Create simple file checker for existence validation only
+    this.fileChecker = createSimpleFileChecker(
       dependencies.fileSystem,
       dependencies.environment,
       this.logger
@@ -804,18 +806,19 @@ export class DebugMcpServer {
       // Validate session
       this.validateSession(args.sessionId);
       
-      // Validate file path
-      const validation = await this.pathValidator.validateFilePath(args.file);
-      if (!validation.isValid) {
-        throw new McpError(McpErrorCode.InvalidParams, validation.errorMessage || `Invalid file path: ${args.file}`);
+      // Check file exists for immediate feedback (hands-off: no path manipulation)
+      const fileCheck = await this.fileChecker.checkExists(args.file);
+      if (!fileCheck.exists) {
+        throw new McpError(McpErrorCode.InvalidParams, 
+          `Line context file not found: '${args.file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
       }
       
-      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${validation.resolvedPath}, line: ${args.line}`);
+      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${args.file}, line: ${args.line}`);
       
       // Get line context using the line reader
       const contextLines = args.linesContext ?? 5; // Default to 5 lines of context
       const lineContext = await this.lineReader.getLineContext(
-        validation.resolvedPath,
+        fileCheck.effectivePath,
         args.line,
         { contextLines }
       );
@@ -828,7 +831,7 @@ export class DebugMcpServer {
             text: JSON.stringify({ 
               success: false, 
               error: 'Could not read source context. File may be binary or inaccessible.',
-              file: validation.resolvedPath,
+              file: args.file,
               line: args.line
             }) 
           }] 
@@ -839,7 +842,7 @@ export class DebugMcpServer {
       this.logger.info('debug:source_context', {
         sessionId: args.sessionId,
         sessionName: this.getSessionName(args.sessionId),
-        file: validation.resolvedPath,
+        file: args.file,
         line: args.line,
         contextLines: contextLines,
         timestamp: Date.now()
@@ -850,7 +853,7 @@ export class DebugMcpServer {
           type: 'text', 
           text: JSON.stringify({ 
             success: true,
-            file: validation.resolvedPath,
+            file: args.file,
             line: args.line,
             lineContent: lineContext.lineContent,
             surrounding: lineContext.surrounding,

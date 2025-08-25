@@ -140,7 +140,7 @@ adapter.on('stateChanged', (oldState, newState) => {
 ### Path Handling Complexity
 
 **Theory**: Adapters handle path translation cleanly  
-**Reality**: Path handling is complex, especially with containers. See [path-resolution.md](../path-resolution.md) for the full story.
+**Reality**: Path handling was abandoned entirely. **TRUE HANDS-OFF** approach - no path manipulation whatsoever. Debug adapters handle paths natively.
 
 ### State Management
 

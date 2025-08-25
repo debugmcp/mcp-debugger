@@ -94,7 +94,9 @@ export default defineConfig({
     pool: 'threads',
     poolOptions: {
       threads: {
-        singleThread: true // Important for process spawning tests
+        singleThread: true, // Important for process spawning tests
+        maxThreads: 1,
+        minThreads: 1
       }
     },
     testTransformMode: {

@@ -30,10 +30,11 @@ docker build -t mcp-debugger:local .
 
 ### Why /workspace?
 
-The Debug MCP Server uses a "hands-off" approach to path handling. When running in a container (`MCP_CONTAINER=true`), it simply prepends `/workspace/` to all incoming path arguments. This means:
+The Debug MCP Server uses a **TRUE HANDS-OFF** approach to path handling. When running in a container (`MCP_CONTAINER=true`), it only prepends `/workspace/` for file existence checks - all paths are passed unchanged to the debug adapter. This means:
 - Your project files must be mounted at `/workspace`
-- The LLM should provide paths relative to the mount point
-- The server will transform these to absolute paths inside the container
+- The LLM can provide any path format (relative, absolute, Windows, Linux)
+- The server does NO path interpretation or cross-platform conversion
+- Debug adapter (debugpy) handles all path resolution natively
 
 ## Running the Server with Docker
 
