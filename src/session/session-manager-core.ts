@@ -68,6 +68,7 @@ export class SessionManagerCore {
   protected logger: ILogger;
   protected fileSystem: IFileSystem;
   protected networkManager: INetworkManager;
+  protected environment: IEnvironment;
   protected proxyManagerFactory: IProxyManagerFactory;
   protected sessionStoreFactory: ISessionStoreFactory;
   protected debugTargetLauncher: IDebugTargetLauncher;
@@ -89,6 +90,7 @@ export class SessionManagerCore {
     this.logger = dependencies.logger;
     this.fileSystem = dependencies.fileSystem;
     this.networkManager = dependencies.networkManager;
+    this.environment = dependencies.environment;
     this.proxyManagerFactory = dependencies.proxyManagerFactory;
     this.sessionStoreFactory = dependencies.sessionStoreFactory;
     this.debugTargetLauncher = dependencies.debugTargetLauncher;

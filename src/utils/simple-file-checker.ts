@@ -10,6 +10,7 @@
  */
 
 import { IFileSystem, IEnvironment } from '../interfaces/external-dependencies.js';
+import { translatePathForContainer } from './container-path-utils.js';
 
 /**
  * Result of simple file existence check
@@ -64,18 +65,7 @@ export class SimpleFileChecker {
    * ONLY container prefix logic - no other path manipulation
    */
   private getEffectivePath(path: string): string {
-    // Container mode: Simple prefix only
-    if (this.environment.get('MCP_CONTAINER') === 'true') {
-      // If already starts with /workspace/, use as-is
-      if (path.startsWith('/workspace/')) {
-        return path;
-      }
-      // Otherwise prepend /workspace/
-      return `/workspace/${path}`;
-    }
-    
-    // Host mode: Pass through unchanged
-    return path;
+    return translatePathForContainer(path, this.environment);
   }
 }
 

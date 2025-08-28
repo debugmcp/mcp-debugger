@@ -191,7 +191,7 @@ describe('Error Scenarios E2E', () => {
         expect(true).toBe(false);
       } catch (error: any) {
         // Expected to throw MCP error with file validation message
-        expect(error.message).toContain('File not found');
+        expect(error.message).toContain('Breakpoint file not found');
         console.log('[E2E Error Scenarios] Correctly rejected non-existent file for breakpoint');
       }
     });
@@ -221,7 +221,7 @@ describe('Error Scenarios E2E', () => {
         expect(true).toBe(false);
       } catch (error: any) {
         // Expected to throw MCP error with file validation message
-        expect(error.message).toContain('File not found');
+        expect(error.message).toContain('Script file not found');
         console.log('[E2E Error Scenarios] Correctly rejected invalid script path');
       }
     });

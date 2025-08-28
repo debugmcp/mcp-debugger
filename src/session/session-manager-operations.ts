@@ -14,6 +14,7 @@ import { findPythonExecutable } from '../utils/python-utils.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '../adapters/debug-adapter-interface.js';
+import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
 
 /**
  * Debug operations functionality for session management
@@ -59,8 +60,10 @@ export class SessionManagerOperations extends SessionManagerData {
     });
     
     // scriptPath has been validated by server.ts before reaching here
-    const translatedScriptPath = scriptPath; 
-    this.logger.info(`[SessionManager] Using validated script path: ${translatedScriptPath}`);
+    const translatedScriptPath = translatePathForContainer(scriptPath, this.environment);
+    if (isContainerMode(this.environment) && translatedScriptPath !== scriptPath) {
+      this.logger.info(`[SessionManager] Container mode: translated path from '${scriptPath}' to '${translatedScriptPath}'`);
+    }
 
     // Resolve executable path based on language
     let resolvedExecutablePath: string;
