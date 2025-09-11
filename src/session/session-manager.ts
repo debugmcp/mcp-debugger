@@ -17,6 +17,8 @@ export type {
   DebugResult
 } from './session-manager-core.js';
 
+export type { EvaluateResult } from './session-manager-operations.js';
+
 // Re-export the operations class for any direct usage needs
 export { SessionManagerOperations } from './session-manager-operations.js';
 

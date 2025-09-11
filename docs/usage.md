@@ -262,6 +262,27 @@ Set a breakpoint where the bug occurs:
 
 Now we can see the bug! After `a = b`, both variables have the value 20.
 
+### Step 8b: Evaluate Expressions (Optional)
+
+You can also evaluate arbitrary expressions in the current debug context:
+
+```json
+// Tool: evaluate_expression
+// Request:
+{
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "expression": "a == b"
+}
+// Response:
+{
+  "success": true,
+  "result": "True",
+  "type": "bool",
+  "variablesReference": 0,
+  "message": "Evaluated expression: a == b"
+}
+```
+
 ### Step 9: Continue Execution
 
 ```json
@@ -339,10 +360,36 @@ Now we can see the bug! After `a = b`, both variables have the value 20.
 The following tools are defined but not yet implemented:
 
 1. **pause_execution**: Returns "Pause execution not yet implemented with proxy"
-2. **evaluate_expression**: Returns "Evaluate expression not yet implemented with proxy"
-3. **get_source_context**: Returns "Get source context not yet fully implemented with proxy"
+2. **get_source_context**: Returns "Get source context not yet fully implemented with proxy"
 
 See [Roadmap.md](../Roadmap.md) for implementation timeline.
+
+## Recently Implemented Features (v0.13.0)
+
+### evaluate_expression
+The `evaluate_expression` tool is now fully functional, allowing you to:
+- Evaluate arbitrary expressions in the current debug context
+- Automatically uses the current frame when `frameId` is not specified
+- Modify program state (expressions with side effects are allowed)
+- Get detailed type information and variablesReference for complex objects
+
+Example usage:
+```json
+// Tool: evaluate_expression
+// Request:
+{
+  "sessionId": "your-session-id",
+  "expression": "len([1, 2, 3]) * 2"
+}
+// Response:
+{
+  "success": true,
+  "result": "6",
+  "type": "int",
+  "variablesReference": 0,
+  "message": "Evaluated expression: len([1, 2, 3]) * 2"
+}
+```
 
 ## Best Practices
 
@@ -354,4 +401,4 @@ See [Roadmap.md](../Roadmap.md) for implementation timeline.
 
 ---
 
-*Last updated: 2025-06-11 based on actual testing*
+*Last updated: 2025-09-11 - Updated with evaluate_expression implementation (v0.13.0)*

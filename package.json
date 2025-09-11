@@ -88,7 +88,6 @@
     "express": "^5.1.0",
     "fs-extra": "^11.2.0",
     "lru-cache": "^11.1.0",
-    "mcp-debugger": "github:debugmcp/mcp-debugger",
     "node-fetch": "^2.7.0",
     "uuid": "^9.0.1",
     "which": "^5.0.0",

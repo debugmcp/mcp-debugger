@@ -17,6 +17,20 @@ import { AdapterConfig } from '../adapters/debug-adapter-interface.js';
 import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
 
 /**
+ * Result type for evaluate expression operations
+ */
+export interface EvaluateResult {
+  success: boolean;
+  result?: string;
+  type?: string;
+  variablesReference?: number;
+  namedVariables?: number;
+  indexedVariables?: number;
+  presentationHint?: DebugProtocol.VariablePresentationHint;
+  error?: string;
+}
+
+/**
  * Debug operations functionality for session management
  */
 export class SessionManagerOperations extends SessionManagerData {
@@ -564,6 +578,167 @@ export class SessionManagerOperations extends SessionManagerData {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`);
       throw error; 
+    }
+  }
+
+  /**
+   * Helper method to truncate long strings for logging
+   */
+  private truncateForLog(value: string, maxLength: number = 1000): string {
+    if (!value) return '';
+    return value.length > maxLength 
+      ? value.substring(0, maxLength) + '... (truncated)'
+      : value;
+  }
+
+  /**
+   * Evaluate an expression in the context of the current debug session.
+   * The debugger must be paused for evaluation to work.
+   * Expressions CAN and SHOULD be able to modify program state (this is a feature).
+   * 
+   * @param sessionId - The session ID
+   * @param expression - The expression to evaluate
+   * @param frameId - Optional stack frame ID for context (defaults to current frame)
+   * @param context - The context in which to evaluate ('repl' is default for maximum flexibility)
+   * @returns Evaluation result with value, type, and optional variable reference
+   */
+  async evaluateExpression(
+    sessionId: string,
+    expression: string,
+    frameId?: number,
+    context: 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables' = 'repl'
+  ): Promise<EvaluateResult> {
+    const session = this._getSessionById(sessionId);
+    this.logger.info(`[SM evaluateExpression ${sessionId}] Entered. Expression: "${this.truncateForLog(expression, 100)}", frameId: ${frameId}, context: ${context}, state: ${session.state}`);
+
+    // Basic sanity checks
+    if (!expression || expression.trim().length === 0) {
+      this.logger.warn(`[SM evaluateExpression ${sessionId}] Empty expression provided`);
+      return { success: false, error: 'Expression cannot be empty' };
+    }
+
+    // Validate session state
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      this.logger.warn(`[SM evaluateExpression ${sessionId}] No active proxy or proxy not running`);
+      return { success: false, error: 'No active debug session' };
+    }
+
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SM evaluateExpression ${sessionId}] Cannot evaluate: session not paused. State: ${session.state}`);
+      return { success: false, error: 'Cannot evaluate: debugger not paused. Ensure the debugger is stopped at a breakpoint.' };
+    }
+
+    // Handle frameId - get current frame from stack trace if not provided
+    if (frameId === undefined) {
+      try {
+        const threadId = session.proxyManager.getCurrentThreadId();
+        if (!threadId) {
+          this.logger.warn(`[SM evaluateExpression ${sessionId}] No current thread ID to get stack trace`);
+          return { success: false, error: 'Unable to find thread for evaluation. Ensure the debugger is paused at a breakpoint.' };
+        }
+
+        this.logger.info(`[SM evaluateExpression ${sessionId}] No frameId provided, getting current frame from stack trace`);
+        const stackResponse = await session.proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', {
+          threadId,
+          startFrame: 0,
+          levels: 1  // We only need the first frame
+        });
+
+        if (stackResponse?.body?.stackFrames && stackResponse.body.stackFrames.length > 0) {
+          frameId = stackResponse.body.stackFrames[0].id;
+          this.logger.info(`[SM evaluateExpression ${sessionId}] Using current frame ID: ${frameId} from stack trace`);
+        } else {
+          this.logger.warn(`[SM evaluateExpression ${sessionId}] No stack frames available`);
+          return { success: false, error: 'No active stack frame. Ensure the debugger is paused at a breakpoint.' };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error(`[SM evaluateExpression ${sessionId}] Error getting stack trace for default frame:`, error);
+        return { success: false, error: `Unable to determine current frame: ${errorMessage}` };
+      }
+    }
+
+    try {
+      // Send DAP evaluate request
+      this.logger.info(`[SM evaluateExpression ${sessionId}] Sending DAP 'evaluate' request. Expression: "${this.truncateForLog(expression, 100)}", frameId: ${frameId}, context: ${context}`);
+      
+      const response = await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>('evaluate', {
+        expression,
+        frameId,
+        context
+      });
+
+      // Log raw response in debug mode
+      this.logger.debug(`[SM evaluateExpression ${sessionId}] DAP evaluate raw response:`, response);
+
+      // Process response
+      if (response && response.body) {
+        const body = response.body;
+        
+        // Note: debugpy automatically truncates collections at 300 items for performance
+        const result: EvaluateResult = {
+          success: true,
+          result: body.result || '',  // Default to empty string if no result
+          type: body.type,  // Optional, can be undefined
+          variablesReference: body.variablesReference || 0,  // Default to 0 (no children)
+          namedVariables: body.namedVariables,
+          indexedVariables: body.indexedVariables,
+          presentationHint: body.presentationHint
+        };
+
+        // Log the evaluation result with structured logging
+        this.logger.info('debug:evaluate', {
+          event: 'expression',
+          sessionId,
+          sessionName: session.name,
+          expression: this.truncateForLog(expression, 100),
+          frameId,
+          context,
+          result: this.truncateForLog(result.result || '', 1000),
+          type: result.type,
+          variablesReference: result.variablesReference,
+          namedVariables: result.namedVariables,
+          indexedVariables: result.indexedVariables,
+          timestamp: Date.now()
+        });
+
+        this.logger.info(`[SM evaluateExpression ${sessionId}] Evaluation successful. Result: "${this.truncateForLog(result.result || '', 200)}", Type: ${result.type}, VarRef: ${result.variablesReference}`);
+        
+        return result;
+      } else {
+        this.logger.warn(`[SM evaluateExpression ${sessionId}] No body in evaluate response`);
+        return { success: false, error: 'No response body from debug adapter' };
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Log the error
+      this.logger.error('debug:evaluate', {
+        event: 'error',
+        sessionId,
+        sessionName: session.name,
+        expression: this.truncateForLog(expression, 100),
+        frameId,
+        context,
+        error: errorMessage,
+        timestamp: Date.now()
+      });
+
+      this.logger.error(`[SM evaluateExpression ${sessionId}] Error evaluating expression:`, error);
+      
+      // Determine error type for better user feedback
+      let userError = errorMessage;
+      if (errorMessage.includes('SyntaxError')) {
+        userError = `Syntax error in expression: ${errorMessage}`;
+      } else if (errorMessage.includes('NameError')) {
+        userError = `Name not found: ${errorMessage}`;
+      } else if (errorMessage.includes('TypeError')) {
+        userError = `Type error: ${errorMessage}`;
+      } else if (errorMessage.includes('frame')) {
+        userError = `Invalid frame context: ${errorMessage}`;
+      }
+      
+      return { success: false, error: userError };
     }
   }
 }

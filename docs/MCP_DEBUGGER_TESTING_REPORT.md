@@ -28,8 +28,14 @@ Successfully tested the mcp-debugger MCP server and rewrote all documentation ba
 ### Tools Not Implemented ❌
 
 1. **pause_execution** - Returns "not yet implemented with proxy"
-2. **evaluate_expression** - Returns "not yet implemented with proxy"
-3. **get_source_context** - Returns "not yet fully implemented with proxy"
+2. **get_source_context** - Returns "not yet fully implemented with proxy"
+
+### Tools Now Implemented ✅
+**evaluate_expression** - FULLY FUNCTIONAL as of v0.13.0
+- Evaluates expressions in current debug context
+- Automatically detects current frame when frameId not provided
+- Supports modifying program state (side effects allowed)
+- Returns results with type information and variablesReference for complex objects
 
 ## Key Discoveries
 

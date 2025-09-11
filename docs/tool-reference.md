@@ -410,21 +410,98 @@ Gets variables within a scope.
 
 ---
 
-### evaluate_expression ❌
+### evaluate_expression
 
-**Status:** Not Implemented
+Evaluates an expression in the context of the current debug session.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
 - `expression` (string, required): The expression to evaluate.
+- `frameId` (number, optional): Stack frame ID for context. If not provided, automatically uses the current (top) frame.
 
-**Error Response:**
+**Response:**
 ```json
 {
-  "code": -32603,
-  "message": "MCP error -32603: Evaluate expression not yet implemented with proxy."
+  "success": true,
+  "result": "10",
+  "type": "int",
+  "variablesReference": 0,
+  "presentationHint": {}
 }
 ```
+
+**Example - Simple Variable:**
+```json
+// Request (no frameId needed!)
+{
+  "sessionId": "d507d6fb-45fc-4295-9dc0-4f44b423c103",
+  "expression": "x"
+}
+
+// Response
+{
+  "success": true,
+  "result": "10",
+  "type": "int",
+  "variablesReference": 0
+}
+```
+
+**Example - Arithmetic Expression:**
+```json
+// Request
+{
+  "sessionId": "d507d6fb-45fc-4295-9dc0-4f44b423c103",
+  "expression": "x + y"
+}
+
+// Response
+{
+  "success": true,
+  "result": "30",
+  "type": "int",
+  "variablesReference": 0
+}
+```
+
+**Example - Complex Expression:**
+```json
+// Request
+{
+  "sessionId": "d507d6fb-45fc-4295-9dc0-4f44b423c103",
+  "expression": "[i*2 for i in range(5)]"
+}
+
+// Response
+{
+  "success": true,
+  "result": "[0, 2, 4, 6, 8]",
+  "type": "list",
+  "variablesReference": 4  // Can be expanded to see elements
+}
+```
+
+**Error Handling:**
+```json
+// Request - undefined variable
+{
+  "sessionId": "d507d6fb-45fc-4295-9dc0-4f44b423c103",
+  "expression": "undefined_variable"
+}
+
+// Response
+{
+  "success": false,
+  "error": "Name not found: Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nNameError: name 'undefined_variable' is not defined\n"
+}
+```
+
+**Important Notes:**
+- **Automatic Frame Detection**: When `frameId` is not provided, the tool automatically gets the current frame from the stack trace
+- **Side Effects Are Allowed**: Expressions CAN modify program state (e.g., `x = 100`). This is intentional and useful for debugging
+- **Session Must Be Paused**: The debugger must be stopped at a breakpoint for evaluation to work
+- **Results Are Strings**: All results are returned as strings, even for numeric types
+- **Python Truncation**: Python/debugpy automatically truncates collections at 300 items for performance
 
 ---
 

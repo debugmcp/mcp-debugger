@@ -394,7 +394,7 @@ export class DebugMcpServer {
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
           { name: 'get_stack_trace', description: 'Get stack trace', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
-          { name: 'evaluate_expression', description: 'Evaluate expression (Not Implemented)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' } }, required: ['sessionId', 'expression'] } },
+          { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context (defaults to 0 - top frame)' } }, required: ['sessionId', 'expression'] } },
           { name: 'get_source_context', description: 'Get source context around a specific line in a file', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number to get context for' }, linesContext: { type: 'number', description: 'Number of lines before and after to include (default: 5)' } }, required: ['sessionId', 'file', 'line'] } },
         ],
       };
@@ -790,14 +790,65 @@ export class DebugMcpServer {
     }
   }
 
-  private async handleEvaluateExpression(args: { sessionId: string, expression: string }): Promise<ServerResult> {
+  private async handleEvaluateExpression(args: { sessionId: string, expression: string, frameId?: number }): Promise<ServerResult> {
     try {
-      this.logger.info(`Evaluate requested for session: ${args.sessionId}, expression: ${args.expression}`);
-      throw new McpError(McpErrorCode.InternalError, "Evaluate expression not yet implemented with proxy.");
+      // Validate session
+      this.validateSession(args.sessionId);
+      
+      // Check expression length (sanity check)
+      if (args.expression.length > 10240) {
+        throw new McpError(McpErrorCode.InvalidParams, 'Expression too long (max 10KB)');
+      }
+      
+      // Call SessionManager's evaluateExpression method
+      const result = await this.sessionManager.evaluateExpression(
+        args.sessionId,
+        args.expression,
+        args.frameId,
+        'repl' // Default context for AI/user evaluation
+      );
+      
+      // Log for audit trail
+      this.logger.info('tool:evaluate_expression', {
+        sessionId: args.sessionId,
+        sessionName: this.getSessionName(args.sessionId),
+        expression: args.expression.substring(0, 100), // Truncate for logging
+        success: result.success,
+        hasResult: !!result.result,
+        timestamp: Date.now()
+      });
+      
+      // Return formatted response
+      return { 
+        content: [{ 
+          type: 'text', 
+          text: JSON.stringify(result) 
+        }] 
+      };
     } catch (error) {
-      this.logger.error('Failed to evaluate expression', { error });
-      if (error instanceof McpError) throw error;
-      throw new McpError(McpErrorCode.InternalError, `Failed to evaluate expression: ${(error as Error).message}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Log the error
+      this.logger.error('tool:evaluate_expression:error', {
+        sessionId: args.sessionId,
+        expression: args.expression.substring(0, 100),
+        error: errorMessage,
+        timestamp: Date.now()
+      });
+      
+      // Handle session state errors specifically
+      if (error instanceof McpError && 
+          (error.message.includes('terminated') || 
+           error.message.includes('closed') || 
+           error.message.includes('not found') ||
+           error.message.includes('not paused'))) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+      } else if (error instanceof McpError) {
+        throw error;
+      } else {
+        // Wrap unexpected errors
+        throw new McpError(McpErrorCode.InternalError, `Failed to evaluate expression: ${errorMessage}`);
+      }
     }
   }
 
