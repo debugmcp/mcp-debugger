@@ -232,10 +232,13 @@ describe('ProxyManager - Lifecycle', () => {
     it('should stop running proxy gracefully', async () => {
       const fakeProxy = fakeLauncher.getLastLaunchedProxy()!;
       
+      // Track terminate command
+      let terminateReceived = false;
+      
       // Simulate graceful exit when terminate command is received
-      fakeProxy.on('message', (msg: string) => {
-        const parsed = JSON.parse(msg);
-        if (parsed.cmd === 'terminate') {
+      fakeProxy.on('message', (msg: any) => {
+        if (msg.cmd === 'terminate') {
+          terminateReceived = true;
           setTimeout(() => fakeProxy.simulateExit(0), 50);
         }
       });
@@ -243,9 +246,7 @@ describe('ProxyManager - Lifecycle', () => {
       await proxyManager.stop();
 
       // Verify terminate command was sent
-      const commands = fakeProxy.sentCommands;
-      const terminateCommand = commands.find((cmd: any) => cmd.cmd === 'terminate');
-      expect(terminateCommand).toBeDefined();
+      expect(terminateReceived).toBe(true);
 
       // Verify state is cleaned up
       expect(proxyManager.isRunning()).toBe(false);
@@ -282,8 +283,8 @@ describe('ProxyManager - Lifecycle', () => {
     it('should handle error sending terminate command', async () => {
       const fakeProxy = fakeLauncher.getLastLaunchedProxy()!;
       
-      // Make sendCommand throw
-      fakeProxy.sendCommand = vi.fn().mockImplementation(() => {
+      // Make send throw
+      fakeProxy.send = vi.fn().mockImplementation(() => {
         throw new Error('IPC channel closed');
       });
 

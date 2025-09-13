@@ -39,7 +39,7 @@ export interface DapCommandPayload {
 
 export interface TerminatePayload {
   cmd: 'terminate';
-  sessionId: string;
+  sessionId?: string;
 }
 
 export type ParentCommand = ProxyInitPayload | DapCommandPayload | TerminatePayload;

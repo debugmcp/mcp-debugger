@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createDebugSession, startDebugging, closeDebugSession, debugServer } from '../../../test-utils/helpers/session-helpers';
+import { createDebugSession, startDebugging, closeDebugSession } from '../../../test-utils/helpers/session-helpers';
 import path from 'path';
 import { DebugLanguage } from '../../../../src/session/models';
 
@@ -13,7 +13,7 @@ describe('Python Discovery - Failure Scenario', () => {
     originalPath = process.env.PATH;
     // Start server with minimal PATH so python commands cannot be found
     process.env.PATH = 'C:\\Windows\\System32';
-    await debugServer.start();
+    // Debug server is now lazy-initialized when needed
   });
 
   afterAll(async () => {
@@ -21,7 +21,7 @@ describe('Python Discovery - Failure Scenario', () => {
       await closeDebugSession(sessionId);
       sessionId = undefined;
     }
-    await debugServer.stop();
+    // Debug server cleanup is handled by vitest.setup.ts
     // Restore original PATH
     if (originalPath !== undefined) {
       process.env.PATH = originalPath;

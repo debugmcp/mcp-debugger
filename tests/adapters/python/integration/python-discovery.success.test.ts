@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createDebugSession, startDebugging, closeDebugSession, debugServer } from '../../../test-utils/helpers/session-helpers';
+import { createDebugSession, startDebugging, closeDebugSession, getDebugServer } from '../../../test-utils/helpers/session-helpers';
 import { getLogger } from '../../../../src/utils/logger';
 import { DebugLanguage } from '../../../../src/session/models';
 import path from 'path';
@@ -18,8 +18,7 @@ describe('Python Discovery - Success Scenarios', () => {
     // Ensure we're using the compiled version by setting the working directory
     const projectRoot = path.resolve(fileURLToPath(import.meta.url), '../../../');
     
-    // Start the debug server explicitly for these tests
-    await debugServer.start();
+    // Debug server is now lazy-initialized when needed
   });
 
   afterAll(async () => {
@@ -27,8 +26,7 @@ describe('Python Discovery - Success Scenarios', () => {
       await closeDebugSession(sessionId);
       sessionId = undefined;
     }
-    // Stop the debug server after all tests are done
-    await debugServer.stop();
+    // Debug server cleanup is handled by vitest.setup.ts
   });
 
   it('should find Python on Windows/Linux without explicit path and start debugging successfully', async () => {

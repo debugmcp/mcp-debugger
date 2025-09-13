@@ -281,9 +281,17 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.logger.info(`[ProxyManager] Stopping proxy for session ${this.sessionId}`);
 
-    // Send terminate command
+    // Mark as shutting down to stop processing new messages
+    const process = this.proxyProcess;
+    
+    // Immediately cleanup to prevent "unknown request" warnings
+    this.cleanup();
+
+    // Send terminate command if process is still running
     try {
-      this.sendCommand({ cmd: 'terminate' });
+      if (!process.killed) {
+        process.send({ cmd: 'terminate', sessionId: this.sessionId });
+      }
     } catch (error) {
       this.logger.error(`[ProxyManager] Error sending terminate command:`, error);
     }
@@ -292,14 +300,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         this.logger.warn(`[ProxyManager] Timeout waiting for proxy exit. Force killing.`);
-        this.proxyProcess?.kill('SIGKILL');
+        if (!process.killed) {
+          process.kill('SIGKILL');
+        }
         resolve();
       }, 5000);
 
-      this.proxyProcess?.once('exit', () => {
+      process.once('exit', () => {
         clearTimeout(timeout);
         resolve();
       });
+
+      // If already killed/exited, resolve immediately
+      if (process.killed || process.exitCode !== null) {
+        clearTimeout(timeout);
+        resolve();
+      }
     });
   }
 
@@ -489,7 +505,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private handleDapResponse(message: ProxyDapResponseMessage): void {
     const pending = this.pendingDapRequests.get(message.requestId);
     if (!pending) {
-      this.logger.warn(`[ProxyManager] Received response for unknown request: ${message.requestId}`);
+      // During shutdown, it's normal to receive responses for requests that were cancelled
+      if (this.proxyProcess) {
+        this.logger.debug(`[ProxyManager] Received response for unknown/cancelled request: ${message.requestId}`);
+      }
       return;
     }
 
@@ -580,6 +599,15 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   private cleanup(): void {
+    // Clear pending DAP requests to avoid "unknown request" warnings during shutdown
+    if (this.pendingDapRequests.size > 0) {
+      this.logger.debug(`[ProxyManager] Clearing ${this.pendingDapRequests.size} pending DAP requests during cleanup`);
+      for (const [requestId, pending] of this.pendingDapRequests) {
+        pending.reject(new Error(`Request cancelled during proxy shutdown: ${pending.command}`));
+      }
+      this.pendingDapRequests.clear();
+    }
+    
     this.proxyProcess = null;
     this.isInitialized = false;
     this.adapterConfigured = false;

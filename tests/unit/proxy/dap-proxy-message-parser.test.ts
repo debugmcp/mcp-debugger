@@ -88,7 +88,7 @@ describe('MessageParser', () => {
 
     it('should throw on missing sessionId field', () => {
       expect(() => MessageParser.parseCommand({ cmd: 'init' }))
-        .toThrow("Missing or invalid 'sessionId' field");
+        .toThrow("Init payload missing or invalid 'sessionId'");
     });
 
     it('should throw on unknown command type', () => {
@@ -299,13 +299,14 @@ describe('MessageParser', () => {
       expect(result).toEqual(payload);
     });
 
-    it('should throw on missing sessionId', () => {
+    it('should allow missing sessionId for emergency shutdown', () => {
       const payload = {
         cmd: 'terminate'
       };
 
-      expect(() => MessageParser.validateTerminatePayload(payload))
-        .toThrow("Terminate payload missing or invalid 'sessionId'");
+      // Should not throw - sessionId is optional for emergency shutdown
+      const result = MessageParser.validateTerminatePayload(payload);
+      expect(result).toEqual(payload);
     });
   });
 

@@ -251,9 +251,9 @@ describe('ProxyManager - Communication', () => {
         response: { success: true }
       });
       
-      // Verify warning was logged
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Received response for unknown request: unknown-id')
+      // Verify debug log was called (changed from warn to debug to avoid noise during shutdown)
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Received response for unknown/cancelled request: unknown-id')
       );
     });
   });

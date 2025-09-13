@@ -38,12 +38,8 @@ export class MessageParser {
       throw new Error(`Missing or invalid 'cmd' field: ${obj.cmd}`);
     }
 
-    // Check for required 'sessionId' field
-    if (!obj.sessionId || typeof obj.sessionId !== 'string') {
-      throw new Error(`Missing or invalid 'sessionId' field: ${obj.sessionId}`);
-    }
-
     // Route to specific validators based on command type
+    // Note: sessionId validation is done per command type since terminate can work without it
     switch (obj.cmd) {
       case 'init':
         return this.validateInitPayload(obj);
@@ -152,9 +148,9 @@ export class MessageParser {
   static validateTerminatePayload(payload: unknown): TerminatePayload {
     const obj = payload as Record<string, unknown>;
 
-    // Only sessionId is required (cmd is already validated)
-    if (!obj.sessionId || typeof obj.sessionId !== 'string') {
-      throw new Error(`Terminate payload missing or invalid 'sessionId': ${obj.sessionId}`);
+    // sessionId is preferred but not strictly required for emergency shutdown
+    if (obj.sessionId !== undefined && typeof obj.sessionId !== 'string') {
+      throw new Error(`Terminate payload has invalid 'sessionId' type: ${typeof obj.sessionId}`);
     }
 
     // Type assertion via unknown to satisfy TypeScript

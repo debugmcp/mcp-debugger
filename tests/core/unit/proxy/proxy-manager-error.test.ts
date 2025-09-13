@@ -207,9 +207,9 @@ describe('ProxyManager - Error Handling', () => {
         // Missing response field
       });
 
-      // Should log warning
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Received response for unknown request: some-id')
+      // Should log debug (changed from warn to debug to avoid noise during shutdown)
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Received response for unknown/cancelled request: some-id')
       );
     });
 

@@ -56,7 +56,7 @@ export class DapProxyWorker {
    * Main command handler
    */
   async handleCommand(command: ParentCommand): Promise<void> {
-    this.currentSessionId = command.sessionId;
+    this.currentSessionId = command.sessionId || null;
 
     try {
       switch (command.cmd) {
