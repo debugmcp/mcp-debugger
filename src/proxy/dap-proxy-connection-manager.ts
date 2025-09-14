@@ -11,9 +11,11 @@ import {
 } from './dap-proxy-interfaces.js';
 
 export class DapConnectionManager {
-  private readonly INITIAL_CONNECT_DELAY = 500;
+  // Increased initial delay to give debugpy more time to start
+  // This is especially important in CI/test environments
+  private readonly INITIAL_CONNECT_DELAY = 500;  
   private readonly MAX_CONNECT_ATTEMPTS = 60;
-  private readonly CONNECT_RETRY_INTERVAL = 200;
+  private readonly CONNECT_RETRY_INTERVAL = 200;  
 
   constructor(
     private dapClientFactory: IDapClientFactory,

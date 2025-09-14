@@ -81,6 +81,14 @@ describe('evaluate_expression E2E', () => {
       }
     });
     const startResult = parseSdkToolResult(startResponse);
+    
+    // Add detailed logging for debugging
+    if (!startResult.success) {
+      console.error('[E2E evaluate_expression] Failed to start debugging:', startResult);
+      console.error('[E2E evaluate_expression] Error message:', startResult.message);
+      console.error('[E2E evaluate_expression] Error details:', startResult.error);
+    }
+    
     expect(startResult.success).toBe(true);
     expect(startResult.state).toBe('paused');
     console.log('[E2E evaluate_expression] Debugging started and paused at breakpoint');
