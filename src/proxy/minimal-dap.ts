@@ -119,38 +119,44 @@ export class MinimalDapClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       logger.info(`[MinimalDapClient] Connecting to ${this.host}:${this.port}`);
       
-      // Error handler for connection phase only
-      const connectErrorHandler = (err: Error) => {
-        logger.error('[MinimalDapClient] Connection error:', err);
-        reject(err);
-      };
+      let connected = false;
+      let connectionRejected = false;
       
       // Use net.createConnection for test compatibility
       this.socket = net.createConnection({ host: this.host, port: this.port }, () => {
         logger.info(`[MinimalDapClient] Connected to ${this.host}:${this.port}`);
-        // Remove the temporary error handler since we're connected
-        this.socket?.removeListener('error', connectErrorHandler);
+        connected = true;
         resolve();
       });
       
-      // Add temporary error handler for connection
-      this.socket.once('error', connectErrorHandler);
-      
-      // Set up persistent handlers
+      // Set up all handlers immediately
       this.socket.on('data', (data: Buffer) => {
         this.handleData(data);
+      });
+      
+      this.socket.on('error', (err) => {
+        logger.error('[MinimalDapClient] Socket error:', err);
+        
+        // Only emit error events after successful connection
+        // During connection, just reject the promise
+        if (connected) {
+          this.emit('error', err);
+        } else if (!connectionRejected) {
+          connectionRejected = true;
+          reject(err);
+        }
       });
       
       this.socket.on('close', () => {
         logger.info('[MinimalDapClient] Socket closed');
         this.emit('close');
         this.cleanup();
-      });
-      
-      // Add persistent error handler after connection phase
-      this.socket.on('error', (err) => {
-        logger.error('[MinimalDapClient] Socket error:', err);
-        this.emit('error', err);
+        
+        // If we never connected and haven't rejected yet, reject now
+        if (!connected && !connectionRejected) {
+          connectionRejected = true;
+          reject(new Error('Socket closed before connection established'));
+        }
       });
     });
   }

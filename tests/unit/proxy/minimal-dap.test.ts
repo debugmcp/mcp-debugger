@@ -89,7 +89,7 @@ describe('MinimalDapClient', () => {
     it('should handle connection errors', async () => {
       const error = new Error('Connection refused');
       
-      // Add error handler to prevent unhandled error
+      // Add error handler - it should NOT be called during connection phase
       const errorHandler = vi.fn();
       client.on('error', errorHandler);
       
@@ -104,7 +104,9 @@ describe('MinimalDapClient', () => {
       });
 
       await expect(client.connect()).rejects.toThrow('Connection refused');
-      expect(errorHandler).toHaveBeenCalledWith(error);
+      // Error handler should NOT be called during connection phase
+      // This prevents uncaught exceptions in the proxy process
+      expect(errorHandler).not.toHaveBeenCalled();
       
       // Clean up
       client.off('error', errorHandler);
