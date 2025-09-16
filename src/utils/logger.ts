@@ -63,7 +63,7 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
       // Fallback for test environments
       projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs/debug-mcp-server.log');
     }
-  } catch (e) {
+  } catch {
     // Fallback if import.meta.url fails
     projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs/debug-mcp-server.log');
   }

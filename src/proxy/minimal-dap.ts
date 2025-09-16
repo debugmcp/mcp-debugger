@@ -83,12 +83,22 @@ export class MinimalDapClient extends EventEmitter {
   }
 
   private handleProtocolMessage(message: DebugProtocol.ProtocolMessage): void {
-    logger.debug(`[MinimalDapClient] Received message:`, {
+    const debugInfo: Record<string, unknown> = {
       type: message.type,
-      seq: message.seq,
-      command: (message as any).command,
-      event: (message as any).event
-    });
+      seq: message.seq
+    };
+    
+    // Add command if it's a request or response
+    if (message.type === 'request' || message.type === 'response') {
+      debugInfo.command = (message as DebugProtocol.Request | DebugProtocol.Response).command;
+    }
+    
+    // Add event if it's an event
+    if (message.type === 'event') {
+      debugInfo.event = (message as DebugProtocol.Event).event;
+    }
+    
+    logger.debug(`[MinimalDapClient] Received message:`, debugInfo);
     
     if (message.type === 'response') {
       const response = message as DebugProtocol.Response;

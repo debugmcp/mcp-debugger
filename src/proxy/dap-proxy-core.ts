@@ -42,6 +42,7 @@ export class ProxyRunner {
   private rl?: readline.Interface;
   private messageHandler?: (message: unknown) => Promise<void>;
   private isRunning = false;
+  private _initTimeout?: NodeJS.Timeout;
 
   constructor(
     private dependencies: DapProxyDependencies,
@@ -97,7 +98,7 @@ export class ProxyRunner {
       }, timeoutDuration);
 
       // Store timeout so we can clear it when init is received
-      (this as any)._initTimeout = initTimeout;
+      this._initTimeout = initTimeout;
     } catch (error) {
       this.isRunning = false;
       this.logger.error('[ProxyRunner] Failed to start:', error);
@@ -157,9 +158,9 @@ export class ProxyRunner {
         command = MessageParser.parseCommand(messageStr);
 
         // Clear initialization timeout when init command is received
-        if (command.cmd === 'init' && (this as any)._initTimeout) {
-          clearTimeout((this as any)._initTimeout);
-          (this as any)._initTimeout = null;
+        if (command.cmd === 'init' && this._initTimeout) {
+          clearTimeout(this._initTimeout);
+          this._initTimeout = undefined;
           this.logger.info('[ProxyRunner] Initialization timeout cleared');
         }
 

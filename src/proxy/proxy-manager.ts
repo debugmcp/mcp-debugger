@@ -621,7 +621,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Clear pending DAP requests to avoid "unknown request" warnings during shutdown
     if (this.pendingDapRequests.size > 0) {
       this.logger.debug(`[ProxyManager] Clearing ${this.pendingDapRequests.size} pending DAP requests during cleanup`);
-      for (const [requestId, pending] of this.pendingDapRequests) {
+      for (const pending of this.pendingDapRequests.values()) {
         pending.reject(new Error(`Request cancelled during proxy shutdown: ${pending.command}`));
       }
       this.pendingDapRequests.clear();

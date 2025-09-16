@@ -113,13 +113,13 @@ class ProcessAdapter extends EventEmitter implements IProcess {
         try {
           // Kill the process group (negative PID)
           process.kill(-this.childProcess.pid, signal || 'SIGTERM');
-        } catch (e) {
+        } catch {
           // Fallback to killing just the process
           return this.childProcess.kill(signal);
         }
       }
       return this.childProcess.kill(signal);
-    } catch (error) {
+    } catch {
       // Process may already be dead
       return false;
     }

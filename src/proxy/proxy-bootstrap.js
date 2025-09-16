@@ -50,7 +50,7 @@ setInterval(() => {
     try {
       // Try to ping parent
       process.send({ type: 'heartbeat', pid: process.pid });
-    } catch (e) {
+    } catch {
       logBootstrapActivity('Cannot communicate with parent, terminating...');
       process.exit(1);
     }

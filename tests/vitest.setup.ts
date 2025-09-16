@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Vitest Setup File
  * 
@@ -8,26 +7,28 @@
  * - Initialize test environments
  */
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
-import { PortRange, portManager } from './test-utils/helpers/port-manager.js';
+import { portManager } from './test-utils/helpers/port-manager.js';
 
 // Add type declarations for global test helpers
 declare global {
+  // eslint-disable-next-line no-var
   var __dirname: string;
+  // eslint-disable-next-line no-var
   var testPortManager: typeof portManager;
 }
 
 // Make __dirname available in ESM context
-globalThis.__dirname = import.meta.url
+(globalThis as any).__dirname = import.meta.url
   ? new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)\//, '$1/')  // For Windows paths
   : process.cwd();
 
 // For Windows, clean up the path format
-if (process.platform === 'win32' && globalThis.__dirname) {
-  globalThis.__dirname = globalThis.__dirname.replace(/\//g, '\\');
+if (process.platform === 'win32' && (globalThis as any).__dirname) {
+  (globalThis as any).__dirname = (globalThis as any).__dirname.replace(/\//g, '\\');
 }
 
 // Make port manager available globally
-globalThis.testPortManager = portManager;
+(globalThis as any).testPortManager = portManager;
 
 // Reset test states before each test file
 beforeAll(() => {
