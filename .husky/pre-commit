@@ -1,5 +1,29 @@
-# Check for personal information in staged files
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run linting check
+echo "🔍 Running ESLint checks before commit..."
+npm run lint
+
+if [ $? -eq 0 ]; then
+    echo "✅ ESLint checks passed!"
+else
+    echo "❌ ESLint errors found! Please fix them before committing."
+    echo "💡 You can use 'npm run lint:fix' to auto-fix some issues."
+    echo "💡 Or use 'git commit --no-verify' to bypass this check (not recommended)."
+    exit 1
+fi
+
+# Run personal information check on staged files
+echo ""
+echo "🔍 Checking staged files for personal information..."
 node scripts/check-personal-paths.cjs
 
-echo "✅ Pre-commit checks passed. Personal information check completed."
-echo "💡 Note: Tests will run before push to ensure code quality on GitHub."
+if [ $? -eq 0 ]; then
+    echo "✅ Pre-commit checks passed. Personal information check completed."
+    echo "💡 Note: Tests will run before push to ensure code quality on GitHub."
+else
+    echo ""
+    echo "❌ Pre-commit checks failed. Please address the issues."
+    exit 1
+fi
