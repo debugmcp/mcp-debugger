@@ -13,7 +13,6 @@ ARG CACHEBUST=1
 # Copy workspace configuration and package files
 COPY package.json package-lock.json ./
 COPY packages/shared/package*.json ./packages/shared/
-COPY vitest.workspace.ts ./
 
 # Install ALL dependencies (respects workspace configuration)
 RUN npm ci --silent --ignore-scripts
