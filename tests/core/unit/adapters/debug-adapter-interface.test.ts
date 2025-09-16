@@ -19,8 +19,8 @@ import {
   FeatureRequirement,
   AdapterCapabilities,
   ExceptionBreakpointFilter
-} from '../../../../src/adapters/debug-adapter-interface.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+} from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('debug-adapter-interface', () => {
   describe('AdapterState enum', () => {

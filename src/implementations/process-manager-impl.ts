@@ -3,7 +3,7 @@
  */
 import { spawn, SpawnOptions, exec } from 'child_process';
 import { promisify } from 'util';
-import { IProcessManager, IChildProcess } from '../interfaces/external-dependencies.js';
+import { IProcessManager, IChildProcess } from '@debugmcp/shared';
 
 const execAsync = promisify(exec);
 

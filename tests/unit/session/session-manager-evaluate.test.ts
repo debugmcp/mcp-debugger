@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { SessionManager } from '../../../src/session/session-manager.js';
 import { SessionManagerConfig } from '../../../src/session/session-manager-core.js';
-import { SessionState, DebugLanguage } from '../../../src/session/models.js';
+import { SessionState, DebugLanguage } from '@debugmcp/shared';
 import { createMockSessionManagerDependencies } from '../../test-utils/helpers/test-dependencies.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import type { ProxyManager } from '../../../src/proxy/proxy-manager.js';

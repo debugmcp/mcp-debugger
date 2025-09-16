@@ -10,10 +10,10 @@ import {
   AdapterDependencies,
   AdapterMetadata,
   FactoryValidationResult
-} from '../adapter-registry-interface.js';
-import { IDebugAdapter } from '../debug-adapter-interface.js';
+} from '@debugmcp/shared';
+import { IDebugAdapter } from '@debugmcp/shared';
 import { MockDebugAdapter, MockAdapterConfig } from './mock-debug-adapter.js';
-import { DebugLanguage } from '../../session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 /**
  * Factory for creating mock debug adapter instances

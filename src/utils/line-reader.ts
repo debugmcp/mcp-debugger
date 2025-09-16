@@ -2,7 +2,7 @@
  * Line reader utility for efficient file line reading with context
  * Used for breakpoint context and source context operations
  */
-import { IFileSystem } from '../interfaces/external-dependencies.js';
+import { IFileSystem } from '@debugmcp/shared';
 import { LRUCache } from 'lru-cache';
 
 /**

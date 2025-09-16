@@ -10,16 +10,27 @@ ENV MCP_CONTAINER=true
 # Cache busting argument - changes this will invalidate all subsequent layers
 ARG CACHEBUST=1
 
-# Copy package files and install ALL dependencies (including dev)
+# Copy workspace configuration and package files
 COPY package.json package-lock.json ./
+COPY packages/shared/package*.json ./packages/shared/
+COPY vitest.workspace.ts ./
+
+# Install ALL dependencies (respects workspace configuration)
 RUN npm ci --silent --ignore-scripts
 
-# Copy source files
+# Copy TypeScript configurations
 COPY tsconfig.json ./
+COPY packages/shared/tsconfig*.json ./packages/shared/
+
+# Copy source files
 COPY src ./src
+COPY packages/shared/src ./packages/shared/src
 COPY scripts ./scripts/
 
-# Build TypeScript first
+# Build shared package first (it's a dependency)
+RUN npm run build -w @debugmcp/shared --silent
+
+# Build TypeScript main package
 RUN npm run build --silent
 
 # Bundle the application into a single file
@@ -49,6 +60,9 @@ RUN apk add --no-cache nodejs && \
 # Copy the bundled application, all dist files for proxy dependencies, and package.json
 COPY --from=builder /app/dist/ /app/dist/
 COPY --from=builder /app/package.json /app/package.json
+
+# Copy packages for potential runtime references (workspace symlinks)
+COPY --from=builder /app/packages/shared/dist/ /app/packages/shared/dist/
 
 # Expose ports
 EXPOSE 3000 5679

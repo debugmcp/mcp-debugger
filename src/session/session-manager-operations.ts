@@ -3,7 +3,7 @@
  * continuing, and breakpoint management.
  */
 import { v4 as uuidv4 } from 'uuid';
-import { Breakpoint, SessionState, SessionLifecycleState } from './models.js'; 
+import { Breakpoint, SessionState, SessionLifecycleState } from '@debugmcp/shared';
 import { ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
@@ -13,7 +13,7 @@ import { ErrorMessages } from '../utils/error-messages.js';
 import { findPythonExecutable } from '../utils/python-utils.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
-import { AdapterConfig } from '../adapters/debug-adapter-interface.js';
+import { AdapterConfig } from '@debugmcp/shared';
 import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
 
 /**

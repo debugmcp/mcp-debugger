@@ -3,7 +3,7 @@
  * These guards ensure type safety at critical boundaries (IPC, serialization, etc.)
  */
 
-import { AdapterCommand } from '../adapters/debug-adapter-interface.js';
+import { AdapterCommand } from '@debugmcp/shared';
 import { ProxyInitPayload } from '../proxy/dap-proxy-interfaces.js';
 
 /**

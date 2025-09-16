@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 describe('SessionManager - Path Resolution', () => {

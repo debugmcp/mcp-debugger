@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { SessionStore, CreateSessionParams } from '../../../../src/session/session-store.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('Session Migration Verification', () => {
   it('should not accept pythonPath parameter', () => {

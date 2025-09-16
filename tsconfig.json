@@ -14,9 +14,12 @@
     "rootDir": "src",
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
+    "composite": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@debugmcp/shared": ["packages/shared/src"],
+      "@debugmcp/shared/*": ["packages/shared/src/*"],
       "*": ["node_modules/*"]
     }
   },
@@ -25,5 +28,8 @@
     "experimentalSpecifierResolution": "node"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests", "build"]
+  "exclude": ["node_modules", "dist", "tests", "build"],
+  "references": [
+    { "path": "./packages/shared" }
+  ]
 }

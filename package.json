@@ -1,18 +1,24 @@
 {
-  "name": "@debugmcp/mcp-debugger",
+  "name": "mcp-debugger-monorepo",
+  "private": true,
   "version": "0.14.1",
-  "description": "Run-time step-through debugging for LLM agents.",
+  "description": "Run-time step-through debugging for LLM agents - Monorepo root",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/debugmcp/mcp-debugger.git"
   },
-  "main": "dist/index.js",
-  "type": "module",
+  "workspaces": {
+    "packages": ["packages/*"],
+    "nohoist": ["**/debugpy", "**/node-inspector"]
+  },
   "scripts": {
     "prepare": "npm run build",
     "prebuild": "rimraf dist",
-    "build": "tsc && npm run postbuild",
+    "build": "npm run build:shared && tsc --build && npm run build:servercore && tsc src/proxy/dap-proxy-entry.ts src/proxy/dap-proxy-worker.ts src/proxy/dap-proxy-core.ts src/proxy/dap-proxy-dependencies.ts src/proxy/dap-proxy-interfaces.ts src/proxy/dap-proxy-adapter-manager.ts src/proxy/dap-proxy-connection-manager.ts src/proxy/dap-proxy-message-parser.ts src/proxy/dap-proxy-request-tracker.ts src/proxy/dap-proxy.ts src/proxy/minimal-dap.ts src/proxy/index.ts src/proxy/proxy-config.ts src/proxy/proxy-manager.ts src/adapters/mock/mock-adapter-process.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && npm run postbuild",
+    "build:shared": "npm run build -w @debugmcp/shared --if-present",
+    "build:servercore": "tsc src/index.ts src/server.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022",
+    "build:all": "npm run build --workspaces --if-present && npm run build",
     "build:clean": "npm run clean && npm run build",
     "start": "node dist/index.js",
     "dev": "ts-node-esm src/index.ts",
@@ -27,6 +33,7 @@
     "test:integration": "vitest run tests/core/integration tests/adapters/*/integration",
     "posttest:integration": "node scripts/cleanup-test-processes.js",
     "test:e2e": "npm run pretest:docker && vitest run tests/e2e",
+    "pretest:e2e": "npm run build",
     "posttest:e2e": "node scripts/cleanup-test-processes.js",
     "test:no-python": "cross-env SKIP_PYTHON_TESTS=true npm test",
     "test:no-docker": "cross-env SKIP_DOCKER_TESTS=true npm test",
@@ -88,10 +95,13 @@
   "engines": {
     "node": ">=16.0.0"
   },
+  "main": "dist/index.js",
+  "type": "module",
   "bin": {
     "mcp-debugger": "./dist/index.js"
   },
   "dependencies": {
+    "@debugmcp/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
     "@vscode/debugadapter": "^1.68.0",

@@ -142,7 +142,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           let hasStarted = false;
           
           // Start server with specific port
-          sseServerProcess = spawn('node', [
+          sseServerProcess = spawn(process.execPath, [
             path.join(projectRoot, 'dist', 'index.js'),
             'sse',
             '-p', port.toString(),

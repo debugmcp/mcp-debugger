@@ -12,8 +12,8 @@ import {
   IDebugTarget,
   IProxyProcessLauncher,
   IProxyProcess
-} from '../interfaces/process-interfaces.js';
-import { IProcessManager, IChildProcess, INetworkManager } from '../interfaces/external-dependencies.js';
+} from '@debugmcp/shared';
+import { IProcessManager, IChildProcess, INetworkManager } from '@debugmcp/shared';
 
 /**
  * Adapter to wrap IChildProcess as IProcess

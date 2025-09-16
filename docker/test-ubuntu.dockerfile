@@ -15,13 +15,23 @@ RUN pip3 install debugpy
 # Set working directory
 WORKDIR /app
 
-# Copy the project
+# Copy workspace configuration and package files
+COPY package*.json ./
+COPY packages/shared/package*.json ./packages/shared/
+COPY vitest.workspace.ts ./
+COPY tsconfig*.json ./
+COPY packages/shared/tsconfig*.json ./packages/shared/
+
+# Copy all source and test files
 COPY . .
 
-# Install npm dependencies
+# Install npm dependencies (respects workspace configuration)
 RUN npm ci
 
-# Build the project
+# Build shared package first
+RUN npm run build -w @debugmcp/shared
+
+# Build the main project
 RUN npm run build
 
 # Run the e2e test that was failing with DAP timeout

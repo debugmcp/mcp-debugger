@@ -28,9 +28,9 @@ import {
   AdapterError,
   AdapterErrorCode,
   AdapterEvents
-} from '../debug-adapter-interface.js';
-import { DebugLanguage } from '../../session/models.js';
-import { AdapterDependencies } from '../adapter-registry-interface.js';
+} from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
+import { AdapterDependencies } from '@debugmcp/shared';
 import { findPythonExecutable, getPythonVersion } from '../../utils/python-utils.js';
 
 /**
@@ -56,6 +56,7 @@ interface PythonLaunchConfig extends LanguageSpecificLaunchConfig {
   redirectOutput?: boolean;     // Redirect output to debug console
   showReturnValue?: boolean;    // Show function return values
   subProcess?: boolean;         // Debug child processes
+  [key: string]: unknown;       // Required by LanguageSpecificLaunchConfig
 }
 
 /**
@@ -313,7 +314,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   // ===== Debug Configuration =====
   
-  transformLaunchConfig(config: GenericLaunchConfig): PythonLaunchConfig {
+  transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig {
     const pythonConfig: PythonLaunchConfig = {
       ...config,
       type: 'python',

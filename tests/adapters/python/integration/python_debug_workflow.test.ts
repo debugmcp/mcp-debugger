@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { DebugSessionInfo, StackFrame, Variable } from '../../../../src/session/models';
+import { DebugSessionInfo, StackFrame, Variable } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';

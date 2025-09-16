@@ -27,7 +27,7 @@ describe('Adapter Switching E2E', () => {
     mcpClient = new Client({ name: "e2e-adapter-switch-test", version: "0.1.0" });
     
     const transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [path.join(process.cwd(), 'dist', 'index.js'), 'stdio'],
     });
     

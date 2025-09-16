@@ -218,7 +218,7 @@ describe('Full Debug Session E2E', () => {
     mcpClient = new Client({ name: "e2e-full-debug-test", version: "0.1.0" });
     
     const transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [path.join(process.cwd(), 'dist', 'index.js'), 'stdio'],
     });
     

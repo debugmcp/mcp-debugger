@@ -6,6 +6,20 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./tests/vitest.setup.ts'],
+    // Include all test files from both main project and packages
+    include: [
+      'tests/**/*.test.ts',
+      'src/**/*.test.ts',
+      'packages/**/tests/**/*.test.ts',
+      'packages/**/src/**/*.test.ts'
+    ],
+    // Exclude patterns
+    exclude: [
+      'node_modules',
+      'dist',
+      '**/node_modules/**',
+      '**/dist/**'
+    ],
     // Reporter configuration
     reporters: process.env.CI ? ['dot'] : ['default'],
     outputFile: {
@@ -78,6 +92,7 @@ export default defineConfig({
         'node_modules',
         'dist',
         'tests',
+        'packages/**/tests',
         'src/proxy/proxy-bootstrap.js',
         '**/*.d.ts',
         '**/*.test.ts',
@@ -88,7 +103,7 @@ export default defineConfig({
         // Mock adapter process - tested via e2e tests, runs as separate process
         'src/adapters/mock/mock-adapter-process.ts'
       ],
-      include: ['src/**/*.ts']
+      include: ['src/**/*.ts', 'packages/**/src/**/*.ts']
     },
     testTimeout: 30000,
     pool: 'threads',
@@ -100,7 +115,7 @@ export default defineConfig({
       }
     },
     testTransformMode: {
-      web: ['src/**/*.ts'] // Ensure TypeScript files in src are transformed
+      web: ['src/**/*.ts', 'packages/**/src/**/*.ts'] // Ensure TypeScript files in src are transformed
     },
     // Module name mapper equivalent
     alias: {
@@ -109,13 +124,16 @@ export default defineConfig({
       // Handle absolute imports with .js extension
       '^(src/.+)\\.js$': path.resolve(__dirname, '$1'),
       '@/': path.resolve(__dirname, './src'),
-      '../../src/(.*)': path.resolve(__dirname, './src/$1.ts') // Direct alias for relative imports to src
+      '../../src/(.*)': path.resolve(__dirname, './src/$1.ts'), // Direct alias for relative imports to src
+      // Add support for @debugmcp/shared package
+      '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts')
     }
   },
   resolve: {
     extensions: ['.ts', '.js', '.json', '.node'], // Add .ts for resolution
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(__dirname, './src'),
+      '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts')
     }
   },
   // Handle ESM modules that need to be transformed

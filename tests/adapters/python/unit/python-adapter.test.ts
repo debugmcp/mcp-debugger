@@ -7,8 +7,8 @@ import { PythonAdapterFactory } from '../../../../src/adapters/python/python-ada
 import { 
   AdapterState, 
   DebugFeature 
-} from '../../../../src/adapters/debug-adapter-interface.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+} from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
 import * as pythonUtils from '../../../../src/utils/python-utils.js';
 import * as child_process from 'child_process';
 import { EventEmitter } from 'events';

@@ -65,7 +65,9 @@ const filesToCheck = [
   'package.json',
   'package-lock.json',
   'tsconfig.json',
-  'scripts/bundle.js'
+  'scripts/bundle.js',
+  'vitest.workspace.ts',
+  'packages/shared/package.json'
 ];
 
 let newestFileTime = new Date(0);
@@ -91,6 +93,12 @@ if (existsSync(srcDir)) {
 const scriptsDir = join(process.cwd(), 'scripts');
 if (existsSync(scriptsDir)) {
   newestFileTime = getLatestModifiedTime(scriptsDir, newestFileTime);
+}
+
+// Check packages directory (workspace packages)
+const packagesDir = join(process.cwd(), 'packages');
+if (existsSync(packagesDir)) {
+  newestFileTime = getLatestModifiedTime(packagesDir, newestFileTime);
 }
 
 // Determine if we need to build

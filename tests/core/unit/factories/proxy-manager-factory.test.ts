@@ -5,9 +5,9 @@ import { IProxyProcessLauncher } from '../../../../src/interfaces/process-interf
 import { IFileSystem, ILogger } from '../../../../src/interfaces/external-dependencies.js';
 import { createMockLogger, createMockFileSystem } from '../../../test-utils/helpers/test-dependencies.js';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
-import { IDebugAdapter } from '../../../../src/adapters/debug-adapter-interface.js';
+import { IDebugAdapter } from '@debugmcp/shared';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('ProxyManagerFactory', () => {
   let mockProxyProcessLauncher: IProxyProcessLauncher;

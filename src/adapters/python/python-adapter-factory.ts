@@ -6,10 +6,10 @@
  * 
  * @since 2.0.0
  */
-import { IDebugAdapter } from '../debug-adapter-interface.js';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '../adapter-registry-interface.js';
+import { IDebugAdapter } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
 import { PythonDebugAdapter } from './python-debug-adapter.js';
-import { DebugLanguage } from '../../session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 import { findPythonExecutable, getPythonVersion } from '../../utils/python-utils.js';
 import { spawn } from 'child_process';
 

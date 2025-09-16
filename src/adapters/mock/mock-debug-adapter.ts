@@ -24,9 +24,9 @@ import {
   AdapterError,
   AdapterErrorCode,
   AdapterEvents
-} from '../debug-adapter-interface.js';
-import { DebugLanguage } from '../../session/models.js';
-import { AdapterDependencies } from '../adapter-registry-interface.js';
+} from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
+import { AdapterDependencies } from '@debugmcp/shared';
 
 /**
  * Mock adapter configuration

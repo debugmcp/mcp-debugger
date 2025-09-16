@@ -6,7 +6,7 @@ import {
   ISessionStoreFactory
 } from '../../../../src/factories/session-store-factory.js';
 import { SessionStore, CreateSessionParams } from '../../../../src/session/session-store.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('SessionStoreFactory', () => {
   afterEach(() => {

@@ -15,8 +15,8 @@ import {
   AdapterRegistryConfig,
   AdapterFactoryMap,
   ActiveAdapterMap
-} from './adapter-registry-interface.js';
-import { IDebugAdapter, AdapterConfig } from './debug-adapter-interface.js';
+} from '@debugmcp/shared';
+import { IDebugAdapter, AdapterConfig } from '@debugmcp/shared';
 
 /**
  * Default registry configuration

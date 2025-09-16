@@ -14,7 +14,7 @@ import {
 } from '../../../../src/interfaces/external-dependencies.js';
 import { IDebugTargetLauncher } from '../../../../src/interfaces/process-interfaces.js';
 import { createMockFileSystem, createMockLogger } from '../../../test-utils/helpers/test-utils.js';
-import { IAdapterRegistry } from '../../../../src/adapters/adapter-registry-interface.js';
+import { IAdapterRegistry } from '@debugmcp/shared';
 import { createMockAdapterRegistry as createCentralizedMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
 // Mock for the deprecated constructor path in SessionManager

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDebugSession, startDebugging, closeDebugSession, getDebugServer } from '../../../test-utils/helpers/session-helpers';
 import { getLogger } from '../../../../src/utils/logger';
-import { DebugLanguage } from '../../../../src/session/models';
+import { DebugLanguage } from '@debugmcp/shared';
 import path from 'path';
 import { fileURLToPath } from 'url';
 

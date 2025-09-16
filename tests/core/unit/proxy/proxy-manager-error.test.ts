@@ -9,7 +9,7 @@ import { FakeProxyProcessLauncher } from '../../../implementations/test/fake-pro
 import { createMockLogger, createMockFileSystem } from '../../../test-utils/helpers/test-utils.js';
 import { ILogger, IFileSystem } from '../../../../src/interfaces/external-dependencies.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('ProxyManager - Error Handling', () => {
   let proxyManager: ProxyManager;
