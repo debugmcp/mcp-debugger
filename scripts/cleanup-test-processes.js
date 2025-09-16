@@ -2,10 +2,10 @@
 
 /**
  * Test Process Cleanup Script
- * 
+ *
  * Cleans up orphaned processes after test suite execution.
  * Cross-platform compatible (Windows/Linux/macOS).
- * 
+ *
  * This addresses a known issue where proxy-bootstrap processes
  * can become orphaned on Unix systems during test execution.
  */
@@ -13,12 +13,15 @@
 import { execSync } from 'child_process';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 const isWindows = process.platform === 'win32';
 const isDarwin = process.platform === 'darwin';
 const isLinux = process.platform === 'linux';
 
 // Get the project root (parent of scripts directory)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const projectName = path.basename(projectRoot);
 
@@ -55,7 +58,7 @@ function getProcessList() {
 function findMcpProcesses() {
   const processList = getProcessList();
   const mcpProcesses = [];
-  
+
   // Patterns to match MCP-related processes
   // More specific to avoid killing unrelated processes
   const patterns = [
@@ -64,7 +67,7 @@ function findMcpProcesses() {
     `vitest.*${projectRoot}`,           // Vitest running in this project
     `debugpy.*${projectRoot}`,          // debugpy spawned by this project
   ];
-  
+
   const lines = processList.split('\n');
   for (const line of lines) {
     for (const pattern of patterns) {
@@ -84,7 +87,7 @@ function findMcpProcesses() {
             pid = parts[1];
           }
         }
-        
+
         if (pid && !isNaN(pid)) {
           mcpProcesses.push({
             pid: parseInt(pid),
@@ -95,7 +98,7 @@ function findMcpProcesses() {
       }
     }
   }
-  
+
   return mcpProcesses;
 }
 
@@ -132,25 +135,25 @@ function cleanup() {
     console.log('✓ Windows: Process cleanup not needed (automatic)');
     return;
   }
-  
+
   console.log('Searching for orphaned test processes...');
-  
+
   const mcpProcesses = findMcpProcesses();
-  
+
   if (mcpProcesses.length === 0) {
     console.log('✓ No orphaned processes found');
     return;
   }
-  
+
   console.log(`Found ${mcpProcesses.length} processes to clean up:`);
   mcpProcesses.forEach(p => {
     console.log(`  PID ${p.pid}: ${p.command}`);
   });
-  
+
   console.log('\nTerminating processes...');
   let killed = 0;
   let failed = 0;
-  
+
   for (const proc of mcpProcesses) {
     if (killProcess(proc.pid)) {
       killed++;
@@ -158,12 +161,12 @@ function cleanup() {
       failed++;
     }
   }
-  
+
   console.log(`\n✓ Cleaned up ${killed} processes`);
   if (failed > 0) {
     console.log(`⚠ Failed to kill ${failed} processes`);
   }
-  
+
   // Show memory status on Linux
   if (isLinux) {
     console.log('\nMemory status:');

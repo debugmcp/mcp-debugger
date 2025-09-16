@@ -250,14 +250,23 @@ export class FakeProxyProcessLauncher implements IProxyProcessLauncher {
     sessionId: string,
     env?: Record<string, string>
   ): IProxyProcess {
+    const isPreppedProxy = !!this.nextProxy;
     const proxy = this.nextProxy || new FakeProxyProcess(sessionId);
     this.nextProxy = undefined;
-    
+
     this.launchedProxies.push({ proxyScriptPath, sessionId, env, process: proxy });
-    
+
     // Simulate spawn event
     proxy.simulateSpawn();
-    
+
+    // Simulate proxy-ready signal after spawn (mimics real proxy behavior)
+    // Only send for non-prepped proxies (prepped proxies control their own messages)
+    if (!isPreppedProxy) {
+      process.nextTick(() => {
+        proxy.simulateMessage({ type: 'proxy-ready', pid: process.pid });
+      });
+    }
+
     return proxy;
   }
   

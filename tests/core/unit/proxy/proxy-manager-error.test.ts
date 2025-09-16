@@ -90,9 +90,21 @@ describe('ProxyManager - Error Handling', () => {
     });
   });
 
+  // Helper function to prepare a proxy with proxy-ready signal
+  const prepareProxyWithReady = (setup: (proxy: any) => void) => {
+    fakeLauncher.prepareProxy((proxy) => {
+      // Send proxy-ready signal immediately to allow initialization to proceed
+      process.nextTick(() => {
+        proxy.simulateMessage({ type: 'proxy-ready', pid: process.pid });
+      });
+      // Run custom setup
+      setup(proxy);
+    });
+  };
+
   describe('Initialization Errors', () => {
     it('should handle error event during initialization', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateProcessError(new Error('Spawn error'));
         }, 50);
@@ -103,7 +115,7 @@ describe('ProxyManager - Error Handling', () => {
     });
 
     it('should handle exit with non-zero code during initialization', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateExit(1);
         }, 50);
@@ -114,7 +126,7 @@ describe('ProxyManager - Error Handling', () => {
     });
 
     it('should handle exit with signal during initialization', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateExit(0, 'SIGKILL');
         }, 50);
@@ -133,7 +145,7 @@ describe('ProxyManager - Error Handling', () => {
         expect(error.message).toBe('Failed to import debugpy');
       });
       
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         // Send initialization first to complete start
         setTimeout(() => {
           proxy.simulateMessage({
@@ -165,7 +177,7 @@ describe('ProxyManager - Error Handling', () => {
   describe('Runtime Errors', () => {
     beforeEach(async () => {
       // Start proxy successfully first
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -253,7 +265,7 @@ describe('ProxyManager - Error Handling', () => {
   describe('Timeout Handling', () => {
     it('should handle DAP request timeout and cleanup', async () => {
       // Start proxy
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -343,7 +355,7 @@ describe('ProxyManager - Error Handling', () => {
   describe('Error Recovery', () => {
     it('should allow restart after error', async () => {
       // First start with error
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateProcessError(new Error('First start failed'));
         }, 50);
@@ -355,7 +367,7 @@ describe('ProxyManager - Error Handling', () => {
       expect(proxyManager.isRunning()).toBe(false);
 
       // Second start should work
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -380,7 +392,7 @@ describe('ProxyManager - Error Handling', () => {
 
   describe('Edge Cases', () => {
     it('should handle adapter exit status messages', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -412,7 +424,7 @@ describe('ProxyManager - Error Handling', () => {
     });
 
     it('should handle terminated status message', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -444,7 +456,7 @@ describe('ProxyManager - Error Handling', () => {
       // Simulate a scenario where DAP state is not initialized
       // This is an edge case that shouldn't happen normally
       
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',

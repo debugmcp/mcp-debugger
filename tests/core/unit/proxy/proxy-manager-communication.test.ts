@@ -42,6 +42,11 @@ describe('ProxyManager - Communication', () => {
 
     // Start proxy with default initialization
     fakeLauncher.prepareProxy((proxy) => {
+      // Send proxy-ready signal immediately to allow initialization to proceed
+      process.nextTick(() => {
+        proxy.simulateMessage({ type: 'proxy-ready', pid: process.pid });
+      });
+      // Then send the initialization complete status
       setTimeout(() => {
         proxy.simulateMessage({
           type: 'status',
@@ -368,8 +373,8 @@ describe('ProxyManager - Communication', () => {
       fakeProxy.simulateMessage(null);
       fakeProxy.simulateMessage(undefined);
       
-      // Verify warnings were logged (4 for invalid messages + 1 for missing sessionId)
-      expect(mockLogger.warn).toHaveBeenCalledTimes(5);
+      // Verify warnings were logged (4 for invalid messages + 1 for missing sessionId + 1 for proxy-ready from beforeEach)
+      expect(mockLogger.warn).toHaveBeenCalledTimes(6);
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Invalid message format'),
         expect.anything()

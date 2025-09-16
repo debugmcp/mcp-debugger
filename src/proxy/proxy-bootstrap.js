@@ -16,6 +16,52 @@ function logBootstrapActivity(message) {
   console.error(`${bootstrapLogPrefix} ${message}`);
 }
 
+// Set up signal handlers to ensure proper cleanup
+process.on('SIGTERM', () => {
+  logBootstrapActivity('Received SIGTERM, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  logBootstrapActivity('Received SIGINT, shutting down gracefully...');
+  process.exit(0);
+});
+
+// Handle parent process death
+process.on('disconnect', () => {
+  logBootstrapActivity('Parent process disconnected, shutting down...');
+  process.exit(0);
+});
+
+// Set up heartbeat to detect orphaned state
+let lastHeartbeat = Date.now();
+const HEARTBEAT_TIMEOUT = 30000; // 30 seconds
+
+// Check if we're orphaned every 10 seconds
+setInterval(() => {
+  // If parent is gone (ppid = 1 on Linux means orphaned)
+  if (process.ppid === 1) {
+    logBootstrapActivity('Process orphaned (ppid=1), terminating...');
+    process.exit(1);
+  }
+
+  // Also check if we haven't received any IPC messages in a while
+  if (Date.now() - lastHeartbeat > HEARTBEAT_TIMEOUT && process.send) {
+    try {
+      // Try to ping parent
+      process.send({ type: 'heartbeat', pid: process.pid });
+    } catch (e) {
+      logBootstrapActivity('Cannot communicate with parent, terminating...');
+      process.exit(1);
+    }
+  }
+}, 10000);
+
+// Update heartbeat on any message from parent
+process.on('message', () => {
+  lastHeartbeat = Date.now();
+});
+
 logBootstrapActivity(`Bootstrap script started. CWD: ${process.cwd()}`);
 
 (async () => {

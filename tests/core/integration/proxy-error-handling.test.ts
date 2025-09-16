@@ -2,7 +2,7 @@
  * Integration tests for proxy error handling
  * Tests the interaction between ProxyManager and ProxyWorker for error scenarios
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { createTestDependencies } from '../../test-utils/helpers/test-dependencies.js';
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 
 describe('Proxy Error Handling Integration', () => {
   let dependencies: Dependencies;
-  let proxyManager: ProxyManager;
+  let proxyManager: ProxyManager | null = null;
   let mockAdapter: IDebugAdapter;
   let mockProxyLauncher: IProxyProcessLauncher;
   
@@ -68,22 +68,22 @@ describe('Proxy Error Handling Integration', () => {
           sendCommand: vi.fn().mockImplementation((cmd: any) => {
             // Simulate worker behavior - exit on init with non-existent script
             if (cmd.cmd === 'init') {
-              // Send error message first
-              const errorHandler = eventHandlers.message?.[0];
-              if (errorHandler) {
-                errorHandler({
+              // Send error message to all handlers
+              const messageHandlers = eventHandlers.message || [];
+              for (const handler of messageHandlers) {
+                handler({
                   type: 'error',
                   message: `Script path not found: ${cmd.scriptPath}`,
                   sessionId: cmd.sessionId
                 });
               }
-              
+
               // Then exit the process
               setTimeout(() => {
                 processKilled = true; // Mark process as killed
-                const exitHandler = eventHandlers.exit?.[0];
-                if (exitHandler) {
-                  exitHandler(1, null);
+                const exitHandlers = eventHandlers.exit || [];
+                for (const handler of exitHandlers) {
+                  handler(1, null);
                 }
               }, 10); // Small delay to simulate async behavior
             }
@@ -101,6 +101,17 @@ describe('Proxy Error Handling Integration', () => {
             on: vi.fn()
           }
         } as unknown as IProxyProcess;
+
+        // Send proxy-ready signal after event handlers are set up
+        // We need a slight delay to ensure ProxyManager has set up its handlers
+        setTimeout(() => {
+          // Send to ALL message handlers, not just the first one
+          const messageHandlers = eventHandlers.message || [];
+          for (const handler of messageHandlers) {
+            handler({ type: 'proxy-ready', pid: 12345 });
+          }
+        }, 10);
+
         return mockProcess;
       })
     };
@@ -112,6 +123,21 @@ describe('Proxy Error Handling Integration', () => {
       dependencies.fileSystem,
       dependencies.logger
     );
+  });
+
+  afterEach(async () => {
+    // Clean up proxy manager if it exists
+    if (proxyManager) {
+      try {
+        await proxyManager.stop();
+      } catch (error) {
+        // Ignore errors during cleanup
+      }
+      proxyManager = null;
+    }
+
+    // Clear all mocks
+    vi.clearAllMocks();
   });
 
   describe('Script Path Validation', () => {

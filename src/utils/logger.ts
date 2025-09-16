@@ -52,9 +52,21 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     );
   }
   
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const projectRootDefaultLogPath = path.resolve(__dirname, '../../logs/debug-mcp-server.log');
+  // Handle cases where import.meta.url might be undefined (e.g., in test environments)
+  let projectRootDefaultLogPath: string;
+  try {
+    if (import.meta.url) {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      projectRootDefaultLogPath = path.resolve(__dirname, '../../logs/debug-mcp-server.log');
+    } else {
+      // Fallback for test environments
+      projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs/debug-mcp-server.log');
+    }
+  } catch (e) {
+    // Fallback if import.meta.url fails
+    projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs/debug-mcp-server.log');
+  }
   
   const logFilePath = options.file || projectRootDefaultLogPath;
 

@@ -25,12 +25,8 @@ export async function cleanupTestServer(): Promise<void> {
   if (debugServer) {
     logger.info(`[Test Helper] Cleaning up shared test server`);
     try {
-      // Close all active sessions before shutting down
-      const sessions = debugServer.listSessions();
-      for (const session of sessions) {
-        logger.info(`[Test Helper] Closing session ${session.id} during server cleanup`);
-        await debugServer.closeDebugSession(session.id);
-      }
+      // Stop the server which will close all active sessions
+      await debugServer.stop();
     } catch (error) {
       logger.error(`[Test Helper] Error during server cleanup:`, error);
     } finally {

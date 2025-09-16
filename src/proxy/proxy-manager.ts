@@ -189,9 +189,28 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     this.logger.info(`[ProxyManager] Proxy spawned with PID: ${this.proxyProcess.pid}`);
-    
+
     // Set up event handlers
     this.setupEventHandlers();
+
+    // Wait for proxy to be ready before sending init command
+    await new Promise<void>((resolve, reject) => {
+      const readyTimeout = setTimeout(() => {
+        reject(new Error('Proxy did not send ready signal within 5 seconds'));
+      }, 5000);
+
+      const handleProxyReady = (message: unknown) => {
+        const msg = message as { type?: string } | null;
+        if (msg?.type === 'proxy-ready') {
+          clearTimeout(readyTimeout);
+          this.proxyProcess?.removeListener('message', handleProxyReady);
+          this.logger.info('[ProxyManager] Proxy is ready to receive commands');
+          resolve();
+        }
+      };
+
+      this.proxyProcess?.on('message', handleProxyReady);
+    });
 
     // Send initialization command
     const initCommand = {
@@ -210,7 +229,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       // Pass adapter command info for language-agnostic adapter spawning
       adapterCommand: config.adapterCommand
     };
-    
+
     // Debug log the command being sent
     this.logger.info(`[ProxyManager] Sending init command with adapterCommand:`, {
       hasAdapterCommand: !!config.adapterCommand,
@@ -220,7 +239,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         hasEnv: !!config.adapterCommand.env
       } : null
     });
-    
+
     this.sendCommand(initCommand);
 
     // Wait for initialization or dry run completion

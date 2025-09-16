@@ -28,12 +28,25 @@ describe('Proxy Startup Integration', () => {
 
   afterEach(async () => {
     // Clean up any spawned processes
-    if (proxy && !proxy.killed) {
-      proxy.kill('SIGTERM');
-      // Wait a bit for graceful shutdown
-      await new Promise(resolve => setTimeout(resolve, 100));
+    if (proxy) {
+      // First try to send a terminate command if IPC is available
+      if (proxy.connected) {
+        try {
+          proxy.send({ cmd: 'terminate' });
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (e) {
+          // Ignore IPC errors
+        }
+      }
+
+      // Then kill the process
       if (!proxy.killed) {
-        proxy.kill('SIGKILL');
+        proxy.kill('SIGTERM');
+        // Wait a bit for graceful shutdown
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (!proxy.killed) {
+          proxy.kill('SIGKILL');
+        }
       }
     }
     proxy = null;

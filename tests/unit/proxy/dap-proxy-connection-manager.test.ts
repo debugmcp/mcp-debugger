@@ -77,6 +77,8 @@ describe('DapConnectionManager', () => {
   });
 
   afterEach(() => {
+    // Clear all pending timers before switching to real timers
+    vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });

@@ -50,6 +50,18 @@ describe('ProxyManager - Lifecycle', () => {
     fakeLauncher.reset();
   });
 
+  // Helper function to prepare a proxy with proxy-ready signal
+  const prepareProxyWithReady = (setup: (proxy: any) => void) => {
+    fakeLauncher.prepareProxy((proxy) => {
+      // Send proxy-ready signal immediately to allow initialization to proceed
+      process.nextTick(() => {
+        proxy.simulateMessage({ type: 'proxy-ready', pid: process.pid });
+      });
+      // Run custom setup
+      setup(proxy);
+    });
+  };
+
   describe('Constructor', () => {
     it('should create ProxyManager with dependencies', () => {
       expect(proxyManager).toBeDefined();
@@ -61,7 +73,7 @@ describe('ProxyManager - Lifecycle', () => {
   describe('start()', () => {
     it('should start proxy process with correct configuration', async () => {
       // Prepare a fake process that will simulate successful initialization
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -97,7 +109,7 @@ describe('ProxyManager - Lifecycle', () => {
     it('should handle dry run mode', async () => {
       const dryRunConfig = { ...defaultConfig, dryRunSpawn: true };
 
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -119,7 +131,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should reject if proxy already running', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -166,7 +178,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should handle process exit during initialization', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateExit(1, 'SIGTERM');
         }, 50);
@@ -177,7 +189,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should handle error during initialization', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateProcessError(new Error('Failed to connect to adapter'));
         }, 50);
@@ -196,7 +208,7 @@ describe('ProxyManager - Lifecycle', () => {
         ]
       };
 
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -217,7 +229,7 @@ describe('ProxyManager - Lifecycle', () => {
   describe('stop()', () => {
     beforeEach(async () => {
       // Start proxy first
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -304,7 +316,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should return true when proxy is running', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -319,7 +331,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should return false after proxy exits', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -345,7 +357,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should return thread ID after stopped event', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -371,7 +383,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should return null after stop', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -406,7 +418,7 @@ describe('ProxyManager - Lifecycle', () => {
 
   describe('Process Exit Handling', () => {
     it('should emit exit event when proxy process exits', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -432,7 +444,7 @@ describe('ProxyManager - Lifecycle', () => {
     });
 
     it('should clean up pending DAP requests on exit', async () => {
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -459,7 +471,7 @@ describe('ProxyManager - Lifecycle', () => {
     it('should handle IPC test message', async () => {
       let ipcTestReceived = false;
       
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         // Override kill to track it was called but don't actually exit
         const originalKill = proxy.kill.bind(proxy);
         proxy.kill = vi.fn((signal) => {
@@ -500,7 +512,7 @@ describe('ProxyManager - Lifecycle', () => {
     it('should emit dry-run-complete event', async () => {
       const config = { ...defaultConfig, dryRunSpawn: true };
       
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -528,7 +540,7 @@ describe('ProxyManager - Lifecycle', () => {
         proxyManager.once('adapter-configured', resolve);
       });
 
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           proxy.simulateMessage({
             type: 'status',
@@ -551,7 +563,7 @@ describe('ProxyManager - Lifecycle', () => {
       let initCount = 0;
       proxyManager.on('initialized', () => initCount++);
 
-      fakeLauncher.prepareProxy((proxy) => {
+      prepareProxyWithReady((proxy) => {
         setTimeout(() => {
           // Send multiple adapter_configured messages
           proxy.simulateMessage({

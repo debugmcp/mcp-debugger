@@ -77,6 +77,27 @@ export class ProxyRunner {
       }
 
       this.logger.info('[ProxyRunner] Ready to receive commands');
+
+      // Send a ready signal to parent process if using IPC
+      if (this.options.useIPC !== false && typeof process.send === 'function') {
+        try {
+          process.send({ type: 'proxy-ready', pid: process.pid });
+        } catch (e) {
+          this.logger.warn('[ProxyRunner] Failed to send ready signal:', e);
+        }
+      }
+
+      // Set up initialization timeout - exit if no init command received
+      // This prevents orphaned processes from consuming resources
+      // Use much shorter timeout to prevent resource consumption
+      const timeoutDuration = 10000; // 10 seconds - should be enough for normal initialization
+      const initTimeout = setTimeout(() => {
+        this.logger.warn(`[ProxyRunner] No initialization received within ${timeoutDuration / 1000} seconds, exiting...`);
+        process.exit(1);
+      }, timeoutDuration);
+
+      // Store timeout so we can clear it when init is received
+      (this as any)._initTimeout = initTimeout;
     } catch (error) {
       this.isRunning = false;
       this.logger.error('[ProxyRunner] Failed to start:', error);
@@ -130,10 +151,18 @@ export class ProxyRunner {
   private createMessageProcessor(): (messageStr: string) => Promise<void> {
     return async (messageStr: string) => {
       this.logger.info(`[ProxyRunner] Received message (first 200 chars): ${messageStr.substring(0, 200)}...`);
-      
+
       let command: ParentCommand | null = null;
       try {
         command = MessageParser.parseCommand(messageStr);
+
+        // Clear initialization timeout when init command is received
+        if (command.cmd === 'init' && (this as any)._initTimeout) {
+          clearTimeout((this as any)._initTimeout);
+          (this as any)._initTimeout = null;
+          this.logger.info('[ProxyRunner] Initialization timeout cleared');
+        }
+
         await this.worker.handleCommand(command);
       } catch (error) {
         const errorMsg = MessageParser.getErrorMessage(error);

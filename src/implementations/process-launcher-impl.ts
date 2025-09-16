@@ -107,7 +107,22 @@ class ProcessAdapter extends EventEmitter implements IProcess {
   }
   
   kill(signal?: string): boolean {
-    return this.childProcess.kill(signal);
+    try {
+      // If the process has a pid, try to kill the entire process group
+      if (this.childProcess.pid && process.platform !== 'win32') {
+        try {
+          // Kill the process group (negative PID)
+          process.kill(-this.childProcess.pid, signal || 'SIGTERM');
+        } catch (e) {
+          // Fallback to killing just the process
+          return this.childProcess.kill(signal);
+        }
+      }
+      return this.childProcess.kill(signal);
+    } catch (error) {
+      // Process may already be dead
+      return false;
+    }
   }
 }
 
@@ -140,7 +155,7 @@ export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
   ): Promise<IDebugTarget> {
     // Find a free port if not specified
     const port = debugPort || await this.networkManager.findFreePort();
-    
+
     // Launch Python with debugpy
     const debugArgs = [
       '-m', 'debugpy',
@@ -149,13 +164,13 @@ export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
       scriptPath,
       ...args
     ];
-    
+
     // No cwd manipulation - let the process inherit the current working directory
     const debugProcess = this.processLauncher.launch(
       pythonPath,
       debugArgs
     );
-    
+
     return {
       process: debugProcess,
       debugPort: port,
@@ -165,10 +180,10 @@ export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
             resolve();
             return;
           }
-          
+
           debugProcess.once('exit', () => resolve());
           debugProcess.kill('SIGTERM');
-          
+
           // Force kill after timeout
           setTimeout(() => {
             if (!debugProcess.killed) {
@@ -180,6 +195,7 @@ export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
       }
     };
   }
+
 }
 
 /**
@@ -192,18 +208,22 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   private initializationState: 'none' | 'waiting' | 'completed' | 'failed' = 'none';
   private initializationCleanup?: () => void;
   private disposed = false;
-  
+  private promiseId: string;
+
   constructor(
     childProcess: IChildProcess,
     public readonly sessionId: string
   ) {
     super(childProcess);
-    
+
+    // Create a unique ID for this adapter's promises for debugging
+    this.promiseId = `ProxyProcess-${sessionId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     // NO promise creation here - wait for waitForInitialization()
-    
+
     // Set up early exit handler
     this.once('exit', this.handleEarlyExit.bind(this));
-    
+
     // Set up error handling immediately to prevent unhandled errors
     // This must be done in the constructor to catch any early errors
     this.setupErrorHandling();
@@ -224,34 +244,53 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   }
   
   private createInitializationPromise(timeout: number): Promise<void> {
-    return new Promise((resolve, reject) => {
+    // Log promise creation for debugging
+    if (process.env.DEBUG_PROMISES) {
+      console.error(`[DEBUG] Creating initialization promise [ID: ${this.promiseId}, Timeout: ${timeout}ms]`);
+    }
+
+    const promise = new Promise<void>((resolve, reject) => {
       this.initializationResolve = resolve;
       this.initializationReject = reject;
-      
+
       // Set up message handler
       const messageHandler = (message: unknown) => {
         const msg = message as { type?: string; status?: string } | null;
-        if (msg?.type === 'status' && 
-            (msg.status === 'adapter_configured_and_launched' || 
+        if (msg?.type === 'status' &&
+            (msg.status === 'adapter_configured_and_launched' ||
              msg.status === 'dry_run_complete')) {
           this.completeInitialization();
         }
       };
       this.on('message', messageHandler);
-      
+
       // Set up timeout
       const timeoutId = setTimeout(() => {
         if (this.initializationState === 'waiting') {
-          this.failInitialization(new Error('Proxy initialization timeout'));
+          this.failInitialization(new Error(`Proxy initialization timeout [Promise ID: ${this.promiseId}]`));
         }
       }, timeout);
-      
+
       // Store cleanup info
       this.initializationCleanup = () => {
         this.removeListener('message', messageHandler);
         clearTimeout(timeoutId);
       };
     });
+
+    // Add a default catch handler to prevent unhandled rejection
+    // This will be overridden when the caller awaits or catches the promise
+    // IMPORTANT: We must handle rejections that occur from timeouts or dispose
+    promise.catch((error) => {
+      // Log the error if debugging is enabled
+      if (process.env.DEBUG_PROMISES) {
+        console.error(`[DEBUG] Promise rejection handled internally [ID: ${this.promiseId}]:`, error?.message);
+      }
+      // Silently handle rejection to prevent unhandled rejection warnings
+      // The actual error handling is done by the caller
+    });
+
+    return promise;
   }
   
   private completeInitialization(): void {
@@ -268,14 +307,21 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   
   private failInitialization(error: Error): void {
     if (this.initializationState !== 'waiting') return;
-    
+
     this.initializationState = 'failed';
-    if (this.initializationReject) {
-      this.initializationReject(error);
-      this.initializationResolve = undefined;
-      this.initializationReject = undefined;
-    }
+
+    // Clear references first to prevent any re-entry
+    const rejectFn = this.initializationReject;
+    this.initializationResolve = undefined;
+    this.initializationReject = undefined;
+
+    // Clean up before rejecting to ensure no double-rejection from cleanup
     this.cleanupInitialization();
+
+    // Now safely reject if we had a reject function
+    if (rejectFn) {
+      rejectFn(error);
+    }
   }
   
   private cleanupInitialization(): void {
@@ -286,27 +332,31 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   }
   
   private handleEarlyExit(): void {
-    if (this.initializationState === 'waiting' && this.initializationReject) {
-      // Only reject if someone is waiting for initialization
-      this.failInitialization(new Error('Proxy process exited before initialization'));
-    } else if (this.initializationState === 'none') {
+    if (this.initializationState === 'none') {
       // Process exited without initialization being requested
       // Mark as failed to prevent future initialization attempts
       this.initializationState = 'failed';
     }
+    // dispose() will handle the rejection if we're waiting for initialization
     this.dispose();
   }
   
   private dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    
-    // Clean up initialization resources
-    this.cleanupInitialization();
-    
+
+    // If we're waiting for initialization, fail it gracefully to avoid unhandled rejection
+    if (this.initializationState === 'waiting') {
+      // Use failInitialization to handle this cleanly
+      this.failInitialization(new Error(`Proxy process exited before initialization [Promise ID: ${this.promiseId}]`));
+    } else {
+      // Clean up initialization resources
+      this.cleanupInitialization();
+    }
+
     // Remove all listeners from this adapter
     this.removeAllListeners();
-    
+
     // Remove listeners from the underlying childProcess
     for (const { event, listener } of this.childProcessListeners) {
       this.childProcess.removeListener(event, listener);
@@ -369,7 +419,7 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
  */
 export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
   constructor(private processLauncher: IProcessLauncher) {}
-  
+
   launchProxy(
     proxyScriptPath: string,
     sessionId: string,
@@ -377,7 +427,7 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
   ): IProxyProcess {
     const diagnosticFlags = ['--trace-uncaught', '--trace-exit'];
     const args = [...diagnosticFlags, proxyScriptPath];
-    
+
     // Convert process.env to ensure all values are strings
     // Filter out test-related environment variables to ensure proxy runs normally
     const processEnv: Record<string, string> = {};
@@ -394,28 +444,31 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
         }
       }
     }
-    
+
     // Ensure the proxy knows it's not in test mode
     delete processEnv.NODE_ENV;
     delete processEnv.VITEST;
     delete processEnv.JEST_WORKER_ID;
-    
+
     const options: IProcessOptions = {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions IPC compatibility
       env: processEnv,
-      cwd: process.cwd() // Ensure proxy runs from the MCP server's working directory
+      cwd: process.cwd(), // Ensure proxy runs from the MCP server's working directory
+      // Create new process group on Unix systems to ensure all child processes can be killed together
+      detached: process.platform !== 'win32'
     };
-    
+
     const launchedProcess = this.processLauncher.launch(
       process.execPath,
       args,
       options
     );
-    
+
     // Cast to ProcessAdapter to access the underlying child process
     const processAdapter = launchedProcess as ProcessAdapter;
     return new ProxyProcessAdapter(processAdapter['childProcess'], sessionId);
   }
+
 }
 
 /**
