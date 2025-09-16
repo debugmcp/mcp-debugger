@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2025-01-15
+
+### Added
+- **`evaluate_expression` tool** - Execute expressions in the current debug context to inspect and modify program state dynamically
+- **Proxy-ready handshake mechanism** - Ensures reliable proxy initialization and prevents race conditions
+- **Orphan process detection** - Automatically terminates proxy processes that become orphaned
+
+### Fixed
+- Memory leak in DAP client buffer management - Improved from O(n²) to O(n) complexity
+- Race condition in MinimalDapClient causing unhandled error events during connection phase
+- Race condition in proxy initialization causing unhandled promise rejections
+- Proxy processes becoming orphaned after test suite execution on Linux
+
+### Changed
+- Proxy initialization timeout reduced from 30s to 10s to prevent resource consumption
+- Improved error handling in ProxyProcessAdapter with proper promise lifecycle management
+
+## [0.13.0] - 2025-01-15
+
+### Added
+- Initial implementation of `evaluate_expression` tool for dynamic debugging capabilities
+
 ## [0.12.0] - 2025-07-28
 
 ### Added
