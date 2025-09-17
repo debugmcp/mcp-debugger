@@ -101,7 +101,8 @@ export default defineConfig({
         'src/container/types.ts',
         'src/dap-core/types.ts',
         // Mock adapter process - tested via e2e tests, runs as separate process
-        'src/adapters/mock/mock-adapter-process.ts'
+        'src/adapters/mock/mock-adapter-process.ts',
+        'packages/adapter-mock/src/mock-adapter-process.ts'
       ],
       include: ['src/**/*.ts', 'packages/**/src/**/*.ts']
     },
@@ -126,14 +127,16 @@ export default defineConfig({
       '@/': path.resolve(__dirname, './src'),
       '../../src/(.*)': path.resolve(__dirname, './src/$1.ts'), // Direct alias for relative imports to src
       // Add support for @debugmcp/shared package
-      '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts')
+      '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts'),
+      '@debugmcp/adapter-mock': path.resolve(__dirname, './packages/adapter-mock/src/index.ts')
     }
   },
   resolve: {
     extensions: ['.ts', '.js', '.json', '.node'], // Add .ts for resolution
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts')
+      '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts'),
+      '@debugmcp/adapter-mock': path.resolve(__dirname, './packages/adapter-mock/src/index.ts')
     }
   },
   // Handle ESM modules that need to be transformed

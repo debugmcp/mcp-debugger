@@ -1,0 +1,26 @@
+{
+  "name": "@debugmcp/adapter-mock",
+  "version": "0.14.1",
+  "description": "Mock debug adapter for testing MCP debugger",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
+  },
+  "dependencies": {
+    "@debugmcp/shared": "^0.14.1",
+    "@vscode/debugprotocol": "^1.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "typescript": "^5.2.2",
+    "vitest": "^3.2.1"
+  },
+  "peerDependencies": {
+    "@debugmcp/shared": "^0.14.1"
+  }
+}

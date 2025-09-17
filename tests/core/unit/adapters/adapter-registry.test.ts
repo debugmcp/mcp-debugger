@@ -15,8 +15,8 @@ import {
   DuplicateRegistrationError,
   FactoryValidationError
 } from '@debugmcp/shared';
-import { MockAdapterFactory } from '../../../../src/adapters/mock/mock-adapter-factory.js';
-import { MockDebugAdapter } from '../../../../src/adapters/mock/mock-debug-adapter.js';
+import { MockAdapterFactory } from '@debugmcp/adapter-mock';
+import { MockDebugAdapter } from '@debugmcp/adapter-mock';
 import { DebugLanguage } from '@debugmcp/shared';
 
 describe('AdapterRegistry', () => {

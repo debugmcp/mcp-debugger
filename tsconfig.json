@@ -20,6 +20,8 @@
       "@/*": ["src/*"],
       "@debugmcp/shared": ["packages/shared/src"],
       "@debugmcp/shared/*": ["packages/shared/src/*"],
+      "@debugmcp/adapter-mock": ["packages/adapter-mock/dist/index.d.ts"],
+      "@debugmcp/adapter-mock/*": ["packages/adapter-mock/dist/*"],
       "*": ["node_modules/*"]
     }
   },
@@ -30,6 +32,7 @@
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "build"],
   "references": [
-    { "path": "./packages/shared" }
+    { "path": "./packages/shared" },
+    { "path": "./packages/adapter-mock" }
   ]
 }

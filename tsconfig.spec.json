@@ -17,7 +17,11 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@debugmcp/shared": ["packages/shared/src"],
+      "@debugmcp/shared/*": ["packages/shared/src/*"],
+      "@debugmcp/adapter-mock": ["packages/adapter-mock/src"],
+      "@debugmcp/adapter-mock/*": ["packages/adapter-mock/src/*"]
     }
   },
   "include": [

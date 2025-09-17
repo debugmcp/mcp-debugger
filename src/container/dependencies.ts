@@ -30,7 +30,7 @@ import { SessionStoreFactory } from '../factories/session-store-factory.js';
 import { ProxyManagerFactory, IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 import { AdapterRegistry } from '../adapters/adapter-registry.js';
-import { MockAdapterFactory } from '../adapters/mock/mock-adapter-factory.js';
+import { MockAdapterFactory } from '../../packages/adapter-mock/dist/index.js';
 import { PythonAdapterFactory } from '../adapters/python/python-adapter-factory.js';
 import { DebugLanguage } from '@debugmcp/shared';
 
