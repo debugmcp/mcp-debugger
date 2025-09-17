@@ -8,10 +8,10 @@ export default defineConfig({
     setupFiles: ['./tests/vitest.setup.ts'],
     // Include all test files from both main project and packages
     include: [
-      'tests/**/*.test.ts',
-      'src/**/*.test.ts',
-      'packages/**/tests/**/*.test.ts',
-      'packages/**/src/**/*.test.ts'
+      'tests/**/*.{test,spec}.ts',
+      'src/**/*.{test,spec}.ts',
+      'packages/**/tests/**/*.{test,spec}.ts',
+      'packages/**/src/**/*.{test,spec}.ts'
     ],
     // Exclude patterns
     exclude: [
