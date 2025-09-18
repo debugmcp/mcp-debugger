@@ -4,7 +4,7 @@
  */
 import { 
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState
-} from './models.js';
+} from '@debugmcp/shared';
 import { SessionStore, ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
@@ -13,13 +13,13 @@ import {
   IFileSystem, 
   INetworkManager, 
   ILogger,
-  IProxyManagerFactory,
   IEnvironment
-} from '../interfaces/external-dependencies.js';
+} from '@debugmcp/shared';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
-import { IDebugTargetLauncher } from '../interfaces/process-interfaces.js';
-import { IAdapterRegistry } from '../adapters/adapter-registry-interface.js';
+import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
+import { IDebugTargetLauncher } from '@debugmcp/shared';
+import { IAdapterRegistry } from '@debugmcp/shared';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {

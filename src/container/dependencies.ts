@@ -9,14 +9,13 @@ import {
   IProcessManager, 
   INetworkManager, 
   ILogger,
-  IProxyManagerFactory,
   IEnvironment
-} from '../interfaces/external-dependencies.js';
+} from '@debugmcp/shared';
 import { 
   IProcessLauncher, 
   IDebugTargetLauncher, 
   IProxyProcessLauncher 
-} from '../interfaces/process-interfaces.js';
+} from '@debugmcp/shared';
 import { 
   FileSystemImpl, 
   ProcessManagerImpl, 
@@ -28,12 +27,12 @@ import {
 import { ProcessEnvironment } from '../implementations/environment-impl.js';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { SessionStoreFactory } from '../factories/session-store-factory.js';
-import { ProxyManagerFactory } from '../factories/proxy-manager-factory.js';
-import { IAdapterRegistry } from '../adapters/adapter-registry-interface.js';
+import { ProxyManagerFactory, IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
+import { IAdapterRegistry } from '@debugmcp/shared';
 import { AdapterRegistry } from '../adapters/adapter-registry.js';
-import { MockAdapterFactory } from '../adapters/mock/mock-adapter-factory.js';
-import { PythonAdapterFactory } from '../adapters/python/python-adapter-factory.js';
-import { DebugLanguage } from '../session/models.js';
+import { MockAdapterFactory } from '../../packages/adapter-mock/dist/index.js';
+import { PythonAdapterFactory } from '../../packages/adapter-python/dist/index.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 /**
  * Complete set of application dependencies

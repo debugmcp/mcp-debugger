@@ -13,7 +13,7 @@ import {
   SessionState,
   mapLegacyState,
   mapToLegacyState
-} from '../../../../src/session/models.js';
+} from '@debugmcp/shared';
 
 describe('Session Models', () => {
   describe('mapLegacyState', () => {

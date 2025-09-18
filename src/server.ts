@@ -21,7 +21,7 @@ import {
     DebugLanguage,
     Breakpoint,
     SessionLifecycleState 
-} from './session/models.js';
+} from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker } from './utils/simple-file-checker.js';

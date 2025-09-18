@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDebugSession, startDebugging, closeDebugSession } from '../../../test-utils/helpers/session-helpers';
 import path from 'path';
-import { DebugLanguage } from '../../../../src/session/models';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('Python Discovery - Failure Scenario', () => {
   let sessionId: string | undefined;

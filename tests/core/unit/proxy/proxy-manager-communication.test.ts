@@ -10,7 +10,7 @@ import { createMockLogger, createMockFileSystem } from '../../../test-utils/help
 import { ILogger, IFileSystem } from '../../../../src/interfaces/external-dependencies.js';
 import { v4 as uuidv4 } from 'uuid';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('ProxyManager - Communication', () => {
   let proxyManager: ProxyManager;

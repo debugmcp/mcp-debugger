@@ -14,7 +14,7 @@ import {
   getAdapterCommandProperty,
   logAdapterCommandValidation
 } from '../../../../src/utils/type-guards.js';
-import { AdapterCommand } from '../../../../src/adapters/debug-adapter-interface.js';
+import { AdapterCommand } from '@debugmcp/shared';
 import { ProxyInitPayload } from '../../../../src/proxy/dap-proxy-interfaces.js';
 
 describe('Type Guards', () => {

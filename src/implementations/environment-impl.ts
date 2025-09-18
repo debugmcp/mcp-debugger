@@ -2,7 +2,7 @@
  * Environment implementation that wraps Node.js process.env and process.cwd()
  */
 
-import { IEnvironment } from '../interfaces/external-dependencies.js';
+import { IEnvironment } from '@debugmcp/shared';
 
 /**
  * Production implementation of IEnvironment

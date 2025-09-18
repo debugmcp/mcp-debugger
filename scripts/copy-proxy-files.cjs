@@ -8,10 +8,10 @@ async function copyProxyFiles() {
   try {
     console.log('[Build] Copying proxy JavaScript files...');
     
-    // Ensure dist/proxy directory exists
+    // Ensure dist/proxy directory exists (but don't clear it!)
     await fs.ensureDir(distDir);
     
-    // Get all .js files from src/proxy
+    // Get all .js files from src/proxy (like proxy-bootstrap.js)
     const files = await fs.readdir(srcDir);
     const jsFiles = files.filter(file => file.endsWith('.js'));
     
@@ -21,6 +21,7 @@ async function copyProxyFiles() {
       const distPath = path.join(distDir, file);
       
       // Copy file and preserve timestamps
+      // This will only overwrite the specific .js files, not delete others
       await fs.copy(srcPath, distPath, { 
         overwrite: true,
         preserveTimestamps: true 
@@ -30,7 +31,8 @@ async function copyProxyFiles() {
       copiedCount++;
     }
     
-    console.log(`[Build] Successfully copied ${copiedCount} proxy files to dist/proxy`);
+    console.log(`[Build] Successfully copied ${copiedCount} proxy JavaScript files to dist/proxy`);
+    console.log('[Build] Note: TypeScript-compiled proxy files are preserved');
   } catch (error) {
     console.error('[Build] Error copying proxy files:', error);
     process.exit(1);

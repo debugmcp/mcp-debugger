@@ -4,9 +4,9 @@
  * @since 2.0.0
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { MockDebugAdapter, MockErrorScenario } from '../../../../src/adapters/mock/mock-debug-adapter.js';
-import { AdapterState, AdapterError, DebugFeature } from '../../../../src/adapters/debug-adapter-interface.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+import { MockDebugAdapter, MockErrorScenario } from '@debugmcp/adapter-mock';
+import { AdapterState, AdapterError, DebugFeature } from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 
 describe('MockDebugAdapter', () => {

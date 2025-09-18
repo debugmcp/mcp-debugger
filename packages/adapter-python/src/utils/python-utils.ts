@@ -2,10 +2,9 @@
  * Python executable detection utilities using the 'which' library.
  */
 import { spawn } from 'child_process';
-import { CommandFinder, CommandNotFoundError } from '../interfaces/command-finder.js';
-import { WhichCommandFinder } from '../implementations/which-command-finder.js';
+import which from 'which';
 
-// Define a simple logger interface
+// Simple logger interface (kept local to avoid external coupling)
 interface Logger {
   error: (message: string) => void;
   debug?: (message: string) => void;
@@ -16,6 +15,50 @@ const noopLogger: Logger = {
   error: () => {},
   debug: () => {}
 };
+
+// Local CommandFinder abstraction and which-based implementation
+
+export class CommandNotFoundError extends Error {
+  command: string;
+  constructor(command: string) {
+    super(command);
+    this.name = 'CommandNotFoundError';
+    this.command = command;
+  }
+}
+
+export interface CommandFinder {
+  find(cmd: string): Promise<string>;
+}
+
+class WhichCommandFinder implements CommandFinder {
+  private cache = new Map<string, string>();
+  constructor(private useCache = true) {}
+
+  async find(cmd: string): Promise<string> {
+    if (this.useCache && this.cache.has(cmd)) {
+      return this.cache.get(cmd)!;
+    }
+    try {
+      const resolved = await which(cmd);
+      if (this.useCache) this.cache.set(cmd, resolved);
+      return resolved;
+    } catch {
+      throw new CommandNotFoundError(cmd);
+    }
+  }
+}
+
+// Default command finder instance for production use
+let defaultCommandFinder: CommandFinder = new WhichCommandFinder();
+
+/**
+ * Set the default command finder (useful for testing)
+ * @param finder The CommandFinder to use as default
+ */
+export function setDefaultCommandFinder(finder: CommandFinder): void {
+  defaultCommandFinder = finder;
+}
 
 /**
  * Validate that a Python command is a real Python executable, not a Windows Store alias
@@ -47,17 +90,6 @@ async function isValidPythonExecutable(pythonCmd: string, logger: Logger = noopL
       }
     });
   });
-}
-
-// Default command finder instance for production use
-let defaultCommandFinder: CommandFinder = new WhichCommandFinder();
-
-/**
- * Set the default command finder (useful for testing)
- * @param finder The CommandFinder to use as default
- */
-export function setDefaultCommandFinder(finder: CommandFinder): void {
-  defaultCommandFinder = finder;
 }
 
 /**

@@ -22,7 +22,6 @@ import { MockProxyManagerFactory } from '../../../src/factories/proxy-manager-fa
 import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
 import { DebugMcpServer, DebugMcpServerOptions } from '../../../src/server.js';
 import { SessionManagerDependencies } from '../../../src/session/session-manager.js';
-import { IPathUtils } from '../../../src/interfaces/path-utils.js';
 import { createMockAdapterRegistry } from '../mocks/mock-adapter-registry.js';
 
 /**
@@ -108,7 +107,6 @@ export function createMockSessionManagerDependencies(): SessionManagerDependenci
     sessionStoreFactory: new MockSessionStoreFactory(),
     debugTargetLauncher: createMockDebugTargetLauncher(),
     environment: createMockEnvironment(),
-    pathUtils: createMockPathUtils(),
     adapterRegistry: createMockAdapterRegistry()
   };
 }
@@ -216,34 +214,6 @@ export function createMockEnvironment(): IEnvironment {
   };
 }
 
-export function createMockPathUtils(): IPathUtils {
-  return {
-    isAbsolute: vi.fn((p: string) => {
-      if (process.platform === 'win32') {
-        return /^[A-Za-z]:[\\\/]/.test(p) || /^\\\\/.test(p);
-      } else {
-        return p.startsWith('/');
-      }
-    }),
-    resolve: vi.fn((...args: string[]) => {
-      return args.join('/').replace(/\/+/g, '/');
-    }),
-    join: vi.fn((...args: string[]) => args.join('/')),
-    dirname: vi.fn((p: string) => {
-      const lastSlash = p.lastIndexOf('/');
-      return lastSlash === -1 ? '.' : p.substring(0, lastSlash);
-    }),
-    basename: vi.fn((p: string, ext?: string) => {
-      const lastSlash = p.lastIndexOf('/');
-      const base = lastSlash === -1 ? p : p.substring(lastSlash + 1);
-      if (ext && base.endsWith(ext)) {
-        return base.substring(0, base.length - ext.length);
-      }
-      return base;
-    }),
-    sep: '/'
-  };
-}
 
 /**
  * Create a full adapter registry for testing
@@ -252,8 +222,8 @@ export function createMockPathUtils(): IPathUtils {
 export async function createFullAdapterRegistry() {
   // Dynamic imports to avoid require() usage
   const { getAdapterRegistry, resetAdapterRegistry } = await import('../../../src/adapters/adapter-registry.js');
-  const { PythonAdapterFactory } = await import('../../../src/adapters/python/python-adapter-factory.js');
-  const { MockAdapterFactory } = await import('../../../src/adapters/mock/mock-adapter-factory.js');
+  const { PythonAdapterFactory } = await import('@debugmcp/adapter-python');
+  const { MockAdapterFactory } = await import('@debugmcp/adapter-mock');
   
   // Reset any existing registry
   resetAdapterRegistry();

@@ -1,4 +1,4 @@
-import { IEnvironment } from '../interfaces/external-dependencies.js';
+import { IEnvironment } from '@debugmcp/shared';
 
 /**
  * Container workspace directory prefix

@@ -13,7 +13,7 @@ import {
   ExecutionState,
   DebugSessionInfo,
   Breakpoint 
-} from './models.js';
+} from '@debugmcp/shared';
 
 // Platform-aware default Python command
 const DEFAULT_PYTHON = process.platform === 'win32' ? 'python' : 'python3';

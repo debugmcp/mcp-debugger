@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
+import * as net from 'net';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
 import * as path from 'path';
@@ -27,6 +28,7 @@ const TEST_TIMEOUT = 60000;
 let mcpSdkClient: Client | null = null;
 let debugpyProcess: ChildProcess | null = null;
 let mcpProcess: ChildProcess | null = null;
+let serverPort: number | null = null;
 const projectRoot = process.cwd();
 
 // Centralized cleanup function
@@ -111,6 +113,46 @@ const parseSdkToolResult = (rawResult: ServerResult) => {
   return JSON.parse(contentArray[0].text);
 };
 
+/**
+ * Find an available port by trying to bind to it
+ */
+async function findAvailablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const maxAttempts = 10;
+    let attempts = 0;
+
+    const tryPort = () => {
+      if (attempts >= maxAttempts) {
+        reject(new Error('Could not find an available port after 10 attempts'));
+        return;
+      }
+
+      attempts++;
+      const port = Math.floor(Math.random() * (65535 - 49152)) + 49152;
+      const server = net.createServer();
+
+      server.once('error', (err: any) => {
+        if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+          tryPort();
+        } else {
+          reject(err);
+        }
+      });
+
+      server.once('listening', () => {
+        server.close(() => {
+          // Add a small delay to ensure Windows fully releases the port
+          setTimeout(() => resolve(port), 200);
+        });
+      });
+
+      server.listen(port);
+    };
+
+    tryPort();
+  });
+}
+
 async function startDebugpyServer(port = 5679): Promise<ChildProcess> {
   const serverScriptPath = path.join(projectRoot, 'tests', 'fixtures', 'python', 'debugpy_server.py');
   console.log(`Starting debugpy server using ${serverScriptPath} on port ${port}`);
@@ -147,9 +189,9 @@ async function startDebugpyServer(port = 5679): Promise<ChildProcess> {
   });
 }
 
-async function startMcpServer(): Promise<ChildProcess> {
+async function startMcpServer(port: number): Promise<ChildProcess> {
   console.log('Starting MCP server in SSE mode');
-  const serverProcess = spawn('node', ['dist/index.js', 'sse', '-p', '3000', '--log-level', 'debug'], { stdio: 'pipe' });
+  const serverProcess = spawn(process.execPath, ['dist/index.js', 'sse', '-p', port.toString(), '--log-level', 'debug'], { stdio: 'pipe' });
   serverProcess.stdout?.on('data', (data) => console.log(`[MCP Server] ${data.toString().trim()}`));
   serverProcess.stderr?.on('data', (data) => console.error(`[MCP Server Error] ${data.toString().trim()}`));
   await new Promise(resolve => setTimeout(resolve, 3000)); 
@@ -159,11 +201,18 @@ async function startMcpServer(): Promise<ChildProcess> {
 describe('MCP Server connecting to debugpy', () => {
   beforeAll(async () => {
     try {
+      // Ensure build output exists before running E2E
+      const distIndex = path.join(projectRoot, 'dist', 'index.js');
+      if (!nativeNodeExistsSync(distIndex)) {
+        throw new Error('dist/index.js not found. Run "npm run build" first or use "npm run test:e2e".');
+      }
+
       debugpyProcess = await startDebugpyServer();
-      mcpProcess = await startMcpServer(); 
+      serverPort = await findAvailablePort();
+      mcpProcess = await startMcpServer(serverPort); 
 
       let mcpServerReady = false;
-      const healthUrl = 'http://localhost:3000/health';
+      const healthUrl = `http://localhost:${serverPort}/health`;
       const pollTimeout = Date.now() + 10000; 
       console.log(`[E2E Test] Polling MCP server health at ${healthUrl}...`);
       while (Date.now() < pollTimeout) {
@@ -189,7 +238,7 @@ describe('MCP Server connecting to debugpy', () => {
       }
       
       mcpSdkClient = new Client({ name: "e2e-sdk-test-client", version: "0.1.0" });
-      const transport = new SSEClientTransport(new URL('http://localhost:3000/sse'));
+      const transport = new SSEClientTransport(new URL(`http://localhost:${serverPort}/sse`));
       await mcpSdkClient.connect(transport);
       console.log('[E2E Test] MCP SDK Client connected via SSE.');
     } catch (error) {

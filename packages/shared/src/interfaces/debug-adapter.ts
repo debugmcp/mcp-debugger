@@ -15,7 +15,7 @@
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { DebugLanguage } from '../session/models.js';
+import { DebugLanguage } from '../models/index.js';
 
 /**
  * Core debug adapter interface that all language adapters must implement

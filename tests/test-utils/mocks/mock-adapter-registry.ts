@@ -4,8 +4,8 @@
  * Provides reusable mocks for IAdapterRegistry interface with realistic behavior
  */
 import { vi } from 'vitest';
-import { IAdapterRegistry, AdapterInfo } from '../../../src/adapters/adapter-registry-interface.js';
-import { DebugLanguage } from '../../../src/session/models.js';
+import { IAdapterRegistry, AdapterInfo } from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
 
 /**
  * Create a standard mock adapter registry with default behavior

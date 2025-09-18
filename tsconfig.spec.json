@@ -17,7 +17,13 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@debugmcp/shared": ["packages/shared/src"],
+      "@debugmcp/shared/*": ["packages/shared/src/*"],
+      "@debugmcp/adapter-mock": ["packages/adapter-mock/src"],
+      "@debugmcp/adapter-mock/*": ["packages/adapter-mock/src/*"],
+      "@debugmcp/adapter-python": ["packages/adapter-python/src"],
+      "@debugmcp/adapter-python/*": ["packages/adapter-python/src/*"]
     }
   },
   "include": [

@@ -9,8 +9,8 @@ import { fileURLToPath } from 'url';
 import { 
   IFileSystem,
   ILogger
-} from '../interfaces/external-dependencies.js';
-import { IProxyProcessLauncher, IProxyProcess } from '../interfaces/process-interfaces.js';
+} from '@debugmcp/shared';
+import { IProxyProcessLauncher, IProxyProcess } from '@debugmcp/shared';
 import { 
   createInitialState, 
   handleProxyMessage, 
@@ -19,7 +19,7 @@ import {
 } from '../dap-core/index.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
-import { IDebugAdapter } from '../adapters/debug-adapter-interface.js';
+import { IDebugAdapter } from '@debugmcp/shared';
 
 /**
  * Events emitted by ProxyManager

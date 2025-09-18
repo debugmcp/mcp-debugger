@@ -24,9 +24,9 @@ import {
   AdapterError,
   AdapterErrorCode,
   AdapterEvents
-} from '../debug-adapter-interface.js';
-import { DebugLanguage } from '../../session/models.js';
-import { AdapterDependencies } from '../adapter-registry-interface.js';
+} from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
+import { AdapterDependencies } from '@debugmcp/shared';
 
 /**
  * Mock adapter configuration
@@ -288,9 +288,9 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
       mockAdapterPath = path.join(currentDir, 'mock-adapter-process.js');
     } catch {
       // Fallback: assume we're running from the project root
-      // The compiled files are in dist/adapters/mock/
+      // The compiled file is at packages/adapter-mock/dist/mock-adapter-process.js
       const projectRoot = path.resolve(process.cwd());
-      mockAdapterPath = path.join(projectRoot, 'dist', 'adapters', 'mock', 'mock-adapter-process.js');
+      mockAdapterPath = path.join(projectRoot, 'packages', 'adapter-mock', 'dist', 'mock-adapter-process.js');
       
       this.dependencies.logger?.debug(
         `[MockDebugAdapter] Using fallback path resolution: ${mockAdapterPath}`

@@ -14,9 +14,16 @@
     "rootDir": "src",
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
+    "composite": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@debugmcp/shared": ["packages/shared/src"],
+      "@debugmcp/shared/*": ["packages/shared/src/*"],
+      "@debugmcp/adapter-mock": ["packages/adapter-mock/dist/index.d.ts"],
+      "@debugmcp/adapter-mock/*": ["packages/adapter-mock/dist/*"],
+      "@debugmcp/adapter-python": ["packages/adapter-python/dist/index.d.ts"],
+      "@debugmcp/adapter-python/*": ["packages/adapter-python/dist/*"],
       "*": ["node_modules/*"]
     }
   },
@@ -25,5 +32,10 @@
     "experimentalSpecifierResolution": "node"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests", "build"]
+  "exclude": ["node_modules", "dist", "tests", "build"],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/adapter-mock" },
+    { "path": "./packages/adapter-python" }
+  ]
 }

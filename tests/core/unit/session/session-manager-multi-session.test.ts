@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '../../../../src/session/models.js';
+import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
 import { createMockDependencies } from './session-manager-test-utils.js';
 

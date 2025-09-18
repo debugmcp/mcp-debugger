@@ -1,7 +1,7 @@
 /**
  * Configuration for starting a proxy - language agnostic version
  */
-import { DebugLanguage } from '../session/models.js';
+import { DebugLanguage } from '@debugmcp/shared';
 
 /**
  * Configuration for starting a proxy

@@ -8,7 +8,7 @@ import { EventEmitter } from 'events';
 import { SpawnOptions } from 'child_process';
 import { Stats } from 'fs';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
-import type { IDebugAdapter } from '../adapters/debug-adapter-interface.js';
+import type { IDebugAdapter } from '@debugmcp/shared';
 
 /**
  * File system operations interface

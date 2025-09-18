@@ -2,7 +2,7 @@
  * Concrete implementation of INetworkManager using Node.js net module
  */
 import net from 'net';
-import { INetworkManager, IServer } from '../interfaces/external-dependencies.js';
+import { INetworkManager, IServer } from '@debugmcp/shared';
 
 export class NetworkManagerImpl implements INetworkManager {
   createServer(): IServer {

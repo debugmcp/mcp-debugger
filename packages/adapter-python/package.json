@@ -1,0 +1,28 @@
+{
+  "name": "@debugmcp/adapter-python",
+  "version": "0.14.1",
+  "description": "Python debug adapter for MCP debugger using debugpy",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
+  },
+  "dependencies": {
+    "@debugmcp/shared": "^0.14.1",
+    "@vscode/debugprotocol": "^1.68.0",
+    "which": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@types/which": "^3.0.4",
+    "typescript": "^5.2.2",
+    "vitest": "^3.2.1"
+  },
+  "peerDependencies": {
+    "@debugmcp/shared": "^0.14.1"
+  }
+}

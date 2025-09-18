@@ -7,7 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { Breakpoint } from '../../../../src/session/models.js';
+import { Breakpoint } from '@debugmcp/shared';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,

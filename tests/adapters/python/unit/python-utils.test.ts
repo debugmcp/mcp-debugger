@@ -1,18 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn } from 'child_process';
-import { findPythonExecutable, getPythonVersion, setDefaultCommandFinder } from '../../../../src/utils/python-utils.js';
+import { findPythonExecutable, getPythonVersion, setDefaultCommandFinder } from '@debugmcp/adapter-python';
 import { MockCommandFinder } from '../../../test-utils/mocks/mock-command-finder.js';
-import { CommandNotFoundError } from '../../../../src/interfaces/command-finder.js';
+import { CommandNotFoundError } from '@debugmcp/adapter-python';
 import { EventEmitter } from 'events';
 
-// Mock child_process module for getPythonVersion tests only
-vi.mock('child_process', () => ({
-  spawn: vi.fn()
-}));
+/**
+ * Mock child_process with a partial mock so other APIs like exec remain available
+ * This avoids breaking cleanup code that imports process-manager-impl (uses exec)
+ */
+vi.mock('child_process', async (importOriginal: any) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as any),
+    spawn: vi.fn()
+  };
+});
 
 const mockSpawn = vi.mocked(spawn);
 
-describe('python-utils', { tag: '@requires-python' }, () => {
+describe('python-utils', () => {
   let mockCommandFinder: MockCommandFinder;
 
   beforeEach(() => {

@@ -6,7 +6,7 @@
  * 
  * @since 2.0.0
  */
-import { IDebugAdapter, AdapterConfig } from './debug-adapter-interface.js';
+import { IDebugAdapter, AdapterConfig } from './debug-adapter.js';
 
 /**
  * Registry for managing debug adapters across multiple languages
@@ -307,8 +307,8 @@ export type ActiveAdapterMap = Map<string, Set<IDebugAdapter>>;
 
 // ===== External Dependencies (imported from existing interfaces) =====
 
-import type { IFileSystem } from '../interfaces/external-dependencies.js';
-import type { ILogger } from '../interfaces/external-dependencies.js';
-import type { IEnvironment } from '../interfaces/external-dependencies.js';
-import type { IProcessLauncher } from '../interfaces/process-interfaces.js';
-import type { INetworkManager } from '../interfaces/external-dependencies.js';
+import type { IFileSystem } from './external-dependencies.js';
+import type { ILogger } from './external-dependencies.js';
+import type { IEnvironment } from './external-dependencies.js';
+import type { IProcessLauncher } from './process-interfaces.js';
+import type { INetworkManager } from './external-dependencies.js';

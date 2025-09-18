@@ -3,7 +3,7 @@
  */
 import fs from 'fs-extra';
 import { Stats } from 'fs';
-import { IFileSystem } from '../interfaces/external-dependencies.js';
+import { IFileSystem } from '@debugmcp/shared';
 
 export class FileSystemImpl implements IFileSystem {
   // Basic fs operations

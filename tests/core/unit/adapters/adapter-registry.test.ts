@@ -14,10 +14,10 @@ import {
   AdapterNotFoundError,
   DuplicateRegistrationError,
   FactoryValidationError
-} from '../../../../src/adapters/adapter-registry-interface.js';
-import { MockAdapterFactory } from '../../../../src/adapters/mock/mock-adapter-factory.js';
-import { MockDebugAdapter } from '../../../../src/adapters/mock/mock-debug-adapter.js';
-import { DebugLanguage } from '../../../../src/session/models.js';
+} from '@debugmcp/shared';
+import { MockAdapterFactory } from '@debugmcp/adapter-mock';
+import { MockDebugAdapter } from '@debugmcp/adapter-mock';
+import { DebugLanguage } from '@debugmcp/shared';
 
 describe('AdapterRegistry', () => {
   let registry: AdapterRegistry;

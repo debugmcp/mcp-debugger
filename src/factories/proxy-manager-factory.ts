@@ -3,9 +3,9 @@
  * Enables dependency injection and easy mocking for tests
  */
 import { IProxyManager, ProxyManager } from '../proxy/proxy-manager.js';
-import { IProxyProcessLauncher } from '../interfaces/process-interfaces.js';
-import { IFileSystem, ILogger } from '../interfaces/external-dependencies.js';
-import { IDebugAdapter } from '../adapters/debug-adapter-interface.js';
+import { IProxyProcessLauncher } from '@debugmcp/shared';
+import { IFileSystem, ILogger } from '@debugmcp/shared';
+import { IDebugAdapter } from '@debugmcp/shared';
 
 /**
  * Interface for ProxyManager factory

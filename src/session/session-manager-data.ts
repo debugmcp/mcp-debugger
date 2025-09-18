@@ -2,10 +2,9 @@
  * Data retrieval operations for session management including variables,
  * stack traces, and scopes.
  */
-import { Variable, StackFrame } from './models.js'; 
-import { DebugProtocol } from '@vscode/debugprotocol'; 
-import { SessionState } from './models.js';
+import { Variable, StackFrame, SessionState } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
+import { DebugProtocol } from '@vscode/debugprotocol';
 
 /**
  * Data retrieval functionality for session management

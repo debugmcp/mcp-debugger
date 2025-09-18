@@ -48,7 +48,7 @@ describe('MCP Server E2E Smoke Test', () => {
     
     // StdioClientTransport will spawn the server process for us
     const transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [path.join(projectRoot, 'dist', 'index.js'), 'stdio'],
     });
     
@@ -133,7 +133,7 @@ describe('MCP Server E2E Smoke Test', () => {
       
       // StdioClientTransport will spawn the server process with temp directory as cwd
       const transport = new StdioClientTransport({
-        command: 'node',
+        command: process.execPath,
         args: [path.join(projectRoot, 'dist', 'index.js'), 'stdio'],
         env: {
           ...process.env,

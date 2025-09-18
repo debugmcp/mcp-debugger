@@ -9,7 +9,7 @@
  * 5. No path interpretation, normalization, or cross-platform logic
  */
 
-import { IFileSystem, IEnvironment } from '../interfaces/external-dependencies.js';
+import { IFileSystem, IEnvironment } from '@debugmcp/shared';
 import { translatePathForContainer } from './container-path-utils.js';
 
 /**

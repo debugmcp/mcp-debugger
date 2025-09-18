@@ -1,6 +1,6 @@
 import { DebugMcpServer } from '../../../src/server.js';
 import { createLogger } from '../../../src/utils/logger.js';
-import { DebugSessionInfo, DebugLanguage, Breakpoint, Variable, StackFrame } from '../../../src/session/models.js';
+import { DebugSessionInfo, DebugLanguage, Breakpoint, Variable, StackFrame } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 
 // Create a logger for the test helpers

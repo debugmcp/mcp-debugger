@@ -2,7 +2,7 @@
  * Test utilities for Debug MCP Server tests
  */
 import { EventEmitter } from 'events';
-import { DebugLanguage, SessionState, DebugSession } from '../../../src/session/models.js';
+import { DebugLanguage, SessionState, DebugSession } from '@debugmcp/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 /**

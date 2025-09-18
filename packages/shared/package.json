@@ -1,0 +1,62 @@
+{
+  "name": "@debugmcp/shared",
+  "version": "0.14.1",
+  "description": "Shared interfaces, types, and utilities for MCP Debugger",
+  "homepage": "https://github.com/debugmcp/mcp-debugger/tree/main/packages/shared",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/debugmcp/mcp-debugger.git",
+    "directory": "packages/shared"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "build:clean": "npm run clean && npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "mcp",
+    "debugger",
+    "interfaces",
+    "types",
+    "dap",
+    "debug-adapter-protocol"
+  ],
+  "author": "debugmcp <debug@sycamore.llc>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/debugmcp/mcp-debugger/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@vscode/debugprotocol": "^1.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@vitest/coverage-istanbul": "^3.2.1",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.2.2",
+    "vitest": "^3.2.1"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

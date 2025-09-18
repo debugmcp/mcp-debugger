@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionStore, CreateSessionParams } from '../../../../src/session/session-store.js';
-import { DebugLanguage, SessionState } from '../../../../src/session/models.js';
+import { DebugLanguage, SessionState } from '@debugmcp/shared';
 
 describe('SessionStore', () => {
   let store: SessionStore;
