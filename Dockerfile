@@ -31,8 +31,7 @@ COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
 COPY src ./src
 COPY scripts ./scripts/
 
-# 4) Build workspace packages (shared first), then main project; then bundle
-RUN npm run build -w @debugmcp/shared --silent
+# 4) Build workspace packages and main project (root build runs build:packages); then bundle
 RUN npm run build --silent
 RUN node scripts/bundle.js
 

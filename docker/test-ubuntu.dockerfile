@@ -18,9 +18,13 @@ WORKDIR /app
 # Copy workspace configuration and package files
 COPY package*.json ./
 COPY packages/shared/package*.json ./packages/shared/
+COPY packages/adapter-mock/package*.json ./packages/adapter-mock/
+COPY packages/adapter-python/package*.json ./packages/adapter-python/
 COPY vitest.workspace.ts ./
 COPY tsconfig*.json ./
 COPY packages/shared/tsconfig*.json ./packages/shared/
+COPY packages/adapter-mock/tsconfig*.json ./packages/adapter-mock/
+COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
 
 # Copy all source and test files
 COPY . .
@@ -28,10 +32,7 @@ COPY . .
 # Install npm dependencies (respects workspace configuration)
 RUN npm ci
 
-# Build shared package first
-RUN npm run build -w @debugmcp/shared
-
-# Build the main project
+# Build all packages and the main project (root build runs build:packages)
 RUN npm run build
 
 # Run the e2e test that was failing with DAP timeout
