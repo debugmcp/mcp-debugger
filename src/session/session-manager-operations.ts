@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
-import { findPythonExecutable } from '../utils/python-utils.js';
+import { findPythonExecutable } from '../../packages/adapter-python/dist/index.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '@debugmcp/shared';

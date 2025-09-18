@@ -128,7 +128,8 @@ export default defineConfig({
       '../../src/(.*)': path.resolve(__dirname, './src/$1.ts'), // Direct alias for relative imports to src
       // Add support for @debugmcp/shared package
       '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts'),
-      '@debugmcp/adapter-mock': path.resolve(__dirname, './packages/adapter-mock/src/index.ts')
+      '@debugmcp/adapter-mock': path.resolve(__dirname, './packages/adapter-mock/src/index.ts'),
+      '@debugmcp/adapter-python': path.resolve(__dirname, './packages/adapter-python/src/index.ts')
     }
   },
   resolve: {
@@ -136,7 +137,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@debugmcp/shared': path.resolve(__dirname, './packages/shared/src/index.ts'),
-      '@debugmcp/adapter-mock': path.resolve(__dirname, './packages/adapter-mock/src/index.ts')
+      '@debugmcp/adapter-mock': path.resolve(__dirname, './packages/adapter-mock/src/index.ts'),
+      '@debugmcp/adapter-python': path.resolve(__dirname, './packages/adapter-python/src/index.ts')
     }
   },
   // Handle ESM modules that need to be transformed

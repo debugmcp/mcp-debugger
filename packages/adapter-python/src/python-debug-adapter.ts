@@ -31,7 +31,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { findPythonExecutable, getPythonVersion } from '../../utils/python-utils.js';
+import { findPythonExecutable, getPythonVersion } from './utils/python-utils.js';
 
 /**
  * Cache entry for Python executable paths

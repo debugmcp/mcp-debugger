@@ -31,7 +31,7 @@ import { ProxyManagerFactory, IProxyManagerFactory } from '../factories/proxy-ma
 import { IAdapterRegistry } from '@debugmcp/shared';
 import { AdapterRegistry } from '../adapters/adapter-registry.js';
 import { MockAdapterFactory } from '../../packages/adapter-mock/dist/index.js';
-import { PythonAdapterFactory } from '../adapters/python/python-adapter-factory.js';
+import { PythonAdapterFactory } from '../../packages/adapter-python/dist/index.js';
 import { DebugLanguage } from '@debugmcp/shared';
 
 /**

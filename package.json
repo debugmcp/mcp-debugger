@@ -17,7 +17,7 @@
     "prebuild": "rimraf dist",
     "build": "npm run build:shared && npm run build:adapters && tsc --build && npm run build:servercore && tsc src/index.ts src/server.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && tsc src/proxy/dap-proxy-entry.ts src/proxy/dap-proxy-worker.ts src/proxy/dap-proxy-core.ts src/proxy/dap-proxy-dependencies.ts src/proxy/dap-proxy-interfaces.ts src/proxy/dap-proxy-adapter-manager.ts src/proxy/dap-proxy-connection-manager.ts src/proxy/dap-proxy-message-parser.ts src/proxy/dap-proxy-request-tracker.ts src/proxy/dap-proxy.ts src/proxy/minimal-dap.ts src/proxy/index.ts src/proxy/proxy-config.ts src/proxy/proxy-manager.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && npm run postbuild",
     "build:shared": "npm run build -w @debugmcp/shared --if-present",
-    "build:adapters": "npm run build -w @debugmcp/adapter-mock",
+    "build:adapters": "npm run build -w @debugmcp/adapter-mock && npm run build -w @debugmcp/adapter-python",
     "build:servercore": "tsc -p tsconfig.json",
     "build:all": "npm run build --workspaces --if-present && npm run build",
     "build:clean": "npm run clean && npm run build",
@@ -104,6 +104,7 @@
   "dependencies": {
     "@debugmcp/shared": "workspace:*",
     "@debugmcp/adapter-mock": "workspace:*",
+    "@debugmcp/adapter-python": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
     "@vscode/debugadapter": "^1.68.0",

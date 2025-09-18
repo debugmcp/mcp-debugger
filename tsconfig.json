@@ -22,6 +22,8 @@
       "@debugmcp/shared/*": ["packages/shared/src/*"],
       "@debugmcp/adapter-mock": ["packages/adapter-mock/dist/index.d.ts"],
       "@debugmcp/adapter-mock/*": ["packages/adapter-mock/dist/*"],
+      "@debugmcp/adapter-python": ["packages/adapter-python/dist/index.d.ts"],
+      "@debugmcp/adapter-python/*": ["packages/adapter-python/dist/*"],
       "*": ["node_modules/*"]
     }
   },
@@ -33,6 +35,7 @@
   "exclude": ["node_modules", "dist", "tests", "build"],
   "references": [
     { "path": "./packages/shared" },
-    { "path": "./packages/adapter-mock" }
+    { "path": "./packages/adapter-mock" },
+    { "path": "./packages/adapter-python" }
   ]
 }

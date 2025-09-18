@@ -2,27 +2,38 @@
  * Unit tests for Python Debug Adapter
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { PythonDebugAdapter } from '../../../../src/adapters/python/python-debug-adapter.js';
-import { PythonAdapterFactory } from '../../../../src/adapters/python/python-adapter-factory.js';
+import { PythonDebugAdapter } from '@debugmcp/adapter-python';
+import { PythonAdapterFactory } from '@debugmcp/adapter-python';
 import { 
   AdapterState, 
   DebugFeature 
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
-import * as pythonUtils from '../../../../src/utils/python-utils.js';
+import * as pythonUtils from '../../../../packages/adapter-python/src/utils/python-utils.js';
 import * as child_process from 'child_process';
 import { EventEmitter } from 'events';
 
-// Mock python-utils
-vi.mock('../../../../src/utils/python-utils.js', () => ({
-  findPythonExecutable: vi.fn(),
-  getPythonVersion: vi.fn()
-}));
+/**
+ * Mock python-utils via the exact module path the adapter imports,
+ * so the adapter's internal imports are affected.
+ */
+vi.mock('../../../../packages/adapter-python/src/utils/python-utils.js', async (importOriginal: any) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as any),
+    findPythonExecutable: vi.fn(),
+    getPythonVersion: vi.fn()
+  };
+});
 
 // Mock child_process
-vi.mock('child_process', () => ({
-  spawn: vi.fn()
-}));
+vi.mock('child_process', async (importOriginal: any) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as any),
+    spawn: vi.fn()
+  };
+});
 
 // Create a mock process helper
 function createMockProcess() {
@@ -41,7 +52,7 @@ function createMockProcess() {
   return mockProcess;
 }
 
-describe('PythonDebugAdapter', { tag: '@requires-python' }, () => {
+describe('PythonDebugAdapter', () => {
   let adapter: PythonDebugAdapter;
   
   // Create properly typed mock dependencies
@@ -59,9 +70,42 @@ describe('PythonDebugAdapter', { tag: '@requires-python' }, () => {
   };
 
   beforeEach(() => {
-    // @ts-expect-error - Mock dependencies for testing
-    adapter = new PythonDebugAdapter(mockDependencies);
     vi.clearAllMocks();
+
+    // Provide a safe default mock for child_process.spawn used by:
+    // - getPythonVersion (args[0] === '--version')
+    // - debugpy check (args[0] === '-c' and includes 'import debugpy')
+    // - generic validation calls (args[0] === '-c' with other code)
+    vi.mocked(child_process.spawn).mockImplementation((cmd: string, args?: readonly string[]) => {
+      const mock = createMockProcess();
+
+      // Ensure stdout/stderr exist for listeners
+      if (!mock.stdout) (mock as any).stdout = new EventEmitter();
+      if (!mock.stderr) (mock as any).stderr = new EventEmitter();
+
+      process.nextTick(() => {
+        if (Array.isArray(args) && args[0] === '--version') {
+          // Simulate typical Python --version output on stdout
+          mock.stdout.emit('data', 'Python 3.9.0\n');
+          mock.emit('exit', 0);
+        } else if (
+          Array.isArray(args) &&
+          args[0] === '-c' &&
+          typeof args[1] === 'string' &&
+          args[1].includes('import debugpy')
+        ) {
+          // Simulate debugpy version check
+          mock.stdout.emit('data', '1.6.0\n');
+          mock.emit('exit', 0);
+        } else {
+          // Generic success for other -c validations
+          mock.emit('exit', 0);
+        }
+      });
+      return mock as any;
+    });
+
+    adapter = new PythonDebugAdapter(mockDependencies as any);
   });
 
   afterEach(() => {
@@ -320,8 +364,7 @@ describe('PythonAdapterFactory', () => {
   });
 
   it('should create Python debug adapter instances', () => {
-    // @ts-expect-error - Mock dependencies for testing
-    const adapter = factory.createAdapter(mockDependencies);
+    const adapter = factory.createAdapter(mockDependencies as any);
     
     expect(adapter).toBeInstanceOf(PythonDebugAdapter);
     expect(adapter.language).toBe(DebugLanguage.PYTHON);

@@ -10,7 +10,7 @@ import { IDebugAdapter } from '@debugmcp/shared';
 import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
 import { PythonDebugAdapter } from './python-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { findPythonExecutable, getPythonVersion } from '../../utils/python-utils.js';
+import { findPythonExecutable, getPythonVersion } from './utils/python-utils.js';
 import { spawn } from 'child_process';
 
 /**

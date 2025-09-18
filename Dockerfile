@@ -14,6 +14,7 @@ ARG CACHEBUST=1
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/package.json
 COPY packages/adapter-mock/package.json ./packages/adapter-mock/package.json
+COPY packages/adapter-python/package.json ./packages/adapter-python/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
@@ -25,6 +26,7 @@ RUN npm --version && npm ci --ignore-scripts
 COPY tsconfig.json ./
 COPY packages/shared/tsconfig*.json ./packages/shared/
 COPY packages/adapter-mock/tsconfig*.json ./packages/adapter-mock/
+COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
 
 COPY src ./src
 COPY scripts ./scripts/
@@ -62,6 +64,7 @@ COPY --from=builder /app/package.json /app/package.json
 # Copy packages for potential runtime references (workspace symlinks / dist artifacts)
 COPY --from=builder /app/packages/shared/dist/ /app/packages/shared/dist/
 COPY --from=builder /app/packages/adapter-mock/dist/ /app/packages/adapter-mock/dist/
+COPY --from=builder /app/packages/adapter-python/dist/ /app/packages/adapter-python/dist/
 
 # Expose ports
 EXPOSE 3000 5679

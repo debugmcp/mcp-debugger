@@ -1,7 +1,8 @@
 /**
  * Mock implementation of CommandFinder for testing
  */
-import { CommandFinder, CommandNotFoundError } from '../../../src/interfaces/command-finder.js';
+import type { CommandFinder } from '@debugmcp/adapter-python';
+import { CommandNotFoundError } from '@debugmcp/adapter-python';
 
 /**
  * Mock command finder for unit tests

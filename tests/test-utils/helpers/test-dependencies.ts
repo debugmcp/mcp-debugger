@@ -222,7 +222,7 @@ export function createMockEnvironment(): IEnvironment {
 export async function createFullAdapterRegistry() {
   // Dynamic imports to avoid require() usage
   const { getAdapterRegistry, resetAdapterRegistry } = await import('../../../src/adapters/adapter-registry.js');
-  const { PythonAdapterFactory } = await import('../../../src/adapters/python/python-adapter-factory.js');
+  const { PythonAdapterFactory } = await import('@debugmcp/adapter-python');
   const { MockAdapterFactory } = await import('@debugmcp/adapter-mock');
   
   // Reset any existing registry
