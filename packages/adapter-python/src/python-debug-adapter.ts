@@ -372,7 +372,8 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       this.currentThreadId = event.body.threadId;
     }
     
-    this.emit(event.event as keyof AdapterEvents, event.body);
+    type AdapterEventName = Extract<keyof AdapterEvents, string | symbol>;
+    this.emit(event.event as AdapterEventName, event.body);
   }
   
   handleDapResponse(_response: DebugProtocol.Response): void {

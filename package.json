@@ -1,7 +1,7 @@
 {
   "name": "mcp-debugger-monorepo",
   "private": true,
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "Run-time step-through debugging for LLM agents - Monorepo root",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
   "repository": {
@@ -18,7 +18,7 @@
     "build": "npm run build:packages && tsc --build && npm run build:servercore && tsc src/index.ts src/server.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && tsc src/proxy/dap-proxy-entry.ts src/proxy/dap-proxy-worker.ts src/proxy/dap-proxy-core.ts src/proxy/dap-proxy-dependencies.ts src/proxy/dap-proxy-interfaces.ts src/proxy/dap-proxy-adapter-manager.ts src/proxy/dap-proxy-connection-manager.ts src/proxy/dap-proxy-message-parser.ts src/proxy/dap-proxy-request-tracker.ts src/proxy/dap-proxy.ts src/proxy/minimal-dap.ts src/proxy/index.ts src/proxy/proxy-config.ts src/proxy/proxy-manager.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && npm run postbuild",
     "build:shared": "npm run build -w @debugmcp/shared --if-present",
     "build:adapters": "npm run build -w @debugmcp/adapter-mock && npm run build -w @debugmcp/adapter-python",
-    "build:packages": "tsc -b packages/shared packages/adapter-mock packages/adapter-python",
+    "build:packages": "npm run build -w @debugmcp/shared && npm run build -w @debugmcp/adapter-mock && npm run build -w @debugmcp/adapter-python",
     "build:servercore": "tsc -p tsconfig.json",
     "build:all": "npm run build --workspaces --if-present && npm run build",
     "build:clean": "npm run clean && npm run build",
@@ -105,7 +105,7 @@
     "mcp-debugger": "./dist/index.js"
   },
   "dependencies": {
-    "@debugmcp/shared": "workspace:*",
+    "@debugmcp/shared": "^0.15.0",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
     "@vscode/debugadapter": "^1.68.0",
@@ -123,8 +123,8 @@
     "zod": "^3.22.4"
   },
   "optionalDependencies": {
-    "@debugmcp/adapter-mock": "workspace:*",
-    "@debugmcp/adapter-python": "workspace:*"
+    "@debugmcp/adapter-mock": "^0.15.0",
+    "@debugmcp/adapter-python": "^0.15.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
