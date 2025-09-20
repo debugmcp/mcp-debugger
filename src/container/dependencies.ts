@@ -28,11 +28,8 @@ import { ProcessEnvironment } from '../implementations/environment-impl.js';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { SessionStoreFactory } from '../factories/session-store-factory.js';
 import { ProxyManagerFactory, IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
-import { IAdapterRegistry } from '@debugmcp/shared';
+import { IAdapterRegistry, AdapterRegistryConfig } from '@debugmcp/shared';
 import { AdapterRegistry } from '../adapters/adapter-registry.js';
-import { MockAdapterFactory } from '../../packages/adapter-mock/dist/index.js';
-import { PythonAdapterFactory } from '../../packages/adapter-python/dist/index.js';
-import { DebugLanguage } from '@debugmcp/shared';
 
 /**
  * Complete set of application dependencies
@@ -93,18 +90,37 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   
   // Create adapter registry with validation disabled during registration
   // Validation will happen when actually creating adapter instances
-  const adapterRegistry = new AdapterRegistry({
+  // Enable dynamic adapter loading in production to allow on-demand adapter discovery
+  const dynConfig: AdapterRegistryConfig & { enableDynamicLoading?: boolean } = {
     validateOnRegister: false,
-    allowOverride: false
-  });
-  
-  // Register Python adapter for real Python debugging
-  const pythonAdapterFactory = new PythonAdapterFactory();
-  adapterRegistry.register(DebugLanguage.PYTHON, pythonAdapterFactory);
-  
-  // Register mock adapter for testing purposes
-  const mockAdapterFactory = new MockAdapterFactory();
-  adapterRegistry.register(DebugLanguage.MOCK, mockAdapterFactory);
+    allowOverride: false,
+    enableDynamicLoading: true
+  };
+  const adapterRegistry = new AdapterRegistry(dynConfig);
+
+  // Adapters are loaded dynamically on-demand by the AdapterRegistry via AdapterLoader.
+  // In container runtime, pre-register known adapters using dynamic import (fire-and-forget)
+  if (process.env.MCP_CONTAINER === 'true') {
+    const tryRegister = (lang: 'mock' | 'python', factoryName: string) => {
+      const url = new URL(`../node_modules/@debugmcp/adapter-${lang}/dist/index.js`, import.meta.url).href;
+      // Fire-and-forget; do not block dependency creation
+      import(
+        /* webpackIgnore: true */
+        url
+      ).then((mod: Record<string, unknown>) => {
+        const Factory = mod[factoryName] as unknown;
+        if (typeof Factory === 'function') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises
+          adapterRegistry.register(lang, new (Factory as unknown as new () => any)());
+        }
+      }).catch(() => {
+        // Optional in container; ignore failures
+      });
+    };
+
+    tryRegister('mock', 'MockAdapterFactory');
+    tryRegister('python', 'PythonAdapterFactory');
+  }
   
   return {
     fileSystem,

@@ -65,11 +65,37 @@ COPY --from=builder /app/packages/shared/dist/ /app/packages/shared/dist/
 COPY --from=builder /app/packages/adapter-mock/dist/ /app/packages/adapter-mock/dist/
 COPY --from=builder /app/packages/adapter-python/dist/ /app/packages/adapter-python/dist/
 
+# Create lightweight node_modules entries so adapters can resolve @debugmcp/* at runtime
+RUN mkdir -p /app/node_modules/@debugmcp/shared \
+  && mkdir -p /app/node_modules/@debugmcp/adapter-mock \
+  && mkdir -p /app/node_modules/@debugmcp/adapter-python
+
+# Copy package.json and dist for workspace packages into node_modules for resolution
+COPY --from=builder /app/packages/shared/package.json /app/node_modules/@debugmcp/shared/package.json
+COPY --from=builder /app/packages/shared/dist/ /app/node_modules/@debugmcp/shared/dist/
+
+COPY --from=builder /app/packages/adapter-mock/package.json /app/node_modules/@debugmcp/adapter-mock/package.json
+COPY --from=builder /app/packages/adapter-mock/dist/ /app/node_modules/@debugmcp/adapter-mock/dist/
+
+COPY --from=builder /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/package.json
+COPY --from=builder /app/packages/adapter-python/dist/ /app/node_modules/@debugmcp/adapter-python/dist/
+
+# Provide adapter/runtime Node deps from builder's node_modules
+COPY --from=builder /app/node_modules/@vscode/debugprotocol /app/node_modules/@vscode/debugprotocol
+COPY --from=builder /app/node_modules/which /app/node_modules/which
+# which depends on isexe; include it to avoid MODULE_NOT_FOUND at runtime
+COPY --from=builder /app/node_modules/isexe /app/node_modules/isexe
+
 # Expose ports
 EXPOSE 3000 5679
 
-# Set the entrypoint to run the bundled application
-ENTRYPOINT ["node", "dist/bundle.cjs"]
+# Copy stdio silencer preloader into runtime image
+COPY --from=builder /app/scripts/stdio-silencer.cjs /app/scripts/stdio-silencer.cjs
+# Create an entrypoint wrapper that logs early startup context and preloads the silencer, then execs the server
+RUN printf '#!/bin/sh\nmkdir -p /app/logs\n{\n  echo \"==== entry.sh ====\";\n  date;\n  echo \"argv: $*\";\n} >> /app/logs/entry.log 2>&1\nexec node --no-warnings -r /app/scripts/stdio-silencer.cjs dist/bundle.cjs \"$@\"\n' > /app/entry.sh && chmod +x /app/entry.sh
+
+# Use the wrapper as entrypoint
+ENTRYPOINT ["/app/entry.sh"]
 
 # Default command arguments
 CMD ["stdio"]

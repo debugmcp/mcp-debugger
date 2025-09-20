@@ -80,17 +80,43 @@ export class DebugMcpServer {
   private lineReader: LineReader;
 
   // Get supported languages from adapter registry
-  private getSupportedLanguages(): string[] {
+  private async getSupportedLanguagesAsync(): Promise<string[]> {
     const adapterRegistry = this.getAdapterRegistry();
-    return adapterRegistry.getSupportedLanguages();
+    // Guard against undefined registry in certain test environments
+    if (!adapterRegistry) {
+      return ['python', 'mock'];
+    }
+    // Prefer dynamic discovery if available on the concrete registry
+    const maybeList = (adapterRegistry as any)?.listLanguages;
+    if (typeof maybeList === 'function') {
+      try {
+        const langs = await maybeList.call(adapterRegistry);
+        if (Array.isArray(langs) && langs.length > 0) return langs;
+      } catch (e) {
+        this.logger.warn('Dynamic adapter language discovery failed, falling back to registered languages', { error: (e as Error)?.message });
+      }
+    }
+    // Fallback to already-registered factories (may be empty until first use)
+    const langs = adapterRegistry.getSupportedLanguages?.() || [];
+    if (langs.length > 0) {
+      // In container runtime, ensure python is advertised even if not yet registered (preload may be async)
+      if (process.env.MCP_CONTAINER === 'true' && !langs.includes('python')) {
+        return [...new Set([...langs, 'python'])];
+      }
+      return langs;
+    }
+    // Final fallback to known defaults for UX (ensure python listed in container)
+    if (process.env.MCP_CONTAINER === 'true') {
+      return ['python', 'mock'];
+    }
+    return ['python', 'mock'];
   }
 
   // Get language metadata for all supported languages
-  private getLanguageMetadata(): LanguageMetadata[] {
-    const adapterRegistry = this.getAdapterRegistry();
-    const languages = adapterRegistry.getSupportedLanguages();
-    
-    // Map to metadata - in future, this info will come from adapter registry
+  private async getLanguageMetadata(): Promise<LanguageMetadata[]> {
+    const languages = await this.getSupportedLanguagesAsync();
+
+    // Map to metadata - in future, this info can come directly from adapter registry
     return languages.map((lang: string) => {
       switch (lang) {
         case 'python':
@@ -135,10 +161,12 @@ export class DebugMcpServer {
 
   // Public methods to expose SessionManager functionality for testing/external use
   public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
-    // Validate language support
-    const adapterRegistry = this.getAdapterRegistry();
-    if (!adapterRegistry.isLanguageSupported(params.language)) {
-      const supported = adapterRegistry.getSupportedLanguages();
+    // Validate language support using dynamic discovery
+    const supported = await this.getSupportedLanguagesAsync();
+    const requested = params.language as unknown as string;
+    const isContainer = process.env.MCP_CONTAINER === 'true';
+    const allowInContainer = isContainer && requested === 'python'; // ensure python allowed in container
+    if (!allowInContainer && !supported.includes(requested)) {
       throw new McpError(
         McpErrorCode.InvalidParams, 
         `Language '${params.language}' is not supported. Available languages: ${supported.join(', ')}`
@@ -347,14 +375,7 @@ export class DebugMcpServer {
       this.logger.debug('Handling ListToolsRequest');
       
       // Get supported languages dynamically - deferred until request time
-      let supportedLanguages: string[];
-      try {
-        supportedLanguages = this.getSupportedLanguages();
-      } catch (error) {
-        // Fallback if adapter registry isn't ready
-        supportedLanguages = ['python', 'mock'];
-        this.logger.warn('Adapter registry not ready, using default languages', { error });
-      }
+      const supportedLanguages = await this.getSupportedLanguagesAsync();
       
       // Generate dynamic descriptions for path parameters
       const fileDescription = this.getPathDescription('source file');
@@ -420,8 +441,18 @@ export class DebugMcpServer {
           
           switch (toolName) {
             case 'create_debug_session': {
+              // Ensure requested language is among dynamically supported ones
+              const supported = await this.getSupportedLanguagesAsync();
+              const lang = (args.language || 'python') as DebugLanguage;
+              const requested = lang as unknown as string;
+              const isContainer = process.env.MCP_CONTAINER === 'true';
+              const allowInContainer = isContainer && requested === 'python';
+              if (!allowInContainer && !supported.includes(lang)) {
+                throw new McpError(McpErrorCode.InvalidParams, `Language '${lang}' is not supported. Available languages: ${supported.join(', ')}`);
+              }
+
               const sessionInfo = await this.createDebugSession({
-                language: (args.language || 'python') as DebugLanguage,
+                language: lang,
                 name: args.name,
                 executablePath: args.executablePath
               });
@@ -921,8 +952,44 @@ export class DebugMcpServer {
 
   private async handleListSupportedLanguages(): Promise<ServerResult> {
     try {
-      const languages = this.getLanguageMetadata();
-      return { content: [{ type: 'text', text: JSON.stringify({ success: true, languages, count: languages.length }) }] };
+      const adapterRegistry = this.getAdapterRegistry();
+      // Get installed languages via dynamic registry if available
+      const installed = await this.getSupportedLanguagesAsync();
+
+      // Also surface known adapters with install status if available from registry
+      let available: Array<{ language: string; package: string; installed: boolean; description?: string }> = [];
+      const dyn = adapterRegistry as unknown as { listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean }>> };
+      if (typeof dyn.listAvailableAdapters === 'function') {
+        try {
+          const meta = await dyn.listAvailableAdapters!();
+          available = meta.map(m => ({
+            language: m.name,
+            package: m.packageName,
+            installed: m.installed,
+            description: m.description
+          }));
+        } catch (e) {
+          this.logger.warn('Failed to query detailed adapter metadata; returning installed list only', { error: (e as Error)?.message });
+        }
+      } else {
+        // Fallback: build minimal available list from installed
+        available = installed.map(lang => ({
+          language: lang,
+          package: `@debugmcp/adapter-${lang}`,
+          installed: true
+        }));
+      }
+
+      // Also build simple metadata array for backward compatibility with previous payload shape
+      const languageMetadata = await this.getLanguageMetadata();
+
+      return { content: [{ type: 'text', text: JSON.stringify({
+        success: true,
+        installed,
+        available,
+        languages: languageMetadata, // backward-compatible field with display info
+        count: installed.length
+      }) }] };
     } catch (error) {
       this.logger.error('Failed to list supported languages', { error });
       throw new McpError(McpErrorCode.InternalError, `Failed to list supported languages: ${(error as Error).message}`);

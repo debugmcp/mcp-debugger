@@ -218,11 +218,13 @@ export async function cleanupDocker(containerId?: string): Promise<void> {
  * Get cross-platform volume mount string
  */
 export function getVolumeMount(hostPath: string, containerPath: string): string {
-  // On Windows, convert backslashes to forward slashes for Docker
-  const normalizedHostPath = process.platform === 'win32' 
+  // On Windows, convert backslashes to forward slashes for Docker.
+  // IMPORTANT: Do NOT add quotes here because we spawn docker directly (no shell),
+  // so spaces are preserved as part of the single argument and quoting would break parsing.
+  const normalizedHostPath = process.platform === 'win32'
     ? hostPath.replace(/\\/g, '/')
     : hostPath;
-  
+
   return `${normalizedHostPath}:${containerPath}`;
 }
 

@@ -27,6 +27,7 @@ export async function handleStdioCommand(
   logger.info('Starting Debug MCP Server in stdio mode');
   
   try {
+
     const debugMcpServer = serverFactory({
       logLevel: options.logLevel,
       logFile: options.logFile
@@ -35,11 +36,22 @@ export async function handleStdioCommand(
     // Create stdio transport
     logger.info('[MCP] Creating StdioServerTransport...');
     const transport = new StdioServerTransport();
+    // Keep the event loop alive even if stdin closes (e.g., detached containers).
+    // Cleared on transport close or signals.
+    const keepAlive = setInterval(() => {}, 60000);
     
     // Connect MCP server to transport
     logger.info('[MCP] Connecting server to stdio transport...');
     await debugMcpServer.server.connect(transport);
     logger.info('[MCP] Server connected to stdio transport successfully');
+
+    // Ensure deterministic shutdown on transport close
+    const transportWithClose = transport as unknown as { onclose?: () => void };
+    transportWithClose.onclose = () => {
+      logger.warn('[MCP] Transport closed; exiting.');
+      try { clearInterval(keepAlive); } catch {}
+      exitProcess(0);
+    };
     
     // Start the debug server
     await debugMcpServer.start();
@@ -52,6 +64,36 @@ export async function handleStdioCommand(
     
     // Keep the process alive
     process.stdin.resume();
+
+    // Exit policy for stdin end:
+    // - If server hasn't started yet, do not exit immediately (wait to see if transport connects).
+    // - If transport isn't connected, exit (no client will connect).
+    // - If transport is connected, keep running (client controls lifecycle).
+    // In containerized stdio mode, stdin may close unexpectedly.
+    // Do not exit on stdin end; rely on transport close or signals for shutdown.
+    process.stdin.on('end', () => {
+      logger.warn('[MCP] Stdin ended; ignoring in stdio mode and waiting for transport close or signal.');
+    });
+
+    // Add robust exit/signal diagnostics (logged to file; console is disabled in stdio)
+    process.on('SIGTERM', () => {
+      logger.warn('[MCP] SIGTERM received, exiting.');
+      try { clearInterval(keepAlive); } catch {}
+      exitProcess(0);
+    });
+    process.on('SIGINT', () => {
+      logger.warn('[MCP] SIGINT received, exiting.');
+      try { clearInterval(keepAlive); } catch {}
+      exitProcess(0);
+    });
+    process.on('exit', (code) => {
+      logger.error('[MCP] Process exiting', {
+        code,
+        argv: process.argv,
+        env_stdio: process.env.DEBUG_MCP_STDIO,
+        uptime: process.uptime()
+      });
+    });
   } catch (error) {
     logger.error('Failed to start server in stdio mode', { error });
     // In stdio mode, we must not write to console as it corrupts MCP protocol

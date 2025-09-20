@@ -36,6 +36,55 @@ async function bundle() {
     // Write metafile for analysis
     fs.writeFileSync('dist/bundle-meta.json', JSON.stringify(result.metafile));
     
+    // CRITICAL: Add console silencing at the very beginning of the bundle
+    let bundleContent = fs.readFileSync('dist/bundle.cjs', 'utf8');
+    
+    // Remove any shebang lines that got bundled (they're invalid in the middle of the file)
+    bundleContent = bundleContent.replace(/^#!.*$/gm, '// shebang removed');
+    
+    const consoleSilencer = `#!/usr/bin/env node
+// CRITICAL: Console silencing MUST be first - before ANY code runs
+// This prevents stdout pollution in stdio mode which breaks MCP protocol
+(function() {
+  // Handle both quoted and unquoted stdio arguments
+  const hasStdio = process.argv.some(arg => 
+    arg === 'stdio' || 
+    arg === '"stdio"' || 
+    arg.includes('stdio')
+  );
+  
+  if (hasStdio || process.env.DEBUG_MCP_STDIO === '1') {
+    const noop = () => {};
+    console.log = noop;
+    console.error = noop;
+    console.warn = noop;
+    console.info = noop;
+    console.debug = noop;
+    console.trace = noop;
+    console.dir = noop;
+    console.table = noop;
+    console.group = noop;
+    console.groupEnd = noop;
+    console.time = noop;
+    console.timeEnd = noop;
+    console.assert = noop;
+    
+    // Suppress process warnings
+    process.removeAllListeners('warning');
+    process.on('warning', noop);
+  }
+})();
+
+// Clean argv before any code processes it - strip quotes from all arguments
+process.argv = process.argv.map(arg => 
+  typeof arg === 'string' ? arg.replace(/^["'](.*)["']$/, '$1') : arg
+);
+
+`;
+    
+    // Write the modified bundle with console silencing at the top
+    fs.writeFileSync('dist/bundle.cjs', consoleSilencer + bundleContent);
+    
     // Copy proxy-bootstrap.js to dist if it exists
     const proxyBootstrapSrc = path.join('src', 'proxy', 'proxy-bootstrap.js');
     const proxyBootstrapDest = path.join('dist', 'proxy', 'proxy-bootstrap.js');

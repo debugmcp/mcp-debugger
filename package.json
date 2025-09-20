@@ -48,10 +48,12 @@
     "test:e2e:smoke": "vitest run tests/e2e/mcp-server-smoke*.test.ts",
     "test:e2e:container": "docker build --no-cache -t mcp-debugger:local . && vitest run tests/e2e/mcp-server-smoke-container.test.ts",
     "test:coverage": "npm run build && npm run pretest:docker && vitest run --coverage",
-    "posttest:coverage": "node scripts/cleanup-test-processes.js",
+    "posttest:coverage": "node scripts/cleanup-test-processes.js && node analyze-coverage.js",
     "test:coverage:quiet": "vitest run --coverage --reporter=dot --silent",
     "posttest:coverage:quiet": "node scripts/cleanup-test-processes.js",
     "test:coverage:summary": "node tests/utils/test-coverage-summary.js",
+    "test:coverage:analyze": "node analyze-coverage-detailed.js",
+    "coverage:analyze": "npm run test:coverage && node analyze-coverage-detailed.js",
     "test:coverage:json": "npm run build && vitest run --coverage --reporter=json --outputFile=test-results.json",
     "posttest:coverage:json": "node scripts/cleanup-test-processes.js",
     "test:dot": "vitest run --reporter=dot",
@@ -104,8 +106,6 @@
   },
   "dependencies": {
     "@debugmcp/shared": "workspace:*",
-    "@debugmcp/adapter-mock": "workspace:*",
-    "@debugmcp/adapter-python": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
     "@vscode/debugadapter": "^1.68.0",
@@ -121,6 +121,10 @@
     "which": "^5.0.0",
     "winston": "^3.11.0",
     "zod": "^3.22.4"
+  },
+  "optionalDependencies": {
+    "@debugmcp/adapter-mock": "workspace:*",
+    "@debugmcp/adapter-python": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",

@@ -31,7 +31,11 @@ export function setupStdioCommand(program: Command, handler: StdioHandler): void
     .description('Start the server using stdio as transport')
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
-    .action(handler);
+    .action(async (options: StdioOptions, command: Command) => {
+      // Explicitly mark stdio mode to ensure logger avoids console output even under bundling
+      process.env.DEBUG_MCP_STDIO = '1';
+      await handler(options, command);
+    });
 }
 
 export function setupSSECommand(program: Command, handler: SSEHandler): void {

@@ -32,8 +32,9 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
   const transports: winston.transport[] = [];
   
   // In stdio mode, we MUST NOT write to stdout as it corrupts the MCP protocol
-  // Check if we're running in stdio mode by looking for specific command line args
-  const isStdioMode = process.argv.includes('stdio');
+  // Detect via CLI arg or explicit env flag (robust under bundling and quoted args)
+  const argvJoined = Array.isArray(process.argv) ? process.argv.join(' ').toLowerCase() : '';
+  const isStdioMode = (argvJoined.includes('stdio')) || process.env.DEBUG_MCP_STDIO === '1';
   
   if (!isStdioMode) {
     // Only add console transport when NOT in stdio mode
@@ -68,6 +69,10 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs/debug-mcp-server.log');
   }
   
+  // In container runtime, centralize logs under /app/logs for easier collection
+  if (process.env.MCP_CONTAINER === 'true') {
+    projectRootDefaultLogPath = '/app/logs/debug-mcp-server.log';
+  }
   const logFilePath = options.file || projectRootDefaultLogPath;
 
   try {

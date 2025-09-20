@@ -17,6 +17,8 @@ import {
   ActiveAdapterMap
 } from '@debugmcp/shared';
 import { IDebugAdapter, AdapterConfig } from '@debugmcp/shared';
+import { AdapterLoader } from './adapter-loader.js';
+import type { AdapterMetadata } from './adapter-loader.js';
 
 /**
  * Default registry configuration
@@ -37,10 +39,18 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   private readonly activeAdapters: ActiveAdapterMap = new Map();
   private readonly config: Required<AdapterRegistryConfig>;
   private readonly disposeTimers = new Map<string, NodeJS.Timeout>();
+  private readonly loader = new AdapterLoader();
+  // Dynamic loading is opt-in via constructor config to preserve backward compatibility in unit tests
+  private readonly dynamicEnabled: boolean;
 
   constructor(config: AdapterRegistryConfig = {}) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
+    // Enable dynamic loading only when explicitly requested (default false to keep legacy behavior in tests)
+    this.dynamicEnabled = Boolean(
+      (config as unknown as { enableDynamicLoading?: boolean })?.enableDynamicLoading ??
+      (process.env.MCP_CONTAINER === 'true')
+    );
   }
 
   /**
@@ -102,9 +112,23 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
    * Create a new adapter instance for the specified language
    */
   async create(language: string, config: AdapterConfig): Promise<IDebugAdapter> {
-    const factory = this.factories.get(language);
+    let factory = this.factories.get(language);
     if (!factory) {
-      throw new AdapterNotFoundError(language, this.getSupportedLanguages());
+      if (this.dynamicEnabled) {
+        try {
+          const loadedFactory = await this.loader.loadAdapter(language);
+          // Register but also use the loadedFactory directly to avoid undefined from map lookup
+          await this.register(language, loadedFactory);
+          factory = loadedFactory;
+        } catch {
+          // If load fails, include dynamically detected languages (installed ones)
+          const available = await this.listLanguages().catch(() => this.getSupportedLanguages());
+          throw new AdapterNotFoundError(language, available);
+        }
+      } else {
+        // Legacy behavior: not dynamically loading -> throw not found using registered languages only
+        throw new AdapterNotFoundError(language, this.getSupportedLanguages());
+      }
     }
 
     // Check instance limit
@@ -199,6 +223,35 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     }
     
     return result;
+  }
+
+  /**
+   * List languages that are actually installed and available via dynamic loader
+   */
+  async listLanguages(): Promise<string[]> {
+    if (!this.dynamicEnabled) {
+      // Fall back to currently registered languages
+      return this.getSupportedLanguages();
+    }
+    const adapters = await this.loader.listAvailableAdapters();
+    return adapters.filter(a => a.installed).map(a => a.name);
+  }
+
+  /**
+   * List detailed adapter metadata (known + install status)
+   */
+  async listAvailableAdapters(): Promise<AdapterMetadata[]> {
+    if (!this.dynamicEnabled) {
+      // Provide minimal metadata from registered factories
+      const langs = this.getSupportedLanguages();
+      return langs.map(l => ({
+        name: l,
+        packageName: `@debugmcp/adapter-${l}`,
+        description: undefined,
+        installed: true
+      }));
+    }
+    return this.loader.listAvailableAdapters();
   }
 
   /**

@@ -10,8 +10,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
-import { findPythonExecutable } from '../../packages/adapter-python/dist/index.js';
 import { SessionManagerData } from './session-manager-data.js';
+import { WhichCommandFinder } from '../implementations/which-command-finder.js';
+import { spawn } from 'child_process';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '@debugmcp/shared';
 import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
@@ -85,24 +86,34 @@ export class SessionManagerOperations extends SessionManagerData {
     if (session.language === 'python') {
       // Python-specific path resolution
       const executablePathFromSession = session.executablePath!;
-      
+
       if (path.isAbsolute(executablePathFromSession)) {
         // Absolute path provided - use as-is
         resolvedExecutablePath = executablePathFromSession;
       } else if (['python', 'python3', 'py'].includes(executablePathFromSession.toLowerCase())) {
-        // Common Python commands - use auto-detection without preferredPath
+        // Resolve common Python commands using local command finder with validation
+        const finder = new WhichCommandFinder();
         try {
-          resolvedExecutablePath = await findPythonExecutable(undefined, this.logger);
+          const resolved = await finder.find(executablePathFromSession);
+          const valid = await this.isValidPythonExecutable(resolved);
+          if (!valid) {
+            throw new Error(`Python not found. Please install Python 3 or specify the Python path.`);
+          }
+          resolvedExecutablePath = resolved;
           this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedExecutablePath}`);
         } catch (error) {
-          this.logger.error(`[SessionManager] Failed to find Python executable:`, error);
-          throw error;
+          const msg = error instanceof Error ? error.message : String(error);
+          const userMsg = msg.includes('not found')
+            ? 'Python not found. Please install Python 3 or specify the Python path.'
+            : msg;
+          this.logger.error(`[SessionManager] Failed to resolve Python executable '${executablePathFromSession}':`, userMsg);
+          throw new Error(userMsg);
         }
       } else {
         // Relative path - resolve from project root (MCP server's root)
         resolvedExecutablePath = path.resolve(projectRoot, executablePathFromSession);
       }
-      
+
       this.logger.info(`[SessionManager] Using Python path: ${resolvedExecutablePath}`);
     } else {
       // For non-Python languages (like mock), use a generic executable path
@@ -579,6 +590,39 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.error(`[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`);
       throw error; 
     }
+  }
+
+  /**
+   * Validate that a Python command is a real Python executable, not a Windows Store alias.
+   * Mirrors the validation approach used in the python adapter utilities.
+   */
+  private async isValidPythonExecutable(pythonCmd: string): Promise<boolean> {
+    this.logger.debug?.(`[SessionManager] Validating Python executable: ${pythonCmd}`);
+    return new Promise((resolve) => {
+      const child = spawn(pythonCmd, ['-c', 'import sys; sys.exit(0)'], {
+        stdio: ['ignore', 'ignore', 'pipe']
+      });
+
+      let stderrData = '';
+      child.stderr?.on('data', (data) => {
+        stderrData += data.toString();
+      });
+
+      child.on('error', () => resolve(false));
+      child.on('exit', (code) => {
+        const storeAlias =
+          code === 9009 ||
+          stderrData.includes('Microsoft Store') ||
+          stderrData.includes('Windows Store') ||
+          stderrData.includes('AppData\\Local\\Microsoft\\WindowsApps');
+        if (storeAlias) {
+          this.logger.error(`[SessionManager] ${pythonCmd} appears to be a Windows Store alias, skipping...`);
+          resolve(false);
+        } else {
+          resolve(code === 0);
+        }
+      });
+    });
   }
 
   /**
