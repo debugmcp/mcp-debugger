@@ -1,444 +1,345 @@
-# Debug Adapter Development Guide
+# Debug Adapter Development Guide (v0.15.0)
 
-> **⚠️ DRAFT DOCUMENTATION**  
-> This guide is based on mcp-debugger v0.10.0 and will be refined as more language adapters are developed.
+Audience: Adapter authors who want to add a new language to mcp-debugger  
+Scope: Full end-to-end instructions to build, test, publish, and troubleshoot a language adapter for the dynamic loading system.
 
-## Quick Start: Hello World Adapter
+## What is an Adapter?
 
-Want to add debugging support for your favorite language? Here's a minimal adapter in 15 minutes:
+An adapter is a language-specific component that implements the Debug Adapter Protocol (DAP) behind a common TypeScript interface (`IDebugAdapter`). The mcp-debugger core discovers and loads adapters dynamically at runtime using the package naming convention `@debugmcp/adapter-<language>` and a factory class named `<CapitalizedLanguage>AdapterFactory`.
 
+Benefits:
+- Pluggable language support (install only what you need)
+- Small core with lazy loading (faster startup)
+- Clean separation of concerns (core vs language details)
+
+---
+
+## Package Structure (Recommended)
+
+```
+packages/adapter-<language>/
+  package.json
+  tsconfig.json
+  src/
+    <Language>Adapter.ts
+    <Language>AdapterFactory.ts
+    index.ts
+  dist/
+    (compiled output)
+```
+
+Naming conventions:
+- Package name: `@debugmcp/adapter-<language>`
+- Factory class: `<CapitalizedLanguage>AdapterFactory` (e.g., `PythonAdapterFactory`)
+- Default export: `{ name: '<language>', factory: <Language>AdapterFactory }`
+
+Why? The dynamic loader expects the package name and factory class name to follow these conventions.
+
+---
+
+## Step-by-Step Implementation
+
+1) Create the package directory under `packages/`
+```
+packages/
+  adapter-mock/
+  adapter-python/
+  adapter-yourlang/        ← new package here
+```
+
+2) package.json (ESM + proper exports)
+```json
+{
+  "name": "@debugmcp/adapter-yourlang",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist"
+  },
+  "peerDependencies": {
+    "@debugmcp/shared": "^0.14.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
+```
+
+3) Implement `IDebugAdapter` (core contract)
+- File: `src/<Language>Adapter.ts`
+- Use `packages/shared/src/interfaces/debug-adapter.ts` for signatures
+
+4) Implement the factory extending `AdapterFactory`
+- File: `src/<Language>AdapterFactory.ts`
+- Extend `AdapterFactory` from `@debugmcp/shared`
+- Implement `createAdapter(dependencies)`
+
+5) Export from `src/index.ts` with the required default shape
+- Must export named factory class and default `{ name, factory }`
+
+6) Add TypeScript configuration
+- File: `tsconfig.json`
+```json
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "declaration": true
+  },
+  "include": ["src/**/*"]
+}
+```
+
+---
+
+## Minimal Adapter Example
+
+src/ExampleAdapter.ts
 ```typescript
 import { EventEmitter } from 'events';
-import { IDebugAdapter, AdapterState, DebugLanguage } from '../debug-adapter-interface.js';
+import {
+  AdapterState,
+  type IDebugAdapter,
+  type AdapterCapabilities,
+  type DebugFeature,
+} from '@debugmcp/shared';
+import type { DebugProtocol } from '@vscode/debugprotocol';
 
-export class HelloWorldAdapter extends EventEmitter implements IDebugAdapter {
-  readonly language = DebugLanguage.HELLO;
-  readonly name = 'Hello World Debug Adapter';
-  private state = AdapterState.UNINITIALIZED;
+export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
+  readonly language = 'example' as any;
+  readonly name = 'Example Debug Adapter';
+  private state: AdapterState = AdapterState.UNINITIALIZED;
+  private threadId: number | null = null;
 
   async initialize(): Promise<void> {
     this.state = AdapterState.READY;
     this.emit('initialized');
   }
 
-  async validateEnvironment(): Promise<ValidationResult> {
-    // Check if your language runtime exists
+  async dispose(): Promise<void> {
+    this.state = AdapterState.DISCONNECTED;
+    this.emit('disconnected');
+  }
+
+  getState(): AdapterState { return this.state; }
+  isReady(): boolean { return this.state === AdapterState.READY || this.state === AdapterState.DEBUGGING; }
+  getCurrentThreadId(): number | null { return this.threadId; }
+
+  async validateEnvironment() { return { valid: true, errors: [], warnings: [] }; }
+  getRequiredDependencies() { return []; }
+
+  async resolveExecutablePath(preferred?: string): Promise<string> { return preferred ?? 'example'; }
+  getDefaultExecutableName(): string { return 'example'; }
+  getExecutableSearchPaths(): string[] { return []; }
+
+  buildAdapterCommand(config: any) {
+    return { command: 'example', args: ['--port', String(config.adapterPort)], env: process.env as Record<string, string> };
+  }
+
+  getAdapterModuleName(): string { return 'example.adapter'; }
+  getAdapterInstallCommand(): string { return 'npm install -g example-adapter'; }
+
+  transformLaunchConfig(config: any): any { return config; }
+  getDefaultLaunchConfig() { return { stopOnEntry: true }; }
+
+  async sendDapRequest<T extends DebugProtocol.Response>(_command: string, _args?: unknown): Promise<T> {
+    throw new Error('Not implemented');
+  }
+  handleDapEvent(_event: DebugProtocol.Event): void { /* map events to state; emit as needed */ }
+  handleDapResponse(_response: DebugProtocol.Response): void { /* optional */ }
+
+  async connect(_host: string, _port: number): Promise<void> {
+    this.state = AdapterState.CONNECTED;
+    this.emit('connected');
+  }
+
+  async disconnect(): Promise<void> {
+    this.state = AdapterState.DISCONNECTED;
+    this.emit('disconnected');
+  }
+
+  isConnected(): boolean {
+    return this.state === AdapterState.CONNECTED || this.state === AdapterState.DEBUGGING;
+  }
+
+  getInstallationInstructions(): string { return 'Install example adapter per your OS instructions.'; }
+  getMissingExecutableError(): string { return 'Example executable not found'; }
+  translateErrorMessage(error: Error): string { return error.message; }
+
+  supportsFeature(_feature: DebugFeature): boolean { return false; }
+  getFeatureRequirements(_feature: DebugFeature) { return []; }
+  getCapabilities(): AdapterCapabilities { return { supportsConfigurationDoneRequest: true }; }
+}
+```
+
+src/ExampleAdapterFactory.ts
+```typescript
+import { AdapterFactory, type AdapterDependencies, type IDebugAdapter } from '@debugmcp/shared';
+import { ExampleAdapter } from './ExampleAdapter.js';
+
+export class ExampleAdapterFactory extends AdapterFactory {
+  constructor() {
+    super({
+      name: 'example',
+      displayName: 'Example',
+      description: 'Example adapter',
+      minimumDebuggerVersion: '0.14.0'
+    });
+  }
+
+  async validate() {
+    // Optional: verify environment prerequisites here
     return { valid: true, errors: [], warnings: [] };
   }
 
-  buildAdapterCommand(config: AdapterConfig): AdapterCommand {
-    // Return command to launch your debug adapter
-    return {
-      command: 'hello-debug',
-      args: ['--port', config.adapterPort.toString()],
-      env: process.env
-    };
+  createAdapter(_deps: AdapterDependencies): IDebugAdapter {
+    return new ExampleAdapter();
   }
-
-  // ... implement remaining required methods
 }
 ```
 
-## Step-by-Step Adapter Development
-
-### Step 1: Set Up Your Project Structure
-
-```
-src/adapters/
-  your-language/
-    your-language-adapter.ts      # Main adapter implementation
-    your-language-adapter-factory.ts  # Factory for creating instances
-    your-language-adapter-process.ts  # Debug adapter process (if custom)
-    index.ts                      # Exports
-```
-
-### Step 2: Implement the Core Interface
-
-Start with the [MockDebugAdapter](../../src/adapters/mock/mock-debug-adapter.ts) as a template:
-
+src/index.ts
 ```typescript
-export class YourLanguageDebugAdapter extends EventEmitter implements IDebugAdapter {
-  readonly language = DebugLanguage.YOUR_LANGUAGE;
-  readonly name = 'Your Language Debug Adapter';
-  
-  private state: AdapterState = AdapterState.UNINITIALIZED;
-  private currentThreadId: number | null = null;
-  private connected = false;
-  
-  constructor(private dependencies: AdapterDependencies) {
-    super();
-  }
-  
-  // ... implement all required methods
-}
+export { ExampleAdapterFactory } from './ExampleAdapterFactory.js';
+export default { name: 'example', factory: ExampleAdapterFactory };
 ```
 
-### Step 3: Handle State Transitions
-
-```typescript
-private transitionTo(newState: AdapterState): void {
-  const oldState = this.state;
-  this.state = newState;
-  this.emit('stateChanged', oldState, newState);
-}
-```
-
-**Reality Check**: Don't over-engineer state validation. Real adapters like [PythonDebugAdapter](../../src/adapters/python/python-debug-adapter.ts) allow flexible transitions.
-
-### Step 4: Implement Environment Validation
-
-```typescript
-async validateEnvironment(): Promise<ValidationResult> {
-  const errors: ValidationError[] = [];
-  
-  // Check language runtime
-  try {
-    await this.resolveExecutablePath();
-  } catch (error) {
-    errors.push({
-      code: 'RUNTIME_NOT_FOUND',
-      message: `${this.language} runtime not found`,
-      recoverable: false
-    });
-  }
-  
-  // Check debug adapter
-  try {
-    await this.checkDebugAdapterInstalled();
-  } catch (error) {
-    errors.push({
-      code: 'ADAPTER_NOT_INSTALLED',
-      message: this.getInstallationInstructions(),
-      recoverable: true
-    });
-  }
-  
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings: []
-  };
-}
-```
-
-### Step 5: Build the Debug Adapter Command
-
-```typescript
-buildAdapterCommand(config: AdapterConfig): AdapterCommand {
-  // Example for a Node.js-like adapter
-  return {
-    command: config.executablePath,
-    args: [
-      '-m', 'debug_adapter',
-      '--host', config.adapterHost,
-      '--port', config.adapterPort.toString(),
-      '--wait-for-client'
-    ],
-    env: {
-      ...process.env,
-      DEBUG_LOG_DIR: config.logDir
-    }
-  };
-}
-```
-
-## DAP Protocol Integration
-
-### Understanding DAP Events
-
-**Critical**: Read the [DAP Sequence Reference](../development/dap-sequence-reference.md) to understand event sequences!
-
-Key points:
-- `stopped` = PAUSED (at breakpoint), NOT terminated!
-- `terminated` = debugging session ended
-- `exited` = process ended (with exit code)
-- Proper sequence: `exited` → `terminated`
-
-### Handling DAP Events
-
-```typescript
-handleDapEvent(event: DebugProtocol.Event): void {
-  // Update internal state based on events
-  switch (event.event) {
-    case 'stopped':
-      // Debugger is PAUSED, not terminated!
-      this.currentThreadId = event.body?.threadId;
-      this.transitionTo(AdapterState.DEBUGGING);
-      break;
-      
-    case 'continued':
-      // Resumed execution
-      this.transitionTo(AdapterState.DEBUGGING);
-      break;
-      
-    case 'terminated':
-      // Session ended
-      this.currentThreadId = null;
-      this.transitionTo(AdapterState.DISCONNECTED);
-      break;
-      
-    case 'exited':
-      // Process ended (but session might still be active)
-      // Don't change state here - wait for terminated
-      break;
-  }
-  
-  // Emit event for listeners
-  this.emit(event.event as keyof AdapterEvents, event.body);
-}
-```
-
-### Common DAP Quirks by Language
-
-Based on real implementations:
-
-**Python (debugpy)**:
-- Sends `exited` → `terminated` on normal exit
-- May treat `sys.exit()` as exception
-- Can be configured to wait for input on exit
-
-**Node.js**:
-- Older versions wait for debugger detach
-- May need to detect "Waiting for debugger..." message
-- Order of events can vary
-
-**Go (Delve)**:
-- Expects client to send `disconnect` after `terminated`
-- In attach mode, only sends `terminated` (no `exited`)
+---
 
 ## Testing Your Adapter
 
-### Unit Tests
-
-Test each method in isolation:
-
+Unit tests (Vitest)
 ```typescript
-describe('YourLanguageDebugAdapter', () => {
-  let adapter: YourLanguageDebugAdapter;
-  let mockDependencies: AdapterDependencies;
-  
+import { describe, it, expect, beforeEach } from 'vitest';
+import { ExampleAdapter } from '../src/ExampleAdapter';
+
+describe('ExampleAdapter', () => {
+  let adapter: ExampleAdapter;
+
   beforeEach(() => {
-    mockDependencies = createMockDependencies();
-    adapter = new YourLanguageDebugAdapter(mockDependencies);
+    adapter = new ExampleAdapter();
   });
-  
-  describe('validateEnvironment', () => {
-    it('should succeed when runtime is available', async () => {
-      const result = await adapter.validateEnvironment();
-      expect(result.valid).toBe(true);
-    });
-    
-    it('should fail with helpful error when runtime missing', async () => {
-      // Mock missing runtime
-      const result = await adapter.validateEnvironment();
-      expect(result.errors[0].code).toBe('RUNTIME_NOT_FOUND');
-    });
+
+  it('initializes to READY', async () => {
+    await adapter.initialize();
+    expect(adapter.isReady()).toBe(true);
   });
 });
 ```
 
-### Integration Tests
+Integration smoke (using the server tools)
+- Ensure your adapter is built and discoverable (installed into the same node_modules or available via monorepo fallback)
+- From an MCP client or test harness:
+  - Call `list_supported_languages` and confirm your language appears
+  - Call `create_debug_session` with `"language": "<yourlang>"` and ensure success
 
-Test with the actual ProxyManager:
+Local linking
+- `npm pack` and install the generated `.tgz` into your test project
+- Or use `npm link` (note: watch out for ESM + symlink constraints; `npm pack` is often more predictable)
 
-```typescript
-it('should handle full debug session', async () => {
-  const sessionManager = new SessionManager(dependencies);
-  const sessionId = await sessionManager.createSession({
-    language: 'your-language',
-    name: 'test session'
-  });
-  
-  await sessionManager.startDebugging({
-    sessionId,
-    script: 'test.yl',
-    launchConfig: { stopOnEntry: true }
-  });
-  
-  // Verify adapter was used correctly
-  expect(adapter.getState()).toBe(AdapterState.DEBUGGING);
-});
+---
+
+## Publishing
+
+- Build to `dist/` (`tsc -p tsconfig.json`)
+- Publish to npm (`npm publish`)
+- SemVer policy:
+  - Avoid breaking `IDebugAdapter` contracts across minor versions
+  - Use `minimumDebuggerVersion` in factory metadata if the core version is required
+
+---
+
+## Performance Tips
+
+- Lazy initialization: do minimal work in the constructor and in `initialize()`
+- Cache executable discovery results
+- First-load vs cached-load:
+  - The loader caches the factory in-memory; repeated sessions load instantly
+- Preloading:
+  - If your deployment benefits, trigger `list_supported_languages` early to prime the loader
+
+---
+
+## Container Notes
+
+- If your adapter uses `which`, remember it depends on `isexe` at runtime in minimal Node images
+  - Ensure both are included in the runtime image or avoid shell resolution entirely
+- Stdout must be NDJSON-only in stdio mode (no non-JSON output)
+  - The runtime entry preloads a silencer that mirrors to `/app/logs/stdout-raw.log` and `/app/logs/stdin-raw.log` without altering protocol framing
+- Diagnostics:
+  - Use `node scripts/diagnose-stdio-client.mjs` to validate connect → list → create → close
+  - Volume-mount logs and review `/app/logs/*`
+
+---
+
+## Troubleshooting
+
+Common errors & fixes
+- `MODULE_NOT_FOUND` / `ERR_MODULE_NOT_FOUND`
+  - Not installed in the runtime. Fix: `npm install @debugmcp/adapter-<language>` and rebuild image/app
+- `Factory class <Language>AdapterFactory not found`
+  - Export mismatch. Ensure you export the named class and default `{ name, factory }` in your entry
+- Adapter not listed by `list_supported_languages`
+  - Verify npm installation (`npm ls @debugmcp/adapter-*`)
+  - Confirm package’s `exports` and `type: "module"` are correct
+  - In monorepo/dev, confirm dist exists and fallback paths are correct
+- Immediate disconnect on stdio
+  - Likely stdout pollution. Ensure your adapter does not log to stdout/stderr on import/initialize
+  - Use the provided stdio silencer and inspect `/app/logs/stdout-raw.log`
+
+Debugging dynamic loading
+- Increase server logging (debug level) and watch loader logs
+- Use `DEBUG=mcp:*` in your client to get verbose MCP logs (if supported)
+- Confirm default export shape in the compiled `dist/index.js`
+- Validate `@debugmcp/shared` peer version compatibility with the core
+
+Troubleshooting flow
+```
+Adapter not loading?
+├── npm ls @debugmcp/adapter-*
+├── Verify export structure { name: '<lang>', factory: <Lang>AdapterFactory }
+├── Check compiled dist/index.js exists and is ESM
+├── Check stdout purity in stdio (no logs)
+└── Inspect /app/logs/stdout-raw.log and stdin-raw.log (container)
 ```
 
-### E2E Tests
-
-Use the test infrastructure:
-
-```typescript
-it('should debug a simple program', async () => {
-  const { mcp, sessionId } = await createTestSession('your-language');
-  
-  // Start debugging
-  await mcp.startDebugging(sessionId, 'hello.yl');
-  
-  // Wait for stopped event
-  await waitForEvent(mcp, 'stopped');
-  
-  // Continue execution
-  await mcp.continue(sessionId);
-  
-  // Wait for program to end
-  await waitForEvent(mcp, 'terminated');
-});
-```
-
-## Common Pitfalls and Solutions
-
-### 1. Forgetting to Handle State Changes
-
-**Problem**: Not updating internal state on DAP events
-
-**Solution**: Always update state in `handleDapEvent`:
-```typescript
-if (event.event === 'stopped') {
-  this.currentThreadId = event.body?.threadId;
-  this.transitionTo(AdapterState.DEBUGGING);
-}
-```
-
-### 2. Confusing 'stopped' with 'terminated'
-
-**Problem**: Treating `stopped` event as session end
-
-**Solution**: Remember the semantics:
-- `stopped` = paused for debugging
-- `terminated` = session ended
-
-### 3. Missing Error Context
-
-**Problem**: Generic error messages
-
-**Solution**: Provide helpful context:
-```typescript
-getMissingExecutableError(): string {
-  return `${this.language} executable not found. 
-  
-  To install:
-  - Ubuntu/Debian: sudo apt-get install ${this.language}
-  - macOS: brew install ${this.language}
-  - Windows: Download from https://${this.language}.org
-  
-  Or specify a custom path with executablePath option.`;
-}
-```
-
-### 4. Path Handling Issues
-
-**Problem**: Paths work on one OS but not another
-
-**Solution**: Use path utilities and handle platform differences:
-```typescript
-translateScriptPath(scriptPath: string, context: PathContext): string {
-  if (context.isContainer) {
-    // Handle container path mapping
-  }
-  
-  // Normalize for platform
-  return path.normalize(scriptPath);
-}
-```
-
-## Debugging Your Adapter
-
-### Enable Logging
-
-```typescript
-constructor(dependencies: AdapterDependencies) {
-  super();
-  this.logger = dependencies.logger;
-  
-  // Log all state transitions
-  this.on('stateChanged', (oldState, newState) => {
-    this.logger.debug(`[${this.name}] State: ${oldState} → ${newState}`);
-  });
-}
-```
-
-### Common Issues
-
-1. **Adapter process won't start**
-   - Check `buildAdapterCommand` returns valid command
-   - Verify executable permissions
-   - Check environment variables
-
-2. **No DAP events received**
-   - Verify adapter process is running
-   - Check port/host configuration
-   - Look for connection errors in logs
-
-3. **State transitions failing**
-   - Review VALID_TRANSITIONS (but don't be too strict)
-   - Check event handling logic
-   - Verify state updates in `handleDapEvent`
-
-## Advanced Topics
-
-### Custom Debug Adapter Process
-
-If you need a custom adapter process (like the mock adapter):
-
-```typescript
-// your-language-adapter-process.ts
-import { DAPServer } from './dap-server';
-
-const server = new DAPServer();
-server.listen(process.argv);
-```
-
-### Feature Capabilities
-
-Declare what your adapter supports:
-
-```typescript
-getCapabilities(): AdapterCapabilities {
-  return {
-    supportsConfigurationDoneRequest: true,
-    supportsFunctionBreakpoints: false, // If not supported
-    supportsConditionalBreakpoints: true,
-    supportsSetVariable: true,
-    // ... other capabilities
-  };
-}
-```
-
-### Performance Optimization
-
-1. **Lazy initialization**: Don't do expensive work in constructor
-2. **Cache executable paths**: Avoid repeated filesystem lookups
-3. **Batch operations**: Group related DAP requests when possible
-
-## Real-World Examples
-
-Study these implementations:
-
-1. **[MockDebugAdapter](../../src/adapters/mock/mock-debug-adapter.ts)**
-   - Complete reference implementation
-   - Shows all required methods
-   - Includes error simulation for testing
-
-2. **[PythonDebugAdapter](../../src/adapters/python/python-debug-adapter.ts)**
-   - Production implementation
-   - Handles debugpy integration
-   - Shows real-world complexity
+---
 
 ## Checklist for New Adapters
 
-- [ ] All IDebugAdapter methods implemented
-- [ ] State transitions working correctly
-- [ ] Environment validation with helpful errors
-- [ ] DAP event handling (especially stopped/terminated)
-- [ ] Unit tests for all methods
-- [ ] Integration test with ProxyManager  
-- [ ] E2E test with real debugging scenario
-- [ ] Installation instructions documented
-- [ ] Error messages are helpful
-- [ ] Logging for debugging adapter issues
+- [ ] `IDebugAdapter` fully implemented
+- [ ] Factory extends `AdapterFactory` and validates environment (if needed)
+- [ ] Export conventions followed (`@debugmcp/adapter-<language>`, factory class name, default export)
+- [ ] TypeScript built to `dist/` (ESM)
+- [ ] Unit and integration tests pass
+- [ ] Adapter discovers and loads dynamically
+- [ ] Container runtime dependencies included (if applicable)
+- [ ] No stdout pollution in stdio mode
+- [ ] Publishable package metadata (version, license, description)
 
-## Getting Help
+---
 
-1. Review existing adapters for patterns
-2. Check the [DAP specification](https://microsoft.github.io/debug-adapter-protocol/)
-3. Look at [test files](../../tests/core/unit/adapters/) for examples
-4. File issues with specific error messages and logs
+## Quick Start Template
 
-Remember: Start simple, test often, and iterate based on real usage!
+You can scaffold from the minimal example above, or copy the following files and replace `Example` with your language:
+
+- `src/<Language>Adapter.ts`
+- `src/<Language>AdapterFactory.ts`
+- `src/index.ts`
+- `package.json` (with correct `name`, `exports`, `peerDependencies`)
+- `tsconfig.json`
+
+Once built and installed alongside `@debugmcp/mcp-debugger`, your adapter will be discovered by the dynamic loader automatically.

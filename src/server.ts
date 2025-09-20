@@ -87,7 +87,8 @@ export class DebugMcpServer {
       return ['python', 'mock'];
     }
     // Prefer dynamic discovery if available on the concrete registry
-    const maybeList = (adapterRegistry as any)?.listLanguages;
+    const dynRegistry = adapterRegistry as unknown as { listLanguages?: () => Promise<string[]> };
+    const maybeList = dynRegistry.listLanguages;
     if (typeof maybeList === 'function') {
       try {
         const langs = await maybeList.call(adapterRegistry);

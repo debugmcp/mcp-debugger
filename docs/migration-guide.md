@@ -3,6 +3,41 @@
 > **📌 UPDATED DOCUMENTATION**  
 > This migration guide covers changes through v0.12.0, including the major UX improvements.
 
+## What's New in v0.15.0
+
+### ✅ Dynamic Adapter Loading (No Breaking Changes)
+This release introduces dynamic discovery and loading of language adapters at runtime. The core no longer statically imports adapters; instead, it uses a loader/registry to import packages by convention.
+
+- Adapters live in separate packages:
+  - `@debugmcp/adapter-mock`
+  - `@debugmcp/adapter-python`
+- Adapters are treated as optional dependencies in consumers
+- The core discovers and loads adapters on demand:
+  - Package naming: `@debugmcp/adapter-<language>`
+  - Factory class export: `<CapitalizedLanguage>AdapterFactory`
+  - Default export (adapter package): `{ name: '<language>', factory: <Language>AdapterFactory }`
+
+### 🔧 User Guidance
+- Install core only:
+  ```bash
+  npm install @debugmcp/mcp-debugger
+  ```
+- Install core + Python adapter:
+  ```bash
+  npm install @debugmcp/mcp-debugger @debugmcp/adapter-python
+  ```
+- Verify availability:
+  - Call the `list_supported_languages` tool (from your MCP client) to see which adapters are discoverable
+  - If a language is missing, install its adapter package
+
+### 🐳 Container Notes
+- Stdout in stdio mode must be NDJSON-only; the runtime preloads a silencer that mirrors logs to `/app/logs` without altering protocol
+- If you use `which` in minimal Node images, ensure `isexe` is also present (runtime dependency)
+
+### 🧪 Backward Compatibility
+- No breaking API changes from v0.14.x
+- Existing tool calls continue to work; dynamic loading only changes how adapters are supplied to the core
+
 ## What's New in v0.12.0
 
 ### 🎉 Major UX Improvements (Backward Compatible)

@@ -16,7 +16,7 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> **🆕 Version 0.10.0**: Now supports multiple languages through a clean adapter pattern! Start with Python, extend to any language.
+> 🆕 Version 0.15.0: Dynamic adapter loading with monorepo packaging. Install adapters as optional dependencies. Start with Python and Mock; extend to any language.
 
 > 🎬 **Demo Video**: See the debugger in action!
 > 
@@ -37,7 +37,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
 - 🧪 **Mock adapter for testing** – Test without external dependencies
 - 🔄 **STDIO and SSE transport modes** – Works with any MCP client
-- 📊 **99.5% test coverage** – Battle-tested with 808+ passing tests
+- 📊 1019 tests passing – battle-tested end-to-end
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
 - 🛡️ **Path validation** – Prevents crashes from non-existent files
@@ -65,7 +65,7 @@ Add to your MCP settings configuration:
 ### Using Docker
 
 ```bash
-docker run -v $(pwd):/workspace debugmcp/mcp-debugger:0.10.0
+docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
 ### Using npm
@@ -149,7 +149,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 > *Managing multiple debug sessions simultaneously*
 > -->
 
-## 🏗️ Architecture: The Adapter Pattern
+## 🏗️ Architecture: Dynamic Adapter Loading
 
 Version 0.10.0 introduces a clean adapter pattern that separates language-agnostic core functionality from language-specific implementations:
 
@@ -315,8 +315,9 @@ Then get the local variables:
 - 🚦 [Getting Started Guide](./docs/getting-started.md) – First-time setup
 - 🏗️ [Architecture Overview](./docs/architecture/README.md) – Multi-language design
 - 🔧 [Adapter Development](./docs/architecture/adapter-development-guide.md) – Add new languages
-- 📊 [API Reference](./docs/architecture/api-reference.md) – Detailed interface docs
-- 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading from v0.9.x
+- 🔌 [Dynamic Loading Architecture](./docs/architecture/dynamic-loading-architecture.md) – Runtime discovery, lazy loading, caching
+- 🧩 [Adapter API Reference](./docs/architecture/adapter-api-reference.md) – Adapter, factory, loader, and registry contracts
+- 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading to v0.15.0 (dynamic loading)
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
 - 🤖 [AI Integration Guide](./docs/ai-integration.md) – Leverage AI-friendly features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
@@ -350,8 +351,8 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.10.0 with multi-language support
-- ✅ **808+ tests** with 99.5% success rate
+- ✅ **Production Ready**: v0.15.0 with dynamic adapter loading
+- ✅ **1019 tests** passing end-to-end
 - ✅ **Clean architecture** with adapter pattern
 - 🚧 **Coming Soon**: Node.js, Go, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
