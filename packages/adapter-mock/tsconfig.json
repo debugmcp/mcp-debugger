@@ -2,11 +2,17 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "composite": true,
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@debugmcp/shared": ["../shared/src"],
+      "@debugmcp/shared/*": ["../shared/src/*"]
+    }
   },
-  "include": ["src/**/*"],
   "references": [
     { "path": "../shared" }
-  ]
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
 }
