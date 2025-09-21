@@ -1,7 +1,7 @@
 {
   "name": "mcp-debugger-monorepo",
   "private": true,
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "Run-time step-through debugging for LLM agents - Monorepo root",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
   "repository": {
@@ -9,8 +9,13 @@
     "url": "git+https://github.com/debugmcp/mcp-debugger.git"
   },
   "workspaces": {
-    "packages": ["packages/*"],
-    "nohoist": ["**/debugpy", "**/node-inspector"]
+    "packages": [
+      "packages/*"
+    ],
+    "nohoist": [
+      "**/debugpy",
+      "**/node-inspector"
+    ]
   },
   "scripts": {
     "prepare": "npm run build",
