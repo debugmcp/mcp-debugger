@@ -133,8 +133,14 @@ jobs:
     - name: Build project
       run: npm run build
     
-    - name: Publish to npm
-      run: npm publish --access public
+    - name: Publish to npm (workspaces)
+      run: |
+        # Authenticate npm
+        npm config set //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+        # Publish packages in dependency order
+        npm publish -w @debugmcp/shared --access public
+        npm publish -w @debugmcp/adapter-mock --access public
+        npm publish -w @debugmcp/adapter-python --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

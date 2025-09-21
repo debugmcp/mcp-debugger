@@ -26,5 +26,8 @@
   },
   "peerDependencies": {
     "@debugmcp/shared": "^0.15.2"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
