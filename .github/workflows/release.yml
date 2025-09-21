@@ -31,7 +31,7 @@ jobs:
         pip install debugpy
     
     - name: Install dependencies
-      run: npm ci
+      run: npm ci --ignore-scripts
     
     - name: Build project
       run: npm run build
@@ -153,10 +153,16 @@ jobs:
         cache: 'npm'
     
     - name: Install dependencies
-      run: npm ci
+      run: npm ci --ignore-scripts
     
     - name: Build project
       run: npm run build
+
+    - name: Pack npm tarballs (dry-run)
+      run: |
+        npm pack --dry-run -w @debugmcp/shared
+        npm pack --dry-run -w @debugmcp/adapter-mock
+        npm pack --dry-run -w @debugmcp/adapter-python
     
     - name: Publish to npm (workspaces)
       run: |
