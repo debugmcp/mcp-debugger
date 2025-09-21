@@ -4,6 +4,8 @@ node_modules/
 # Build output
 dist/
 build/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
 
 # Bundled adapters (downloaded during build)
 bundled-adapters/

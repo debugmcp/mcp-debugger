@@ -9,16 +9,29 @@
 // This prevents stdout pollution in stdio mode which breaks MCP protocol
 (() => {
   // Handle both quoted and unquoted stdio arguments
-  const hasStdio = process.argv.some(arg => 
-    arg === 'stdio' || 
-    arg === '"stdio"' || 
+  const hasStdio = process.argv.some(arg =>
+    arg === 'stdio' ||
+    arg === '"stdio"' ||
     arg === '"\'stdio\'"' ||
     arg.includes('stdio')
   );
-  
-  if (hasStdio || process.env.DEBUG_MCP_STDIO === '1') {
+
+  // Auto-detect STDIO mode:
+  // 1. Explicit stdio argument
+  // 2. Environment variable set
+  // 3. No transport argument specified (default is STDIO)
+  // 4. stdin is a pipe (typical for MCP STDIO mode)
+  const hasTransportArg = process.argv.some(arg =>
+    arg === '--transport' || arg.includes('transport')
+  );
+  const isStdinPipe = !process.stdin.isTTY;
+  const shouldSilenceConsole = hasStdio ||
+                               process.env.DEBUG_MCP_STDIO === '1' ||
+                               (!hasTransportArg && isStdinPipe);
+
+  if (shouldSilenceConsole) {
     // Set env flag immediately so any early imports see it
-    if (hasStdio) {
+    if (hasStdio || shouldSilenceConsole) {
       process.env.DEBUG_MCP_STDIO = '1';
     }
     

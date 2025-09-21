@@ -290,3 +290,61 @@ packages/adapter-nodejs/
 ### Mock (Testing)
 - No external requirements
 - Used for testing the debug infrastructure
+
+## MCP Integration with Claude Code CLI
+
+### Installation for Claude Code
+The mcp-debugger server can be configured for use with Claude Code CLI. To set it up:
+
+1. **Build the server** (already completed):
+   ```bash
+   npm install
+   npm run build
+   ```
+
+2. **Add to Claude Code** using the claude CLI with the required stdio argument:
+   ```bash
+   # IMPORTANT: Must include "stdio" argument to suppress console output
+   /home/ubuntu/.claude/local/claude mcp add-json mcp-debugger '{"type":"stdio","command":"node","args":["/home/ubuntu/mcp-debugger/dist/index.js","stdio"],"env":{}}'
+   ```
+
+   **Note**: The `stdio` argument is critical - it tells the server to suppress all console output which would otherwise corrupt the JSON-RPC protocol communication.
+
+3. **Verify installation**:
+   ```bash
+   /home/ubuntu/.claude/local/claude mcp list
+   # Should show: mcp-debugger: node /home/ubuntu/mcp-debugger/dist/index.js stdio - ✓ Connected
+   ```
+
+4. **Restart Claude Code** for the changes to take effect
+
+### Configuration Details
+- **Location**: Configuration saved to `/home/ubuntu/.claude.json` under the project's `mcpServers` section
+- **Server Type**: STDIO (local server)
+- **Command**: `node /home/ubuntu/mcp-debugger/dist/index.js stdio` (stdio argument is required!)
+- **Status Check**: After restart, type `/mcp` in Claude Code to see connected servers
+
+### Available Tools After Integration
+Once connected, the following MCP tools become available:
+- `create_debug_session` - Start a new debug session
+- `set_breakpoint` - Set breakpoints in code
+- `start_debugging` - Begin debugging a script
+- `step_over`, `step_into`, `step_out` - Step through code
+- `continue_execution` - Continue running
+- `get_variables`, `get_stack_trace` - Inspect program state
+- `evaluate_expression` - Evaluate expressions in debug context
+- `close_debug_session` - Clean up sessions
+
+### Troubleshooting MCP Connection
+- **If server shows "Failed to connect"**:
+  - Ensure the `stdio` argument is included in the configuration
+  - The server outputs logs to stdout by default, which corrupts JSON-RPC communication
+  - Use the `add-json` command shown above to properly configure with the stdio argument
+  - Note: The server includes auto-detection logic for STDIO mode (checks for pipe input and absence of transport args), but explicit `stdio` argument is most reliable
+- **Test the server manually**:
+  ```bash
+  echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' | node dist/index.js stdio
+  # Should return clean JSON without any log messages
+  ```
+- **Verify Python and debugpy are installed**: `python3 -m debugpy --version`
+- **Check logs if needed**: Set `DEBUG=debug-mcp:*` environment variable (only for troubleshooting, not for normal operation)
