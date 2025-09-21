@@ -96,11 +96,35 @@ jobs:
     - name: Install Python build dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install build twine
+        pip install build twine tomlkit
     
+    - name: Set launcher version from tag
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+    - name: Sync version into pyproject.toml
+      run: |
+        python - <<'PY'
+        import os
+        from tomlkit import parse, dumps
+        p = os.path.join('mcp_debugger_launcher','pyproject.toml')
+        with open(p,'r',encoding='utf-8') as f:
+            doc = parse(f.read())
+        ver = os.environ.get('VERSION','0.0.0')
+        if 'project' in doc and 'version' in doc['project']:
+            doc['project']['version'] = ver
+        elif 'tool' in doc and 'poetry' in doc['tool'] and 'version' in doc['tool']['poetry']:
+            doc['tool']['poetry']['version'] = ver
+        else:
+            doc.setdefault('project', {})['version'] = ver
+        with open(p,'w',encoding='utf-8') as f:
+            f.write(dumps(doc))
+        print(f"Set pyproject version to {ver}")
+        PY
+
     - name: Build Python package
       run: |
         cd mcp_debugger_launcher
+        rm -rf dist build *.egg-info
         python -m build
     
     - name: Publish to PyPI
@@ -109,7 +133,8 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
       run: |
         cd mcp_debugger_launcher
-        python -m twine upload dist/*
+        python -m twine check dist/*
+        python -m twine upload --skip-existing dist/*
 
   npm-publish:
     name: Publish to npm
