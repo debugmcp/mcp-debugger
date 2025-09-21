@@ -40,9 +40,10 @@ describe('MCP Server E2E SSE Smoke Test', () => {
     if (sseServerProcess) {
       try {
         // First try graceful shutdown with SIGTERM
-        if (!sseServerProcess.killed) {
+        const proc = sseServerProcess;
+        if (proc && !proc.killed) {
           console.log('[SSE Smoke Test] Attempting graceful shutdown with SIGTERM...');
-          sseServerProcess.kill('SIGTERM');
+          proc.kill('SIGTERM');
           
           // Wait up to 2 seconds for graceful shutdown
           const gracefulShutdownTimeout = 2000;
@@ -50,7 +51,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           
           await new Promise<void>((resolve) => {
             const checkInterval = setInterval(() => {
-              if (sseServerProcess!.killed || Date.now() - shutdownStart > gracefulShutdownTimeout) {
+              if (!proc || proc.killed || Date.now() - shutdownStart > gracefulShutdownTimeout) {
                 clearInterval(checkInterval);
                 resolve();
               }
@@ -58,9 +59,9 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           });
           
           // If still not killed, use SIGKILL
-          if (!sseServerProcess.killed) {
+          if (proc && !proc.killed) {
             console.log('[SSE Smoke Test] Graceful shutdown failed, using SIGKILL...');
-            sseServerProcess.kill('SIGKILL');
+            proc.kill('SIGKILL');
           } else {
             console.log('[SSE Smoke Test] Server shut down gracefully');
           }
@@ -168,14 +169,6 @@ describe('MCP Server E2E SSE Smoke Test', () => {
             const output = data.toString();
             stdout += output;
             console.log('[SSE Server Stdout]', output.trim());
-            
-            // Look for the server ready message
-            if (output.includes('listening') || output.includes('started')) {
-              hasStarted = true;
-              clearTimeout(timeout);
-              console.log(`[SSE Smoke Test] Server confirmed started on port ${port}`);
-              resolve(port);
-            }
           };
           
           const handleStderr = (data: Buffer) => {
@@ -193,6 +186,21 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           
           sseServerProcess.stdout?.on('data', handleStdout);
           sseServerProcess.stderr?.on('data', handleStderr);
+
+          // Also consider the server ready once the port is accepting connections (deterministic readiness)
+          void (async () => {
+            try {
+              const ok = await waitForPort(port, TEST_TIMEOUT);
+              if (ok && !hasStarted) {
+                hasStarted = true;
+                clearTimeout(timeout);
+                console.log(`[SSE Smoke Test] Port check succeeded; server ready on ${port}`);
+                resolve(port);
+              }
+            } catch {
+              // Ignore; failure paths (exit/timeout) will handle rejection with context
+            }
+          })();
           
           sseServerProcess.on('error', (err) => {
             hasStarted = true; // Prevent timeout error
