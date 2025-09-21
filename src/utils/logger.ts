@@ -32,9 +32,8 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
   const transports: winston.transport[] = [];
   
   // In stdio mode, we MUST NOT write to stdout as it corrupts the MCP protocol
-  // Detect via CLI arg or explicit env flag (robust under bundling and quoted args)
-  const argvJoined = Array.isArray(process.argv) ? process.argv.join(' ').toLowerCase() : '';
-  const isStdioMode = (argvJoined.includes('stdio')) || process.env.DEBUG_MCP_STDIO === '1';
+  // Rely on explicit env flag set by CLI/bootstrap to avoid false positives in tests
+  const isStdioMode = process.env.DEBUG_MCP_STDIO === '1';
   
   if (!isStdioMode) {
     // Only add console transport when NOT in stdio mode

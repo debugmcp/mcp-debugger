@@ -9,6 +9,9 @@
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import { portManager } from './test-utils/helpers/port-manager.js';
 
+// Ensure stdio mode is disabled in unit tests unless explicitly set
+delete process.env.DEBUG_MCP_STDIO;
+
 // Add type declarations for global test helpers
 declare global {
   // eslint-disable-next-line no-var
