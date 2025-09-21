@@ -62,6 +62,24 @@ Add to your MCP settings configuration:
 }
 ```
 
+### For Claude Code CLI
+
+For Claude Code users, we provide an automated installation script:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/mcp-debugger.git
+cd mcp-debugger
+
+# Run the installation script
+./scripts/install-claude-mcp.sh
+
+# Verify the connection
+/home/ubuntu/.claude/local/claude mcp list
+```
+
+**Important**: The `stdio` argument is required to prevent console output from corrupting the JSON-RPC protocol. See [CLAUDE.md](CLAUDE.md) for detailed setup and [docs/MCP_CLAUDE_CODE_INTEGRATION.md](docs/MCP_CLAUDE_CODE_INTEGRATION.md) for troubleshooting.
+
 ### Using Docker
 
 ```bash

@@ -294,29 +294,52 @@ packages/adapter-nodejs/
 ## MCP Integration with Claude Code CLI
 
 ### Installation for Claude Code
-The mcp-debugger server can be configured for use with Claude Code CLI. To set it up:
 
-1. **Build the server** (already completed):
-   ```bash
-   npm install
-   npm run build
-   ```
+Choose the installation method that best fits your use case:
 
-2. **Add to Claude Code** using the claude CLI with the required stdio argument:
-   ```bash
-   # IMPORTANT: Must include "stdio" argument to suppress console output
-   /home/ubuntu/.claude/local/claude mcp add-json mcp-debugger '{"type":"stdio","command":"node","args":["/home/ubuntu/mcp-debugger/dist/index.js","stdio"],"env":{}}'
-   ```
+#### Option 1: NPX (No Installation Required)
+```bash
+# Best for: Trying out mcp-debugger
+/home/ubuntu/.claude/local/claude mcp add-json mcp-debugger \
+  '{"type":"stdio","command":"npx","args":["@debugmcp/mcp-debugger","stdio"]}'
+```
 
-   **Note**: The `stdio` argument is critical - it tells the server to suppress all console output which would otherwise corrupt the JSON-RPC protocol communication.
+#### Option 2: Global NPM Install
+```bash
+# Best for: Regular use across projects
+npm install -g @debugmcp/mcp-debugger
+/home/ubuntu/.claude/local/claude mcp add-json mcp-debugger \
+  '{"type":"stdio","command":"mcp-debugger","args":["stdio"]}'
+```
 
-3. **Verify installation**:
+#### Option 3: Docker
+```bash
+# Best for: Isolation and consistency
+/home/ubuntu/.claude/local/claude mcp add-json mcp-debugger \
+  '{"type":"stdio","command":"docker","args":["run","-i","--rm","-v","${PWD}:/workspace","debugmcp/mcp-debugger:latest","stdio"]}'
+```
+
+#### Option 4: Build from Source (Current Setup)
+```bash
+# Best for: Development of mcp-debugger itself
+npm install && npm run build
+/home/ubuntu/.claude/local/claude mcp add-json mcp-debugger \
+  '{"type":"stdio","command":"node","args":["/home/ubuntu/mcp-debugger/dist/index.js","stdio"]}'
+```
+
+**Note**: The `stdio` argument is critical - it tells the server to suppress all console output which would otherwise corrupt the JSON-RPC protocol communication.
+
+#### Verify Installation
+
+After adding the MCP server:
+
+1. **Check connection status**:
    ```bash
    /home/ubuntu/.claude/local/claude mcp list
-   # Should show: mcp-debugger: node /home/ubuntu/mcp-debugger/dist/index.js stdio - ✓ Connected
+   # Should show: mcp-debugger ... - ✓ Connected
    ```
 
-4. **Restart Claude Code** for the changes to take effect
+2. **Restart Claude Code** for the changes to take effect
 
 ### Configuration Details
 - **Location**: Configuration saved to `/home/ubuntu/.claude.json` under the project's `mcpServers` section
