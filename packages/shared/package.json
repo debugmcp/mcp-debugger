@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/shared",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "description": "Shared interfaces, types, and utilities for MCP Debugger",
   "homepage": "https://github.com/debugmcp/mcp-debugger/tree/main/packages/shared",
   "repository": {

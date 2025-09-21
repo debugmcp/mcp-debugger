@@ -1,7 +1,7 @@
 {
   "name": "mcp-debugger-monorepo",
   "private": true,
-  "version": "0.15.2",
+  "version": "0.15.3",
   "description": "Run-time step-through debugging for LLM agents - Monorepo root",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
   "repository": {
