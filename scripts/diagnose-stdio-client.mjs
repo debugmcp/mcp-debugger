@@ -59,8 +59,10 @@ async function main() {
         const parsed = JSON.parse(contentArray[0].text);
         sessionId = parsed.sessionId;
       }
-    } catch {
-      // ignore parse errors
+    } catch (e) {
+      if (process.env.DEBUG_STDIO_DIAG) {
+        console.warn('[Diag] Ignoring parse error:', e?.message || e);
+      }
     }
 
     if (sessionId) {
@@ -79,7 +81,11 @@ async function main() {
     console.error('[Diag] Error:', err?.message || err);
     process.exitCode = 1;
   } finally {
-    try { await client.close(); } catch {}
+    try { await client.close(); } catch (e) {
+      if (process.env.DEBUG_STDIO_DIAG) {
+        console.warn('[Diag] Ignoring close error:', e?.message || e);
+      }
+    }
   }
 
   console.log('[Diag] Logs should be available under:', logsDir);

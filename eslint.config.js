@@ -26,57 +26,38 @@ export default [
     ]
   },
 
-  // Apply TypeScript recommended rules globally for .ts files
-  // This typically includes the parser, plugin, and recommended rules.
+  // TypeScript flat recommended config (scoped by typescript-eslint to TS files)
   ...tseslint.configs.recommended,
 
-  // Configuration for JavaScript files (if any, e.g., config files themselves)
+  // JavaScript rules (only JS files)
   {
     files: ["**/*.{js,mjs,cjs}"],
-    ...js.configs.recommended, // Apply ESLint's recommended JS rules
+    ...js.configs.recommended,
     languageOptions: {
       globals: {
-        ...globals.node, // Node globals for JS files
+        ...globals.node,
       },
       ecmaVersion: "latest",
-      sourceType: "module", // Assuming JS config files might also be modules
+      sourceType: "module",
     },
   },
 
-  // Specifics for TypeScript source files (src directory)
+  // TS project-aware settings for repo TS sources and tests
   {
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.ts", "packages/*/src/**/*.ts", "tests/**/*.ts"],
     languageOptions: {
       globals: {
-        ...globals.node, // Or globals.nodeBuiltin
+        ...globals.node,
       },
-      parserOptions: {
-        project: ["./tsconfig.json"], // Path to your tsconfig.json
-        // tsconfigRootDir: import.meta.dirname, // If tsconfig.json is not in the same dir as eslint.config.js
-      },
+      
     },
-    // Add any src-specific rules or overrides here
-    // Example:
-    // rules: {
-    //   "@typescript-eslint/no-unused-vars": "warn",
-    // }
   },
 
   // More lenient rules for test files
   {
     files: ["tests/**/*.ts"],
-    languageOptions: {
-      globals: {
-        ...globals.jest,
-        ...globals.node, // Tests also run in Node
-      },
-      parserOptions: {
-        project: ["./tsconfig.spec.json"], // Use tsconfig.spec.json for test files
-        // tsconfigRootDir: import.meta.dirname,
-      },
-    },
     rules: {
-      "@typescript-eslint/no-explicit-any": "warn", // Allow but warn
+      "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": "warn",
       "@typescript-eslint/ban-ts-comment": "warn"
     }
@@ -92,7 +73,14 @@ export default [
     }
   },
   
-  // Note: Ignores for build, node_modules, etc. are also typically handled by .eslintignore
-  // or by not including them in the `files` patterns of lintable configurations.
-  // Adding them here ensures ESLint's flat config explicitly skips them if it tries to glob them.
+  // Script utilities (Node CJS/JS): relax some rules to avoid noise in maintenance scripts
+  {
+    files: ["scripts/**/*.{js,mjs,cjs}"],
+    rules: {
+      "no-unused-vars": "off",
+      "no-useless-escape": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-require-imports": "off"
+    }
+  },
 ];

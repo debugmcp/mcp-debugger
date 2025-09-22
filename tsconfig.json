@@ -18,12 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@debugmcp/shared": ["packages/shared"],
-      "@debugmcp/shared/*": ["packages/shared/*"],
-      "@debugmcp/adapter-mock": ["packages/adapter-mock/dist/index.d.ts"],
-      "@debugmcp/adapter-mock/*": ["packages/adapter-mock/dist/*"],
-      "@debugmcp/adapter-python": ["packages/adapter-python/dist/index.d.ts"],
-      "@debugmcp/adapter-python/*": ["packages/adapter-python/dist/*"],
+      "@debugmcp/shared": ["packages/shared/src"],
+      "@debugmcp/shared/*": ["packages/shared/src/*"],
       "*": ["node_modules/*"]
     }
   },
