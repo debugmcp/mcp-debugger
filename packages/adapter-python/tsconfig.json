@@ -6,8 +6,8 @@
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@debugmcp/shared": ["../shared"],
-      "@debugmcp/shared/*": ["../shared/*"]
+      "@debugmcp/shared": ["../shared/src"],
+      "@debugmcp/shared/*": ["../shared/src/*"]
     },
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true
