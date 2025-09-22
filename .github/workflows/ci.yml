@@ -40,6 +40,21 @@ jobs:
     - name: Install Node dependencies
       run: npm ci
     
+    - name: Debug - Check shared package after install
+      run: |
+        echo "=== Checking @debugmcp/shared package structure ==="
+        echo "Contents of packages/shared:"
+        ls -la packages/shared/
+        echo ""
+        echo "Contents of packages/shared/dist (if exists):"
+        ls -la packages/shared/dist/ 2>/dev/null || echo "dist directory does not exist"
+        echo ""
+        echo "Contents of node_modules/@debugmcp (if exists):"
+        ls -la node_modules/@debugmcp/ 2>/dev/null || echo "@debugmcp directory does not exist"
+        echo ""
+        echo "Check symlink in adapter-mock:"
+        ls -la packages/adapter-mock/node_modules/@debugmcp/ 2>/dev/null || echo "No @debugmcp in adapter-mock node_modules"
+    
     - name: Build project
       run: npm run build
     
