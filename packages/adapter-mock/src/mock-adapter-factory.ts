@@ -5,13 +5,13 @@
  * 
  * @since 2.0.0
  */
-import { 
+import type { 
   IAdapterFactory, 
   AdapterDependencies,
   AdapterMetadata,
-  FactoryValidationResult
+  FactoryValidationResult,
+  IDebugAdapter
 } from '@debugmcp/shared';
-import { IDebugAdapter } from '@debugmcp/shared';
 import { MockDebugAdapter, MockAdapterConfig } from './mock-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 

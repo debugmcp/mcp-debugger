@@ -6,8 +6,8 @@
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@debugmcp/shared": ["../shared/dist/index.d.ts"],
-      "@debugmcp/shared/*": ["../shared/dist/*"]
+      "@debugmcp/shared": ["../shared/src/index.ts"],
+      "@debugmcp/shared/*": ["../shared/src/*"]
     }
   },
   "references": [
