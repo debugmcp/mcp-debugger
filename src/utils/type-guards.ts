@@ -176,7 +176,7 @@ export function getAdapterCommandProperty<K extends keyof AdapterCommand>(
   defaultValue: AdapterCommand[K]
 ): AdapterCommand[K] {
   if (!isValidAdapterCommand(cmd)) {
-    console.warn(`[TYPE GUARD] Invalid adapter command, returning default for ${property}`);
+    console.warn(`[TYPE GUARD] Invalid adapter command, returning default for ${String(property)}`);
     return defaultValue;
   }
   
