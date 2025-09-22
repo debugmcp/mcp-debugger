@@ -1,7 +1,7 @@
 {
   "name": "mcp-debugger-monorepo",
   "private": true,
-  "version": "0.15.3",
+  "version": "0.15.4",
   "description": "Run-time step-through debugging for LLM agents - Monorepo root",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
   "repository": {
@@ -110,7 +110,7 @@
     "mcp-debugger": "./dist/index.js"
   },
   "dependencies": {
-    "@debugmcp/shared": "^0.15.1",
+    "@debugmcp/shared": "^0.15.4",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
     "@vscode/debugadapter": "^1.68.0",
@@ -128,8 +128,8 @@
     "zod": "^3.22.4"
   },
   "optionalDependencies": {
-    "@debugmcp/adapter-mock": "^0.15.1",
-    "@debugmcp/adapter-python": "^0.15.1"
+    "@debugmcp/adapter-mock": "^0.15.4",
+    "@debugmcp/adapter-python": "^0.15.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
