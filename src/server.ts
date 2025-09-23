@@ -15,10 +15,7 @@ import {
   SessionNotFoundError,
   SessionTerminatedError,
   UnsupportedLanguageError,
-  ProxyNotRunningError,
-  DebugSessionCreationError,
-  FileValidationError,
-  getErrorMessage
+  ProxyNotRunningError
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import { createProductionDependencies } from './container/dependencies.js';

@@ -4,17 +4,18 @@
  */
 import { ContainerConfig } from './types.js';
 import { createLogger } from '../utils/logger.js';
-import { 
-  IFileSystem, 
-  IProcessManager, 
-  INetworkManager, 
+import {
+  IFileSystem,
+  IProcessManager,
+  INetworkManager,
   ILogger,
-  IEnvironment
+  IEnvironment,
+  IAdapterFactory
 } from '@debugmcp/shared';
-import { 
-  IProcessLauncher, 
-  IDebugTargetLauncher, 
-  IProxyProcessLauncher 
+import {
+  IProcessLauncher,
+  IDebugTargetLauncher,
+  IProxyProcessLauncher
 } from '@debugmcp/shared';
 import { 
   FileSystemImpl, 
@@ -110,8 +111,9 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
       ).then((mod: Record<string, unknown>) => {
         const Factory = mod[factoryName] as unknown;
         if (typeof Factory === 'function') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises
-          adapterRegistry.register(lang, new (Factory as unknown as new () => any)());
+          // We need a constructor type that returns IAdapterFactory
+          type AdapterFactoryConstructor = new () => IAdapterFactory;
+          adapterRegistry.register(lang, new (Factory as AdapterFactoryConstructor)());
         }
       }).catch(() => {
         // Optional in container; ignore failures

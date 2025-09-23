@@ -71,7 +71,6 @@ export class AdapterLoader {
             try {
               const req = createRequire(import.meta.url);
               const fsPath = fileURLToPath(url);
-              // eslint-disable-next-line @typescript-eslint/no-var-requires
               loadedModule = req(fsPath) as Record<string, unknown>;
               this.logger.debug?.(`[AdapterLoader] Loaded via createRequire from ${fsPath}`);
               loaded = true;

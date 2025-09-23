@@ -176,7 +176,7 @@ export class PortAllocationError extends McpError {
  */
 export function isMcpError<T extends McpError>(
   error: unknown,
-  errorClass: new (...args: any[]) => T
+  errorClass: new (...args: unknown[]) => T
 ): error is T {
   return error instanceof errorClass;
 }
