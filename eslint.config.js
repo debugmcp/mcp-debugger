@@ -78,7 +78,9 @@ export default [
     rules: {
       "@typescript-eslint/no-explicit-any": "warn", // Allow but warn
       "@typescript-eslint/no-unused-vars": "warn",
-      "@typescript-eslint/ban-ts-comment": "warn"
+      "@typescript-eslint/ban-ts-comment": "warn",
+      // Catch unhandled promises - exactly the issue we just fixed!
+      "@typescript-eslint/no-floating-promises": "error"
     }
   },
   
