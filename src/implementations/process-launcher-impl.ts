@@ -245,8 +245,15 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   
   private createInitializationPromise(timeout: number): Promise<void> {
     // Log promise creation for debugging
-    if (process.env.DEBUG_PROMISES) {
+    if (process.env.DEBUG_PROMISES || process.env.DEBUG_PROMISE_LEAKS) {
       console.error(`[DEBUG] Creating initialization promise [ID: ${this.promiseId}, Timeout: ${timeout}ms]`);
+
+      // Enhanced tracking for test debugging
+      if (process.env.NODE_ENV === 'test' && process.env.DEBUG_PROMISE_LEAKS) {
+        const testName = this.sessionId.match(/session-([^-]+(?:-[^-]+)*)/)?.[1] || 'unknown';
+        console.error(`[DEBUG] Promise created by test: ${testName}`);
+        console.error(`[DEBUG] Stack trace:`, new Error().stack);
+      }
     }
 
     const promise = new Promise<void>((resolve, reject) => {
@@ -295,8 +302,13 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   
   private completeInitialization(): void {
     if (this.initializationState !== 'waiting') return;
-    
+
     this.initializationState = 'completed';
+
+    if (process.env.DEBUG_PROMISES || process.env.DEBUG_PROMISE_LEAKS) {
+      console.error(`[DEBUG] Completing initialization [ID: ${this.promiseId}]`);
+    }
+
     if (this.initializationResolve) {
       this.initializationResolve();
       this.initializationResolve = undefined;
@@ -309,6 +321,10 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
     if (this.initializationState !== 'waiting') return;
 
     this.initializationState = 'failed';
+
+    if (process.env.DEBUG_PROMISES || process.env.DEBUG_PROMISE_LEAKS) {
+      console.error(`[DEBUG] Failing initialization [ID: ${this.promiseId}]: ${error.message}`);
+    }
 
     // Clear references first to prevent any re-entry
     const rejectFn = this.initializationReject;

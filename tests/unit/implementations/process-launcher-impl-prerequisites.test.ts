@@ -87,7 +87,7 @@ describe('ProxyProcessAdapter - Prerequisites (Promise Lifecycle)', () => {
   it('should handle process termination without initialization request', async () => {
     const adapter = proxyLauncher.launchProxy(
       '/path/to/proxy.js',
-      'session-123',
+      'session-prereq-no-init',
       { DEBUG: 'true' }
     );
     
@@ -103,30 +103,34 @@ describe('ProxyProcessAdapter - Prerequisites (Promise Lifecycle)', () => {
   });
 
   // Test 2: Lazy initialization
-  it('should not create initialization promise until requested', () => {
+  it('should not create initialization promise until requested', async () => {
     const adapter = proxyLauncher.launchProxy(
       '/path/to/proxy.js',
-      'session-123',
+      'session-prereq-lazy-init',
       { DEBUG: 'true' }
     );
-    
+
     // Access internal state using type assertion
     const internalAdapter = adapter as any;
-    
+
     // Verify no promise exists yet
     // This should FAIL if implementation eagerly creates promises
     expect(internalAdapter.initializationPromise).toBeUndefined();
-    
+
     // Now request initialization
-    adapter.waitForInitialization();
+    const initPromise = adapter.waitForInitialization();
     expect(internalAdapter.initializationPromise).toBeDefined();
+
+    // Clean up by killing the process and handling the promise
+    mockChildProcess.emit('exit', 0);
+    await expect(initPromise).rejects.toThrow('Proxy process exited before initialization');
   });
 
   // Test 3: Proper rejection on early exit
   it('should properly reject initialization promise when process exits', async () => {
     const adapter = proxyLauncher.launchProxy(
       '/path/to/proxy.js',
-      'session-123',
+      'session-prereq-reject-exit',
       { DEBUG: 'true' }
     );
     
@@ -146,7 +150,7 @@ describe('ProxyProcessAdapter - Prerequisites (Promise Lifecycle)', () => {
   it('should handle multiple initialization requests correctly', async () => {
     const adapter = proxyLauncher.launchProxy(
       '/path/to/proxy.js',
-      'session-123',
+      'session-prereq-multiple-init',
       { DEBUG: 'true' }
     );
     
@@ -172,7 +176,7 @@ describe('ProxyProcessAdapter - Prerequisites (Promise Lifecycle)', () => {
     // This mimics what the 8 failing tests do
     const adapter = proxyLauncher.launchProxy(
       '/path/to/proxy.js',
-      'session-123',
+      'session-prereq-typical-cleanup',
       { DEBUG: 'true' }
     );
     // Don't call waitForInitialization() - just like the failing tests
@@ -199,7 +203,7 @@ describe('ProxyProcessAdapter - Prerequisites (Promise Lifecycle)', () => {
       
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        `session-${i}`,
+        `session-prereq-multi-adapter-${i}`,
         { DEBUG: 'true' }
       );
       adapters.push(adapter);
@@ -220,7 +224,7 @@ describe('ProxyProcessAdapter - Prerequisites (Promise Lifecycle)', () => {
   it('should handle process errors during initialization gracefully', async () => {
     const adapter = proxyLauncher.launchProxy(
       '/path/to/proxy.js',
-      'session-123',
+      'session-prereq-error-init',
       { DEBUG: 'true' }
     );
     
@@ -253,7 +257,7 @@ describe('ProxyProcessAdapter - Prerequisites (Promise Lifecycle)', () => {
   it('should clear initialization promise after successful initialization', async () => {
     const adapter = proxyLauncher.launchProxy(
       '/path/to/proxy.js',
-      'session-123',
+      'session-prereq-clear-promise',
       { DEBUG: 'true' }
     );
     

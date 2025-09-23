@@ -56,7 +56,7 @@
     "posttest:coverage": "node scripts/cleanup-test-processes.js && node analyze-coverage.js",
     "test:coverage:quiet": "vitest run --coverage --reporter=dot --silent",
     "posttest:coverage:quiet": "node scripts/cleanup-test-processes.js",
-    "test:coverage:summary": "node tests/utils/test-coverage-summary.js",
+    "test:coverage:summary": "node tests/test-utils/helpers/test-coverage-summary.js",
     "test:coverage:analyze": "node analyze-coverage-detailed.js",
     "coverage:analyze": "npm run test:coverage && node analyze-coverage-detailed.js",
     "test:coverage:json": "npm run build && vitest run --coverage --reporter=json --outputFile=test-results.json",
