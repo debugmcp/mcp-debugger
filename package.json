@@ -23,7 +23,7 @@
     "build": "npm run build:packages && tsc -p tsconfig.json && tsc src/index.ts src/server.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && tsc src/proxy/dap-proxy-entry.ts src/proxy/dap-proxy-worker.ts src/proxy/dap-proxy-core.ts src/proxy/dap-proxy-dependencies.ts src/proxy/dap-proxy-interfaces.ts src/proxy/dap-proxy-adapter-manager.ts src/proxy/dap-proxy-connection-manager.ts src/proxy/dap-proxy-message-parser.ts src/proxy/dap-proxy-request-tracker.ts src/proxy/dap-proxy.ts src/proxy/minimal-dap.ts src/proxy/index.ts src/proxy/proxy-config.ts src/proxy/proxy-manager.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && npm run postbuild",
     "build:shared": "npm run build -w @debugmcp/shared --if-present",
     "build:adapters": "npm run build -w @debugmcp/adapter-mock && npm run build -w @debugmcp/adapter-python",
-    "build:packages": "turbo run build --filter='@debugmcp/*'",
+    "build:packages": "pnpm --filter @debugmcp/shared build && pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build",
     "build:servercore": "tsc -p tsconfig.json",
     "build:all": "npm run build --workspaces --if-present && npm run build",
     "build:clean": "npm run clean && npm run build",
@@ -104,14 +104,13 @@
   "engines": {
     "node": ">=16.0.0"
   },
-  "packageManager": "npm@10.8.2",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
     "mcp-debugger": "./dist/index.js"
   },
   "dependencies": {
-    "@debugmcp/shared": "^0.15.4",
+    "@debugmcp/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
     "@vscode/debugadapter": "^1.68.0",
@@ -129,8 +128,8 @@
     "zod": "^3.22.4"
   },
   "optionalDependencies": {
-    "@debugmcp/adapter-mock": "^0.15.4",
-    "@debugmcp/adapter-python": "^0.15.4"
+    "@debugmcp/adapter-mock": "workspace:*",
+    "@debugmcp/adapter-python": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
@@ -153,7 +152,6 @@
     "husky": "^9.1.7",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.1",
-    "turbo": "^2.5.7",
     "typescript": "^5.2.2",
     "typescript-eslint": "^8.32.1",
     "vitest": "^3.2.1"
