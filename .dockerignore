@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+.git
+.github
+.vscode
+.env
+*.log
+coverage
+.nyc_output
+dist
+build
+.DS_Store
+.pnpm-store
+pnpm-lock.yaml
+.turbo

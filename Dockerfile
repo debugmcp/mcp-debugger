@@ -1,6 +1,9 @@
 # Stage 1: Build and bundle the TypeScript application
 FROM node:20-slim AS builder
 
+# Install pnpm
+RUN npm install -g pnpm@8
+
 # Set application directory
 WORKDIR /app
 
@@ -11,16 +14,16 @@ ENV MCP_CONTAINER=true
 ARG CACHEBUST=1
 
 # 1) Copy ONLY manifests for dependency install (preserves cache)
-COPY package.json package-lock.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/package.json
 COPY packages/adapter-mock/package.json ./packages/adapter-mock/package.json
 COPY packages/adapter-python/package.json ./packages/adapter-python/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
-#    Copy all package sources to allow npm to resolve workspace:* links
+#    Copy all package sources to allow pnpm to resolve workspace:* links
 COPY packages ./packages
-RUN npm --version && npm ci --ignore-scripts
+RUN pnpm --version && pnpm install --frozen-lockfile --ignore-scripts
 
 # 3) Copy the rest of the sources and build configs
 COPY tsconfig.json ./
@@ -32,7 +35,7 @@ COPY src ./src
 COPY scripts ./scripts/
 
 # 4) Build workspace packages and main project (root build runs build:packages); then bundle
-RUN npm run build --silent
+RUN pnpm run build --silent
 RUN node scripts/bundle.js
 
 # Optional: quick diagnostics for bundle
