@@ -23,7 +23,7 @@
     "build": "npm run build:packages && tsc -p tsconfig.json && tsc src/index.ts src/server.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && tsc src/proxy/dap-proxy-entry.ts src/proxy/dap-proxy-worker.ts src/proxy/dap-proxy-core.ts src/proxy/dap-proxy-dependencies.ts src/proxy/dap-proxy-interfaces.ts src/proxy/dap-proxy-adapter-manager.ts src/proxy/dap-proxy-connection-manager.ts src/proxy/dap-proxy-message-parser.ts src/proxy/dap-proxy-request-tracker.ts src/proxy/dap-proxy.ts src/proxy/minimal-dap.ts src/proxy/index.ts src/proxy/proxy-config.ts src/proxy/proxy-manager.ts --outDir dist --module NodeNext --moduleResolution NodeNext --esModuleInterop true --target ES2022 && npm run postbuild",
     "build:shared": "npm run build -w @debugmcp/shared --if-present",
     "build:adapters": "npm run build -w @debugmcp/adapter-mock && npm run build -w @debugmcp/adapter-python",
-    "build:packages": "tsc -b",
+    "build:packages": "npm run build -w @debugmcp/shared && npm run build -w @debugmcp/adapter-mock && npm run build -w @debugmcp/adapter-python",
     "build:servercore": "tsc -p tsconfig.json",
     "build:all": "npm run build --workspaces --if-present && npm run build",
     "build:clean": "npm run clean && npm run build",
