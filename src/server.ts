@@ -7,10 +7,16 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
-  ErrorCode as McpErrorCode, 
+  ErrorCode as McpErrorCode,
   McpError,
-  ServerResult, 
+  ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
+import {
+  SessionNotFoundError,
+  SessionTerminatedError,
+  UnsupportedLanguageError,
+  ProxyNotRunningError
+} from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import { createProductionDependencies } from './container/dependencies.js';
 import { ContainerConfig } from './container/types.js';
@@ -244,7 +250,7 @@ export class DebugMcpServer {
     const session = this.sessionManager.getSession(sessionId);
     const currentThreadId = session?.proxyManager?.getCurrentThreadId();
     if (!session || !session.proxyManager || !currentThreadId) {
-        throw new McpError(McpErrorCode.InvalidRequest, "Cannot get stack trace: no active proxy, thread, or session not found/paused.");
+        throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
     }
     return this.sessionManager.getStackTrace(sessionId, currentThreadId);
   }
@@ -449,7 +455,7 @@ export class DebugMcpServer {
               const isContainer = process.env.MCP_CONTAINER === 'true';
               const allowInContainer = isContainer && requested === 'python';
               if (!allowInContainer && !supported.includes(lang)) {
-                throw new McpError(McpErrorCode.InvalidParams, `Language '${lang}' is not supported. Available languages: ${supported.join(', ')}`);
+                throw new UnsupportedLanguageError(lang, supported);
               }
 
               const sessionInfo = await this.createDebugSession({
@@ -615,10 +621,9 @@ export class DebugMcpServer {
                 result = { content: [{ type: 'text', text: JSON.stringify({ success: stepResult, message: stepResult ? `Stepped ${toolName.replace('step_', '')}` : `Failed to ${toolName.replace('_', ' ')}` }) }] };
               } catch (error) {
                 // Handle validation errors specifically
-                if (error instanceof McpError && 
-                    (error.message.includes('terminated') || 
-                     error.message.includes('closed') || 
-                     error.message.includes('not found'))) {
+                if (error instanceof SessionTerminatedError ||
+                    error instanceof SessionNotFoundError ||
+                    error instanceof ProxyNotRunningError) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
                 } else if (error instanceof Error) {
                   // Handle other expected errors (like "Failed to step over")
@@ -640,10 +645,9 @@ export class DebugMcpServer {
                 result = { content: [{ type: 'text', text: JSON.stringify({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' }) }] };
               } catch (error) {
                 // Handle validation errors specifically
-                if (error instanceof McpError && 
-                    (error.message.includes('terminated') || 
-                     error.message.includes('closed') || 
-                     error.message.includes('not found'))) {
+                if (error instanceof SessionTerminatedError ||
+                    error instanceof SessionNotFoundError ||
+                    error instanceof ProxyNotRunningError) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
                 } else if (error instanceof Error) {
                   // Handle other expected errors
@@ -686,10 +690,9 @@ export class DebugMcpServer {
                 result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope }) }] };
               } catch (error) {
                 // Handle validation errors specifically
-                if (error instanceof McpError && 
-                    (error.message.includes('terminated') || 
-                     error.message.includes('closed') || 
-                     error.message.includes('not found'))) {
+                if (error instanceof SessionTerminatedError ||
+                    error instanceof SessionNotFoundError ||
+                    error instanceof ProxyNotRunningError) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
                 } else {
                   // Re-throw unexpected errors
@@ -708,11 +711,9 @@ export class DebugMcpServer {
                 result = { content: [{ type: 'text', text: JSON.stringify({ success: true, stackFrames, count: stackFrames.length }) }] };
               } catch (error) {
                 // Handle validation errors specifically
-                if (error instanceof McpError && 
-                    (error.message.includes('terminated') || 
-                     error.message.includes('closed') || 
-                     error.message.includes('not found') ||
-                     error.message.includes('Cannot get stack trace'))) {
+                if (error instanceof SessionTerminatedError ||
+                    error instanceof SessionNotFoundError ||
+                    error instanceof ProxyNotRunningError) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
                 } else {
                   // Re-throw unexpected errors
@@ -731,10 +732,9 @@ export class DebugMcpServer {
                 result = { content: [{ type: 'text', text: JSON.stringify({ success: true, scopes }) }] };
               } catch (error) {
                 // Handle validation errors specifically
-                if (error instanceof McpError && 
-                    (error.message.includes('terminated') || 
-                     error.message.includes('closed') || 
-                     error.message.includes('not found'))) {
+                if (error instanceof SessionTerminatedError ||
+                    error instanceof SessionNotFoundError ||
+                    error instanceof ProxyNotRunningError) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
                 } else {
                   // Re-throw unexpected errors

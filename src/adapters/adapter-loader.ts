@@ -4,6 +4,10 @@ import { createLogger } from '../utils/logger.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
+export interface ModuleLoader {
+  load(modulePath: string): Promise<Record<string, unknown>>;
+}
+
 export interface AdapterMetadata {
   name: string;
   packageName: string;
@@ -14,9 +18,22 @@ export interface AdapterMetadata {
 export class AdapterLoader {
   private cache = new Map<string, IAdapterFactory>();
   private logger: WinstonLogger;
+  private moduleLoader: ModuleLoader;
 
-  constructor(logger?: WinstonLogger) {
+  constructor(logger?: WinstonLogger, moduleLoader?: ModuleLoader) {
     this.logger = logger || createLogger('AdapterLoader');
+    this.moduleLoader = moduleLoader || this.createDefaultModuleLoader();
+  }
+
+  private createDefaultModuleLoader(): ModuleLoader {
+    return {
+      load: async (modulePath: string) => {
+        return await import(
+          /* webpackIgnore: true */
+          modulePath
+        ) as Record<string, unknown>;
+      }
+    };
   }
 
   /**
@@ -37,10 +54,7 @@ export class AdapterLoader {
       // Try primary dynamic import by package name, with a monorepo fallback
       let loadedModule: Record<string, unknown> | undefined;
       try {
-        loadedModule = await import(
-          /* webpackIgnore: true */
-          packageName
-        ) as Record<string, unknown>;
+        loadedModule = await this.moduleLoader.load(packageName);
       } catch {
         // Try multiple fallback locations in order of likelihood
         const candidates = this.getFallbackModulePaths(language);
@@ -49,10 +63,7 @@ export class AdapterLoader {
         for (const url of candidates) {
           this.logger.debug?.(`[AdapterLoader] Primary import failed for ${packageName}, trying fallback URL: ${url}`);
           try {
-            loadedModule = await import(
-              /* webpackIgnore: true */
-              url
-            ) as Record<string, unknown>;
+            loadedModule = await this.moduleLoader.load(url);
             loaded = true;
             break;
           } catch {
@@ -60,7 +71,6 @@ export class AdapterLoader {
             try {
               const req = createRequire(import.meta.url);
               const fsPath = fileURLToPath(url);
-              // eslint-disable-next-line @typescript-eslint/no-var-requires
               loadedModule = req(fsPath) as Record<string, unknown>;
               this.logger.debug?.(`[AdapterLoader] Loaded via createRequire from ${fsPath}`);
               loaded = true;

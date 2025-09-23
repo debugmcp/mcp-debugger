@@ -84,7 +84,7 @@ describe('ProxyProcessAdapter', () => {
     it('should launch proxy with correct configuration', () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123',
+        'session-proxy-launch-config',
         { DEBUG: 'true' }
       );
       createdProcesses.push(proxyProcess);
@@ -98,7 +98,7 @@ describe('ProxyProcessAdapter', () => {
         })
       );
       
-      expect(proxyProcess.sessionId).toBe('session-123');
+      expect(proxyProcess.sessionId).toBe('session-proxy-launch-config');
     });
 
     it('should use process.env when no env provided', () => {
@@ -135,7 +135,7 @@ describe('ProxyProcessAdapter', () => {
     it('should send commands as JSON', () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-send-json'
       );
       createdProcesses.push(proxyProcess);
 
@@ -148,7 +148,7 @@ describe('ProxyProcessAdapter', () => {
     it('should handle complex command objects', () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-complex-cmd'
       );
       createdProcesses.push(proxyProcess);
 
@@ -172,7 +172,7 @@ describe('ProxyProcessAdapter', () => {
     it('should resolve on adapter_configured_and_launched message', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-init-adapter'
       );
       createdProcesses.push(proxyProcess);
 
@@ -190,7 +190,7 @@ describe('ProxyProcessAdapter', () => {
     it('should resolve on dry_run_complete message', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-init-dryrun'
       );
       createdProcesses.push(proxyProcess);
 
@@ -208,7 +208,7 @@ describe('ProxyProcessAdapter', () => {
     it('should ignore non-status messages during initialization', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-ignore-nonstatus'
       );
       createdProcesses.push(proxyProcess);
 
@@ -244,7 +244,7 @@ describe('ProxyProcessAdapter', () => {
     it('should handle malformed initialization messages', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-malformed-msg'
       );
       createdProcesses.push(proxyProcess);
 
@@ -274,7 +274,7 @@ describe('ProxyProcessAdapter', () => {
     it('should only resolve initialization once', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-init-once'
       );
       createdProcesses.push(proxyProcess);
 
@@ -304,7 +304,7 @@ describe('ProxyProcessAdapter', () => {
     it('should handle initialization timeout using critical async pattern', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-init-timeout'
       );
       createdProcesses.push(proxyProcess);
 
@@ -321,7 +321,7 @@ describe('ProxyProcessAdapter', () => {
     it('should reject if process exits before initialization', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-exit-before-init'
       );
       createdProcesses.push(proxyProcess);
 
@@ -338,7 +338,7 @@ describe('ProxyProcessAdapter', () => {
     it('should handle multiple calls to waitForInitialization', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-multiple-init'
       );
       createdProcesses.push(proxyProcess);
 
@@ -362,7 +362,7 @@ describe('ProxyProcessAdapter', () => {
     it('should forward spawn, message, close, and exit events', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-forward-events'
       );
       createdProcesses.push(proxyProcess);
 
@@ -393,7 +393,7 @@ describe('ProxyProcessAdapter', () => {
     it('should forward error events from the process', async () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-forward-error'
       );
       createdProcesses.push(proxyProcess);
 
@@ -417,7 +417,7 @@ describe('ProxyProcessAdapter', () => {
     it('should track exit code and signal', () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-exit-tracking'
       );
       createdProcesses.push(proxyProcess);
 
@@ -433,7 +433,7 @@ describe('ProxyProcessAdapter', () => {
     it('should provide access to process properties', () => {
       const proxyProcess = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-properties'
       );
       createdProcesses.push(proxyProcess);
 
@@ -449,7 +449,7 @@ describe('ProxyProcessAdapter', () => {
     it('should reject promise AND emit event when adapter crashes during init', async () => {
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-dap-crash'
       );
       createdProcesses.push(adapter);
       
@@ -471,7 +471,7 @@ describe('ProxyProcessAdapter', () => {
     it('should support configurable initialization timeout', async () => {
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-dap-timeout'
       );
       createdProcesses.push(adapter);
       
@@ -488,7 +488,7 @@ describe('ProxyProcessAdapter', () => {
     it('should handle rapid start/stop cycles', async () => {
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-dap-rapid'
       );
       createdProcesses.push(adapter);
       
@@ -509,7 +509,7 @@ describe('ProxyProcessAdapter', () => {
     it('should handle errors after successful initialization', async () => {
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-dap-post-init'
       );
       createdProcesses.push(adapter);
       
@@ -536,7 +536,7 @@ describe('ProxyProcessAdapter', () => {
     it('should remove all event listeners on disposal', () => {
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-cleanup-listeners'
       );
       createdProcesses.push(adapter);
       
@@ -562,7 +562,7 @@ describe('ProxyProcessAdapter', () => {
     it('should handle cleanup when process is already killed', () => {
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-cleanup-killed'
       );
       createdProcesses.push(adapter);
       
@@ -578,7 +578,7 @@ describe('ProxyProcessAdapter', () => {
     it('should clean up initialization state on exit', async () => {
       const adapter = proxyLauncher.launchProxy(
         '/path/to/proxy.js',
-        'session-123'
+        'session-proxy-cleanup-init-exit'
       );
       createdProcesses.push(adapter);
       
