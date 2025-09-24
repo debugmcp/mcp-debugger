@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+**/*.tsbuildinfo
 tsconfig.tsbuildinfo
 
 # Turbo cache (not using Turborepo)

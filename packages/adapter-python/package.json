@@ -10,6 +10,8 @@
   ],
   "scripts": {
     "build": "tsc -b",
+    "build:ci": "tsc -b -f",
+    "clean": "rimraf dist && rimraf tsconfig.tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest watch"
   },

@@ -27,7 +27,8 @@
   },
   "scripts": {
     "build": "tsc -b && node scripts/ensure-declarations.cjs",
-    "clean": "rimraf dist",
+    "build:ci": "tsc -b -f && node scripts/ensure-declarations.cjs",
+    "clean": "rimraf dist && rimraf tsconfig.tsbuildinfo",
     "build:clean": "npm run clean && npm run build",
     "test": "vitest run",
     "test:watch": "vitest watch",
