@@ -7,6 +7,9 @@ build/
 *.tsbuildinfo
 tsconfig.tsbuildinfo
 
+# Turbo cache (not using Turborepo)
+.turbo/
+
 # Bundled adapters (downloaded during build)
 bundled-adapters/
 
