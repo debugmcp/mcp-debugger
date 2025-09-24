@@ -26,8 +26,8 @@
     }
   },
   "scripts": {
-    "prepare": "tsc || true",
-    "build": "tsc && node scripts/ensure-declarations.cjs",
+    "prepare": "tsc -b || true",
+    "build": "tsc -b && node scripts/ensure-declarations.cjs",
     "clean": "rimraf dist",
     "build:clean": "npm run clean && npm run build",
     "test": "vitest run",
