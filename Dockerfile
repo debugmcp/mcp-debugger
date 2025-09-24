@@ -1,8 +1,8 @@
 # Stage 1: Build and bundle the TypeScript application
 FROM node:20-slim AS builder
 
-# Install pnpm
-RUN npm install -g pnpm@8
+# Install pnpm (using version 10 to match local development)
+RUN npm install -g pnpm@10
 
 # Set application directory
 WORKDIR /app
@@ -46,6 +46,19 @@ RUN echo "=== Listing dist directory after bundling ===" && \
     echo "=== Bundle size ===" && \
     (command -v du >/dev/null 2>&1 && du -h dist/bundle.cjs) || true
 
+# 5) Ensure adapter packages are available in node_modules
+# pnpm uses symlinks that don't survive Docker COPY, so we need to replace them with actual files
+RUN rm -rf /app/node_modules/@debugmcp && \
+    mkdir -p /app/node_modules/@debugmcp/shared && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-mock && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-python && \
+    cp -r /app/packages/shared/dist /app/node_modules/@debugmcp/shared/ && \
+    cp /app/packages/shared/package.json /app/node_modules/@debugmcp/shared/ && \
+    cp -r /app/packages/adapter-mock/dist /app/node_modules/@debugmcp/adapter-mock/ && \
+    cp /app/packages/adapter-mock/package.json /app/node_modules/@debugmcp/adapter-mock/ && \
+    cp -r /app/packages/adapter-python/dist /app/node_modules/@debugmcp/adapter-python/ && \
+    cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/
+
 # Stage 2: Create minimal runtime image
 FROM python:3.11-alpine
 
@@ -68,26 +81,8 @@ COPY --from=builder /app/packages/shared/dist/ /app/packages/shared/dist/
 COPY --from=builder /app/packages/adapter-mock/dist/ /app/packages/adapter-mock/dist/
 COPY --from=builder /app/packages/adapter-python/dist/ /app/packages/adapter-python/dist/
 
-# Create lightweight node_modules entries so adapters can resolve @debugmcp/* at runtime
-RUN mkdir -p /app/node_modules/@debugmcp/shared \
-  && mkdir -p /app/node_modules/@debugmcp/adapter-mock \
-  && mkdir -p /app/node_modules/@debugmcp/adapter-python
-
-# Copy package.json and dist for workspace packages into node_modules for resolution
-COPY --from=builder /app/packages/shared/package.json /app/node_modules/@debugmcp/shared/package.json
-COPY --from=builder /app/packages/shared/dist/ /app/node_modules/@debugmcp/shared/dist/
-
-COPY --from=builder /app/packages/adapter-mock/package.json /app/node_modules/@debugmcp/adapter-mock/package.json
-COPY --from=builder /app/packages/adapter-mock/dist/ /app/node_modules/@debugmcp/adapter-mock/dist/
-
-COPY --from=builder /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/package.json
-COPY --from=builder /app/packages/adapter-python/dist/ /app/node_modules/@debugmcp/adapter-python/dist/
-
-# Provide adapter/runtime Node deps from builder's node_modules
-COPY --from=builder /app/node_modules/@vscode/debugprotocol /app/node_modules/@vscode/debugprotocol
-COPY --from=builder /app/node_modules/which /app/node_modules/which
-# which depends on isexe; include it to avoid MODULE_NOT_FOUND at runtime
-COPY --from=builder /app/node_modules/isexe /app/node_modules/isexe
+# Copy node_modules (already dereferenced in builder stage)
+COPY --from=builder /app/node_modules /app/node_modules
 
 # Expose ports
 EXPOSE 3000 5679

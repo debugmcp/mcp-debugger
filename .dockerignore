@@ -11,5 +11,4 @@ dist
 build
 .DS_Store
 .pnpm-store
-pnpm-lock.yaml
 .turbo
