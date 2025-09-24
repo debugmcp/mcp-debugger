@@ -93,6 +93,29 @@ async function isValidPythonExecutable(pythonCmd: string, logger: Logger = noopL
 }
 
 /**
+ * Check if a Python executable has debugpy installed
+ */
+async function hasDebugpy(pythonPath: string, logger: Logger = noopLogger): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    
+    let output = '';
+    child.stdout?.on('data', (data) => { output += data.toString(); });
+    
+    child.on('error', () => resolve(false));
+    child.on('exit', (code) => {
+      const hasIt = code === 0 && output.trim().length > 0;
+      if (hasIt) {
+        logger.debug?.(`[Python Detection] debugpy version: ${output.trim()}`);
+      }
+      resolve(hasIt);
+    });
+  });
+}
+
+/**
  * Find a working Python executable
  * @param preferredPath Optional preferred Python path to check first
  * @param logger Optional logger instance for logging detection info
@@ -105,10 +128,11 @@ export async function findPythonExecutable(
 ): Promise<string> {
   const isWindows = process.platform === 'win32';
   const triedPaths: string[] = [];
+  const validPythonPaths: string[] = [];
 
   logger.debug?.(`[Python Detection] Starting discovery...`);
 
-  // 1. User-specified path
+  // 1. User-specified path (if provided, prefer it regardless of debugpy)
   if (preferredPath) {
     try {
       const resolved = await commandFinder.find(preferredPath);
@@ -126,7 +150,7 @@ export async function findPythonExecutable(
     }
   }
 
-  // 2. Environment variable
+  // 2. Environment variable (also prefer if set)
   const envPython = process.env.PYTHON_PATH || process.env.PYTHON_EXECUTABLE;
   if (envPython) {
     try {
@@ -145,7 +169,7 @@ export async function findPythonExecutable(
     }
   }
 
-  // 3. Auto-detect
+  // 3. Auto-detect - collect all valid Python executables
   const pythonCommands = isWindows
     ? ['py', 'python', 'python3']
     : ['python3', 'python'];
@@ -156,8 +180,9 @@ export async function findPythonExecutable(
       const resolved = await commandFinder.find(cmd);
       triedPaths.push(`${cmd} → ${resolved}`);
       if (!isWindows || await isValidPythonExecutable(resolved, logger)) {
-        logger.debug?.(`[Python Detection] Found working Python: ${resolved}`);
-        return resolved;
+        // Don't return immediately, collect all valid ones
+        validPythonPaths.push(resolved);
+        logger.debug?.(`[Python Detection] Found valid Python: ${resolved}`);
       }
     } catch (error) {
       if (error instanceof CommandNotFoundError) {
@@ -168,7 +193,25 @@ export async function findPythonExecutable(
     }
   }
 
-  // No Python found
+  // 4. Check each valid Python for debugpy and return the first one that has it
+  logger.debug?.(`[Python Detection] Checking ${validPythonPaths.length} Python installations for debugpy...`);
+  for (const pythonPath of validPythonPaths) {
+    if (await hasDebugpy(pythonPath, logger)) {
+      logger.debug?.(`[Python Detection] Found Python with debugpy installed: ${pythonPath}`);
+      return pythonPath;
+    } else {
+      logger.debug?.(`[Python Detection] Python at ${pythonPath} does not have debugpy`);
+    }
+  }
+
+  // 5. Fall back to first valid Python if none have debugpy
+  if (validPythonPaths.length > 0) {
+    logger.debug?.(`[Python Detection] No Python with debugpy found, using first valid: ${validPythonPaths[0]}`);
+    logger.debug?.(`[Python Detection] Note: debugpy will need to be installed`);
+    return validPythonPaths[0];
+  }
+
+  // No Python found at all
   const triedList = triedPaths.map(p => `  - ${p}`).join('\n');
   throw new Error(
     `Python not found.\nTried:\n${triedList}\n` +
