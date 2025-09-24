@@ -87,6 +87,32 @@ describe('python-utils', () => {
       });
 
       it('should auto-detect python commands in platform-specific order', async () => {
+        // Mock hasDebugpy check - first valid Python has debugpy
+        let hasDebugpyCallCount = 0;
+        mockSpawn.mockImplementation((cmd, args) => {
+          const proc = new EventEmitter() as any;
+          proc.stdout = new EventEmitter();
+          proc.stderr = new EventEmitter();
+          
+          if (args?.[0] === '-c' && args[1]?.includes('import debugpy')) {
+            hasDebugpyCallCount++;
+            // First valid Python has debugpy
+            if (hasDebugpyCallCount === 1) {
+              process.nextTick(() => {
+                proc.stdout.emit('data', Buffer.from('1.8.0'));
+                proc.emit('exit', 0);
+              });
+            } else {
+              process.nextTick(() => proc.emit('exit', 1));
+            }
+          } else {
+            // Regular validation check
+            process.nextTick(() => proc.emit('exit', 0));
+          }
+          
+          return proc;
+        });
+        
         if (platform === 'win32') {
           // On Windows: py -> python -> python3
           mockCommandFinder.setResponse('py', new CommandNotFoundError('py'));
@@ -102,10 +128,12 @@ describe('python-utils', () => {
         
         if (platform === 'win32') {
           expect(result).toBe('C:\\Python\\python.exe');
-          expect(mockCommandFinder.getCallHistory()).toEqual(['py', 'python']);
+          // Now checks all commands to collect valid pythons
+          expect(mockCommandFinder.getCallHistory()).toEqual(['py', 'python', 'python3']);
         } else {
           expect(result).toBe('/usr/bin/python3');
-          expect(mockCommandFinder.getCallHistory()).toEqual(['python3']);
+          // Now checks all commands to collect valid pythons
+          expect(mockCommandFinder.getCallHistory()).toEqual(['python3', 'python']);
         }
       });
 
@@ -204,12 +232,37 @@ describe('python-utils', () => {
       it('should prioritize py launcher on Windows', async () => {
         mockCommandFinder.setResponse('py', 'C:\\Windows\\py.exe');
         mockCommandFinder.setResponse('python', 'C:\\Python\\python.exe');
+        mockCommandFinder.setResponse('python3', 'C:\\Python\\python3.exe');
+        
+        // Mock hasDebugpy check - py has debugpy
+        mockSpawn.mockImplementation((cmd, args) => {
+          const proc = new EventEmitter() as any;
+          proc.stdout = new EventEmitter();
+          proc.stderr = new EventEmitter();
+          
+          if (args?.[0] === '-c' && args[1]?.includes('import debugpy')) {
+            // Only py.exe has debugpy
+            if (cmd === 'C:\\Windows\\py.exe') {
+              process.nextTick(() => {
+                proc.stdout.emit('data', Buffer.from('1.8.0'));
+                proc.emit('exit', 0);
+              });
+            } else {
+              process.nextTick(() => proc.emit('exit', 1));
+            }
+          } else {
+            // Regular validation check
+            process.nextTick(() => proc.emit('exit', 0));
+          }
+          
+          return proc;
+        });
 
         const result = await findPythonExecutable(undefined, undefined, mockCommandFinder);
         expect(result).toBe('C:\\Windows\\py.exe');
         
-        // Should only have tried 'py' since it was found
-        expect(mockCommandFinder.getCallHistory()).toEqual(['py']);
+        // Now checks all commands to collect valid pythons
+        expect(mockCommandFinder.getCallHistory()).toEqual(['py', 'python', 'python3']);
       });
 
       it('should validate python executable to detect Store aliases', async () => {
