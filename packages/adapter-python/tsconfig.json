@@ -5,6 +5,12 @@
     "outDir": "dist",
     "rootDir": "src",
     "baseUrl": ".",
+    "paths": {
+      "@debugmcp/shared": ["../shared/src"],
+      "@debugmcp/shared/*": ["../shared/src/*"]
+    },
+    "declaration": true,
+    "declarationMap": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true
   },

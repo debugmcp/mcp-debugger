@@ -45,22 +45,74 @@ jobs:
     - name: Install Node dependencies
       run: pnpm install --frozen-lockfile
     
-    - name: Debug - Check shared package after install
+    - name: Debug - Check package structure after install
       run: |
-        echo "=== Checking @debugmcp/shared package structure ==="
+        echo "=== Checking @debugmcp/shared package structure AFTER INSTALL ==="
         echo "Contents of packages/shared:"
         ls -la packages/shared/
         echo ""
         echo "Contents of packages/shared/dist (if exists):"
-        ls -la packages/shared/dist/ 2>/dev/null || echo "dist directory does not exist"
+        ls -la packages/shared/dist/ 2>/dev/null || echo "dist directory does not exist yet"
         echo ""
         echo "Contents of node_modules/@debugmcp (if exists):"
         ls -la node_modules/@debugmcp/ 2>/dev/null || echo "@debugmcp directory does not exist"
         echo ""
+        echo "Check symlink target for shared:"
+        readlink -f node_modules/@debugmcp/shared 2>/dev/null || echo "No symlink found"
+        echo ""
         echo "Check symlink in adapter-mock:"
         ls -la packages/adapter-mock/node_modules/@debugmcp/ 2>/dev/null || echo "No @debugmcp in adapter-mock node_modules"
     
-    - name: Build project
+    - name: Build shared package only
+      run: |
+        echo "=== Building @debugmcp/shared first ==="
+        cd packages/shared
+        pnpm run build
+        echo ""
+        echo "=== Shared package build complete ==="
+        echo "Contents of packages/shared/dist after build:"
+        ls -la dist/
+        echo ""
+        echo "Check if index.d.ts exists:"
+        if [ -f dist/index.d.ts ]; then
+          echo "index.d.ts exists! First 20 lines:"
+          head -20 dist/index.d.ts
+        else
+          echo "ERROR: index.d.ts was not generated!"
+        fi
+        cd ../..
+    
+    - name: Debug - Check symlinks after shared build
+      run: |
+        echo "=== Checking symlinks AFTER SHARED BUILD ==="
+        echo "Contents of node_modules/@debugmcp/shared:"
+        ls -la node_modules/@debugmcp/shared/ 2>/dev/null || echo "Shared not in node_modules"
+        echo ""
+        echo "If it's a symlink, what does it point to:"
+        readlink -f node_modules/@debugmcp/shared 2>/dev/null || echo "Not a symlink or doesn't exist"
+        echo ""
+        echo "Contents of the symlink target (if it exists):"
+        ls -la $(readlink -f node_modules/@debugmcp/shared)/ 2>/dev/null || echo "Cannot list symlink target"
+        echo ""
+        echo "Check for dist in symlink target:"
+        ls -la $(readlink -f node_modules/@debugmcp/shared)/dist/ 2>/dev/null || echo "No dist in symlink target"
+    
+    - name: Build remaining packages
+      run: |
+        echo "=== Building adapter packages ==="
+        pnpm run build:packages
+        echo "Build packages complete"
+    
+    - name: Debug - Final state before main build
+      run: |
+        echo "=== FINAL STATE BEFORE MAIN BUILD ==="
+        echo "Adapter-mock dist:"
+        ls -la packages/adapter-mock/dist/ 2>/dev/null || echo "No dist yet"
+        echo ""
+        echo "Adapter-python dist:"
+        ls -la packages/adapter-python/dist/ 2>/dev/null || echo "No dist yet"
+    
+    - name: Build main project
       run: pnpm run build
     
     - name: Run linting

@@ -4,7 +4,13 @@
     "composite": true,
     "outDir": "dist",
     "rootDir": "src",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@debugmcp/shared": ["../shared/src"],
+      "@debugmcp/shared/*": ["../shared/src/*"]
+    },
+    "declaration": true,
+    "declarationMap": true
   },
   "references": [
     { "path": "../shared" }
