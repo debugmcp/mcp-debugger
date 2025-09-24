@@ -11,6 +11,7 @@
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
+    "emitDeclarationOnly": false,
     "sourceMap": true,
     "rootDir": "src",
     "resolveJsonModule": true,
