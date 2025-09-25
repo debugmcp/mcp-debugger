@@ -26,7 +26,7 @@ COPY packages ./packages
 RUN pnpm --version && pnpm install --frozen-lockfile --ignore-scripts
 
 # 3) Copy the rest of the sources and build configs
-COPY tsconfig.json ./
+COPY tsconfig*.json ./
 COPY packages/shared/tsconfig*.json ./packages/shared/
 COPY packages/adapter-mock/tsconfig*.json ./packages/adapter-mock/
 COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/

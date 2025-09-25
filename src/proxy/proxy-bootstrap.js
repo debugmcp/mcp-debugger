@@ -5,6 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { shouldExitAsOrphanFromEnv } from './utils/orphan-check.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,11 +38,11 @@ process.on('disconnect', () => {
 let lastHeartbeat = Date.now();
 const HEARTBEAT_TIMEOUT = 30000; // 30 seconds
 
-// Check if we're orphaned every 10 seconds
+ // Check if we're orphaned every 10 seconds
 setInterval(() => {
-  // If parent is gone (ppid = 1 on Linux means orphaned)
-  if (process.ppid === 1) {
-    logBootstrapActivity('Process orphaned (ppid=1), terminating...');
+  // Use container-safe orphan detection (ppid=1 ignored inside containers)
+  if (shouldExitAsOrphanFromEnv(process.ppid, process.env)) {
+    logBootstrapActivity('Process orphaned (ppid=1 outside container), terminating...');
     process.exit(1);
   }
 
