@@ -74,8 +74,8 @@ const shouldSkip =
       const sessionId = JSON.parse((createRes as any).content?.[0]?.text || '{}').sessionId as string;
       expect(sessionId).toBeDefined();
 
-      // Set breakpoint
-      const fibonacciPath = path.join(projectRoot, 'examples', 'python', 'fibonacci.py');
+      // Set breakpoint - use relative path (server prepends /workspace)
+      const fibonacciPath = 'examples/python/fibonacci.py';
       const bpRes = await client.callTool({
         name: 'set_breakpoint',
         arguments: { sessionId, file: fibonacciPath, line: 32 }
