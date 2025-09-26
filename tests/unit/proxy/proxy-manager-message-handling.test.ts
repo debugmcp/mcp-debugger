@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { TestProxyManager } from '../test-utils/test-proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
+import { DebugLanguage } from '@debugmcp/shared';
 import { createMockLogger } from '../test-utils/mock-factories.js';
 
 describe('ProxyManager Message Handling', () => {
@@ -23,6 +24,7 @@ describe('ProxyManager Message Handling', () => {
     // Create mock config
     mockConfig = {
       sessionId: 'test-session',
+      language: DebugLanguage.PYTHON,
       executablePath: '/usr/bin/python3',
       adapterHost: 'localhost',
       adapterPort: 5678,
@@ -31,7 +33,7 @@ describe('ProxyManager Message Handling', () => {
       scriptArgs: ['arg1'],
       initialBreakpoints: [],
       dryRunSpawn: false,
-      dapLaunchArgs: { stopOnEntry: true }
+      stopOnEntry: true
     };
 
     // Create TestProxyManager instance
@@ -444,7 +446,7 @@ describe('ProxyManager Message Handling', () => {
       expect(proxyManager.getCurrentThreadId()).toBeNull();
     });
 
-    it('should handle dry-run mode state changes', () => {
+    it('should handle dry-run mode state changes', async () => {
       const dryRunConfig = {
         ...mockConfig,
         dryRunSpawn: true
@@ -454,7 +456,7 @@ describe('ProxyManager Message Handling', () => {
       const dryRunManager = new TestProxyManager(mockLogger);
 
       // In dry-run mode, manager should complete immediately
-      expect(dryRunManager.start(dryRunConfig)).resolves.not.toThrow();
+      await expect(dryRunManager.start(dryRunConfig)).resolves.not.toThrow();
     });
   });
 });
