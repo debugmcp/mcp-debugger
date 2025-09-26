@@ -13,11 +13,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { spawn, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import net from 'net';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const shouldSkip =
   process.env.CI === 'true' ||  // Skip in CI environments
@@ -26,44 +25,7 @@ const shouldSkip =
 // Skip entire suite when not explicitly enabled
 (shouldSkip ? describe.skip : describe)('Docker E2E - Proxy Liveness', () => {
   const projectRoot = process.cwd();
-  let containerId: string | null = null;
   let client: Client | null = null;
-
-  const findFreePort = async (): Promise<number> => {
-    return new Promise((resolve, reject) => {
-      const server = net.createServer();
-      server.listen(0, () => {
-        const addr = server.address();
-        if (typeof addr === 'object' && addr && addr.port) {
-          const port = addr.port;
-          server.close(() => resolve(port));
-        } else {
-          server.close(() => reject(new Error('Failed to get random port')));
-        }
-      });
-    });
-  };
-
-  const waitForPort = (port: number, timeoutMs: number): Promise<boolean> => {
-    const start = Date.now();
-    return new Promise((resolve) => {
-      const tryConnect = () => {
-        const socket = net.createConnection({ port, host: '127.0.0.1' }, () => {
-          socket.end();
-          resolve(true);
-        });
-        socket.on('error', () => {
-          socket.destroy();
-          if (Date.now() - start > timeoutMs) {
-            resolve(false);
-          } else {
-            setTimeout(tryConnect, 200);
-          }
-        });
-      };
-      tryConnect();
-    });
-  };
 
   it(
     'maintains proxy connectivity across time and DAP ops (container)',
@@ -72,38 +34,37 @@ const shouldSkip =
       try {
         execSync('docker image inspect mcp-debugger:local', { stdio: 'ignore' });
       } catch {
+        console.log('Building Docker image...');
         execSync('docker build . -t mcp-debugger:local', { stdio: 'inherit' });
       }
 
-      // Choose dynamic host ports
-      const ssePort = await findFreePort();
-      const dbgPort = await findFreePort(); // debugpy port
       const logLevel = 'debug';
+      const tempLogPath = path.join(projectRoot, 'logs', 'docker-e2e.log');
 
-      // Run the server in SSE mode
-      // Map ports: host:ssePort->container:3001 (default), host:dbgPort->container:5679
+      // Run the server in stdio mode with interactive flag
       const runArgs = [
-        'run', '--rm',
-        '-p', `${ssePort}:3001`,
-        '-p', `${dbgPort}:5679`,
+        'run', '--rm', '-i',
+        '-v', `${projectRoot}:/workspace:rw`,
+        '-v', `${path.dirname(tempLogPath)}:/logs:rw`,
         'mcp-debugger:local',
-        'sse', '--log-level', logLevel
+        'stdio', 
+        '--log-level', logLevel,
+        '--log-file', '/logs/docker-e2e.log'
       ];
-      const proc = spawn('docker', runArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-
-      // Capture container ID by querying after spawn (best effort)
-      // Note: this is not strictly necessary since we use --rm and rely on proc to manage lifecycle.
-      proc.stdout?.on('data', (d) => process.stdout.write(`[docker stdout] ${d}`));
-      proc.stderr?.on('data', (d) => process.stderr.write(`[docker stderr] ${d}`));
-
-      // Wait for port to become ready
-      const ready = await waitForPort(ssePort, 30000);
-      expect(ready).toBe(true);
-
-      // Connect SSE client
-      client = new Client({ name: 'docker-e2e', version: '0.1.0' });
-      const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${ssePort}/sse`));
+      
+      // Connect stdio client - let the transport spawn the Docker process
+      client = new Client({ name: 'docker-e2e', version: '0.1.0' }, {
+        capabilities: {}
+      });
+      
+      const transport = new StdioClientTransport({
+        command: 'docker',
+        args: runArgs
+      });
+      
+      console.log('Starting Docker container and connecting via stdio...');
       await client.connect(transport);
+      console.log('Connected to Docker container via stdio');
 
       // Start session
       const createRes = await client.callTool({
@@ -154,12 +115,11 @@ const shouldSkip =
       // Cleanup: close session
       await client.callTool({ name: 'close_debug_session', arguments: { sessionId } });
 
-      // Close client
+      // Close client (this will also terminate the Docker process)
       await client.close();
       client = null;
-
-      // Stop container by killing process (docker --rm will clean up)
-      proc.kill('SIGTERM');
+      
+      console.log('Test completed successfully');
     },
     120_000
   );
