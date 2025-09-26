@@ -87,7 +87,10 @@
     "act:test:all": "scripts\\act-runner.cmd -j build-and-test",
     "act:full": "scripts\\act-runner.cmd",
     "act:list": "scripts\\act-runner.cmd -l",
-    "act:debug": "scripts\\act-runner.cmd -j build-and-test --verbose"
+    "act:debug": "scripts\\act-runner.cmd -j build-and-test --verbose",
+    "validate": "node scripts/validate-push.js",
+    "validate:quick": "node scripts/validate-push.js --no-tests",
+    "validate:smoke": "node scripts/validate-push.js --smoke"
   },
   "keywords": [
     "mcp",
