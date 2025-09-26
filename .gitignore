@@ -8,6 +8,27 @@ build/
 **/*.tsbuildinfo
 tsconfig.tsbuildinfo
 
+# TypeScript compilation artifacts in source directories (NEVER commit these!)
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+tests/**/*.js
+tests/**/*.d.ts
+tests/**/*.js.map
+
+# Package source compilation artifacts
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.js.map
+packages/*/tests/**/*.js
+packages/*/tests/**/*.d.ts
+packages/*/tests/**/*.js.map
+
+# Package distribution files
+*.tgz
+packages/**/*.tgz
+*.vsix
+
 # Turbo cache (not using Turborepo)
 .turbo/
 
@@ -19,6 +40,23 @@ bundled-adapters/
 !.vscode/extensions.json
 .idea/
 *.sublime-*
+*.iml
+.history/
+
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+
+# JetBrains IDEs
+.idea/
+
+# Eclipse
+.project
+.classpath
+.settings/
 
 # LLM files
 .clinerules
@@ -27,7 +65,13 @@ bundled-adapters/
 # Environment variables
 .env
 .env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.template
+
+# Local npm config (might contain tokens)
+.npmrc
+.yarnrc
 
 # Personal configuration files that might be created
 **/personal-config.json
@@ -39,14 +83,34 @@ sessions/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
 
 # OS files
 .DS_Store
 Thumbs.db
+Desktop.ini
 
 # Testing
 coverage/
 .nyc_output/
+test-results/
+junit.xml
+*.tap
+test-report.xml
+
+# Node.js profiling & debugging
+*.heapsnapshot
+*.cpuprofile
+*.heap
+v8.log
+.chrome/
+
+# Build tool caches
+.esbuild/
+.parcel-cache/
+.webpack/
+.rollup.cache/
 
 # Temporary files
 tmp/

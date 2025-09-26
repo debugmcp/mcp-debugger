@@ -2,6 +2,21 @@ echo "🧪 Running tests before push to ensure code quality..."
 echo "💡 This prevents broken code from being pushed to GitHub."
 echo ""
 
+# Clean build to ensure no stale artifacts
+echo "🔨 Running clean build to ensure fresh compilation..."
+npm run clean
+npm run build
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Build failed! Push blocked to prevent broken code on GitHub."
+    echo "💡 Fix build errors before pushing."
+    exit 1
+fi
+
+echo "✅ Build successful!"
+echo ""
+
 # Run the full test suite
 npm test
 

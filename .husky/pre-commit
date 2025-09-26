@@ -1,28 +1,45 @@
-#!/usr/bin/env sh
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
 
-# Run linting check
-echo "🔍 Running ESLint checks before commit..."
-npm run lint
-
-if [ $? -eq 0 ]; then
-    echo "✅ ESLint checks passed!"
-else
-    echo "❌ ESLint errors found! Please fix them before committing."
-    echo "💡 You can use 'npm run lint:fix' to auto-fix some issues."
-    echo "💡 Or use 'git commit --no-verify' to bypass this check (not recommended)."
-    exit 1
-fi
-
-# Run personal information check on staged files
-echo ""
-echo "🔍 Checking staged files for personal information..."
+# Run existing personal info check
 node scripts/check-personal-paths.cjs
 
-if [ $? -eq 0 ]; then
-    echo "✅ Pre-commit checks passed. Personal information check completed."
-    echo "💡 Note: Tests will run before push to ensure code quality on GitHub."
-else
+# Check for build artifacts in src directories
+echo "🔍 Checking for build artifacts in source directories..."
+
+# Check for JS files in src/
+if git diff --cached --name-only | grep -E '^src/.*\.(js|d\.ts|js\.map)$'; then
     echo ""
-    echo "❌ Pre-commit checks failed. Please address the issues."
+    echo "❌ Error: Build artifacts detected in src/ directory!"
+    echo "   These files should not be committed:"
+    git diff --cached --name-only | grep -E '^src/.*\.(js|d\.ts|js\.map)$'
+    echo ""
+    echo "💡 Run 'npm run clean' to remove build artifacts"
+    echo "💡 Only TypeScript source files should be in src/"
     exit 1
 fi
+
+# Check for JS files in packages/*/src/
+if git diff --cached --name-only | grep -E '^packages/.*/src/.*\.(js|d\.ts|js\.map)$'; then
+    echo ""
+    echo "❌ Error: Build artifacts detected in package source directories!"
+    echo "   These files should not be committed:"
+    git diff --cached --name-only | grep -E '^packages/.*/src/.*\.(js|d\.ts|js\.map)$'
+    echo ""
+    echo "💡 Run 'npm run clean' to remove build artifacts"
+    echo "💡 Only TypeScript source files should be in packages/*/src/"
+    exit 1
+fi
+
+# Check for package tarballs
+if git diff --cached --name-only | grep -E '\.tgz$'; then
+    echo ""
+    echo "❌ Error: Package tarball files detected!"
+    echo "   These files should not be committed:"
+    git diff --cached --name-only | grep -E '\.tgz$'
+    echo ""
+    echo "💡 Package tarballs are for local testing only"
+    exit 1
+fi
+
+echo "✅ No build artifacts found in staged files"

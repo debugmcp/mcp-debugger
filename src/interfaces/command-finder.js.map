@@ -1,1 +1,0 @@
-{"version":3,"file":"command-finder.js","sourceRoot":"","sources":["command-finder.ts"],"names":[],"mappings":"AAaA;;GAEG;AACH,MAAM,OAAO,oBAAqB,SAAQ,KAAK;IACjB;IAA5B,YAA4B,OAAe;QACzC,KAAK,CAAC,sBAAsB,OAAO,EAAE,CAAC,CAAC;QADb,YAAO,GAAP,OAAO,CAAQ;QAEzC,IAAI,CAAC,IAAI,GAAG,sBAAsB,CAAC;IACrC,CAAC;CACF"}

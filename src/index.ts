@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Debug MCP Server - Entry Point
  * 
