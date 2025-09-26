@@ -1,11 +1,15 @@
 /**
- * Local-only Docker E2E test to validate proxy liveness in container.
- * - Skipped by default in CI (honors SKIP_DOCKER_TESTS and requires DOCKER_E2E=1).
+ * Docker E2E test to validate proxy liveness in container.
+ * - Runs locally by default to catch container-specific regressions
+ * - Skipped in CI environments (process.env.CI === 'true')
+ * - Can be explicitly skipped with SKIP_DOCKER_TESTS=true
  * - Ensures the containerized server supports sustained DAP operations.
  *
  * To run locally:
- *   pnpm run docker-build   # or pnpm run pretest:docker
- *   DOCKER_E2E=1 vitest run tests/e2e/docker/docker-proxy-liveness.test.ts
+ *   pnpm test                # Runs automatically with other tests
+ *   
+ * To skip locally:
+ *   SKIP_DOCKER_TESTS=true pnpm test
  */
 
 import { describe, it, expect } from 'vitest';
@@ -16,8 +20,8 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import net from 'net';
 
 const shouldSkip =
-  process.env.SKIP_DOCKER_TESTS === 'true' ||
-  process.env.DOCKER_E2E !== '1';
+  process.env.CI === 'true' ||  // Skip in CI environments
+  process.env.SKIP_DOCKER_TESTS === 'true';  // Or explicitly skipped locally
 
 // Skip entire suite when not explicitly enabled
 (shouldSkip ? describe.skip : describe)('Docker E2E - Proxy Liveness', () => {
