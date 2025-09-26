@@ -30,6 +30,7 @@
     { "path": "./packages/shared" },
     { "path": "./packages/adapter-mock" },
     { "path": "./packages/adapter-python" },
+    { "path": "./packages/mcp-debugger" },
     { "path": "./tsconfig.src.json" }
   ]
 }

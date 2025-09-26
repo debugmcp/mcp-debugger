@@ -173,6 +173,14 @@ jobs:
     - name: Install dependencies
       run: npm ci --ignore-scripts
     
+    - name: Set CLI package version from tag
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "Setting CLI package version to $VERSION"
+        cd packages/mcp-debugger
+        npm version $VERSION --no-git-tag-version --allow-same-version
+        cd ../..
+    
     - name: Build project
       run: npm run build
 
@@ -181,6 +189,7 @@ jobs:
         npm pack --dry-run -w @debugmcp/shared
         npm pack --dry-run -w @debugmcp/adapter-mock
         npm pack --dry-run -w @debugmcp/adapter-python
+        npm pack --dry-run -w @debugmcp/mcp-debugger
     
     - name: Publish to npm (workspaces)
       run: |
@@ -190,6 +199,7 @@ jobs:
         npm publish -w @debugmcp/shared --access public
         npm publish -w @debugmcp/adapter-mock --access public
         npm publish -w @debugmcp/adapter-python --access public
+        npm publish -w @debugmcp/mcp-debugger --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -237,14 +247,25 @@ jobs:
         docker pull debugmcp/mcp-debugger:${{ steps.changelog.outputs.VERSION }}
         ```
         
-        **npm:**
+        **npm (global install):**
         ```bash
         npm install -g @debugmcp/mcp-debugger@${{ steps.changelog.outputs.VERSION }}
+        ```
+        
+        **npx (no install):**
+        ```bash
+        npx @debugmcp/mcp-debugger@${{ steps.changelog.outputs.VERSION }} stdio
         ```
         
         **PyPI:**
         ```bash
         pip install debug-mcp-server-launcher==${{ steps.changelog.outputs.VERSION }}
+        ```
+        
+        **Optional adapters:**
+        ```bash
+        npm install -g @debugmcp/adapter-python
+        npm install -g @debugmcp/adapter-mock
         ```
         
         ### 📚 Documentation
