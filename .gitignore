@@ -9,7 +9,9 @@ build/
 tsconfig.tsbuildinfo
 
 # TypeScript compilation artifacts in source directories (NEVER commit these!)
+# Exception: proxy-bootstrap.js is a legitimate source file (not TypeScript output)
 src/**/*.js
+!src/proxy/proxy-bootstrap.js
 src/**/*.d.ts
 src/**/*.js.map
 tests/**/*.js

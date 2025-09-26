@@ -7,15 +7,16 @@ node scripts/check-personal-paths.cjs
 # Check for build artifacts in src directories
 echo "🔍 Checking for build artifacts in source directories..."
 
-# Check for JS files in src/
-if git diff --cached --name-only | grep -E '^src/.*\.(js|d\.ts|js\.map)$'; then
+# Check for JS files in src/ (excluding proxy-bootstrap.js which is a legitimate source file)
+if git diff --cached --name-only | grep -E '^src/.*\.(js|d\.ts|js\.map)$' | grep -v '^src/proxy/proxy-bootstrap.js$'; then
     echo ""
     echo "❌ Error: Build artifacts detected in src/ directory!"
     echo "   These files should not be committed:"
-    git diff --cached --name-only | grep -E '^src/.*\.(js|d\.ts|js\.map)$'
+    git diff --cached --name-only | grep -E '^src/.*\.(js|d\.ts|js\.map)$' | grep -v '^src/proxy/proxy-bootstrap.js$'
     echo ""
     echo "💡 Run 'npm run clean' to remove build artifacts"
     echo "💡 Only TypeScript source files should be in src/"
+    echo "💡 Exception: src/proxy/proxy-bootstrap.js is a legitimate JavaScript source file"
     exit 1
 fi
 
