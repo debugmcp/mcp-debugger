@@ -199,13 +199,26 @@ jobs:
         npm -v
         pnpm -v
     
-    - name: Set CLI package version from tag
+    - name: Set CLI package version from tag (monorepo-safe)
+      env:
+        VERSION: ${{ github.ref_name }}
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         echo "Setting CLI package version to $VERSION"
-        cd packages/mcp-debugger
-        npm version $VERSION --no-git-tag-version --allow-same-version
-        cd ../..
+        node -e "const fs=require('fs');const p='packages/mcp-debugger/package.json';const pkg=JSON.parse(fs.readFileSync(p,'utf8'));pkg.version=process.env.VERSION;fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\n');console.log('Updated',p,'to',pkg.version)"
+    - name: Capture workspace package versions
+      run: |
+        echo "SHARED_VERSION=$(node -p \"require('./packages/shared/package.json').version\")" >> $GITHUB_ENV
+        echo "ADAPTER_MOCK_VERSION=$(node -p \"require('./packages/adapter-mock/package.json').version\")" >> $GITHUB_ENV
+        echo "ADAPTER_PYTHON_VERSION=$(node -p \"require('./packages/adapter-python/package.json').version\")" >> $GITHUB_ENV
+        echo "CLI_VERSION=$(node -p \"require('./packages/mcp-debugger/package.json').version\")" >> $GITHUB_ENV
+    - name: Set npm dist-tag
+      run: |
+        if [[ "${CLI_VERSION}" == *"-beta"* ]] || [[ "${CLI_VERSION}" == *"-alpha"* ]]; then
+          echo "NPM_TAG=beta" >> $GITHUB_ENV
+        else
+          echo "NPM_TAG=latest" >> $GITHUB_ENV
+        fi
     
     - name: Build project
       run: pnpm run build
@@ -221,11 +234,31 @@ jobs:
       run: |
         # Authenticate npm
         npm config set //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
-        # Publish packages in dependency order
-        npm publish -w @debugmcp/shared --access public
-        npm publish -w @debugmcp/adapter-mock --access public
-        npm publish -w @debugmcp/adapter-python --access public
-        npm publish -w @debugmcp/mcp-debugger --access public
+
+        # Publish packages in dependency order if the target version does NOT yet exist
+        if npm view @debugmcp/shared@${SHARED_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/shared@${SHARED_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/shared --access public
+        fi
+
+        if npm view @debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/adapter-mock --access public
+        fi
+
+        if npm view @debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/adapter-python --access public
+        fi
+
+        if npm view @debugmcp/mcp-debugger@${CLI_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/mcp-debugger@${CLI_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/mcp-debugger --access public --tag ${NPM_TAG}
+        fi
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
