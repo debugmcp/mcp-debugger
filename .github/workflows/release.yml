@@ -200,12 +200,10 @@ jobs:
         pnpm -v
     
     - name: Set CLI package version from tag (monorepo-safe)
-      env:
-        VERSION: ${{ github.ref_name }}
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         echo "Setting CLI package version to $VERSION"
-        node -e "const fs=require('fs');const p='packages/mcp-debugger/package.json';const pkg=JSON.parse(fs.readFileSync(p,'utf8'));pkg.version=process.env.VERSION;fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\n');console.log('Updated',p,'to',pkg.version)"
+        VERSION_STRIPPED="$VERSION" node -e "const fs=require('fs');const p='packages/mcp-debugger/package.json';const pkg=JSON.parse(fs.readFileSync(p,'utf8'));const ver=process.env.VERSION_STRIPPED; if(!/^[0-9]+\\.[0-9]+\\.[0-9]+(-.+)?$/.test(ver)){console.error('Invalid semver:',ver);process.exit(1);} pkg.version=ver; fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\\n');console.log('Updated',p,'to',pkg.version)"
     - name: Capture workspace package versions
       run: |
         echo "SHARED_VERSION=$(node -p \"require('./packages/shared/package.json').version\")" >> $GITHUB_ENV
