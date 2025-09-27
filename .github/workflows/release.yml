@@ -128,8 +128,17 @@ jobs:
         python -m pip install --upgrade pip
         pip install build twine tomlkit
     
+    - name: Resolve release ref
+      run: |
+        if [ -n "${{ github.event.inputs.ref }}" ]; then
+          echo "RELEASE_REF=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+        else
+          echo "RELEASE_REF=${GITHUB_REF}" >> $GITHUB_ENV
+        fi
     - name: Set launcher version from tag
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+      run: |
+        VERSION="${RELEASE_REF#refs/tags/v}"
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
 
     - name: Sync version into pyproject.toml
       run: |
@@ -199,9 +208,16 @@ jobs:
         npm -v
         pnpm -v
     
+    - name: Resolve release ref
+      run: |
+        if [ -n "${{ github.event.inputs.ref }}" ]; then
+          echo "RELEASE_REF=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+        else
+          echo "RELEASE_REF=${GITHUB_REF}" >> $GITHUB_ENV
+        fi
     - name: Set CLI package version from tag (monorepo-safe)
       run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
+        VERSION="${RELEASE_REF#refs/tags/v}"
         echo "Setting CLI package version to $VERSION"
         VERSION_STRIPPED="$VERSION" node -e "const fs=require('fs');const p='packages/mcp-debugger/package.json';const pkg=JSON.parse(fs.readFileSync(p,'utf8'));const ver=process.env.VERSION_STRIPPED; if(!/^[0-9]+\\.[0-9]+\\.[0-9]+(-.+)?$/.test(ver)){console.error('Invalid semver:',ver);process.exit(1);} pkg.version=ver; fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\\n');console.log('Updated',p,'to',pkg.version)"
     - name: Capture workspace package versions (robust)
@@ -274,11 +290,18 @@ jobs:
         fetch-depth: 0
         ref: ${{ github.event.inputs.ref || github.ref }}
     
+    - name: Resolve release ref
+      run: |
+        if [ -n "${{ github.event.inputs.ref }}" ]; then
+          echo "RELEASE_REF=${{ github.event.inputs.ref }}" >> $GITHUB_ENV
+        else
+          echo "RELEASE_REF=${GITHUB_REF}" >> $GITHUB_ENV
+        fi
     - name: Generate changelog
       id: changelog
       run: |
         # Extract version from tag
-        VERSION=${GITHUB_REF#refs/tags/}
+        VERSION=${RELEASE_REF#refs/tags/}
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
         
         # Get changelog for this version
