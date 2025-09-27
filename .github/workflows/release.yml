@@ -23,11 +23,16 @@ jobs:
         fetch-depth: 0
         ref: ${{ github.event.inputs.ref || github.ref }}
     
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v2
+      with:
+        version: 10
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20.x'
-        cache: 'npm'
+        node-version: '22.x'
+        cache: 'pnpm'
 
     - name: Setup Python 3.11
       uses: actions/setup-python@v5
@@ -38,15 +43,25 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install debugpy
+
+    - name: Sanity versions
+      run: |
+        node -v
+        npm -v
+        pnpm -v
+
+    - name: Approve build scripts (esbuild)
+      run: pnpm approve-builds esbuild
+      continue-on-error: true
     
     - name: Install dependencies
-      run: npm ci --ignore-scripts
+      run: pnpm install --frozen-lockfile --ignore-scripts
     
     - name: Build project
-      run: npm run build
+      run: pnpm run build
     
     - name: Run tests
-      run: npm run test:ci-no-python
+      run: pnpm run test:ci-no-python
 
   docker-publish:
     name: Build and Push Docker Image
@@ -163,15 +178,26 @@ jobs:
         fetch-depth: 0
         ref: ${{ github.event.inputs.ref || github.ref }}
     
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v2
+      with:
+        version: 10
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20.x'
+        node-version: '22.x'
         registry-url: 'https://registry.npmjs.org'
-        cache: 'npm'
+        cache: 'pnpm'
     
     - name: Install dependencies
-      run: npm ci --ignore-scripts
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    - name: Sanity versions
+      run: |
+        node -v
+        npm -v
+        pnpm -v
     
     - name: Set CLI package version from tag
       run: |
@@ -182,7 +208,7 @@ jobs:
         cd ../..
     
     - name: Build project
-      run: npm run build
+      run: pnpm run build
 
     - name: Pack npm tarballs (dry-run)
       run: |
