@@ -17,7 +17,6 @@ import { CustomLaunchRequestArguments, DebugResult } from './session-manager-cor
 import { AdapterConfig } from '@debugmcp/shared';
 import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
 import { 
-  SessionNotFoundError, 
   SessionTerminatedError, 
   ProxyNotRunningError,
   DebugSessionCreationError,

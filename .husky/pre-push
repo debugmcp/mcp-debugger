@@ -2,6 +2,20 @@ echo "🧪 Running tests before push to ensure code quality..."
 echo "💡 This prevents broken code from being pushed to GitHub."
 echo ""
 
+# Run linting first to catch syntax and style issues
+echo "🔎 Running ESLint to catch linting issues..."
+pnpm run lint
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Lint failed! Push blocked to prevent broken code on GitHub."
+    echo "💡 Run 'pnpm run lint' to see all errors, or 'pnpm run lint:fix' for auto-fixes."
+    exit 1
+fi
+
+echo "✅ Lint passed!"
+echo ""
+
 # Clean build to ensure no stale artifacts
 echo "🔨 Running clean build to ensure fresh compilation..."
 npm run clean
