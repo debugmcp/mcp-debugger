@@ -34,6 +34,9 @@ const session = await createDebugSession({ language: DebugLanguage.PYTHON, name:
 
     const result = await startDebugging(sessionId, scriptPath);
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Python not found');
+    // Assert on typed error identity instead of brittle strings
+    expect(result.errorType).toBe('PythonNotFoundError');
+    // Optional: MCP InvalidParams
+    expect(result.errorCode).toBe(-32602);
   }, 30000);
 });

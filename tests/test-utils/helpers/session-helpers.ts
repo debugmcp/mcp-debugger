@@ -48,7 +48,7 @@ export async function startDebugging(
   args?: string[], 
   dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>, 
   dryRunSpawn?: boolean
-): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
+): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
   logger.info(`[Test Helper] Calling startDebugging for session: ${sessionId}, script: ${scriptPath}, dryRun: ${dryRunSpawn}`);
   return getDebugServer().startDebugging(sessionId, scriptPath, args, dapLaunchArgs, dryRunSpawn);
 }

@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionStore, CreateSessionParams } from '../../../../src/session/session-store.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 
 describe('SessionStore', () => {
   let store: SessionStore;
@@ -162,9 +163,7 @@ describe('SessionStore', () => {
     });
 
     it('should throw error for non-existent session', () => {
-      expect(() => store.getOrThrow('non-existent-id')).toThrow(
-        'Managed session not found: non-existent-id'
-      );
+      expect(() => store.getOrThrow('non-existent-id')).toThrow(SessionNotFoundError);
     });
   });
 
@@ -195,9 +194,7 @@ describe('SessionStore', () => {
     });
 
     it('should throw error when updating non-existent session', () => {
-      expect(() => store.update('non-existent-id', { name: 'New Name' })).toThrow(
-        'Managed session not found: non-existent-id' // Adjusted error message
-      );
+      expect(() => store.update('non-existent-id', { name: 'New Name' })).toThrow(SessionNotFoundError);
     });
   });
 
@@ -228,9 +225,7 @@ describe('SessionStore', () => {
     });
 
     it('should throw error when updating state of non-existent session', () => {
-      expect(() => store.updateState('non-existent-id', SessionState.RUNNING)).toThrow(
-        'Managed session not found: non-existent-id' // Adjusted error message
-      );
+      expect(() => store.updateState('non-existent-id', SessionState.RUNNING)).toThrow(SessionNotFoundError);
     });
   });
 

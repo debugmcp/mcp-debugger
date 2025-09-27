@@ -8,10 +8,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig, SessionManagerDependencies } from '../../../src/session/session-manager.js';
 import { SessionManagerOperations } from '../../../src/session/session-manager-operations.js';
 import { ManagedSession } from '../../../src/session/session-store.js';
+import { DebugLanguage, SessionState, SessionLifecycleState, Breakpoint } from '@debugmcp/shared';
 import { WhichCommandFinder } from '../../../src/implementations/which-command-finder.js';
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { IProxyManager } from '../../../src/proxy/proxy-manager.js';
+import { PythonNotFoundError } from '../../../src/errors/debug-errors.js';
 import {
   createMockChildProcess,
   createPythonValidationProcess,
@@ -103,10 +105,11 @@ describe('SessionManagerOperations', () => {
       })
     };
 
-    // Create mock debug target launcher
-    const mockDebugTargetLauncher = {
-      launch: vi.fn().mockResolvedValue({ pid: 12345 })
-    };
+ // Create mock debug target launcher
+const mockDebugTargetLauncher = {
+  launch: vi.fn().mockResolvedValue({ pid: 12345 }),
+  launchPythonDebugTarget: vi.fn()
+};
 
     // Create mock adapter registry with proper adapter that has buildAdapterCommand
     const mockAdapter = {
@@ -119,29 +122,39 @@ describe('SessionManagerOperations', () => {
       transformLaunchConfig: vi.fn().mockImplementation((config: any) => config)
     };
 
-    const mockAdapterRegistry = {
-      getAdapter: vi.fn().mockResolvedValue(null),
-      hasAdapter: vi.fn().mockReturnValue(false),
-      registerAdapter: vi.fn(),
-      listAdapters: vi.fn().mockReturnValue([]),
-      create: vi.fn().mockResolvedValue(mockAdapter)
-    };
+const mockAdapterRegistry = {
+  getAdapter: vi.fn().mockResolvedValue(null),
+  hasAdapter: vi.fn().mockReturnValue(false),
+  registerAdapter: vi.fn(),
+  listAdapters: vi.fn().mockReturnValue([]),
+  create: vi.fn().mockResolvedValue(mockAdapter),
+  // Additional methods to satisfy IAdapterRegistry typing
+  register: vi.fn(),
+  unregister: vi.fn(),
+  getSupportedLanguages: vi.fn().mockReturnValue(['python', 'mock']),
+  isLanguageSupported: vi.fn().mockReturnValue(true),
+  listLanguages: vi.fn().mockResolvedValue(['python', 'mock']),
+  listAvailableAdapters: vi.fn().mockResolvedValue([]),
+  getAdapterInfo: vi.fn().mockReturnValue(undefined),
+  getAllAdapterInfo: vi.fn().mockReturnValue([]),
+  disposeAll: vi.fn(),
+  getActiveAdapterCount: vi.fn().mockReturnValue(0)
+};
 
-    // Create mock session
-    mockSession = {
-      id: 'session-123',
-      name: 'test-session',
-      language: 'python',
-      executablePath: 'python3',
-      state: {
-        lifecycleState: 'READY',
-        dapState: { currentThreadId: null },
-        proxyManager: null
-      },
-      breakpoints: new Map(),
-      createdAt: new Date(),
-      lastActiveAt: new Date()
-    } as ManagedSession;
+ // Create mock session
+mockSession = {
+  id: 'session-123',
+  name: 'test-session',
+  language: DebugLanguage.PYTHON as any,
+  executablePath: 'python3',
+  state: SessionState.CREATED,
+  sessionLifecycle: SessionLifecycleState.ACTIVE,
+  proxyManager: null as any,
+  breakpoints: new Map<string, Breakpoint>(),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  executionState: undefined
+} as unknown as ManagedSession;
 
     // Create a test class that extends SessionManagerOperations
     class TestSessionManagerOperations extends SessionManagerOperations {
@@ -179,9 +192,9 @@ describe('SessionManagerOperations', () => {
         return this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
       }
 
-      public async testIsValidPythonExecutable(pythonCmd: string) {
-        return this.isValidPythonExecutable(pythonCmd);
-      }
+public async testIsValidPythonExecutable(pythonCmd: string) {
+  return (this as any).isValidPythonExecutable(pythonCmd);
+}
 
       public async testFindFreePort() {
         return this.findFreePort();
@@ -256,7 +269,7 @@ describe('SessionManagerOperations', () => {
 
       await expect(
         sessionManager.testStartProxyManager(mockSession, '/path/to/script.py')
-      ).rejects.toThrow('Python not found');
+      ).rejects.toThrow(PythonNotFoundError);
     });
 
     it('should handle dry-run mode correctly', async () => {
@@ -286,17 +299,19 @@ describe('SessionManagerOperations', () => {
     });
 
     it('should pass initial breakpoints to proxy manager', async () => {
-      mockSession.breakpoints.set('bp-1', {
-        id: 'bp-1',
-        file: '/path/to/file.py',
-        line: 10,
-        condition: 'x > 5'
-      });
-      mockSession.breakpoints.set('bp-2', {
-        id: 'bp-2',
-        file: '/path/to/file.py',
-        line: 20
-      });
+mockSession.breakpoints.set('bp-1', {
+  id: 'bp-1',
+  file: '/path/to/file.py',
+  line: 10,
+  condition: 'x > 5',
+  verified: false
+});
+mockSession.breakpoints.set('bp-2', {
+  id: 'bp-2',
+  file: '/path/to/file.py',
+  line: 20,
+  verified: false
+});
 
       await sessionManager.testStartProxyManager(mockSession, '/path/to/script.py');
 
@@ -325,7 +340,7 @@ describe('SessionManagerOperations', () => {
     });
 
     it('should handle non-Python languages', async () => {
-      mockSession.language = 'mock';
+mockSession.language = DebugLanguage.MOCK as any;
       mockSession.executablePath = 'mock-executable';
 
       await sessionManager.testStartProxyManager(mockSession, '/path/to/script.mock');
@@ -356,6 +371,7 @@ describe('SessionManagerOperations', () => {
     });
 
     it('should handle spawn errors', async () => {
+      vi.useFakeTimers();
       const mockProcess = createMockChildProcess();
       vi.mocked(spawn).mockReturnValue(mockProcess as any);
 
@@ -366,8 +382,11 @@ describe('SessionManagerOperations', () => {
         mockProcess.emit('error', new Error('ENOENT'));
       }, 10);
 
+      await vi.advanceTimersByTimeAsync(20);
+
       const isValid = await validationPromise;
       expect(isValid).toBe(false);
+      vi.useRealTimers();
     });
 
     it('should timeout long-running validation', async () => {
@@ -472,30 +491,33 @@ describe('SessionManagerOperations', () => {
 
       await expect(
         sessionManager.testStartProxyManager(mockSession, '/path/to/script.py')
-      ).rejects.toThrow('Python not found');
+      ).rejects.toThrow(PythonNotFoundError);
     });
   });
 
   describe('complex scenarios', () => {
     it('should handle session with multiple breakpoints and dry-run', async () => {
       // Add multiple breakpoints
-      mockSession.breakpoints.set('bp-1', {
-        id: 'bp-1',
-        file: '/path/to/file1.py',
-        line: 10,
-        condition: 'x > 5'
-      });
-      mockSession.breakpoints.set('bp-2', {
-        id: 'bp-2',
-        file: '/path/to/file2.py',
-        line: 20
-      });
-      mockSession.breakpoints.set('bp-3', {
-        id: 'bp-3',
-        file: '/path/to/file3.py',
-        line: 30,
-        condition: 'y == "test"'
-      });
+mockSession.breakpoints.set('bp-1', {
+  id: 'bp-1',
+  file: '/path/to/file1.py',
+  line: 10,
+  condition: 'x > 5',
+  verified: false
+});
+mockSession.breakpoints.set('bp-2', {
+  id: 'bp-2',
+  file: '/path/to/file2.py',
+  line: 20,
+  verified: false
+});
+mockSession.breakpoints.set('bp-3', {
+  id: 'bp-3',
+  file: '/path/to/file3.py',
+  line: 30,
+  condition: 'y == "test"',
+  verified: false
+});
 
       await sessionManager.testStartProxyManager(
         mockSession,

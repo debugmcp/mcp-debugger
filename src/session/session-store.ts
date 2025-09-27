@@ -14,6 +14,7 @@ import {
   DebugSessionInfo,
   Breakpoint 
 } from '@debugmcp/shared';
+import { SessionNotFoundError } from '../errors/debug-errors.js';
 
 // Platform-aware default Python command
 const DEFAULT_PYTHON = process.platform === 'win32' ? 'python' : 'python3';
@@ -109,7 +110,7 @@ export class SessionStore {
   getOrThrow(sessionId: string): ManagedSession {
     const session = this.sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Managed session not found: ${sessionId}`);
+      throw new SessionNotFoundError(sessionId);
     }
     return session;
   }

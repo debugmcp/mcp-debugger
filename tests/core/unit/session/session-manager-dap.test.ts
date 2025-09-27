@@ -6,6 +6,7 @@ import { SessionManager, SessionManagerConfig } from '../../../../src/session/se
 import { DebugLanguage } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
+import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
 
 describe('SessionManager - DAP Operations', () => {
   let sessionManager: SessionManager;
@@ -36,7 +37,7 @@ describe('SessionManager - DAP Operations', () => {
     it('should queue breakpoints before session starts', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
@@ -52,7 +53,7 @@ describe('SessionManager - DAP Operations', () => {
     it('should send breakpoints to active session', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       // Start debugging first
@@ -79,7 +80,7 @@ describe('SessionManager - DAP Operations', () => {
     it('should handle conditional breakpoints', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -106,7 +107,7 @@ describe('SessionManager - DAP Operations', () => {
     async function setupPausedSession() {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -163,18 +164,17 @@ describe('SessionManager - DAP Operations', () => {
     it('should reject step operations when not paused', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
-      // Try stepping without starting
-      let result = await sessionManager.stepOver(session.id);
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('No active debug run');
+      // Try stepping without starting - now throws typed error
+      await expect(sessionManager.stepOver(session.id)).rejects.toThrow(ProxyNotRunningError);
       
       // Start but simulate running state  
       await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
       await vi.runAllTimersAsync();
       
+      let result: any;
       result = await sessionManager.stepOver(session.id);
       expect(result.success).toBe(false);
       // When running, it should say "Not paused"
@@ -202,7 +202,7 @@ describe('SessionManager - DAP Operations', () => {
     it('should retrieve variables for a scope', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -230,7 +230,7 @@ describe('SessionManager - DAP Operations', () => {
     it('should retrieve stack trace', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -258,7 +258,7 @@ describe('SessionManager - DAP Operations', () => {
     it('should retrieve scopes for a frame', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -285,7 +285,7 @@ describe('SessionManager - DAP Operations', () => {
     it('should return empty arrays when not paused', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       // Try without starting

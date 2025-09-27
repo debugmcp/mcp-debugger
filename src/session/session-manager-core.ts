@@ -34,6 +34,9 @@ export interface DebugResult {
   state: SessionState;
   error?: string;
   data?: unknown;
+  // Machine-readable error identity for tests and callers (avoid string assertions)
+  errorType?: string; // e.g., 'PythonNotFoundError'
+  errorCode?: number; // e.g., -32602 (MCP InvalidParams)
 }
 
 /**

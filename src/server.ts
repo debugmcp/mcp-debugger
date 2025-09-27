@@ -201,7 +201,7 @@ export class DebugMcpServer {
     args?: string[], 
     dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>, 
     dryRunSpawn?: boolean
-  ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
+  ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
     this.validateSession(sessionId);
     
     // Check script file exists for immediate feedback (hands-off: no path manipulation)

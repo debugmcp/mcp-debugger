@@ -16,6 +16,14 @@ import { spawn } from 'child_process';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '@debugmcp/shared';
 import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
+import { 
+  SessionNotFoundError, 
+  SessionTerminatedError, 
+  ProxyNotRunningError,
+  DebugSessionCreationError,
+  PythonNotFoundError
+} from '../errors/debug-errors.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * Result type for evaluate expression operations
@@ -97,17 +105,23 @@ export class SessionManagerOperations extends SessionManagerData {
           const resolved = await finder.find(executablePathFromSession);
           const valid = await this.isValidPythonExecutable(resolved);
           if (!valid) {
-            throw new Error(`Python not found. Please install Python 3 or specify the Python path.`);
+            throw new PythonNotFoundError(executablePathFromSession);
           }
           resolvedExecutablePath = resolved;
           this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedExecutablePath}`);
         } catch (error) {
+          // If it's already a typed error, re-throw it
+          if (error instanceof PythonNotFoundError) {
+            throw error;
+          }
           const msg = error instanceof Error ? error.message : String(error);
-          const userMsg = msg.includes('not found')
-            ? 'Python not found. Please install Python 3 or specify the Python path.'
-            : msg;
-          this.logger.error(`[SessionManager] Failed to resolve Python executable '${executablePathFromSession}':`, userMsg);
-          throw new Error(userMsg);
+          // Convert generic "not found" errors to typed Python error
+          if (msg.includes('not found')) {
+            throw new PythonNotFoundError(executablePathFromSession);
+          }
+          // For other errors, wrap them
+          this.logger.error(`[SessionManager] Failed to resolve Python executable '${executablePathFromSession}':`, msg);
+          throw new DebugSessionCreationError(`Failed to resolve Python: ${msg}`, error instanceof Error ? error : undefined);
         }
       } else {
         // Relative path - resolve from project root (MCP server's root)
@@ -355,13 +369,29 @@ export class SessionManagerOperations extends SessionManagerData {
         await session.proxyManager.stop();
         session.proxyManager = undefined;
       }
-      
-      return { success: false, error: errorMessage, state: session.state };
+
+      // Normalize error identity for callers/tests
+      let errorType: string | undefined;
+      let errorCode: number | undefined;
+      if (error instanceof McpError) {
+        errorType = (error as McpError).constructor.name || 'McpError';
+        errorCode = (error as McpError).code as number | undefined;
+      } else if (error instanceof Error) {
+        errorType = error.constructor.name || 'Error';
+      }
+
+      return { success: false, error: errorMessage, state: session.state, errorType, errorCode };
     }
   }
   
   async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     const session = this._getSessionById(sessionId);
+    
+    // Check if session is terminated
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+    
     const bpId = uuidv4();
 
     // The file path has been validated and translated by server.ts before reaching here
@@ -410,11 +440,17 @@ export class SessionManagerOperations extends SessionManagerData {
 
   async stepOver(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
+    
+    // Check if session is terminated
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+    
     const threadId = session.proxyManager?.getCurrentThreadId();
     this.logger.info(`[SM stepOver ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      return { success: false, error: 'No active debug run', state: session.state };
+      throw new ProxyNotRunningError(sessionId, 'step over');
     }
     if (session.state !== SessionState.PAUSED) {
       this.logger.warn(`[SM stepOver ${sessionId}] Not paused. State: ${session.state}`);
@@ -461,11 +497,17 @@ export class SessionManagerOperations extends SessionManagerData {
 
   async stepInto(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
+    
+    // Check if session is terminated
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+    
     const threadId = session.proxyManager?.getCurrentThreadId();
     this.logger.info(`[SM stepInto ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      return { success: false, error: 'No active debug run', state: session.state };
+      throw new ProxyNotRunningError(sessionId, 'step into');
     }
     if (session.state !== SessionState.PAUSED) {
       this.logger.warn(`[SM stepInto ${sessionId}] Not paused. State: ${session.state}`);
@@ -512,11 +554,17 @@ export class SessionManagerOperations extends SessionManagerData {
 
   async stepOut(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
+    
+    // Check if session is terminated
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+    
     const threadId = session.proxyManager?.getCurrentThreadId();
     this.logger.info(`[SM stepOut ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      return { success: false, error: 'No active debug run', state: session.state };
+      throw new ProxyNotRunningError(sessionId, 'step out');
     }
     if (session.state !== SessionState.PAUSED) {
       this.logger.warn(`[SM stepOut ${sessionId}] Not paused. State: ${session.state}`);
@@ -563,12 +611,17 @@ export class SessionManagerOperations extends SessionManagerData {
 
   async continue(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
+    
+    // Check if session is terminated
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+    
     const threadId = session.proxyManager?.getCurrentThreadId();
     this.logger.info(`[SessionManager continue] Called for session ${sessionId}. Current state: ${session.state}, ThreadID: ${threadId}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      this.logger.warn(`[SessionManager continue] No active debug run for session ${sessionId}.`);
-      return { success: false, error: 'No active debug run', state: session.state };
+      throw new ProxyNotRunningError(sessionId, 'continue');
     }
     if (session.state !== SessionState.PAUSED) {
       this.logger.warn(`[SessionManager continue] Session ${sessionId} not paused. State: ${session.state}.`);

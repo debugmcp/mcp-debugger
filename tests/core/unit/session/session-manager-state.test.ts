@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
+import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
 
 describe('SessionManager - State Machine Integrity', () => {
   let sessionManager: SessionManager;
@@ -34,7 +35,7 @@ describe('SessionManager - State Machine Integrity', () => {
   it('should enforce valid state transitions', async () => {
     const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
     
     // CREATED → INITIALIZING
@@ -61,13 +62,12 @@ describe('SessionManager - State Machine Integrity', () => {
   it('should reject invalid operations based on state', async () => {
     const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
     
-    // Can't step when not started
-    let result = await sessionManager.stepOver(session.id);
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('No active debug run');
+    // Can't step when not started - now throws typed error
+    await expect(sessionManager.stepOver(session.id)).rejects.toThrow(ProxyNotRunningError);
+    let result: any;
     
     // Start session but don't pause
     await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
@@ -88,7 +88,7 @@ describe('SessionManager - State Machine Integrity', () => {
   it('should maintain state consistency during errors', async () => {
     const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
     
     await sessionManager.startDebugging(session.id, 'test.py');

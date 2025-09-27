@@ -9,6 +9,14 @@
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 import { portManager } from './test-utils/helpers/port-manager.js';
 
+// Surface unhandled rejections/exceptions during tests with concise messages
+process.on('unhandledRejection', (reason) => {
+  console.error('[Test] UnhandledRejection:', reason instanceof Error ? reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[Test] UncaughtException:', err instanceof Error ? err.message : err);
+});
+
 // Ensure stdio mode is disabled in unit tests unless explicitly set
 delete process.env.DEBUG_MCP_STDIO;
 
