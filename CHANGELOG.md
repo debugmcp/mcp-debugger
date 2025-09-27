@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.7] - 2025-09-27
+
+### Added
+- **Monorepo architecture** - Complete refactor to workspace-based monorepo structure, setting the foundation for multi-language adapter support
+  - Extracted Python adapter into `@debugmcp/adapter-python` package
+  - Extracted Mock adapter into `@debugmcp/adapter-mock` package  
+  - Created shared types and interfaces in `@debugmcp/shared` package
+  - Dynamic adapter loading system for extensibility
+- **Pre-push lint validation** - ESLint now runs before push to prevent CI failures
+- **Typed error system** - Replaced brittle string matching in tests with proper typed errors
+- **Validation script** - Test in clean environment before release
+- **npx distribution package** - Direct execution support via `npx @debugmcp/mcp-debugger`
+- **pnpm workspace support** - Migrated from npm to pnpm for better monorepo management
+
+### Fixed
+- Removed unused `SessionNotFoundError` import that was blocking CI
+- Docker container file operations now use relative paths
+- Docker E2E test converted to use stdio transport for reliability
+- Deprecated warnings resolved before release
+- Build artifacts removed from git and prevented in CI tests
+- Proxy bootstrap JavaScript file restored to fix CI failures
+- TypeScript module resolution issues in CI/CD pipeline
+- Workspace package type declarations and build order
+
+### Changed
+- **Architecture**: Modularized codebase into workspace packages for better maintainability and future language support
+- Docker E2E tests now enabled locally by default
+- Improved error handling with typed error classes for better reliability
+- Enhanced pre-push hooks to match CI validation requirements
+- Build system now uses TypeScript composite projects for proper inter-package dependencies
+
 ## [0.14.1] - 2025-01-16
 
 ### Fixed
