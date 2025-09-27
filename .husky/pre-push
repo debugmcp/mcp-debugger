@@ -2,6 +2,23 @@ echo "🧪 Running tests before push to ensure code quality..."
 echo "💡 This prevents broken code from being pushed to GitHub."
 echo ""
 
+# Detect if this push contains only tags (read refs from stdin)
+TMP_REFS=$(mktemp 2>/dev/null || echo ./.prepush_tmp)
+cat - > "$TMP_REFS"
+TAGS_ONLY=true
+if [ ! -s "$TMP_REFS" ]; then
+    # If no stdin provided, assume this is not a tags-only push
+    TAGS_ONLY=false
+else
+    while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+        case "$LOCAL_REF" in
+            refs/tags/*) : ;; # tag, ok
+            *) TAGS_ONLY=false ;;
+        esac
+    done < "$TMP_REFS"
+fi
+rm -f "$TMP_REFS" 2>/dev/null || true
+
 # Run linting first to catch syntax and style issues
 echo "🔎 Running ESLint to catch linting issues..."
 pnpm run lint
@@ -31,8 +48,15 @@ fi
 echo "✅ Build successful!"
 echo ""
 
-# Run the full test suite
-npm test
+# Run tests (reduced suite for tag-only pushes to match release CI)
+if [ "$TAGS_ONLY" = true ]; then
+    echo ""
+    echo "🔖 Tag-only push detected. Running reduced CI tests (no e2e, no python) to match release workflow..."
+    npm run test:ci-no-python
+else
+    # Run the full test suite
+    npm test
+fi
 
 if [ $? -eq 0 ]; then
     echo ""
