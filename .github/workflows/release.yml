@@ -222,10 +222,10 @@ jobs:
         VERSION_STRIPPED="$VERSION" node -e "const fs=require('fs');const p='packages/mcp-debugger/package.json';const pkg=JSON.parse(fs.readFileSync(p,'utf8'));const ver=process.env.VERSION_STRIPPED; if(!/^[0-9]+\\.[0-9]+\\.[0-9]+(-.+)?$/.test(ver)){console.error('Invalid semver:',ver);process.exit(1);} pkg.version=ver; fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\\n');console.log('Updated',p,'to',pkg.version)"
     - name: Capture workspace package versions (robust)
       run: |
-        node -e "const fs=require('fs');const p=require('./packages/shared/package.json').version;fs.appendFileSync(process.env.GITHUB_ENV, `SHARED_VERSION=${p}\n`);"
-        node -e "const fs=require('fs');const p=require('./packages/adapter-mock/package.json').version;fs.appendFileSync(process.env.GITHUB_ENV, `ADAPTER_MOCK_VERSION=${p}\n`);"
-        node -e "const fs=require('fs');const p=require('./packages/adapter-python/package.json').version;fs.appendFileSync(process.env.GITHUB_ENV, `ADAPTER_PYTHON_VERSION=${p}\n`);"
-        node -e "const fs=require('fs');const p=require('./packages/mcp-debugger/package.json').version;fs.appendFileSync(process.env.GITHUB_ENV, `CLI_VERSION=${p}\n`);"
+        node -e 'console.log("SHARED_VERSION="+require("./packages/shared/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("ADAPTER_MOCK_VERSION="+require("./packages/adapter-mock/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("ADAPTER_PYTHON_VERSION="+require("./packages/adapter-python/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("CLI_VERSION="+require("./packages/mcp-debugger/package.json").version)' >> $GITHUB_ENV
     - name: Set npm dist-tag
       run: |
         if [[ "${CLI_VERSION}" == *"-beta"* ]] || [[ "${CLI_VERSION}" == *"-alpha"* ]]; then
