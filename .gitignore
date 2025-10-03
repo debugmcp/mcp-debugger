@@ -149,3 +149,7 @@ tests/manual/
 /*_SUMMARY.md
 /*_ANALYSIS.md
 /integration_test_*.log
+
+# Vendored js-debug artifacts (generated during build; do not commit)
+packages/adapter-javascript/vendor/js-debug/
+packages/adapter-javascript/vendor/js-debug/**
