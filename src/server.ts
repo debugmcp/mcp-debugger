@@ -141,6 +141,14 @@ export class DebugMcpServer {
             version: '1.0.0',
             requiresExecutable: false
           };
+        case 'javascript':
+          return {
+            id: 'javascript',
+            displayName: 'JavaScript/TypeScript',
+            version: '1.0.0',
+            requiresExecutable: true,
+            defaultExecutable: 'node'
+          };
         default:
           return {
             id: lang,

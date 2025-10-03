@@ -262,6 +262,53 @@ Local linking
 
 ---
 
+## Modular adapters and enabling JavaScript
+
+Modularity by default
+- mcp-debugger loads adapters dynamically from a fixed catalog using package names `@debugmcp/adapter-<language>`.
+- There is no auto-install on first use. Users install or build only the adapters they need.
+
+“Installed” semantics
+- list_supported_languages marks an adapter as installed:true when the loader can resolve/import the adapter package (or its dist via monorepo fallback).
+- Validation of deeper requirements (e.g., vendor files like js-debug) happens later at session creation/start; discovery remains fast and non-invasive.
+
+Developer workflow (monorepo)
+- Build all adapters for local testing:
+  - pnpm -w run build:adapters:all
+- Build only the JavaScript adapter and vendor js-debug:
+  - pnpm -w run dev:js
+  - Equivalent steps:
+    - pnpm -w -F @debugmcp/adapter-javascript build
+    - pnpm -w -F @debugmcp/adapter-javascript run build:adapter
+- After building, list_supported_languages should show:
+  - available includes javascript with installed:true
+  - languages contains a JavaScript/TypeScript entry with defaultExecutable: node
+
+Published/package consumption
+- Consumers install only the adapters they need, for example:
+  - npm i @debugmcp/adapter-javascript
+- The adapter-javascript package includes dist and vendor/js-debug (to support offline/air-gapped use).
+
+Monorepo dynamic loading
+- The loader first tries to import the package by name.
+- If that fails, it attempts fallback URLs that include:
+  - node_modules/@debugmcp/adapter-<language>/dist/index.js
+  - packages/adapter-<language>/dist/index.js (handy for monorepo development)
+- A small unit test ensures javascript is marked installed:true when only packages/adapter-javascript/dist exists.
+
+Windows notes
+- Fallback paths are constructed via file URLs; tests cover resolution on Windows.
+- Use Node.js 18+ for the JS adapter and ensure node is on PATH for defaultExecutable behavior.
+
+Verification
+- Build and vendor JS:
+  - pnpm -w run dev:js
+- Build all adapters (optional):
+  - pnpm -w run build:adapters:all
+- Start the server and call list_supported_languages:
+  - javascript appears in available with installed:true
+  - languages contains the JavaScript/TypeScript metadata with defaultExecutable: node
+
 ## Performance Tips
 
 - Lazy initialization: do minimal work in the constructor and in `initialize()`

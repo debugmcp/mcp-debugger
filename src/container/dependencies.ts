@@ -102,7 +102,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   // Adapters are loaded dynamically on-demand by the AdapterRegistry via AdapterLoader.
   // In container runtime, pre-register known adapters using dynamic import (fire-and-forget)
   if (process.env.MCP_CONTAINER === 'true') {
-    const tryRegister = (lang: 'mock' | 'python', factoryName: string) => {
+    const tryRegister = (lang: 'mock' | 'python' | 'javascript', factoryName: string) => {
       const url = new URL(`../node_modules/@debugmcp/adapter-${lang}/dist/index.js`, import.meta.url).href;
       // Fire-and-forget; do not block dependency creation
       import(
@@ -122,6 +122,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 
     tryRegister('mock', 'MockAdapterFactory');
     tryRegister('python', 'PythonAdapterFactory');
+    tryRegister('javascript', 'JavascriptAdapterFactory');
   }
   
   return {

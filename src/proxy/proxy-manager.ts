@@ -196,8 +196,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Wait for proxy to be ready before sending init command
     await new Promise<void>((resolve, reject) => {
       const readyTimeout = setTimeout(() => {
-        reject(new Error('Proxy did not send ready signal within 5 seconds'));
-      }, 5000);
+        reject(new Error('Proxy did not send ready signal within 10 seconds'));
+      }, 10000);
 
       const handleProxyReady = (message: unknown) => {
         const msg = message as { type?: string } | null;

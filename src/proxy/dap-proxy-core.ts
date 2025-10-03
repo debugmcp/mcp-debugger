@@ -79,12 +79,20 @@ export class ProxyRunner {
 
       this.logger.info('[ProxyRunner] Ready to receive commands');
 
-      // Send a ready signal to parent process if using IPC
+      // Send a ready signal to parent process if using IPC (slight delay to avoid race with parent listener)
       if (this.options.useIPC !== false && typeof process.send === 'function') {
         try {
-          process.send({ type: 'proxy-ready', pid: process.pid });
+          setTimeout(() => {
+            try {
+              if (typeof process.send === 'function') {
+                process.send({ type: 'proxy-ready', pid: process.pid });
+              }
+            } catch (sendErr) {
+              this.logger.warn('[ProxyRunner] Failed to send ready signal (delayed):', sendErr);
+            }
+          }, 25);
         } catch (e) {
-          this.logger.warn('[ProxyRunner] Failed to send ready signal:', e);
+          this.logger.warn('[ProxyRunner] Failed to schedule ready signal:', e);
         }
       }
 

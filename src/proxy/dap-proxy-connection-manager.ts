@@ -70,11 +70,11 @@ export class DapConnectionManager {
   /**
    * Initialize DAP session
    */
-  async initializeSession(client: IDapClient, sessionId: string): Promise<void> {
+  async initializeSession(client: IDapClient, sessionId: string, adapterId: string = 'python'): Promise<void> {
     const initializeArgs: ExtendedInitializeArgs = {
       clientID: `mcp-proxy-${sessionId}`,
       clientName: 'MCP Debug Proxy',
-      adapterID: 'python',
+      adapterID: adapterId,
       pathFormat: 'path',
       linesStartAt1: true,
       columnsStartAt1: true,

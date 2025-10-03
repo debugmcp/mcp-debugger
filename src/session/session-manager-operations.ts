@@ -144,7 +144,7 @@ export class SessionManagerOperations extends SessionManagerData {
     const adapterConfig: AdapterConfig = {
       sessionId,
       executablePath: resolvedExecutablePath,
-      adapterHost: '127.0.0.1',
+      adapterHost: 'localhost',
       adapterPort,
       logDir: sessionLogDir,
       scriptPath: translatedScriptPath,
@@ -162,7 +162,7 @@ export class SessionManagerOperations extends SessionManagerData {
       sessionId,
       language: session.language,  // Add language from session
       executablePath: resolvedExecutablePath,
-      adapterHost: '127.0.0.1',
+      adapterHost: 'localhost',
       adapterPort,
       logDir: sessionLogDir,
       scriptPath: translatedScriptPath, // Use the already translated script path

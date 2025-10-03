@@ -453,20 +453,21 @@ describe('Full Debug Session E2E', () => {
   
   // Language-agnostic tests
   describe('Language support', () => {
-    it('should list supported languages including python and mock', async () => {
+    it('should list supported languages including python, mock, and javascript', async () => {
       const response = await mcpClient!.callTool({
         name: 'list_supported_languages',
         arguments: {}
       });
+      
       const result = parseSdkToolResult(response);
       expect(result.success).toBe(true);
       
-      const languages = result.languages as Array<{ id: string }>;
-      const languageIds = languages.map(l => l.id);
+      const languages = result.languages || [];
+      const languageIds = languages.map((l: any) => l.id);
       
       expect(languageIds).toContain('python');
       expect(languageIds).toContain('mock');
-      expect(languageIds).not.toContain('javascript'); // Should not be registered anymore
+      expect(languageIds).toContain('javascript'); // JavaScript is now supported
     });
   });
 });

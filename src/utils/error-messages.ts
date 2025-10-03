@@ -26,8 +26,8 @@ export const ErrorMessages = {
    */
   proxyInitTimeout: (timeout: number) =>
     `Debug proxy initialization did not complete within ${timeout}s. ` +
-    `This may indicate that debugpy failed to start or is not installed. ` +
-    `Check that Python and debugpy are properly installed and accessible.`,
+    `This may indicate that the debug adapter failed to start or is not properly configured. ` +
+    `Check that the required debug adapter is installed and accessible.`,
   
   /**
    * Error message for step operation timeouts

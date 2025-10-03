@@ -58,32 +58,18 @@ describe('Error Scenarios E2E', () => {
   });
 
   describe('Language Support Errors', () => {
-    it('should reject unsupported language', async () => {
+    it('should reject unsupported language (fakelang)', async () => {
       console.log('\n[E2E Error Scenarios] Testing unsupported language...');
       
       const result = await callToolSafely(
         mcpClient!,
         'create_debug_session',
-        { language: 'ruby', name: 'Ruby Test' }
+        { language: 'fakelang', name: 'Fake Language Test' }
       );
       
       expect(result.success).toBe(false);
       expect(result.message).toContain('not supported');
       console.log('[E2E Error Scenarios] Correctly rejected unsupported language');
-    });
-    
-    it('should reject javascript (now that it is replaced by mock)', async () => {
-      console.log('\n[E2E Error Scenarios] Testing javascript language (should be rejected)...');
-      
-      const result = await callToolSafely(
-        mcpClient!,
-        'create_debug_session',
-        { language: 'javascript', name: 'JavaScript Test' }
-      );
-      
-      expect(result.success).toBe(false);
-      expect(result.message).toContain('not supported');
-      console.log('[E2E Error Scenarios] Correctly rejected javascript language');
     });
   });
 

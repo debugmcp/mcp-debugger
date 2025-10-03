@@ -255,23 +255,36 @@ export class DapProxyWorker {
       // Set up event handlers
       this.setupDapEventHandlers();
 
-      // Initialize DAP session
-      await this.connectionManager!.initializeSession(this.dapClient, payload.sessionId);
+      // Check if this is a JavaScript adapter by looking for js-debug in the command
+      const isJavaScriptAdapter = !!(payload.adapterCommand && 
+        payload.adapterCommand.args.some(arg => arg.includes('js-debug')));
 
-      // Send launch request
-      // DIAGNOSTIC: Log the scriptPath before sending to connection manager
-      this.logger!.info('[Worker] DIAGNOSTIC: About to send launch request with scriptPath:', payload.scriptPath);
-      this.logger!.info('[Worker] DIAGNOSTIC: scriptPath type:', typeof payload.scriptPath);
-      this.logger!.info('[Worker] DIAGNOSTIC: scriptPath length:', payload.scriptPath.length);
-      this.logger!.info('[Worker] DIAGNOSTIC: Full payload object:', JSON.stringify(payload, null, 2));
-      
-      await this.connectionManager!.sendLaunchRequest(
+      // Initialize DAP session with correct adapterId
+      await this.connectionManager!.initializeSession(
         this.dapClient,
-        payload.scriptPath,
-        payload.scriptArgs,
-        payload.stopOnEntry,
-        payload.justMyCode
+        payload.sessionId,
+        isJavaScriptAdapter ? 'javascript' : 'python'
       );
+
+      if (isJavaScriptAdapter) {
+        // JavaScript adapter: Skip automatic launch, test will send proper config
+        this.logger!.info('[Worker] JavaScript adapter detected, skipping automatic launch. Test will send launch configuration.');
+      } else {
+        // Python/other adapters: Send automatic launch request
+        // DIAGNOSTIC: Log the scriptPath before sending to connection manager
+        this.logger!.info('[Worker] DIAGNOSTIC: About to send launch request with scriptPath:', payload.scriptPath);
+        this.logger!.info('[Worker] DIAGNOSTIC: scriptPath type:', typeof payload.scriptPath);
+        this.logger!.info('[Worker] DIAGNOSTIC: scriptPath length:', payload.scriptPath.length);
+        this.logger!.info('[Worker] DIAGNOSTIC: Full payload object:', JSON.stringify(payload, null, 2));
+        
+        await this.connectionManager!.sendLaunchRequest(
+          this.dapClient,
+          payload.scriptPath,
+          payload.scriptArgs,
+          payload.stopOnEntry,
+          payload.justMyCode
+        );
+      }
 
       this.logger!.info('[Worker] Waiting for "initialized" event from adapter.');
     } catch (error) {

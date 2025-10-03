@@ -20,12 +20,14 @@
   "scripts": {
     "prepare": "husky",
     "prebuild": "rimraf dist",
-"build": "pnpm run build:packages && tsc -b -f . && pnpm run postbuild",
+    "build": "pnpm run build:packages && tsc -b -f . && pnpm run postbuild",
     "build:shared": "pnpm --filter @debugmcp/shared build",
     "build:adapters": "pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build",
-    "build:packages": "pnpm --filter @debugmcp/shared build && pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build",
+    "build:adapters:all": "pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build && pnpm --filter @debugmcp/adapter-javascript build",
+    "dev:js": "pnpm -w -F @debugmcp/adapter-javascript build && pnpm -w -F @debugmcp/adapter-javascript run build:adapter",
+    "build:packages": "pnpm --filter @debugmcp/shared build && pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build && pnpm --filter @debugmcp/adapter-javascript build",
     "build:packages:ci": "pnpm --filter @debugmcp/shared build:ci && pnpm --filter @debugmcp/adapter-mock build:ci && pnpm --filter @debugmcp/adapter-python build:ci",
-"build:ci": "pnpm run build:packages:ci && tsc -b -f . && pnpm run postbuild",
+    "build:ci": "pnpm run build:packages:ci && tsc -b -f . && pnpm run postbuild",
     "build:servercore": "tsc -p tsconfig.json",
     "build:all": "pnpm -r build && pnpm run build",
     "build:clean": "pnpm run clean && pnpm run build",
@@ -117,6 +119,7 @@
     "mcp-debugger": "./dist/index.js"
   },
   "dependencies": {
+    "@debugmcp/adapter-javascript": "workspace:*",
     "@debugmcp/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",

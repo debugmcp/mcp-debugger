@@ -61,6 +61,45 @@ describe('Server Language Discovery Tests', () => {
     vi.clearAllMocks();
   });
 
+  describe('JavaScript availability and metadata', () => {
+    it('should report javascript installed:true in available and include rich JS metadata when resolvable', async () => {
+      const debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      // Simulate dynamic registry reporting JS resolvable (installed)
+      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'javascript']);
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python debugger using debugpy' },
+        { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, description: 'Mock adapter for testing' },
+        { name: 'javascript', packageName: '@debugmcp/adapter-javascript', installed: true, description: 'JavaScript/TypeScript debugger using js-debug' }
+      ]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_supported_languages',
+          arguments: {}
+        }
+      });
+
+      expect(result.content[0].type).toBe('text');
+      const content = JSON.parse(result.content[0].text);
+
+      // available array contains javascript with installed true
+      const jsAvail = content.available.find((a: any) => a.language === 'javascript');
+      expect(jsAvail).toBeDefined();
+      expect(jsAvail.installed).toBe(true);
+      expect(jsAvail.package).toBe('@debugmcp/adapter-javascript');
+
+      // languages metadata includes explicit javascript entry with defaultExecutable: 'node'
+      const jsMeta = content.languages.find((m: any) => m.id === 'javascript');
+      expect(jsMeta).toBeDefined();
+      expect(jsMeta.displayName).toBe('JavaScript/TypeScript');
+      expect(jsMeta.requiresExecutable).toBe(true);
+      expect(jsMeta.defaultExecutable).toBe('node');
+    });
+  });
+
   describe('getSupportedLanguagesAsync', () => {
     it('should return languages from dynamic discovery when available', async () => {
       debugServer = new DebugMcpServer();

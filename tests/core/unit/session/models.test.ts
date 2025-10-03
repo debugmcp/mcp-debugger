@@ -211,9 +211,10 @@ describe('Session Models', () => {
         expect(DebugLanguage.MOCK).toBe('mock');
       });
 
-      it('should have exactly 2 language options', () => {
+      it('should have exactly 3 language options including javascript', () => {
         const languages = Object.values(DebugLanguage);
-        expect(languages).toHaveLength(2);
+        expect(languages).toHaveLength(3);
+        expect(languages).toContain('javascript');
       });
     });
 
@@ -291,7 +292,7 @@ describe('Session Models', () => {
       // The actual type checking is done at compile time, but we can verify the structure
       
       // Example type usage to ensure they're exported correctly
-      const mockSession: import('../../../../src/session/models.js').DebugSession = {
+      const mockSession: import('@debugmcp/shared').DebugSession = {
         id: 'test-id',
         language: DebugLanguage.PYTHON,
         name: 'test-session',
