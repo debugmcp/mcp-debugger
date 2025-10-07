@@ -257,7 +257,7 @@ export class DebugMcpServer {
     this.validateSession(sessionId);
     const session = this.sessionManager.getSession(sessionId);
     const currentThreadId = session?.proxyManager?.getCurrentThreadId();
-    if (!session || !session.proxyManager || !currentThreadId) {
+    if (!session || !session.proxyManager || typeof currentThreadId !== 'number') {
         throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
     }
     return this.sessionManager.getStackTrace(sessionId, currentThreadId);
