@@ -60,7 +60,7 @@ export class SessionManagerData extends SessionManagerCore {
     }
     
     const currentThreadForRequest = threadId || currentThreadId;
-    if (!currentThreadForRequest) { 
+    if (typeof currentThreadForRequest !== 'number') { 
       this.logger.warn(`[SM getStackTrace ${sessionId}] No effective thread ID to use.`); 
       return []; 
     }
