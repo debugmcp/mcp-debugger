@@ -85,6 +85,13 @@ function handleStatusMessage(
         { type: 'emitEvent', event: 'dry-run-complete', args: [message.command, message.script] }
       );
       break;
+
+    case 'adapter_connected':
+      commands.push(
+        { type: 'log', level: 'info', message: '[ProxyManager] Adapter transport connected' },
+        { type: 'emitEvent', event: 'initialized', args: [] }
+      );
+      return { commands, newState: setInitialized(state, true) };
     
     case 'adapter_configured_and_launched':
       commands.push(
@@ -225,7 +232,7 @@ function handleDapResponse(
     return {
       commands: [{
         type: 'log',
-        level: 'warn',
+        level: 'debug',
         message: `[ProxyManager] Received response for unknown request: ${message.requestId}`
       }]
     };

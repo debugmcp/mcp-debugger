@@ -49,6 +49,7 @@ export interface DAPProcessingResult {
 export type ProxyStatusMessage = 
   | { type: 'status'; sessionId: string; status: 'proxy_minimal_ran_ipc_test'; message?: string }
   | { type: 'status'; sessionId: string; status: 'dry_run_complete'; command: string; script: string; data?: unknown }
+  | { type: 'status'; sessionId: string; status: 'adapter_connected'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_configured_and_launched'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; data?: unknown };
 

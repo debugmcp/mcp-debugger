@@ -65,7 +65,8 @@ export class GenericAdapterManager {
     const spawnOptions: any = {
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'] as ('ignore' | 'pipe' | 'inherit' | 'ipc' | number)[],
       env: env || process.env,
-      detached: true
+      detached: true,
+      windowsHide: true
     };
 
     // Only set cwd if explicitly provided
@@ -87,9 +88,16 @@ export class GenericAdapterManager {
       throw new Error('Failed to spawn adapter process or get PID');
     }
 
-    // Detach the process
-    adapterProcess.unref();
-    this.logger.info(`[AdapterManager] Called unref() on adapter process PID: ${adapterProcess.pid}`);
+    // Detach and unref so proxy lifecycle is not blocked by child adapter
+    try {
+      adapterProcess.unref();
+      this.logger.info(`[AdapterManager] Called unref() on adapter process PID: ${adapterProcess.pid}`);
+    } catch {
+      // ignore unref errors (older Node or platform quirk)
+    }
+
+    // Spawned adapter process; hide console on Windows and keep attached for lifecycle management
+    this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers
     this.setupProcessHandlers(adapterProcess);
@@ -134,7 +142,24 @@ export class GenericAdapterManager {
 
         if (!process.killed) {
           this.logger.warn(`[AdapterManager] Adapter process PID: ${process.pid} did not exit after SIGTERM. Sending SIGKILL.`);
-          process.kill('SIGKILL');
+          try {
+            process.kill('SIGKILL');
+          } catch {
+            // ignore SIGKILL errors
+          }
+
+          // Windows-specific fallback: force kill entire process tree
+          if (globalThis.process.platform === 'win32' && process.pid) {
+            try {
+              this.logger.warn(`[AdapterManager] Forcing termination via taskkill /T /F for PID: ${process.pid}`);
+              this.processSpawner.spawn('taskkill', ['/PID', String(process.pid), '/T', '/F'], {
+                stdio: 'ignore',
+                windowsHide: true
+              });
+            } catch (tkErr) {
+              this.logger.error('[AdapterManager] taskkill fallback failed:', tkErr as Error);
+            }
+          }
         } else {
           this.logger.info(`[AdapterManager] Adapter process PID: ${process.pid} exited after SIGTERM.`);
         }

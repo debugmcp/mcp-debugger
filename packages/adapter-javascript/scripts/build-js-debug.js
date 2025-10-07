@@ -478,13 +478,18 @@ async function findAllByBasename(rootDir, targetNames) {
 async function main() {
   // Idempotent skip only if artifact AND required sidecars exist
   const bootloaderRequired = path.join(VENDOR_DIR, 'bootloader.js');
-  if (!FORCE && fs.existsSync(VENDOR_FILE) && fs.existsSync(bootloaderRequired)) {
-    logInfo(`Artifact already present at ${normalizePath(VENDOR_FILE)} and bootloader present. Set JS_DEBUG_FORCE_REBUILD=true to rebuild.`);
+  const hashRequired = path.join(VENDOR_DIR, 'hash.js');
+  if (!FORCE && fs.existsSync(VENDOR_FILE) && fs.existsSync(bootloaderRequired) && fs.existsSync(hashRequired)) {
+    logInfo(`Artifact already present at ${normalizePath(VENDOR_FILE)} and required sidecars present (bootloader.js, hash.js). Set JS_DEBUG_FORCE_REBUILD=true to rebuild.`);
     process.exitCode = 0;
     return;
   }
-  if (!FORCE && fs.existsSync(VENDOR_FILE) && !fs.existsSync(bootloaderRequired)) {
-    logWarn('Artifact present but bootloader.js missing; proceeding to re-vendor to restore sidecars.');
+  if (!FORCE && fs.existsSync(VENDOR_FILE) && (!fs.existsSync(bootloaderRequired) || !fs.existsSync(hashRequired))) {
+    const missing = [
+      !fs.existsSync(bootloaderRequired) ? 'bootloader.js' : null,
+      !fs.existsSync(hashRequired) ? 'hash.js' : null
+    ].filter(Boolean).join(', ');
+    logWarn(`Artifact present but required sidecars missing (${missing}); proceeding to re-vendor to restore sidecars.`);
   }
 
   await ensureDir(VENDOR_DIR);
@@ -577,7 +582,8 @@ async function main() {
         ext === '.json' ||
         ext === '.node' ||
         name === 'bootloader.js' ||
-        name === 'watchdog.js'
+        name === 'watchdog.js' ||
+        name === 'hash.js'
       ) {
         await fsp.copyFile(path.join(serverDir, name), path.join(VENDOR_DIR, name));
       }
@@ -587,9 +593,9 @@ async function main() {
     void 0;
   }
 
-  // Ensure critical JS sidecars (bootloader/watchdog) are vendored to root
+  // Ensure critical JS sidecars (bootloader/watchdog/hash) are vendored to root
   try {
-    const supportTargets = new Set(['bootloader.js', 'watchdog.js']);
+    const supportTargets = new Set(['bootloader.js', 'watchdog.js', 'hash.js']);
     const hits = await findAllByBasename(extractDir, supportTargets);
     for (const src of hits) {
       const base = path.basename(src);
@@ -597,15 +603,18 @@ async function main() {
     }
   } catch (err) { logWarn(`Support sidecar search failed: ${(err && err.message) || err}`); }
 
-  // Build-time hard check for bootloader.js
-  try {
-    await fsp.stat(path.join(VENDOR_DIR, 'bootloader.js'));
-  } catch {
+  // Build-time hard check for critical sidecars
+  const requiredSidecars = ['bootloader.js', 'hash.js'];
+  const missingSidecars = [];
+  for (const f of requiredSidecars) {
+    try { await fsp.stat(path.join(VENDOR_DIR, f)); } catch { missingSidecars.push(f); }
+  }
+  if (missingSidecars.length) {
     throw new Error(
-      'Vendoring error: bootloader.js was not found. ' +
+      'Vendoring error: missing required sidecars: ' + missingSidecars.join(', ') + '. ' +
       'Archive layout may have changed. ' +
       'Action items:\n' +
-      ' - Inspect js-debug artifact; ensure src/bootloader.js exists.\n' +
+      ' - Inspect js-debug artifact; ensure src/bootloader.js and hash.js exist.\n' +
       ' - Optionally set JS_DEBUG_BUILD_FROM_SOURCE=true or pin JS_DEBUG_VERSION.'
     );
   }

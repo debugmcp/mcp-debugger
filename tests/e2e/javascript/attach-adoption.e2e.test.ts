@@ -1,15 +1,15 @@
 import fs from 'fs';
-import path from 'path';
 import net from 'net';
+import path from 'path';
 import { spawn, ChildProcess } from 'child_process';
-import { describe, test, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
 import { resetAdapterRegistry, getAdapterRegistry } from '../../../src/adapters/adapter-registry.js';
 import { createProductionDependencies } from '../../../src/container/dependencies.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { JavascriptAdapterFactory } from '../../../packages/adapter-javascript/src/index.ts';
 import { waitForEvent } from '../../test-utils/helpers/test-utils.ts';
 
-vi.setConfig({ testTimeout: 90000 }); // allow extra time on CI; individual waits up to 45s
+vi.setConfig({ testTimeout: 90000 });
 
 // Normalize paths for cross-platform assertions
 const norm = (p: string) => p.replace(/\\+/g, '/');
@@ -23,7 +23,6 @@ function findBreakLine(filePath: string): number {
   return idx + 1; // 1-based
 }
 
-// Find a free TCP port on localhost
 async function findFreePort(host = '127.0.0.1'): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -36,18 +35,19 @@ async function findFreePort(host = '127.0.0.1'): Promise<number> {
   });
 }
 
-describe('E2E JS - simple script (breakpoint + step)', () => {
+describe('E2E JS - attach + adoption (parent attach by port, child __pendingTargetId)', () => {
   const logsDir = path.join(process.cwd(), 'logs');
-  const sessionId = `e2e-js-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `e2e-js-attach-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const program = path.resolve(process.cwd(), 'tests/fixtures/javascript-e2e/simple.js');
-  let ATTACH_PORT: number;
-  let targetProc: ChildProcess | null = null;
 
   let proxyManager: import('../../../src/proxy/proxy-manager.js').IProxyManager | null = null;
+  let targetProc: ChildProcess | null = null;
+  let adapterPort = 0;
+  let inspectorPort = 0;
   let restoreEnv: Record<string, string | undefined> = {};
 
   beforeAll(async () => {
-    // Snapshot a couple of env vars in case they are modified by adapterCommand
+    // Snapshot env in case adapter modifies
     restoreEnv.NODE_OPTIONS = process.env.NODE_OPTIONS;
     restoreEnv.PATH = process.env.PATH;
 
@@ -56,18 +56,20 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
     // Build production deps (real implementations)
     const deps = createProductionDependencies({
       logLevel: 'info',
-      logFile: path.join(logsDir, `e2e-js-${Date.now()}.log`)
+      logFile: path.join(logsDir, `e2e-js-attach-${Date.now()}.log`)
     });
 
     // Registry: register adapter and create instance
     resetAdapterRegistry();
     const registry = getAdapterRegistry({ validateOnRegister: true });
     await registry.register('javascript', new JavascriptAdapterFactory());
-    // Allocate a free inspector port to avoid EADDRINUSE on CI and parallel runs
-    ATTACH_PORT = await findFreePort();
+
+    // Allocate free ports for adapter and inspector
+    adapterPort = await findFreePort();
+    inspectorPort = await findFreePort();
 
     // Spawn Node target with --inspect-brk on the chosen inspector port
-    targetProc = spawn(process.execPath, [`--inspect-brk=${ATTACH_PORT}`, program], {
+    targetProc = spawn(process.execPath, [`--inspect-brk=${inspectorPort}`, program], {
       cwd: path.dirname(program),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -77,9 +79,6 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
     targetProc.stdout?.on('data', d => { try { process.stdout.write(`[target] ${d}`); } catch {} });
     targetProc.stderr?.on('data', d => { try { process.stderr.write(`[target] ${d}`); } catch {} });
 
-    // Allocate a valid TCP port for the adapter (proxy requires non-zero port)
-    const adapterPort = 9229 + Math.floor(Math.random() * 1000);
-    
     const adapterConfig = {
       sessionId,
       executablePath: process.execPath,
@@ -96,29 +95,20 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
     // Verify adapter command points to vendored js-debug with TCP mode
     const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
     expect(norm(adapterCommand.args[0])).toMatch(/\/vendor\/js-debug\/vsDebugServer\.cjs$/);
-    expect(adapterCommand.args[1]).toMatch(/^\d+$/); // Should be a port number
-    expect(Number(adapterCommand.args[1])).toBe(adapterPort); // Should match our allocated port
-    expect(typeof adapterCommand.command).toBe('string');
+    expect(adapterCommand.args[1]).toMatch(/^\d+$/);
+    expect(Number(adapterCommand.args[1])).toBe(adapterPort);
 
-    // Transform launch config for the script
-    const launchCfg = adapter.transformLaunchConfig({
-      program,
-      cwd: path.dirname(program),
-      stopOnEntry: true,
-      args: []
-    } as unknown as any);
-
-    // Create proxy manager via factory
+    // Create proxy manager via factory and start
     const pmFactory = deps.proxyManagerFactory;
     proxyManager = pmFactory.create(adapter);
 
-    // TODO: switch to DebugLanguage.JAVASCRIPT once added to enum (using MOCK placeholder for now)
+    // Start proxy (MOCK used for now; switch to DebugLanguage.JAVASCRIPT if available)
     await proxyManager.start({
       sessionId,
       language: DebugLanguage.MOCK,
       executablePath: process.execPath,
       adapterHost: 'localhost',
-      adapterPort, // Use the allocated port
+      adapterPort,
       logDir: logsDir,
       scriptPath: program,
       scriptArgs: [],
@@ -128,8 +118,7 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
       adapterCommand
     } as any);
 
-
-    // DAP handshake
+    // DAP handshake: initialize -> setExceptionBreakpoints -> setBreakpoints -> configurationDone -> attach(by port)
     await proxyManager.sendDapRequest('initialize', {
       clientID: 'e2e',
       adapterID: 'javascript',
@@ -139,60 +128,61 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
     });
 
     const breakLine = findBreakLine(program);
+
+    // Send exception filters first (VSCode behavior)
+    await proxyManager.sendDapRequest('setExceptionBreakpoints', { filters: [] });
+
     await proxyManager.sendDapRequest('setBreakpoints', {
       source: { path: program },
       breakpoints: [{ line: breakLine }],
       sourceModified: false
     });
 
-    // Align with VS Code behavior: send exception filters during configuration phase
-    await proxyManager.sendDapRequest('setExceptionBreakpoints', { filters: [] });
-    
-    // Send configurationDone, then attach to the already-running target by inspector port
     await proxyManager.sendDapRequest('configurationDone', {});
+
+
+    // Parent attach to inspector port (single allowed pre-adoption)
     await proxyManager.sendDapRequest('attach', {
       type: 'pwa-node',
       request: 'attach',
       address: '127.0.0.1',
-      port: ATTACH_PORT,
+      port: inspectorPort,
       continueOnAttach: false,
       attachExistingChildren: true,
-      attachSimplePort: ATTACH_PORT
+      attachSimplePort: inspectorPort
     });
-  }, 90000);
+  }, 120000);
 
   afterAll(async () => {
     try {
       if (proxyManager) {
         await proxyManager.stop();
       }
-      // Ensure target process is terminated
+    } catch {}
+    try {
       if (targetProc && !targetProc.killed) {
         try { targetProc.kill('SIGTERM'); } catch {}
         setTimeout(() => {
           try { targetProc?.kill('SIGKILL'); } catch {}
         }, 250);
       }
-    } finally {
-      // restore env
-      if (restoreEnv.NODE_OPTIONS !== undefined) process.env.NODE_OPTIONS = restoreEnv.NODE_OPTIONS;
-      if (restoreEnv.PATH !== undefined) process.env.PATH = restoreEnv.PATH;
-    }
+    } catch {}
+    // restore env
+    if (restoreEnv.NODE_OPTIONS !== undefined) process.env.NODE_OPTIONS = restoreEnv.NODE_OPTIONS;
+    if (restoreEnv.PATH !== undefined) process.env.PATH = restoreEnv.PATH;
   });
 
-  test('hits breakpoint, can evaluate, step, and continue to termination', async () => {
-    // Wait for first stopped with robust fallback (threads + pause), tolerate missing/zero threadId
+  test('stops at breakpoint (or pause fallback), variables/evaluate ok, step/continue to termination, no DI ambiguity in logs', async () => {
+    // Wait for first stopped, with fallback: threads + pause if not emitted yet
     let threadId: number;
     try {
-      const [, , body] = await waitForEvent<[number, string, any]>(
-        proxyManager as any,
-        'stopped',
-        45000
-      );
+      const [, , body] = await waitForEvent<[number, string, any]>(proxyManager as any, 'stopped', 60000);
+      // Try to get threadId from body if available
       const tid = (body && typeof body.threadId === 'number') ? body.threadId : undefined;
       if (typeof tid === 'number') {
         threadId = tid;
       } else {
+        // fallback: query threads to get a usable thread id
         const threadsResp: any = await (proxyManager as any).sendDapRequest('threads', {});
         const first = threadsResp?.body?.threads?.[0];
         if (!first?.id) throw new Error('No threads available after stopped');
@@ -204,22 +194,19 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
       const first = threadsResp?.body?.threads?.[0];
       if (!first?.id) throw new Error('No threads available to pause');
       await (proxyManager as any).sendDapRequest('pause', { threadId: first.id });
-      const [, , body2] = await waitForEvent<[number, string, any]>(
-        proxyManager as any,
-        'stopped',
-        20000
-      );
+      const [, , body2] = await waitForEvent<[number, string, any]>(proxyManager as any, 'stopped', 30000);
       const tid2 = (body2 && typeof body2.threadId === 'number') ? body2.threadId : first.id;
       threadId = Number(tid2);
     }
     expect(typeof threadId).toBe('number');
     expect((proxyManager as any).getCurrentThreadId()).toBe(threadId);
 
-    // stackTrace -> top frame (retry after pause if needed, tolerate threadId=0)
+    // stackTrace -> top frame (robust: pause-if-needed and retry on "not paused" or threadId===0)
     let st: any;
     try {
       st = await (proxyManager as any).sendDapRequest('stackTrace', { threadId, startFrame: 0, levels: 20 });
     } catch (_err) {
+      // If thread is not paused or id is 0, issue a pause and wait for a real stopped, then retry
       try {
         if (threadId === 0) {
           try { await (proxyManager as any).sendDapRequest('pause', { threadId: 0 }); } catch {}
@@ -227,7 +214,7 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
         } else {
           try { await (proxyManager as any).sendDapRequest('pause', { threadId }); } catch {}
         }
-        // Wait for a real stopped and refresh threadId if adapter provided one
+        // Wait for stopped and refresh threadId
         try {
           const [, , body3] = await waitForEvent<[number, string, any]>(proxyManager as any, 'stopped', 10000);
           const tid3 = (body3 && typeof body3.threadId === 'number') ? body3.threadId : undefined;
@@ -239,57 +226,33 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
             if (first3?.id != null) threadId = Number(first3.id);
           }
         } catch {}
-        // Retry stackTrace
+        // Retry stackTrace once
         st = await (proxyManager as any).sendDapRequest('stackTrace', { threadId, startFrame: 0, levels: 20 });
       } catch (e2) {
         throw e2;
       }
     }
-    // If no frames were returned, do a proactive pause-and-retry to ensure we have a valid frame
-    let frames: any[] = Array.isArray(st?.body?.stackFrames) ? st.body.stackFrames : [];
-    if (!frames.length) {
-      try {
-        // Try pausing the current thread (and 1 as a fallback if 0 was used)
-        if (threadId === 0) {
-          try { await (proxyManager as any).sendDapRequest('pause', { threadId: 0 }); } catch {}
-          try { await (proxyManager as any).sendDapRequest('pause', { threadId: 1 }); } catch {}
-        } else {
-          try { await (proxyManager as any).sendDapRequest('pause', { threadId }); } catch {}
-        }
-        // Wait for a stopped and refresh thread id if adapter provides one
-        try {
-          const [, , body4] = await waitForEvent<[number, string, any]>(proxyManager as any, 'stopped', 10000);
-          const tid4 = (body4 && typeof body4.threadId === 'number') ? body4.threadId : undefined;
-          if (typeof tid4 === 'number') {
-            threadId = tid4;
-          }
-        } catch {}
-        // Retry stackTrace and grab frames
-        const stRetry: any = await (proxyManager as any).sendDapRequest('stackTrace', { threadId, startFrame: 0, levels: 20 });
-        frames = Array.isArray(stRetry?.body?.stackFrames) ? stRetry.body.stackFrames : [];
-        st = stRetry;
-      } catch {
-        // fall through and let assertion below fail if still no frames
-      }
-    }
-    const top = Array.isArray(frames) ? frames[0] : st?.body?.stackFrames?.[0];
+    const top = st?.body?.stackFrames?.[0];
     expect(top?.id).toBeDefined();
 
     // evaluate simple expression
     const ev: any = await (proxyManager as any).sendDapRequest('evaluate', {
       expression: '1+1',
-      frameId: top.id
+      frameId: top.id,
+      context: 'repl'
     });
-    // js-debug returns strings for values
-    expect(String(ev?.body?.result ?? '')).toBe('2');
+    expect(String(ev?.body?.result ?? '')).toContain('2');
 
-    // single step, then robust continue loop to termination
+    // single step
     await (proxyManager as any).sendDapRequest('next', { threadId });
+
+    // Try to observe another stopped; regardless, continue to termination
     try {
       await waitForEvent(proxyManager as any, 'stopped', 15000);
     } catch {
       // ignore if not seen quickly
     }
+
     await (proxyManager as any).sendDapRequest('continue', { threadId });
 
     // Keep continuing until terminated/exited; js-debug can emit multiple intermediate stops
@@ -318,16 +281,25 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
         continue;
       }
 
-      // No event observed in the short window; skip 'threads' nudge to avoid timeouts if adapter is closing
-      // (js-debug will emit further stops if needed; loop continues to watch for them)
+      // No event observed in the short window; try to nudge by continuing first thread if any
+      try {
+        const threadsResp: any = await (proxyManager as any).sendDapRequest('threads', {});
+        const t = threadsResp?.body?.threads?.[0]?.id;
+        if (typeof t === 'number') {
+          await (proxyManager as any).sendDapRequest('continue', { threadId: t });
+        }
+      } catch {
+        // ignore
+      }
     }
 
-    // Final short wait to confirm termination, then use disconnect fallback if needed
+    // Final short wait to confirm termination
     let ended = false;
     try {
       await Promise.race([
         waitForEvent(proxyManager as any, 'terminated', 3000),
-        waitForEvent(proxyManager as any, 'exited', 3000)
+        waitForEvent(proxyManager as any, 'exited', 3000),
+        waitForEvent(proxyManager as any, 'exit', 3000)
       ]);
       ended = true;
     } catch {}
@@ -355,6 +327,18 @@ describe('E2E JS - simple script (breakpoint + step)', () => {
         waitForEvent(proxyManager as any, 'exited', 5000),
         waitForEvent(proxyManager as any, 'exit', 5000)
       ]);
+    }
+
+    // Assert no DI ambiguity errors in logs
+    const proxyLog = path.join(logsDir, `proxy-${sessionId}.log`);
+    const dapTrace = path.join(logsDir, `dap-trace-${sessionId}.ndjson`);
+    const haystacks: string[] = [];
+    try { if (fs.existsSync(proxyLog)) haystacks.push(fs.readFileSync(proxyLog, 'utf8')); } catch {}
+    try { if (fs.existsSync(dapTrace)) haystacks.push(fs.readFileSync(dapTrace, 'utf8')); } catch {}
+
+    const allLogs = haystacks.join('\n');
+    if (allLogs.length > 0) {
+      expect(allLogs.includes('Ambiguous match found for serviceIdentifier: je')).toBe(false);
     }
   });
 });

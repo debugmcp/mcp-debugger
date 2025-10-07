@@ -61,12 +61,12 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     // Log any validation warnings via dependencies logger
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const logger = this.dependencies.logger;
       if (validation?.warnings && Array.isArray(validation.warnings)) {
         for (const w of validation.warnings) {
-          if (w && typeof (w as any).message === 'string') {
-            logger?.warn?.((w as any).message);
+          const msg = (w as { message?: unknown }).message;
+          if (typeof msg === 'string') {
+            logger?.warn?.(msg);
           }
         }
       }
@@ -76,7 +76,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     if (!validation.valid) {
       this.transitionTo(AdapterState.ERROR);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const logger = this.dependencies.logger;
       const msg = validation.errors[0]?.message ?? 'Environment invalid';
       logger?.warn?.(msg);
@@ -86,7 +85,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       );
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.dependencies.logger?.info?.('JavaScript adapter initialized');
 
     this.transitionTo(AdapterState.READY);
@@ -223,7 +221,26 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // ESM-safe resolution of vendored js-debug adapter path
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
+    
+    // Log diagnostic information about path resolution
+    this.dependencies.logger?.info?.(`[JavascriptDebugAdapter] Building adapter command:`);
+    this.dependencies.logger?.info?.(`  __filename: ${__filename}`);
+    this.dependencies.logger?.info?.(`  __dirname: ${__dirname}`);
+    this.dependencies.logger?.info?.(`  process.cwd(): ${process.cwd()}`);
+    
     const adapterPath = path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs');
+    this.dependencies.logger?.info?.(`  Resolved adapter path: ${adapterPath}`);
+    
+    // Verify the file exists
+    if (!fs.existsSync(adapterPath)) {
+      this.dependencies.logger?.error?.(`[JavascriptDebugAdapter] js-debug vendor file not found at: ${adapterPath}`);
+      throw new AdapterError(
+        `js-debug vendor file not found at: ${adapterPath}. Run: pnpm -w -F @debugmcp/adapter-javascript run build:adapter`,
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
+    } else {
+      this.dependencies.logger?.info?.(`  Adapter file exists: YES`);
+    }
 
     // Command: prefer resolved executablePath provided by Session Manager; fall back to cached or process.execPath
     const command =
@@ -235,7 +252,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // The proxy validates adapterPort and rejects port 0 or undefined.
     // js-debug uses positional argument syntax for TCP: [adapterPath, String(port)]
     // This matches the pattern used by the Python adapter (debugpy with --host/--port)
-    const port = (config as any)?.adapterPort as number | undefined;
+    const port = config.adapterPort;
     
     // Validate port - proxy infrastructure requires valid TCP port
     if (!port || port === 0) {
@@ -290,13 +307,14 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig {
     // Base fields and defaults
     const user = (config || {}) as Record<string, unknown>;
-    const program = String((user as any).program || '');
-    const cwd = (typeof (user as any).cwd === 'string' && (user as any).cwd)
-      ? (user as any).cwd as string
+    const u = user as Record<string, unknown>;
+    const program = typeof u.program === 'string' ? u.program : '';
+    const cwd = (typeof u.cwd === 'string' && u.cwd)
+      ? (u.cwd as string)
       : (program ? path.dirname(program) : process.cwd());
-    const args = Array.isArray((user as any).args) ? ((user as any).args as string[]) : [];
-    const stopOnEntry = (user as any).stopOnEntry ?? false;
-    const justMyCode = (user as any).justMyCode ?? true;
+    const args = Array.isArray(u.args) ? (u.args as string[]) : [];
+    const stopOnEntry = (u.stopOnEntry as boolean | undefined) ?? false;
+    const justMyCode = (u.justMyCode as boolean | undefined) ?? true;
 
     // Type detection: treat .ts, .tsx, .mts, .cts as TypeScript
     const isTS = /\.([mc])?tsx?$/i.test(program);
@@ -306,22 +324,24 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     for (const [k, v] of Object.entries(process.env)) {
       if (typeof v === 'string') mergedEnv[k] = v;
     }
-    if (user.env && typeof user.env === 'object') {
-      for (const [k, v] of Object.entries(user.env as Record<string, unknown>)) {
+    const userEnv = (u.env as Record<string, unknown> | undefined);
+    if (userEnv && typeof userEnv === 'object') {
+      for (const [k, v] of Object.entries(userEnv)) {
         if (typeof v === 'string') mergedEnv[k] = v;
       }
     }
-    mergedEnv.NODE_ENV = typeof (user as any)?.env?.NODE_ENV === 'string'
-      ? (user as any).env.NODE_ENV
+    mergedEnv.NODE_ENV = userEnv && typeof userEnv.NODE_ENV === 'string'
+      ? (userEnv.NODE_ENV as string)
       : 'development';
 
     // Skip files defaults with optional user merge (dedupe)
     const defaultSkip = ['<node_internals>/**', '**/node_modules/**'];
-    const userSkip = Array.isArray((user as any).skipFiles) ? ((user as any).skipFiles as string[]) : undefined;
+    const userSkip = Array.isArray(u.skipFiles) ? (u.skipFiles as string[]) : undefined;
     const skipFiles = Array.from(new Set([...(userSkip || []), ...defaultSkip]));
 
     // Source maps and outFiles
-    const result: Record<string, unknown> = {
+    type MutableConfig = Partial<LanguageSpecificLaunchConfig> & { [key: string]: unknown };
+    const result: MutableConfig = {
       type: 'pwa-node',
       request: 'launch',
       name: 'Debug JavaScript/TypeScript',
@@ -334,19 +354,19 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       skipFiles,
       console: 'internalConsole',
       outputCapture: 'std',
-      autoAttachChildProcesses: true,
+      autoAttachChildProcesses: false,
       env: mergedEnv
     };
 
     if (isTS) {
       result.sourceMaps = true;
-      const outFiles = determineOutFiles(program, Array.isArray((user as any).outFiles) ? ((user as any).outFiles as string[]) : undefined);
+      const outFiles = determineOutFiles(program, Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined);
       result.outFiles = outFiles;
       result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
     } else {
-      const sm = Boolean((user as any).sourceMaps);
+      const sm = Boolean(u.sourceMaps as unknown);
       result.sourceMaps = sm;
-      const userOut = Array.isArray((user as any).outFiles) ? ((user as any).outFiles as string[]) : undefined;
+      const userOut = Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined;
       if (sm) {
         result.outFiles = determineOutFiles(program, userOut);
         result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
@@ -357,34 +377,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     }
 
     // Runtime selection and args with overrides and idempotency
-    const runtimeExecutableOverride = (user as any).runtimeExecutable as string | undefined;
-    const userRuntimeArgs = Array.isArray((user as any).runtimeArgs) ? ((user as any).runtimeArgs as string[]) : [];
+    const runtimeExecutableOverride = typeof u.runtimeExecutable === 'string' ? (u.runtimeExecutable as string) : undefined;
+    const userRuntimeArgs = Array.isArray(u.runtimeArgs) ? (u.runtimeArgs as string[]) : [];
 
-    const build = async () => {
-      // Determine runtimeExecutable
-      let runtimeExecutable: string;
-      if (typeof runtimeExecutableOverride === 'string' && runtimeExecutableOverride.length > 0) {
-        runtimeExecutable = runtimeExecutableOverride;
-      } else {
-        runtimeExecutable = await this.determineRuntimeExecutable(isTS);
-      }
-
-      // Determine runtimeArgs
-      const runtimeArgs = await this.determineRuntimeArgs(isTS, {
-        ...user,
-        program,
-        cwd,
-        runtimeExecutable: runtimeExecutableOverride,
-        runtimeArgs: userRuntimeArgs
-      });
-
-      result.runtimeExecutable = runtimeExecutable;
-      if (runtimeArgs.length > 0) {
-        result.runtimeArgs = runtimeArgs;
-      }
-
-      return result as LanguageSpecificLaunchConfig;
-    };
 
     // Note: transformLaunchConfig is not async in the interface; however our internal
     // helpers are async. Since we cannot change the signature, we synchronously block
@@ -449,11 +444,48 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     }
 
     // Append any user-provided args last and normalize/dedupe
-    const finalArgs = this.normalizeAndDedupeArgs([...computedArgs, ...userRuntimeArgs]);
+    let finalArgs = this.normalizeAndDedupeArgs([...computedArgs, ...userRuntimeArgs]);
 
-    (result as any).runtimeExecutable = runtimeExecutableSync;
+    // Do not force Node inspector flags here; rely on adapter's stopOnEntry behavior.
+
+    result.runtimeExecutable = runtimeExecutableSync;
     if (finalArgs.length > 0) {
-      (result as any).runtimeArgs = finalArgs;
+      result.runtimeArgs = finalArgs;
+    }
+    // Normalize Node inspector flags and enable single-session adoption in js-debug.
+    // If an --inspect/--inspect-brk flag is present, ensure it's explicit with a port
+    // and set attachSimplePort so js-debug adopts the target in this same DAP session
+    // (avoiding a reverse 'startDebugging' request).
+    if (runtimeExecutableSync === 'node') {
+      const findInspectIndex = () =>
+        finalArgs.findIndex(
+          (a) =>
+            a === '--inspect' ||
+            a === '--inspect-brk' ||
+            a.startsWith('--inspect=') ||
+            a.startsWith('--inspect-brk=')
+        );
+      const idx = findInspectIndex();
+      if (idx !== -1) {
+        let port = 9229;
+        const arg = finalArgs[idx];
+        const m = arg.match(/^--inspect(?:-brk)?=(\d+)$/);
+        if (m) {
+          const p = Number(m[1]);
+          if (!Number.isNaN(p) && p > 0) port = p;
+        } else {
+          // Promote to explicit port for consistency and reliable auto-attach
+          finalArgs[idx] = `--inspect-brk=${port}`;
+          result.runtimeArgs = finalArgs;
+        }
+        (result as MutableConfig).attachSimplePort = port;
+      } else if (stopOnEntry === true) {
+        // Ensure a deterministic single-session stop on entry when requested
+        const port = 9229;
+        finalArgs = [...finalArgs, `--inspect-brk=${port}`];
+        result.runtimeArgs = finalArgs;
+        (result as MutableConfig).attachSimplePort = port;
+      }
     }
 
     return result as LanguageSpecificLaunchConfig;
@@ -473,22 +505,25 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   async sendDapRequest<T extends DebugProtocol.Response>(command: string, args?: unknown): Promise<T> {
     // Minimal validation only; transport handled by ProxyManager
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const logger = this.dependencies.logger;
       logger?.debug?.(`sendDapRequest: ${command}`);
 
       // Clone top-level and nested source to avoid mutating original args
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const req: any = args
-        ? {
-            ...(args as any),
-            source: (args as any)?.source ? { ...(args as any).source } : undefined
-          }
-        : undefined;
+      let req: Record<string, unknown> | undefined;
+      if (args && typeof args === 'object') {
+        const base = args as Record<string, unknown>;
+        const source = base.source && typeof base.source === 'object'
+          ? { ...(base.source as Record<string, unknown>) }
+          : undefined;
+        req = { ...base, source };
+      }
 
-      if (command === 'setBreakpoints' && req?.source?.path && typeof req.source.path === 'string') {
-        // Normalize to absolute path (validation only)
-        req.source.path = path.resolve(req.source.path);
+      if (command === 'setBreakpoints' && req && typeof req.source === 'object' && req.source) {
+        const src = req.source as Record<string, unknown>;
+        const p = src.path;
+        if (typeof p === 'string') {
+          src.path = path.resolve(p);
+        }
       }
     } catch {
       // ignore validation/logging errors
@@ -499,12 +534,10 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   }
 
   handleDapEvent(event: DebugProtocol.Event): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const body: any = (event as any)?.body ?? {};
+    const body: Record<string, unknown> = (event.body as Record<string, unknown>) ?? {};
 
     // Optional trace logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this as any)?.dependencies?.logger?.debug?.(`DAP event: ${event.event}`);
+    this.dependencies?.logger?.debug?.(`DAP event: ${event.event}`);
 
     switch (event.event) {
       case 'output': {
@@ -514,8 +547,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         break;
       }
       case 'stopped': {
-        if (body?.threadId != null) {
-          this.currentThreadId = body.threadId as number;
+        {
+          const maybeTid = (body as { threadId?: unknown }).threadId;
+          if (typeof maybeTid === 'number') {
+            this.currentThreadId = maybeTid;
+          }
         }
         this.transitionTo(AdapterState.DEBUGGING);
         break;
@@ -537,7 +573,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     this.emit(event.event as string, body);
   }
 
-  handleDapResponse(_response: DebugProtocol.Response): void {
+  handleDapResponse(): void {
     // No-op for Task 1
   }
 
@@ -663,13 +699,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // Warn when no TS runner found
     try {
       // Prefer dependency logger if present
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const logger = this.dependencies.logger;
       if (logger && typeof logger.warn === 'function') {
         logger.warn('TypeScript file detected but no TS runner found. Install tsx or ts-node for best experience.');
       } else {
         // Fallback to console
-        // eslint-disable-next-line no-console
         console.warn('TypeScript file detected but no TS runner found. Install tsx or ts-node for best experience.');
       }
     } catch {

@@ -4,6 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { 
   IProcess, 
   IProcessLauncher, 
@@ -24,7 +26,7 @@ class ProcessAdapter extends EventEmitter implements IProcess {
   private _signalCode: string | null = null;
   protected childProcessListeners: Array<{ event: string; listener: (...args: any[]) => void }> = []; // eslint-disable-line @typescript-eslint/no-explicit-any
   
-  constructor(protected childProcess: IChildProcess) {
+  constructor(public readonly childProcess: IChildProcess) {
     super();
     
     // Create event handlers
@@ -200,8 +202,9 @@ export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
 
 /**
  * Proxy process adapter that adds proxy-specific functionality
+ * Does NOT extend ProcessAdapter to avoid double message handling
  */
-class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
+class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
   private initializationPromise?: Promise<void>;
   private initializationResolve?: () => void;
   private initializationReject?: (error: Error) => void;
@@ -209,15 +212,58 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
   private initializationCleanup?: () => void;
   private disposed = false;
   private promiseId: string;
+  protected childProcessListeners: Array<{ event: string; listener: (...args: any[]) => void }> = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+  private _exitCode: number | null = null;
+  private _signalCode: string | null = null;
 
   constructor(
-    childProcess: IChildProcess,
+    public readonly childProcess: IChildProcess,
     public readonly sessionId: string
   ) {
-    super(childProcess);
+    super();
 
     // Create a unique ID for this adapter's promises for debugging
     this.promiseId = `ProxyProcess-${sessionId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Set up event handlers
+    const exitHandler = (code: number | null, signal: string | null) => {
+      this._exitCode = code;
+      this._signalCode = signal;
+      this.emit('exit', code, signal);
+    };
+    
+    const closeHandler = (code: number | null, signal: string | null) => {
+      this.emit('close', code, signal);
+    };
+    
+    const errorHandler = (error: Error) => {
+      this.emit('error', error);
+    };
+    
+    const spawnHandler = () => {
+      this.emit('spawn');
+    };
+    
+    // IMPORTANT: Forward messages from childProcess to ProxyManager
+    const messageHandler = (message: unknown) => {
+      this.emit('message', message);
+    };
+    
+    // Add listeners and track them
+    childProcess.on('exit', exitHandler);
+    childProcess.on('close', closeHandler);
+    childProcess.on('error', errorHandler);
+    childProcess.on('spawn', spawnHandler);
+    childProcess.on('message', messageHandler);
+    
+    // Track all listeners for cleanup
+    this.childProcessListeners.push(
+      { event: 'exit', listener: exitHandler },
+      { event: 'close', listener: closeHandler },
+      { event: 'error', listener: errorHandler },
+      { event: 'spawn', listener: spawnHandler },
+      { event: 'message', listener: messageHandler }
+    );
 
     // NO promise creation here - wait for waitForInitialization()
 
@@ -380,9 +426,61 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
     this.childProcessListeners = [];
   }
   
+  get pid(): number | undefined {
+    return this.childProcess.pid;
+  }
+  
+  get stdin(): NodeJS.WritableStream | null {
+    return this.childProcess.stdin;
+  }
+  
+  get stdout(): NodeJS.ReadableStream | null {
+    return this.childProcess.stdout;
+  }
+  
+  get stderr(): NodeJS.ReadableStream | null {
+    return this.childProcess.stderr;
+  }
+  
+  get killed(): boolean {
+    return this.childProcess.killed;
+  }
+  
+  get exitCode(): number | null {
+    return this._exitCode;
+  }
+  
+  get signalCode(): string | null {
+    return this._signalCode;
+  }
+  
+  send(message: unknown): boolean {
+    // The IChildProcess interface only has send(message) - one parameter
+    if (typeof this.childProcess.send === 'function') {
+      const result = this.childProcess.send(message);
+      return result;
+    } else {
+      return false;
+    }
+  }
+  
   sendCommand(command: object): void {
     // Send object directly - Node.js IPC will handle serialization
-    this.send(command);
+    try {
+      const result = this.send(command);
+      // Log the result for debugging
+      if (typeof result === 'boolean') {
+        if (!result) {
+          // Log details about why send failed
+          const killed = this.killed;
+          const hasChildProcess = !!this.childProcess;
+          const childProcessKilled = hasChildProcess ? this.childProcess.killed : 'N/A';
+          throw new Error(`Failed to send command via IPC. Send returned false. Adapter killed: ${killed}, Has childProcess: ${hasChildProcess}, Child killed: ${childProcessKilled}`);
+        }
+      }
+    } catch (error) {
+      throw new Error(`IPC send threw error: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   
   async waitForInitialization(timeout: number = 30000): Promise<void> {
@@ -419,14 +517,11 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
       this.failInitialization(new Error('Process killed during initialization'));
     }
     
-    const result = super.kill(signal);
-    
-    // Ensure disposal happens after kill
-    if (result) {
-      this.once('exit', () => this.dispose());
+    try {
+      return this.childProcess.kill(signal);
+    } catch {
+      return false;
     }
-    
-    return result;
   }
 }
 
@@ -434,7 +529,10 @@ class ProxyProcessAdapter extends ProcessAdapter implements IProxyProcess {
  * Production implementation of IProxyProcessLauncher
  */
 export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
-  constructor(private processLauncher: IProcessLauncher) {}
+  constructor(
+    private processLauncher: IProcessLauncher,
+    private processManager: IProcessManager
+  ) {}
 
   launchProxy(
     proxyScriptPath: string,
@@ -466,23 +564,27 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     delete processEnv.VITEST;
     delete processEnv.JEST_WORKER_ID;
 
+    // Ensure the proxy runs from the project root directory, not VS Code's directory
+    // This is critical for IPC and path resolution to work correctly
+    const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+    
     const options: IProcessOptions = {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions IPC compatibility
       env: processEnv,
-      cwd: process.cwd(), // Ensure proxy runs from the MCP server's working directory
+      cwd: projectRoot, // Use project root instead of process.cwd() which might be VS Code's directory
       // Create new process group on Unix systems to ensure all child processes can be killed together
       detached: process.platform !== 'win32'
     };
 
-    const launchedProcess = this.processLauncher.launch(
+    // Get the raw child process directly to avoid double-wrapping
+    const childProcess = this.processManager.spawn(
       process.execPath,
       args,
       options
     );
-
-    // Cast to ProcessAdapter to access the underlying child process
-    const processAdapter = launchedProcess as ProcessAdapter;
-    return new ProxyProcessAdapter(processAdapter['childProcess'], sessionId);
+    
+    // Create the proxy process adapter with the raw child process
+    return new ProxyProcessAdapter(childProcess, sessionId);
   }
 
 }
@@ -507,6 +609,6 @@ export class ProcessLauncherFactoryImpl {
   
   createProxyProcessLauncher(): IProxyProcessLauncher {
     const processLauncher = this.createProcessLauncher();
-    return new ProxyProcessLauncherImpl(processLauncher);
+    return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
   }
 }

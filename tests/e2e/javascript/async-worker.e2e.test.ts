@@ -69,7 +69,7 @@ describe('E2E JS - async + worker_threads (multi-thread)', () => {
     const launchCfg = adapter.transformLaunchConfig({
       program: mainProgram,
       cwd: fixturesDir,
-      stopOnEntry: false,
+      stopOnEntry: true,
       args: []
     } as unknown as any);
 
@@ -117,8 +117,11 @@ describe('E2E JS - async + worker_threads (multi-thread)', () => {
       sourceModified: false
     });
 
-    await proxyManager.sendDapRequest('launch', { ...launchCfg });
+    // Align with VS Code behavior: send exception filters during configuration phase
+    await proxyManager.sendDapRequest('setExceptionBreakpoints', { filters: [] });
+    
     await proxyManager.sendDapRequest('configurationDone', {});
+    await proxyManager.sendDapRequest('launch', { ...launchCfg });
   }, 90000);
 
   afterAll(async () => {

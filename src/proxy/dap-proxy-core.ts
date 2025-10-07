@@ -202,13 +202,21 @@ export class ProxyRunner {
   private setupIPCCommunication(processMessage: (message: string) => Promise<void>): void {
     this.logger.info('[ProxyRunner] Setting up IPC communication');
     
+    // Test if IPC channel exists
+    if (typeof process.send !== 'function') {
+      this.logger.error('[ProxyRunner] ERROR: process.send is not a function - IPC channel not available!');
+      return;
+    }
+    
+    this.logger.info('[ProxyRunner] IPC channel confirmed available');
+    
     this.messageHandler = async (message: unknown) => {
-      this.logger.debug('[ProxyRunner] IPC message received');
+      this.logger.info('[ProxyRunner] IPC message received (raw):', JSON.stringify(message).substring(0, 200));
       
       if (typeof message === 'string') {
         await processMessage(message);
       } else if (typeof message === 'object' && message !== null) {
-        this.logger.debug('[ProxyRunner] Received object message, stringifying:', message);
+        this.logger.info('[ProxyRunner] Received object message, stringifying');
         try {
           await processMessage(JSON.stringify(message));
         } catch (e) {
@@ -223,6 +231,7 @@ export class ProxyRunner {
     };
 
     process.on('message', this.messageHandler);
+    this.logger.info('[ProxyRunner] IPC message handler attached');
   }
 
   /**

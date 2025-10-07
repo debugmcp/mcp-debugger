@@ -38,6 +38,13 @@ export class DapProxyWorker {
   private requestTracker: CallbackRequestTracker;
   private processManager: GenericAdapterManager | null = null;
   private connectionManager: DapConnectionManager | null = null;
+  private isJavaScriptAdapter: boolean = false;
+  private jsInitialized: boolean = false;
+  private jsInitResponded: boolean = false;
+  private jsConfigDone: boolean = false;
+  private jsStartSent: boolean = false;
+  private jsPending: DapCommandPayload[] = [];
+  private preConnectQueue: DapCommandPayload[] = [];
 
   constructor(private dependencies: DapProxyDependencies) {
     this.requestTracker = new CallbackRequestTracker(
@@ -97,6 +104,15 @@ export class DapProxyWorker {
       await this.dependencies.fileSystem.ensureDir(path.dirname(logPath));
       this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
+
+      // Enable per-session DAP frame tracing for diagnostics
+      try {
+        const tracePath = path.join(payload.logDir, `dap-trace-${payload.sessionId}.ndjson`);
+        process.env.DAP_TRACE_FILE = tracePath;
+        this.logger.info(`[Worker] DAP trace enabled at: ${tracePath}`);
+      } catch (e) {
+        this.logger.warn?.('[Worker] Failed to enable DAP trace file', e as Error);
+      }
 
       // Create managers with logger
       // Use generic adapter manager if adapter command is provided, otherwise fall back to Python
@@ -256,20 +272,25 @@ export class DapProxyWorker {
       this.setupDapEventHandlers();
 
       // Check if this is a JavaScript adapter by looking for js-debug in the command
-      const isJavaScriptAdapter = !!(payload.adapterCommand && 
+      this.isJavaScriptAdapter = !!(payload.adapterCommand && 
         payload.adapterCommand.args.some(arg => arg.includes('js-debug')));
 
-      // Initialize DAP session with correct adapterId
-      await this.connectionManager!.initializeSession(
-        this.dapClient,
-        payload.sessionId,
-        isJavaScriptAdapter ? 'javascript' : 'python'
-      );
-
-      if (isJavaScriptAdapter) {
-        // JavaScript adapter: Skip automatic launch, test will send proper config
-        this.logger!.info('[Worker] JavaScript adapter detected, skipping automatic launch. Test will send launch configuration.');
+      if (this.isJavaScriptAdapter) {
+        // JavaScript adapter: do not auto-initialize or auto-launch; client will drive handshake
+        this.logger!.info('[Worker] JavaScript adapter detected; not sending initialize/launch. Client will drive handshake.');
+        // Mark connected so we can accept DAP requests immediately
+        this.state = ProxyState.CONNECTED;
+        // Notify transport readiness to parent
+        this.sendStatus('adapter_connected');
+        await this.drainPreConnectQueue();
       } else {
+        // Initialize DAP session with correct adapterId (python legacy path)
+        await this.connectionManager!.initializeSession(
+          this.dapClient,
+          payload.sessionId,
+          'python'
+        );
+        
         // Python/other adapters: Send automatic launch request
         // DIAGNOSTIC: Log the scriptPath before sending to connection manager
         this.logger!.info('[Worker] DIAGNOSTIC: About to send launch request with scriptPath:', payload.scriptPath);
@@ -301,7 +322,15 @@ export class DapProxyWorker {
 
     this.connectionManager.setupEventHandlers(this.dapClient, {
       onInitialized: async () => {
-        await this.handleInitializedEvent();
+        if (this.isJavaScriptAdapter) {
+          this.logger!.info('[Worker] DAP "initialized" (JS) received; forwarding event and draining queue.');
+          this.jsInitialized = true;
+          this.sendDapEvent('initialized', {});
+          // Do not auto-send configurationDone here; client/test will drive it and we will sequence via drainJsQueue
+          await this.drainJsQueue();
+        } else {
+          await this.handleInitializedEvent();
+        }
       },
       onOutput: (body) => {
         this.logger!.debug('[Worker] DAP event: output', body);
@@ -378,12 +407,77 @@ export class DapProxyWorker {
    * Handle DAP command
    */
   async handleDapCommand(payload: DapCommandPayload): Promise<void> {
-    if (this.state !== ProxyState.CONNECTED || !this.dapClient) {
-      this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
+    // If shutting down, fail fast
+    if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
+      this.sendDapResponse(payload.requestId, false, undefined, 'Proxy is shutting down');
+      return;
+    }
+
+    // Queue or fail-fast any DAP requests until the transport is connected
+    if (!this.dapClient || this.state !== ProxyState.CONNECTED) {
+      // Detect if the planned adapter is js-debug (queue) or not (fail-fast)
+      const isJsPlanned =
+        !!(this.currentInitPayload &&
+          (this.currentInitPayload as unknown as { adapterCommand?: { args?: unknown[] } }).adapterCommand &&
+          Array.isArray((this.currentInitPayload as unknown as { adapterCommand?: { args?: unknown[] } }).adapterCommand!.args) &&
+          (this.currentInitPayload as unknown as { adapterCommand?: { args?: string[] } }).adapterCommand!.args!.some(
+            (a) => typeof a === 'string' && (a.includes('js-debug') || a.includes('vsDebugServer.cjs'))
+          ));
+
+      if (isJsPlanned) {
+        this.logger?.info(`[Worker] Queuing '${payload.dapCommand}' until DAP client connected (js-debug).`);
+        this.preConnectQueue.push(payload);
+      } else {
+        this.logger?.info(`[Worker] Rejecting '${payload.dapCommand}' before connection (non-JS adapter): DAP client not connected`);
+        this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
+      }
       return;
     }
 
     try {
+      // For JS adapter, gate all non-'initialize' requests until initialize response is received
+      if (this.isJavaScriptAdapter && !this.jsInitResponded && payload.dapCommand !== 'initialize') {
+        this.logger!.info(`[Worker] Queuing '${payload.dapCommand}' until 'initialize' response (JS adapter).`);
+        this.jsPending.push(payload);
+        return;
+      }
+
+      // For JS adapter, gate configuration requests until 'initialized' to follow DAP spec
+      // Allow initialize and launch/attach to pass (some adapters emit 'initialized' after launch)
+      if (this.isJavaScriptAdapter && !this.jsInitialized) {
+        const configCmds = new Set<string>([
+          'setBreakpoints',
+          'setFunctionBreakpoints',
+          'setExceptionBreakpoints',
+          'setDataBreakpoints',
+          'setInstructionBreakpoints',
+          'configurationDone'
+        ]);
+        if (configCmds.has(payload.dapCommand)) {
+          this.logger!.info(`[Worker] Queuing '${payload.dapCommand}' until 'initialized' (JS adapter).`);
+          this.jsPending.push(payload);
+          return;
+        }
+      }
+
+
+
+
+
+      // For JS adapter, if a start (launch/attach) arrives before configurationDone, enforce strict order:
+      // enqueue a silent configurationDone first, then the start, and drain in order.
+      if (this.isJavaScriptAdapter && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach') && !this.jsConfigDone) {
+        this.logger!.info(`[Worker] JS: deferring '${payload.dapCommand}' until configurationDone (strict order)`);
+        const hasQueuedConfigDone = this.jsPending.some(p => p.dapCommand === 'configurationDone');
+        if (!hasQueuedConfigDone) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          this.jsPending.push({ ...(payload as any), requestId: `__silent_configDone_${Date.now()}`, dapCommand: 'configurationDone', dapArgs: {}, __silent: true } as any);
+        }
+        this.jsPending.push(payload);
+        await this.drainJsQueue();
+        return;
+      }
+
       // Track request
       this.requestTracker.track(payload.requestId, payload.dapCommand);
 
@@ -392,8 +486,37 @@ export class DapProxyWorker {
         this.logger!.info(`[Worker] Sending 'setBreakpoints' command. Args:`, payload.dapArgs);
       }
 
+      // For JavaScript adapter launch, add runtimeExecutable from executablePath
+      let dapArgs = payload.dapArgs;
+      if (this.isJavaScriptAdapter && payload.dapCommand === 'launch' && this.currentInitPayload?.executablePath) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const launchArgs = dapArgs as any;
+        if (!launchArgs.runtimeExecutable) {
+          // Use the full path to Node.js that was provided during initialization
+          launchArgs.runtimeExecutable = this.currentInitPayload.executablePath;
+          this.logger!.info(`[Worker] Added runtimeExecutable to launch args: ${launchArgs.runtimeExecutable}`);
+          dapArgs = launchArgs;
+        }
+      }
+
       // Send request
-      const response = await this.dapClient.sendRequest(payload.dapCommand, payload.dapArgs);
+      const response = await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
+      // Mark start sent for JS when we issue start requests
+      if (this.isJavaScriptAdapter && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+        this.jsStartSent = true;
+      }
+      // Do not synthesize 'stopped' events; rely on adapter to emit real events after pause.
+
+      // Mark initialize response received (JS path) to allow subsequent requests to flow to adapter
+      if (this.isJavaScriptAdapter && payload.dapCommand === 'initialize') {
+        this.jsInitResponded = true;
+      }
+      // Mark configurationDone as completed and opportunistically drain any queued launch
+      if (this.isJavaScriptAdapter && payload.dapCommand === 'configurationDone') {
+        this.jsConfigDone = true;
+        // Try to drain any queued launch/attach now that config is done
+        await this.drainJsQueue();
+      }
 
       // Complete tracking
       this.requestTracker.complete(payload.requestId);
@@ -427,6 +550,16 @@ export class DapProxyWorker {
 
       // Send response
       this.sendDapResponse(payload.requestId, true, response);
+      // For JS single-session flows, proactively try to surface a 'stopped' by pausing first thread
+      if (this.isJavaScriptAdapter && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+        try {
+          // Now that a start request has gone out, drain any queued configuration (e.g., configurationDone)
+          await this.drainJsQueue();
+          await this.ensureInitialStop();
+        } catch {
+          // ignore
+        }
+      }
     } catch (error) {
       this.requestTracker.complete(payload.requestId);
       const message = error instanceof Error ? error.message : String(error);
@@ -486,6 +619,148 @@ export class DapProxyWorker {
 
     this.state = ProxyState.TERMINATED;
     this.logger?.info('[Worker] Shutdown sequence completed.');
+  }
+
+  private async sendJsQueuedLaunches(): Promise<void> {
+    if (!this.dapClient) return;
+    if (!this.jsPending.length) return;
+    const launches = this.jsPending.filter(p => p.dapCommand === 'launch' || p.dapCommand === 'attach');
+    if (!launches.length) return;
+    this.logger!.info('[Worker] Flushing queued JS launch/attach requests after initialize response. Count:', launches.length);
+    // Remove these from the pending queue
+    this.jsPending = this.jsPending.filter(p => !(p.dapCommand === 'launch' || p.dapCommand === 'attach'));
+    for (const payload of launches) {
+      try {
+        this.requestTracker.track(payload.requestId, payload.dapCommand);
+        const response = await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
+        // Mark start sent when launching/attaching from queue
+        if (this.isJavaScriptAdapter && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+          this.jsStartSent = true;
+        }
+        this.requestTracker.complete(payload.requestId);
+        this.sendDapResponse(payload.requestId, true, response);
+        if (this.isJavaScriptAdapter && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+          try {
+            await this.ensureInitialStop();
+          } catch {
+            // ignore ensure stop errors
+          }
+        }
+      } catch (error) {
+        this.requestTracker.complete(payload.requestId);
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger!.error(`[Worker] JS queued launch/attach ${payload.dapCommand} failed:`, { error: message });
+        this.sendDapResponse(payload.requestId, false, undefined, message);
+      }
+    }
+  }
+
+  private async drainJsQueue(): Promise<void> {
+    if (!this.dapClient) return;
+    if (!this.jsPending.length) return;
+    this.logger!.info('[Worker] Draining queued JS DAP requests after initialized. Count:', this.jsPending.length);
+    
+    const isConfig = (cmd: string) => (
+      cmd === 'setBreakpoints' ||
+      cmd === 'setFunctionBreakpoints' ||
+      cmd === 'setExceptionBreakpoints' ||
+      cmd === 'setDataBreakpoints' ||
+      cmd === 'setInstructionBreakpoints'
+    );
+    
+    const configs = this.jsPending.filter(p => isConfig(p.dapCommand));
+    const configDone = this.jsPending.filter(p => p.dapCommand === 'configurationDone');
+    const launches = this.jsPending.filter(p => p.dapCommand === 'launch' || p.dapCommand === 'attach');
+    const others = this.jsPending.filter(p => !isConfig(p.dapCommand) && p.dapCommand !== 'configurationDone' && p.dapCommand !== 'launch' && p.dapCommand !== 'attach');
+    
+    // JS (js-debug) strict order: configs -> configurationDone -> starts -> others
+    const ordered = [...configs, ...configDone, ...launches, ...others];
+    // Clear queue after ordering
+    this.jsPending = [];
+    
+    for (const payload of ordered) {
+      try {
+        const silent = ((payload as unknown as { __silent?: boolean }).__silent === true);
+        if (silent) {
+          await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
+          if (payload.dapCommand === 'configurationDone') {
+            this.jsConfigDone = true;
+          }
+          // Do not send a parent response for silently deferred requests
+          continue;
+        }
+
+        this.requestTracker.track(payload.requestId, payload.dapCommand);
+        const response = await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
+        // Mark start sent when launching/attaching from queue
+        if (this.isJavaScriptAdapter && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+          this.jsStartSent = true;
+        }
+        // Track configDone completion
+        if (payload.dapCommand === 'configurationDone') {
+          this.jsConfigDone = true;
+        }
+        this.requestTracker.complete(payload.requestId);
+        this.sendDapResponse(payload.requestId, true, response);
+        if (this.isJavaScriptAdapter && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+          try {
+            await this.ensureInitialStop();
+          } catch {
+            // ignore ensure stop errors
+          }
+        }
+      } catch (error) {
+        this.requestTracker.complete(payload.requestId);
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger!.error(`[Worker] JS queued DAP command ${payload.dapCommand} failed:`, { error: message });
+        this.sendDapResponse(payload.requestId, false, undefined, message);
+      }
+    }
+  }
+
+  private async ensureInitialStop(timeoutMs: number = 12000): Promise<void> {
+    if (!this.dapClient) return;
+    const start = Date.now();
+
+    // Do not issue an immediate pause on 'thread' events for js-debug; wait for a genuine 'stopped' or use polling fallback.
+
+    try {
+      while (Date.now() - start < timeoutMs) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const threadsResp: any = await this.dapClient.sendRequest('threads', {});
+          const first = threadsResp?.body?.threads?.[0]?.id;
+          if (typeof first === 'number' && first > 0) {
+            const pauseTid = first;
+            this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
+            try {
+              await this.dapClient.sendRequest('pause', { threadId: pauseTid });
+              // Rely on adapter to emit a real 'stopped' event after pause.
+            } catch {
+              // ignore pause errors
+            }
+            return;
+          }
+        } catch {
+          // ignore threads errors
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      this.logger?.warn('[Worker] ensureInitialStop: no threads discovered within timeout');
+    } finally {
+      // nothing to unsubscribe
+    }
+  }
+
+  private async drainPreConnectQueue(): Promise<void> {
+    if (!this.dapClient) return;
+    if (!this.preConnectQueue.length) return;
+    this.logger!.info('[Worker] Draining pre-connect DAP request queue. Count:', this.preConnectQueue.length);
+    const queued = [...this.preConnectQueue];
+    this.preConnectQueue = [];
+    for (const payload of queued) {
+      await this.handleDapCommand(payload);
+    }
   }
 
   // Message sending helpers

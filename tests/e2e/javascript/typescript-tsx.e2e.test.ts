@@ -70,7 +70,7 @@ describe('E2E JS/TS - TypeScript via tsx (source maps)', () => {
     const launchCfg = adapter.transformLaunchConfig({
       program,
       cwd: fixturesDir,
-      stopOnEntry: false,
+      stopOnEntry: true,
       args: []
     } as unknown as any);
 
@@ -121,8 +121,8 @@ describe('E2E JS/TS - TypeScript via tsx (source maps)', () => {
       sourceModified: false
     });
 
-    await proxyManager.sendDapRequest('launch', { ...launchCfg });
     await proxyManager.sendDapRequest('configurationDone', {});
+    await proxyManager.sendDapRequest('launch', { ...launchCfg });
   }, 90000);
 
   afterAll(async () => {
