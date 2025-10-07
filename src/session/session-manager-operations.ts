@@ -801,7 +801,7 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.warn(`[SM stepOver ${sessionId}] Not paused. State: ${session.state}`);
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
+    if (typeof threadId !== 'number') {
       this.logger.warn(`[SM stepOver ${sessionId}] No current thread ID.`);
       return { success: false, error: 'No current thread ID', state: session.state };
     }
@@ -862,7 +862,7 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.warn(`[SM stepInto ${sessionId}] Not paused. State: ${session.state}`);
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
+    if (typeof threadId !== 'number') {
       this.logger.warn(`[SM stepInto ${sessionId}] No current thread ID.`);
       return { success: false, error: 'No current thread ID', state: session.state };
     }
@@ -927,7 +927,7 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.warn(`[SM stepOut ${sessionId}] Not paused. State: ${session.state}`);
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
+    if (typeof threadId !== 'number') {
       this.logger.warn(`[SM stepOut ${sessionId}] No current thread ID.`);
       return { success: false, error: 'No current thread ID', state: session.state };
     }
@@ -990,7 +990,7 @@ export class SessionManagerOperations extends SessionManagerData {
       );
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
+    if (typeof threadId !== 'number') {
       this.logger.warn(
         `[SessionManager continue] No current thread ID for session ${sessionId}.`
       );
@@ -1110,7 +1110,7 @@ export class SessionManagerOperations extends SessionManagerData {
     if (frameId === undefined) {
       try {
         const threadId = session.proxyManager.getCurrentThreadId();
-        if (!threadId) {
+        if (typeof threadId !== 'number') {
           this.logger.warn(
             `[SM evaluateExpression ${sessionId}] No current thread ID to get stack trace`
           );
