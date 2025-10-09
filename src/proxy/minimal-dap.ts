@@ -57,11 +57,7 @@ export class MinimalDapClient extends EventEmitter {
   private childSessions = new Map<string, MinimalDapClient>();
   private activeChild: MinimalDapClient | null = null;
   private storedBreakpoints = new Map<string, DebugProtocol.SourceBreakpoint[]>();
-  private lastInspectorPort?: number;
-  private lastPendingTargetId?: string;
-  private lastPendingType?: string;
   private initializedSeen = false;
-  private configDoneSent = false;
 
   // Adapter policy (selected per reverse startDebugging request)
   private activePolicy?: AdapterPolicy;
@@ -83,11 +79,7 @@ export class MinimalDapClient extends EventEmitter {
   private childConfigComplete = false;
   // Prevent handling multiple concurrent startDebugging requests (js-debug may send attach+launch)
   private adoptionInProgress = false;
-
-  // JS attach/launch mode tracking and guards
-  private parentStartMode: 'attach' | 'launch' | null = null;
-  private parentPortAttachPerformed = false;
-  private adoptionStarted = false;
+  
   private supportsConfigDone = true;
 
   constructor(host: string, port: number) {
@@ -191,10 +183,6 @@ export class MinimalDapClient extends EventEmitter {
         this.pendingRequests.delete(response.request_seq);
         
         if (response.success) {
-          // Track configurationDone acknowledgement
-          if (response.command === 'configurationDone') {
-            this.configDoneSent = true;
-          }
           // Cache capabilities from initialize response
           if (response.command === 'initialize') {
             try {
@@ -266,9 +254,6 @@ export class MinimalDapClient extends EventEmitter {
               if (pendingId && typeof pendingId === 'string') {
                 logger.info(`[MinimalDapClient] ✅ VALID pendingTargetId: ${pendingId} - Starting child adoption`);
                 
-                // mark adoption started to suppress late parent attaches
-                this.adoptionStarted = true;
-                this.lastPendingTargetId = pendingId;
 
                 // If we're already adopting or have an active child, ignore additional startDebugging requests
                 if (this.adoptionInProgress || this.activeChild || this.childSessions.size > 0) {
@@ -386,152 +371,6 @@ export class MinimalDapClient extends EventEmitter {
     });
   }
 
-  // Inspector port management to avoid EADDRINUSE during tests or concurrent runs
-  private async isPortAvailable(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const srv = net.createServer();
-      srv.once('error', () => {
-        resolve(false);
-      });
-      srv.once('listening', () => {
-        srv.close(() => resolve(true));
-      });
-      srv.listen(port, this.host);
-    });
-  }
-
-  private async findFreePort(): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const srv = net.createServer();
-      srv.once('error', (e) => reject(e));
-      srv.listen(0, this.host, () => {
-        const address = srv.address();
-        const port = typeof address === 'object' && address ? address.port : 0;
-        srv.close(() => resolve(port));
-      });
-    });
-  }
-
-  // Normalize launch args to a unique free inspector port to avoid EADDRINUSE races
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async adjustInspectorPortIfBusy(args: any): Promise<any> {
-    if (!args || typeof args !== 'object') return args;
-    const ra: unknown = Array.isArray(args.runtimeArgs) ? [...args.runtimeArgs] : null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let runtimeArgs: any[] | null = (ra as any[]) ?? null;
-
-    // If caller provided explicit inspector wiring, honor it (don't remap)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const hasAttachSimplePort = Object.prototype.hasOwnProperty.call(args as any, 'attachSimplePort');
-    const hasExplicitInspect =
-      Array.isArray(runtimeArgs) &&
-      runtimeArgs.some((entry) => typeof entry === 'string' && /^--inspect(?:-brk)?(?:=\d+)?$/.test(entry as string));
-
-    // If caller provided explicit inspector wiring, honor it unless the chosen port is busy.
-    if (hasAttachSimplePort || hasExplicitInspect) {
-      // Parse current port (attachSimplePort takes precedence)
-      let currentPort: number | undefined = undefined;
-      if (hasAttachSimplePort) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const p = Number((args as any).attachSimplePort);
-        if (!Number.isNaN(p) && p > 0) currentPort = p;
-      }
-      if (currentPort == null && Array.isArray(runtimeArgs)) {
-        for (const entry of runtimeArgs) {
-          if (typeof entry === 'string') {
-            const m = entry.match(/^--inspect(?:-brk)?=(\d+)$/);
-            if (m) {
-              const p = Number(m[1]);
-              if (!Number.isNaN(p) && p > 0) {
-                currentPort = p;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      // Always remap to a fresh free port to avoid time-of-check/use EADDRINUSE races on CI
-      const newPort = await this.findFreePort();
-      this.lastInspectorPort = newPort;
-
-      // Update runtimeArgs entry if present; otherwise append
-      let updated = false;
-      if (Array.isArray(runtimeArgs)) {
-        for (let i = 0; i < runtimeArgs.length; i++) {
-          const entry = runtimeArgs[i];
-          if (typeof entry === 'string') {
-            const match = entry.match(/^--inspect(-brk)?(?:=(\d+))?$/);
-            if (match) {
-              const isBrk = match[1] === '-brk';
-              runtimeArgs[i] = `${isBrk ? '--inspect-brk' : '--inspect'}=${newPort}`;
-              updated = true;
-              break;
-            }
-            if (/^--inspect(?:-brk)?=/.test(entry)) {
-              const isBrk = entry.startsWith('--inspect-brk=');
-              runtimeArgs[i] = `${isBrk ? '--inspect-brk' : '--inspect'}=${newPort}`;
-              updated = true;
-              break;
-            }
-          }
-        }
-      }
-      if (!updated) {
-        runtimeArgs = Array.isArray(runtimeArgs) ? runtimeArgs : [];
-        runtimeArgs.push(`--inspect-brk=${newPort}`);
-      }
-
-      // Reflect updates
-      args.runtimeArgs = runtimeArgs;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (args as any).attachSimplePort = newPort;
-      logger.info(`[MinimalDapClient] Remapped inspector port ${typeof currentPort === 'number' ? currentPort : 'unknown'} -> ${newPort} to avoid conflicts`);
-      return args;
-    }
-
-    // Always assign a unique free port when using Node inspector to avoid time-of-check/use races
-    const newPort = await this.findFreePort();
-    this.lastInspectorPort = newPort;
-
-    // Detect existing inspect flag (with or without explicit port)
-    let foundInspect = false;
-    if (runtimeArgs) {
-      for (let i = 0; i < runtimeArgs.length; i++) {
-        const entry = runtimeArgs[i];
-        if (typeof entry === 'string') {
-          const m = entry.match(/^--inspect(-brk)?(?:=(\d+))?$/);
-          if (m) {
-            const isBrk = m[1] === '-brk';
-            runtimeArgs[i] = `${isBrk ? '--inspect-brk' : '--inspect'}=${newPort}`;
-            foundInspect = true;
-            break;
-          }
-          // Also handle explicit forms with equals (already covered above), but keep fallback
-          if (/^--inspect(?:-brk)?=/.test(entry)) {
-            const isBrk = entry.startsWith('--inspect-brk=');
-            runtimeArgs[i] = `${isBrk ? '--inspect-brk' : '--inspect'}=${newPort}`;
-            foundInspect = true;
-            break;
-          }
-        }
-      }
-    }
-
-    // If no runtimeArgs or no inspect flag present, ensure we add one
-    if (!runtimeArgs) {
-      runtimeArgs = [`--inspect-brk=${newPort}`];
-    } else if (!foundInspect) {
-      runtimeArgs.push(`--inspect-brk=${newPort}`);
-    }
-
-    // Reflect updates
-    args.runtimeArgs = runtimeArgs;
-    args.attachSimplePort = newPort;
-    logger.info(`[MinimalDapClient] Using unique inspector port ${newPort} to avoid conflicts`);
-    return args;
-  }
-
   private flushDeferredParentConfigDone(): void {
     if (this.parentConfigDoneDeferred) {
       const pending = this.parentConfigDoneDeferred;
@@ -582,85 +421,8 @@ export class MinimalDapClient extends EventEmitter {
     });
   }
 
-  private async tryAdoptInParent(pendingId: string, type: string = 'pwa-node'): Promise<boolean> {
-    // Attempt to attach the pending target directly in this (parent) session.
-    // This avoids spawning a second DAP session and matches js-debug's adoption flow when supported.
-
-    let attached = false;
-    let lastErr: unknown = undefined;
-
-    for (let i = 0; i < 8; i++) {
-      try {
-        logger.info(`[MinimalDapClient] [parent] attach by __pendingTargetId attempt ${i + 1}`);
-        await this.sendRequest('attach', { type, request: 'attach', __pendingTargetId: pendingId, continueOnAttach: true }, 5000);
-        attached = true;
-        break;
-      } catch (e1) {
-        lastErr = e1;
-        const emsg = e1 instanceof Error ? e1.message : String(e1);
-        logger.warn(`[MinimalDapClient] [parent] attach by __pendingTargetId failed: ${emsg}`);
-
-        if (this.lastInspectorPort) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const altArgs: any = {
-              type,
-              request: 'attach',
-              // Provide both for maximum compatibility with js-debug
-              port: this.lastInspectorPort,
-              attachSimplePort: this.lastInspectorPort,
-              // IPv4/IPv6 loopback
-              address: 'localhost',
-              continueOnAttach: true,
-              attachExistingChildren: true
-            };
-            logger.info(`[MinimalDapClient] [parent] attach by port=${this.lastInspectorPort} attempt ${i + 1}`);
-            await this.sendRequest('attach', altArgs, 4000);
-            attached = true;
-            break;
-          } catch (e2) {
-            lastErr = e2;
-            const emsg2 = e2 instanceof Error ? e2.message : String(e2);
-            logger.warn(`[MinimalDapClient] [parent] attach by port=${this.lastInspectorPort} failed: ${emsg2}`);
-          }
-        }
-      }
-      await this.sleep(250);
-    }
-
-    if (attached) {
-      // Route subsequent debuggee-scoped requests to this (parent) session
-      this.activeChild = null;
-
-      // Ensure configurationDone after adoption to finalize configuration in this session
-      try {
-        await this.sendRequest('configurationDone', {});
-      } catch {
-        // ignore
-      }
-
-      // Best-effort to trigger a stopped by pausing the first available thread
-      try {
-        const tid = await this.waitForFirstThreadId();
-        if (typeof tid === 'number') {
-          await this.sendRequest('pause', { threadId: tid });
-        }
-      } catch {
-        // ignore
-      }
-
-      logger.info('[MinimalDapClient] [parent] pending target adopted successfully in parent session');
-      return true;
-    }
-
-    logger.warn(`[MinimalDapClient] [parent] adoption failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
-    return false;
-  }
-
   private async createChildSession(pendingId: string, configuration: Record<string, unknown>, _policy: AdapterPolicy): Promise<void> {
     void _policy;
-    // Mark adoption begun (idempotent)
-    this.adoptionStarted = true;
 
     if (this.childSessions.has(pendingId)) {
       this.activeChild = this.childSessions.get(pendingId)!;
@@ -983,40 +745,6 @@ export class MinimalDapClient extends EventEmitter {
       throw new Error('Client is disconnecting or disconnected');
     }
 
-    // Mode-aware guard for parent attach by inspector port to avoid js-debug DI ambiguity
-    if (command === 'attach') {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const a: any = args;
-        const hasPending = !!(a && typeof a.__pendingTargetId === 'string');
-        const hasPortAttach = !!(a && (typeof a.port === 'number' || typeof a.attachSimplePort === 'number'));
-
-        if (hasPending) {
-          // Always allow adoption attach using __pendingTargetId
-        } else if (hasPortAttach) {
-          // Infer attach mode if first start mode not yet set
-          if (this.parentStartMode == null) {
-            this.parentStartMode = 'attach';
-          }
-          const allowOncePreAdoption =
-            this.parentStartMode === 'attach' &&
-            !this.parentPortAttachPerformed &&
-            !this.adoptionStarted;
-
-          if (allowOncePreAdoption) {
-            this.parentPortAttachPerformed = true;
-            logger.info('[MinimalDapClient] Allowing single parent attach-by-port (attach mode, pre-adoption).');
-          } else {
-            logger.info('[MinimalDapClient] Suppressing parent attach-by-port to avoid js-debug DI ambiguity.');
-            // Fabricate a local success response to satisfy upstream correlation without sending to adapter
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return Promise.resolve({ type: 'response', seq: 0, request_seq: 0, command: 'attach', success: true, body: {} } as any as T);
-          }
-        }
-      } catch {
-        // ignore guard errors, fall through to normal path if parsing fails
-      }
-    }
 
     // Defer parent's configurationDone briefly to allow child session to configure,
     // avoiding immediate resume of the target before adoption completes.
@@ -1095,26 +823,6 @@ export class MinimalDapClient extends EventEmitter {
       }
     }
     
-    // Ensure requested inspector port is available; if not, remap to a free one
-    if (command === 'launch') {
-      try {
-        // For child sessions launched via __pendingTargetId, do NOT mutate runtimeArgs/ports.
-        // Only adjust inspector ports for primary parent launches.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const a: any = args;
-        const hasPending = a && typeof a.__pendingTargetId === 'string';
-        if (!hasPending) {
-          if (this.parentStartMode == null) {
-            this.parentStartMode = 'launch';
-          }
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          args = await this.adjustInspectorPortIfBusy(a as any);
-        }
-      } catch (e) {
-        const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
-        logger.warn(`[MinimalDapClient] adjustInspectorPortIfBusy failed: ${emsg}`);
-      }
-    }
 
     const requestSeq = this.nextSeq++;
     
@@ -1174,55 +882,6 @@ export class MinimalDapClient extends EventEmitter {
       });
       
       // Send the request
-      try {
-        if (command === 'launch') {
-          const a = args as Record<string, unknown> | undefined;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const portCandidate = Number((a as any)?.attachSimplePort);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const type = typeof (a as any)?.type === 'string' ? ((a as any).type as string) : 'pwa-node';
-          if (Number.isFinite(portCandidate) && portCandidate > 0) {
-            this.lastInspectorPort = portCandidate;
-            // Record mode if unset
-            if (this.parentStartMode == null) {
-              this.parentStartMode = 'launch';
-            }
-            // Only perform a parent attach-by-port automatically in ATTACH-driven flows.
-            // For LAUNCH flows, js-debug will manage the session; avoid DI ambiguity.
-            if (this.parentStartMode === 'attach' && !this.adoptionStarted && !this.parentPortAttachPerformed) {
-              setTimeout(() => {
-                try {
-                  if (this.adoptionStarted || this.parentPortAttachPerformed) {
-                    return;
-                  }
-                  this.parentPortAttachPerformed = true;
-                  const attachArgs = {
-                    type,
-                    request: 'attach',
-                    address: 'localhost',
-                    port: portCandidate,
-                    attachExistingChildren: true,
-                    continueOnAttach: true,
-                    attachSimplePort: portCandidate
-                  };
-                  logger.info(`[MinimalDapClient] Performing single parent attach-by-port type='${String(type)}' port=${portCandidate} to initiate child adoption`);
-                  void this.sendRequest('attach', attachArgs).catch((err) => {
-                    const emsg = err instanceof Error ? err.message : String(err);
-                    logger.warn(`[MinimalDapClient] Post-launch parent attach failed: ${emsg}`);
-                  });
-                } catch (e) {
-                  const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
-                  logger.warn(`[MinimalDapClient] Error scheduling parent attach: ${emsg}`);
-                }
-              }, 200);
-            } else {
-              logger.info('[MinimalDapClient] Skipping parent attach in LAUNCH flow or because adoption already started / attach already performed');
-            }
-          }
-        }
-      } catch {
-        // ignore post-launch attach scheduling errors
-      }
       this.appendTrace('out', request);
       const json = JSON.stringify(request);
       const contentLength = Buffer.byteLength(json, 'utf8');
