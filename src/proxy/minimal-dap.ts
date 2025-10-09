@@ -271,7 +271,9 @@ export class MinimalDapClient extends EventEmitter {
                 const adapterType: string | undefined = typeof cfg?.type === 'string' ? (cfg.type as string) : undefined;
                 const policy: AdapterPolicy = adapterType === 'pwa-node' ? JsDebugAdapterPolicy : DefaultAdapterPolicy;
                 this.activePolicy = policy;
-                this.deferParentConfigDoneActive = !!policy.shouldDeferParentConfigDone(cfg as Record<string, unknown>);
+                // DISABLED: Deferring configDone causes module entry pause
+                // The probe shows immediate configDone triggers proper flow
+                this.deferParentConfigDoneActive = false; // !!policy.shouldDeferParentConfigDone(cfg as Record<string, unknown>);
                 
                 logger.info(`[MinimalDapClient] 🎯 Child session policy:`, {
                   adapterType,
