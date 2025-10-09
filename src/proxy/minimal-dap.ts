@@ -163,6 +163,23 @@ export class MinimalDapClient extends EventEmitter {
       debugInfo.event = (message as DebugProtocol.Event).event;
     }
     
+    // DIAGNOSTIC: Enhanced logging for ALL messages
+    logger.info(`[MinimalDapClient] 🔍 DAP MESSAGE: ${message.type}`, debugInfo);
+    if (message.type === 'request') {
+      const req = message as DebugProtocol.Request;
+      logger.info(`[MinimalDapClient] 📨 REVERSE REQUEST: ${req.command}`, {
+        command: req.command,
+        seq: req.seq,
+        arguments: req.arguments
+      });
+    } else if (message.type === 'event') {
+      const evt = message as DebugProtocol.Event;
+      logger.info(`[MinimalDapClient] 🎯 EVENT: ${evt.event}`, {
+        event: evt.event,
+        body: evt.body
+      });
+    }
+    
     logger.debug(`[MinimalDapClient] Received message:`, debugInfo);
     
     if (message.type === 'response') {
@@ -223,21 +240,43 @@ export class MinimalDapClient extends EventEmitter {
             this.sendResponse(request, {});
             break;
           case 'startDebugging': {
+            // DIAGNOSTIC: Enhanced startDebugging logging
+            logger.info(`[MinimalDapClient] 🚀 RECEIVED startDebugging REQUEST!`, {
+              seq: request.seq,
+              fullRequest: request
+            });
+            
             // Multi-session pattern: spawn a child DAP session and attach via launch(__pendingTargetId)
             try {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const args: any = (request as any)?.arguments ?? {};
               const cfg = args?.configuration ?? {};
               const pendingId: string | undefined = cfg?.__pendingTargetId;
+              
+              logger.info(`[MinimalDapClient] 🔍 startDebugging PARSED:`, {
+                hasArgs: !!args,
+                hasConfiguration: !!cfg,
+                pendingId: pendingId,
+                configType: cfg?.type,
+                fullConfig: cfg
+              });
+              
               this.sendResponse(request, {});
+              
               if (pendingId && typeof pendingId === 'string') {
+                logger.info(`[MinimalDapClient] ✅ VALID pendingTargetId: ${pendingId} - Starting child adoption`);
+                
                 // mark adoption started to suppress late parent attaches
                 this.adoptionStarted = true;
                 this.lastPendingTargetId = pendingId;
 
                 // If we're already adopting or have an active child, ignore additional startDebugging requests
                 if (this.adoptionInProgress || this.activeChild || this.childSessions.size > 0) {
-                  logger.info('[MinimalDapClient] Ignoring startDebugging; adoption in progress or child active');
+                  logger.info('[MinimalDapClient] ⚠️ Ignoring startDebugging; adoption in progress or child active', {
+                    adoptionInProgress: this.adoptionInProgress,
+                    hasActiveChild: !!this.activeChild,
+                    childSessionCount: this.childSessions.size
+                  });
                   return;
                 }
                 // Mark adoption in progress immediately to avoid races when js-debug sends multiple requests
@@ -248,22 +287,41 @@ export class MinimalDapClient extends EventEmitter {
                 const policy: AdapterPolicy = adapterType === 'pwa-node' ? JsDebugAdapterPolicy : DefaultAdapterPolicy;
                 this.activePolicy = policy;
                 this.deferParentConfigDoneActive = !!policy.shouldDeferParentConfigDone(cfg as Record<string, unknown>);
+                
+                logger.info(`[MinimalDapClient] 🎯 Child session policy:`, {
+                  adapterType,
+                  policyName: policy.constructor.name,
+                  shouldDeferParentConfigDone: this.deferParentConfigDoneActive
+                });
+                
                 // De-duplicate per pending target id
                 if (!this.adoptedTargets.has(pendingId)) {
                   this.adoptedTargets.add(pendingId);
+                  logger.info(`[MinimalDapClient] 🏗️ Creating child session for ${pendingId}`);
                   void this.createChildSession(pendingId, cfg, policy)
                     .then(() => {
                       // keep adoptionInProgress false after child established
                       this.adoptionInProgress = false;
+                      logger.info(`[MinimalDapClient] ✅ Child session created successfully for ${pendingId}`);
                     })
                     .catch((err) => {
                       const msg = err instanceof Error ? err.message : String(err);
-                      logger.error(`[MinimalDapClient] createChildSession failed for ${pendingId}: ${msg}`);
+                      logger.error(`[MinimalDapClient] ❌ createChildSession failed for ${pendingId}: ${msg}`);
                       this.adoptionInProgress = false;
                     });
+                } else {
+                  logger.info(`[MinimalDapClient] ⚠️ Pending target ${pendingId} already adopted`);
                 }
+              } else {
+                logger.warn(`[MinimalDapClient] ❌ startDebugging without valid __pendingTargetId:`, {
+                  pendingId,
+                  pendingIdType: typeof pendingId,
+                  hasPendingId: 'pendingId' in (cfg || {}),
+                  configKeys: Object.keys(cfg || {})
+                });
               }
-            } catch {
+            } catch (error) {
+              logger.error(`[MinimalDapClient] ❌ startDebugging handler error:`, error);
               // Best-effort ack even if we couldn't parse args
               this.sendResponse(request, {});
             }
@@ -275,7 +333,7 @@ export class MinimalDapClient extends EventEmitter {
             break;
         }
       } catch (e) {
-        const err = e instanceof Error ? e.message : String(e);
+        const err = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
         logger.error(`[MinimalDapClient] Error handling adapter request '${request.command}': ${err}`);
         // Best-effort ack to unblock the adapter even on error.
         // For startDebugging, prefer explicit failure even on error.
@@ -534,7 +592,7 @@ export class MinimalDapClient extends EventEmitter {
     for (let i = 0; i < 8; i++) {
       try {
         logger.info(`[MinimalDapClient] [parent] attach by __pendingTargetId attempt ${i + 1}`);
-        await this.sendRequest('attach', { type, request: 'attach', __pendingTargetId: pendingId, continueOnAttach: false }, 5000);
+        await this.sendRequest('attach', { type, request: 'attach', __pendingTargetId: pendingId, continueOnAttach: true }, 5000);
         attached = true;
         break;
       } catch (e1) {
@@ -553,7 +611,7 @@ export class MinimalDapClient extends EventEmitter {
               attachSimplePort: this.lastInspectorPort,
               // IPv4/IPv6 loopback
               address: 'localhost',
-              continueOnAttach: false,
+              continueOnAttach: true,
               attachExistingChildren: true
             };
             logger.info(`[MinimalDapClient] [parent] attach by port=${this.lastInspectorPort} attempt ${i + 1}`);
@@ -665,7 +723,7 @@ export class MinimalDapClient extends EventEmitter {
         await child.sendRequest('setBreakpoints', { source: { path: absolutePath }, breakpoints: bps });
       }
     } catch (e) {
-      const emsg = e instanceof Error ? e.message : String(e);
+      const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
       logger.warn(`[MinimalDapClient] [child:${pendingId}] setBreakpoints failed: ${emsg}`);
     }
 
@@ -697,7 +755,7 @@ export class MinimalDapClient extends EventEmitter {
             type,
             request: 'attach',
             __pendingTargetId: pendingId,
-            continueOnAttach: false
+            continueOnAttach: true
           }, 20000);
           adopted = true;
           break;
@@ -776,7 +834,7 @@ export class MinimalDapClient extends EventEmitter {
       // ignore
     }
 
-    if (!sawStopped) {
+    if (false && !sawStopped) {
       // Fallback: poll threads and pause the first one (accept threadId===0)
       try {
         let threadId: number | undefined;
@@ -857,7 +915,7 @@ export class MinimalDapClient extends EventEmitter {
           logger.warn(`[MinimalDapClient] [child:${pendingId}] No threads discovered within timeout for pause fallback`);
         }
       } catch (e) {
-        const emsg = e instanceof Error ? e.message : String(e);
+        const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
         logger.warn(`[MinimalDapClient] [child:${pendingId}] threads/pause fallback failed: ${emsg}`);
       }
     }
@@ -1053,7 +1111,7 @@ export class MinimalDapClient extends EventEmitter {
           args = await this.adjustInspectorPortIfBusy(a as any);
         }
       } catch (e) {
-        const emsg = e instanceof Error ? e.message : String(e);
+        const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
         logger.warn(`[MinimalDapClient] adjustInspectorPortIfBusy failed: ${emsg}`);
       }
     }
@@ -1144,7 +1202,7 @@ export class MinimalDapClient extends EventEmitter {
                     address: 'localhost',
                     port: portCandidate,
                     attachExistingChildren: true,
-                    continueOnAttach: false,
+                    continueOnAttach: true,
                     attachSimplePort: portCandidate
                   };
                   logger.info(`[MinimalDapClient] Performing single parent attach-by-port type='${String(type)}' port=${portCandidate} to initiate child adoption`);
@@ -1153,7 +1211,7 @@ export class MinimalDapClient extends EventEmitter {
                     logger.warn(`[MinimalDapClient] Post-launch parent attach failed: ${emsg}`);
                   });
                 } catch (e) {
-                  const emsg = e instanceof Error ? e.message : String(e);
+                  const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
                   logger.warn(`[MinimalDapClient] Error scheduling parent attach: ${emsg}`);
                 }
               }, 200);
@@ -1183,7 +1241,7 @@ export class MinimalDapClient extends EventEmitter {
           clearTimeout(timer);
           this.pendingRequests.delete(requestSeq);
           reject(err);
-        } else if (willAutoPauseAfterLaunch) {
+        } else if (false && willAutoPauseAfterLaunch) {
           // Try to surface a 'stopped' event quickly:
           // 1) Listen for a 'thread' event and pause that thread immediately
           // 2) Fallback: poll threads and pause the first available
@@ -1286,8 +1344,9 @@ export class MinimalDapClient extends EventEmitter {
       }
       this.childSessions.clear();
       this.activeChild = null;
-    } catch (e) {
-      logger.warn('[MinimalDapClient] Error shutting down child sessions', e as Error);
+    } catch (e: any) {
+      const emsg = e && typeof e.message === 'string' ? e.message : String(e);
+      logger.warn('[MinimalDapClient] Error shutting down child sessions:', emsg);
     }
 
     // Use immediate cleanup when explicitly shutting down

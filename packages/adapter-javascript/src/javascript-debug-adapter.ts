@@ -478,13 +478,13 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
           finalArgs[idx] = `--inspect-brk=${port}`;
           result.runtimeArgs = finalArgs;
         }
-        (result as MutableConfig).attachSimplePort = port;
+        // REMOVED: attachSimplePort to trigger multi-session mode
       } else if (stopOnEntry === true) {
         // Ensure a deterministic single-session stop on entry when requested
         const port = 9229;
         finalArgs = [...finalArgs, `--inspect-brk=${port}`];
         result.runtimeArgs = finalArgs;
-        (result as MutableConfig).attachSimplePort = port;
+        // REMOVED: attachSimplePort to trigger multi-session mode
       }
     }
 

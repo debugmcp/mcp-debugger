@@ -439,12 +439,12 @@ export class SessionManagerOperations extends SessionManagerData {
 
   /**
    * JavaScript (js-debug) strict handshake via ProxyManager:
-   * 1) initialize
-   * 2) wait for DAP 'initialized'
+   * 1) initialize with supportsStartDebuggingRequest: true
+   * 2) wait for DAP 'initialized' event
    * 3) setExceptionBreakpoints + setBreakpoints (queued in session)
    * 4) configurationDone
-   * 5) attach (preferred for MCP scenario) using attachSimplePort/port/address
-   * 6) wait for 'stopped'; fallback to threads+pause (tolerate threadId 0 by trying 1)
+   * 5) launch or attach based on configuration
+   * The multi-session architecture in minimal-dap.ts handles everything else
    */
   private async performJsHandshake(
     session: ManagedSession,
@@ -469,6 +469,8 @@ export class SessionManagerOperations extends SessionManagerData {
         linesStartAt1: true,
         columnsStartAt1: true,
         pathFormat: 'path',
+        // CRITICAL: Tell js-debug we support multi-session for proper breakpoint handling
+        supportsStartDebuggingRequest: true,
       } as Partial<DebugProtocol.InitializeRequestArguments>);
     } catch (e) {
       this.logger.warn(
@@ -566,7 +568,7 @@ export class SessionManagerOperations extends SessionManagerData {
           request: 'attach',
           address: '127.0.0.1',
           port: attachPort,
-          continueOnAttach: false,
+          continueOnAttach: true,
           attachExistingChildren: true,
           attachSimplePort: attachPort
         });
@@ -607,93 +609,12 @@ export class SessionManagerOperations extends SessionManagerData {
       }
     }
 
-    // 6) wait for 'stopped'; fallback to threads+pause with tolerance for threadId 0
-    let sawStopped = false;
-    try {
-      await new Promise<void>((resolve) => {
-        let done = false;
-        const timer = setTimeout(() => {
-          if (done) return;
-          done = true;
-          pm.removeListener('dap-event', onHandler as any);
-          resolve();
-        }, 15000);
-        const onHandler = (event: string, _body: unknown) => {
-          if (done) return;
-          if (event === 'stopped') {
-            sawStopped = true;
-            done = true;
-            clearTimeout(timer);
-            pm.removeListener('dap-event', onHandler as any);
-            resolve();
-          }
-        };
-        pm.on('dap-event', onHandler);
-      });
-    } catch {
-      // ignore
-    }
-
-    if (!sawStopped) {
-      // Fallback: threads + pause first available
-      try {
-        // Probe threads repeatedly up to ~5s
-        let tid: number | undefined;
-        for (let i = 0; i < 50; i++) {
-          const threadsResp = await pm.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const threads = (threadsResp as any)?.body?.threads ?? [];
-          const first = Array.isArray(threads) && threads.length ? threads[0]?.id : undefined;
-          if (typeof first === 'number') {
-            tid = first;
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 100));
-        }
-        if (typeof tid === 'number') {
-          this.logger.info(`[SessionManager] [JS] pause fallback on threadId=${tid}`);
-          try {
-            await pm.sendDapRequest('pause', { threadId: tid });
-          } catch {}
-          if (tid === 0) {
-            try {
-              this.logger.info(
-                `[SessionManager] [JS] additional pause attempt on threadId=1 (id=0 fallback)`
-              );
-              await pm.sendDapRequest('pause', { threadId: 1 });
-            } catch {}
-          }
-          // Short wait for stopped after pause
-          await new Promise<void>((resolve) => {
-            let done = false;
-            const timer = setTimeout(() => {
-              if (done) return;
-              done = true;
-              pm.removeListener('dap-event', handler as any);
-              resolve();
-            }, 8000);
-            const handler = (event: string) => {
-              if (done) return;
-              if (event === 'stopped') {
-                done = true;
-                clearTimeout(timer);
-                pm.removeListener('dap-event', handler as any);
-                resolve();
-              }
-            };
-            pm.on('dap-event', handler);
-          });
-        } else {
-          this.logger.warn(`[SessionManager] [JS] No threads discovered for pause fallback`);
-        }
-      } catch (e) {
-        this.logger.warn(
-          `[SessionManager] [JS] threads/pause fallback failed: ${
-            e instanceof Error ? e.message : String(e)
-          }`
-        );
-      }
-    }
+    // Multi-session architecture handles everything from here
+    // The minimal-dap.ts layer will:
+    // 1. Receive the startDebugging request from js-debug
+    // 2. Create a child session for the actual debugging
+    // 3. The child session will emit stopped events when hitting breakpoints
+    this.logger.info(`[SessionManager] [JS] Handshake complete. Multi-session architecture now handling debugging.`);
   }
 
   async setBreakpoint(
@@ -1074,7 +995,7 @@ export class SessionManagerOperations extends SessionManagerData {
     sessionId: string,
     expression: string,
     frameId?: number,
-    context: 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables' = 'repl'
+    context: 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables' = 'variables'
   ): Promise<EvaluateResult> {
     const session = this._getSessionById(sessionId);
     this.logger.info(

@@ -840,12 +840,12 @@ export class DebugMcpServer {
         throw new McpError(McpErrorCode.InvalidParams, 'Expression too long (max 10KB)');
       }
       
-      // Call SessionManager's evaluateExpression method
+      // Call SessionManager's evaluateExpression method (uses 'watch' context by default for variable access)
       const result = await this.sessionManager.evaluateExpression(
         args.sessionId,
         args.expression,
-        args.frameId,
-        'repl' // Default context for AI/user evaluation
+        args.frameId
+        // Let SessionManager use its default context ('watch') for proper variable access
       );
       
       // Log for audit trail
