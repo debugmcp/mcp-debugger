@@ -171,6 +171,7 @@ export type { AdapterPolicy, ChildSessionStrategy } from './interfaces/adapter-p
 export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
+export { MockAdapterPolicy } from './interfaces/adapter-policy-mock.js';
 
 // ===== Re-export VSCode Debug Protocol types for convenience =====
 export type { DebugProtocol } from '@vscode/debugprotocol';

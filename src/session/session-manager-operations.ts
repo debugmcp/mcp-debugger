@@ -3,7 +3,17 @@
  * continuing, and breakpoint management.
  */
 import { v4 as uuidv4 } from 'uuid';
-import { Breakpoint, SessionState, SessionLifecycleState } from '@debugmcp/shared';
+import { 
+  Breakpoint, 
+  SessionState, 
+  SessionLifecycleState,
+  AdapterPolicy,
+  DefaultAdapterPolicy,
+  PythonAdapterPolicy,
+  JsDebugAdapterPolicy,
+  MockAdapterPolicy,
+  DebugLanguage
+} from '@debugmcp/shared';
 import { ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
@@ -12,7 +22,6 @@ import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { WhichCommandFinder } from '../implementations/which-command-finder.js';
-import { spawn } from 'child_process';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '@debugmcp/shared';
 import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
@@ -42,6 +51,25 @@ export interface EvaluateResult {
  * Debug operations functionality for session management
  */
 export class SessionManagerOperations extends SessionManagerData {
+  /**
+   * Selects the appropriate adapter policy based on language
+   */
+  private selectPolicy(language: string | DebugLanguage): AdapterPolicy {
+    switch (language) {
+      case 'python':
+      case DebugLanguage.PYTHON:
+        return PythonAdapterPolicy;
+      case 'javascript':
+      case DebugLanguage.JAVASCRIPT:
+        return JsDebugAdapterPolicy;
+      case 'mock':
+      case DebugLanguage.MOCK:
+        return MockAdapterPolicy;
+      default:
+        return DefaultAdapterPolicy;
+    }
+  }
+
   protected async startProxyManager(
     session: ManagedSession,
     scriptPath: string,
@@ -89,32 +117,27 @@ export class SessionManagerOperations extends SessionManagerData {
       );
     }
 
-    // Resolve executable path based on language
-    let resolvedExecutablePath: string;
+    // Use policy to resolve executable path
+    const policy = this.selectPolicy(session.language);
+    let resolvedExecutablePath: string | undefined;
 
-    if (session.language === 'python') {
-      // Python-specific path resolution
-      const executablePathFromSession = session.executablePath!;
-
+    // First attempt: Use policy's resolution
+    const policyResolvedPath = policy.resolveExecutablePath(session.executablePath);
+    
+    if (session.language === 'python' && policyResolvedPath) {
+      // Python needs special handling for command resolution and validation
+      const executablePathFromSession = policyResolvedPath;
+      
       if (path.isAbsolute(executablePathFromSession)) {
-        // Absolute path provided - use as-is
+        // Absolute path provided - validate it
         resolvedExecutablePath = executablePathFromSession;
       } else if (['python', 'python3', 'py'].includes(executablePathFromSession.toLowerCase())) {
-        // Resolve common Python commands using local command finder with validation
+        // Resolve common Python commands using local command finder
         const finder = new WhichCommandFinder();
         try {
-          const resolved = await finder.find(executablePathFromSession);
-          const valid = await this.isValidPythonExecutable(resolved);
-          if (!valid) {
-            throw new PythonNotFoundError(executablePathFromSession);
-          }
-          resolvedExecutablePath = resolved;
+          resolvedExecutablePath = await finder.find(executablePathFromSession);
           this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedExecutablePath}`);
         } catch (error) {
-          // If it's already a typed error, re-throw it
-          if (error instanceof PythonNotFoundError) {
-            throw error;
-          }
           const msg = error instanceof Error ? error.message : String(error);
           // Convert generic "not found" errors to typed Python error
           if (msg.includes('not found')) {
@@ -131,15 +154,29 @@ export class SessionManagerOperations extends SessionManagerData {
           );
         }
       } else {
-        // Relative path - resolve from project root (MCP server's root)
+        // Relative path - resolve from project root
         resolvedExecutablePath = path.resolve(projectRoot, executablePathFromSession);
       }
-
-      this.logger.info(`[SessionManager] Using Python path: ${resolvedExecutablePath}`);
+      
+      // Validate the resolved Python executable
+      if (resolvedExecutablePath && policy.validateExecutable) {
+        const valid = await policy.validateExecutable(resolvedExecutablePath);
+        if (!valid) {
+          throw new PythonNotFoundError(session.executablePath!);
+        }
+      }
+      
+      this.logger.info(`[SessionManager] Using validated Python path: ${resolvedExecutablePath}`);
     } else {
-      // For non-Python languages (like mock/js), use a generic executable path (default to node)
-      resolvedExecutablePath = session.executablePath || process.execPath;
+      // For non-Python languages, use the policy-resolved path directly
+      resolvedExecutablePath = policyResolvedPath || session.executablePath || process.execPath;
       this.logger.info(`[SessionManager] Using ${session.language} executable: ${resolvedExecutablePath}`);
+    }
+
+    if (!resolvedExecutablePath) {
+      throw new DebugSessionCreationError(
+        `Failed to resolve executable path for ${session.language}`
+      );
     }
 
     // Merge launch args
@@ -334,13 +371,21 @@ export class SessionManagerOperations extends SessionManagerData {
       await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
-      // If JavaScript adapter, drive strict js-debug handshake (initialize → initialized → config → configurationDone → attach/launch)
-      if (session.language === 'javascript') {
+      // Perform language-specific handshake if required
+      const policy = this.selectPolicy(session.language);
+      if (policy.performHandshake) {
         try {
-          await this.performJsHandshake(session, dapLaunchArgs, scriptPath, scriptArgs);
+          await policy.performHandshake({
+            proxyManager: session.proxyManager,
+            sessionId: session.id,
+            dapLaunchArgs,
+            scriptPath,
+            scriptArgs,
+            breakpoints: session.breakpoints
+          });
         } catch (handshakeErr) {
           this.logger.warn(
-            `[SessionManager] JS handshake returned with warning/error: ${
+            `[SessionManager] Language handshake returned with warning/error: ${
               handshakeErr instanceof Error ? handshakeErr.message : String(handshakeErr)
             }`
           );
@@ -437,185 +482,6 @@ export class SessionManagerOperations extends SessionManagerData {
     }
   }
 
-  /**
-   * JavaScript (js-debug) strict handshake via ProxyManager:
-   * 1) initialize with supportsStartDebuggingRequest: true
-   * 2) wait for DAP 'initialized' event
-   * 3) setExceptionBreakpoints + setBreakpoints (queued in session)
-   * 4) configurationDone
-   * 5) launch or attach based on configuration
-   * The multi-session architecture in minimal-dap.ts handles everything else
-   */
-  private async performJsHandshake(
-    session: ManagedSession,
-    dapLaunchArgs: Partial<CustomLaunchRequestArguments> | undefined,
-    programPath: string,
-    programArgs?: string[]
-  ): Promise<void> {
-    const pm = session.proxyManager;
-    if (!pm || !pm.isRunning()) {
-      this.logger.warn(
-        `[SessionManager] performJsHandshake skipped: proxy manager not running for session ${session.id}`
-      );
-      return;
-    }
-
-    // 1) initialize
-    try {
-      this.logger.info(`[SessionManager] [JS] Sending 'initialize' request`);
-      await pm.sendDapRequest('initialize', {
-        clientID: 'mcp',
-        adapterID: 'javascript',
-        linesStartAt1: true,
-        columnsStartAt1: true,
-        pathFormat: 'path',
-        // CRITICAL: Tell js-debug we support multi-session for proper breakpoint handling
-        supportsStartDebuggingRequest: true,
-      } as Partial<DebugProtocol.InitializeRequestArguments>);
-    } catch (e) {
-      this.logger.warn(
-        `[SessionManager] [JS] 'initialize' failed or deferred: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      );
-    }
-
-    // 2) wait for DAP 'initialized'
-    await new Promise<void>((resolve) => {
-      let done = false;
-      const timer = setTimeout(() => {
-        if (done) return;
-        done = true;
-        this.logger.warn(`[SessionManager] [JS] Timeout waiting for DAP 'initialized' event`);
-        resolve();
-      }, 10000);
-      const onEvt = (ev: string) => {
-        if (done) return;
-        if (ev === 'initialized') {
-          done = true;
-          clearTimeout(timer);
-          pm.removeListener('dap-event', onHandler as any);
-          resolve();
-        }
-      };
-      const onHandler = (event: string, _body: unknown) => onEvt(event);
-      pm.on('dap-event', onHandler);
-    });
-
-    // 3) setExceptionBreakpoints + setBreakpoints
-    try {
-      this.logger.info(`[SessionManager] [JS] Sending 'setExceptionBreakpoints' []`);
-      await pm.sendDapRequest('setExceptionBreakpoints', { filters: [] });
-    } catch (e) {
-      this.logger.warn(
-        `[SessionManager] [JS] 'setExceptionBreakpoints' failed or unsupported: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      );
-    }
-    try {
-      // Group queued breakpoints by file
-      const grouped: Map<string, Array<{ line: number; condition?: string }>> = new Map();
-      for (const bp of session.breakpoints.values()) {
-        const arr = grouped.get(bp.file) || [];
-        arr.push({ line: bp.line, condition: bp.condition });
-        grouped.set(bp.file, arr);
-      }
-      for (const [file, bps] of grouped) {
-        this.logger.info(
-          `[SessionManager] [JS] Sending 'setBreakpoints' for ${file} (${bps.length})`
-        );
-        await pm.sendDapRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
-          source: { path: file },
-          breakpoints: bps,
-        });
-      }
-    } catch (e) {
-      this.logger.warn(
-        `[SessionManager] [JS] 'setBreakpoints' failed: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-
-    // 4) configurationDone
-    try {
-      this.logger.info(`[SessionManager] [JS] Sending 'configurationDone'`);
-      await pm.sendDapRequest('configurationDone', {});
-    } catch (e) {
-      this.logger.warn(
-        `[SessionManager] [JS] 'configurationDone' failed or deferred: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      );
-    }
-
-    // 5) start debug target (attach if explicit attach+port; else launch using adapter policy)
-    const a: Record<string, unknown> = (dapLaunchArgs as Record<string, unknown>) || {};
-    const type = typeof a.type === 'string' ? (a.type as string) : 'pwa-node';
-    const req = typeof a.request === 'string' ? (a.request as string) : 'launch';
-    const attachPort =
-      typeof (a as any)?.attachSimplePort === 'number'
-        ? (a as any).attachSimplePort
-        : typeof (a as any)?.port === 'number'
-        ? (a as any).port
-        : undefined;
-
-    if (req === 'attach' && typeof attachPort === 'number' && attachPort > 0) {
-      // Explicit ATTACH flow (single parent session); avoid DI ambiguity
-      try {
-        this.logger.info(`[SessionManager] [JS] Sending 'attach' to ${attachPort} (address=127.0.0.1)`);
-        await pm.sendDapRequest('attach', {
-          type,
-          request: 'attach',
-          address: '127.0.0.1',
-          port: attachPort,
-          continueOnAttach: true,
-          attachExistingChildren: true,
-          attachSimplePort: attachPort
-        });
-      } catch (e) {
-        this.logger.warn(`[SessionManager] [JS] 'attach' failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    } else {
-      // LAUNCH flow (default for MCP). Use adapter-configured policy; do not add parent attach-by-port afterward
-      try {
-        const cwd =
-          typeof (a as any)?.cwd === 'string' && (a as any)?.cwd
-            ? ((a as any)?.cwd as string)
-            : (programPath ? path.dirname(programPath) : process.cwd());
-        const launchArgs: Record<string, unknown> = {
-          type,
-          request: 'launch',
-          program: programPath,
-          cwd,
-          args: Array.isArray(programArgs) ? programArgs : [],
-          stopOnEntry: (a as any)?.stopOnEntry ?? false,
-          justMyCode: (a as any)?.justMyCode ?? true,
-          console: 'internalConsole',
-          outputCapture: 'std',
-          smartStep: true
-        };
-        // Pass through runtime overrides if provided
-        if (typeof (a as any)?.runtimeExecutable === 'string') {
-          launchArgs.runtimeExecutable = (a as any).runtimeExecutable;
-        }
-        if (Array.isArray((a as any)?.runtimeArgs)) {
-          launchArgs.runtimeArgs = (a as any).runtimeArgs;
-        }
-
-        this.logger.info(`[SessionManager] [JS] Sending 'launch' for program='${programPath}' cwd='${cwd}'`);
-        await pm.sendDapRequest('launch', launchArgs);
-      } catch (e) {
-        this.logger.warn(`[SessionManager] [JS] 'launch' failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-
-    // Multi-session architecture handles everything from here
-    // The minimal-dap.ts layer will:
-    // 1. Receive the startDebugging request from js-debug
-    // 2. Create a child session for the actual debugging
-    // 3. The child session will emit stopped events when hitting breakpoints
-    this.logger.info(`[SessionManager] [JS] Handshake complete. Multi-session architecture now handling debugging.`);
-  }
 
   async setBreakpoint(
     sessionId: string,
@@ -937,40 +803,6 @@ export class SessionManagerOperations extends SessionManagerData {
     }
   }
 
-  /**
-   * Validate that a Python command is a real Python executable, not a Windows Store alias.
-   * Mirrors the validation approach used in the python adapter utilities.
-   */
-  private async isValidPythonExecutable(pythonCmd: string): Promise<boolean> {
-    this.logger.debug?.(`[SessionManager] Validating Python executable: ${pythonCmd}`);
-    return new Promise((resolve) => {
-      const child = spawn(pythonCmd, ['-c', 'import sys; sys.exit(0)'], {
-        stdio: ['ignore', 'ignore', 'pipe'],
-      });
-
-      let stderrData = '';
-      child.stderr?.on('data', (data) => {
-        stderrData += data.toString();
-      });
-
-      child.on('error', () => resolve(false));
-      child.on('exit', (code) => {
-        const storeAlias =
-          code === 9009 ||
-          stderrData.includes('Microsoft Store') ||
-          stderrData.includes('Windows Store') ||
-          stderrData.includes('AppData\\Local\\Microsoft\\WindowsApps');
-        if (storeAlias) {
-          this.logger.error(
-            `[SessionManager] ${pythonCmd} appears to be a Windows Store alias, skipping...`
-          );
-          resolve(false);
-        } else {
-          resolve(code === 0);
-        }
-      });
-    });
-  }
 
   /**
    * Helper method to truncate long strings for logging

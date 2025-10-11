@@ -103,6 +103,64 @@ export interface AdapterPolicy {
    * @returns The scope name(s) to look for when finding locals
    */
   getLocalScopeName?(): string | string[];
+
+  /**
+   * Get DAP adapter configuration including type and future config options.
+   * This determines which DAP adapter type to use (e.g., 'pwa-node', 'debugpy').
+   * 
+   * @returns The DAP adapter configuration
+   */
+  getDapAdapterConfiguration(): {
+    type: string;  // 'pwa-node', 'debugpy', 'mock', etc.
+    // Future: could include other DAP-specific configuration
+  };
+
+  /**
+   * Resolve the executable path for this language.
+   * Handles language-specific executable resolution logic.
+   * 
+   * @param providedPath Optional path provided by the user
+   * @returns The resolved executable path or undefined
+   */
+  resolveExecutablePath(providedPath?: string): string | undefined;
+
+  /**
+   * Get debugger configuration and requirements.
+   * Specifies language-specific debugger behavior and capabilities.
+   * 
+   * @returns Configuration options for the debugger
+   */
+  getDebuggerConfiguration(): {
+    requiresStrictHandshake?: boolean;
+    skipConfigurationDone?: boolean;
+    supportsVariableType?: boolean;
+    // Additional debugger-specific configuration can be added here
+  };
+
+  /**
+   * Validate that the resolved executable is actually usable for this language.
+   * This is language-specific - e.g., Python needs to check for Windows Store aliases.
+   * 
+   * @param executablePath The path to validate
+   * @returns Promise resolving to true if valid, false otherwise
+   */
+  validateExecutable?(executablePath: string): Promise<boolean>;
+
+  /**
+   * Perform language-specific handshake after connecting to the debug adapter.
+   * Some languages (like JavaScript) require a specific initialization sequence.
+   * 
+   * @param context Context object with session details and helper methods
+   * @returns Promise that resolves when handshake is complete
+   */
+  performHandshake?(context: {
+    proxyManager: unknown;  // Will be IProxyManager in implementation
+    sessionId: string;
+    dapLaunchArgs?: Record<string, unknown>;
+    scriptPath: string;
+    scriptArgs?: string[];
+    breakpoints: Map<string, unknown>;  // Will be Breakpoint in implementation
+  }): Promise<void>;
 }
 
 /**
@@ -130,7 +188,7 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
-    includeSpecial?: boolean
+    _includeSpecial?: boolean
   ): Variable[] => {
     // Get the top frame
     if (!stackFrames || stackFrames.length === 0) {
@@ -160,5 +218,25 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
   getLocalScopeName: (): string[] => {
     // Common scope names for locals across languages
     return ['Locals', 'Local', 'local'];
+  },
+  
+  getDapAdapterConfiguration: () => {
+    return {
+      type: 'default'  // Generic/default adapter type
+    };
+  },
+  
+  resolveExecutablePath: (providedPath?: string) => {
+    // Default policy just returns the provided path as-is
+    return providedPath;
+  },
+  
+  getDebuggerConfiguration: () => {
+    return {
+      // Default configuration - no special requirements
+      requiresStrictHandshake: false,
+      skipConfigurationDone: false,
+      supportsVariableType: false
+    };
   }
 };

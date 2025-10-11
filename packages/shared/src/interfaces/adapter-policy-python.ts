@@ -87,5 +87,71 @@ export const PythonAdapterPolicy: AdapterPolicy = {
    */
   getLocalScopeName: (): string[] => {
     return ['Locals'];
+  },
+  
+  getDapAdapterConfiguration: () => {
+    return {
+      type: 'debugpy'  // Python Debug Adapter Protocol type
+    };
+  },
+  
+  resolveExecutablePath: (providedPath?: string) => {
+    // Python-specific executable path resolution
+    // Priority: provided path > PYTHON_PATH env > default python command
+    if (providedPath) {
+      return providedPath;
+    }
+    
+    // Check environment variable for Python path
+    if (process.env.PYTHON_PATH) {
+      return process.env.PYTHON_PATH;
+    }
+    
+    // Default to 'python' command in PATH
+    return 'python';
+  },
+  
+  getDebuggerConfiguration: () => {
+    return {
+      // Python debugger configuration
+      requiresStrictHandshake: false,
+      skipConfigurationDone: false,
+      supportsVariableType: true  // Python debugpy supports variable type information
+    };
+  },
+  
+  /**
+   * Validate that a Python command is a real Python executable, not a Windows Store alias.
+   * This validation is critical on Windows to avoid false positives.
+   */
+  validateExecutable: async (pythonCmd: string): Promise<boolean> => {
+    // Import spawn dynamically to avoid issues in browser environments
+    const { spawn } = await import('child_process');
+    
+    return new Promise((resolve) => {
+      const child = spawn(pythonCmd, ['-c', 'import sys; sys.exit(0)'], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      let stderrData = '';
+      child.stderr?.on('data', (data) => {
+        stderrData += data.toString();
+      });
+
+      child.on('error', () => resolve(false));
+      child.on('exit', (code) => {
+        const storeAlias =
+          code === 9009 ||
+          stderrData.includes('Microsoft Store') ||
+          stderrData.includes('Windows Store') ||
+          stderrData.includes('AppData\\Local\\Microsoft\\WindowsApps');
+        if (storeAlias) {
+          // Windows Store alias detected - not a valid Python
+          resolve(false);
+        } else {
+          resolve(code === 0);
+        }
+      });
+    });
   }
 };
