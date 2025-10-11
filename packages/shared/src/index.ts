@@ -170,6 +170,7 @@ export { AdapterFactory } from './factories/adapter-factory.js';
 export type { AdapterPolicy, ChildSessionStrategy } from './interfaces/adapter-policy.js';
 export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
+export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
 
 // ===== Re-export VSCode Debug Protocol types for convenience =====
 export type { DebugProtocol } from '@vscode/debugprotocol';

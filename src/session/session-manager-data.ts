@@ -5,6 +5,7 @@
 import { Variable, StackFrame, SessionState } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import type { AdapterPolicy } from '@debugmcp/shared';
 
 /**
  * Data retrieval functionality for session management
@@ -45,10 +46,10 @@ export class SessionManagerData extends SessionManagerCore {
     }
   }
 
-  async getStackTrace(sessionId: string, threadId?: number): Promise<StackFrame[]> {
+  async getStackTrace(sessionId: string, threadId?: number, includeInternals: boolean = false): Promise<StackFrame[]> {
     const session = this._getSessionById(sessionId);
     const currentThreadId = session.proxyManager?.getCurrentThreadId();
-    this.logger.info(`[SM getStackTrace ${sessionId}] Entered. Requested threadId: ${threadId}, Current state: ${session.state}, Actual currentThreadId: ${currentThreadId}`);
+    this.logger.info(`[SM getStackTrace ${sessionId}] Entered. Requested threadId: ${threadId}, Current state: ${session.state}, Actual currentThreadId: ${currentThreadId}, includeInternals: ${includeInternals}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) { 
       this.logger.warn(`[SM getStackTrace ${sessionId}] No active proxy.`); 
@@ -71,11 +72,25 @@ export class SessionManagerData extends SessionManagerCore {
       this.logger.info(`[SM getStackTrace ${sessionId}] DAP 'stackTrace' response received. Body:`, response?.body);
       
       if (response && response.body && response.body.stackFrames) {
-        const frames = response.body.stackFrames.map((sf: DebugProtocol.StackFrame) => ({ 
+        let frames: StackFrame[] = response.body.stackFrames.map((sf: DebugProtocol.StackFrame) => ({ 
             id: sf.id, name: sf.name, 
             file: sf.source?.path || sf.source?.name || "<unknown_source>", 
             line: sf.line, column: sf.column
         }));
+        
+        // Apply filtering if the session uses JavaScript and we have a filter policy
+        if (session.language === 'javascript') {
+          // Import and use JsDebugAdapterPolicy for filtering
+          const { JsDebugAdapterPolicy } = await import('@debugmcp/shared');
+          // Check if the optional filterStackFrames method exists
+          if ('filterStackFrames' in JsDebugAdapterPolicy && typeof JsDebugAdapterPolicy.filterStackFrames === 'function') {
+            this.logger.info(`[SM getStackTrace ${sessionId}] Applying JavaScript stack frame filtering. Original count: ${frames.length}`);
+            frames = JsDebugAdapterPolicy.filterStackFrames(frames, includeInternals);
+            this.logger.info(`[SM getStackTrace ${sessionId}] After filtering: ${frames.length} frames`);
+          }
+        }
+        // Note: For other languages, we don't apply filtering
+        
         this.logger.info(`[SM getStackTrace ${sessionId}] Parsed stack frames (top 3):`, frames.slice(0,3).map(f => ({name:f.name, file:f.file, line:f.line})));
         return frames;
       }
@@ -114,6 +129,121 @@ export class SessionManagerData extends SessionManagerCore {
     } catch (error) {
       this.logger.error(`[SM getScopes ${sessionId}] Error getting scopes:`, error);
       return [];
+    }
+  }
+
+  /**
+   * Get local variables for the current or specified stack frame.
+   * This is a convenience method that orchestrates getting stack trace,
+   * scopes, and variables, then delegates to the adapter policy to extract
+   * just the local variables.
+   */
+  async getLocalVariables(sessionId: string, includeSpecial: boolean = false): Promise<{
+    variables: Variable[];
+    frame: { name: string; file: string; line: number } | null;
+    scopeName: string | null;
+  }> {
+    const session = this._getSessionById(sessionId);
+    this.logger.info(`[SM getLocalVariables ${sessionId}] Entered. includeSpecial: ${includeSpecial}, Current state: ${session.state}`);
+    
+    // Validate session state
+    if (!session.proxyManager || !session.proxyManager.isRunning()) { 
+      this.logger.warn(`[SM getLocalVariables ${sessionId}] No active proxy.`); 
+      return { variables: [], frame: null, scopeName: null }; 
+    }
+    if (session.state !== SessionState.PAUSED) { 
+      this.logger.warn(`[SM getLocalVariables ${sessionId}] Session not paused. State: ${session.state}.`); 
+      return { variables: [], frame: null, scopeName: null }; 
+    }
+    
+    try {
+      // Step 1: Get stack trace
+      const stackFrames = await this.getStackTrace(sessionId);
+      if (!stackFrames || stackFrames.length === 0) {
+        this.logger.warn(`[SM getLocalVariables ${sessionId}] No stack frames available.`);
+        return { variables: [], frame: null, scopeName: null };
+      }
+      
+      const topFrame = stackFrames[0];
+      this.logger.info(`[SM getLocalVariables ${sessionId}] Top frame: ${topFrame.name} at ${topFrame.file}:${topFrame.line}`);
+      
+      // Step 2: Collect all scopes for all frames (may need multiple frames for closures)
+      const scopesMap: Record<number, DebugProtocol.Scope[]> = {};
+      for (const frame of stackFrames) {
+        const scopes = await this.getScopes(sessionId, frame.id);
+        if (scopes && scopes.length > 0) {
+          scopesMap[frame.id] = scopes;
+        }
+      }
+      
+      // Step 3: Collect variables for all scopes
+      const variablesMap: Record<number, Variable[]> = {};
+      for (const frameId in scopesMap) {
+        const scopes = scopesMap[frameId];
+        for (const scope of scopes) {
+          if (scope.variablesReference > 0) {
+            const variables = await this.getVariables(sessionId, scope.variablesReference);
+            if (variables && variables.length > 0) {
+              variablesMap[scope.variablesReference] = variables;
+            }
+          }
+        }
+      }
+      
+      // Step 4: Get the appropriate adapter policy
+      let policy: AdapterPolicy | null = null;
+      
+      if (session.language === 'python') {
+        // Import Python policy dynamically
+        const { PythonAdapterPolicy } = await import('@debugmcp/shared');
+        policy = PythonAdapterPolicy;
+      } else if (session.language === 'javascript') {
+        // Import JavaScript policy dynamically
+        const { JsDebugAdapterPolicy } = await import('@debugmcp/shared');
+        policy = JsDebugAdapterPolicy;
+      } else {
+        // Use default policy
+        const { DefaultAdapterPolicy } = await import('@debugmcp/shared');
+        policy = DefaultAdapterPolicy;
+      }
+      
+      // Step 5: Extract local variables using the adapter policy
+      let localVars: Variable[] = [];
+      let scopeName: string | null = null;
+      
+      if (policy && 'extractLocalVariables' in policy && typeof policy.extractLocalVariables === 'function') {
+        localVars = policy.extractLocalVariables(stackFrames, scopesMap, variablesMap, includeSpecial);
+        
+        // Get the scope name for reporting
+        if ('getLocalScopeName' in policy && typeof policy.getLocalScopeName === 'function') {
+          const scopeNames = policy.getLocalScopeName();
+          scopeName = Array.isArray(scopeNames) ? scopeNames[0] : scopeNames;
+        }
+      } else {
+        // Fallback: use first non-global scope from top frame
+        const topFrameScopes = scopesMap[topFrame.id] || [];
+        const localScope = topFrameScopes.find(s => !s.name.toLowerCase().includes('global'));
+        if (localScope) {
+          localVars = variablesMap[localScope.variablesReference] || [];
+          scopeName = localScope.name;
+        }
+      }
+      
+      this.logger.info(`[SM getLocalVariables ${sessionId}] Found ${localVars.length} local variables.`);
+      
+      return {
+        variables: localVars,
+        frame: {
+          name: topFrame.name,
+          file: topFrame.file,
+          line: topFrame.line
+        },
+        scopeName
+      };
+      
+    } catch (error) {
+      this.logger.error(`[SM getLocalVariables ${sessionId}] Error getting local variables:`, error);
+      return { variables: [], frame: null, scopeName: null };
     }
   }
 }

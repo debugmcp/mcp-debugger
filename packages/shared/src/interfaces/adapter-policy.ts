@@ -13,6 +13,7 @@
  * @since 2.1.0
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import type { StackFrame, Variable } from '../models/index.js';
 
 export type ChildSessionStrategy =
   | 'none'                     // No child session expected/created
@@ -58,6 +59,50 @@ export interface AdapterPolicy {
    * Some adapters (e.g., js-debug) may prefer to wait for 'thread' or 'stopped'.
    */
   isChildReadyEvent(evt: DebugProtocol.Event): boolean;
+
+  /**
+   * Filter stack frames to remove internal/framework frames based on adapter-specific logic.
+   * This is optional - if not implemented, all frames are returned unfiltered.
+   * 
+   * @param frames The original stack frames from the debug adapter
+   * @param includeInternals Whether to include internal/framework frames
+   * @returns The filtered stack frames
+   */
+  filterStackFrames?(frames: StackFrame[], includeInternals: boolean): StackFrame[];
+
+  /**
+   * Check if a stack frame is an internal/framework frame.
+   * This is used by filterStackFrames to determine which frames to filter out.
+   * 
+   * @param frame The stack frame to check
+   * @returns True if the frame is internal/framework code, false otherwise
+   */
+  isInternalFrame?(frame: StackFrame): boolean;
+
+  /**
+   * Extract local variables from the raw DAP data based on language-specific logic.
+   * This allows each language adapter to define what constitutes "local variables".
+   * 
+   * @param stackFrames The stack frames from the DAP response
+   * @param scopes A map of frame IDs to their scopes
+   * @param variables A map of scope references to their variables
+   * @param includeSpecial Whether to include special/internal variables
+   * @returns The extracted local variables
+   */
+  extractLocalVariables?(
+    stackFrames: StackFrame[],
+    scopes: Record<number, DebugProtocol.Scope[]>,
+    variables: Record<number, Variable[]>,
+    includeSpecial?: boolean
+  ): Variable[];
+
+  /**
+   * Get the scope name(s) that contain local variables for this language.
+   * Different languages may use different names (e.g., "Locals" vs "Local").
+   * 
+   * @returns The scope name(s) to look for when finding locals
+   */
+  getLocalScopeName?(): string | string[];
 }
 
 /**
@@ -79,5 +124,41 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
   isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
     // For most adapters, 'initialized' is the earliest readiness signal.
     return evt?.event === 'initialized';
+  },
+  // Default implementation: Use first non-global scope as locals
+  extractLocalVariables: (
+    stackFrames: StackFrame[],
+    scopes: Record<number, DebugProtocol.Scope[]>,
+    variables: Record<number, Variable[]>,
+    includeSpecial?: boolean
+  ): Variable[] => {
+    // Get the top frame
+    if (!stackFrames || stackFrames.length === 0) {
+      return [];
+    }
+    
+    const topFrame = stackFrames[0];
+    const frameScopes = scopes[topFrame.id];
+    
+    if (!frameScopes || frameScopes.length === 0) {
+      return [];
+    }
+    
+    // Find the first non-global scope (usually the locals)
+    const localScope = frameScopes.find(scope => 
+      !scope.name.toLowerCase().includes('global')
+    );
+    
+    if (!localScope) {
+      return [];
+    }
+    
+    // Return the variables for this scope
+    return variables[localScope.variablesReference] || [];
+  },
+  
+  getLocalScopeName: (): string[] => {
+    // Common scope names for locals across languages
+    return ['Locals', 'Local', 'local'];
   }
 };
