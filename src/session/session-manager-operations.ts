@@ -6,13 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { 
   Breakpoint, 
   SessionState, 
-  SessionLifecycleState,
-  AdapterPolicy,
-  DefaultAdapterPolicy,
-  PythonAdapterPolicy,
-  JsDebugAdapterPolicy,
-  MockAdapterPolicy,
-  DebugLanguage
+  SessionLifecycleState
 } from '@debugmcp/shared';
 import { ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -51,25 +45,6 @@ export interface EvaluateResult {
  * Debug operations functionality for session management
  */
 export class SessionManagerOperations extends SessionManagerData {
-  /**
-   * Selects the appropriate adapter policy based on language
-   */
-  private selectPolicy(language: string | DebugLanguage): AdapterPolicy {
-    switch (language) {
-      case 'python':
-      case DebugLanguage.PYTHON:
-        return PythonAdapterPolicy;
-      case 'javascript':
-      case DebugLanguage.JAVASCRIPT:
-        return JsDebugAdapterPolicy;
-      case 'mock':
-      case DebugLanguage.MOCK:
-        return MockAdapterPolicy;
-      default:
-        return DefaultAdapterPolicy;
-    }
-  }
-
   protected async startProxyManager(
     session: ManagedSession,
     scriptPath: string,

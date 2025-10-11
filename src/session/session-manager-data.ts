@@ -2,15 +2,43 @@
  * Data retrieval operations for session management including variables,
  * stack traces, and scopes.
  */
-import { Variable, StackFrame, SessionState } from '@debugmcp/shared';
+import { 
+  Variable, 
+  StackFrame, 
+  SessionState,
+  AdapterPolicy,
+  DefaultAdapterPolicy,
+  PythonAdapterPolicy,
+  JsDebugAdapterPolicy,
+  MockAdapterPolicy,
+  DebugLanguage
+} from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from '@debugmcp/shared';
 
 /**
  * Data retrieval functionality for session management
  */
 export class SessionManagerData extends SessionManagerCore {
+  /**
+   * Selects the appropriate adapter policy based on language
+   */
+  protected selectPolicy(language: string | DebugLanguage): AdapterPolicy {
+    switch (language) {
+      case 'python':
+      case DebugLanguage.PYTHON:
+        return PythonAdapterPolicy;
+      case 'javascript':
+      case DebugLanguage.JAVASCRIPT:
+        return JsDebugAdapterPolicy;
+      case 'mock':
+      case DebugLanguage.MOCK:
+        return MockAdapterPolicy;
+      default:
+        return DefaultAdapterPolicy;
+    }
+  }
+
   async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
     const session = this._getSessionById(sessionId);
     this.logger.info(`[SM getVariables ${sessionId}] Entered. variablesReference: ${variablesReference}, Current state: ${session.state}`);
@@ -78,18 +106,13 @@ export class SessionManagerData extends SessionManagerCore {
             line: sf.line, column: sf.column
         }));
         
-        // Apply filtering if the session uses JavaScript and we have a filter policy
-        if (session.language === 'javascript') {
-          // Import and use JsDebugAdapterPolicy for filtering
-          const { JsDebugAdapterPolicy } = await import('@debugmcp/shared');
-          // Check if the optional filterStackFrames method exists
-          if ('filterStackFrames' in JsDebugAdapterPolicy && typeof JsDebugAdapterPolicy.filterStackFrames === 'function') {
-            this.logger.info(`[SM getStackTrace ${sessionId}] Applying JavaScript stack frame filtering. Original count: ${frames.length}`);
-            frames = JsDebugAdapterPolicy.filterStackFrames(frames, includeInternals);
-            this.logger.info(`[SM getStackTrace ${sessionId}] After filtering: ${frames.length} frames`);
-          }
+        // Apply filtering using the language's policy
+        const policy = this.selectPolicy(session.language);
+        if (policy.filterStackFrames) {
+          this.logger.info(`[SM getStackTrace ${sessionId}] Applying stack frame filtering for ${session.language}. Original count: ${frames.length}`);
+          frames = policy.filterStackFrames(frames, includeInternals);
+          this.logger.info(`[SM getStackTrace ${sessionId}] After filtering: ${frames.length} frames`);
         }
-        // Note: For other languages, we don't apply filtering
         
         this.logger.info(`[SM getStackTrace ${sessionId}] Parsed stack frames (top 3):`, frames.slice(0,3).map(f => ({name:f.name, file:f.file, line:f.line})));
         return frames;
@@ -191,31 +214,17 @@ export class SessionManagerData extends SessionManagerCore {
       }
       
       // Step 4: Get the appropriate adapter policy
-      let policy: AdapterPolicy | null = null;
-      
-      if (session.language === 'python') {
-        // Import Python policy dynamically
-        const { PythonAdapterPolicy } = await import('@debugmcp/shared');
-        policy = PythonAdapterPolicy;
-      } else if (session.language === 'javascript') {
-        // Import JavaScript policy dynamically
-        const { JsDebugAdapterPolicy } = await import('@debugmcp/shared');
-        policy = JsDebugAdapterPolicy;
-      } else {
-        // Use default policy
-        const { DefaultAdapterPolicy } = await import('@debugmcp/shared');
-        policy = DefaultAdapterPolicy;
-      }
+      const policy = this.selectPolicy(session.language);
       
       // Step 5: Extract local variables using the adapter policy
       let localVars: Variable[] = [];
       let scopeName: string | null = null;
       
-      if (policy && 'extractLocalVariables' in policy && typeof policy.extractLocalVariables === 'function') {
+      if (policy.extractLocalVariables) {
         localVars = policy.extractLocalVariables(stackFrames, scopesMap, variablesMap, includeSpecial);
         
         // Get the scope name for reporting
-        if ('getLocalScopeName' in policy && typeof policy.getLocalScopeName === 'function') {
+        if (policy.getLocalScopeName) {
           const scopeNames = policy.getLocalScopeName();
           scopeName = Array.isArray(scopeNames) ? scopeNames[0] : scopeNames;
         }
