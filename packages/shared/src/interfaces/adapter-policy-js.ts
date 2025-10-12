@@ -208,16 +208,18 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
         console.warn(`[JsDebugAdapterPolicy] [JS] Timeout waiting for DAP 'initialized' event`);
         resolve();
       }, 10000);
-      const onEvt = (ev: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const onHandler = (event: any) => {
         if (done) return;
-        if (ev === 'initialized') {
+        // Handle both event object and string formats
+        const eventName = typeof event === 'string' ? event : event?.event;
+        if (eventName === 'initialized') {
           done = true;
           clearTimeout(timer);
           pm.removeListener('dap-event', onHandler);
           resolve();
         }
       };
-      const onHandler = (event: string) => onEvt(event);
       pm.on('dap-event', onHandler);
     });
 
@@ -316,9 +318,11 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
           justMyCode: a?.justMyCode ?? true,
           console: 'internalConsole',
           outputCapture: 'std',
-          smartStep: true
+          smartStep: true,
+          // Use process.execPath to ensure we use the same Node.js that's running this process
+          runtimeExecutable: process.execPath
         };
-        // Pass through runtime overrides if provided
+        // Pass through runtime overrides if provided (allow override of our default)
         if (typeof a?.runtimeExecutable === 'string') {
           launchArgs.runtimeExecutable = a.runtimeExecutable;
         }
