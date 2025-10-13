@@ -9,18 +9,27 @@ import {
   ILogger,
   ExtendedInitializeArgs
 } from './dap-proxy-interfaces.js';
+import type { AdapterPolicy } from '@debugmcp/shared';
 
 export class DapConnectionManager {
   // Increased initial delay to give debugpy more time to start
   // This is especially important in CI/test environments
   private readonly INITIAL_CONNECT_DELAY = 500;  
   private readonly MAX_CONNECT_ATTEMPTS = 60;
-  private readonly CONNECT_RETRY_INTERVAL = 200;  
+  private readonly CONNECT_RETRY_INTERVAL = 200;
+  private policy?: AdapterPolicy;
 
   constructor(
     private dapClientFactory: IDapClientFactory,
     private logger: ILogger
   ) {}
+  
+  /**
+   * Set the adapter policy for creating DAP clients
+   */
+  setAdapterPolicy(policy: AdapterPolicy): void {
+    this.policy = policy;
+  }
 
   /**
    * Connect to DAP adapter with retry logic
@@ -29,7 +38,10 @@ export class DapConnectionManager {
     this.logger.info(`[ConnectionManager] Waiting ${this.INITIAL_CONNECT_DELAY}ms before first DAP connect attempt.`);
     await new Promise(resolve => setTimeout(resolve, this.INITIAL_CONNECT_DELAY));
 
-    const client = this.dapClientFactory.create(host, port);
+    // Create client with policy if available
+    const client = this.policy 
+      ? this.dapClientFactory.create(host, port, this.policy)
+      : this.dapClientFactory.create(host, port);
     
     // Temporary error handler to prevent unhandled 'error' event crashes during connect attempts
     const tempErrorHandler = (err: Error) => {

@@ -130,7 +130,7 @@ export interface IDapClient {
  * Factory for creating DAP clients
  */
 export interface IDapClientFactory {
-  create(host: string, port: number): IDapClient;
+  create(host: string, port: number, policy?: any): IDapClient;
 }
 
 /**

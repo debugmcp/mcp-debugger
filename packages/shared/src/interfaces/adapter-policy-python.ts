@@ -4,8 +4,9 @@
  * Encodes debugpy specific behaviors and variable handling logic.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
+import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
 export const PythonAdapterPolicy: AdapterPolicy = {
   name: 'python',
@@ -153,5 +154,118 @@ export const PythonAdapterPolicy: AdapterPolicy = {
         }
       });
     });
+  },
+
+  /**
+   * Python adapter doesn't require command queueing
+   */
+  requiresCommandQueueing: (): boolean => false,
+
+  /**
+   * Python doesn't need to queue commands
+   */
+  shouldQueueCommand: (): CommandHandling => {
+    // Python adapter processes commands immediately
+    return {
+      shouldQueue: false,
+      shouldDefer: false,
+      reason: 'Python adapter does not queue commands'
+    };
+  },
+
+  /**
+   * Create initial state for Python adapter
+   */
+  createInitialState: (): AdapterSpecificState => {
+    return {
+      initialized: false,
+      configurationDone: false
+    };
+  },
+
+  /**
+   * Update state when a command is sent
+   */
+  updateStateOnCommand: (command: string, _args: unknown, state: AdapterSpecificState): void => {
+    if (command === 'configurationDone') {
+      state.configurationDone = true;
+    }
+  },
+
+  /**
+   * Update state when an event is received
+   */
+  updateStateOnEvent: (event: string, _body: unknown, state: AdapterSpecificState): void => {
+    if (event === 'initialized') {
+      state.initialized = true;
+    }
+  },
+
+  /**
+   * Check if Python adapter is initialized
+   */
+  isInitialized: (state: AdapterSpecificState): boolean => {
+    return state.initialized;
+  },
+
+  /**
+   * Check if Python adapter is connected
+   */
+  isConnected: (state: AdapterSpecificState): boolean => {
+    // Python adapter is connected once initialized
+    return state.initialized;
+  },
+
+  /**
+   * Check if this policy applies to the given adapter command
+   */
+  matchesAdapter: (adapterCommand: { command: string; args: string[] }): boolean => {
+    // Check for debugpy in command or arguments
+    const commandStr = adapterCommand.command.toLowerCase();
+    const argsStr = adapterCommand.args.join(' ').toLowerCase();
+    
+    return commandStr.includes('debugpy') || 
+           commandStr.includes('python') ||
+           argsStr.includes('debugpy') || 
+           argsStr.includes('-m debugpy');
+  },
+
+  /**
+   * Python adapter has no special initialization requirements
+   */
+  getInitializationBehavior: () => {
+    return {};  // Python doesn't need any special initialization quirks
+  },
+
+  /**
+   * Python DAP client behaviors - minimal since Python doesn't use child sessions
+   */
+  getDapClientBehavior: (): DapClientBehavior => {
+    return {
+      // Python doesn't handle reverse requests
+      handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {
+        // Just acknowledge any reverse requests (shouldn't receive any)
+        if (request.command === 'runInTerminal') {
+          context.sendResponse(request, {});
+          return { handled: true };
+        }
+        return { handled: false };
+      },
+      
+      // No child session routing needed
+      childRoutedCommands: undefined,
+      
+      // Python-specific behaviors
+      mirrorBreakpointsToChild: false,
+      deferParentConfigDone: false,
+      pauseAfterChildAttach: false,
+      
+      // No adapter ID normalization needed
+      normalizeAdapterId: undefined,
+      
+      // Standard timeouts
+      childInitTimeout: 5000,
+      suppressPostAttachConfigDone: false
+    };
   }
 };

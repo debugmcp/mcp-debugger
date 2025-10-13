@@ -9,35 +9,19 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { createLogger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
-import { AdapterPolicy, DefaultAdapterPolicy, JsDebugAdapterPolicy } from '@debugmcp/shared';
+import { 
+  AdapterPolicy, 
+  DefaultAdapterPolicy, 
+  JsDebugAdapterPolicy, 
+  DapClientBehavior,
+  DapClientContext,
+  ChildSessionConfig 
+} from '@debugmcp/shared';
+import { ChildSessionManager } from './child-session-manager.js';
 
 const logger = createLogger('minimal-dap-simple');
 
 const TWO_CRLF = '\r\n\r\n';
-
-const CHILD_ROUTED_COMMANDS = new Set<string>([
-  'threads',
-  'pause',
-  'continue',
-  'next',
-  'stepIn',
-  'stepOut',
-  'stackTrace',
-  'scopes',
-  'variables',
-  'evaluate',
-  'loadedSources',
-  'source',
-  'setVariable',
-  'setExpression',
-  'restart',
-  'disconnect',
-  'terminate',
-  'goto',
-  'restartFrame',
-  'stepBack',
-  'reverseContinue'
-]);
 
 export class MinimalDapClient extends EventEmitter {
   private socket: Socket | null = null;
@@ -59,7 +43,12 @@ export class MinimalDapClient extends EventEmitter {
   private storedBreakpoints = new Map<string, DebugProtocol.SourceBreakpoint[]>();
   private initializedSeen = false;
 
-  // Adapter policy (selected per reverse startDebugging request)
+  // Adapter policy and DAP behavior configuration
+  private policy: AdapterPolicy;
+  private dapBehavior: DapClientBehavior;
+  private childSessionManager?: ChildSessionManager;
+
+  // Legacy fields for compatibility during refactoring
   private activePolicy?: AdapterPolicy;
   // When true, we defer parent's configurationDone (policy-driven, e.g. js-debug)
   private deferParentConfigDoneActive = false;
@@ -82,10 +71,37 @@ export class MinimalDapClient extends EventEmitter {
   
   private supportsConfigDone = true;
 
-  constructor(host: string, port: number) {
+  constructor(host: string, port: number, policy?: AdapterPolicy) {
     super();
     this.host = host;
     this.port = port;
+    this.policy = policy || DefaultAdapterPolicy;
+    this.dapBehavior = this.policy.getDapClientBehavior();
+    
+    // Initialize ChildSessionManager for policies that support child sessions
+    if (this.policy.supportsReverseStartDebugging) {
+      this.childSessionManager = new ChildSessionManager({
+        policy: this.policy,
+        parentClient: this,
+        host,
+        port
+      });
+      
+      // Wire up events from ChildSessionManager
+      this.childSessionManager.on('childCreated', (_pendingId, _child) => {
+        // Child session created successfully
+      });
+      
+      this.childSessionManager.on('childEvent', (evt: DebugProtocol.Event) => {
+        // Forward child events
+        this.emit(evt.event, evt.body);
+        this.emit('event', evt);
+      });
+      
+      this.childSessionManager.on('childError', (_pendingId, error) => {
+        logger.error('[MinimalDapClient] Child session error:', error);
+      });
+    }
   }
 
   /**
@@ -221,99 +237,62 @@ export class MinimalDapClient extends EventEmitter {
     } else if (message.type === 'request') {
       const request = message as DebugProtocol.Request;
       logger.info(`[MinimalDapClient] Received adapter request: ${request.command}`);
+      
+      // Try to handle through policy's reverse request handler
+      if (this.dapBehavior.handleReverseRequest) {
+        try {
+          const context: DapClientContext = {
+            sendResponse: (req: DebugProtocol.Request, body: unknown, success?: boolean, errorMessage?: string) => {
+              this.sendResponse(req, body, success ?? true, errorMessage);
+            },
+            createChildSession: async (config: ChildSessionConfig) => {
+              if (this.childSessionManager) {
+                await this.childSessionManager.createChildSession(config);
+                // Update active child reference from manager
+                this.activeChild = this.childSessionManager.getActiveChild();
+              }
+            },
+            activeChildren: this.childSessions as Map<string, unknown>,
+            adoptedTargets: this.adoptedTargets
+          };
+          
+          const result = await this.dapBehavior.handleReverseRequest(request, context);
+          
+          if (result.handled) {
+            // Policy handled the request
+            if (result.createChildSession && this.childSessionManager && result.childConfig) {
+              // Create child session through the manager
+              logger.info(`[MinimalDapClient] Creating child session via ChildSessionManager`);
+              try {
+                await this.childSessionManager.createChildSession(result.childConfig);
+                
+                // Set up deferred config if needed
+                if (this.dapBehavior.deferParentConfigDone) {
+                  this.deferParentConfigDoneActive = true;
+                }
+                
+                // Update active child reference from manager
+                this.activeChild = this.childSessionManager.getActiveChild();
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.error(`[MinimalDapClient] Failed to create child session: ${msg}`);
+              }
+            }
+            return;
+          }
+        } catch (e) {
+          const err = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
+          logger.error(`[MinimalDapClient] Error in policy reverse request handler: ${err}`);
+        }
+      }
+      
+      // Default handling for unhandled reverse requests
       try {
         switch (request.command) {
           case 'runInTerminal':
             // Acknowledge without spawning a terminal (internalConsole launch path).
             this.sendResponse(request, {});
             break;
-          case 'startDebugging': {
-            // DIAGNOSTIC: Enhanced startDebugging logging
-            logger.info(`[MinimalDapClient] 🚀 RECEIVED startDebugging REQUEST!`, {
-              seq: request.seq,
-              fullRequest: request
-            });
-            
-            // Multi-session pattern: spawn a child DAP session and attach via launch(__pendingTargetId)
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const args: any = (request as any)?.arguments ?? {};
-              const cfg = args?.configuration ?? {};
-              const pendingId: string | undefined = cfg?.__pendingTargetId;
-              
-              logger.info(`[MinimalDapClient] 🔍 startDebugging PARSED:`, {
-                hasArgs: !!args,
-                hasConfiguration: !!cfg,
-                pendingId: pendingId,
-                configType: cfg?.type,
-                fullConfig: cfg
-              });
-              
-              this.sendResponse(request, {});
-              
-              if (pendingId && typeof pendingId === 'string') {
-                logger.info(`[MinimalDapClient] ✅ VALID pendingTargetId: ${pendingId} - Starting child adoption`);
-                
-
-                // If we're already adopting or have an active child, ignore additional startDebugging requests
-                if (this.adoptionInProgress || this.activeChild || this.childSessions.size > 0) {
-                  logger.info('[MinimalDapClient] ⚠️ Ignoring startDebugging; adoption in progress or child active', {
-                    adoptionInProgress: this.adoptionInProgress,
-                    hasActiveChild: !!this.activeChild,
-                    childSessionCount: this.childSessions.size
-                  });
-                  return;
-                }
-                // Mark adoption in progress immediately to avoid races when js-debug sends multiple requests
-                this.adoptionInProgress = true;
-
-                // Choose policy by adapter type
-                const adapterType: string | undefined = typeof cfg?.type === 'string' ? (cfg.type as string) : undefined;
-                const policy: AdapterPolicy = adapterType === 'pwa-node' ? JsDebugAdapterPolicy : DefaultAdapterPolicy;
-                this.activePolicy = policy;
-                // DISABLED: Deferring configDone causes module entry pause
-                // The probe shows immediate configDone triggers proper flow
-                this.deferParentConfigDoneActive = false; // !!policy.shouldDeferParentConfigDone(cfg as Record<string, unknown>);
-                
-                logger.info(`[MinimalDapClient] 🎯 Child session policy:`, {
-                  adapterType,
-                  policyName: policy.constructor.name,
-                  shouldDeferParentConfigDone: this.deferParentConfigDoneActive
-                });
-                
-                // De-duplicate per pending target id
-                if (!this.adoptedTargets.has(pendingId)) {
-                  this.adoptedTargets.add(pendingId);
-                  logger.info(`[MinimalDapClient] 🏗️ Creating child session for ${pendingId}`);
-                  void this.createChildSession(pendingId, cfg, policy)
-                    .then(() => {
-                      // keep adoptionInProgress false after child established
-                      this.adoptionInProgress = false;
-                      logger.info(`[MinimalDapClient] ✅ Child session created successfully for ${pendingId}`);
-                    })
-                    .catch((err) => {
-                      const msg = err instanceof Error ? err.message : String(err);
-                      logger.error(`[MinimalDapClient] ❌ createChildSession failed for ${pendingId}: ${msg}`);
-                      this.adoptionInProgress = false;
-                    });
-                } else {
-                  logger.info(`[MinimalDapClient] ⚠️ Pending target ${pendingId} already adopted`);
-                }
-              } else {
-                logger.warn(`[MinimalDapClient] ❌ startDebugging without valid __pendingTargetId:`, {
-                  pendingId,
-                  pendingIdType: typeof pendingId,
-                  hasPendingId: 'pendingId' in (cfg || {}),
-                  configKeys: Object.keys(cfg || {})
-                });
-              }
-            } catch (error) {
-              logger.error(`[MinimalDapClient] ❌ startDebugging handler error:`, error);
-              // Best-effort ack even if we couldn't parse args
-              this.sendResponse(request, {});
-            }
-            break;
-          }
           default:
             // For unrecognized adapter requests, reply success with empty body to avoid deadlocks.
             this.sendResponse(request, {});
@@ -322,13 +301,7 @@ export class MinimalDapClient extends EventEmitter {
       } catch (e) {
         const err = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
         logger.error(`[MinimalDapClient] Error handling adapter request '${request.command}': ${err}`);
-        // Best-effort ack to unblock the adapter even on error.
-        // For startDebugging, prefer explicit failure even on error.
-        if (request.command === 'startDebugging') {
-          this.sendResponse(request, {}, false, 'startDebugging not supported by MCP DAP client');
-        } else {
-          this.sendResponse(request, {});
-        }
+        this.sendResponse(request, {});
       }
     }
   }
@@ -782,23 +755,16 @@ export class MinimalDapClient extends EventEmitter {
       }
     }
     
-    // Route debuggee-scoped requests to active child session when present.
-    // If a child session is being created asynchronously, wait briefly.
-    if (CHILD_ROUTED_COMMANDS.has(command)) {
-      // If a child session is pending creation (adoptedTargets > childSessions) or not yet selected, wait longer.
-      if (!this.activeChild) {
-        const shouldWait = this.childSessions.size > 0;
-        if (shouldWait) {
-          for (let i = 0; i < 120 && !this.activeChild; i++) {
-            await this.sleep(100); // up to ~12s
-          }
-          // If a child exists but not marked active yet, pick the most recently created
-          if (!this.activeChild && this.childSessions.size > 0) {
-            const lastChild = Array.from(this.childSessions.values()).pop() || null;
-            if (lastChild) this.activeChild = lastChild;
-          }
+    // Route debuggee-scoped requests to active child session when present using policy
+    if (this.childSessionManager?.shouldRouteToChild(command)) {
+      // If a child session is pending creation, wait briefly
+      if (!this.activeChild && this.childSessionManager.hasActiveChildren()) {
+        for (let i = 0; i < 120 && !this.activeChild; i++) {
+          await this.sleep(100); // up to ~12s
+          this.activeChild = this.childSessionManager.getActiveChild();
         }
       }
+      
       if (this.activeChild) {
         return this.activeChild.sendRequest<T>(command, args as unknown, timeoutMs);
       } else {
@@ -806,8 +772,8 @@ export class MinimalDapClient extends EventEmitter {
       }
     }
     
-    // Track and mirror setBreakpoints to child if/when present
-    if (command === 'setBreakpoints') {
+    // Track and mirror setBreakpoints to child if/when present using ChildSessionManager
+    if (command === 'setBreakpoints' && this.childSessionManager) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const a: any = args ?? {};
@@ -815,10 +781,10 @@ export class MinimalDapClient extends EventEmitter {
         const bps: DebugProtocol.SourceBreakpoint[] | undefined = a?.breakpoints;
         if (typeof sp === 'string' && Array.isArray(bps)) {
           const absolutePath = path.isAbsolute(sp) ? sp : path.resolve(sp);
+          // Store breakpoints in ChildSessionManager for mirroring
+          this.childSessionManager.storeBreakpoints(absolutePath, bps);
+          // Also keep local copy for legacy code compatibility
           this.storedBreakpoints.set(absolutePath, bps);
-          if (this.activeChild) {
-            void this.activeChild.sendRequest('setBreakpoints', { source: { path: absolutePath }, breakpoints: bps }).catch(() => {});
-          }
         }
       } catch {
         // ignore tracking errors
@@ -828,15 +794,18 @@ export class MinimalDapClient extends EventEmitter {
 
     const requestSeq = this.nextSeq++;
     
-    // Normalize initialize args for js-debug: adapterID should be 'pwa-node' (tests send 'javascript')
-    if (command === 'initialize') {
+    // Normalize initialize args using policy
+    if (command === 'initialize' && this.dapBehavior.normalizeAdapterId) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const a: any = args && typeof args === 'object' ? { ...(args as Record<string, unknown>) } : {};
-        if (typeof a.adapterID === 'string' && a.adapterID.toLowerCase() === 'javascript') {
-          a.adapterID = 'pwa-node';
-          args = a;
-          logger.info('[MinimalDapClient] Normalized initialize.adapterID -> pwa-node for js-debug');
+        if (typeof a.adapterID === 'string') {
+          const normalized = this.dapBehavior.normalizeAdapterId(a.adapterID);
+          if (normalized !== a.adapterID) {
+            a.adapterID = normalized;
+            args = a;
+            logger.info(`[MinimalDapClient] Normalized initialize.adapterID -> ${normalized}`);
+          }
         }
       } catch {
         // ignore normalization errors

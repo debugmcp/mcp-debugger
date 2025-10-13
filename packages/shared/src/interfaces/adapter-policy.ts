@@ -14,12 +14,31 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { StackFrame, Variable } from '../models/index.js';
+import type { DapClientBehavior } from './dap-client-behavior.js';
 
 export type ChildSessionStrategy =
   | 'none'                     // No child session expected/created
   | 'launchWithPendingTarget'  // Launch child using __pendingTargetId (js-debug typical)
   | 'attachByPort'             // Attach child by known inspector port
   | 'adoptInParent';           // Adopt pending target in the same parent session
+
+/**
+ * Command handling result that determines how the proxy should proceed
+ */
+export interface CommandHandling {
+  shouldQueue: boolean;
+  shouldDefer: boolean;
+  reason?: string;
+}
+
+/**
+ * Adapter-specific state that can be managed by each policy
+ */
+export interface AdapterSpecificState {
+  initialized: boolean;
+  configurationDone: boolean;
+  [key: string]: unknown;
+}
 
 export interface AdapterPolicy {
   /**
@@ -161,6 +180,97 @@ export interface AdapterPolicy {
     scriptArgs?: string[];
     breakpoints: Map<string, unknown>;  // Will be Breakpoint in implementation
   }): Promise<void>;
+
+  /**
+   * Determines if commands should be queued before initialization
+   * @returns True if this adapter requires command queueing
+   */
+  requiresCommandQueueing(): boolean;
+
+  /**
+   * Determines if a specific command should be queued based on current state
+   * @param command The DAP command name
+   * @param state Current adapter state
+   * @returns Decision on whether to queue the command
+   */
+  shouldQueueCommand(command: string, state: AdapterSpecificState): CommandHandling;
+
+  /**
+   * Process queued commands and return them in the correct order
+   * @param commands Currently queued commands (type any to handle full DapCommandPayload)
+   * @param state Current adapter state
+   * @returns Ordered array of commands to execute
+   */
+  processQueuedCommands?(
+    commands: unknown[],
+    state: AdapterSpecificState
+  ): unknown[];
+
+  /**
+   * Create initial state for this adapter
+   * @returns Initial state object
+   */
+  createInitialState(): AdapterSpecificState;
+
+  /**
+   * Update state based on a DAP command being sent
+   * @param command The DAP command name
+   * @param args Command arguments
+   * @param state Current state (will be mutated)
+   */
+  updateStateOnCommand?(command: string, args: unknown, state: AdapterSpecificState): void;
+
+  /**
+   * Update state based on a DAP event being received
+   * @param event The DAP event name
+   * @param body Event body
+   * @param state Current state (will be mutated)
+   */
+  updateStateOnEvent?(event: string, body: unknown, state: AdapterSpecificState): void;
+
+  /**
+   * Check if the adapter is fully initialized and ready for commands
+   * @param state Current adapter state
+   * @returns True if initialized and ready
+   */
+  isInitialized(state: AdapterSpecificState): boolean;
+
+  /**
+   * Check if the adapter connection is ready to accept DAP commands
+   * @param state Current adapter state
+   * @returns True if connected and ready
+   */
+  isConnected(state: AdapterSpecificState): boolean;
+
+  /**
+   * Determine the adapter type from adapter command
+   * @param adapterCommand Command used to spawn the adapter
+   * @returns True if this policy applies to the given adapter
+   */
+  matchesAdapter(adapterCommand: { command: string; args: string[] }): boolean;
+
+  /**
+   * Get initialization behavior flags for this adapter.
+   * This combines multiple initialization quirks into a single method to reduce interface bloat.
+   * @returns Object with initialization behavior flags
+   */
+  getInitializationBehavior(): {
+    /** Whether to defer configurationDone until after launch/attach */
+    deferConfigDone?: boolean;
+    /** Whether to add runtimeExecutable to launch arguments */
+    addRuntimeExecutable?: boolean;
+    /** Whether to track initialize response separately from initialized event */
+    trackInitializeResponse?: boolean;
+    /** Whether to ensure initial stop after launch/attach */
+    requiresInitialStop?: boolean;
+  };
+
+  /**
+   * Get DAP client-specific behavior configuration.
+   * This groups all DAP client behaviors (reverse requests, child sessions, etc.)
+   * @returns DAP client behavior configuration
+   */
+  getDapClientBehavior(): DapClientBehavior;
 }
 
 /**
@@ -238,5 +348,48 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
       skipConfigurationDone: false,
       supportsVariableType: false
     };
+  },
+  
+  // Command queueing methods - Default policy doesn't need queueing
+  requiresCommandQueueing: () => false,
+  
+  shouldQueueCommand: (): CommandHandling => {
+    // Default policy never queues commands
+    return {
+      shouldQueue: false,
+      shouldDefer: false,
+      reason: 'Default adapter does not queue commands'
+    };
+  },
+  
+  createInitialState: (): AdapterSpecificState => {
+    return {
+      initialized: false,
+      configurationDone: false
+    };
+  },
+  
+  isInitialized: (state: AdapterSpecificState): boolean => {
+    return state.initialized;
+  },
+  
+  isConnected: (state: AdapterSpecificState): boolean => {
+    // Default assumes connected if initialized
+    return state.initialized;
+  },
+  
+  matchesAdapter: (): boolean => {
+    // Default policy is a fallback, doesn't match specific adapters
+    return false;
+  },
+  
+  getInitializationBehavior: () => {
+    // Default adapter has no special initialization requirements
+    return {};
+  },
+  
+  getDapClientBehavior: (): DapClientBehavior => {
+    // Default adapter has no special DAP client behaviors
+    return {};
   }
 };

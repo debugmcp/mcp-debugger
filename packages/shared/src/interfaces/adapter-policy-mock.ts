@@ -4,8 +4,9 @@
  * Encodes mock adapter behaviors for testing purposes.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
+import type { DapClientBehavior } from './dap-client-behavior.js';
 
 export const MockAdapterPolicy: AdapterPolicy = {
   name: 'mock',
@@ -22,7 +23,7 @@ export const MockAdapterPolicy: AdapterPolicy = {
   /**
    * Mock adapter doesn't need stack frame filtering
    */
-  filterStackFrames: (frames: StackFrame[], includeInternals: boolean): StackFrame[] => {
+  filterStackFrames: (frames: StackFrame[]): StackFrame[] => {
     // Mock adapter returns all frames as-is
     return frames;
   },
@@ -33,8 +34,7 @@ export const MockAdapterPolicy: AdapterPolicy = {
   extractLocalVariables: (
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,
-    variables: Record<number, Variable[]>,
-    includeSpecial: boolean = false
+    variables: Record<number, Variable[]>
   ): Variable[] => {
     // Get the top frame
     if (!stackFrames || stackFrames.length === 0) {
@@ -84,6 +84,110 @@ export const MockAdapterPolicy: AdapterPolicy = {
       requiresStrictHandshake: false,
       skipConfigurationDone: false,
       supportsVariableType: false  // Mock adapter has simple variable support
+    };
+  },
+
+  /**
+   * Mock adapter doesn't require command queueing
+   */
+  requiresCommandQueueing: (): boolean => false,
+
+  /**
+   * Mock adapter doesn't queue commands
+   */
+  shouldQueueCommand: (): CommandHandling => {
+    // Mock adapter processes commands immediately
+    return {
+      shouldQueue: false,
+      shouldDefer: false,
+      reason: 'Mock adapter does not queue commands'
+    };
+  },
+
+  /**
+   * Create initial state for mock adapter
+   */
+  createInitialState: (): AdapterSpecificState => {
+    return {
+      initialized: false,
+      configurationDone: false
+    };
+  },
+
+  /**
+   * Update state when a command is sent
+   */
+  updateStateOnCommand: (command: string, _args: unknown, state: AdapterSpecificState): void => {
+    if (command === 'configurationDone') {
+      state.configurationDone = true;
+    }
+  },
+
+  /**
+   * Update state when an event is received
+   */
+  updateStateOnEvent: (event: string, _body: unknown, state: AdapterSpecificState): void => {
+    if (event === 'initialized') {
+      state.initialized = true;
+    }
+  },
+
+  /**
+   * Check if mock adapter is initialized
+   */
+  isInitialized: (state: AdapterSpecificState): boolean => {
+    return state.initialized;
+  },
+
+  /**
+   * Check if mock adapter is connected
+   */
+  isConnected: (state: AdapterSpecificState): boolean => {
+    // Mock adapter is connected once initialized
+    return state.initialized;
+  },
+
+  /**
+   * Check if this policy applies to the given adapter command
+   */
+  matchesAdapter: (adapterCommand: { command: string; args: string[] }): boolean => {
+    // Check for mock adapter in command or arguments
+    const commandStr = adapterCommand.command.toLowerCase();
+    const argsStr = adapterCommand.args.join(' ').toLowerCase();
+    
+    return commandStr.includes('mock-adapter') || 
+           argsStr.includes('mock-adapter');
+  },
+
+  /**
+   * Mock adapter has no special initialization requirements
+   */
+  getInitializationBehavior: () => {
+    return {};  // Mock adapter has no special initialization requirements
+  },
+
+  /**
+   * Mock DAP client behaviors - minimal for testing
+   */
+  getDapClientBehavior: (): DapClientBehavior => {
+    return {
+      // Mock doesn't handle reverse requests
+      handleReverseRequest: undefined,
+      
+      // No child session routing needed for mock
+      childRoutedCommands: undefined,
+      
+      // Mock-specific behaviors (all disabled)
+      mirrorBreakpointsToChild: false,
+      deferParentConfigDone: false,
+      pauseAfterChildAttach: false,
+      
+      // No adapter ID normalization needed
+      normalizeAdapterId: undefined,
+      
+      // Standard timeouts
+      childInitTimeout: 1000, // Shorter for testing
+      suppressPostAttachConfigDone: false
     };
   }
 };

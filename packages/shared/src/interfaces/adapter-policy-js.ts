@@ -5,8 +5,18 @@
  * generic DAP flow in core code.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
+import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+
+/**
+ * JavaScript-specific adapter state
+ */
+interface JsAdapterState extends AdapterSpecificState {
+  initializeResponded: boolean;
+  startSent: boolean;
+  pendingCommands: Array<{ requestId: string; dapCommand: string; dapArgs?: unknown }>;
+}
 
 export const JsDebugAdapterPolicy: AdapterPolicy = {
   name: 'js-debug',
@@ -21,7 +31,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
         type,
         request: 'attach',
         __pendingTargetId: pendingId,
-        continueOnAttach: false
+        continueOnAttach: true  // js-debug requires true to work properly
       }
     };
   },
@@ -339,5 +349,262 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
 
     // Multi-session architecture handles everything from here
     console.info(`[JsDebugAdapterPolicy] [JS] Handshake complete. Multi-session architecture now handling debugging.`);
+  },
+
+  /**
+   * JavaScript adapter requires command queueing for proper initialization
+   */
+  requiresCommandQueueing: (): boolean => true,
+
+  /**
+   * Determine if a command should be queued based on JavaScript-specific state
+   */
+  shouldQueueCommand: (command: string, state: AdapterSpecificState): CommandHandling => {
+    const jsState = state as JsAdapterState;
+    
+    // Don't queue 'initialize' - it goes through immediately
+    if (command === 'initialize') {
+      return { shouldQueue: false, shouldDefer: false };
+    }
+    
+    // Gate all non-'initialize' requests until initialize response is received
+    if (!jsState.initializeResponded) {
+      return {
+        shouldQueue: true,
+        shouldDefer: false,
+        reason: `Queuing '${command}' until 'initialize' response (JS adapter)`
+      };
+    }
+    
+    // Configuration commands must wait for 'initialized' event
+    const configCommands = new Set([
+      'setBreakpoints',
+      'setFunctionBreakpoints', 
+      'setExceptionBreakpoints',
+      'setDataBreakpoints',
+      'setInstructionBreakpoints',
+      'configurationDone'
+    ]);
+    
+    if (!jsState.initialized && configCommands.has(command)) {
+      return {
+        shouldQueue: true,
+        shouldDefer: false,
+        reason: `Queuing '${command}' until 'initialized' event (JS adapter)`
+      };
+    }
+    
+    // If launch/attach arrives before configurationDone, ensure strict ordering
+    if ((command === 'launch' || command === 'attach') && !jsState.configurationDone) {
+      return {
+        shouldQueue: true,
+        shouldDefer: true, // Signal that we need to inject configurationDone first
+        reason: `JS: deferring '${command}' until configurationDone (strict order)`
+      };
+    }
+    
+    // Command can proceed normally
+    return { shouldQueue: false, shouldDefer: false };
+  },
+
+  /**
+   * Process queued commands in JavaScript-specific order
+   */
+  processQueuedCommands: (
+    commands: unknown[]
+  ): unknown[] => {
+    // Cast to the expected type for internal processing
+    const typedCommands = commands as Array<{ requestId: string; dapCommand: string; dapArgs?: unknown }>;
+    
+    // Group commands by type for proper ordering
+    const isConfig = (cmd: string) => [
+      'setBreakpoints',
+      'setFunctionBreakpoints',
+      'setExceptionBreakpoints',
+      'setDataBreakpoints',
+      'setInstructionBreakpoints'
+    ].includes(cmd);
+    
+    const configs = typedCommands.filter(p => isConfig(p.dapCommand));
+    const configDone = typedCommands.filter(p => p.dapCommand === 'configurationDone');
+    const launches = typedCommands.filter(p => p.dapCommand === 'launch' || p.dapCommand === 'attach');
+    const others = typedCommands.filter(p => 
+      !isConfig(p.dapCommand) && 
+      p.dapCommand !== 'configurationDone' && 
+      p.dapCommand !== 'launch' && 
+      p.dapCommand !== 'attach'
+    );
+    
+    // JS (js-debug) strict order: configs -> configurationDone -> starts -> others
+    return [...configs, ...configDone, ...launches, ...others];
+  },
+
+  /**
+   * Create initial state for JavaScript adapter
+   */
+  createInitialState: (): AdapterSpecificState => {
+    return {
+      initialized: false,
+      configurationDone: false,
+      initializeResponded: false,
+      startSent: false,
+      pendingCommands: []
+    } as JsAdapterState;
+  },
+
+  /**
+   * Update state when a command is sent
+   */
+  updateStateOnCommand: (command: string, _args: unknown, state: AdapterSpecificState): void => {
+    const jsState = state as JsAdapterState;
+    
+    if (command === 'initialize') {
+      // Will mark initializeResponded when we get the response
+    } else if (command === 'configurationDone') {
+      jsState.configurationDone = true;
+    } else if (command === 'launch' || command === 'attach') {
+      jsState.startSent = true;
+    }
+  },
+
+  /**
+   * Update state when an event is received
+   */
+  updateStateOnEvent: (event: string, _body: unknown, state: AdapterSpecificState): void => {
+    const jsState = state as JsAdapterState;
+    
+    if (event === 'initialized') {
+      jsState.initialized = true;
+    }
+  },
+
+  /**
+   * Check if JavaScript adapter is initialized
+   */
+  isInitialized: (state: AdapterSpecificState): boolean => {
+    const jsState = state as JsAdapterState;
+    return jsState.initialized && jsState.initializeResponded;
+  },
+
+  /**
+   * Check if JavaScript adapter is connected
+   */
+  isConnected: (state: AdapterSpecificState): boolean => {
+    // For JavaScript, we consider it connected once initialize response is received
+    const jsState = state as JsAdapterState;
+    return jsState.initializeResponded;
+  },
+
+  /**
+   * Check if this policy applies to the given adapter command
+   */
+  matchesAdapter: (adapterCommand: { command: string; args: string[] }): boolean => {
+    // Check for js-debug or pwa-node in command or arguments
+    const commandStr = adapterCommand.command.toLowerCase();
+    const argsStr = adapterCommand.args.join(' ').toLowerCase();
+    
+    return commandStr.includes('js-debug') || 
+           commandStr.includes('pwa-node') ||
+           commandStr.includes('vsDebugServer') ||
+           argsStr.includes('js-debug') || 
+           argsStr.includes('pwa-node') ||
+           argsStr.includes('vsDebugServer');
+  },
+
+  /**
+   * JavaScript adapter has special initialization requirements
+   */
+  getInitializationBehavior: () => {
+    return {
+      deferConfigDone: true,          // Must defer configurationDone until after launch/attach
+      addRuntimeExecutable: true,      // Needs to add runtimeExecutable to launch args
+      trackInitializeResponse: true,   // Must track initialize response separately
+      requiresInitialStop: true        // Must ensure initial stop after launch/attach
+    };
+  },
+
+  /**
+   * JavaScript-specific DAP client behaviors
+   */
+  getDapClientBehavior: (): DapClientBehavior => {
+    return {
+      // Handle reverse startDebugging requests
+      handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {
+        if (request.command === 'startDebugging') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const args: any = (request as any)?.arguments ?? {};
+          const cfg = args?.configuration ?? {};
+          const pendingId: string | undefined = cfg?.__pendingTargetId;
+          
+          // Send acknowledgment
+          context.sendResponse(request, {});
+          
+          if (pendingId && typeof pendingId === 'string') {
+            // Check if not already adopted
+            if (!context.adoptedTargets.has(pendingId)) {
+              context.adoptedTargets.add(pendingId);
+              return {
+                handled: true,
+                createChildSession: true,
+                childConfig: {
+                  host: cfg.host || 'localhost',
+                  port: cfg.port || 9229,
+                  pendingId,
+                  parentConfig: cfg
+                }
+              };
+            }
+          }
+          return { handled: true }; // Handled but no child session
+        } else if (request.command === 'runInTerminal') {
+          // Acknowledge without spawning terminal
+          context.sendResponse(request, {});
+          return { handled: true };
+        }
+        return { handled: false };
+      },
+      
+      // Commands that should be routed to child sessions
+      childRoutedCommands: new Set([
+        'threads',
+        'pause',
+        'continue',
+        'next',
+        'stepIn',
+        'stepOut',
+        'stackTrace',
+        'scopes',
+        'variables',
+        'evaluate',
+        'loadedSources',
+        'source',
+        'setVariable',
+        'setExpression',
+        'restart',
+        'disconnect',
+        'terminate',
+        'goto',
+        'restartFrame',
+        'stepBack',
+        'reverseContinue'
+      ]),
+      
+      // JavaScript-specific child session behaviors
+      mirrorBreakpointsToChild: true,
+      deferParentConfigDone: true,
+      pauseAfterChildAttach: true,
+      
+      // Normalize adapter ID for initialize
+      normalizeAdapterId: (requestedId: string): string => {
+        if (requestedId.toLowerCase() === 'javascript') {
+          return 'pwa-node';
+        }
+        return requestedId;
+      },
+      
+      // Timeouts
+      childInitTimeout: 12000,
+      suppressPostAttachConfigDone: false  // Child session needs configurationDone
+    };
   }
 };
