@@ -17,6 +17,7 @@ import {
   ChildSessionConfig 
 } from '@debugmcp/shared';
 import { ChildSessionManager } from './child-session-manager.js';
+import { getErrorMessage, isInitializeResponse, hasThreadsBody } from './dap-extensions.js';
 
 const logger = createLogger('minimal-dap-simple');
 
@@ -201,10 +202,9 @@ export class MinimalDapClient extends EventEmitter {
         
         if (response.success) {
           // Cache capabilities from initialize response
-          if (response.command === 'initialize') {
+          if (response.command === 'initialize' && isInitializeResponse(response)) {
             try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const caps: any = (response as any)?.body?.capabilities ?? (response as any)?.body;
+              const caps = response.body?.capabilities;
               if (caps && typeof caps.supportsConfigurationDoneRequest === 'boolean') {
                 this.supportsConfigDone = !!caps.supportsConfigurationDoneRequest;
                 logger.info(`[MinimalDapClient] initialize capabilities: supportsConfigurationDoneRequest=${this.supportsConfigDone}`);
@@ -282,7 +282,7 @@ export class MinimalDapClient extends EventEmitter {
             return;
           }
         } catch (e) {
-          const err = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
+          const err = getErrorMessage(e);
           logger.error(`[MinimalDapClient] Error in policy reverse request handler: ${err}`);
         }
       }
@@ -300,7 +300,7 @@ export class MinimalDapClient extends EventEmitter {
             break;
         }
       } catch (e) {
-        const err = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
+          const err = getErrorMessage(e);
         logger.error(`[MinimalDapClient] Error handling adapter request '${request.command}': ${err}`);
         this.sendResponse(request, {});
       }
@@ -364,11 +364,12 @@ export class MinimalDapClient extends EventEmitter {
     for (let i = 0; i < maxAttempts; i++) {
       try {
         const resp = await this.sendRequest<DebugProtocol.ThreadsResponse>('threads', {} as unknown, 5000);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const threads = (resp as any)?.body?.threads;
-        const firstId = Array.isArray(threads) && threads.length ? threads[0]?.id : undefined;
-        if (typeof firstId === 'number') {
-          return firstId;
+        if (hasThreadsBody(resp)) {
+          const threads = resp.body?.threads;
+          const firstId = Array.isArray(threads) && threads.length ? threads[0]?.id : undefined;
+          if (typeof firstId === 'number') {
+            return firstId;
+          }
         }
       } catch {
         // ignore and retry
@@ -460,10 +461,10 @@ export class MinimalDapClient extends EventEmitter {
         logger.info(`[MinimalDapClient] [child:${pendingId}] setBreakpoints -> ${absolutePath} (${bps.length})`);
         await child.sendRequest('setBreakpoints', { source: { path: absolutePath }, breakpoints: bps });
       }
-    } catch (e) {
-      const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
-      logger.warn(`[MinimalDapClient] [child:${pendingId}] setBreakpoints failed: ${emsg}`);
-    }
+      } catch (e) {
+        const emsg = getErrorMessage(e);
+        logger.warn(`[MinimalDapClient] [child:${pendingId}] setBreakpoints failed: ${emsg}`);
+      }
 
     // 5) configurationDone (guarded by capability observed on child's initialize)
     try {
@@ -577,14 +578,15 @@ export class MinimalDapClient extends EventEmitter {
       try {
         let threadId: number | undefined;
         for (let i = 0; i < 240; i++) {
-        const resp = await child.sendRequest<DebugProtocol.ThreadsResponse>('threads', {} as unknown, 5000);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const threads = (resp as any)?.body?.threads;
-        const firstId = Array.isArray(threads) && threads.length ? threads[0]?.id : undefined;
-        if (typeof firstId === 'number') {
-          threadId = firstId;
-          break;
-        }
+          const resp = await child.sendRequest<DebugProtocol.ThreadsResponse>('threads', {} as unknown, 5000);
+          if (hasThreadsBody(resp)) {
+            const threads = resp.body?.threads;
+            const firstId = Array.isArray(threads) && threads.length ? threads[0]?.id : undefined;
+            if (typeof firstId === 'number') {
+              threadId = firstId;
+              break;
+            }
+          }
           await this.sleep(100);
         }
         if (typeof threadId === 'number') {
@@ -630,8 +632,7 @@ export class MinimalDapClient extends EventEmitter {
           if (!sawStopped) {
             try {
               const resp2 = await child.sendRequest<DebugProtocol.ThreadsResponse>('threads', {} as unknown, 3000);
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const threads2 = (resp2 as any)?.body?.threads ?? [];
+              const threads2 = hasThreadsBody(resp2) ? resp2.body?.threads ?? [] : [];
               const ids: number[] = [];
               for (const t of threads2) {
                 const id = t?.id;
@@ -653,7 +654,7 @@ export class MinimalDapClient extends EventEmitter {
           logger.warn(`[MinimalDapClient] [child:${pendingId}] No threads discovered within timeout for pause fallback`);
         }
       } catch (e) {
-        const emsg = ((e as any) && typeof (e as any).message === "string") ? (e as any).message : String(e);
+        const emsg = getErrorMessage(e);
         logger.warn(`[MinimalDapClient] [child:${pendingId}] threads/pause fallback failed: ${emsg}`);
       }
     }
@@ -975,8 +976,8 @@ export class MinimalDapClient extends EventEmitter {
       }
       this.childSessions.clear();
       this.activeChild = null;
-    } catch (e: any) {
-      const emsg = e && typeof e.message === 'string' ? e.message : String(e);
+    } catch (e) {
+      const emsg = getErrorMessage(e);
       logger.warn('[MinimalDapClient] Error shutting down child sessions:', emsg);
     }
 

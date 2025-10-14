@@ -25,6 +25,7 @@ import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
   validateProxyInitPayload
 } from '../utils/type-guards.js';
+import { SilentDapCommandPayload, JsDebugAdapterState } from './dap-extensions.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
 import { 
@@ -48,7 +49,7 @@ export class DapProxyWorker {
   // Policy-based state management
   private adapterPolicy: AdapterPolicy = DefaultAdapterPolicy;
   private adapterState: AdapterSpecificState;
-  private commandQueue: DapCommandPayload[] = [];
+  private commandQueue: (DapCommandPayload | SilentDapCommandPayload)[] = [];
   private preConnectQueue: DapCommandPayload[] = [];
 
   constructor(private dependencies: DapProxyDependencies) {
@@ -415,7 +416,7 @@ export class DapProxyWorker {
           const hasQueuedConfigDone = this.commandQueue.some(p => p.dapCommand === 'configurationDone');
           if (!hasQueuedConfigDone) {
             // Inject a silent configurationDone
-            this.commandQueue.push({ 
+            const silentCommand: SilentDapCommandPayload = { 
               requestId: `__silent_configDone_${Date.now()}`, 
               dapCommand: 'configurationDone', 
               dapArgs: {},
@@ -423,7 +424,8 @@ export class DapProxyWorker {
               cmd: 'dap',
               // Mark as silent so we don't send response
               __silent: true
-            } as any);
+            };
+            this.commandQueue.push(silentCommand);
           }
         }
         
@@ -444,7 +446,7 @@ export class DapProxyWorker {
       let dapArgs = payload.dapArgs;
       const initBehavior = this.adapterPolicy.getInitializationBehavior();
       if (initBehavior.addRuntimeExecutable && payload.dapCommand === 'launch' && this.currentInitPayload?.executablePath) {
-        const launchArgs = dapArgs as any;
+        const launchArgs = dapArgs as Record<string, unknown>;
         if (!launchArgs.runtimeExecutable) {
           launchArgs.runtimeExecutable = this.currentInitPayload.executablePath;
           this.logger!.info(`[Worker] Added runtimeExecutable to launch args: ${launchArgs.runtimeExecutable}`);
@@ -462,7 +464,7 @@ export class DapProxyWorker {
 
       // Mark initialize response received if needed
       if (initBehavior.trackInitializeResponse && payload.dapCommand === 'initialize') {
-        (this.adapterState as any).initializeResponded = true;
+        (this.adapterState as JsDebugAdapterState).initializeResponded = true;
       }
 
       // Complete tracking
@@ -507,7 +509,7 @@ export class DapProxyWorker {
     
     for (const payload of ordered) {
       try {
-        const silent = ((payload as any).__silent === true);
+        const silent = ((payload as SilentDapCommandPayload).__silent === true);
         if (silent) {
           await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
           if (this.adapterPolicy.updateStateOnCommand) {
@@ -553,7 +555,7 @@ export class DapProxyWorker {
     try {
       while (Date.now() - start < timeoutMs) {
         try {
-          const threadsResp: any = await this.dapClient.sendRequest('threads', {});
+          const threadsResp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
           const first = threadsResp?.body?.threads?.[0]?.id;
           if (typeof first === 'number' && first > 0) {
             const pauseTid = first;
