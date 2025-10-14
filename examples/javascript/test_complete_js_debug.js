@@ -22,7 +22,7 @@ function deepFunction(level) {
     return deepFunction(level - 1);
   } else {
     const localVar = "Bottom of stack";
-    debugger; // BREAKPOINT HERE - Line 25
+    console.log("At bottom of stack"); // Line 24 - good for breakpoint
     return localVar;
   }
 }
@@ -34,7 +34,7 @@ function testVariables() {
   const array = [1, 2, 3, 4, 5];
   const object = { a: 1, b: 2, nested: { c: 3 } };
   
-  debugger; // BREAKPOINT HERE - Line 37
+  console.log("Testing variables"); // Line 37 - good for breakpoint
   
   // Modify variables to test expression evaluation
   const result = number * 2;

@@ -111,9 +111,15 @@ export default defineConfig({
         // Proxy entry point - separate process
         'src/proxy/dap-proxy-entry.ts',
         // Factory pattern files with minimal logic
-        'packages/shared/src/factories/adapter-factory.ts'
+        'packages/shared/src/factories/adapter-factory.ts',
+        // Exclude barrel export index files to prevent duplicate coverage
+        'packages/shared/src/index.ts',
+        'packages/shared/src/models/index.ts'
       ],
-      include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}']
+      include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}'],
+      // Prevent Istanbul from tracking files multiple times
+      // when they're imported through different resolution paths
+      all: false  // Don't include all files, only those actually imported
     },
     testTimeout: 30000,
     pool: 'threads',
