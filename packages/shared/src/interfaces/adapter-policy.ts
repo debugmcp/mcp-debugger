@@ -271,6 +271,29 @@ export interface AdapterPolicy {
    * @returns DAP client behavior configuration
    */
   getDapClientBehavior(): DapClientBehavior;
+
+  /**
+   * Get the configuration for spawning the debug adapter process.
+   * This allows each policy to define how to spawn its adapter.
+   * @param payload The initialization payload containing ports, paths, etc.
+   * @returns Configuration for spawning the adapter, or undefined if not applicable
+   */
+  getAdapterSpawnConfig?(payload: {
+    executablePath: string;
+    adapterHost: string;
+    adapterPort: number;
+    logDir: string;
+    scriptPath: string;
+    adapterCommand?: { command: string; args: string[]; env?: Record<string, string> };
+  }): {
+    command: string;
+    args: string[];
+    host: string;
+    port: number;
+    logDir: string;
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+  } | undefined;
 }
 
 /**

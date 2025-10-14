@@ -20,15 +20,13 @@ import {
   ErrorMessage
 } from './dap-proxy-interfaces.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
-import { GenericAdapterManager, DebugpyAdapterManager } from './dap-proxy-adapter-manager.js';
+import { GenericAdapterManager } from './dap-proxy-adapter-manager.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
-  validateProxyInitPayload, 
-  validateAdapterCommand,
-  logAdapterCommandValidation 
+  validateProxyInitPayload
 } from '../utils/type-guards.js';
 // Import adapter policies from shared package
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from '@debugmcp/shared';
+import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
 import { 
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -150,21 +148,12 @@ export class DapProxyWorker {
         this.logger.warn?.('[Worker] Failed to enable DAP trace file', e as Error);
       }
 
-      // Create managers with logger
-      if (payload.adapterCommand) {
-        this.processManager = new GenericAdapterManager(
-          this.dependencies.processSpawner,
-          this.logger,
-          this.dependencies.fileSystem
-        );
-      } else {
-        // Backward compatibility - use Python adapter manager
-        this.processManager = new DebugpyAdapterManager(
-          this.dependencies.processSpawner,
-          this.logger,
-          this.dependencies.fileSystem
-        );
-      }
+      // Create generic adapter manager
+      this.processManager = new GenericAdapterManager(
+        this.dependencies.processSpawner,
+        this.logger,
+        this.dependencies.fileSystem
+      );
       
       this.connectionManager = new DapConnectionManager(
         this.dependencies.dapClientFactory,
@@ -196,26 +185,21 @@ export class DapProxyWorker {
    * Handle dry run mode
    */
   private handleDryRun(payload: ProxyInitPayload): void {
-    let command: string;
-    let args: string[];
+    // Get adapter spawn config from policy
+    const spawnConfig = this.adapterPolicy.getAdapterSpawnConfig?.({
+      executablePath: payload.executablePath,
+      adapterHost: payload.adapterHost,
+      adapterPort: payload.adapterPort,
+      logDir: payload.logDir,
+      scriptPath: payload.scriptPath,
+      adapterCommand: payload.adapterCommand
+    });
     
-    if (payload.adapterCommand) {
-      command = payload.adapterCommand.command;
-      args = payload.adapterCommand.args;
-    } else if (this.processManager instanceof DebugpyAdapterManager) {
-      const spawnCommand = this.processManager.buildSpawnCommand(
-        payload.executablePath,
-        payload.adapterHost,
-        payload.adapterPort,
-        payload.logDir
-      );
-      command = spawnCommand.command;
-      args = spawnCommand.args;
-    } else {
-      throw new Error('Cannot determine adapter command for dry run');
+    if (!spawnConfig) {
+      throw new Error(`Cannot determine adapter command for dry run (policy: ${this.adapterPolicy.name})`);
     }
     
-    const fullCommand = `${command} ${args.join(' ')}`;
+    const fullCommand = `${spawnConfig.command} ${spawnConfig.args.join(' ')}`;
     
     this.logger!.warn(`[Worker DRY_RUN] Would execute: ${fullCommand}`);
     this.logger!.warn(`[Worker DRY_RUN] Script to debug: ${payload.scriptPath}`);
@@ -230,30 +214,22 @@ export class DapProxyWorker {
    * Start adapter and establish connection
    */
   private async startDebugpyAdapterAndConnect(payload: ProxyInitPayload): Promise<void> {
-    // Spawn adapter process
-    let spawnResult;
+    // Get adapter spawn config from policy
+    const spawnConfig = this.adapterPolicy.getAdapterSpawnConfig?.({
+      executablePath: payload.executablePath,
+      adapterHost: payload.adapterHost,
+      adapterPort: payload.adapterPort,
+      logDir: payload.logDir,
+      scriptPath: payload.scriptPath,
+      adapterCommand: payload.adapterCommand
+    });
     
-    if (payload.adapterCommand) {
-      const validatedCommand = validateAdapterCommand(payload.adapterCommand, 'proxy-worker-spawn');
-      
-      spawnResult = await this.processManager!.spawn({
-        command: validatedCommand.command,
-        args: validatedCommand.args,
-        host: payload.adapterHost,
-        port: payload.adapterPort,
-        logDir: payload.logDir,
-        env: validatedCommand.env
-      });
-    } else if (this.processManager instanceof DebugpyAdapterManager) {
-      spawnResult = await this.processManager.spawnDebugpy({
-        pythonPath: payload.executablePath,
-        host: payload.adapterHost,
-        port: payload.adapterPort,
-        logDir: payload.logDir
-      });
-    } else {
-      throw new Error('Cannot determine how to spawn adapter');
+    if (!spawnConfig) {
+      throw new Error(`Adapter policy ${this.adapterPolicy.name} does not provide spawn configuration`);
     }
+    
+    // Spawn adapter process using the config from the policy
+    const spawnResult = await this.processManager!.spawn(spawnConfig);
 
     this.adapterProcess = spawnResult.process;
     this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);

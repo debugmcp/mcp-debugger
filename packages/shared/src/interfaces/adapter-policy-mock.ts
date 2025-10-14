@@ -189,5 +189,26 @@ export const MockAdapterPolicy: AdapterPolicy = {
       childInitTimeout: 1000, // Shorter for testing
       suppressPostAttachConfigDone: false
     };
+  },
+
+  /**
+   * Get the configuration for spawning the mock debug adapter (for testing)
+   */
+  getAdapterSpawnConfig: (payload) => {
+    // If a custom adapter command was provided, use it directly
+    if (payload.adapterCommand) {
+      return {
+        command: payload.adapterCommand.command,
+        args: payload.adapterCommand.args,
+        host: payload.adapterHost,
+        port: payload.adapterPort,
+        logDir: payload.logDir,
+        env: payload.adapterCommand.env
+      };
+    }
+
+    // Mock adapter doesn't spawn a real process, return undefined
+    // The proxy worker should handle this case appropriately for testing
+    return undefined;
   }
 };

@@ -606,5 +606,28 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       childInitTimeout: 12000,
       suppressPostAttachConfigDone: false  // Child session needs configurationDone
     };
+  },
+
+  /**
+   * Get the configuration for spawning the JavaScript debug adapter (js-debug/pwa-node)
+   */
+  getAdapterSpawnConfig: (payload) => {
+    // JavaScript should always have a custom adapter command
+    // since js-debug/pwa-node isn't a simple executable
+    if (payload.adapterCommand) {
+      return {
+        command: payload.adapterCommand.command,
+        args: payload.adapterCommand.args,
+        host: payload.adapterHost,
+        port: payload.adapterPort,
+        logDir: payload.logDir,
+        env: payload.adapterCommand.env
+      };
+    }
+
+    // Fallback - this shouldn't normally happen for JavaScript
+    // as js-debug requires specific setup
+    console.warn('[JsDebugAdapterPolicy] No adapter command provided - JavaScript debugging may not work correctly');
+    return undefined;
   }
 };
