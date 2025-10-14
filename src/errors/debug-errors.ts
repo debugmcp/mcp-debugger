@@ -172,6 +172,24 @@ export class PortAllocationError extends McpError {
 }
 
 /**
+ * Proxy initialization error
+ */
+export class ProxyInitializationError extends McpError {
+  public readonly sessionId: string;
+  public readonly reason: string;
+
+  constructor(sessionId: string, reason: string) {
+    super(
+      McpErrorCode.InternalError,
+      `Failed to initialize proxy for session ${sessionId}: ${reason}`,
+      { sessionId, reason }
+    );
+    this.sessionId = sessionId;
+    this.reason = reason;
+  }
+}
+
+/**
  * Type guard to check if an error is a specific MCP error type
  */
 export function isMcpError<T extends McpError>(

@@ -601,7 +601,14 @@ export class DapProxyWorker {
    * Handle terminate command
    */
   async handleTerminate(): Promise<void> {
-    this.logger!.info('[Worker] Received terminate command.');
+    // Check if already shutting down or terminated for idempotent behavior
+    if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
+      this.logger?.info('[Worker] Already shutting down or terminated.');
+      return;
+    }
+    
+    // Use optional chaining since logger might be null if not initialized
+    this.logger?.info('[Worker] Received terminate command.');
     await this.shutdown();
     this.sendStatus('terminated');
   }
