@@ -86,7 +86,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
 
   it('should complete Python debugging flow cleanly', async () => {
     // Python quirk: Use absolute path for scriptPath
-    const scriptPath = path.resolve(ROOT, 'test-scripts', 'test_python_debug.py');
+    const scriptPath = path.resolve(ROOT, 'examples', 'python', 'test_python_debug.py');
     
     // 1. Create Python debug session
     console.log('[Python Smoke Test] Creating debug session...');
@@ -228,7 +228,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
   }, 60000);
 
   it('should handle multiple breakpoints in Python', async () => {
-    const scriptPath = path.resolve(ROOT, 'test-scripts', 'test_python_debug.py');
+    const scriptPath = path.resolve(ROOT, 'examples', 'python', 'test_python_debug.py');
     
     // Create session
     const createResult = await mcpClient!.callTool({
@@ -274,7 +274,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
   });
 
   it('should evaluate expressions in Python context', async () => {
-    const scriptPath = path.resolve(ROOT, 'test-scripts', 'test_python_debug.py');
+    const scriptPath = path.resolve(ROOT, 'examples', 'python', 'test_python_debug.py');
     
     // Create and start session
     const createResult = await mcpClient!.callTool({
@@ -334,7 +334,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
   });
 
   it('should get source context for Python files', async () => {
-    const scriptPath = path.resolve(ROOT, 'test-scripts', 'test_python_debug.py');
+    const scriptPath = path.resolve(ROOT, 'examples', 'python', 'test_python_debug.py');
     
     // Create session
     const createResult = await mcpClient!.callTool({
@@ -370,7 +370,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
   });
 
   it('should handle step into for Python', async () => {
-    const scriptPath = path.resolve(ROOT, 'test-scripts', 'test_python_debug.py');
+    const scriptPath = path.resolve(ROOT, 'examples', 'python', 'test_python_debug.py');
     
     // Create session
     const createResult = await mcpClient!.callTool({
