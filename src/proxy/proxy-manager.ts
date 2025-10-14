@@ -202,21 +202,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     try {
       await new Promise<void>((resolve) => {
         let resolved = false;
-        let msgHandler: ((message: unknown) => void) | undefined;
-        let spawnHandler: (() => void) | undefined;
-        let fallbackTimer: NodeJS.Timeout | undefined;
-        let hardTimer: NodeJS.Timeout | undefined;
-
-        const cleanup = () => {
-          if (resolved) return;
-          resolved = true;
-          if (msgHandler) this.proxyProcess?.removeListener('message', msgHandler);
-          if (spawnHandler) this.proxyProcess?.removeListener('spawn', spawnHandler);
-          if (fallbackTimer) clearTimeout(fallbackTimer);
-          if (hardTimer) clearTimeout(hardTimer);
-        };
-
-        msgHandler = (message: unknown) => {
+        const msgHandler: ((message: unknown) => void) | undefined = (message: unknown) => {
           const msg = message as { type?: string } | null;
           if (msg?.type === 'proxy-ready') {
             this.logger.info('[ProxyManager] Received proxy-ready');
@@ -225,7 +211,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           }
         };
 
-        spawnHandler = () => {
+        const spawnHandler: (() => void) | undefined = () => {
           // Give the child a short moment to attach handlers
           setTimeout(() => {
             if (!resolved) {
@@ -237,7 +223,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         };
 
         // Short timeout fallback to proceed even if proxy-ready is missed
-        fallbackTimer = setTimeout(() => {
+        const fallbackTimer: NodeJS.Timeout | undefined = setTimeout(() => {
           if (!resolved) {
             this.logger.warn('[ProxyManager] Proceeding without explicit proxy-ready (timeout fallback)');
             cleanup();
@@ -246,13 +232,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         }, 250);
 
         // Hard fallback to ensure we never block here
-        hardTimer = setTimeout(() => {
+        const hardTimer: NodeJS.Timeout | undefined = setTimeout(() => {
           if (!resolved) {
             this.logger.warn('[ProxyManager] Proceeding without proxy-ready after 2s hard fallback');
             cleanup();
             resolve();
           }
         }, 2000);
+
+        const cleanup = () => {
+          if (resolved) return;
+          resolved = true;
+          if (msgHandler) this.proxyProcess?.removeListener('message', msgHandler);
+          if (spawnHandler) this.proxyProcess?.removeListener('spawn', spawnHandler);
+          if (fallbackTimer) clearTimeout(fallbackTimer);
+          if (hardTimer) clearTimeout(hardTimer);
+        };
 
         this.proxyProcess?.on('message', msgHandler);
         this.proxyProcess?.once('spawn', spawnHandler);

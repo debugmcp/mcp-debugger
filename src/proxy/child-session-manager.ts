@@ -187,6 +187,8 @@ export class ChildSessionManager extends EventEmitter {
    * Initialize child session
    */
   private async initializeChild(child: MinimalDapClient, pendingId: string, _parentConfig: Record<string, unknown>): Promise<void> {
+    void _parentConfig; // Currently unused but may be needed for future policy implementations
+    
     const initArgs = {
       clientID: `mcp-child-${pendingId}`,
       adapterID: this.policy.getDapAdapterConfiguration().type,
@@ -206,6 +208,8 @@ export class ChildSessionManager extends EventEmitter {
    * Configure child session (breakpoints, exception filters, etc.)
    */
   private async configureChild(child: MinimalDapClient, pendingId: string, _parentConfig: Record<string, unknown>): Promise<void> {
+    void _parentConfig; // Currently unused but may be needed for future policy implementations
+    
     // Set exception breakpoints
     try {
       logger.info(`[child:${pendingId}] setExceptionBreakpoints`);

@@ -321,8 +321,11 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
-    _includeSpecial?: boolean
+    includeSpecial?: boolean
   ): Variable[] => {
+    // Default implementation doesn't filter based on includeSpecial
+    void includeSpecial;
+    
     // Get the top frame
     if (!stackFrames || stackFrames.length === 0) {
       return [];

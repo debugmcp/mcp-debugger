@@ -12,7 +12,6 @@ import path from 'path';
 import { 
   AdapterPolicy, 
   DefaultAdapterPolicy, 
-  JsDebugAdapterPolicy, 
   DapClientBehavior,
   DapClientContext,
   ChildSessionConfig 
@@ -90,6 +89,8 @@ export class MinimalDapClient extends EventEmitter {
       // Wire up events from ChildSessionManager
       this.childSessionManager.on('childCreated', (_pendingId, _child) => {
         // Child session created successfully
+        void _pendingId;
+        void _child;
       });
       
       this.childSessionManager.on('childEvent', (evt: DebugProtocol.Event) => {
