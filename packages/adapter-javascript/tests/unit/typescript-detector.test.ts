@@ -1,16 +1,31 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
-import type { PathLike } from 'fs';
-// ESM-safe mock for fs.existsSync
-let existsSyncMock: (p: PathLike) => boolean;
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const existsDelegate: typeof actual.existsSync = (p: PathLike) =>
-    existsSyncMock ? existsSyncMock(p) : actual.existsSync(p);
-  return { ...actual, existsSync: existsDelegate };
-});
-import { detectTsRunners, clearCache } from '../../src/utils/typescript-detector.js';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+import { detectTsRunners, clearCache, setDefaultFileSystem } from '../../src/utils/typescript-detector.js';
 import { isWindows } from '../../src/utils/executable-resolver.js';
+
+/**
+ * Mock implementation of FileSystem for testing
+ */
+class MockFileSystem implements FileSystem {
+  private existsMock: ((path: string) => boolean) | null = null;
+
+  setExistsMock(mock: (path: string) => boolean): void {
+    this.existsMock = mock;
+  }
+
+  existsSync(path: string): boolean {
+    if (this.existsMock) {
+      return this.existsMock(path);
+    }
+    return false;
+  }
+
+  readFileSync(path: string, encoding: string): string {
+    // Not used in typescript-detector
+    return '';
+  }
+}
 
 const WIN = isWindows();
 let callCount = 0;
@@ -25,15 +40,18 @@ function withPath(paths: string[]) {
 
 describe('utils/typescript-detector: detectTsRunners', () => {
   let restoreEnv: (() => void) | null = null;
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
     clearCache();
     restoreEnv = null;
     callCount = 0;
-    existsSyncMock = () => {
+    mockFileSystem = new MockFileSystem();
+    setDefaultFileSystem(mockFileSystem);
+    mockFileSystem.setExistsMock(() => {
       callCount++;
       return false;
-    };
+    });
   });
 
   afterEach(() => {
@@ -43,14 +61,15 @@ describe('utils/typescript-detector: detectTsRunners', () => {
       restoreEnv();
       restoreEnv = null;
     }
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('returns undefineds when no runners found (no local bins, empty PATH)', async () => {
     restoreEnv = withPath([]); // empty PATH
-    existsSyncMock = () => {
+    mockFileSystem.setExistsMock(() => {
       callCount++;
       return false;
-    };
+    });
 
     const cwd = path.resolve(process.cwd(), 'proj-none');
     const res = await detectTsRunners(cwd);
@@ -67,10 +86,10 @@ describe('utils/typescript-detector: detectTsRunners', () => {
     // PATH irrelevant here
     restoreEnv = withPath([]);
 
-    existsSyncMock = (p: PathLike) => {
+    mockFileSystem.setExistsMock((p: string) => {
       callCount++;
-      return String(p) === localTsx;
-    };
+      return p === localTsx;
+    });
 
     const res = await detectTsRunners(cwd);
     expect(res.tsx).toBe(path.resolve(localTsx));
@@ -87,15 +106,14 @@ describe('utils/typescript-detector: detectTsRunners', () => {
     restoreEnv = withPath([binDir]);
 
     // Local checks should be false; PATH candidate true
-    existsSyncMock = (p: PathLike) => {
+    mockFileSystem.setExistsMock((p: string) => {
       callCount++;
-      const s = String(p);
       // local checks (cwd/node_modules/.bin/*) negative
-      if (s.includes(path.join(cwd, 'node_modules', '.bin'))) {
+      if (p.includes(path.join(cwd, 'node_modules', '.bin'))) {
         return false;
       }
-      return s === pathCandidate;
-    };
+      return p === pathCandidate;
+    });
 
     const res = await detectTsRunners(cwd);
     expect(res.tsNode).toBe(path.resolve(pathCandidate));
@@ -106,10 +124,10 @@ describe('utils/typescript-detector: detectTsRunners', () => {
 
     restoreEnv = withPath([]); // empty PATH
 
-    existsSyncMock = () => {
+    mockFileSystem.setExistsMock(() => {
       callCount++;
       return false;
-    };
+    });
 
     const res1 = await detectTsRunners(cwd);
     expect(res1.tsx).toBeUndefined();
@@ -126,10 +144,10 @@ describe('utils/typescript-detector: detectTsRunners', () => {
     const localDir = path.join(cwd, 'node_modules', '.bin');
     const localTsx = WIN ? path.join(localDir, 'tsx.cmd') : path.join(localDir, 'tsx');
 
-    existsSyncMock = (p: PathLike) => {
+    mockFileSystem.setExistsMock((p: string) => {
       callCount++;
-      return String(p) === localTsx;
-    };
+      return p === localTsx;
+    });
     callCount = 0;
 
     const res3 = await detectTsRunners(cwd);

@@ -98,7 +98,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       },
       adapterRegistry: {
         create: vi.fn().mockResolvedValue({
-          buildAdapterCommand: vi.fn().mockReturnValue('python -m debugpy')
+          buildAdapterCommand: vi.fn().mockReturnValue('python -m debugpy'),
+          resolveExecutablePath: vi.fn().mockResolvedValue('python')
         })
       }
     };

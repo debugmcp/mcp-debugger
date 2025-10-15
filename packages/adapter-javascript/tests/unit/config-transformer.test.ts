@@ -1,25 +1,42 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { PathLike } from 'fs';
-
-// ESM-safe fs mocks using a delegate pattern
-let existsSyncMock: (p: PathLike) => boolean;
-let readFileSyncMock: (p: any, enc?: any) => string;
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const existsDelegate: typeof actual.existsSync = (p: PathLike) =>
-    existsSyncMock ? existsSyncMock(p) : actual.existsSync(p);
-  const readFileDelegate: typeof actual.readFileSync = (p: any, enc?: any) =>
-    readFileSyncMock ? (readFileSyncMock(p, enc)) : (actual.readFileSync as any)(p, enc);
-  return {
-    ...actual,
-    existsSync: existsDelegate,
-    readFileSync: readFileDelegate as any
-  };
-});
-
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
-import { determineOutFiles, isESMProject, hasTsConfigPaths } from '../../src/utils/config-transformer.js';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+import {
+  determineOutFiles,
+  isESMProject,
+  hasTsConfigPaths,
+  setDefaultFileSystem
+} from '../../src/utils/config-transformer.js';
+
+/**
+ * Mock implementation of FileSystem for testing
+ */
+class MockFileSystem implements FileSystem {
+  private existsMock: ((path: string) => boolean) | null = null;
+  private readFileMock: ((path: string, encoding: string) => string) | null = null;
+
+  setExistsMock(mock: (path: string) => boolean): void {
+    this.existsMock = mock;
+  }
+
+  setReadFileMock(mock: (path: string, encoding: string) => string): void {
+    this.readFileMock = mock;
+  }
+
+  existsSync(path: string): boolean {
+    if (this.existsMock) {
+      return this.existsMock(path);
+    }
+    return false;
+  }
+
+  readFileSync(path: string, encoding: string): string {
+    if (this.readFileMock) {
+      return this.readFileMock(path, encoding);
+    }
+    return '';
+  }
+}
 
 describe('utils/config-transformer: determineOutFiles', () => {
   it('returns user-provided outFiles when given', () => {
@@ -35,14 +52,19 @@ describe('utils/config-transformer: determineOutFiles', () => {
 describe('utils/config-transformer: isESMProject', () => {
   const projDir = path.resolve(process.cwd(), 'proj-esm');
   const programDir = path.join(projDir, 'src');
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    existsSyncMock = () => false;
-    readFileSyncMock = () => '';
+    mockFileSystem = new MockFileSystem();
+    setDefaultFileSystem(mockFileSystem);
+    // Default: no files exist
+    mockFileSystem.setExistsMock(() => false);
+    mockFileSystem.setReadFileMock(() => '');
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    // Restore the default filesystem
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('returns true for .mjs program', () => {
@@ -55,79 +77,79 @@ describe('utils/config-transformer: isESMProject', () => {
 
   it('returns true when package.json in program dir has type: module', () => {
     const pkgPath = path.join(programDir, 'package.json');
-    existsSyncMock = (p) => String(p) === pkgPath;
-  readFileSyncMock = (p, enc) => {
-      void enc;
+    mockFileSystem.setExistsMock((p) => String(p) === pkgPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === pkgPath) {
         return JSON.stringify({ type: 'module' });
       }
       return '';
-    };
+    });
     expect(isESMProject(path.join(programDir, 'main.js'), projDir)).toBe(true);
   });
 
   it('returns true when package.json in cwd has type: module', () => {
     const pkgPath = path.join(projDir, 'package.json');
-    existsSyncMock = (p) => String(p) === pkgPath;
-  readFileSyncMock = (p, enc) => {
-      void enc;
+    mockFileSystem.setExistsMock((p) => String(p) === pkgPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === pkgPath) {
         return JSON.stringify({ type: 'module' });
       }
       return '';
-    };
+    });
     expect(isESMProject(path.join(programDir, 'main.js'), projDir)).toBe(true);
   });
 
   it('returns true when tsconfig.json has module ESNext', () => {
     const tsconfigPath = path.join(programDir, 'tsconfig.json');
-    existsSyncMock = (p) => String(p) === tsconfigPath;
-  readFileSyncMock = (p, enc) => {
-      void enc;
+    mockFileSystem.setExistsMock((p) => String(p) === tsconfigPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === tsconfigPath) {
         return JSON.stringify({ compilerOptions: { module: 'ESNext' } });
       }
       return '';
-    };
+    });
     expect(isESMProject(path.join(programDir, 'main.ts'), projDir)).toBe(true);
   });
 
   it('returns true when tsconfig.json has module NodeNext in cwd', () => {
     const tsconfigPath = path.join(projDir, 'tsconfig.json');
-    existsSyncMock = (p) => String(p) === tsconfigPath;
-  readFileSyncMock = (p, enc) => {
-      void enc;
+    mockFileSystem.setExistsMock((p) => String(p) === tsconfigPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === tsconfigPath) {
         return JSON.stringify({ compilerOptions: { module: 'NodeNext' } });
       }
       return '';
-    };
+    });
     expect(isESMProject(path.join(programDir, 'main.ts'), projDir)).toBe(true);
   });
 
   it('returns false when no indicators present', () => {
-    existsSyncMock = () => false;
+    // Already set to return false in beforeEach
     expect(isESMProject(path.join(programDir, 'main.ts'), projDir)).toBe(false);
   });
 });
 
 describe('utils/config-transformer: hasTsConfigPaths', () => {
   const projDir = path.resolve(process.cwd(), 'proj-tspaths');
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    existsSyncMock = () => false;
-    readFileSyncMock = () => '';
+    mockFileSystem = new MockFileSystem();
+    setDefaultFileSystem(mockFileSystem);
+    // Default: no files exist
+    mockFileSystem.setExistsMock(() => false);
+    mockFileSystem.setReadFileMock(() => '');
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    // Restore the default filesystem
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('returns true when tsconfig.json contains non-empty compilerOptions.paths', () => {
     const tsconfigPath = path.join(projDir, 'tsconfig.json');
-    existsSyncMock = (p) => String(p) === tsconfigPath;
-  readFileSyncMock = (p, enc) => {
-      void enc;
+    mockFileSystem.setExistsMock((p) => String(p) === tsconfigPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === tsconfigPath) {
         return JSON.stringify({
           compilerOptions: {
@@ -138,15 +160,14 @@ describe('utils/config-transformer: hasTsConfigPaths', () => {
         });
       }
       return '';
-    };
+    });
     expect(hasTsConfigPaths(projDir)).toBe(true);
   });
 
   it('returns false when tsconfig.json has empty or missing paths', () => {
     const tsconfigPath = path.join(projDir, 'tsconfig.json');
-    existsSyncMock = (p) => String(p) === tsconfigPath;
-  readFileSyncMock = (p, enc) => {
-      void enc;
+    mockFileSystem.setExistsMock((p) => String(p) === tsconfigPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === tsconfigPath) {
         return JSON.stringify({
           compilerOptions: {
@@ -155,12 +176,12 @@ describe('utils/config-transformer: hasTsConfigPaths', () => {
         });
       }
       return '';
-    };
+    });
     expect(hasTsConfigPaths(projDir)).toBe(false);
   });
 
   it('returns false when tsconfig.json missing', () => {
-    existsSyncMock = () => false;
+    // Already set to return false in beforeEach
     expect(hasTsConfigPaths(projDir)).toBe(false);
   });
 });

@@ -7,13 +7,24 @@
  *
  * @since 0.1.0
  */
-import * as fs from 'fs';
 import * as path from 'path';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
 import { whichInPath, isWindows } from './executable-resolver.js';
 
 export type TsRunnerDetection = { tsx?: string; tsNode?: string };
 
 let cached: TsRunnerDetection | null = null;
+
+// Default filesystem instance for production use
+let defaultFileSystem: FileSystem = new NodeFileSystem();
+
+/**
+ * Set the default filesystem implementation (useful for testing)
+ * @param fileSystem The FileSystem to use as default
+ */
+export function setDefaultFileSystem(fileSystem: FileSystem): void {
+  defaultFileSystem = fileSystem;
+}
 
 export function clearCache(): void {
   cached = null;
@@ -27,8 +38,13 @@ function toAbs(p: string): string {
  * Detects a single TS runner binary.
  * - name: 'tsx' or 'ts-node'
  * - cwd: directory to check for local node_modules/.bin first
+ * - fileSystem: optional filesystem implementation for testing
  */
-export function detectBinary(name: 'tsx' | 'ts-node', cwd: string): string | undefined {
+export function detectBinary(
+  name: 'tsx' | 'ts-node',
+  cwd: string,
+  fileSystem: FileSystem = defaultFileSystem
+): string | undefined {
   const candidates = isWindows() ? [`${name}.cmd`, `${name}.exe`, `${name}`] : [name];
 
   // Local-first: <cwd>/node_modules/.bin/<candidate>
@@ -36,7 +52,7 @@ export function detectBinary(name: 'tsx' | 'ts-node', cwd: string): string | und
   for (const n of candidates) {
     const localPath = path.join(localBinDir, n);
     try {
-      if (fs.existsSync(localPath)) {
+      if (fileSystem.existsSync(localPath)) {
         return toAbs(localPath);
       }
     } catch {
@@ -45,7 +61,7 @@ export function detectBinary(name: 'tsx' | 'ts-node', cwd: string): string | und
   }
 
   // PATH fallback
-  const found = whichInPath(candidates);
+  const found = whichInPath(candidates, fileSystem);
   if (found) {
     return toAbs(found);
   }
@@ -57,13 +73,16 @@ export function detectBinary(name: 'tsx' | 'ts-node', cwd: string): string | und
  * Detects tsx and ts-node runners with process-level caching.
  * No throw; returns undefineds when not found.
  */
-export async function detectTsRunners(cwd: string = process.cwd()): Promise<TsRunnerDetection> {
+export async function detectTsRunners(
+  cwd: string = process.cwd(),
+  fileSystem: FileSystem = defaultFileSystem
+): Promise<TsRunnerDetection> {
   if (cached) {
     return cached;
   }
 
-  const tsx = detectBinary('tsx', cwd);
-  const tsNode = detectBinary('ts-node', cwd);
+  const tsx = detectBinary('tsx', cwd, fileSystem);
+  const tsNode = detectBinary('ts-node', cwd, fileSystem);
 
   cached = { tsx, tsNode };
   return cached;

@@ -186,5 +186,9 @@ export type {
   ChildSessionConfig
 } from './interfaces/dap-client-behavior.js';
 
+// FileSystem abstraction for dependency injection
+export type { FileSystem } from './interfaces/filesystem.js';
+export { NodeFileSystem, setDefaultFileSystem, getDefaultFileSystem } from './interfaces/filesystem.js';
+
 // ===== Re-export VSCode Debug Protocol types for convenience =====
 export type { DebugProtocol } from '@vscode/debugprotocol';

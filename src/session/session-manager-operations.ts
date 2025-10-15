@@ -11,11 +11,9 @@ import {
 import { ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { SessionManagerData } from './session-manager-data.js';
-import { WhichCommandFinder } from '../implementations/which-command-finder.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '@debugmcp/shared';
 import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
@@ -72,9 +70,6 @@ export class SessionManagerOperations extends SessionManagerData {
     // Get free port for adapter
     const adapterPort = await this.findFreePort();
 
-    // Resolve paths
-    const projectRoot = path.resolve(fileURLToPath(import.meta.url), '../../../'); // Path to the MCP debugger server's root
-
     const initialBreakpoints = Array.from(session.breakpoints.values()).map((bp) => {
       // Breakpoint file path has been validated by server.ts before reaching here
       return {
@@ -92,78 +87,16 @@ export class SessionManagerOperations extends SessionManagerData {
       );
     }
 
-    // Use policy to resolve executable path
-    const policy = this.selectPolicy(session.language);
-    let resolvedExecutablePath: string | undefined;
-
-    // First attempt: Use policy's resolution
-    const policyResolvedPath = policy.resolveExecutablePath(session.executablePath);
-    
-    if (session.language === 'python' && policyResolvedPath) {
-      // Python needs special handling for command resolution and validation
-      const executablePathFromSession = policyResolvedPath;
-      
-      if (path.isAbsolute(executablePathFromSession)) {
-        // Absolute path provided - validate it
-        resolvedExecutablePath = executablePathFromSession;
-      } else if (['python', 'python3', 'py'].includes(executablePathFromSession.toLowerCase())) {
-        // Resolve common Python commands using local command finder
-        const finder = new WhichCommandFinder();
-        try {
-          resolvedExecutablePath = await finder.find(executablePathFromSession);
-          this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedExecutablePath}`);
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          // Convert generic "not found" errors to typed Python error
-          if (msg.includes('not found')) {
-            throw new PythonNotFoundError(executablePathFromSession);
-          }
-          // For other errors, wrap them
-          this.logger.error(
-            `[SessionManager] Failed to resolve Python executable '${executablePathFromSession}':`,
-            msg
-          );
-          throw new DebugSessionCreationError(
-            `Failed to resolve Python: ${msg}`,
-            error instanceof Error ? error : undefined
-          );
-        }
-      } else {
-        // Relative path - resolve from project root
-        resolvedExecutablePath = path.resolve(projectRoot, executablePathFromSession);
-      }
-      
-      // Validate the resolved Python executable
-      if (resolvedExecutablePath && policy.validateExecutable) {
-        const valid = await policy.validateExecutable(resolvedExecutablePath);
-        if (!valid) {
-          throw new PythonNotFoundError(session.executablePath!);
-        }
-      }
-      
-      this.logger.info(`[SessionManager] Using validated Python path: ${resolvedExecutablePath}`);
-    } else {
-      // For non-Python languages, use the policy-resolved path directly
-      resolvedExecutablePath = policyResolvedPath || session.executablePath || process.execPath;
-      this.logger.info(`[SessionManager] Using ${session.language} executable: ${resolvedExecutablePath}`);
-    }
-
-    if (!resolvedExecutablePath) {
-      throw new DebugSessionCreationError(
-        `Failed to resolve executable path for ${session.language}`
-      );
-    }
-
     // Merge launch args
     const effectiveLaunchArgs = {
       ...this.defaultDapLaunchArgs,
       ...(dapLaunchArgs || {}),
     };
 
-    // Create the adapter for this language
+    // Create the adapter for this language first
     const adapterConfig: AdapterConfig = {
       sessionId,
-      executablePath: resolvedExecutablePath,
+      executablePath: '', // Will be resolved by adapter
       adapterHost: 'localhost',
       adapterPort,
       logDir: sessionLogDir,
@@ -173,6 +106,32 @@ export class SessionManagerOperations extends SessionManagerData {
     };
 
     const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
+
+    // Use the adapter to resolve the executable path
+    let resolvedExecutablePath: string;
+    try {
+      resolvedExecutablePath = await adapter.resolveExecutablePath(session.executablePath);
+      this.logger.info(`[SessionManager] Adapter resolved executable path: ${resolvedExecutablePath}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[SessionManager] Failed to resolve executable for ${session.language}:`,
+        msg
+      );
+
+      // Convert to appropriate error type based on language
+      if (session.language === 'python' && msg.includes('not found')) {
+        throw new PythonNotFoundError(session.executablePath || 'python');
+      }
+
+      throw new DebugSessionCreationError(
+        `Failed to resolve ${session.language} executable: ${msg}`,
+        error instanceof Error ? error : undefined
+      );
+    }
+
+    // Update adapter config with resolved executable path
+    adapterConfig.executablePath = resolvedExecutablePath;
 
     // Build adapter command using the adapter
     const adapterCommand = adapter.buildAdapterCommand(adapterConfig);

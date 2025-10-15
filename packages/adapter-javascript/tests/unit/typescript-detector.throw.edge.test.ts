@@ -1,21 +1,38 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
-import type { PathLike } from 'fs';
-
-// ESM-safe fs.existsSync delegate mock that can throw
-let existsSyncMock: (p: PathLike) => boolean;
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const existsDelegate: typeof actual.existsSync = (p: PathLike) =>
-    existsSyncMock ? existsSyncMock(p) : actual.existsSync(p);
-  return {
-    ...actual,
-    existsSync: existsDelegate
-  };
-});
-
-import { detectBinary } from '../../src/utils/typescript-detector.js';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+import { detectBinary, setDefaultFileSystem } from '../../src/utils/typescript-detector.js';
 import { isWindows } from '../../src/utils/executable-resolver.js';
+
+/**
+ * Mock implementation of FileSystem for testing
+ */
+class MockFileSystem implements FileSystem {
+  private existsMock: ((path: string) => boolean) | null = null;
+  private readFileMock: ((path: string, encoding: string) => string) | null = null;
+
+  setExistsMock(mock: (path: string) => boolean): void {
+    this.existsMock = mock;
+  }
+
+  setReadFileMock(mock: (path: string, encoding: string) => string): void {
+    this.readFileMock = mock;
+  }
+
+  existsSync(path: string): boolean {
+    if (this.existsMock) {
+      return this.existsMock(path);
+    }
+    return false;
+  }
+
+  readFileSync(path: string, encoding: string): string {
+    if (this.readFileMock) {
+      return this.readFileMock(path, encoding);
+    }
+    return '';
+  }
+}
 
 const WIN = isWindows();
 
@@ -29,10 +46,15 @@ function withPath(paths: string[]) {
 
 describe('utils/typescript-detector: throw/edge coverage', () => {
   let restoreEnv: (() => void) | null = null;
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
     restoreEnv = null;
-    existsSyncMock = () => false;
+    mockFileSystem = new MockFileSystem();
+    setDefaultFileSystem(mockFileSystem);
+    // Default: no files exist
+    mockFileSystem.setExistsMock(() => false);
+    mockFileSystem.setReadFileMock(() => '');
   });
 
   afterEach(() => {
@@ -40,7 +62,8 @@ describe('utils/typescript-detector: throw/edge coverage', () => {
       restoreEnv();
       restoreEnv = null;
     }
-    vi.restoreAllMocks();
+    // Restore the default filesystem
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('local bin check throws (first), falls back to PATH result', () => {
@@ -57,21 +80,20 @@ describe('utils/typescript-detector: throw/edge coverage', () => {
     const pathCmd = path.join(A, 'tsx.cmd');
     const pathBare = path.join(A, 'tsx');
 
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
+    mockFileSystem.setExistsMock((p: string) => {
       // First local candidate throws (simulate fs error), other locals false
-      if (s === localCmd || s === localExe || s === localBare) {
-        if (s === localCmd) throw new Error('fs error');
+      if (p === localCmd || p === localExe || p === localBare) {
+        if (p === localCmd) throw new Error('fs error');
         return false;
       }
       // On PATH, choose first existing respecting suffix preference
       if (WIN) {
-        return s === pathCmd; // provide .cmd on PATH
+        return p === pathCmd; // provide .cmd on PATH
       }
-      return s === pathBare; // POSIX bare on PATH
-    };
+      return p === pathBare; // POSIX bare on PATH
+    });
 
-    const found = detectBinary('tsx', cwd);
+    const found = detectBinary('tsx', cwd, mockFileSystem);
     if (WIN) {
       expect(found).toBe(path.resolve(pathCmd));
     } else {
@@ -83,11 +105,11 @@ describe('utils/typescript-detector: throw/edge coverage', () => {
     const cwd = path.resolve(process.cwd(), 'proj-throw2');
     restoreEnv = withPath([]);
 
-    existsSyncMock = () => {
+    mockFileSystem.setExistsMock(() => {
       throw new Error('fs error');
-    };
+    });
 
-    const found = detectBinary('ts-node', cwd);
+    const found = detectBinary('ts-node', cwd, mockFileSystem);
     expect(found).toBeUndefined();
   });
 });

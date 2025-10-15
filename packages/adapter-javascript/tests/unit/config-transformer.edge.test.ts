@@ -1,67 +1,89 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
-import type { PathLike } from 'fs';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+import {
+  determineOutFiles,
+  isESMProject,
+  hasTsConfigPaths,
+  setDefaultFileSystem
+} from '../../src/utils/config-transformer.js';
 
-// ESM-safe fs mocks using a delegate pattern
-let existsSyncMock: (p: PathLike) => boolean;
-let readFileSyncMock: (p: any, enc?: any) => string;
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const existsDelegate: typeof actual.existsSync = (p: PathLike) =>
-    existsSyncMock ? existsSyncMock(p) : actual.existsSync(p);
-  const readFileDelegate: typeof actual.readFileSync = (p: any, enc?: any) =>
-    readFileSyncMock ? readFileSyncMock(p, enc) : (actual.readFileSync as any)(p, enc);
-  return {
-    ...actual,
-    existsSync: existsDelegate,
-    readFileSync: readFileDelegate as any
-  };
-});
+/**
+ * Mock implementation of FileSystem for testing
+ */
+class MockFileSystem implements FileSystem {
+  private existsMock: ((path: string) => boolean) | null = null;
+  private readFileMock: ((path: string, encoding: string) => string) | null = null;
 
-import { determineOutFiles, isESMProject, hasTsConfigPaths } from '../../src/utils/config-transformer.js';
+  setExistsMock(mock: (path: string) => boolean): void {
+    this.existsMock = mock;
+  }
+
+  setReadFileMock(mock: (path: string, encoding: string) => string): void {
+    this.readFileMock = mock;
+  }
+
+  existsSync(path: string): boolean {
+    if (this.existsMock) {
+      return this.existsMock(path);
+    }
+    return false;
+  }
+
+  readFileSync(path: string, encoding: string): string {
+    if (this.readFileMock) {
+      return this.readFileMock(path, encoding);
+    }
+    return '';
+  }
+}
 
 describe('utils/config-transformer.edge: tolerant JSON parse and defaults', () => {
   const projDir = path.resolve(process.cwd(), 'proj-edge');
   const programDir = path.join(projDir, 'src');
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    existsSyncMock = () => false;
-    readFileSyncMock = () => '';
+    mockFileSystem = new MockFileSystem();
+    setDefaultFileSystem(mockFileSystem);
+    // Default: no files exist
+    mockFileSystem.setExistsMock(() => false);
+    mockFileSystem.setReadFileMock(() => '');
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    // Restore the default filesystem
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('isESMProject: malformed package.json in program dir returns false and does not throw', () => {
     const pkgPath = path.join(programDir, 'package.json');
-    existsSyncMock = (p) => String(p) === pkgPath;
-    readFileSyncMock = (p) => {
+    mockFileSystem.setExistsMock((p) => String(p) === pkgPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === pkgPath) return '{ "type": "module"'; // malformed JSON
       return '';
-    };
+    });
     // Use .js (not .mjs/.mts) so extension path does not force true
     expect(isESMProject(path.join(programDir, 'main.js'), projDir)).toBe(false);
   });
 
   it('isESMProject: malformed tsconfig.json in cwd returns false and does not throw', () => {
     const tcPath = path.join(projDir, 'tsconfig.json');
-    existsSyncMock = (p) => String(p) === tcPath;
-    readFileSyncMock = (p) => {
+    mockFileSystem.setExistsMock((p) => String(p) === tcPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === tcPath) return '{ "compilerOptions": { "module": "ESNext" '; // malformed
       return '';
-    };
+    });
     expect(isESMProject(path.join(programDir, 'main.ts'), projDir)).toBe(false);
   });
 
   it('hasTsConfigPaths: malformed tsconfig.json returns false and does not throw', () => {
     const tcPath = path.join(projDir, 'tsconfig.json');
-    existsSyncMock = (p) => String(p) === tcPath;
-    readFileSyncMock = (p) => {
+    mockFileSystem.setExistsMock((p) => String(p) === tcPath);
+    mockFileSystem.setReadFileMock((p, _enc) => {
       if (String(p) === tcPath) return '{ "compilerOptions": { "paths": { "@x/*": ["./x/*"] }'; // malformed
       return '';
-    };
+    });
     expect(hasTsConfigPaths(projDir)).toBe(false);
   });
 

@@ -1,20 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
-import type { PathLike } from 'fs';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+import { whichInPath, findNode, isWindows, setDefaultFileSystem } from '../../src/utils/executable-resolver.js';
 
-// ESM-safe fs.existsSync delegate mock
-let existsSyncMock: (p: PathLike) => boolean;
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const existsDelegate: typeof actual.existsSync = (p: PathLike) =>
-    existsSyncMock ? existsSyncMock(p) : actual.existsSync(p);
-  return {
-    ...actual,
-    existsSync: existsDelegate
-  };
-});
+/**
+ * Mock implementation of FileSystem for testing
+ */
+class MockFileSystem implements FileSystem {
+  private existsMock: ((path: string) => boolean) | null = null;
 
-import { whichInPath, findNode, isWindows } from '../../src/utils/executable-resolver.js';
+  setExistsMock(mock: (path: string) => boolean): void {
+    this.existsMock = mock;
+  }
+
+  existsSync(path: string): boolean {
+    if (this.existsMock) {
+      return this.existsMock(path);
+    }
+    return false;
+  }
+}
 
 const WIN = isWindows();
 
@@ -28,10 +33,12 @@ function withPath(paths: string[]) {
 
 describe('utils/executable-resolver.edge', () => {
   let restoreEnv: (() => void) | null = null;
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
     restoreEnv = null;
-    existsSyncMock = () => false;
+    mockFileSystem = new MockFileSystem();
+    setDefaultFileSystem(mockFileSystem);
   });
 
   afterEach(() => {
@@ -40,6 +47,7 @@ describe('utils/executable-resolver.edge', () => {
       restoreEnv = null;
     }
     vi.restoreAllMocks();
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('Windows: whichInPath prefers node.exe over node when both present in same dir (name order), POSIX: prefers node', () => {
@@ -49,10 +57,9 @@ describe('utils/executable-resolver.edge', () => {
     const nodeExe = path.join(dir, 'node.exe');
     const nodeBare = path.join(dir, 'node');
 
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
-      return s === nodeExe || s === nodeBare;
-    };
+    mockFileSystem.setExistsMock((p: string) => {
+      return p === nodeExe || p === nodeBare;
+    });
 
     const names = WIN ? ['node.exe', 'node'] : ['node'];
 
@@ -76,10 +83,9 @@ describe('utils/executable-resolver.edge', () => {
     const aNode = path.join(dirA, 'node');
     const bNodeExe = path.join(dirB, 'node.exe');
 
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
-      return s === aNode || s === bNodeExe;
-    };
+    mockFileSystem.setExistsMock((p: string) => {
+      return p === aNode || p === bNodeExe;
+    });
 
     const found = whichInPath(names);
     // Contract: dir-first, then name order -> choose A/node before B/node.exe
@@ -89,7 +95,7 @@ describe('utils/executable-resolver.edge', () => {
   it('preferredPath relative but exists: findNode returns resolved absolute path', async () => {
     const rel = path.join('tmp', WIN ? 'node.exe' : 'node');
     // existsSync is checked against the raw preferred string
-    existsSyncMock = (p: PathLike) => String(p) === rel;
+    mockFileSystem.setExistsMock((p: string) => p === rel);
 
     const resolved = await findNode(rel);
     expect(resolved).toBe(path.resolve(rel));
@@ -102,16 +108,15 @@ describe('utils/executable-resolver.edge', () => {
     const candidate = WIN ? path.join(dir, 'node.exe') : path.join(dir, 'node');
 
     // First sub-case: PATH candidate present, execPath should be ignored if not existing
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
-      if (s === process.execPath) return false;
-      return s === candidate;
-    };
+    mockFileSystem.setExistsMock((p: string) => {
+      if (p === process.execPath) return false;
+      return p === candidate;
+    });
     const fromPath = await findNode();
     expect(fromPath).toBe(path.resolve(candidate));
 
     // Second sub-case: neither execPath nor PATH exist -> fallback to resolved execPath
-    existsSyncMock = () => false;
+    mockFileSystem.setExistsMock(() => false);
     const fallback = await findNode();
     expect(fallback).toBe(path.resolve(process.execPath));
   });

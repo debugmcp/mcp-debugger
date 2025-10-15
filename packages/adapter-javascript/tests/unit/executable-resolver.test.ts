@@ -1,22 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
-import type { PathLike } from 'fs';
-
-// Mock fs.existsSync in ESM-safe way via vi.mock and a mutable delegate
-let existsSyncMock: (p: PathLike) => boolean;
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const existsDelegate: typeof actual.existsSync = (p: PathLike) =>
-    existsSyncMock ? existsSyncMock(p) : actual.existsSync(p);
-  return {
-    ...actual,
-    existsSync: existsDelegate
-  };
-});
-
-import { findNode, whichInPath, isWindows } from '../../src/utils/executable-resolver.js';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+import { findNode, whichInPath, isWindows, setDefaultFileSystem } from '../../src/utils/executable-resolver.js';
 
 const WIN = isWindows();
+
+/**
+ * Mock implementation of FileSystem for testing
+ */
+class MockFileSystem implements FileSystem {
+  private existsMock: ((path: string) => boolean) | null = null;
+
+  setExistsMock(mock: (path: string) => boolean): void {
+    this.existsMock = mock;
+  }
+
+  existsSync(path: string): boolean {
+    if (this.existsMock) {
+      return this.existsMock(path);
+    }
+    return false;
+  }
+}
 
 function withPath(paths: string[]) {
   const orig = process.env.PATH;
@@ -28,10 +33,13 @@ function withPath(paths: string[]) {
 
 describe('utils/executable-resolver: findNode and whichInPath', () => {
   let restoreEnv: (() => void) | null = null;
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
     restoreEnv = null;
-    existsSyncMock = () => false; // default: nothing exists
+    mockFileSystem = new MockFileSystem();
+    // Set mock as default
+    setDefaultFileSystem(mockFileSystem);
   });
 
   afterEach(() => {
@@ -40,10 +48,12 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
       restoreEnv();
       restoreEnv = null;
     }
+    // Reset to a new NodeFileSystem for other tests
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('findNode returns process.execPath when preferredPath not set and execPath exists', async () => {
-    existsSyncMock = (p: PathLike) => String(p) === process.execPath;
+    mockFileSystem.setExistsMock((p: string) => p === process.execPath);
 
     const resolved = await findNode();
     expect(resolved).toBe(path.resolve(process.execPath));
@@ -51,7 +61,7 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
 
   it('preferredPath takes precedence when it exists', async () => {
     const preferred = path.resolve('tmp', WIN ? 'node.exe' : 'node');
-    existsSyncMock = (p: PathLike) => String(p) === preferred;
+    mockFileSystem.setExistsMock((p: string) => p === preferred);
 
     const resolved = await findNode(preferred);
     expect(resolved).toBe(preferred);
@@ -64,13 +74,12 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
     // PATH includes binDir first
     restoreEnv = withPath([binDir, path.resolve(process.cwd(), '.other_bin')]);
 
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
-      if (s === process.execPath) {
+    mockFileSystem.setExistsMock((p: string) => {
+      if (p === process.execPath) {
         return false; // bypass execPath branch
       }
-      return s === candidate;
-    };
+      return p === candidate;
+    });
 
     const resolved = await findNode();
     expect(resolved).toBe(path.resolve(candidate));
@@ -86,11 +95,10 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
     const target1 = path.join(dirB, 'nodeA'); // exists in later dir
     const target2 = path.join(dirA, 'nodeB'); // exists in earlier dir but second name
 
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
+    mockFileSystem.setExistsMock((p: string) => {
       // Simulate only these two files exist
-      return s === target1 || s === target2;
-    };
+      return p === target1 || p === target2;
+    });
 
     const found = whichInPath(names);
     // Expect dir-first then name order: should find dirA/nodeB before dirB/nodeA
@@ -99,7 +107,7 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
 
   it('negative: when execPath and PATH matches are "missing", findNode still returns process.execPath deterministically', async () => {
     restoreEnv = withPath([]); // empty PATH
-    existsSyncMock = () => false;
+    mockFileSystem.setExistsMock(() => false);
 
     const resolved = await findNode();
     // returns absolute process.execPath even if not verified

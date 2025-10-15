@@ -1,21 +1,38 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
-import type { PathLike } from 'fs';
-
-// ESM-safe fs.existsSync delegate mock
-let existsSyncMock: (p: PathLike) => boolean;
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const existsDelegate: typeof actual.existsSync = (p: PathLike) =>
-    existsSyncMock ? existsSyncMock(p) : actual.existsSync(p);
-  return {
-    ...actual,
-    existsSync: existsDelegate
-  };
-});
-
-import { detectBinary } from '../../src/utils/typescript-detector.js';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+import { detectBinary, setDefaultFileSystem } from '../../src/utils/typescript-detector.js';
 import { isWindows } from '../../src/utils/executable-resolver.js';
+
+/**
+ * Mock implementation of FileSystem for testing
+ */
+class MockFileSystem implements FileSystem {
+  private existsMock: ((path: string) => boolean) | null = null;
+  private readFileMock: ((path: string, encoding: string) => string) | null = null;
+
+  setExistsMock(mock: (path: string) => boolean): void {
+    this.existsMock = mock;
+  }
+
+  setReadFileMock(mock: (path: string, encoding: string) => string): void {
+    this.readFileMock = mock;
+  }
+
+  existsSync(path: string): boolean {
+    if (this.existsMock) {
+      return this.existsMock(path);
+    }
+    return false;
+  }
+
+  readFileSync(path: string, encoding: string): string {
+    if (this.readFileMock) {
+      return this.readFileMock(path, encoding);
+    }
+    return '';
+  }
+}
 
 const WIN = isWindows();
 
@@ -29,10 +46,15 @@ function withPath(paths: string[]) {
 
 describe('utils/typescript-detector.edge: detectBinary ordering and PATH precedence', () => {
   let restoreEnv: (() => void) | null = null;
+  let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
     restoreEnv = null;
-    existsSyncMock = () => false;
+    mockFileSystem = new MockFileSystem();
+    setDefaultFileSystem(mockFileSystem);
+    // Default: no files exist
+    mockFileSystem.setExistsMock(() => false);
+    mockFileSystem.setReadFileMock(() => '');
   });
 
   afterEach(() => {
@@ -40,13 +62,14 @@ describe('utils/typescript-detector.edge: detectBinary ordering and PATH precede
       restoreEnv();
       restoreEnv = null;
     }
-    vi.restoreAllMocks();
+    // Restore the default filesystem
+    setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('Windows: local-first suffix ordering within a single dir: .cmd > .exe > bare', () => {
     if (!WIN) {
       // Not applicable on POSIX; ensure detectBinary returns undefined since nothing exists
-      const found = detectBinary('tsx', path.resolve(process.cwd(), 'proj'));
+      const found = detectBinary('tsx', path.resolve(process.cwd(), 'proj'), mockFileSystem);
       expect(found).toBeUndefined();
       return;
     }
@@ -58,20 +81,18 @@ describe('utils/typescript-detector.edge: detectBinary ordering and PATH precede
     const bare = path.join(binDir, 'tsx');
 
     // Only .cmd and .exe exist; should pick .cmd
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
-      return s === cmd || s === exe; // bare absent
-    };
+    mockFileSystem.setExistsMock((p: string) => {
+      return p === cmd || p === exe; // bare absent
+    });
 
-    const found1 = detectBinary('tsx', cwd);
+    const found1 = detectBinary('tsx', cwd, mockFileSystem);
     expect(found1).toBe(path.resolve(cmd));
 
     // Now only .exe and bare exist; should pick .exe
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
-      return s === exe || s === bare;
-    };
-    const found2 = detectBinary('tsx', cwd);
+    mockFileSystem.setExistsMock((p: string) => {
+      return p === exe || p === bare;
+    });
+    const found2 = detectBinary('tsx', cwd, mockFileSystem);
     expect(found2).toBe(path.resolve(exe));
   });
 
@@ -84,14 +105,13 @@ describe('utils/typescript-detector.edge: detectBinary ordering and PATH precede
     const aBare = path.join(A, 'ts-node');
     const bCmd = path.join(B, WIN ? 'ts-node.cmd' : 'ts-node');
 
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
+    mockFileSystem.setExistsMock((p: string) => {
       // Local <cwd>/node_modules/.bin/* should be false for this test
-      if (s.includes(path.join('node_modules', '.bin'))) return false;
-      return s === aBare || s === bCmd;
-    };
+      if (p.includes(path.join('node_modules', '.bin'))) return false;
+      return p === aBare || p === bCmd;
+    });
 
-    const found = detectBinary('ts-node', path.resolve(process.cwd(), 'proj'));
+    const found = detectBinary('ts-node', path.resolve(process.cwd(), 'proj'), mockFileSystem);
     // Dir-first -> A wins even though .cmd might have higher suffix priority in B
     expect(found).toBe(path.resolve(aBare));
   });
@@ -104,12 +124,11 @@ describe('utils/typescript-detector.edge: detectBinary ordering and PATH precede
     const exe = path.join(D, 'tsx.exe');
     const bare = path.join(D, 'tsx');
 
-    existsSyncMock = (p: PathLike) => {
-      const s = String(p);
-      return s === cmd || s === exe || s === bare;
-    };
+    mockFileSystem.setExistsMock((p: string) => {
+      return p === cmd || p === exe || p === bare;
+    });
 
-    const found = detectBinary('tsx', path.resolve(process.cwd(), 'proj'));
+    const found = detectBinary('tsx', path.resolve(process.cwd(), 'proj'), mockFileSystem);
     if (WIN) {
       expect(found).toBe(path.resolve(cmd));
     } else {

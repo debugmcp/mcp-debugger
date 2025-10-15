@@ -102,14 +102,15 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     if (providedPath) {
       return providedPath;
     }
-    
+
     // Check environment variable for Python path
     if (process.env.PYTHON_PATH) {
       return process.env.PYTHON_PATH;
     }
-    
-    // Default to 'python' command in PATH
-    return 'python';
+
+    // Platform-specific default: 'python' on Windows, 'python3' on Unix-like systems
+    // Note: The actual resolution will be done by the adapter's resolveExecutablePath method
+    return process.platform === 'win32' ? 'python' : 'python3';
   },
   
   getDebuggerConfiguration: () => {

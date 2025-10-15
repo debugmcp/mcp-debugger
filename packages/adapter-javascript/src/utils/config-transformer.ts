@@ -6,8 +6,19 @@
  *
  * @since 0.1.0
  */
-import * as fs from 'fs';
 import * as path from 'path';
+import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
+
+// Default filesystem instance for production use
+let defaultFileSystem: FileSystem = new NodeFileSystem();
+
+/**
+ * Set the default filesystem implementation (useful for testing)
+ * @param fileSystem The FileSystem to use as default
+ */
+export function setDefaultFileSystem(fileSystem: FileSystem): void {
+  defaultFileSystem = fileSystem;
+}
 
 /**
  * Determine outFiles to use for js-debug.
@@ -42,7 +53,11 @@ type TsConfig = { compilerOptions?: { module?: string; paths?: Record<string, st
  * - package.json with "type": "module" in program dir or cwd -> true
  * - tsconfig.json with compilerOptions.module in ['ESNext', 'NodeNext'] in program dir or cwd -> true (heuristic)
  */
-export function isESMProject(programPath: string, cwd?: string): boolean {
+export function isESMProject(
+  programPath: string,
+  cwd?: string,
+  fileSystem: FileSystem = defaultFileSystem
+): boolean {
   try {
     const programExt = path.extname(programPath || '');
     const extLower = programExt.toLowerCase();
@@ -60,8 +75,8 @@ export function isESMProject(programPath: string, cwd?: string): boolean {
     for (const dir of dirsToCheck) {
       const pj = path.join(dir, 'package.json');
       try {
-        if (fs.existsSync(pj)) {
-          const raw = fs.readFileSync(pj, 'utf8');
+        if (fileSystem.existsSync(pj)) {
+          const raw = fileSystem.readFileSync(pj, 'utf8');
           const pkg = safeJsonParse<PkgJson>(raw);
           if (pkg && typeof pkg.type === 'string' && pkg.type === 'module') {
             return true;
@@ -76,8 +91,8 @@ export function isESMProject(programPath: string, cwd?: string): boolean {
     for (const dir of dirsToCheck) {
       const tc = path.join(dir, 'tsconfig.json');
       try {
-        if (fs.existsSync(tc)) {
-          const raw = fs.readFileSync(tc, 'utf8');
+        if (fileSystem.existsSync(tc)) {
+          const raw = fileSystem.readFileSync(tc, 'utf8');
           const ts = safeJsonParse<TsConfig>(raw);
           const mod = ts?.compilerOptions?.module;
           if (typeof mod === 'string') {
@@ -101,13 +116,16 @@ export function isESMProject(programPath: string, cwd?: string): boolean {
  * Detect whether tsconfig has non-empty compilerOptions.paths.
  * - Looks for tsconfig.json in the provided directory.
  */
-export function hasTsConfigPaths(cwdOrProgramDir: string): boolean {
+export function hasTsConfigPaths(
+  cwdOrProgramDir: string,
+  fileSystem: FileSystem = defaultFileSystem
+): boolean {
   try {
     const dir = path.resolve(cwdOrProgramDir || process.cwd());
     const tc = path.join(dir, 'tsconfig.json');
     try {
-      if (fs.existsSync(tc)) {
-        const raw = fs.readFileSync(tc, 'utf8');
+      if (fileSystem.existsSync(tc)) {
+        const raw = fileSystem.readFileSync(tc, 'utf8');
         const ts = safeJsonParse<TsConfig>(raw);
         const paths = ts?.compilerOptions?.paths;
         if (paths && typeof paths === 'object') {
