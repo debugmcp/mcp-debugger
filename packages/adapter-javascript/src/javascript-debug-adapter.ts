@@ -267,9 +267,13 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       );
     }
 
-    // js-debug TCP mode: positional port argument
-    // Example: ['path/to/vsDebugServer.cjs', '5678']
-    const args = [adapterPath, String(port)];
+    // js-debug TCP mode: positional port argument followed by host
+    // Example: ['path/to/vsDebugServer.cjs', '5678', '127.0.0.1']
+    const host =
+      typeof config?.adapterHost === 'string' && config.adapterHost.trim().length > 0
+        ? config.adapterHost
+        : '127.0.0.1';
+    const args = [adapterPath, String(port), host];
 
     // Environment: clone from process.env (string values only), safely ensure NODE_OPTIONS memory flag
     const env: Record<string, string> = {};

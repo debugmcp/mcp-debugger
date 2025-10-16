@@ -63,10 +63,12 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
 
     // Args: [adapterPath, "--stdio"]
     expect(Array.isArray(cmd.args)).toBe(true);
-    expect(cmd.args.length).toBeGreaterThanOrEqual(2);
+    expect(cmd.args.length).toBeGreaterThanOrEqual(3);
     // Second argument should be the TCP port number
     expect(cmd.args[1]).toBe(String(defaultConfig.adapterPort));
     expect(Number(cmd.args[1])).toBe(defaultConfig.adapterPort);
+    // Third argument should be the adapter host
+    expect(cmd.args[2]).toBe(defaultConfig.adapterHost);
 
     // adapterPath ends with vendor/js-debug/vsDebugServer.cjs
     const adapterPath = cmd.args[0];
