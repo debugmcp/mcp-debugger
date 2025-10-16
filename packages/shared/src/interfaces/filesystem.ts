@@ -7,10 +7,15 @@
  * @since 2.1.0
  */
 import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
+import { pathToFileURL } from 'url';
 
 // Create require function for ES modules
-const require = createRequire(import.meta.url || fileURLToPath(new URL('.', import.meta.url)));
+// Use a more robust fallback when import.meta.url is not available
+const require = createRequire(
+  typeof import.meta?.url !== 'undefined'
+    ? import.meta.url
+    : pathToFileURL(process.cwd() + '/').href
+);
 
 /**
  * FileSystem interface for basic filesystem operations

@@ -4,7 +4,7 @@
 October 11, 2025
 
 ## Test Environment
-- **Working Directory**: c:/Users/johnf/Dropbox/projects/250106 AGENTS/debug-mcp-server
+- **Working Directory**: /path/to/project/debug-mcp-server
 - **MCP Server**: mcp-debugger
 - **Available Languages**: Mock, Python, JavaScript
 

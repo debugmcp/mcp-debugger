@@ -81,6 +81,8 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "check:personal-paths": "node scripts/check-personal-paths.cjs",
     "check:all-personal-paths": "node scripts/check-all-personal-paths.cjs",
+    "commit:safe": "scripts/safe-commit.sh",
+    "commit:fast": "scripts/safe-commit.sh --skip-tests",
     "postbuild": "node scripts/copy-proxy-files.cjs",
     "clean": "rimraf dist",
     "act:check": "scripts\\act-runner.cmd --version",
