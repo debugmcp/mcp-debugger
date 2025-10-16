@@ -213,17 +213,19 @@ export class DebugMcpServer {
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
     this.validateSession(sessionId);
     
-    // Check script file exists for immediate feedback (hands-off: no path manipulation)
+    // Check script file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(scriptPath);
     if (!fileCheck.exists) {
       throw new McpError(McpErrorCode.InvalidParams, 
         `Script file not found: '${scriptPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
     }
     
-    this.logger.info(`[DebugMcpServer.startDebugging] Script file exists: ${scriptPath}`);
+    this.logger.info(`[DebugMcpServer.startDebugging] Script file exists: ${fileCheck.effectivePath} (original: ${scriptPath})`);
+    
+    // Pass the effective path (which has been resolved for container) to session manager
     const result = await this.sessionManager.startDebugging(
       sessionId, 
-      scriptPath, 
+      fileCheck.effectivePath, 
       args, 
       dapLaunchArgs, 
       dryRunSpawn
@@ -238,15 +240,17 @@ export class DebugMcpServer {
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
     
-    // Check file exists for immediate feedback (hands-off: no path manipulation)
+    // Check file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(file);
     if (!fileCheck.exists) {
       throw new McpError(McpErrorCode.InvalidParams, 
         `Breakpoint file not found: '${file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
     }
     
-    this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${file}`);
-    return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
+    this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${fileCheck.effectivePath} (original: ${file})`);
+    
+    // Pass the effective path (which has been resolved for container) to session manager
+    return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -914,14 +918,14 @@ export class DebugMcpServer {
       // Validate session
       this.validateSession(args.sessionId);
       
-      // Check file exists for immediate feedback (hands-off: no path manipulation)
+      // Check file exists for immediate feedback
       const fileCheck = await this.fileChecker.checkExists(args.file);
       if (!fileCheck.exists) {
         throw new McpError(McpErrorCode.InvalidParams, 
           `Line context file not found: '${args.file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
       }
       
-      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${args.file}, line: ${args.line}`);
+      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${fileCheck.effectivePath}, line: ${args.line}`);
       
       // Get line context using the line reader
       const contextLines = args.linesContext ?? 5; // Default to 5 lines of context

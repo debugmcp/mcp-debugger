@@ -222,25 +222,30 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     
-    // Log diagnostic information about path resolution
-    this.dependencies.logger?.info?.(`[JavascriptDebugAdapter] Building adapter command:`);
-    this.dependencies.logger?.info?.(`  __filename: ${__filename}`);
-    this.dependencies.logger?.info?.(`  __dirname: ${__dirname}`);
-    this.dependencies.logger?.info?.(`  process.cwd(): ${process.cwd()}`);
+    // Try multiple possible locations for the vendored js-debug
+    const possiblePaths = [
+      path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs'),
+      path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.js'),
+      // In container builds, might be in different locations
+      '/app/packages/adapter-javascript/vendor/js-debug/vsDebugServer.cjs',
+      '/app/node_modules/@debugmcp/adapter-javascript/vendor/js-debug/vsDebugServer.cjs'
+    ];
     
-    const adapterPath = path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs');
-    this.dependencies.logger?.info?.(`  Resolved adapter path: ${adapterPath}`);
+    const adapterPath = possiblePaths.find(p => fs.existsSync(p));
     
-    // Verify the file exists
-    if (!fs.existsSync(adapterPath)) {
-      this.dependencies.logger?.error?.(`[JavascriptDebugAdapter] js-debug vendor file not found at: ${adapterPath}`);
+    if (!adapterPath) {
+      this.dependencies.logger?.error?.(`[JavascriptDebugAdapter] js-debug vendor file not found. Searched paths:`);
+      possiblePaths.forEach(p => {
+        this.dependencies.logger?.error?.(`  ${p}: ${fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'}`);
+      });
+      
       throw new AdapterError(
-        `js-debug vendor file not found at: ${adapterPath}. Run: pnpm -w -F @debugmcp/adapter-javascript run build:adapter`,
+        `js-debug vendor file not found. Run: pnpm -w -F @debugmcp/adapter-javascript run build:adapter`,
         AdapterErrorCode.ENVIRONMENT_INVALID
       );
-    } else {
-      this.dependencies.logger?.info?.(`  Adapter file exists: YES`);
     }
+    
+    this.dependencies.logger?.info?.(`[JavascriptDebugAdapter] Using adapter at: ${adapterPath}`);
 
     // Command: prefer resolved executablePath provided by Session Manager; fall back to cached or process.execPath
     const command =
@@ -305,13 +310,30 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   // ===== Debug Configuration =====
 
   transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig {
-    // Base fields and defaults
+    // Base fields and defaults - paths already resolved by server
     const user = (config || {}) as Record<string, unknown>;
     const u = user as Record<string, unknown>;
     const program = typeof u.program === 'string' ? u.program : '';
-    const cwd = (typeof u.cwd === 'string' && u.cwd)
-      ? (u.cwd as string)
-      : (program ? path.dirname(program) : process.cwd());
+    
+    // Use cwd as provided (already resolved by server) or derive from program
+    let cwd: string;
+    if (typeof u.cwd === 'string' && u.cwd) {
+      cwd = u.cwd as string;
+    } else {
+      // In container mode, use MCP_WORKSPACE_ROOT as the working directory
+      if (program) {
+        cwd = path.dirname(program);
+      } else {
+        // Fallback: use MCP_WORKSPACE_ROOT in container mode, otherwise process.cwd()
+        if (process.env.MCP_CONTAINER === 'true') {
+          // Use MCP_WORKSPACE_ROOT if set, fallback to /workspace for backward compatibility
+          cwd = process.env.MCP_WORKSPACE_ROOT || '/workspace';
+        } else {
+          cwd = process.cwd();
+        }
+      }
+    }
+    
     const args = Array.isArray(u.args) ? (u.args as string[]) : [];
     const stopOnEntry = (u.stopOnEntry as boolean | undefined) ?? false;
     const justMyCode = (u.justMyCode as boolean | undefined) ?? true;

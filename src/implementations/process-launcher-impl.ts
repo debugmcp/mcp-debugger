@@ -110,8 +110,11 @@ class ProcessAdapter extends EventEmitter implements IProcess {
   
   kill(signal?: string): boolean {
     try {
-      // If the process has a pid, try to kill the entire process group
-      if (this.childProcess.pid && process.platform !== 'win32') {
+      // Check if we're in a container - don't use process groups in containers
+      const inContainer = process.env.MCP_CONTAINER === 'true';
+      
+      // If the process has a pid, try to kill the entire process group (but not in containers)
+      if (this.childProcess.pid && process.platform !== 'win32' && !inContainer) {
         try {
           // Kill the process group (negative PID)
           process.kill(-this.childProcess.pid, signal || 'SIGTERM');
@@ -568,12 +571,16 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     // This is critical for IPC and path resolution to work correctly
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     
+    // Check if we're in a container - don't detach in containers as it can cause SIGTERM issues
+    const inContainer = processEnv.MCP_CONTAINER === 'true' || process.env.MCP_CONTAINER === 'true';
+    
     const options: IProcessOptions = {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions IPC compatibility
       env: processEnv,
       cwd: projectRoot, // Use project root instead of process.cwd() which might be VS Code's directory
       // Create new process group on Unix systems to ensure all child processes can be killed together
-      detached: process.platform !== 'win32'
+      // BUT: Don't detach in containers as it causes SIGTERM issues with PID namespace handling
+      detached: process.platform !== 'win32' && !inContainer
     };
 
     // Get the raw child process directly to avoid double-wrapping

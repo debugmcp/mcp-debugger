@@ -66,16 +66,30 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/
 
 # Stage 2: Create minimal runtime image
-FROM python:3.11-alpine
+# Use Debian-slim for glibc compatibility with js-debug binary
+FROM python:3.11-slim
 
 # Set application directory
 WORKDIR /app
 
 # Set container marker for runtime
 ENV MCP_CONTAINER=true
+# Set default workspace mount location (can be overridden at runtime)
+ENV MCP_WORKSPACE_ROOT=/workspace
 
-# Install only Node.js runtime (no npm) and Python deps
-RUN apk add --no-cache nodejs && \
+# Install Node.js runtime, Python debugging support, tini for signal handling, and debugging tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    strace \
+    procps \
+    lsof \
+    tini && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
     pip3 install --no-cache-dir "debugpy>=1.8.14"
 
 # Copy the bundled application, all dist files for proxy dependencies, and package.json
@@ -98,10 +112,10 @@ EXPOSE 3000 5679
 # Copy stdio silencer preloader into runtime image
 COPY --from=builder /app/scripts/stdio-silencer.cjs /app/scripts/stdio-silencer.cjs
 # Create an entrypoint wrapper that logs early startup context and preloads the silencer, then execs the server
-RUN printf '#!/bin/sh\nmkdir -p /app/logs\n{\n  echo \"==== entry.sh ====\";\n  date;\n  echo \"argv: $*\";\n} >> /app/logs/entry.log 2>&1\nexec node --no-warnings -r /app/scripts/stdio-silencer.cjs dist/bundle.cjs \"$@\"\n' > /app/entry.sh && chmod +x /app/entry.sh
+RUN printf '#!/bin/sh\nmkdir -p /app/logs\n{\n  echo \"==== entry.sh ====\";\n  date;\n  echo \"argv: $*\";\n} >> /app/logs/entry.log 2>&1\nexport MCP_WORKSPACE_ROOT="${MCP_WORKSPACE_ROOT:-/workspace}"\nexec node --no-warnings -r /app/scripts/stdio-silencer.cjs dist/bundle.cjs \"$@\"\n' > /app/entry.sh && chmod +x /app/entry.sh
 
-# Use the wrapper as entrypoint
-ENTRYPOINT ["/app/entry.sh"]
+# Use tini as PID1 to properly handle signals, then run our wrapper
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/entry.sh"]
 
 # Default command arguments
 CMD ["stdio"]

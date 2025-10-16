@@ -26,6 +26,7 @@ import {
   validateProxyInitPayload
 } from '../utils/type-guards.js';
 import { SilentDapCommandPayload, JsDebugAdapterState } from './dap-extensions.js';
+import { setupSignalDebugging } from './signal-debug.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
 import { 
@@ -139,6 +140,12 @@ export class DapProxyWorker {
       this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
       this.logger.info(`[Worker] Using adapter policy: ${this.adapterPolicy.name}`);
+      
+      // Set up signal debugging for containers
+      if (process.env.MCP_CONTAINER === 'true') {
+        this.logger.info(`[Worker] Container environment detected - setting up signal debugging`);
+        setupSignalDebugging(payload.sessionId);
+      }
 
       // Enable per-session DAP frame tracing for diagnostics
       try {

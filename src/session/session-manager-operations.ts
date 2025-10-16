@@ -16,7 +16,6 @@ import { ErrorMessages } from '../utils/error-messages.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '@debugmcp/shared';
-import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
 import {
   SessionTerminatedError,
   ProxyNotRunningError,
@@ -79,14 +78,6 @@ export class SessionManagerOperations extends SessionManagerData {
       };
     });
 
-    // scriptPath has been validated by server.ts before reaching here
-    const translatedScriptPath = translatePathForContainer(scriptPath, this.environment);
-    if (isContainerMode(this.environment) && translatedScriptPath !== scriptPath) {
-      this.logger.info(
-        `[SessionManager] Container mode: translated path from '${scriptPath}' to '${translatedScriptPath}'`
-      );
-    }
-
     // Merge launch args
     const effectiveLaunchArgs = {
       ...this.defaultDapLaunchArgs,
@@ -100,7 +91,7 @@ export class SessionManagerOperations extends SessionManagerData {
       adapterHost: 'localhost',
       adapterPort,
       logDir: sessionLogDir,
-      scriptPath: translatedScriptPath,
+      scriptPath,
       scriptArgs,
       launchConfig: effectiveLaunchArgs,
     };
@@ -144,7 +135,7 @@ export class SessionManagerOperations extends SessionManagerData {
       adapterHost: 'localhost',
       adapterPort,
       logDir: sessionLogDir,
-      scriptPath: translatedScriptPath, // Use the already translated script path
+      scriptPath, // Path already resolved by server
       scriptArgs,
       stopOnEntry: effectiveLaunchArgs.stopOnEntry,
       justMyCode: effectiveLaunchArgs.justMyCode,

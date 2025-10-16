@@ -1,16 +1,15 @@
 /**
- * Simple file existence checker - TRUE HANDS-OFF APPROACH
+ * Simple file existence checker - Centralized path resolution approach
  * 
  * POLICY: 
- * 1. Accept all paths as-is from MCP clients
- * 2. Only check file existence for immediate UX feedback  
- * 3. Container mode: Simple /workspace/ prefix only
- * 4. Pass original paths to debug adapter unchanged
- * 5. No path interpretation, normalization, or cross-platform logic
+ * 1. Use centralized path resolution from container-path-utils
+ * 2. Only check file existence for immediate UX feedback
+ * 3. Log both original and resolved paths for debugging
+ * 4. Clear error messages for path issues
  */
 
 import { IFileSystem, IEnvironment } from '@debugmcp/shared';
-import { translatePathForContainer } from './container-path-utils.js';
+import { resolvePathForRuntime, getPathDescription } from './container-path-utils.js';
 
 /**
  * Result of simple file existence check
@@ -33,12 +32,29 @@ export class SimpleFileChecker {
   ) {}
 
   /**
-   * Check if file exists - the ONLY path operation we perform
+   * Check if file exists - using centralized path resolution
    */
   async checkExists(path: string): Promise<FileExistenceResult> {
-    const effectivePath = this.getEffectivePath(path);
+    let effectivePath: string;
     
-    this.logger?.debug(`[SimpleFileChecker] Checking existence: ${path} -> ${effectivePath}`);
+    try {
+      // Use centralized path resolution
+      effectivePath = resolvePathForRuntime(path, this.environment);
+      
+      const pathDesc = getPathDescription(path, effectivePath, this.environment);
+      this.logger?.debug(`[SimpleFileChecker] Checking existence: ${pathDesc}`);
+    } catch (error) {
+      // Path resolution failed - return with error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger?.debug(`[SimpleFileChecker] Path resolution failed: ${errorMessage}`);
+      
+      return {
+        exists: false,
+        originalPath: path,
+        effectivePath: path, // Use original since resolution failed
+        errorMessage
+      };
+    }
     
     try {
       const exists = await this.fileSystem.pathExists(effectivePath);
@@ -58,14 +74,6 @@ export class SimpleFileChecker {
         errorMessage: `Cannot check file existence: ${errorMessage}`
       };
     }
-  }
-
-  /**
-   * Get the effective path we'll check for existence
-   * ONLY container prefix logic - no other path manipulation
-   */
-  private getEffectivePath(path: string): string {
-    return translatePathForContainer(path, this.environment);
   }
 }
 
