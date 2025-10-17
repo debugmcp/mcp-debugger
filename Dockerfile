@@ -92,19 +92,21 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     pip3 install --no-cache-dir "debugpy>=1.8.14"
 
-# Copy the bundled application, all dist files for proxy dependencies, and package.json
-COPY --from=builder /app/dist/ /app/dist/
-COPY --from=builder /app/package.json /app/package.json
+# Copy ONLY the bundled server and proxy files (everything else is bundled)
+COPY --from=builder /app/dist/bundle.cjs /app/dist/bundle.cjs
+COPY --from=builder /app/dist/proxy/proxy-bootstrap.js /app/dist/proxy/proxy-bootstrap.js
+COPY --from=builder /app/dist/proxy/proxy-bundle.cjs /app/dist/proxy/proxy-bundle.cjs
+COPY --from=builder /app/dist/proxy/utils /app/dist/proxy/utils
 
-# Copy packages for potential runtime references (workspace symlinks / dist artifacts)
-COPY --from=builder /app/packages/shared/dist/ /app/packages/shared/dist/
-COPY --from=builder /app/packages/adapter-mock/dist/ /app/packages/adapter-mock/dist/
-COPY --from=builder /app/packages/adapter-python/dist/ /app/packages/adapter-python/dist/
-COPY --from=builder /app/packages/adapter-javascript/dist/ /app/packages/adapter-javascript/dist/
-COPY --from=builder /app/packages/adapter-javascript/vendor/ /app/packages/adapter-javascript/vendor/
+# Copy ONLY the runtime adapter packages (not entire node_modules)
+# These are loaded dynamically at runtime via import()
+COPY --from=builder /app/node_modules/@debugmcp /app/node_modules/@debugmcp
 
-# Copy node_modules (already dereferenced in builder stage)
-COPY --from=builder /app/node_modules /app/node_modules
+# Copy ONLY the production runtime dependencies needed by adapters
+# Use a minimal set - the bundle already includes most dependencies
+COPY --from=builder /app/node_modules/@vscode /app/node_modules/@vscode
+COPY --from=builder /app/node_modules/which /app/node_modules/which
+COPY --from=builder /app/node_modules/.pnpm/isexe@3.1.1/node_modules/isexe /app/node_modules/isexe
 
 # Expose ports
 EXPOSE 3000 5679

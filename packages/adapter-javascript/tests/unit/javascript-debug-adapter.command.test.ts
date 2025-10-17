@@ -61,7 +61,7 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
     // Command equals the provided Node path (absolute)
     expect(cmd.command).toBe(fakeNode);
 
-    // Args: [adapterPath, "--stdio"]
+    // Args: [adapterPath, "<port>", "<host>"]
     expect(Array.isArray(cmd.args)).toBe(true);
     expect(cmd.args.length).toBeGreaterThanOrEqual(3);
     // Second argument should be the TCP port number

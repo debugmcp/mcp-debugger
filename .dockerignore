@@ -1,14 +1,122 @@
+# Dependencies (reinstalled in container)
 node_modules
 **/node_modules
+.pnpm-store
+
+# Version control
 .git
 .github
+.husky
+
+# IDE files
 .vscode
+.idea
+*.sublime-*
+*.iml
+.history
+
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+
+# LLM/Claude files
+.clinerules
+.claude
+
+# Environment variables
 .env
+.env.local
+.env.*
+!.env.example
+!.env.template
+
+# Local npm config
+.npmrc
+.yarnrc
+
+# Logs and sessions
+logs
+sessions
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Testing output (NOT needed in container)
 coverage
 .nyc_output
+test-results
+junit.xml
+*.tap
+test-report.xml
+test-results*.json
+test-output.txt
+
+# Build output (rebuilt in container)
 dist
+!dist/proxy/
+!dist/proxy/proxy-bootstrap.js
+!dist/proxy/proxy-bundle.cjs
+!dist/proxy/utils/
+!dist/proxy/utils/**
 build
-.DS_Store
-.pnpm-store
+*.tsbuildinfo
+**/*.tsbuildinfo
 .turbo
+
+# Profiling & debugging
+*.heapsnapshot
+*.cpuprofile
+*.heap
+v8.log
+.chrome
+
+# Build tool caches
+.esbuild
+.parcel-cache
+.webpack
+.rollup.cache
+
+# Temporary files
+tmp
+temp
+-p
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+
+# Personal/temporary files
+**/personal-config.json
+/test-*
+/test_*.py
+/*_REPORT.md
+/*_SUMMARY.md
+/*_ANALYSIS.md
+/integration_test_*.log
+coverage-analysis-details.json
+test-refactor-summary.json
+migrate-to-vitest.js
+fix-test-imports.cjs
+analyze-test-results.cjs
+
+# Documentation artifacts (keep in git, not in container)
+CI_TEST_FAILURE_INVESTIGATION.md
+COVERAGE_AUTO_DISPLAY.md
+KNOWN_ISSUES.md
+MCP_DEBUGGER_COMPARISON_RESULTS.md
+
+# Manual tests
+tests/manual
