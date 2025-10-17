@@ -48,8 +48,6 @@ export class MinimalDapClient extends EventEmitter {
   private dapBehavior: DapClientBehavior;
   private childSessionManager?: ChildSessionManager;
 
-  // Legacy fields for compatibility during refactoring
-  private activePolicy?: AdapterPolicy;
   // When true, we defer parent's configurationDone (policy-driven, e.g. js-debug)
   private deferParentConfigDoneActive = false;
 
