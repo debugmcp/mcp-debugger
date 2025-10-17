@@ -50,11 +50,9 @@ async function cleanCoverage() {
     if (process.platform === 'win32') {
       const dockerMountPath = ROOT.replace(/\\/g, '/');
       console.log('[Clean Coverage] Attempting to remove via Docker helper container...');
+      const dockerCommand = `docker run --rm -v "${dockerMountPath}:/workspace" --entrypoint sh alpine:3.19 -c "chmod -R +w /workspace/coverage 2>/dev/null || true && rm -rf /workspace/coverage"`;
       try {
-        execSync(
-          `docker run --rm -v "${dockerMountPath}:/workspace" --entrypoint sh alpine:3.19 -c "rm -rf /workspace/coverage"`,
-          { stdio: 'inherit' }
-        );
+        execSync(dockerCommand, { stdio: 'inherit' });
         console.log('[Clean Coverage] Successfully removed coverage directory via Docker');
         return;
       } catch (dockerError) {
