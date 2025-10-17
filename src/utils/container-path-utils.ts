@@ -10,7 +10,6 @@
  */
 
 import { IEnvironment } from '@debugmcp/shared';
-import * as path from 'path';
 
 /**
  * Check if the application is running in container mode
@@ -62,31 +61,6 @@ export function resolvePathForRuntime(inputPath: string, environment: IEnvironme
   // Simply prepend the workspace root to any path
   // No validation, no rejection, no smart handling
   return `${workspaceRoot}/${inputPath}`;
-}
-
-/**
- * Legacy compatibility - translates a path for container mode if needed
- * @deprecated Use resolvePathForRuntime instead
- */
-export function translatePathForContainer(inputPath: string, environment: IEnvironment): string {
-  try {
-    return resolvePathForRuntime(inputPath, environment);
-  } catch {
-    // Legacy behavior: on error, try simple prefix
-    if (isContainerMode(environment)) {
-      const root = environment.get('MCP_WORKSPACE_ROOT') || '/workspace';
-      const normalized = inputPath.replace(/\\/g, '/');
-      
-      // Don't double-prefix
-      if (normalized.startsWith(root)) {
-        return normalized;
-      }
-      
-      // Simple prefix for legacy compatibility
-      return path.posix.join(root, normalized.replace(/^\/+/, ''));
-    }
-    return inputPath;
-  }
 }
 
 /**
