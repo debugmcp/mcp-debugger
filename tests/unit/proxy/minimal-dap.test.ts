@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import net from 'net';
 import { EventEmitter } from 'events';
 import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
+import type { ChildSessionManager } from '../../../src/proxy/child-session-manager.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import { JsDebugAdapterPolicy } from '@debugmcp/shared';
 
 // Mock the net module
 vi.mock('net');
@@ -639,6 +641,91 @@ describe('MinimalDapClient', () => {
       mockSocket.emit('data', createDapMessage(unknownMessage));
 
       // Should log warning but not crash
+    });
+  });
+
+  describe('Child session integration', () => {
+    class StubChildSessionManager extends EventEmitter {
+      createChildSession = vi.fn().mockResolvedValue(undefined);
+      getActiveChild = vi.fn().mockReturnValue(null);
+      hasActiveChildren = vi.fn().mockReturnValue(false);
+      shouldRouteToChild = vi.fn().mockReturnValue(false);
+      storeBreakpoints = vi.fn();
+    }
+
+    it('should delegate startDebugging adoption to ChildSessionManager when policy requests it', async () => {
+      const stubManager = new StubChildSessionManager();
+      const client = new MinimalDapClient(
+        'localhost',
+        5678,
+        JsDebugAdapterPolicy,
+        {
+          childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+        }
+      );
+
+      const request: DebugProtocol.Request = {
+        seq: 1,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: {
+          configuration: {
+            __pendingTargetId: 'pending-target-1'
+          }
+        }
+      };
+
+      await (client as any).handleProtocolMessage(request);
+
+      expect(stubManager.createChildSession).toHaveBeenCalledWith(
+        expect.objectContaining({ pendingId: 'pending-target-1' })
+      );
+    });
+
+    it('should mirror breakpoints to ChildSessionManager during sendRequest', async () => {
+      const stubManager = new StubChildSessionManager();
+      const client = new MinimalDapClient(
+        'localhost',
+        5678,
+        JsDebugAdapterPolicy,
+        {
+          childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+        }
+      );
+
+      const fakeSocket = {
+        write: vi.fn((_: string, cb?: (err?: Error | null) => void) => {
+          if (cb) cb(null);
+          return true;
+        }),
+        destroyed: false
+      } as unknown as net.Socket;
+
+      (client as any).socket = fakeSocket;
+
+      const breakpointArgs = {
+        source: { path: './foo.js' },
+        breakpoints: [{ line: 10 }]
+      };
+
+      const sendPromise = client.sendRequest('setBreakpoints', breakpointArgs);
+
+      await (client as any).handleProtocolMessage({
+        seq: 1,
+        type: 'response',
+        request_seq: 1,
+        command: 'setBreakpoints',
+        success: true
+      });
+
+      await expect(sendPromise).resolves.toEqual(
+        expect.objectContaining({ command: 'setBreakpoints', success: true })
+      );
+
+      expect(stubManager.storeBreakpoints).toHaveBeenCalledWith(
+        expect.stringContaining('foo.js'),
+        expect.arrayContaining([expect.objectContaining({ line: 10 })])
+      );
     });
   });
 });

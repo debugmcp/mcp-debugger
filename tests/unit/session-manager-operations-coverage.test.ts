@@ -38,6 +38,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       sendDapRequest: vi.fn(),
       stop: vi.fn(),
       once: vi.fn(),
+      off: vi.fn(),
       removeListener: vi.fn(),
       on: vi.fn(),
       start: vi.fn()
@@ -536,11 +537,15 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockImplementation(() => 
         new Promise(resolve => setTimeout(() => resolve({ success: true }), 50))
       );
-      mockProxyManager.once.mockImplementation((event: string, callback: Function) => {
-        if (event === 'stopped') {
+      const eventHandler = (event: string, callback: Function) => {
+        if (event === 'stopped' || event === 'terminated' || event === 'exited' || event === 'exit') {
           setTimeout(() => callback(), 10);
         }
-      });
+        return mockProxyManager;
+      };
+      mockProxyManager.once.mockImplementation(eventHandler);
+      mockProxyManager.on.mockImplementation(eventHandler);
+      mockProxyManager.off.mockImplementation(() => mockProxyManager);
 
       // Start multiple operations concurrently
       const promises = [

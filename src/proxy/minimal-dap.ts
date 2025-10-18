@@ -16,10 +16,14 @@ import {
   DapClientContext,
   ChildSessionConfig 
 } from '@debugmcp/shared';
-import { ChildSessionManager } from './child-session-manager.js';
-import { getErrorMessage, isInitializeResponse, hasThreadsBody } from './dap-extensions.js';
+import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
+import { getErrorMessage, isInitializeResponse } from './dap-extensions.js';
 
 const logger = createLogger('minimal-dap-simple');
+
+type MinimalDapClientOptions = {
+  childSessionManagerFactory?: (options: ChildSessionOptions) => ChildSessionManager;
+};
 
 const TWO_CRLF = '\r\n\r\n';
 
@@ -69,7 +73,7 @@ export class MinimalDapClient extends EventEmitter {
   
   private supportsConfigDone = true;
 
-  constructor(host: string, port: number, policy?: AdapterPolicy) {
+  constructor(host: string, port: number, policy?: AdapterPolicy, options?: MinimalDapClientOptions) {
     super();
     this.host = host;
     this.port = port;
@@ -78,7 +82,11 @@ export class MinimalDapClient extends EventEmitter {
     
     // Initialize ChildSessionManager for policies that support child sessions
     if (this.policy.supportsReverseStartDebugging) {
-      this.childSessionManager = new ChildSessionManager({
+      const createChildSessionManager =
+        options?.childSessionManagerFactory ??
+        ((opts: ChildSessionOptions) => new ChildSessionManager(opts));
+
+      this.childSessionManager = createChildSessionManager({
         policy: this.policy,
         parentClient: this,
         host,
@@ -358,25 +366,6 @@ export class MinimalDapClient extends EventEmitter {
     }
   }
 
-  private async waitForFirstThreadId(maxAttempts = 240, intervalMs = 100): Promise<number | undefined> {
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        const resp = await this.sendRequest<DebugProtocol.ThreadsResponse>('threads', {} as unknown, 5000);
-        if (hasThreadsBody(resp)) {
-          const threads = resp.body?.threads;
-          const firstId = Array.isArray(threads) && threads.length ? threads[0]?.id : undefined;
-          if (typeof firstId === 'number') {
-            return firstId;
-          }
-        }
-      } catch {
-        // ignore and retry
-      }
-      await this.sleep(intervalMs);
-    }
-    return undefined;
-  }
-
   private wireChildEvents(child: MinimalDapClient): void {
     child.on('event', (evt: DebugProtocol.Event) => {
       try {
@@ -543,9 +532,6 @@ export class MinimalDapClient extends EventEmitter {
     } catch {}
 
     // 7) Wait for stopped; fallback to threads+pause and retry wait
-    let sawStopped = false;
-
-
     try {
       await new Promise<void>((resolve) => {
         let done = false;
@@ -553,7 +539,6 @@ export class MinimalDapClient extends EventEmitter {
           if (done) return;
           if (evt && evt.event === 'stopped') {
             done = true;
-            sawStopped = true;
             child.off('event', onEvt);
             clearTimeout(timer);
             resolve();
@@ -569,92 +554,6 @@ export class MinimalDapClient extends EventEmitter {
       });
     } catch {
       // ignore
-    }
-
-    if (false && !sawStopped) {
-      // Fallback: poll threads and pause the first one (accept threadId===0)
-      try {
-        let threadId: number | undefined;
-        for (let i = 0; i < 240; i++) {
-          const resp = await child.sendRequest<DebugProtocol.ThreadsResponse>('threads', {} as unknown, 5000);
-          if (hasThreadsBody(resp)) {
-            const threads = resp.body?.threads;
-            const firstId = Array.isArray(threads) && threads.length ? threads[0]?.id : undefined;
-            if (typeof firstId === 'number') {
-              threadId = firstId;
-              break;
-            }
-          }
-          await this.sleep(100);
-        }
-        if (typeof threadId === 'number') {
-          logger.info(`[MinimalDapClient] [child:${pendingId}] pause fallback on threadId=${threadId}`);
-          try {
-            await child.sendRequest('pause', { threadId });
-          } catch {
-            // ignore pause errors
-          }
-
-          // If js-debug reports threadId=0, also try pausing threadId=1 (some builds prefer 1)
-          if (threadId === 0) {
-            try {
-              logger.info(`[MinimalDapClient] [child:${pendingId}] additional pause attempt on threadId=1 (id=0 fallback)`);
-              await child.sendRequest('pause', { threadId: 1 });
-            } catch {
-              // ignore
-            }
-          }
-
-          // wait again for stopped briefly
-          await new Promise<void>((resolve) => {
-            let done = false;
-            const onEvt = (evt: DebugProtocol.Event) => {
-              if (done) return;
-              if (evt && evt.event === 'stopped') {
-                done = true;
-                child.off('event', onEvt);
-                clearTimeout(timer2);
-                resolve();
-              }
-            };
-            const timer2 = setTimeout(() => {
-              if (done) return;
-              done = true;
-              child.off('event', onEvt);
-              resolve();
-            }, 12000);
-            child.on('event', onEvt);
-          });
-
-          // If still not stopped, iterate available thread ids and try pausing each (best-effort)
-          if (!sawStopped) {
-            try {
-              const resp2 = await child.sendRequest<DebugProtocol.ThreadsResponse>('threads', {} as unknown, 3000);
-              const threads2 = hasThreadsBody(resp2) ? resp2.body?.threads ?? [] : [];
-              const ids: number[] = [];
-              for (const t of threads2) {
-                const id = t?.id;
-                if (typeof id === 'number' && !ids.includes(id)) ids.push(id);
-              }
-              for (const id of ids) {
-                try {
-                  logger.info(`[MinimalDapClient] [child:${pendingId}] secondary pause attempt on threadId=${id}`);
-                  await child.sendRequest('pause', { threadId: id });
-                } catch {
-                  // ignore per-thread pause errors
-                }
-              }
-            } catch {
-              // ignore threads probe errors
-            }
-          }
-        } else {
-          logger.warn(`[MinimalDapClient] [child:${pendingId}] No threads discovered within timeout for pause fallback`);
-        }
-      } catch (e) {
-        const emsg = getErrorMessage(e);
-        logger.warn(`[MinimalDapClient] [child:${pendingId}] threads/pause fallback failed: ${emsg}`);
-      }
     }
 
     this.childSessions.set(pendingId, child);
@@ -818,17 +717,6 @@ export class MinimalDapClient extends EventEmitter {
       command: command,
       arguments: args
     };
-
-    // For single-session js-debug launches (no __pendingTargetId), attempt to ensure an early stop:
-    // after launch, poll threads and issue a pause as a fallback to surface a 'stopped' event.
-    const willAutoPauseAfterLaunch =
-      command === 'launch' &&
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      !((args as any) && typeof (args as any).__pendingTargetId === 'string') &&
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      typeof (args as any)?.type === 'string' &&
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (args as any).type === 'pwa-node';
     
     logger.info(`[MinimalDapClient] Sending request:`, {
       command,
@@ -871,60 +759,6 @@ export class MinimalDapClient extends EventEmitter {
           clearTimeout(timer);
           this.pendingRequests.delete(requestSeq);
           reject(err);
-        } else if (false && willAutoPauseAfterLaunch) {
-          // Try to surface a 'stopped' event quickly:
-          // 1) Listen for a 'thread' event and pause that thread immediately
-          // 2) Fallback: poll threads and pause the first available
-          const onEvt = (evt: DebugProtocol.Event) => {
-            try {
-              if (evt.event === 'thread') {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const tid = (evt.body as any)?.threadId;
-                if (typeof tid === 'number') {
-                  this.off('event', onEvt);
-                  // First try pausing the reported thread
-                  void this.sendRequest('pause', { threadId: tid }).catch(() => {});
-                  // If js-debug reports threadId=0, also try pausing threadId=1 as a fallback
-                  if (tid === 0) {
-                    setTimeout(() => {
-                      void this.sendRequest('pause', { threadId: 1 }).catch(() => {});
-                    }, 50);
-                  }
-                }
-              }
-            } catch {
-              // ignore
-            }
-          };
-          this.on('event', onEvt);
-          // Remove the event listener after a safety window
-          const evtTimer = setTimeout(() => {
-            try {
-              this.off('event', onEvt);
-            } catch {
-              // ignore
-            }
-          }, 12000);
-
-          // Fallback poll in parallel after a short delay
-          setTimeout(() => {
-            void (async () => {
-              try {
-                const tid = await this.waitForFirstThreadId(120, 100);
-                if (typeof tid === 'number') {
-                  clearTimeout(evtTimer);
-                  try {
-                    this.off('event', onEvt);
-                  } catch {
-                    // ignore
-                  }
-                  await this.sendRequest('pause', { threadId: tid });
-                }
-              } catch {
-                // ignore
-              }
-            })();
-          }, 300);
         }
       });
     });

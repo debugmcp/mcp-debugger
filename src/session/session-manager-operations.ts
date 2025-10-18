@@ -529,8 +529,41 @@ export class SessionManagerOperations extends SessionManagerData {
 
       // Wait for stopped event
       return new Promise((resolve) => {
+        const cleanup = () => {
+          clearTimeout(timeout);
+          session.proxyManager?.off('stopped', onStopped);
+          session.proxyManager?.off('terminated', onTerminated);
+          session.proxyManager?.off('exited', onExited);
+          session.proxyManager?.off('exit', onExited);
+        };
+
+        const resolveSuccess = (message: string) => {
+          this.logger.info(`[SM stepOver ${sessionId}] ${message} Current state: ${session.state}`);
+          resolve({
+            success: true,
+            state: session.state,
+            data: { message }
+          });
+        };
+
+        const onStopped = () => {
+          cleanup();
+          resolveSuccess('Step completed.');
+        };
+
+        const onTerminated = () => {
+          cleanup();
+          resolveSuccess('Step completed as session terminated.');
+        };
+
+        const onExited = () => {
+          cleanup();
+          resolveSuccess('Step completed as session exited.');
+        };
+
         const timeout = setTimeout(() => {
-          this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped event`);
+          cleanup();
+          this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped or termination event`);
           resolve({
             success: false,
             error: ErrorMessages.stepTimeout(5),
@@ -538,13 +571,10 @@ export class SessionManagerOperations extends SessionManagerData {
           });
         }, 5000);
 
-        session.proxyManager?.once('stopped', () => {
-          clearTimeout(timeout);
-          this.logger.info(
-            `[SM stepOver ${sessionId}] Step completed. Current state: ${session.state}`
-          );
-          resolve({ success: true, state: session.state, data: { message: 'Step over completed.' } });
-        });
+        session.proxyManager?.on('stopped', onStopped);
+        session.proxyManager?.on('terminated', onTerminated);
+        session.proxyManager?.on('exited', onExited);
+        session.proxyManager?.on('exit', onExited);
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

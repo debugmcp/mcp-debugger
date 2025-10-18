@@ -92,12 +92,22 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     }
     
     // Find the "Local" scope (JavaScript may use "Local", "Local: functionName", etc.)
-    const localScope = frameScopes.find(scope => 
+    let localScope = frameScopes.find(scope => 
       scope.name === 'Local' || 
       scope.name === 'Locals' ||
       scope.name.startsWith('Local:') ||
       scope.name.startsWith('Block:')
     );
+    
+    // Fallback: when debugging top-level scripts, js-debug reports "Script" or "Global" scopes
+    if (!localScope) {
+      localScope = frameScopes.find(scope => 
+        scope.name === 'Script' ||
+        scope.name === 'Module' ||
+        scope.name === 'module' ||
+        scope.name.toLowerCase().includes('global')
+      );
+    }
     
     if (!localScope) {
       return [];
@@ -142,7 +152,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    * JavaScript uses various local scope names
    */
   getLocalScopeName: (): string[] => {
-    return ['Local', 'Local:', 'Block:'];
+    return ['Local', 'Local:', 'Block:', 'Script', 'Global'];
   },
   
   getDapAdapterConfiguration: () => {

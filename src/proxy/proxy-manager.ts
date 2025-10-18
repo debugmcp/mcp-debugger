@@ -511,21 +511,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     
     this.logger.info(`[ProxyManager] Sending command to proxy: ${JSON.stringify(command).substring(0, 500)}`);
     
-    // QUICK FIX: Use direct send via underlying childProcess since we confirmed it works
-    const proxyAdapter = this.proxyProcess as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    if (proxyAdapter.childProcess && typeof proxyAdapter.childProcess.send === 'function') {
-      const directResult = proxyAdapter.childProcess.send(command);
-      if (!directResult) {
-        throw new Error('Failed to send command via IPC');
-      }
-      this.logger.info(`[ProxyManager] Command sent successfully via direct IPC`);
-      return;
-    }
-    
-    // Fallback to the abstraction layer (shouldn't reach here with current implementation)
     try {
       this.proxyProcess.sendCommand(command);
-      this.logger.info(`[ProxyManager] sendCommand method called successfully`);
+      this.logger.info(`[ProxyManager] Command dispatched via proxy process`);
     } catch (error) {
       this.logger.error(`[ProxyManager] Failed to send command:`, error);
       throw error;
