@@ -23,6 +23,11 @@ const logger = createLogger('minimal-dap-simple');
 
 type MinimalDapClientOptions = {
   childSessionManagerFactory?: (options: ChildSessionOptions) => ChildSessionManager;
+  childClientFactory?: (host: string, port: number, policy: AdapterPolicy) => MinimalDapClient;
+  timers?: {
+    setTimeout: typeof setTimeout;
+    clearTimeout: typeof clearTimeout;
+  };
 };
 
 const TWO_CRLF = '\r\n\r\n';
@@ -73,12 +78,28 @@ export class MinimalDapClient extends EventEmitter {
   
   private supportsConfigDone = true;
 
+  private readonly childClientFactory: (host: string, port: number, policy: AdapterPolicy) => MinimalDapClient;
+  private readonly timers: {
+    setTimeout: typeof setTimeout;
+    clearTimeout: typeof clearTimeout;
+  };
+
   constructor(host: string, port: number, policy?: AdapterPolicy, options?: MinimalDapClientOptions) {
     super();
     this.host = host;
     this.port = port;
     this.policy = policy || DefaultAdapterPolicy;
     this.dapBehavior = this.policy.getDapClientBehavior();
+    this.timers = options?.timers ?? {
+      setTimeout,
+      clearTimeout
+    };
+    this.childClientFactory =
+      options?.childClientFactory ??
+      ((childHost: string, childPort: number, _policy: AdapterPolicy) =>
+        new MinimalDapClient(childHost, childPort, undefined, {
+          timers: this.timers
+        }));
     
     // Initialize ChildSessionManager for policies that support child sessions
     if (this.policy.supportsReverseStartDebugging) {
@@ -203,7 +224,7 @@ export class MinimalDapClient extends EventEmitter {
       const pending = this.pendingRequests.get(response.request_seq);
       
       if (pending) {
-        clearTimeout(pending.timer);
+        this.timers.clearTimeout(pending.timer);
         this.pendingRequests.delete(response.request_seq);
         
         if (response.success) {
@@ -327,7 +348,9 @@ export class MinimalDapClient extends EventEmitter {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      this.timers.setTimeout(resolve, ms);
+    });
   }
 
   private async waitInitialized(timeoutMs = 5000): Promise<void> {
@@ -340,14 +363,14 @@ export class MinimalDapClient extends EventEmitter {
         this.removeListener('initialized', onInit);
         resolve();
       };
-      const timer = setTimeout(() => {
+      const timer = this.timers.setTimeout(() => {
         if (done) return;
         done = true;
         this.removeListener('initialized', onInit);
         resolve();
       }, timeoutMs);
       this.on('initialized', () => {
-        clearTimeout(timer);
+        this.timers.clearTimeout(timer);
         onInit();
       });
     });
@@ -393,7 +416,7 @@ export class MinimalDapClient extends EventEmitter {
       return;
     }
 
-    const child = new MinimalDapClient(this.host, this.port);
+    const child = this.childClientFactory(this.host, this.port, this.policy);
     await child.connect();
     this.wireChildEvents(child);
     // Make the child discoverable for routed commands as early as possible
@@ -420,11 +443,11 @@ export class MinimalDapClient extends EventEmitter {
         if (evt && evt.event === 'initialized') {
           done = true;
           child.off('event', onEvt);
-          clearTimeout(timer);
+          this.timers.clearTimeout(timer);
           resolve();
         }
       };
-      const timer = setTimeout(() => {
+      const timer = this.timers.setTimeout(() => {
         if (done) return;
         done = true;
         child.off('event', onEvt);
@@ -507,11 +530,11 @@ export class MinimalDapClient extends EventEmitter {
             sawPostInit = true;
             done = true;
             child.off('event', onEvt2);
-            clearTimeout(t2);
+            this.timers.clearTimeout(t2);
             resolve();
           }
         };
-        const t2 = setTimeout(() => {
+        const t2 = this.timers.setTimeout(() => {
           if (done) return;
           done = true;
           child.off('event', onEvt2);
@@ -540,11 +563,11 @@ export class MinimalDapClient extends EventEmitter {
           if (evt && evt.event === 'stopped') {
             done = true;
             child.off('event', onEvt);
-            clearTimeout(timer);
+            this.timers.clearTimeout(timer);
             resolve();
           }
         };
-        const timer = setTimeout(() => {
+        const timer = this.timers.setTimeout(() => {
           if (done) return;
           done = true;
           child.off('event', onEvt);
@@ -631,10 +654,10 @@ export class MinimalDapClient extends EventEmitter {
         return new Promise<T>((resolve, reject) => {
           // Clear any prior deferral
           if (this.parentConfigDoneDeferred) {
-            clearTimeout(this.parentConfigDoneDeferred.timer);
+            this.timers.clearTimeout(this.parentConfigDoneDeferred.timer);
             this.parentConfigDoneDeferred = null;
           }
-          const timer = setTimeout(() => {
+          const timer = this.timers.setTimeout(() => {
             // Time-bound deferral: if no child completed in time, send now
             this.suppressNextConfigDoneDeferral = true;
             void this.sendRequest<DebugProtocol.Response>('configurationDone', args)
@@ -726,7 +749,7 @@ export class MinimalDapClient extends EventEmitter {
     
     return new Promise<T>((resolve, reject) => {
       // Set up timeout
-      const timer = setTimeout(() => {
+      const timer = this.timers.setTimeout(() => {
         if (this.pendingRequests.has(requestSeq)) {
           this.pendingRequests.delete(requestSeq);
           reject(new Error(`DAP request '${command}' (seq ${requestSeq}) timed out`));
@@ -748,7 +771,7 @@ export class MinimalDapClient extends EventEmitter {
       
       // Socket was already checked above, but TypeScript needs reassurance
       if (!this.socket) {
-        clearTimeout(timer);
+        this.timers.clearTimeout(timer);
         this.pendingRequests.delete(requestSeq);
         reject(new Error('Socket unexpectedly null'));
         return;
@@ -756,7 +779,7 @@ export class MinimalDapClient extends EventEmitter {
       
       this.socket.write(message, (err) => {
         if (err) {
-          clearTimeout(timer);
+          this.timers.clearTimeout(timer);
           this.pendingRequests.delete(requestSeq);
           reject(err);
         }
@@ -826,7 +849,7 @@ export class MinimalDapClient extends EventEmitter {
   private cleanup(immediate: boolean = false): void {
     // Clear all pending requests
     this.pendingRequests.forEach((pending) => {
-      clearTimeout(pending.timer);
+      this.timers.clearTimeout(pending.timer);
       pending.reject(new Error('DAP client disconnected'));
     });
     this.pendingRequests.clear();

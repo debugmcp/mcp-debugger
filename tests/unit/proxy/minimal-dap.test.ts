@@ -5,23 +5,56 @@ import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
 import type { ChildSessionManager } from '../../../src/proxy/child-session-manager.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { JsDebugAdapterPolicy } from '@debugmcp/shared';
+import type { DapClientBehavior, ReverseRequestResult, AdapterPolicy } from '@debugmcp/shared';
 
 // Mock the net module
 vi.mock('net');
 
+// Track logger instances for assertions using hoisted storage so mocks can access it safely
+type MockLoggerInstance = {
+  info: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+  debug: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+};
+
+const loggerInstances = vi.hoisted(() => [] as MockLoggerInstance[]);
+
 // Mock the logger
 vi.mock('../../../src/utils/logger.js', () => ({
-  createLogger: () => ({
-    info: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-    warn: vi.fn()
+  createLogger: vi.fn(() => {
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      warn: vi.fn()
+    };
+    loggerInstances.push(logger);
+    return logger;
   })
 }));
 
 describe('MinimalDapClient', () => {
   let client: MinimalDapClient;
   let mockSocket: any;
+
+  type ChildSessionManagerStub = ChildSessionManager & EventEmitter & {
+    createChildSession: ReturnType<typeof vi.fn>;
+    getActiveChild: ReturnType<typeof vi.fn>;
+    hasActiveChildren: ReturnType<typeof vi.fn>;
+    shouldRouteToChild: ReturnType<typeof vi.fn>;
+    storeBreakpoints: ReturnType<typeof vi.fn>;
+  };
+
+  const createChildSessionManagerStub = (): ChildSessionManagerStub => {
+    const emitter = new EventEmitter() as unknown as ChildSessionManagerStub;
+    emitter.createChildSession = vi.fn().mockResolvedValue(undefined);
+    emitter.getActiveChild = vi.fn().mockReturnValue(null);
+    emitter.hasActiveChildren = vi.fn().mockReturnValue(false);
+    emitter.shouldRouteToChild = vi.fn().mockReturnValue(false);
+    emitter.storeBreakpoints = vi.fn();
+    return emitter;
+  };
 
   // Helper function to create a mock socket
   const createMockSocket = () => {
@@ -360,42 +393,37 @@ describe('MinimalDapClient', () => {
     });
 
     it('should timeout requests after 30 seconds', async () => {
+      // Recreate client with deterministic timers so the 30s timeout fires immediately
+      client.shutdown();
+      const fakeTimers = {
+        setTimeout: ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+          if (delay === 30000) {
+            return setTimeout(() => callback(...args), 0);
+          }
+          return setTimeout(callback, delay, ...args);
+        }) as typeof setTimeout,
+        clearTimeout: ((timer: NodeJS.Timeout) => {
+          clearTimeout(timer);
+        }) as typeof clearTimeout
+      };
+      client = new MinimalDapClient('localhost', 5678, undefined, { timers: fakeTimers });
+
       await client.connect();
 
-      // Spy on setTimeout and immediately trigger 30s timeouts
-      const originalSetTimeout = global.setTimeout;
-      vi.spyOn(global, 'setTimeout').mockImplementation((callback: any, delay: any, ...args: any[]) => {
-        if (delay === 30000) {
-          // Use setImmediate for next tick execution
-          setImmediate(() => callback());
-          return 123 as any; // fake timer ID
-        }
-        // Use real timers for everything else
-        return originalSetTimeout(callback, delay, ...args);
-      });
+      await expect(
+        client.sendRequest('evaluate', { expression: 'test' })
+      ).rejects.toThrow("DAP request 'evaluate' (seq 1) timed out");
 
-      try {
-        // Send request that will timeout
-        await expect(
-          client.sendRequest('evaluate', { expression: 'test' })
-        ).rejects.toThrow("DAP request 'evaluate' (seq 1) timed out");
+      const lateResponse: DebugProtocol.Response = {
+        seq: 1,
+        type: 'response',
+        request_seq: 1,
+        command: 'evaluate',
+        success: true,
+        body: { result: 'too late' }
+      };
 
-        // Verify that a late response doesn't cause issues
-        // Simulate a late response to ensure it's properly ignored
-        const lateResponse: DebugProtocol.Response = {
-          seq: 1,
-          type: 'response',
-          request_seq: 1,
-          command: 'evaluate',
-          success: true,
-          body: { result: 'too late' }
-        };
-
-        // This should not throw or cause issues since the request was already rejected
-        mockSocket.emit('data', createDapMessage(lateResponse));
-      } finally {
-        vi.restoreAllMocks();
-      }
+      mockSocket.emit('data', createDapMessage(lateResponse));
     });
 
     it('should handle unknown response sequences', async () => {
@@ -644,17 +672,173 @@ describe('MinimalDapClient', () => {
     });
   });
 
-  describe('Child session integration', () => {
-    class StubChildSessionManager extends EventEmitter {
-      createChildSession = vi.fn().mockResolvedValue(undefined);
-      getActiveChild = vi.fn().mockReturnValue(null);
-      hasActiveChildren = vi.fn().mockReturnValue(false);
-      shouldRouteToChild = vi.fn().mockReturnValue(false);
-      storeBreakpoints = vi.fn();
-    }
+  describe('Child session handling', () => {
+    it('handles breakpoint replay failures and adoption exhaustion', async () => {
+      loggerInstances.forEach((instance) => instance.warn.mockClear());
 
+      const timers = {
+        setTimeout: (callback: (...args: unknown[]) => void) => {
+          callback();
+          return 0 as unknown as NodeJS.Timeout;
+        },
+        clearTimeout: vi.fn()
+      };
+
+      const child = new EventEmitter() as EventEmitter & {
+        connect: ReturnType<typeof vi.fn>;
+        sendRequest: ReturnType<typeof vi.fn>;
+        shutdown: ReturnType<typeof vi.fn>;
+        off: EventEmitter['off'];
+      };
+      child.connect = vi.fn().mockResolvedValue(undefined);
+      child.sendRequest = vi.fn().mockImplementation(async (command: string) => {
+        if (command === 'initialize') {
+          child.emit('event', { event: 'initialized' } as DebugProtocol.Event);
+          return {};
+        }
+        if (command === 'setExceptionBreakpoints') {
+          throw new Error('not supported');
+        }
+        if (command === 'setBreakpoints') {
+          throw new Error('replay failed');
+        }
+        if (command === 'attach') {
+          throw new Error('attach failed');
+        }
+        return {};
+      });
+      child.shutdown = vi.fn();
+      // Ensure off exists for EventEmitter compatibility across Node versions
+      if (!child.off) {
+        child.off = ((event: string, listener: (...args: unknown[]) => void) => {
+          child.removeListener(event, listener);
+          return child;
+        }) as EventEmitter['off'];
+      }
+
+      const childSessionManager = createChildSessionManagerStub();
+
+      const policyStub = {
+        supportsReverseStartDebugging: true,
+        getDapClientBehavior: () => ({})
+      } as unknown as AdapterPolicy;
+
+      const customClient = new MinimalDapClient('localhost', 9229, policyStub, {
+        childClientFactory: () => child as unknown as MinimalDapClient,
+        childSessionManagerFactory: () => childSessionManager,
+        timers
+      });
+
+      (customClient as unknown as { storedBreakpoints: Map<string, DebugProtocol.SourceBreakpoint[]> })
+        .storedBreakpoints
+        .set('./app.js', [{ line: 10 } as DebugProtocol.SourceBreakpoint]);
+
+      await (customClient as unknown as {
+        createChildSession: (pendingId: string, config: Record<string, unknown>, policy: unknown) => Promise<void>;
+      }).createChildSession('pending-child', { type: 'pwa-node' }, policyStub);
+
+      const attachAttempts = child.sendRequest.mock.calls.filter(([cmd]) => cmd === 'attach').length;
+      expect(attachAttempts).toBe(20);
+
+      const sawReplayFailure = loggerInstances.some((instance) =>
+        instance.warn.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('setBreakpoints failed: replay failed'))
+      );
+      const sawAdoptionFailure = loggerInstances.some((instance) =>
+        instance.warn.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('attach adoption failed after retries'))
+      );
+
+      expect(sawReplayFailure).toBe(true);
+      expect(sawAdoptionFailure).toBe(true);
+    });
+
+    it('rejects pending requests during disconnect cleanup', () => {
+      const rejectSpy = vi.fn();
+      const pendingRequests = (client as unknown as {
+        pendingRequests: Map<number, { resolve: () => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>;
+      }).pendingRequests;
+
+      const timer = setTimeout(() => {}, 1000);
+      pendingRequests.set(1, {
+        resolve: vi.fn(),
+        reject: rejectSpy,
+        timer
+      });
+
+      (client as unknown as { socket: typeof mockSocket }).socket = mockSocket;
+
+      client.disconnect();
+
+      expect(rejectSpy).toHaveBeenCalledWith(expect.objectContaining({ message: 'DAP client disconnected' }));
+      expect(pendingRequests.size).toBe(0);
+      expect(mockSocket.end).toHaveBeenCalled();
+      expect(mockSocket.destroy).toHaveBeenCalled();
+    });
+  });
+
+  describe('Configuration deferral', () => {
+    it('should defer configurationDone when deferral is active and flush on timeout', async () => {
+      client.shutdown();
+
+      const realSetTimeout = global.setTimeout;
+      const fakeSetTimeout: typeof setTimeout = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+        const actualDelay = delay ?? 0;
+        if (actualDelay === 1500) {
+          return realSetTimeout(() => {
+            callback(...args);
+          }, 0);
+        }
+        return realSetTimeout(callback as (...cbArgs: unknown[]) => void, actualDelay, ...args);
+      }) as typeof setTimeout;
+      const fakeClearTimeout: typeof clearTimeout = ((timer: NodeJS.Timeout) => {
+        clearTimeout(timer);
+      }) as typeof clearTimeout;
+
+      client = new MinimalDapClient('localhost', 5678, undefined, {
+        timers: {
+          setTimeout: fakeSetTimeout,
+          clearTimeout: fakeClearTimeout
+        }
+      });
+
+      const requests: DebugProtocol.Request[] = [];
+      const fakeSocket = Object.assign(new EventEmitter(), {
+        destroyed: false,
+        write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+          const [, body] = raw.split('\r\n\r\n');
+          const request = JSON.parse(body) as DebugProtocol.Request;
+          requests.push(request);
+          cb?.(null);
+          setImmediate(() => {
+            void (client as any).handleProtocolMessage({
+              seq: request.seq,
+              type: 'response',
+              request_seq: request.seq,
+              command: request.command,
+              success: true
+            } satisfies DebugProtocol.Response);
+          });
+          return true;
+        }),
+        end: vi.fn(),
+        destroy: vi.fn()
+      }) as unknown as net.Socket;
+
+      (client as any).socket = fakeSocket;
+      (client as any).deferParentConfigDoneActive = true;
+
+      const result = await client.sendRequest<DebugProtocol.Response>('configurationDone', { foo: 'bar' });
+
+      expect(result.command).toBe('configurationDone');
+      expect(fakeSocket.write).toHaveBeenCalledTimes(1);
+      expect(requests[0]?.command).toBe('configurationDone');
+      expect((client as any).parentConfigDoneDeferred).toBeNull();
+      expect((client as any).suppressNextConfigDoneDeferral).toBe(false);
+    });
+  });
+
+  describe('Child session integration', () => {
     it('should delegate startDebugging adoption to ChildSessionManager when policy requests it', async () => {
-      const stubManager = new StubChildSessionManager();
+      const stubManager = createChildSessionManagerStub();
       const client = new MinimalDapClient(
         'localhost',
         5678,
@@ -683,7 +867,7 @@ describe('MinimalDapClient', () => {
     });
 
     it('should mirror breakpoints to ChildSessionManager during sendRequest', async () => {
-      const stubManager = new StubChildSessionManager();
+      const stubManager = createChildSessionManagerStub();
       const client = new MinimalDapClient(
         'localhost',
         5678,
@@ -726,6 +910,203 @@ describe('MinimalDapClient', () => {
         expect.stringContaining('foo.js'),
         expect.arrayContaining([expect.objectContaining({ line: 10 })])
       );
+    });
+
+    it('should route child-scoped commands to the active child session', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+
+      const childResponse: DebugProtocol.Response = {
+        seq: 42,
+        type: 'response',
+        request_seq: 1,
+        command: 'threads',
+        success: true
+      };
+
+      const childClient = {
+        sendRequest: vi.fn().mockResolvedValue(childResponse)
+      } as unknown as MinimalDapClient;
+
+      const routedClient = new MinimalDapClient(
+        'localhost',
+        5678,
+        JsDebugAdapterPolicy,
+        {
+          childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+        }
+      );
+
+      (routedClient as any).socket = {
+        destroyed: false,
+        write: vi.fn()
+      } as unknown as net.Socket;
+      (routedClient as any).activeChild = childClient;
+
+      const result = await routedClient.sendRequest<DebugProtocol.Response>('threads');
+
+      expect(stubManager.shouldRouteToChild).toHaveBeenCalledWith('threads');
+      expect(childClient.sendRequest).toHaveBeenCalledWith('threads', undefined, 30000);
+      expect(result).toEqual(childResponse);
+    });
+  });
+
+  describe('Reverse request handling', () => {
+    it('delegates to policy handler and respects handled responses', async () => {
+      const childSessionManager = createChildSessionManagerStub();
+
+      expect(typeof (childSessionManager as any).on).toBe('function');
+
+      const handledBehavior: DapClientBehavior = {
+        handleReverseRequest: vi.fn().mockResolvedValue({ handled: true })
+      };
+
+      const client = new MinimalDapClient('localhost', 5678);
+
+      (client as any).childSessionManager = childSessionManager;
+
+      (client as any).dapBehavior = handledBehavior;
+      (client as any).sendResponse = vi.fn();
+      (client as any).socket = { destroyed: false, write: vi.fn() } as unknown as net.Socket;
+
+      const request = {
+        seq: 1,
+        type: 'request',
+        command: 'startDebugging'
+      } as DebugProtocol.Request;
+
+      await (client as any).handleProtocolMessage(request);
+
+      expect(handledBehavior.handleReverseRequest).toHaveBeenCalled();
+      expect(childSessionManager.createChildSession).not.toHaveBeenCalled();
+      expect((client as any).sendResponse).not.toHaveBeenCalled();
+    });
+
+    it('invokes child creation and defers configuration when policy demands', async () => {
+      const child = Object.assign(new EventEmitter(), {
+        sendRequest: vi.fn().mockResolvedValue({})
+      }) as unknown as MinimalDapClient;
+
+      const childSessionManager = createChildSessionManagerStub();
+      childSessionManager.getActiveChild.mockReturnValue(child);
+
+      const deferBehavior: DapClientBehavior = {
+        handleReverseRequest: vi.fn().mockResolvedValue({
+          handled: true,
+          createChildSession: true,
+          childConfig: { pendingId: 'child-1', parentConfig: { __pendingTargetId: 'child-1' } }
+        } as ReverseRequestResult),
+        deferParentConfigDone: true
+      };
+
+      const client = new MinimalDapClient('localhost', 5678);
+
+      (client as any).dapBehavior = deferBehavior;
+      (client as any).socket = { destroyed: false, write: vi.fn() } as unknown as net.Socket;
+      (client as any).childSessionManager = childSessionManager;
+
+      const request = {
+        seq: 1,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: { configuration: { __pendingTargetId: 'child-1' } }
+      } as DebugProtocol.Request;
+
+      await (client as any).handleProtocolMessage(request);
+
+      expect(childSessionManager.createChildSession).toHaveBeenCalledWith({
+        pendingId: 'child-1',
+        parentConfig: { __pendingTargetId: 'child-1' }
+      });
+      expect((client as any).deferParentConfigDoneActive).toBe(true);
+      expect((client as any).activeChild).toBe(child);
+    });
+
+    it('falls back to default response when policy throws', async () => {
+      const childSessionManager = createChildSessionManagerStub();
+      const failingBehavior: DapClientBehavior = {
+        handleReverseRequest: vi.fn().mockRejectedValue(new Error('boom'))
+      };
+
+      const client = new MinimalDapClient('localhost', 5678);
+
+      const responseSpy = vi.spyOn(client as any, 'sendResponse');
+      (client as any).dapBehavior = failingBehavior;
+      (client as any).socket = { destroyed: false, write: vi.fn().mockReturnValue(true) } as unknown as net.Socket;
+      (client as any).childSessionManager = childSessionManager;
+
+      const request = {
+        seq: 1,
+        type: 'request',
+        command: 'runInTerminal'
+      } as DebugProtocol.Request;
+
+      await (client as any).handleProtocolMessage(request);
+
+      expect(failingBehavior.handleReverseRequest).toHaveBeenCalled();
+      expect(responseSpy).toHaveBeenCalledWith(request, {});
+    });
+
+    it('responds with default ack when policy reports unhandled request', async () => {
+      const childSessionManager = createChildSessionManagerStub();
+      const behavior: DapClientBehavior = {
+        handleReverseRequest: vi.fn().mockResolvedValue({ handled: false })
+      };
+
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => childSessionManager
+      });
+
+      const responseSpy = vi.spyOn(client as any, 'sendResponse');
+      (client as any).dapBehavior = behavior;
+      (client as any).socket = { destroyed: false, write: vi.fn().mockReturnValue(true) } as unknown as net.Socket;
+
+      const request = {
+        seq: 1,
+        type: 'request',
+        command: 'runInTerminal'
+      } as DebugProtocol.Request;
+
+      await (client as any).handleProtocolMessage(request);
+
+      expect(behavior.handleReverseRequest).toHaveBeenCalled();
+      expect(responseSpy).toHaveBeenCalledWith(request, {});
+    });
+
+    it('logs child session creation errors without throwing', async () => {
+      const childSessionManager = createChildSessionManagerStub();
+      childSessionManager.createChildSession.mockRejectedValue(new Error('no child'));
+      const behavior: DapClientBehavior = {
+        handleReverseRequest: vi.fn().mockResolvedValue({
+          handled: true,
+          createChildSession: true,
+          childConfig: { pendingId: 'child-err', parentConfig: {} }
+        } as ReverseRequestResult),
+        deferParentConfigDone: true
+      };
+
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => childSessionManager
+      });
+
+      (client as any).dapBehavior = behavior;
+      (client as any).socket = { destroyed: false, write: vi.fn().mockReturnValue(true) } as unknown as net.Socket;
+
+      const request = {
+        seq: 1,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: { configuration: { __pendingTargetId: 'child-err' } }
+      } as DebugProtocol.Request;
+
+      await expect((client as any).handleProtocolMessage(request)).resolves.toBeUndefined();
+
+      expect(childSessionManager.createChildSession).toHaveBeenCalledWith({
+        pendingId: 'child-err',
+        parentConfig: {}
+      });
+      expect((client as any).deferParentConfigDoneActive).toBe(false);
+      expect(behavior.handleReverseRequest).toHaveBeenCalled();
     });
   });
 });

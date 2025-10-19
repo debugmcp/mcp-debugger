@@ -26,7 +26,6 @@ import {
   validateProxyInitPayload
 } from '../utils/type-guards.js';
 import { SilentDapCommandPayload, JsDebugAdapterState } from './dap-extensions.js';
-import { setupSignalDebugging } from './signal-debug.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
 import { 
@@ -35,6 +34,20 @@ import {
   PythonAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
+
+export type DapProxyWorkerHooks = {
+  /**
+   * Custom exit handler used when the worker encounters a fatal error.
+   * Defaults to process.exit for production usage.
+   */
+  exit?: (code: number) => void;
+
+  /**
+   * Factory responsible for configuring DAP frame tracing.
+   * Should return the path used for logging if tracing is enabled.
+   */
+  createTraceFile?: (sessionId: string, logDir: string) => string | undefined;
+};
 
 export class DapProxyWorker {
   private logger: ILogger | null = null;
@@ -53,11 +66,28 @@ export class DapProxyWorker {
   private commandQueue: (DapCommandPayload | SilentDapCommandPayload)[] = [];
   private preConnectQueue: DapCommandPayload[] = [];
 
-  constructor(private dependencies: DapProxyDependencies) {
+  private readonly exitHook: (code: number) => void;
+  private readonly traceFileFactory: (sessionId: string, logDir: string) => string | undefined;
+
+  constructor(
+    private dependencies: DapProxyDependencies,
+    hooks: DapProxyWorkerHooks = {}
+  ) {
     this.requestTracker = new CallbackRequestTracker(
       (requestId, command) => this.handleRequestTimeout(requestId, command)
     );
     this.adapterState = DefaultAdapterPolicy.createInitialState();
+
+    this.exitHook = hooks.exit ?? ((code: number) => {
+      // Default to preserving existing behaviour in production.
+      process.exit(code);
+    });
+
+    this.traceFileFactory = hooks.createTraceFile ?? ((sessionId: string, logDir: string) => {
+      const tracePath = path.join(logDir, `dap-trace-${sessionId}.ndjson`);
+      process.env.DAP_TRACE_FILE = tracePath;
+      return tracePath;
+    });
   }
 
   /**
@@ -140,20 +170,17 @@ export class DapProxyWorker {
       this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
       this.logger.info(`[Worker] Using adapter policy: ${this.adapterPolicy.name}`);
-      
-      // Set up signal debugging for containers
-      if (process.env.MCP_CONTAINER === 'true') {
-        this.logger.info(`[Worker] Container environment detected - setting up signal debugging`);
-        setupSignalDebugging(payload.sessionId);
-      }
 
       // Enable per-session DAP frame tracing for diagnostics
       try {
-        const tracePath = path.join(payload.logDir, `dap-trace-${payload.sessionId}.ndjson`);
-        process.env.DAP_TRACE_FILE = tracePath;
-        this.logger.info(`[Worker] DAP trace enabled at: ${tracePath}`);
+        const tracePath = this.traceFileFactory(payload.sessionId, payload.logDir);
+        if (tracePath) {
+          this.logger?.info(`[Worker] DAP trace enabled at: ${tracePath}`);
+        } else {
+          this.logger?.debug?.('[Worker] Trace file factory returned no path - tracing disabled');
+        }
       } catch (e) {
-        this.logger.warn?.('[Worker] Failed to enable DAP trace file', e as Error);
+        this.logger.warn?.('[Worker] Failed to configure DAP trace file', e as Error);
       }
 
       // Create generic adapter manager
@@ -185,7 +212,7 @@ export class DapProxyWorker {
       const message = error instanceof Error ? error.message : String(error);
       this.logger?.error(`[Worker] Critical initialization error: ${message}`, error);
       await this.shutdown();
-      process.exit(1);
+      this.exitHook(1);
     }
   }
 

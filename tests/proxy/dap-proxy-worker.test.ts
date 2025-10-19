@@ -3,8 +3,13 @@
  * Tests the refactored implementation using the Adapter Policy pattern
  */
 
+import { EventEmitter } from 'events';
+import type { ChildProcess } from 'child_process';
+import path from 'path';
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
+import { GenericAdapterManager } from '../../src/proxy/dap-proxy-adapter-manager.js';
+import { DapConnectionManager } from '../../src/proxy/dap-proxy-connection-manager.js';
 import type {
   DapProxyDependencies,
   ILogger,
@@ -211,6 +216,253 @@ describe('DapProxyWorker', () => {
         })
       );
     });
+
+    it('throws when adapter policy cannot provide spawn config', () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'dry-run-error',
+        scriptPath: '/path/to/script.js',
+        adapterHost: 'localhost',
+        adapterPort: 1234,
+        logDir: '/logs',
+        executablePath: 'node',
+        dryRunSpawn: true
+      };
+
+      (worker as unknown as { adapterPolicy: typeof DefaultAdapterPolicy }).adapterPolicy =
+        DefaultAdapterPolicy;
+      (worker as unknown as { logger: ILogger }).logger = mockLogger;
+
+      expect(() =>
+        (worker as unknown as { handleDryRun: (p: ProxyInitPayload) => void }).handleDryRun(payload)
+      ).toThrow(/Cannot determine adapter command/);
+    });
+  });
+
+  describe('Hook integration', () => {
+    const basePayload: ProxyInitPayload = {
+      cmd: 'init',
+      sessionId: 'hook-session',
+      scriptPath: '/path/to/script.py',
+      adapterHost: 'localhost',
+      adapterPort: 5678,
+      logDir: '/logs',
+      executablePath: 'python',
+      adapterCommand: {
+        command: 'python',
+        args: ['-m', 'debugpy.adapter', '--port', '5678']
+      },
+      dryRunSpawn: true
+    };
+
+    it('uses custom trace file factory during initialization', async () => {
+      const previousTrace = process.env.DAP_TRACE_FILE;
+      const traceSpy = vi.fn().mockImplementation((_sessionId: string, logDir: string) => {
+        const tracePath = path.join(logDir, 'custom-trace.ndjson');
+        process.env.DAP_TRACE_FILE = tracePath;
+        return tracePath;
+      });
+      worker = new DapProxyWorker(dependencies, {
+        createTraceFile: traceSpy
+      });
+
+      await worker.handleCommand(basePayload);
+
+      expect(traceSpy).toHaveBeenCalledWith(basePayload.sessionId, basePayload.logDir);
+      expect(process.env.DAP_TRACE_FILE).toBe(path.join(basePayload.logDir, 'custom-trace.ndjson'));
+
+      if (previousTrace === undefined) {
+        delete process.env.DAP_TRACE_FILE;
+      } else {
+        process.env.DAP_TRACE_FILE = previousTrace;
+      }
+    });
+
+    it('invokes custom exit hook when initialization fails critically', async () => {
+      const exitSpy = vi.fn();
+      const traceSpy = vi.fn().mockReturnValue('/logs/custom-trace.ndjson');
+      dependencies.fileSystem.ensureDir = vi.fn().mockRejectedValue(new Error('cannot ensure dir'));
+
+      worker = new DapProxyWorker(dependencies, {
+        exit: exitSpy,
+        createTraceFile: traceSpy
+      });
+
+      const shutdownSpy = vi.spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown').mockResolvedValue(undefined);
+
+      await worker.handleCommand(basePayload);
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(shutdownSpy).toHaveBeenCalled();
+      expect(worker.getState()).toBe(ProxyState.UNINITIALIZED);
+    });
+
+    it('does not trigger exit hook during successful dry run', async () => {
+      const exitSpy = vi.fn();
+      worker = new DapProxyWorker(dependencies, {
+        exit: exitSpy
+      });
+
+      await worker.handleCommand(basePayload);
+
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Adapter workflow internals', () => {
+    it('startDebugpyAdapterAndConnect should emit adapter_connected for queueing policy', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'js-session',
+        executablePath: 'node',
+        adapterHost: 'localhost',
+        adapterPort: 9229,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.js',
+        adapterCommand: {
+          command: 'node',
+          args: ['--inspect', 'adapter.js']
+        }
+      };
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({
+          process: new EventEmitter() as unknown as ChildProcess,
+          pid: 321
+        }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn(),
+        sendLaunchRequest: vi.fn(),
+        setBreakpoints: vi.fn(),
+        sendConfigurationDone: vi.fn(),
+        disconnect: vi.fn()
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JsDebugAdapterPolicy;
+      (worker as any).adapterState = JsDebugAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startDebugpyAdapterAndConnect(payload);
+
+      expect(processStub.spawn).toHaveBeenCalledTimes(1);
+      expect(connectionStub.connectWithRetry).toHaveBeenCalledWith(payload.adapterHost, payload.adapterPort);
+      const statusCall = mockMessageSender.send.mock.calls.find(
+        ([message]) => message.type === 'status' && message.status === 'adapter_connected'
+      );
+      expect(statusCall).toBeDefined();
+      expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it('startDebugpyAdapterAndConnect should initialize session for non-queue policy', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'py-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.py',
+        scriptArgs: ['--flag'],
+        stopOnEntry: true,
+        justMyCode: true
+      };
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({
+          process: new EventEmitter() as unknown as ChildProcess,
+          pid: 654
+        }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn().mockResolvedValue(undefined),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startDebugpyAdapterAndConnect(payload);
+      await (worker as any).handleInitializedEvent();
+
+      expect(processStub.spawn).toHaveBeenCalledTimes(1);
+      expect(connectionStub.initializeSession).toHaveBeenCalledWith(
+        mockDapClient,
+        payload.sessionId,
+        'debugpy'
+      );
+      expect(connectionStub.sendLaunchRequest).toHaveBeenCalledWith(
+        mockDapClient,
+        payload.scriptPath,
+        payload.scriptArgs,
+        payload.stopOnEntry,
+        payload.justMyCode
+      );
+      const statusCall = mockMessageSender.send.mock.calls.find(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      );
+      expect(statusCall).toBeDefined();
+      expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it('ensureInitialStop should pause when threads available', async () => {
+      (worker as any).dapClient = mockDapClient;
+      const sendRequestMock = mockDapClient.sendRequest as Mock;
+      sendRequestMock.mockReset();
+      sendRequestMock.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 7 }] } };
+        }
+        if (command === 'pause') {
+          return { success: true };
+        }
+        return { success: true };
+      });
+
+      await (worker as any).ensureInitialStop();
+
+      const threadsCall = sendRequestMock.mock.calls.find(([cmd]) => cmd === 'threads');
+      expect(threadsCall).toBeDefined();
+      const pauseCall = sendRequestMock.mock.calls.find(([cmd]) => cmd === 'pause');
+      expect(pauseCall?.[1]).toEqual({ threadId: 7 });
+    });
+
+    it('handleTerminate should shutdown client and process', async () => {
+      (worker as any).dapClient = mockDapClient;
+      const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+      const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).state = ProxyState.CONNECTED;
+
+      await worker.handleTerminate();
+
+      expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient);
+      expect(mockDapClient.shutdown).toHaveBeenCalledWith('worker shutdown');
+      expect(worker.getState()).toBe(ProxyState.TERMINATED);
+    });
   });
 
   describe('DAP Command Handling', () => {
@@ -298,6 +550,38 @@ describe('DapProxyWorker', () => {
         })
       );
     });
+
+    it('surfaces adapter errors when sendRequest rejects', async () => {
+      mockMessageSender.send.mockClear();
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).logger = mockLogger;
+
+      mockDapClient.sendRequest = vi.fn().mockRejectedValue(new Error('boom'));
+
+      const payload: DapCommandPayload = {
+        cmd: 'dap',
+        sessionId: 'test-session',
+        requestId: 'req-error',
+        dapCommand: 'threads',
+        dapArgs: {}
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(mockMessageSender.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'dapResponse',
+          requestId: 'req-error',
+          success: false,
+          error: 'boom'
+        })
+      );
+
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+    });
   });
 
   describe('JavaScript Adapter Command Queueing', () => {
@@ -375,6 +659,60 @@ describe('DapProxyWorker', () => {
     });
   });
 
+  describe('Command queue draining', () => {
+    it('flushes queued commands and injects deferred configurationDone', async () => {
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).logger = mockLogger;
+      (worker as any).state = ProxyState.CONNECTED;
+
+      const requiresQueueSpy = vi.fn(() => true);
+      const shouldQueueSpy = vi.fn(() => ({
+        shouldQueue: true,
+        shouldDefer: true,
+        reason: 'Defer until configurationDone'
+      }));
+      const queuePolicy = {
+        ...DefaultAdapterPolicy,
+        shouldQueueCommand: shouldQueueSpy,
+        requiresCommandQueueing: requiresQueueSpy,
+        getInitializationBehavior: () => ({
+          deferConfigDone: true,
+          requiresInitialStop: false,
+          addRuntimeExecutable: false,
+          trackInitializeResponse: false
+        })
+      };
+
+      (worker as any).adapterPolicy = queuePolicy;
+      (worker as any).adapterState = queuePolicy.createInitialState();
+
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+      mockMessageSender.send.mockClear();
+
+      const payload: DapCommandPayload = {
+        cmd: 'dap',
+        sessionId: 'queue-session',
+        requestId: 'req-queue',
+        dapCommand: 'launch',
+        dapArgs: {}
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(shouldQueueSpy).toHaveBeenCalledWith('launch', expect.any(Object));
+      expect(mockDapClient.sendRequest).toHaveBeenCalledTimes(2);
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('configurationDone', {});
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('launch', {});
+
+      const responses = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'dapResponse' && message.requestId === 'req-queue'
+      );
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0][0].success).toBe(true);
+    });
+  });
+
   describe('Error Handling', () => {
     it('should handle initialization errors gracefully', async () => {
       // Make file system fail
@@ -404,6 +742,88 @@ describe('DapProxyWorker', () => {
       // Note: Logger won't be called since it's created AFTER ensureDir, which is what's failing
 
       exitSpy.mockRestore();
+    });
+
+    it('invokes exit hook when adapter spawn fails', async () => {
+      const exitSpy = vi.fn();
+      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
+      const spawnError = new Error('spawn failed');
+      const spawnSpy = vi
+        .spyOn(GenericAdapterManager.prototype, 'spawn')
+        .mockRejectedValue(spawnError);
+      const shutdownSpy = vi
+        .spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown')
+        .mockResolvedValue(undefined);
+
+      mockLogger.error.mockClear();
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'spawn-session',
+        scriptPath: '/path/to/script.py',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/logs',
+        executablePath: 'python',
+        adapterCommand: {
+          command: 'python',
+          args: ['-m', 'debugpy.adapter']
+        }
+      };
+
+      try {
+        await worker.handleCommand(payload);
+
+        expect(exitSpy).toHaveBeenCalledWith(1);
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          expect.stringContaining('Critical initialization error'),
+          spawnError
+        );
+      } finally {
+        spawnSpy.mockRestore();
+        shutdownSpy.mockRestore();
+      }
+    });
+
+    it('invokes exit hook when DAP connection fails', async () => {
+      const exitSpy = vi.fn();
+      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
+      const connectError = new Error('connect failed');
+      const connectSpy = vi
+        .spyOn(DapConnectionManager.prototype, 'connectWithRetry')
+        .mockRejectedValue(connectError);
+      const shutdownSpy = vi
+        .spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown')
+        .mockResolvedValue(undefined);
+
+      mockLogger.error.mockClear();
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'connect-session',
+        scriptPath: '/path/to/script.py',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/logs',
+        executablePath: 'python',
+        adapterCommand: {
+          command: 'python',
+          args: ['-m', 'debugpy.adapter']
+        }
+      };
+
+      try {
+        await worker.handleCommand(payload);
+
+        expect(exitSpy).toHaveBeenCalledWith(1);
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          expect.stringContaining('Critical initialization error'),
+          connectError
+        );
+      } finally {
+        connectSpy.mockRestore();
+        shutdownSpy.mockRestore();
+      }
     });
 
     it('should handle DAP command errors', async () => {

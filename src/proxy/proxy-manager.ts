@@ -105,6 +105,16 @@ type ProxyErrorMessage = {
 
 type ProxyMessage = ProxyStatusMessage | ProxyDapEventMessage | ProxyDapResponseMessage | ProxyErrorMessage;
 
+interface ProxyRuntimeEnvironment {
+  moduleUrl: string;
+  cwd: () => string;
+}
+
+const DEFAULT_RUNTIME_ENVIRONMENT: ProxyRuntimeEnvironment = {
+  moduleUrl: import.meta.url,
+  cwd: () => process.cwd()
+};
+
 /**
  * Concrete implementation of ProxyManager
  */
@@ -122,14 +132,17 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private adapterConfigured = false;
   private dapState: DAPSessionState | null = null;
   private stderrBuffer: string[] = [];
+  private readonly runtimeEnv: ProxyRuntimeEnvironment;
 
   constructor(
     private adapter: IDebugAdapter | null,  // Optional adapter for language-agnostic support
     private proxyProcessLauncher: IProxyProcessLauncher,
     private fileSystem: IFileSystem,
-    private logger: ILogger
+    private logger: ILogger,
+    runtimeEnv: ProxyRuntimeEnvironment = DEFAULT_RUNTIME_ENVIRONMENT
   ) {
     super();
+    this.runtimeEnv = runtimeEnv;
   }
 
   async start(config: ProxyConfig): Promise<void> {
@@ -143,37 +156,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Initialize functional core state
     this.dapState = createInitialState(config.sessionId);
     
-    // Use adapter to validate environment and resolve executable if available
-    let executablePath: string | undefined = config.executablePath;
-    if (this.adapter) {
-      // Validate environment first
-      const validation = await this.adapter.validateEnvironment();
-      if (!validation.valid) {
-        throw new Error(
-          `Invalid environment for ${this.adapter.language}: ${validation.errors[0].message}`
-        );
-      }
-      
-      // Resolve executable path if not provided
-      if (!executablePath) {
-        executablePath = await this.adapter.resolveExecutablePath();
-        this.logger.info(`[ProxyManager] Adapter resolved executable path: ${executablePath}`);
-      }
-    } else if (!executablePath) {
-      throw new Error('No executable path provided and no adapter available to resolve it');
-    }
-    
-    // Find proxy bootstrap script
-    const proxyScriptPath = await this.findProxyScript();
-    
-    // Use environment as-is without any path manipulation
-    // Filter out undefined values to satisfy TypeScript
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) {
-        env[key] = value;
-      }
-    }
+    const { executablePath, proxyScriptPath, env } = await this.prepareSpawnContext(config);
 
     this.logger.info(`[ProxyManager] Spawning proxy for session ${config.sessionId}. Path: ${proxyScriptPath}`);
     
@@ -471,28 +454,76 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return this.currentThreadId;
   }
 
+  private async prepareSpawnContext(config: ProxyConfig): Promise<{
+    executablePath: string;
+    proxyScriptPath: string;
+    env: Record<string, string>;
+  }> {
+    let executablePath = config.executablePath;
+
+    if (this.adapter) {
+      const validation = await this.adapter.validateEnvironment();
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid environment for ${this.adapter.language}: ${validation.errors[0].message}`
+        );
+      }
+
+      if (!executablePath) {
+        executablePath = await this.adapter.resolveExecutablePath();
+        this.logger.info(`[ProxyManager] Adapter resolved executable path: ${executablePath}`);
+      }
+    } else if (!executablePath) {
+      throw new Error('No executable path provided and no adapter available to resolve it');
+    }
+
+    const proxyScriptPath = await this.findProxyScript();
+
+    if (!executablePath) {
+      throw new Error('Executable path could not be determined after validation');
+    }
+
+    const env = this.cloneProcessEnv();
+
+    return {
+      executablePath,
+      proxyScriptPath,
+      env
+    };
+  }
+
+  private cloneProcessEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+    return env;
+  }
+
   private async findProxyScript(): Promise<string> {
-    // Check if we're running from a bundled environment
-    const isBundled = fileURLToPath(import.meta.url).includes('bundle.cjs');
-    
+    const modulePath = fileURLToPath(this.runtimeEnv.moduleUrl);
+    const isBundled = modulePath.includes('bundle.cjs');
+    const moduleDir = path.dirname(modulePath);
+    const cwd = this.runtimeEnv.cwd();
+
     let distPath: string;
     if (isBundled) {
-      // In bundled environment (e.g., Docker container), proxy-bootstrap.js is in same dist directory
-      distPath = path.resolve(process.cwd(), 'dist/proxy/proxy-bootstrap.js');
+      // In bundled environment (e.g., Docker container), proxy-bootstrap.js lives under dist relative to cwd
+      distPath = path.resolve(cwd, 'dist/proxy/proxy-bootstrap.js');
     } else {
       // In development/non-bundled environment, resolve relative to this module's location
-      const moduleDir = path.dirname(fileURLToPath(import.meta.url));
       distPath = path.resolve(moduleDir, '../../dist/proxy/proxy-bootstrap.js');
     }
-    
+
     this.logger.info(`[ProxyManager] Checking for proxy script at: ${distPath} (bundled: ${isBundled})`);
-    
+
     if (!(await this.fileSystem.pathExists(distPath))) {
-      const moduleDir = path.dirname(fileURLToPath(import.meta.url));
       throw new Error(
         `Bootstrap worker script not found at: ${distPath}\n` +
         `Module directory: ${moduleDir}\n` +
-        `Current working directory: ${process.cwd()}\n` +
+        `Current working directory: ${cwd}\n` +
         `Is bundled: ${isBundled}\n` +
         `This usually means:\n` +
         `  1. You need to run 'npm run build' first\n` +
@@ -500,7 +531,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         `  3. The TypeScript compilation structure is unexpected`
       );
     }
-    
+
     return distPath;
   }
 
