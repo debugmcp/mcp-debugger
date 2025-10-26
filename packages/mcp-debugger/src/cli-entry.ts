@@ -60,6 +60,9 @@ process.argv = process.argv.map(arg =>
   typeof arg === 'string' ? arg.replace(/^["'](.*)["']$/, '$1') : arg
 );
 
+// Import batteries-included module to ensure all adapters are bundled
+import './batteries-included.js';
+
 // Import and run the existing CLI main from the root source to avoid duplicating logic.
 // esbuild will bundle the referenced source into this package so npx works standalone.
 import { main } from '../../../src/index.js';

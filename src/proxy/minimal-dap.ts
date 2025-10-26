@@ -17,7 +17,7 @@ import {
   ChildSessionConfig 
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
-import { getErrorMessage, isInitializeResponse } from './dap-extensions.js';
+import { getErrorMessage } from '../errors/debug-errors.js';
 
 const logger = createLogger('minimal-dap-simple');
 
@@ -31,6 +31,17 @@ type MinimalDapClientOptions = {
 };
 
 const TWO_CRLF = '\r\n\r\n';
+
+function isInitializeResponse(
+  response: unknown
+): response is { command: string; body?: { capabilities?: Record<string, unknown> } } {
+  return (
+    response !== null &&
+    typeof response === 'object' &&
+    'command' in response &&
+    (response as { command: unknown }).command === 'initialize'
+  );
+}
 
 export class MinimalDapClient extends EventEmitter {
   private socket: Socket | null = null;
@@ -96,8 +107,8 @@ export class MinimalDapClient extends EventEmitter {
     };
     this.childClientFactory =
       options?.childClientFactory ??
-      ((childHost: string, childPort: number, _policy: AdapterPolicy) =>
-        new MinimalDapClient(childHost, childPort, undefined, {
+      ((childHost: string, childPort: number, policyForChild: AdapterPolicy) =>
+        new MinimalDapClient(childHost, childPort, policyForChild, {
           timers: this.timers
         }));
     
@@ -170,16 +181,30 @@ export class MinimalDapClient extends EventEmitter {
       
       const header = this.rawData.toString('utf8', 0, idx);
       const lines = header.split('\r\n');
-      
+      let parsedLength: number | null = null;
+
       for (const line of lines) {
-        const match = line.match(/Content-Length: (\d+)/i);
-        if (match) {
-          this.contentLength = parseInt(match[1], 10);
+        if (line.toLowerCase().startsWith('content-length')) {
+          const value = line.split(':')[1]?.trim();
+          const candidate = Number.parseInt(value ?? '', 10);
+          if (!Number.isNaN(candidate)) {
+            parsedLength = candidate;
+          }
+          break;
         }
       }
-      
+
       // Remove header from buffer
       this.rawData = this.rawData.slice(idx + TWO_CRLF.length);
+
+      if (parsedLength === null || parsedLength <= 0 || !Number.isFinite(parsedLength)) {
+        logger.warn('[MinimalDapClient] Invalid Content-Length header encountered; discarding payload');
+        this.contentLength = -1;
+        this.rawData = Buffer.alloc(0);
+        continue;
+      }
+
+      this.contentLength = parsedLength;
     }
   }
 
@@ -827,13 +852,16 @@ export class MinimalDapClient extends EventEmitter {
     // Shutdown any child sessions
     try {
       for (const child of this.childSessions.values()) {
-        child.shutdown('parent shutdown');
+        try {
+          child.shutdown('parent shutdown');
+        } catch (e) {
+          const emsg = getErrorMessage(e);
+          logger.warn('[MinimalDapClient] Error shutting down child sessions:', emsg);
+        }
       }
+    } finally {
       this.childSessions.clear();
       this.activeChild = null;
-    } catch (e) {
-      const emsg = getErrorMessage(e);
-      logger.warn('[MinimalDapClient] Error shutting down child sessions:', emsg);
     }
 
     // Use immediate cleanup when explicitly shutting down

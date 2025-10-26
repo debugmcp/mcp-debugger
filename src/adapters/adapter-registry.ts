@@ -229,29 +229,69 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
    * List languages that are actually installed and available via dynamic loader
    */
   async listLanguages(): Promise<string[]> {
+    const registered = this.getSupportedLanguages();
+
     if (!this.dynamicEnabled) {
-      // Fall back to currently registered languages
-      return this.getSupportedLanguages();
+      // Without dynamic loading, advertise the statically registered adapters.
+      return registered;
     }
-    const adapters = await this.loader.listAvailableAdapters();
-    return adapters.filter(a => a.installed).map(a => a.name);
+
+    const installed = new Set<string>();
+
+    try {
+      const adapters = await this.loader.listAvailableAdapters();
+      for (const adapter of adapters) {
+        if (adapter.installed) {
+          installed.add(adapter.name);
+        }
+      }
+    } catch {
+      // Ignore loader errors in bundled environments where adapters are embedded.
+    }
+
+    // Always include statically registered adapters so bundled builds expose them.
+    for (const language of registered) {
+      installed.add(language);
+    }
+
+    return Array.from(installed);
   }
 
   /**
    * List detailed adapter metadata (known + install status)
    */
   async listAvailableAdapters(): Promise<AdapterMetadata[]> {
+    const registered = new Set(this.getSupportedLanguages());
+
+    const buildEntry = (language: string): AdapterMetadata => ({
+      name: language,
+      packageName: `@debugmcp/adapter-${language}`,
+      description: undefined,
+      installed: true
+    });
+
     if (!this.dynamicEnabled) {
       // Provide minimal metadata from registered factories
-      const langs = this.getSupportedLanguages();
-      return langs.map(l => ({
-        name: l,
-        packageName: `@debugmcp/adapter-${l}`,
-        description: undefined,
-        installed: true
-      }));
+      return Array.from(registered).map(buildEntry);
     }
-    return this.loader.listAvailableAdapters();
+
+    const results = new Map<string, AdapterMetadata>();
+    try {
+      const adapters = await this.loader.listAvailableAdapters();
+      for (const adapter of adapters) {
+        const installed = registered.has(adapter.name) ? true : adapter.installed;
+        results.set(adapter.name, { ...adapter, installed });
+        registered.delete(adapter.name);
+      }
+    } catch {
+      // Ignore loader failures and fall back to registered adapters.
+    }
+
+    for (const language of registered) {
+      results.set(language, buildEntry(language));
+    }
+
+    return Array.from(results.values());
   }
 
   /**

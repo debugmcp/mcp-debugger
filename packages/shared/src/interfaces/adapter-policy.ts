@@ -221,6 +221,14 @@ export interface AdapterPolicy {
   updateStateOnCommand?(command: string, args: unknown, state: AdapterSpecificState): void;
 
   /**
+   * Update state based on a DAP response being received
+   * @param command The DAP command name
+   * @param response The raw DAP response payload
+   * @param state Current state (will be mutated)
+   */
+  updateStateOnResponse?(command: string, response: unknown, state: AdapterSpecificState): void;
+
+  /**
    * Update state based on a DAP event being received
    * @param event The DAP event name
    * @param body Event body
@@ -297,8 +305,10 @@ export interface AdapterPolicy {
 }
 
 /**
- * Default policy: no reverse startDebugging and no child sessions.
- * Parent configurationDone is never deferred.
+ * DefaultAdapterPolicy is a lightweight placeholder used while the worker is
+ * determining which concrete adapter policy to activate. It purposefully
+ * implements the smallest safe surface so real adapters cannot accidentally
+ * rely on it for behaviour.
  */
 export const DefaultAdapterPolicy: AdapterPolicy = {
   name: 'default',
@@ -306,116 +316,29 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
   childSessionStrategy: 'none',
   shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: (pendingId: string) => {
-    // Default policy should not be asked to build child start args.
-    // Throwing here helps catch accidental misuse.
     throw new Error(
-      `DefaultAdapterPolicy does not support child sessions. PendingId=${pendingId}`
+      `DefaultAdapterPolicy is a placeholder and cannot start child sessions (pendingId=${pendingId}).`
     );
   },
-  isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
-    // For most adapters, 'initialized' is the earliest readiness signal.
-    return evt?.event === 'initialized';
-  },
-  // Default implementation: Use first non-global scope as locals
-  extractLocalVariables: (
-    stackFrames: StackFrame[],
-    scopes: Record<number, DebugProtocol.Scope[]>,
-    variables: Record<number, Variable[]>,
-    includeSpecial?: boolean
-  ): Variable[] => {
-    // Default implementation doesn't filter based on includeSpecial
-    void includeSpecial;
-    
-    // Get the top frame
-    if (!stackFrames || stackFrames.length === 0) {
-      return [];
-    }
-    
-    const topFrame = stackFrames[0];
-    const frameScopes = scopes[topFrame.id];
-    
-    if (!frameScopes || frameScopes.length === 0) {
-      return [];
-    }
-    
-    // Find the first non-global scope (usually the locals)
-    const localScope = frameScopes.find(scope => 
-      !scope.name.toLowerCase().includes('global')
-    );
-    
-    if (!localScope) {
-      return [];
-    }
-    
-    // Return the variables for this scope
-    return variables[localScope.variablesReference] || [];
-  },
-  
-  getLocalScopeName: (): string[] => {
-    // Common scope names for locals across languages
-    return ['Locals', 'Local', 'local'];
-  },
-  
-  getDapAdapterConfiguration: () => {
-    return {
-      type: 'default'  // Generic/default adapter type
-    };
-  },
-  
-  resolveExecutablePath: (providedPath?: string) => {
-    // Default policy just returns the provided path as-is
-    return providedPath;
-  },
-  
-  getDebuggerConfiguration: () => {
-    return {
-      // Default configuration - no special requirements
-      requiresStrictHandshake: false,
-      skipConfigurationDone: false,
-      supportsVariableType: false
-    };
-  },
-  
-  // Command queueing methods - Default policy doesn't need queueing
+  isChildReadyEvent: () => false,
+  getDapAdapterConfiguration: () => ({
+    type: 'default'
+  }),
+  resolveExecutablePath: (providedPath?: string) => providedPath,
+  getDebuggerConfiguration: () => ({}),
   requiresCommandQueueing: () => false,
-  
-  shouldQueueCommand: (): CommandHandling => {
-    // Default policy never queues commands
-    return {
-      shouldQueue: false,
-      shouldDefer: false,
-      reason: 'Default adapter does not queue commands'
-    };
-  },
-  
-  createInitialState: (): AdapterSpecificState => {
-    return {
-      initialized: false,
-      configurationDone: false
-    };
-  },
-  
-  isInitialized: (state: AdapterSpecificState): boolean => {
-    return state.initialized;
-  },
-  
-  isConnected: (state: AdapterSpecificState): boolean => {
-    // Default assumes connected if initialized
-    return state.initialized;
-  },
-  
-  matchesAdapter: (): boolean => {
-    // Default policy is a fallback, doesn't match specific adapters
-    return false;
-  },
-  
-  getInitializationBehavior: () => {
-    // Default adapter has no special initialization requirements
-    return {};
-  },
-  
-  getDapClientBehavior: (): DapClientBehavior => {
-    // Default adapter has no special DAP client behaviors
-    return {};
-  }
+  shouldQueueCommand: (): CommandHandling => ({
+    shouldQueue: false,
+    shouldDefer: false,
+    reason: 'DefaultAdapterPolicy is inactive until a real adapter is selected'
+  }),
+  createInitialState: (): AdapterSpecificState => ({
+    initialized: false,
+    configurationDone: false
+  }),
+  isInitialized: () => false,
+  isConnected: () => false,
+  matchesAdapter: () => false,
+  getInitializationBehavior: () => ({}),
+  getDapClientBehavior: (): DapClientBehavior => ({})
 };

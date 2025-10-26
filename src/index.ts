@@ -129,10 +129,25 @@ export async function main(): Promise<void> {
 
 // Only execute if this is the main module
 // Check if the script is being run directly (not imported)
-const isMainModule = process.argv[1] && 
-  (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}` || 
-   import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/')) ||
-   import.meta.url.includes('dist/index.js'));
+// Handle both ESM (import.meta.url) and CJS (__filename) contexts
+const isMainModule = (() => {
+  // In CJS context (bundled), use require.main check
+if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
+    return true;
+  }
+  
+  // In ESM context, check import.meta.url
+  if (typeof import.meta !== 'undefined' && import.meta.url && process.argv[1]) {
+    const scriptPath = process.argv[1].replace(/\\/g, '/');
+    const moduleUrl = import.meta.url.replace(/\\/g, '/');
+    return moduleUrl === `file://${scriptPath}` || 
+           moduleUrl.endsWith(scriptPath) ||
+           scriptPath.endsWith('dist/index.js');
+  }
+  
+  // Fallback: assume it's main if we can't determine otherwise
+  return true;
+})();
 
 if (isMainModule) {
   main().catch((error) => {

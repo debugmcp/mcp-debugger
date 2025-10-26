@@ -25,7 +25,7 @@ import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
   validateProxyInitPayload
 } from '../utils/type-guards.js';
-import { SilentDapCommandPayload, JsDebugAdapterState } from './dap-extensions.js';
+import { SilentDapCommandPayload } from './dap-extensions.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
 import { 
@@ -497,8 +497,11 @@ export class DapProxyWorker {
       }
 
       // Mark initialize response received if needed
-      if (initBehavior.trackInitializeResponse && payload.dapCommand === 'initialize') {
-        (this.adapterState as JsDebugAdapterState).initializeResponded = true;
+      if (this.adapterPolicy.updateStateOnResponse) {
+        this.adapterPolicy.updateStateOnResponse(payload.dapCommand, response, this.adapterState);
+      } else if (initBehavior.trackInitializeResponse && payload.dapCommand === 'initialize') {
+        // Fallback for policies that rely on worker-managed initialize tracking.
+        (this.adapterState as AdapterSpecificState & { initializeResponded?: boolean }).initializeResponded = true;
       }
 
       // Complete tracking

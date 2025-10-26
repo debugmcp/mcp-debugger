@@ -93,6 +93,15 @@ describe('DapProxyWorker', () => {
     worker = new DapProxyWorker(dependencies);
   });
 
+  afterEach(async () => {
+    vi.useRealTimers();
+    try {
+      await worker.handleTerminate();
+    } catch {
+      // ignore termination errors during cleanup
+    }
+  });
+
   describe('State Management', () => {
     it('should initialize with UNINITIALIZED state', () => {
       expect(worker.getState()).toBe(ProxyState.UNINITIALIZED);
@@ -449,6 +458,136 @@ describe('DapProxyWorker', () => {
       expect(pauseCall?.[1]).toEqual({ threadId: 7 });
     });
 
+    it('ensureInitialStop logs warning when no threads appear', async () => {
+      vi.useFakeTimers();
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).logger = mockLogger;
+      const sendRequestMock = mockDapClient.sendRequest as Mock;
+      sendRequestMock.mockReset();
+      sendRequestMock.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [] } };
+        }
+        throw new Error(`Unexpected command ${command}`);
+      });
+
+      const ensurePromise: Promise<void> = (worker as any).ensureInitialStop(120);
+      await vi.advanceTimersByTimeAsync(200);
+      await ensurePromise;
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('ensureInitialStop: no threads discovered within timeout')
+      );
+      expect(sendRequestMock).toHaveBeenCalledWith('threads', {});
+
+      vi.useRealTimers();
+    });
+
+    it('wires adapter process events and propagates DAP events', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'process-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5679,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.py',
+        adapterCommand: {
+          command: 'python',
+          args: ['-m', 'debugpy.adapter']
+        }
+      };
+
+      const adapterEmitter = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(adapterEmitter, {
+        pid: 999,
+        kill: vi.fn(),
+        unref: vi.fn(),
+        killed: false
+      });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({
+          process: adapterEmitter as ChildProcess,
+          pid: 999
+        }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionHandlers: Record<string, (arg?: unknown) => unknown> = {};
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((_client, handlers) => {
+          Object.assign(connectionHandlers, handlers);
+        }),
+        initializeSession: vi.fn().mockResolvedValue(undefined),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+      const shutdownSpy = vi
+        .spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown')
+        .mockResolvedValue(undefined);
+
+      await (worker as any).startDebugpyAdapterAndConnect(payload);
+
+      expect(processStub.spawn).toHaveBeenCalledTimes(1);
+      expect(connectionStub.setupEventHandlers).toHaveBeenCalled();
+
+      const error = new Error('adapter fail');
+      adapterEmitter.emit('error', error);
+      expect(mockLogger.error).toHaveBeenCalledWith('[Worker] Adapter process error:', error);
+      expect(mockMessageSender.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'error',
+          message: 'Adapter process error: adapter fail'
+        })
+      );
+
+      adapterEmitter.emit('exit', 0, null);
+      expect(mockMessageSender.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'status',
+          status: 'adapter_exited',
+          code: 0,
+          signal: null
+        })
+      );
+
+      connectionHandlers.onStopped?.({ reason: 'breakpoint' });
+      expect(mockMessageSender.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'dapEvent',
+          event: 'stopped',
+          body: { reason: 'breakpoint' }
+        })
+      );
+
+      await connectionHandlers.onTerminated?.({ restart: false });
+      expect(mockMessageSender.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'dapEvent',
+          event: 'terminated',
+          body: { restart: false }
+        })
+      );
+      expect(shutdownSpy).toHaveBeenCalled();
+
+      shutdownSpy.mockRestore();
+    });
+
     it('handleTerminate should shutdown client and process', async () => {
       (worker as any).dapClient = mockDapClient;
       const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
@@ -713,6 +852,63 @@ describe('DapProxyWorker', () => {
     });
   });
 
+  describe('Pre-connect queue handling', () => {
+    it('drains pre-connect commands when connection established', async () => {
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).logger = mockLogger;
+      (worker as any).preConnectQueue = [
+        {
+          cmd: 'dap',
+          sessionId: 'queued-session',
+          requestId: 'queued-1',
+          dapCommand: 'threads',
+          dapArgs: {}
+        } satisfies DapCommandPayload
+      ];
+
+      const handleSpy = vi.spyOn(worker, 'handleDapCommand').mockResolvedValue(undefined);
+
+      await (worker as any).drainPreConnectQueue();
+
+      expect(handleSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: 'queued-1' })
+      );
+      expect((worker as any).preConnectQueue).toHaveLength(0);
+
+      handleSpy.mockRestore();
+    });
+  });
+
+  describe('Timeout handling', () => {
+    it('emits failure response when tracked request times out', async () => {
+      vi.useFakeTimers();
+      (worker as any).logger = mockLogger;
+      (worker as any).currentSessionId = 'timeout-session';
+      mockLogger.error.mockClear();
+      mockMessageSender.send.mockClear();
+
+      const tracker = (worker as any).requestTracker;
+      tracker.track('timeout-req', 'threads', 50);
+
+      await vi.advanceTimersByTimeAsync(60);
+      await Promise.resolve();
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        "[Worker] DAP request 'threads' (id: timeout-req) timed out"
+      );
+      expect(mockMessageSender.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'dapResponse',
+          requestId: 'timeout-req',
+          success: false,
+          error: "Request 'threads' timed out"
+        })
+      );
+
+      vi.useRealTimers();
+    });
+  });
+
   describe('Error Handling', () => {
     it('should handle initialization errors gracefully', async () => {
       // Make file system fail
@@ -931,6 +1127,16 @@ describe('DapProxyWorker', () => {
         call => call[0].type === 'status' && call[0].status === 'terminated'
       );
       expect(terminatedCalls.length).toBe(1);
+    });
+
+    it('returns early when shutdown already in progress', async () => {
+      (worker as any).logger = mockLogger;
+      (worker as any).state = ProxyState.SHUTTING_DOWN;
+
+      await (worker as any).shutdown();
+
+      expect(mockLogger.info).toHaveBeenCalledWith('[Worker] Shutdown already in progress.');
+      expect(worker.getState()).toBe(ProxyState.SHUTTING_DOWN);
     });
   });
 });

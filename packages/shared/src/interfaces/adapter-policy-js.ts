@@ -12,7 +12,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 /**
  * JavaScript-specific adapter state
  */
-interface JsAdapterState extends AdapterSpecificState {
+export interface JsAdapterState extends AdapterSpecificState {
   initializeResponded: boolean;
   startSent: boolean;
   pendingCommands: Array<{ requestId: string; dapCommand: string; dapArgs?: unknown }>;
@@ -474,6 +474,16 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       jsState.configurationDone = true;
     } else if (command === 'launch' || command === 'attach') {
       jsState.startSent = true;
+    }
+  },
+
+  /**
+   * Update state when a command response is received
+   */
+  updateStateOnResponse: (command: string, _response: unknown, state: AdapterSpecificState): void => {
+    const jsState = state as JsAdapterState;
+    if (command === 'initialize') {
+      jsState.initializeResponded = true;
     }
   },
 

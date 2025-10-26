@@ -14,6 +14,7 @@ import {
   ParentCommand, 
   ProxyState 
 } from './dap-proxy-interfaces.js';
+import { getErrorMessage } from '../errors/debug-errors.js';
 
 export interface ProxyRunnerOptions {
   /**
@@ -174,7 +175,7 @@ export class ProxyRunner {
 
         await this.worker.handleCommand(command);
       } catch (error) {
-        const errorMsg = MessageParser.getErrorMessage(error);
+        const errorMsg = getErrorMessage(error);
         this.logger.error('[ProxyRunner] Error processing message:', { error: errorMsg });
         this.dependencies.messageSender.send({
           type: 'error',
@@ -222,7 +223,7 @@ export class ProxyRunner {
         } catch (e) {
           this.logger.error('[ProxyRunner] Could not process object message:', {
             message,
-            error: MessageParser.getErrorMessage(e)
+            error: getErrorMessage(e)
           });
         }
       } else {

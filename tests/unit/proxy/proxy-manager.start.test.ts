@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
+import { createInitialState } from '../../../src/dap-core/index.js';
 import type { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { DebugLanguage, type IProxyProcess, type IProxyProcessLauncher, type IFileSystem, type ILogger, type IDebugAdapter } from '@debugmcp/shared';
 
@@ -70,8 +71,20 @@ describe('ProxyManager.start', () => {
     adapterHost: '127.0.0.1',
     adapterPort: 9229,
     logDir: './.tmp/logs',
-    scriptPath: './tests/fixtures/app.js',
-    dryRunSpawn: true
+  scriptPath: './tests/fixtures/app.js',
+  dryRunSpawn: true
+  };
+
+  const completeStart = async (config: ProxyConfig = baseConfig): Promise<void> => {
+    const startPromise = proxyManager.start(config);
+    fakeProcess.sendCommand.mockImplementationOnce(() => {
+      setImmediate(() => {
+        proxyManager.emit('dry-run-complete', 'node --inspect', config.scriptPath);
+      });
+    });
+    fakeProcess.emit('message', { type: 'proxy-ready' });
+    await startPromise;
+    (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
   };
 
   it('launches the proxy process and sends the init command', async () => {
@@ -90,6 +103,72 @@ describe('ProxyManager.start', () => {
         dryRunSpawn: true
       })
     );
+  });
+
+  it('fails to start when adapter environment validation fails', async () => {
+    const adapter = {
+      language: DebugLanguage.PYTHON,
+      validateEnvironment: vi.fn().mockResolvedValue({
+        valid: false,
+        errors: [{ message: 'Missing Python runtime' }],
+        warnings: []
+      }),
+      resolveExecutablePath: vi.fn()
+    } as unknown as IDebugAdapter;
+
+    proxyManager = new ProxyManager(
+      adapter,
+      proxyProcessLauncher,
+      fileSystem,
+      logger
+    );
+
+    const config: ProxyConfig = {
+      ...baseConfig,
+      executablePath: undefined
+    };
+
+    await expect(proxyManager.start(config)).rejects.toThrow(/Invalid environment.*Missing Python runtime/);
+    expect(adapter.validateEnvironment).toHaveBeenCalled();
+    expect(adapter.resolveExecutablePath).not.toHaveBeenCalled();
+    expect(launchProxySpy).not.toHaveBeenCalled();
+  });
+
+  it('fails to start when executable resolution throws', async () => {
+    const adapter = {
+      language: DebugLanguage.PYTHON,
+      validateEnvironment: vi.fn().mockResolvedValue({
+        valid: true,
+        errors: [],
+        warnings: []
+      }),
+      resolveExecutablePath: vi.fn().mockRejectedValue(new Error('resolution failed'))
+    } as unknown as IDebugAdapter;
+
+    proxyManager = new ProxyManager(
+      adapter,
+      proxyProcessLauncher,
+      fileSystem,
+      logger
+    );
+
+    const config: ProxyConfig = {
+      ...baseConfig,
+      executablePath: undefined
+    };
+
+    await expect(proxyManager.start(config)).rejects.toThrow('resolution failed');
+    expect(adapter.validateEnvironment).toHaveBeenCalled();
+    expect(adapter.resolveExecutablePath).toHaveBeenCalled();
+    expect(launchProxySpy).not.toHaveBeenCalled();
+  });
+
+  it('fails to start when bootstrap worker script is missing', async () => {
+    (fileSystem.pathExists as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+    await expect(proxyManager.start(baseConfig)).rejects.toThrow(/Bootstrap worker script not found/);
+    expect(fileSystem.pathExists).toHaveBeenCalled();
+    expect(launchProxySpy).not.toHaveBeenCalled();
   });
 
   it('attaches listeners for proxy messages and forwards status events', async () => {
@@ -116,6 +195,287 @@ describe('ProxyManager.start', () => {
     fakeProcess.emit('message', statusPayload);
 
     expect(listener).toHaveBeenCalledWith(statusPayload.command, statusPayload.script);
+  });
+
+  it('emits lifecycle events when adapter-driven statuses arrive', async () => {
+    const adapter = {
+      language: DebugLanguage.PYTHON,
+      validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+      resolveExecutablePath: vi.fn().mockResolvedValue('python-auto')
+    } as unknown as IDebugAdapter;
+
+    proxyManager = new ProxyManager(
+      adapter,
+      proxyProcessLauncher,
+      fileSystem,
+      logger
+    );
+
+    const config: ProxyConfig = {
+      ...baseConfig,
+      executablePath: undefined
+    };
+
+    const context = await (proxyManager as unknown as {
+      prepareSpawnContext(cfg: ProxyConfig): Promise<{ executablePath: string }>;
+    }).prepareSpawnContext(config);
+
+    expect(adapter.validateEnvironment).toHaveBeenCalled();
+    expect(adapter.resolveExecutablePath).toHaveBeenCalled();
+    expect(context.executablePath).toBe('python-auto');
+
+    const dryRun = vi.fn();
+    const initialized = vi.fn();
+    const adapterConfigured = vi.fn();
+    const exit = vi.fn();
+    proxyManager.on('dry-run-complete', dryRun);
+    proxyManager.on('initialized', initialized);
+    proxyManager.on('adapter-configured', adapterConfigured);
+    proxyManager.on('exit', exit);
+
+    (proxyManager as unknown as { sessionId: string | null }).sessionId = config.sessionId;
+
+    (proxyManager as unknown as {
+      handleStatusMessage: (msg: object) => void;
+    }).handleStatusMessage({
+      type: 'status',
+      sessionId: config.sessionId,
+      status: 'dry_run_complete',
+      command: 'python-auto',
+      script: config.scriptPath
+    });
+
+    expect(dryRun).toHaveBeenCalledWith('python-auto', config.scriptPath);
+
+    (proxyManager as unknown as {
+      handleStatusMessage: (msg: object) => void;
+    }).handleStatusMessage({
+      type: 'status',
+      sessionId: config.sessionId,
+      status: 'adapter_configured_and_launched'
+    });
+
+    expect(initialized).toHaveBeenCalled();
+    expect(adapterConfigured).toHaveBeenCalled();
+
+    (proxyManager as unknown as {
+      handleStatusMessage: (msg: object) => void;
+    }).handleStatusMessage({
+      type: 'status',
+      sessionId: config.sessionId,
+      status: 'adapter_exited',
+      code: 9,
+      signal: 'SIGTERM'
+    });
+
+    expect(exit).toHaveBeenCalledWith(9, 'SIGTERM');
+  });
+
+  it('resolves DAP responses and captures thread ids', async () => {
+    (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+    (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+    (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+    (proxyManager as unknown as { dapState: ReturnType<typeof createInitialState> | null }).dapState =
+      createInitialState(baseConfig.sessionId);
+
+    fakeProcess.sendCommand.mockImplementation((payload) => {
+      if (payload.cmd === 'dap') {
+        (proxyManager as unknown as {
+          handleProxyMessage: (message: object) => void;
+        }).handleProxyMessage({
+          type: 'dapResponse',
+          sessionId: baseConfig.sessionId,
+          requestId: payload.requestId,
+          success: true,
+          response: {
+            type: 'response',
+            seq: 10,
+            request_seq: 5,
+            command: payload.dapCommand,
+            success: true,
+            body: {
+              threads: [{ id: 77, name: 'main' }]
+            }
+          }
+        });
+      }
+    });
+
+    const response = await proxyManager.sendDapRequest<any>('threads');
+
+    expect(response.command).toBe('threads');
+    expect(proxyManager.getCurrentThreadId()).toBe(77);
+    expect(fakeProcess.sendCommand).toHaveBeenCalledWith(expect.objectContaining({ dapCommand: 'threads' }));
+    const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
+    expect(pending.size).toBe(0);
+  });
+
+  it('rejects DAP requests on proxy error', async () => {
+    (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+    (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+    (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+    (proxyManager as unknown as { dapState: ReturnType<typeof createInitialState> | null }).dapState =
+      createInitialState(baseConfig.sessionId);
+
+    fakeProcess.sendCommand.mockImplementation((payload) => {
+      if (payload.cmd === 'dap') {
+        (proxyManager as unknown as {
+          handleProxyMessage: (message: object) => void;
+        }).handleProxyMessage({
+          type: 'dapResponse',
+          sessionId: baseConfig.sessionId,
+          requestId: payload.requestId,
+          success: false,
+          error: 'Request failed'
+        });
+      }
+    });
+
+    await expect(proxyManager.sendDapRequest('launch')).rejects.toThrow(/Request failed/);
+    const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
+    expect(pending.size).toBe(0);
+  });
+
+  it('rejects DAP requests when timeout elapses', async () => {
+    (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+    (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+    (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+
+    vi.useFakeTimers();
+    try {
+      fakeProcess.sendCommand.mockImplementation(() => {
+        // Do not emit any response to force timeout
+      });
+
+      const request = proxyManager.sendDapRequest('continue');
+
+      await vi.advanceTimersByTimeAsync(35000);
+
+      await expect(request).rejects.toThrow(/Debug adapter did not respond to 'continue'/);
+      const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
+      expect(pending.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates sendCommand transport errors and clears pending requests', async () => {
+    await completeStart();
+
+    fakeProcess.sendCommand.mockClear();
+    fakeProcess.sendCommand.mockImplementation(() => {
+      throw new Error('transport failure');
+    });
+
+    await expect(proxyManager.sendDapRequest('threads')).rejects.toThrow('transport failure');
+    expect((proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests.size).toBe(0);
+  });
+
+  it('rejects pending DAP requests when proxy exits', async () => {
+    await completeStart();
+
+    fakeProcess.sendCommand.mockClear();
+    let requestId: string | null = null;
+    fakeProcess.sendCommand.mockImplementation((payload) => {
+      requestId = payload.requestId;
+    });
+
+    const pendingPromise = proxyManager.sendDapRequest('evaluate');
+
+    expect(requestId).not.toBeNull();
+    setImmediate(() => {
+      fakeProcess.emit('exit', 1, null);
+    });
+
+    await expect(pendingPromise).rejects.toThrow('Proxy exited');
+    expect((proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests.size).toBe(0);
+  });
+
+  it('rejects initialization when proxy exits with non-zero status before readiness', async () => {
+    const config: ProxyConfig = {
+      ...baseConfig,
+      dryRunSpawn: false
+    };
+
+    fakeProcess.sendCommand.mockImplementationOnce(() => {
+      setImmediate(() => {
+        fakeProcess.emit('exit', 7, null);
+      });
+    });
+
+    const startPromise = proxyManager.start(config);
+
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization.*Code: 7/);
+  });
+
+  it('rejects initialization when proxy exits via signal before readiness', async () => {
+    const config: ProxyConfig = {
+      ...baseConfig,
+      dryRunSpawn: false
+    };
+
+    fakeProcess.sendCommand.mockImplementationOnce(() => {
+      setImmediate(() => {
+        fakeProcess.emit('exit', null, 'SIGTERM');
+      });
+    });
+
+    const startPromise = proxyManager.start(config);
+
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization.*Signal: SIGTERM/);
+  });
+
+  it('allows multiple concurrent stop calls without errors', async () => {
+    await completeStart();
+
+    const stopOne = proxyManager.stop();
+    const stopTwo = proxyManager.stop();
+    setImmediate(() => {
+      fakeProcess.emit('exit', 0, null);
+    });
+
+    const results = await Promise.all([stopOne, stopTwo]);
+    expect(results).toEqual([undefined, undefined]);
+    expect(fakeProcess.kill).not.toHaveBeenCalled();
+  });
+
+  it('prevents new DAP requests after stop is initiated', async () => {
+    await completeStart();
+
+    const stopPromise = proxyManager.stop();
+    setImmediate(() => {
+      fakeProcess.emit('exit', 0, null);
+    });
+    await stopPromise;
+
+    await expect(proxyManager.sendDapRequest('threads')).rejects.toThrow('Proxy not initialized');
+  });
+
+  it('handles stop invoked while start is still pending', async () => {
+    const config: ProxyConfig = {
+      ...baseConfig,
+      dryRunSpawn: false
+    };
+
+    const startPromise = proxyManager.start(config);
+    const stopPromise = proxyManager.stop();
+
+    setImmediate(() => {
+      fakeProcess.emit('exit', 0, null);
+    });
+
+    await expect(stopPromise).resolves.toBeUndefined();
+    await expect(startPromise).rejects.toThrow(/Proxy/);
+  });
+
+  it('resolves stop immediately if proxy already exited', async () => {
+    await completeStart();
+
+    setImmediate(() => {
+      fakeProcess.emit('exit', 0, null);
+    });
+
+    await expect(proxyManager.stop()).resolves.toBeUndefined();
   });
 });
 

@@ -77,10 +77,17 @@ const baseConfig: AdapterConfig = {
 describe('AdapterRegistry', () => {
   let registry: AdapterRegistry;
 
-  beforeEach(() => {
-    createProductionDependenciesMock.mockClear();
-    registry = new AdapterRegistry({ autoDispose: false });
+beforeEach(() => {
+  createProductionDependenciesMock.mockClear();
+  createProductionDependenciesMock.mockReturnValue({
+    fileSystem: {},
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    environment: {},
+    processLauncher: {},
+    networkManager: {}
   });
+  registry = new AdapterRegistry({ autoDispose: false });
+});
 
   it('registers factories and creates adapters', async () => {
     const factory = makeFactory();
@@ -135,5 +142,73 @@ describe('AdapterRegistry', () => {
     expect(createProductionDependenciesMock).not.toHaveBeenCalled();
     await expect(limitedRegistry.create('python', baseConfig)).rejects.toThrow(/Maximum adapter instances/);
     expect(createProductionDependenciesMock).not.toHaveBeenCalled();
+  });
+
+  it('unregisters factories and disposes active adapters', async () => {
+    const factory = makeFactory();
+    await registry.register('python', factory);
+
+    const adapter = (await registry.create('python', baseConfig)) as StubAdapter;
+    adapter.dispose.mockResolvedValue(undefined);
+
+    const result = registry.unregister('python');
+
+    expect(result).toBe(true);
+    expect(adapter.dispose).toHaveBeenCalled();
+    expect(registry.isLanguageSupported('python')).toBe(false);
+  });
+
+  it('disposes all adapters and clears registry state', async () => {
+    const factory = makeFactory();
+    await registry.register('python', factory);
+    await registry.create('python', baseConfig);
+
+    await registry.disposeAll();
+
+    expect(registry.getSupportedLanguages()).toHaveLength(0);
+    expect(registry.getActiveAdapterCount()).toBe(0);
+  });
+
+  it('reports available adapters when dynamic loading is disabled', async () => {
+    const python = makeFactory();
+    const mock = makeFactory();
+
+    await registry.register('python', python);
+    await registry.register('mock', mock);
+
+    const available = await registry.listAvailableAdapters();
+
+    expect(available).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'python', installed: true }),
+        expect.objectContaining({ name: 'mock', installed: true })
+      ])
+    );
+  });
+
+  it('returns registered languages when dynamic loading disabled', async () => {
+    const factory = makeFactory();
+    await registry.register('python', factory);
+
+    const languages = await registry.listLanguages();
+
+    expect(languages).toEqual(['python']);
+  });
+
+  it('auto-disposes idle adapters after the timeout', async () => {
+    vi.useFakeTimers();
+    const autoRegistry = new AdapterRegistry({ autoDisposeTimeout: 50, validateOnRegister: false });
+    const factory = makeFactory();
+    await autoRegistry.register('python', factory);
+
+    const adapter = (await autoRegistry.create('python', baseConfig)) as StubAdapter;
+    adapter.dispose.mockResolvedValue(undefined);
+
+    adapter.emit('stateChanged', AdapterState.READY, AdapterState.DISCONNECTED);
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
   });
 });

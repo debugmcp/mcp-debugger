@@ -10,23 +10,27 @@ async function bundleCLI() {
   console.log('Bundling MCP debugger CLI...');
   
   try {
+    const distDir = 'dist';
+    fs.rmSync(distDir, { recursive: true, force: true });
+    fs.mkdirSync(distDir, { recursive: true });
+
     // Bundle the CLI entry point directly from TypeScript source
     const result = await esbuild.build({
       entryPoints: ['src/cli-entry.ts'],
       bundle: true,
       platform: 'node',
       target: 'node18',
-      format: 'cjs',
-      outfile: 'dist/cli.cjs',
-      define: {
-        'import.meta.url': JSON.stringify('file:///app/dist/cli.cjs'),
-        '__dirname': JSON.stringify('/app/dist')
+      format: 'esm',
+      outfile: 'dist/cli.mjs',
+      banner: {
+        js: [
+          'import { createRequire as __createRequire } from "module";',
+          'const require = __createRequire(import.meta.url);'
+        ].join('\n')
       },
       external: [
-        // Keep adapter packages external for dynamic loading
-        '@debugmcp/adapter-python',
-        '@debugmcp/adapter-mock',
-        // Keep native modules external
+        // Keep only native modules external
+        // Adapters are now bundled for "batteries included" npx distribution
         'fsevents'
       ],
       minify: false, // Keep readable for debugging
@@ -43,7 +47,7 @@ async function bundleCLI() {
     fs.writeFileSync('dist/bundle-meta.json', JSON.stringify(result.metafile));
     
     // Make the bundle executable
-    const bundlePath = 'dist/cli.cjs';
+    const bundlePath = 'dist/cli.mjs';
     if (fs.existsSync(bundlePath)) {
       // Add shebang if not present
       let bundleContent = fs.readFileSync(bundlePath, 'utf8');

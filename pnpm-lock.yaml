@@ -215,7 +215,20 @@ importers:
         specifier: ^3.2.1
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.18.6)
 
-  packages/mcp-debugger: {}
+  packages/mcp-debugger:
+    devDependencies:
+      '@debugmcp/adapter-javascript':
+        specifier: workspace:*
+        version: link:../adapter-javascript
+      '@debugmcp/adapter-mock':
+        specifier: workspace:*
+        version: link:../adapter-mock
+      '@debugmcp/adapter-python':
+        specifier: workspace:*
+        version: link:../adapter-python
+      '@debugmcp/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/shared:
     dependencies:

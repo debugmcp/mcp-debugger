@@ -4,7 +4,8 @@ import { PythonDebugAdapter } from '../../../packages/adapter-python/src/python-
 import { AdapterState, AdapterError, DebugFeature } from '@debugmcp/shared';
 
 vi.mock('child_process', () => ({
-  spawn: vi.fn()
+  spawn: vi.fn(),
+  exec: vi.fn()
 }));
 
 vi.mock('../../../packages/adapter-python/src/utils/python-utils.js', () => ({
@@ -58,6 +59,21 @@ describe('PythonDebugAdapter', () => {
     expect(result.errors[0]?.code).toBe('PYTHON_VERSION_TOO_OLD');
   });
 
+  it('reports debugpy missing even when Python version passes checks', async () => {
+    const deps = createDependencies();
+    const adapter = new PythonDebugAdapter(deps);
+    (adapter as any).resolveExecutablePath = vi.fn().mockResolvedValue('/usr/bin/python');
+    (adapter as any).checkPythonVersion = vi.fn().mockResolvedValue('3.11.1');
+    (adapter as any).checkDebugpyInstalled = vi.fn().mockResolvedValue(false);
+    (adapter as any).detectVirtualEnv = vi.fn().mockResolvedValue(true);
+
+    const result = await adapter.validateEnvironment();
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.map((entry: { code: string }) => entry.code)).toContain('DEBUGPY_NOT_INSTALLED');
+    expect(deps.logger.info).toHaveBeenCalledWith('[PythonDebugAdapter] Virtual environment detected');
+  });
+
   it('returns validation error when Python executable cannot be resolved', async () => {
     const adapter = new PythonDebugAdapter(createDependencies());
     (adapter as any).resolveExecutablePath = vi.fn().mockRejectedValue(new Error('not found'));
@@ -104,6 +120,14 @@ describe('PythonDebugAdapter', () => {
     ).rejects.toBeInstanceOf(AdapterError);
   });
 
+  it('passes through allowed DAP requests without modification', async () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+
+    await expect(
+      adapter.sendDapRequest('setExceptionBreakpoints', { filters: ['raised', 'uncaught'] })
+    ).resolves.toEqual({});
+  });
+
   it('updates thread id on stopped events', () => {
     const adapter = new PythonDebugAdapter(createDependencies());
     adapter.handleDapEvent({
@@ -130,6 +154,27 @@ describe('PythonDebugAdapter', () => {
     const adapter = new PythonDebugAdapter(createDependencies());
     const message = adapter.translateErrorMessage(new Error('ModuleNotFoundError: No module named debugpy'));
     expect(message).toContain('debugpy');
+  });
+
+  it('translateErrorMessage normalizes other common errors', () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+
+    expect(adapter.translateErrorMessage(new Error('python: command not found'))).toContain('Python not found');
+    expect(adapter.translateErrorMessage(new Error('Permission denied to execute python'))).toContain('Permission denied');
+    expect(adapter.translateErrorMessage(new Error('Windows Store Python cannot be used'))).toContain('Windows Store');
+    expect(adapter.translateErrorMessage(new Error('unexpected failure'))).toBe('unexpected failure');
+  });
+
+  it('returns feature requirements for select features and empty for unsupported ones', () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+
+    const logPoints = adapter.getFeatureRequirements(DebugFeature.LOG_POINTS);
+    expect(logPoints).toEqual([
+      expect.objectContaining({ description: 'debugpy 1.5+', required: true })
+    ]);
+
+    const none = adapter.getFeatureRequirements(DebugFeature.VARIABLE_PAGING);
+    expect(none).toEqual([]);
   });
 
   it('initializes successfully when environment validates', async () => {
@@ -230,5 +275,49 @@ describe('PythonDebugAdapter', () => {
     expect(config.showReturnValue).toBe(true);
     expect(config.stopOnEntry).toBe(true);
     expect(config.justMyCode).toBe(false);
+  });
+
+  it('disposes by clearing state and emitting event', async () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+    const disposed = vi.fn();
+    adapter.on('disposed', disposed);
+
+    await adapter.connect('localhost', 5678);
+    await adapter.disconnect();
+    await adapter.dispose();
+
+    expect(disposed).toHaveBeenCalled();
+    expect(adapter.getState()).toBe(AdapterState.UNINITIALIZED);
+    expect(adapter.isConnected()).toBe(false);
+  });
+
+  it('exposes python capabilities and requirements', () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+    const capabilities = adapter.getCapabilities();
+
+    expect(capabilities.supportsConfigurationDoneRequest).toBe(true);
+    expect(capabilities.exceptionBreakpointFilters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ filter: 'raised' }),
+        expect.objectContaining({ filter: 'uncaught' })
+      ])
+    );
+  });
+
+  it('provides installation guidance strings', () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+
+    expect(adapter.getInstallationInstructions()).toContain('pip install debugpy');
+    expect(adapter.getMissingExecutableError()).toContain('Python not found');
+  });
+
+  it('returns default launch configuration snapshot', () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+    const defaults = adapter.getDefaultLaunchConfig();
+
+    expect(defaults.stopOnEntry).toBe(false);
+    expect(defaults.justMyCode).toBe(true);
+    expect(defaults.env).toEqual({});
+    expect(defaults.cwd).toBe(process.cwd());
   });
 });

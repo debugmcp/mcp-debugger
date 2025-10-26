@@ -59,7 +59,10 @@ describe('MinimalDapClient', () => {
   // Helper function to create a mock socket
   const createMockSocket = () => {
     const socket = new EventEmitter() as any;
-    socket.write = vi.fn().mockReturnValue(true);
+    socket.write = vi.fn((_: string, cb?: (err?: Error | null) => void) => {
+      cb?.(null);
+      return true;
+    });
     socket.end = vi.fn((callback?: () => void) => {
       if (callback) callback();
     });
@@ -161,11 +164,26 @@ describe('MinimalDapClient', () => {
       await client.connect();
       const errorHandler = vi.fn();
       client.on('error', errorHandler);
+      const logger = loggerInstances.at(-1)!;
+      logger.error.mockClear();
 
       const error = new Error('Socket error');
       mockSocket.emit('error', error);
 
       expect(errorHandler).toHaveBeenCalledWith(error);
+      expect(logger.error).toHaveBeenCalledWith('[MinimalDapClient] Socket error:', error);
+    });
+
+    it('cleans up when socket closes after connecting', async () => {
+      await client.connect();
+      const cleanupSpy = vi.spyOn(client as any, 'cleanup');
+      const logger = loggerInstances.at(-1)!;
+      logger.info.mockClear();
+
+      mockSocket.emit('close');
+
+      expect(logger.info).toHaveBeenCalledWith('[MinimalDapClient] Socket closed');
+      expect(cleanupSpy).toHaveBeenCalled();
     });
   });
 
@@ -252,11 +270,53 @@ describe('MinimalDapClient', () => {
 
     it('should handle invalid JSON gracefully', async () => {
       await client.connect();
+      const logger = loggerInstances.at(-1)!;
+      logger.error.mockClear();
 
       const invalidJson = 'Content-Length: 20\r\n\r\n{invalid json content';
       mockSocket.emit('data', Buffer.from(invalidJson));
 
-      // Should handle the error without crashing
+      expect(logger.error).toHaveBeenCalledWith('[MinimalDapClient] Error parsing message:', expect.any(Error));
+    });
+
+    it('logs a warning and drops payload when Content-Length header is non-numeric', async () => {
+      await client.connect();
+      const logger = loggerInstances.at(-1)!;
+      logger.warn.mockClear();
+      const protocolSpy = vi.spyOn(client as any, 'handleProtocolMessage');
+
+      const payload = Buffer.from('Content-Length: abc\r\n\r\n{"type":"event","seq":1,"event":"output"}');
+      (client as unknown as { handleData(data: Buffer): void }).handleData(payload);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[MinimalDapClient] Invalid Content-Length header encountered; discarding payload'
+      );
+      expect(protocolSpy).not.toHaveBeenCalled();
+      expect((client as unknown as { rawData: Buffer }).rawData.length).toBe(0);
+      protocolSpy.mockRestore();
+    });
+
+    it('logs a warning and drops payload for zero or negative Content-Length values', async () => {
+      await client.connect();
+      const logger = loggerInstances.at(-1)!;
+      logger.warn.mockClear();
+
+      const zeroHeader = Buffer.from('Content-Length: 0\r\n\r\n{}');
+      const negativeHeader = Buffer.from('Content-Length: -5\r\n\r\n{}');
+
+      (client as unknown as { handleData(data: Buffer): void }).handleData(zeroHeader);
+      (client as unknown as { handleData(data: Buffer): void }).handleData(negativeHeader);
+
+      expect(logger.warn).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        1,
+        '[MinimalDapClient] Invalid Content-Length header encountered; discarding payload'
+      );
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        2,
+        '[MinimalDapClient] Invalid Content-Length header encountered; discarding payload'
+      );
+      expect((client as unknown as { rawData: Buffer }).rawData.length).toBe(0);
     });
 
     it('should handle incomplete message body', async () => {
@@ -775,6 +835,76 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  describe('Shutdown behaviour', () => {
+    it('clears pending requests when socket write callback reports an error', async () => {
+      await client.connect();
+      const originalWrite = mockSocket.write;
+      mockSocket.write = vi.fn((_message: string, cb?: (err?: Error | null) => void) => {
+        cb?.(new Error('write failed'));
+        return false;
+      });
+
+      await expect(client.sendRequest('threads')).rejects.toThrow('write failed');
+      expect((client as unknown as { pendingRequests: Map<number, unknown> }).pendingRequests.size).toBe(0);
+      mockSocket.write = originalWrite;
+    });
+
+    it('logs an error when writeMessage executes without an active socket', () => {
+      const orphanClient = new MinimalDapClient('localhost', 4500);
+      const logger = loggerInstances.at(-1)!;
+      const errorSpy = vi.spyOn(logger, 'error');
+
+      (orphanClient as unknown as { socket: net.Socket | null }).socket = {
+        destroyed: true,
+        write: vi.fn()
+      } as unknown as net.Socket;
+
+      (orphanClient as unknown as { writeMessage(message: DebugProtocol.ProtocolMessage): void }).writeMessage({
+        type: 'request',
+        seq: 1,
+        command: 'evaluate',
+        arguments: {}
+      } as DebugProtocol.Request);
+
+      expect(errorSpy).toHaveBeenCalledWith('[MinimalDapClient] Cannot write message, socket not connected/destroyed');
+      orphanClient.shutdown();
+      errorSpy.mockRestore();
+    });
+
+    it('logs a warning when child shutdown throws during parent shutdown', () => {
+      const child = {
+        shutdown: vi.fn().mockImplementation(() => {
+          throw new Error('child boom');
+        })
+      } as unknown as MinimalDapClient;
+
+      (client as unknown as { childSessions: Map<string, MinimalDapClient> }).childSessions.set('child', child);
+      (client as unknown as { activeChild: MinimalDapClient | null }).activeChild = child;
+
+      const logger = loggerInstances.at(-1)!;
+      logger.warn.mockClear();
+
+      client.shutdown('test');
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[MinimalDapClient] Error shutting down child sessions:',
+        'child boom'
+      );
+      expect((client as unknown as { childSessions: Map<string, MinimalDapClient> }).childSessions.size).toBe(0);
+      expect((client as unknown as { activeChild: MinimalDapClient | null }).activeChild).toBeNull();
+    });
+
+    it('logs debug when shutdown is invoked after disconnect has begun', () => {
+      const logger = loggerInstances.at(-1)!;
+      client.shutdown('initial');
+      logger.debug.mockClear();
+
+      client.shutdown('duplicate');
+
+      expect(logger.debug).toHaveBeenCalledWith('[MinimalDapClient] Already disconnecting or disconnected');
+    });
+  });
+
   describe('Configuration deferral', () => {
     it('should defer configurationDone when deferral is active and flush on timeout', async () => {
       client.shutdown();
@@ -952,6 +1082,42 @@ describe('MinimalDapClient', () => {
   });
 
   describe('Reverse request handling', () => {
+    it('acknowledges runInTerminal requests when no policy handler is registered', async () => {
+      const client = new MinimalDapClient('localhost', 5678);
+
+      (client as any).dapBehavior = {} as DapClientBehavior;
+      (client as any).socket = { destroyed: false, write: vi.fn().mockReturnValue(true) } as unknown as net.Socket;
+      const responseSpy = vi.spyOn(client as any, 'sendResponse');
+
+      const request = {
+        seq: 1,
+        type: 'request',
+        command: 'runInTerminal'
+      } as DebugProtocol.Request;
+
+      await (client as any).handleProtocolMessage(request);
+
+      expect(responseSpy).toHaveBeenCalledWith(request, {});
+    });
+
+    it('responds to unknown reverse requests with success when unhandled', async () => {
+      const client = new MinimalDapClient('localhost', 5678);
+
+      (client as any).dapBehavior = { handleReverseRequest: undefined } as DapClientBehavior;
+      (client as any).socket = { destroyed: false, write: vi.fn().mockReturnValue(true) } as unknown as net.Socket;
+      const responseSpy = vi.spyOn(client as any, 'sendResponse');
+
+      const request = {
+        seq: 2,
+        type: 'request',
+        command: 'customAdapterCommand'
+      } as DebugProtocol.Request;
+
+      await (client as any).handleProtocolMessage(request);
+
+      expect(responseSpy).toHaveBeenCalledWith(request, {});
+    });
+
     it('delegates to policy handler and respects handled responses', async () => {
       const childSessionManager = createChildSessionManagerStub();
 
@@ -1107,6 +1273,32 @@ describe('MinimalDapClient', () => {
       });
       expect((client as any).deferParentConfigDoneActive).toBe(false);
       expect(behavior.handleReverseRequest).toHaveBeenCalled();
+    });
+  });
+
+  describe('Initialization helpers', () => {
+    it('resolves waitInitialized quietly when timeout elapses', async () => {
+      const scheduled: Array<() => void> = [];
+      const fakeTimers = {
+        setTimeout: vi.fn((cb: (...args: unknown[]) => void) => {
+          scheduled.push(cb as () => void);
+          return Symbol('timer') as unknown as NodeJS.Timeout;
+        }),
+        clearTimeout: vi.fn()
+      };
+
+      const timeoutClient = new MinimalDapClient('localhost', 9000, undefined, {
+        timers: fakeTimers
+      });
+
+      const waitPromise = (timeoutClient as any).waitInitialized(25);
+
+      expect(fakeTimers.setTimeout).toHaveBeenCalled();
+      expect(scheduled).toHaveLength(1);
+      scheduled[0]!();
+
+      await expect(waitPromise).resolves.toBeUndefined();
+      timeoutClient.shutdown();
     });
   });
 });

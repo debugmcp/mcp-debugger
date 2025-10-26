@@ -559,6 +559,22 @@ export class DebugMcpServer {
                   // Include context if available
                   context: context || undefined
                 }) }] };
+                const contentEntry = Array.isArray(result.content) ? result.content[0] : undefined;
+                const textContent = contentEntry && typeof (contentEntry as { text?: unknown }).text === 'string'
+                  ? (contentEntry as { text: string }).text
+                  : undefined;
+                let parsedResponse: Record<string, unknown> | null = null;
+                if (typeof textContent === 'string') {
+                  try {
+                    parsedResponse = JSON.parse(textContent) as Record<string, unknown>;
+                  } catch {
+                    parsedResponse = null;
+                  }
+                }
+                this.logger.info('tool:set_breakpoint:result', {
+                  sessionId: args.sessionId,
+                  response: parsedResponse
+                });
               } catch (error) {
                 // Handle session state errors specifically
                 if (error instanceof McpError && 

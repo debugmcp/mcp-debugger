@@ -504,27 +504,29 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   private async findProxyScript(): Promise<string> {
     const modulePath = fileURLToPath(this.runtimeEnv.moduleUrl);
-    const isBundled = modulePath.includes('bundle.cjs');
     const moduleDir = path.dirname(modulePath);
+    const dirParts = moduleDir.split(path.sep);
     const cwd = this.runtimeEnv.cwd();
+    const lastPart = dirParts[dirParts.length - 1];
+    const secondLast = dirParts[dirParts.length - 2];
 
     let distPath: string;
-    if (isBundled) {
-      // In bundled environment (e.g., Docker container), proxy-bootstrap.js lives under dist relative to cwd
-      distPath = path.resolve(cwd, 'dist/proxy/proxy-bootstrap.js');
+    if (lastPart === 'dist') {
+      distPath = path.join(moduleDir, 'proxy', 'proxy-bootstrap.js');
+    } else if (lastPart === 'proxy' && secondLast === 'dist') {
+      distPath = path.join(moduleDir, 'proxy-bootstrap.js');
     } else {
-      // In development/non-bundled environment, resolve relative to this module's location
+      // Fallback to development layout
       distPath = path.resolve(moduleDir, '../../dist/proxy/proxy-bootstrap.js');
     }
 
-    this.logger.info(`[ProxyManager] Checking for proxy script at: ${distPath} (bundled: ${isBundled})`);
+    this.logger.info(`[ProxyManager] Checking for proxy script at: ${distPath}`);
 
     if (!(await this.fileSystem.pathExists(distPath))) {
       throw new Error(
         `Bootstrap worker script not found at: ${distPath}\n` +
         `Module directory: ${moduleDir}\n` +
         `Current working directory: ${cwd}\n` +
-        `Is bundled: ${isBundled}\n` +
         `This usually means:\n` +
         `  1. You need to run 'npm run build' first\n` +
         `  2. The build failed to copy proxy files\n` +

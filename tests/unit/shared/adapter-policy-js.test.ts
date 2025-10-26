@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { EventEmitter } from 'events';
 import { JsDebugAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-js.js';
 
 describe('JsDebugAdapterPolicy', () => {
@@ -113,6 +114,14 @@ describe('JsDebugAdapterPolicy', () => {
     expect(JsDebugAdapterPolicy.isInitialized(state)).toBe(true);
   });
 
+  it('marks initialize response when updateStateOnResponse is invoked', () => {
+    const state = JsDebugAdapterPolicy.createInitialState() as any;
+    expect(state.initializeResponded).toBe(false);
+
+    JsDebugAdapterPolicy.updateStateOnResponse?.('initialize', {}, state);
+    expect(state.initializeResponded).toBe(true);
+  });
+
   it('matches js-debug adapter commands and args', () => {
     expect(
       JsDebugAdapterPolicy.matchesAdapter({ command: 'node', args: ['--inspect', 'js-debug'] })
@@ -130,5 +139,83 @@ describe('JsDebugAdapterPolicy', () => {
     expect(JsDebugAdapterPolicy.requiresCommandQueueing()).toBe(true);
     expect(JsDebugAdapterPolicy.resolveExecutablePath()).toBe('node');
     expect(JsDebugAdapterPolicy.resolveExecutablePath('/custom/node')).toBe('/custom/node');
+  });
+
+  describe('performHandshake', () => {
+    it('executes launch flow when proxy is running', async () => {
+      vi.useFakeTimers();
+      const events = new EventEmitter();
+      const sendDapRequest = vi.fn().mockResolvedValue({});
+
+      const proxyManager = Object.assign(events, {
+        isRunning: () => true,
+        sendDapRequest,
+        removeListener: events.removeListener.bind(events)
+      });
+
+      const context = {
+        proxyManager,
+        sessionId: 'session-1',
+        dapLaunchArgs: { stopOnEntry: true },
+        scriptPath: '/workspace/app.js',
+        scriptArgs: ['--flag'],
+        breakpoints: new Map([
+          ['bp1', { file: '/workspace/app.js', line: 12 }]
+        ])
+      };
+
+      const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
+      await Promise.resolve();
+      events.emit('dap-event', { event: 'initialized' });
+      await vi.advanceTimersByTimeAsync(0);
+      await handshakePromise;
+      vi.useRealTimers();
+
+      expect(sendDapRequest).toHaveBeenCalledWith('initialize', expect.any(Object));
+      expect(sendDapRequest).toHaveBeenCalledWith('setExceptionBreakpoints', { filters: [] });
+      expect(sendDapRequest).toHaveBeenCalledWith(
+        'setBreakpoints',
+        expect.objectContaining({
+          source: { path: '/workspace/app.js' },
+          breakpoints: [{ line: 12, condition: undefined }]
+        })
+      );
+      expect(sendDapRequest).toHaveBeenCalledWith('configurationDone', {});
+      expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(true);
+    });
+
+    it('uses attach flow when attach port provided', async () => {
+      vi.useFakeTimers();
+      const events = new EventEmitter();
+      const sendDapRequest = vi.fn().mockResolvedValue({});
+
+      const proxyManager = Object.assign(events, {
+        isRunning: () => true,
+        sendDapRequest,
+        removeListener: events.removeListener.bind(events)
+      });
+
+      const context = {
+        proxyManager,
+        sessionId: 'session-2',
+        dapLaunchArgs: { request: 'attach', attachSimplePort: 9229, type: 'pwa-node' },
+        scriptPath: '/workspace/app.js',
+        scriptArgs: [],
+        breakpoints: new Map()
+      };
+
+      const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
+      await Promise.resolve();
+      events.emit('dap-event', 'initialized');
+      await vi.advanceTimersByTimeAsync(0);
+      await handshakePromise;
+      vi.useRealTimers();
+
+      expect(sendDapRequest).toHaveBeenCalledWith(
+        'attach',
+        expect.objectContaining({ request: 'attach', port: 9229 })
+      );
+      expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
+    });
   });
 });

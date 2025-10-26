@@ -57,6 +57,8 @@
     "posttest:python": "node scripts/cleanup-test-processes.js",
     "test:e2e:smoke": "vitest run tests/e2e/mcp-server-smoke*.test.ts",
     "test:e2e:container": "docker build --no-cache -t mcp-debugger:local . && vitest run tests/e2e/mcp-server-smoke-container.test.ts",
+    "test:e2e:npx": "vitest run tests/e2e/npx",
+    "test:all-channels": "pnpm test:e2e:smoke && pnpm test:e2e:container && pnpm test:e2e:npx",
     "test:docker-e2e": "cross-env DOCKER_E2E=1 vitest run tests/e2e/docker/docker-proxy-liveness.test.ts",
     "pretest:coverage": "pnpm run build && pnpm run pretest:docker && node scripts/clean-coverage.js",
     "test:coverage": "vitest run --coverage",

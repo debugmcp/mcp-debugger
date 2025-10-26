@@ -284,6 +284,183 @@ describe('Docker: JavaScript Debugging Smoke Tests', () => {
     console.log('[Docker JS] ✅ All checks passed');
   }, 120000);  // Increased timeout for Docker operations
 
+  it('should step into nested JavaScript frames in Docker', async () => {
+    const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'mcp_target.js');
+    const scriptPath = hostToContainerPath(hostScriptPath);
+
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: {
+        language: 'javascript',
+        name: 'docker-js-step-into'
+      }
+    });
+
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+
+    const breakpointResult = await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: {
+        sessionId,
+        file: scriptPath,
+        line: 48
+      }
+    });
+    expect(parseSdkToolResult(breakpointResult).success).toBe(true);
+
+    const startResult = await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath,
+        args: [],
+        dapLaunchArgs: {
+          stopOnEntry: false,
+          justMyCode: true
+        }
+      }
+    });
+
+    const startResponse = parseSdkToolResult(startResult);
+    expect(startResponse.state).toBeDefined();
+    expect(startResponse.state).toContain('paused');
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const stackBefore = parseSdkToolResult(
+      await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId, includeInternals: false }
+      })
+    );
+
+    const topBefore = Array.isArray(stackBefore.stackFrames)
+      ? (stackBefore.stackFrames as Array<{ name?: string; line?: number }>)[0]
+      : null;
+    expect(topBefore).toBeTruthy();
+    expect(topBefore?.line).toBe(48);
+
+    const stepResult = await mcpClient!.callTool({
+      name: 'step_into',
+      arguments: { sessionId }
+    });
+
+    const stepResponse = parseSdkToolResult(stepResult);
+    expect(stepResponse.success).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const stackAfter = parseSdkToolResult(
+      await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId, includeInternals: false }
+      })
+    );
+
+    const topAfter = Array.isArray(stackAfter.stackFrames)
+      ? (stackAfter.stackFrames as Array<{ name?: string; line?: number }>)[0]
+      : null;
+
+    expect(topAfter).toBeTruthy();
+    expect(topAfter?.name?.toLowerCase()).toContain('deepfunction');
+    expect(topAfter?.line).toBeLessThan(48);
+
+    const continueResult = await mcpClient!.callTool({
+      name: 'continue_execution',
+      arguments: { sessionId }
+    });
+    expect(parseSdkToolResult(continueResult).success).toBe(true);
+
+    const closeResult = await mcpClient!.callTool({
+      name: 'close_debug_session',
+      arguments: { sessionId }
+    });
+    expect(parseSdkToolResult(closeResult).success).toBe(true);
+
+    sessionId = null;
+  }, 120000);
+
+  it('should step over top-level const declarations in Docker', async () => {
+    const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'test-simple.js');
+    const scriptPath = hostToContainerPath(hostScriptPath);
+
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: {
+        language: 'javascript',
+        name: 'docker-js-step-over-const'
+      }
+    });
+
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+
+    const breakpointResult = await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: {
+        sessionId,
+        file: scriptPath,
+        line: 3
+      }
+    });
+    expect(parseSdkToolResult(breakpointResult).success).toBe(true);
+
+    const startResult = await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath,
+        args: [],
+        dapLaunchArgs: {
+          stopOnEntry: false,
+          justMyCode: true
+        }
+      }
+    });
+
+    const startResponse = parseSdkToolResult(startResult);
+    expect(startResponse.state).toBeDefined();
+    expect(startResponse.state).toContain('paused');
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const stepResult = await mcpClient!.callTool({
+      name: 'step_over',
+      arguments: { sessionId }
+    });
+
+    const stepResponse = parseSdkToolResult(stepResult);
+    expect(stepResponse.success).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const stackAfter = parseSdkToolResult(
+      await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId, includeInternals: false }
+      })
+    );
+
+    const topAfter = Array.isArray(stackAfter.stackFrames)
+      ? (stackAfter.stackFrames as Array<{ name?: string; line?: number }>)[0]
+      : null;
+    expect(topAfter).toBeTruthy();
+    expect(topAfter?.line).toBe(4);
+
+    const continueResult = await mcpClient!.callTool({
+      name: 'continue_execution',
+      arguments: { sessionId }
+    });
+    expect(parseSdkToolResult(continueResult).success).toBe(true);
+
+    const closeResult = await mcpClient!.callTool({
+      name: 'close_debug_session',
+      arguments: { sessionId }
+    });
+    expect(parseSdkToolResult(closeResult).success).toBe(true);
+
+    sessionId = null;
+  }, 120000);
+
   it('should handle multiple breakpoints in Docker', async () => {
     const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'mcp_target.js');
     const scriptPath = hostToContainerPath(hostScriptPath);

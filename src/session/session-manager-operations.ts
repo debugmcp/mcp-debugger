@@ -521,60 +521,11 @@ export class SessionManagerOperations extends SessionManagerData {
     this.logger.info(`[SM stepOver ${sessionId}] Sending DAP 'next' for threadId ${threadId}`);
 
     try {
-      // Send step request
-      await session.proxyManager.sendDapRequest('next', { threadId });
-
-      // Update state to running
-      this._updateSessionState(session, SessionState.RUNNING);
-
-      // Wait for stopped event
-      return new Promise((resolve) => {
-        const cleanup = () => {
-          clearTimeout(timeout);
-          session.proxyManager?.off('stopped', onStopped);
-          session.proxyManager?.off('terminated', onTerminated);
-          session.proxyManager?.off('exited', onExited);
-          session.proxyManager?.off('exit', onExited);
-        };
-
-        const resolveSuccess = (message: string) => {
-          this.logger.info(`[SM stepOver ${sessionId}] ${message} Current state: ${session.state}`);
-          resolve({
-            success: true,
-            state: session.state,
-            data: { message }
-          });
-        };
-
-        const onStopped = () => {
-          cleanup();
-          resolveSuccess('Step completed.');
-        };
-
-        const onTerminated = () => {
-          cleanup();
-          resolveSuccess('Step completed as session terminated.');
-        };
-
-        const onExited = () => {
-          cleanup();
-          resolveSuccess('Step completed as session exited.');
-        };
-
-        const timeout = setTimeout(() => {
-          cleanup();
-          this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped or termination event`);
-          resolve({
-            success: false,
-            error: ErrorMessages.stepTimeout(5),
-            state: session.state,
-          });
-        }, 5000);
-
-        session.proxyManager?.on('stopped', onStopped);
-        session.proxyManager?.on('terminated', onTerminated);
-        session.proxyManager?.on('exited', onExited);
-        session.proxyManager?.on('exit', onExited);
+      return await this._executeStepOperation(session, sessionId, {
+        command: 'next',
+        threadId,
+        logTag: 'stepOver',
+        successMessage: 'Step completed.',
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -612,34 +563,11 @@ export class SessionManagerOperations extends SessionManagerData {
     this.logger.info(`[SM stepInto ${sessionId}] Sending DAP 'stepIn' for threadId ${threadId}`);
 
     try {
-      // Send step request
-      await session.proxyManager.sendDapRequest('stepIn', { threadId });
-
-      // Update state to running
-      this._updateSessionState(session, SessionState.RUNNING);
-
-      // Wait for stopped event
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          this.logger.warn(`[SM stepInto ${sessionId}] Timeout waiting for stopped event`);
-          resolve({
-            success: false,
-            error: ErrorMessages.stepTimeout(5),
-            state: session.state,
-          });
-        }, 5000);
-
-        session.proxyManager?.once('stopped', () => {
-          clearTimeout(timeout);
-          this.logger.info(
-            `[SM stepInto ${sessionId}] Step completed. Current state: ${session.state}`
-          );
-          resolve({
-            success: true,
-            state: session.state,
-            data: { message: 'Step into completed.' },
-          });
-        });
+      return await this._executeStepOperation(session, sessionId, {
+        command: 'stepIn',
+        threadId,
+        logTag: 'stepInto',
+        successMessage: 'Step into completed.',
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -677,30 +605,11 @@ export class SessionManagerOperations extends SessionManagerData {
     this.logger.info(`[SM stepOut ${sessionId}] Sending DAP 'stepOut' for threadId ${threadId}`);
 
     try {
-      // Send step request
-      await session.proxyManager.sendDapRequest('stepOut', { threadId });
-
-      // Update state to running
-      this._updateSessionState(session, SessionState.RUNNING);
-
-      // Wait for stopped event
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          this.logger.warn(`[SM stepOut ${sessionId}] Timeout waiting for stopped event`);
-          resolve({
-            success: false,
-            error: ErrorMessages.stepTimeout(5),
-            state: session.state,
-          });
-        }, 5000);
-
-        session.proxyManager?.once('stopped', () => {
-          clearTimeout(timeout);
-          this.logger.info(
-            `[SM stepOut ${sessionId}] Step completed. Current state: ${session.state}`
-          );
-          resolve({ success: true, state: session.state, data: { message: 'Step out completed.' } });
-        });
+      return await this._executeStepOperation(session, sessionId, {
+        command: 'stepOut',
+        threadId,
+        logTag: 'stepOut',
+        successMessage: 'Step out completed.',
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -708,6 +617,98 @@ export class SessionManagerOperations extends SessionManagerData {
       this._updateSessionState(session, SessionState.ERROR);
       return { success: false, error: errorMessage, state: session.state };
     }
+  }
+
+  private _executeStepOperation(
+    session: ManagedSession,
+    sessionId: string,
+    options: {
+      command: 'next' | 'stepIn' | 'stepOut';
+      threadId: number;
+      logTag: string;
+      successMessage: string;
+      terminatedMessage?: string;
+      exitedMessage?: string;
+    }
+  ): Promise<DebugResult> {
+    const proxyManager = session.proxyManager;
+
+    if (!proxyManager) {
+      return Promise.resolve({
+        success: false,
+        error: 'Proxy manager unavailable',
+        state: session.state,
+      });
+    }
+
+    const terminatedMessage =
+      options.terminatedMessage ?? 'Step completed as session terminated.';
+    const exitedMessage = options.exitedMessage ?? 'Step completed as session exited.';
+
+    return new Promise((resolve) => {
+      let settled = false;
+
+      const cleanup = () => {
+        proxyManager.off('stopped', onStopped);
+        proxyManager.off('terminated', onTerminated);
+        proxyManager.off('exited', onExited);
+        proxyManager.off('exit', onExit);
+        clearTimeout(timeout);
+      };
+
+      const settle = (result: DebugResult) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+
+      const success = (message: string) => {
+        this.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
+        settle({
+          success: true,
+          state: session.state,
+          data: { message },
+        });
+      };
+
+      const onStopped = () => success(options.successMessage);
+      const onTerminated = () => success(terminatedMessage);
+      const onExited = () => success(exitedMessage);
+      const onExit = () => success(exitedMessage);
+
+      const timeout = setTimeout(() => {
+        this.logger.warn(
+          `[SM ${options.logTag} ${sessionId}] Timeout waiting for stopped or termination event`
+        );
+        settle({
+          success: false,
+          error: ErrorMessages.stepTimeout(5),
+          state: session.state,
+        });
+      }, 5000);
+
+      proxyManager.on('stopped', onStopped);
+      proxyManager.on('terminated', onTerminated);
+      proxyManager.on('exited', onExited);
+      proxyManager.on('exit', onExit);
+
+      this._updateSessionState(session, SessionState.RUNNING);
+
+      proxyManager
+        .sendDapRequest(options.command, { threadId: options.threadId })
+        .catch((error: unknown) => {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `[SM ${options.logTag} ${sessionId}] Error during step request:`,
+            error
+          );
+          this._updateSessionState(session, SessionState.ERROR);
+          settle({ success: false, error: errorMessage, state: session.state });
+        });
+    });
   }
 
   async continue(sessionId: string): Promise<DebugResult> {
