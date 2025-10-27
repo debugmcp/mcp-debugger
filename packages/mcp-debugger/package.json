@@ -11,7 +11,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "mcp-debugger": "./dist/cli.mjs"
+    "mcp-debugger": "./dist/cli"
   },
   "files": [
     "dist",

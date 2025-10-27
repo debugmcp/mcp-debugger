@@ -150,14 +150,17 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.m
 })();
 
 if (isMainModule) {
-  main().catch((error) => {
-    // In stdio mode, we must not write to console
-    const isStdio = process.argv.includes('stdio') || process.env.DEBUG_MCP_STDIO === '1';
-    if (!isStdio) {
-      console.error('Fatal error:', error);
-    }
-    process.exit(1);
-  });
+  const skipAutoStart = process.env.DEBUG_MCP_SKIP_AUTO_START === '1';
+  if (!skipAutoStart) {
+    main().catch((error) => {
+      // In stdio mode, we must not write to console
+      const isStdio = process.argv.includes('stdio') || process.env.DEBUG_MCP_STDIO === '1';
+      if (!isStdio) {
+        console.error('Fatal error:', error);
+      }
+      process.exit(1);
+    });
+  }
 }
 
 // Export for testing

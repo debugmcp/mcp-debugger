@@ -60,16 +60,30 @@ process.argv = process.argv.map(arg =>
   typeof arg === 'string' ? arg.replace(/^["'](.*)["']$/, '$1') : arg
 );
 
+// Signal to the core entrypoint that the CLI shim will invoke main() explicitly.
+process.env.DEBUG_MCP_SKIP_AUTO_START = '1';
+
 // Import batteries-included module to ensure all adapters are bundled
 import './batteries-included.js';
 
-// Import and run the existing CLI main from the root source to avoid duplicating logic.
-// esbuild will bundle the referenced source into this package so npx works standalone.
-import { main } from '../../../src/index.js';
+const bootstrap = async (): Promise<void> => {
+  // Import and run the existing CLI main from the root source to avoid duplicating logic.
+  // The bundler will include the referenced source so npx works standalone.
+  const { main } = await import('../../../src/index.js');
 
-Promise.resolve()
-  .then(() => main())
-  .catch((error) => {
+  return Promise.resolve()
+    .then(() => main())
+    .catch((error) => {
+      // In stdio mode, we must not write to console
+      const isStdio = process.argv.includes('stdio') || process.env.DEBUG_MCP_STDIO === '1';
+      if (!isStdio) {
+        console.error('Fatal error:', error);
+      }
+      process.exit(1);
+    });
+};
+
+bootstrap().catch((error) => {
     // In stdio mode, we must not write to console
     const isStdio = process.argv.includes('stdio') || process.env.DEBUG_MCP_STDIO === '1';
     if (!isStdio) {

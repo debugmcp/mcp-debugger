@@ -146,11 +146,28 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // ESM-safe resolution of vendored js-debug adapter path
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = path.dirname(__filename);
-      const adapterPath = path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs');
-
-      try {
-        await fs.promises.access(adapterPath, fs.constants.R_OK);
-      } catch {
+      
+      // Try multiple possible locations
+      const possiblePaths = [
+        path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs'),
+        path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.js'),
+        // In bundled npx distribution
+        path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.cjs'),
+        path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.js'),
+      ];
+      
+      let found = false;
+      for (const adapterPath of possiblePaths) {
+        try {
+          await fs.promises.access(adapterPath, fs.constants.R_OK);
+          found = true;
+          break;
+        } catch {
+          // Continue checking other paths
+        }
+      }
+      
+      if (!found) {
         errors.push({
           code: 'JS_DEBUG_NOT_FOUND',
           message:
@@ -226,6 +243,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     const possiblePaths = [
       path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs'),
       path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.js'),
+      // In bundled npx distribution
+      path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.cjs'),
+      path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.js'),
       // In container builds, might be in different locations
       '/app/packages/adapter-javascript/vendor/js-debug/vsDebugServer.cjs',
       '/app/node_modules/@debugmcp/adapter-javascript/vendor/js-debug/vsDebugServer.cjs'

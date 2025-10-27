@@ -154,3 +154,7 @@ tests/manual/
 # Vendored js-debug artifacts (generated during build; do not commit)
 packages/adapter-javascript/vendor/js-debug/
 packages/adapter-javascript/vendor/js-debug/**
+
+# Build artifacts from mcp-debugger bundling (generated during build; do not commit)
+packages/mcp-debugger/proxy/
+packages/mcp-debugger/vendor/

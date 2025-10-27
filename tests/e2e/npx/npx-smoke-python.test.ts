@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../../..');
 
-describe('NPX: Python Debugging Smoke Tests', () => {
+describe.sequential('NPX: Python Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;

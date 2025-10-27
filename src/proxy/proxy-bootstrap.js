@@ -75,12 +75,8 @@ logBootstrapActivity(`Bootstrap script started. CWD: ${process.cwd()}`);
     const bundlePath = path.join(__dirname, 'proxy-bundle.cjs');
     const entryPath = path.join(__dirname, 'dap-proxy-entry.js');
     
-    // Check if bundle exists and decide which version to use
-    const useBundle = (
-      process.env.NODE_ENV === 'production' || 
-      process.env.MCP_CONTAINER === 'true' ||
-      fs.existsSync(bundlePath)
-    );
+    // Simply check if bundle exists - prefer it when available for reliability
+    const useBundle = fs.existsSync(bundlePath);
     
     const proxyPath = useBundle ? bundlePath : entryPath;
     logBootstrapActivity(`Using ${useBundle ? 'bundled' : 'unbundled'} proxy from: ${proxyPath}`);
