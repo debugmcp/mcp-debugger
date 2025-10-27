@@ -14,9 +14,14 @@ The `dist/` directory contains the compiled TypeScript output and is the source 
   - Runs `postbuild` to copy necessary files (proxy bootstrap)
 - **`npm run prebuild`**: Removes entire `dist/` directory to prevent stale artifacts
 - **`npm run build:clean`**: Explicit clean build (same as `npm run build` due to prebuild)
-- **`npm run bundle`**: Creates production bundles after build
-  - Main application bundle: `dist/bundle.cjs`
-  - Proxy bundle: `dist/proxy/proxy-bundle.cjs`
+
+### Package Build Commands
+- **`pnpm --filter @debugmcp/mcp-debugger build`**: Builds the MCP debugger package
+  - Uses **tsup** (replacing esbuild) with `noExternal: [/./]` to bundle all dependencies
+  - Creates `packages/mcp-debugger/dist/cli.mjs` - self-contained CLI bundle (~3MB)
+  - Creates `packages/mcp-debugger/dist/proxy/proxy-bundle.cjs` - self-contained proxy bundle
+  - Copies compiled proxy, errors, adapters, session, and utils directories from root dist
+  - Copies js-debug adapter for JavaScript debugging support
 
 ### Scripts That Require Fresh Builds
 The following scripts now include `npm run build` to ensure fresh artifacts:
@@ -69,27 +74,60 @@ npm run test:e2e
 
 ## Proxy Bundling
 
-The DAP proxy runs as a separate child process and requires its own bundle for container compatibility. During the build process:
+The DAP proxy runs as a separate child process and requires its own bundle for compatibility. The proxy bundling is handled by the MCP debugger package build:
 
-1. Main application is bundled as `dist/bundle.cjs`
-2. Proxy is bundled as `dist/proxy/proxy-bundle.cjs`
+1. **MCP Debugger CLI** is bundled as `packages/mcp-debugger/dist/cli.mjs` using tsup
+2. **Proxy** is bundled as `packages/mcp-debugger/dist/proxy/proxy-bundle.cjs` using tsup
 
-Both bundles include all necessary dependencies, allowing the application to run in minimal containers without node_modules.
+Both bundles include all necessary dependencies (using tsup's `noExternal` flag), allowing the application to run without requiring node_modules installation.
 
-The proxy bootstrap (`src/proxy/proxy-bootstrap.js`) automatically detects which version to use based on environment:
-- **Production/Container**: Uses the bundled proxy (`proxy-bundle.cjs`)
-- **Development**: Uses the unbundled proxy files for easier debugging
+The proxy bootstrap (`src/proxy/proxy-bootstrap.js`) has been simplified:
+- **If bundle exists**: Uses the bundled proxy (`proxy-bundle.cjs`)
+- **If no bundle**: Uses the unbundled proxy files (development mode)
+- **No environment variables required**: Simply checks for bundle file existence
 
 ### Why Separate Bundles?
 - The proxy runs as a **separate child process** for DAP communication
 - It needs to be a standalone executable that can be spawned independently
 - The bundled version includes all npm dependencies (fs-extra, winston, uuid, etc.)
-- This allows the application to run in minimal Alpine containers without installing npm packages
+- This allows the application to run via npx without installing dependencies
+- Enables distribution in minimal Alpine containers without npm packages
+
+### NPX Distribution
+The MCP debugger can be distributed via npm/npx:
+```bash
+npx @debugmcp/mcp-debugger stdio
+```
+
+This works because:
+- The CLI bundle (`cli.mjs`) includes all workspace dependencies
+- The proxy bundle (`proxy-bundle.cjs`) includes all proxy dependencies
+- No external dependencies need to be installed
+
+## Build Process Architecture
+
+### TypeScript Compilation
+1. **Root `src/` → Root `dist/`**: Main server TypeScript files compile to root dist
+2. **Packages `src/` → Packages `dist/`**: Each package has its own TypeScript compilation
+
+### Bundling with tsup
+The project uses **tsup** for bundling (replaced esbuild for better dependency handling):
+- **`noExternal: [/./]`**: Bundles all dependencies, including workspace packages
+- **ESM output**: CLI bundle uses `.mjs` extension for ESM compatibility
+- **CJS output**: Proxy bundle uses `.cjs` for CommonJS (required by child process)
+
+### Build Artifacts Management
+Build artifacts are properly managed via `.gitignore`:
+- `dist/` directories are ignored (TypeScript compilation output)
+- `packages/mcp-debugger/proxy/` is ignored (copied during build)
+- `packages/mcp-debugger/vendor/` is ignored (copied js-debug adapter)
+- TypeScript source files (`.ts`) are tracked in git
+- JavaScript files (`.js`) in dist are generated and not tracked
 
 ## Docker Builds
 Both Dockerfiles build from source inside the container:
 - `Dockerfile`: Production multi-stage build
-  - Runs `npm run bundle` to create both main and proxy bundles
+  - Builds packages including the new tsup bundling
   - Uses minimal Alpine runtime with only Node.js (no npm)
 - `docker/test-ubuntu.dockerfile`: Test environment build
 

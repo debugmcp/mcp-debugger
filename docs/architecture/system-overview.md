@@ -197,6 +197,7 @@ sequenceDiagram
 - **Protocol**: Model Context Protocol (MCP) over stdio/TCP
 - **Debugging**: Debug Adapter Protocol (DAP) 1.51.0
 - **Testing**: Vitest with 90%+ coverage
+- **Bundling**: tsup with `noExternal` for self-contained distributions
 
 ### Key Dependencies
 - `@modelcontextprotocol/sdk` - MCP server implementation
@@ -214,21 +215,54 @@ sequenceDiagram
 
 ## Deployment Options
 
-### 1. Local Node.js
+### 1. NPX Distribution (Recommended)
+```bash
+npx @debugmcp/mcp-debugger stdio  # stdio mode
+npx @debugmcp/mcp-debugger tcp --port 6111  # TCP mode
+```
+- Self-contained bundles with all dependencies
+- No installation required
+- CLI bundle (~3MB) includes all workspace packages
+- Proxy bundle includes all proxy dependencies
+
+### 2. Local Node.js
 ```bash
 npm install && npm run build
 node dist/index.js  # stdio mode
 node dist/index.js --transport tcp --port 6111  # TCP mode
 ```
 
-### 2. Docker Container
+### 3. Docker Container
 - Dockerfile configured for both stdio and TCP modes
 - Python and debugpy pre-installed in image
 - Volume mounting for workspace access
+- Uses bundled versions for minimal image size
 
-### 3. Python Launcher
+### 4. Python Launcher
 - `mcp-debugger-launcher` package provides easy installation
 - Auto-detects Docker or falls back to local Node.js
+
+## Bundle Architecture
+
+The project uses a dual-bundle approach for distribution:
+
+### CLI Bundle (`cli.mjs`)
+- Built with tsup using `noExternal: [/./]`
+- Includes all workspace dependencies
+- ESM format for modern Node.js compatibility
+- Entry point for npx distribution
+
+### Proxy Bundle (`proxy-bundle.cjs`)
+- Separate bundle for the DAP proxy process
+- CommonJS format for child process compatibility
+- Includes all proxy dependencies (fs-extra, winston, etc.)
+- Auto-detected by proxy bootstrap (no env vars needed)
+
+This architecture enables:
+- Zero-dependency npx distribution
+- Minimal Docker images without node_modules
+- Fast startup times with pre-bundled code
+- Simplified deployment across environments
 
 ## Security Considerations
 

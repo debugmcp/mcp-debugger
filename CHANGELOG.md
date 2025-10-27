@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Build System**: Replaced esbuild with tsup for CLI bundling using `noExternal: [/./]` flag
+  - Resolves cross-package import issues in monorepo structure
+  - Creates fully self-contained bundles with all dependencies
+  - Enables reliable npx distribution without dependency installation
+- **Proxy Bundling**: Added separate proxy bundle (`proxy-bundle.cjs`) for DAP proxy process
+  - Proxy runs as separate child process with its own dependencies
+  - Simplified bootstrap logic - no environment variables required
+  - Automatic detection of bundled vs unbundled mode based on file presence
+- **JavaScript Adapter**: Updated paths to support both development and bundled distributions
+
+### Fixed
+- npx distribution failing due to missing cross-package imports
+- Proxy process failing in npx distribution due to missing dependencies (fs-extra, etc.)
+- JavaScript adapter not finding js-debug in bundled distribution
+
+### Added
+- Comprehensive documentation for new bundling architecture in `docs/development/build-pipeline.md`
+- Bundle architecture section in `docs/architecture/system-overview.md`
+- `.gitignore` entries for mcp-debugger build artifacts (`proxy/`, `vendor/`)
+
+### Improved
+- **NPX Distribution**: Now fully self-contained with zero runtime dependencies
+  - CLI bundle (~3MB) includes all workspace packages
+  - Proxy bundle includes all proxy dependencies
+  - No `npm install` required for end users
+- **Build Performance**: Faster bundling with tsup compared to esbuild
+- **Deployment Simplicity**: Single command `npx @debugmcp/mcp-debugger stdio` just works
+
 ## [0.15.7] - 2025-09-27
 
 ### Added
