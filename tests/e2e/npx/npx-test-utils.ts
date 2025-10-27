@@ -36,6 +36,11 @@ export async function buildAndPackNpmPackage(): Promise<string> {
     await execAsync('pnpm build', { cwd: ROOT });
     console.log('[NPX Test] Build completed');
     
+    // Build the mcp-debugger package specifically (creates bundles)
+    console.log('[NPX Test] Building mcp-debugger package bundles...');
+    await execAsync('pnpm --filter @debugmcp/mcp-debugger build', { cwd: ROOT });
+    console.log('[NPX Test] MCP debugger bundles created');
+    
     // Prepare package.json (resolve workspace deps)
     await execAsync('node scripts/prepare-pack.js prepare', { cwd: ROOT });
 

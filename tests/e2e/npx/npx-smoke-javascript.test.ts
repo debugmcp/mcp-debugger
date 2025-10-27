@@ -148,7 +148,7 @@ describe.sequential('NPX: JavaScript Debugging Smoke Tests', () => {
       arguments: {
         sessionId,
         file: scriptPath,
-        line: 11
+        line: 14
       }
     });
     
