@@ -122,6 +122,23 @@ describe('ChildSessionManager', () => {
       // Check that breakpoints are stored
       expect((manager as any).storedBreakpoints.size).toBeGreaterThan(0);
     });
+
+    it('mirrors stored breakpoints to the active child session', async () => {
+      await manager.createChildSession({
+        pendingId: 'child-breakpoints',
+        host: 'localhost',
+        port: 9229,
+        parentConfig: {}
+      });
+
+      const child = manager.getActiveChild() as unknown as MockMinimalDapClient;
+      child.requests = [];
+
+      manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 42 }]);
+
+      expect(child.requests.some(req => req.command === 'setBreakpoints')).toBe(true);
+    });
+
     
     it('should handle adoption in progress correctly', async () => {
       const config1 = {
@@ -150,6 +167,28 @@ describe('ChildSessionManager', () => {
       expect(manager.getActiveChild()).toBeDefined();
       expect(manager.hasActiveChildren()).toBe(true);
     });
+
+    it('ignores duplicate adoption requests for the same pending target', async () => {
+      await manager.createChildSession({
+        pendingId: 'dup-target',
+        host: 'localhost',
+        port: 9229,
+        parentConfig: {}
+      });
+
+      expect(manager.isAdopted('dup-target')).toBe(true);
+
+      await manager.createChildSession({
+        pendingId: 'dup-target',
+        host: 'localhost',
+        port: 9229,
+        parentConfig: {}
+      });
+
+      expect(manager.isAdopted('dup-target')).toBe(true);
+      expect((manager as any).childSessions.size).toBe(1);
+    });
+
     
     it('should forward child events to parent', async () => {
       const childEventSpy = vi.fn();

@@ -38,7 +38,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   private readonly factories: AdapterFactoryMap = new Map();
   private readonly activeAdapters: ActiveAdapterMap = new Map();
   private readonly config: Required<AdapterRegistryConfig>;
-  private readonly disposeTimers = new Map<string, NodeJS.Timeout>();
+  private readonly disposeTimers = new Map<IDebugAdapter, NodeJS.Timeout>();
   private readonly loader = new AdapterLoader();
   // Dynamic loading is opt-in via constructor config to preserve backward compatibility in unit tests
   private readonly dynamicEnabled: boolean;
@@ -91,15 +91,9 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
         adapter.dispose().catch(err => {
           this.emit('error', new Error(`Failed to dispose adapter: ${err.message}`));
         });
+        this.clearDisposeTimer(adapter);
       }
       this.activeAdapters.delete(language);
-    }
-
-    // Clear any dispose timers
-    const timer = this.disposeTimers.get(language);
-    if (timer) {
-      clearTimeout(timer);
-      this.disposeTimers.delete(language);
     }
 
     // Remove the factory
@@ -363,11 +357,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
    * Set up auto-dispose for an adapter
    */
   private setupAutoDispose(language: string, adapter: IDebugAdapter): void {
-    // Clear any existing timer for this language
-    const existingTimer = this.disposeTimers.get(`${language}-${adapter}`);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
+    this.clearDisposeTimer(adapter);
 
     // Listen for adapter state changes
     adapter.on('stateChanged', (oldState, newState) => {
@@ -379,16 +369,20 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
           });
         }, this.config.autoDisposeTimeout);
 
-        this.disposeTimers.set(`${language}-${adapter}`, timer);
+        this.disposeTimers.set(adapter, timer);
       } else if (newState === 'connected' || newState === 'debugging') {
         // Cancel dispose timer if adapter becomes active again
-        const timer = this.disposeTimers.get(`${language}-${adapter}`);
-        if (timer) {
-          clearTimeout(timer);
-          this.disposeTimers.delete(`${language}-${adapter}`);
-        }
+        this.clearDisposeTimer(adapter);
       }
     });
+  }
+
+  private clearDisposeTimer(adapter: IDebugAdapter): void {
+    const timer = this.disposeTimers.get(adapter);
+    if (timer) {
+      clearTimeout(timer);
+      this.disposeTimers.delete(adapter);
+    }
   }
 }
 

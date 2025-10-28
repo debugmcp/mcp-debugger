@@ -154,7 +154,6 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should handle undefined adapter registry gracefully', async () => {
-      // Create server with undefined registry
       mockDependencies.adapterRegistry = undefined;
       mockSessionManager = createMockSessionManager(undefined);
       vi.mocked(SessionManager).mockImplementation(() => mockSessionManager as any);
@@ -162,14 +161,18 @@ describe('Server Language Discovery Tests', () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
-      // When adapter registry is undefined, expect an error
-      await expect(callToolHandler({
+      const result = await callToolHandler({
         method: 'tools/call',
         params: {
           name: 'list_supported_languages',
           arguments: {}
         }
-      })).rejects.toThrow('Failed to list supported languages');
+      });
+
+      expect(result.content[0].type).toBe('text');
+      const content = JSON.parse(result.content[0].text);
+      const languageIds = content.languages.map((lang: any) => lang.id);
+      expect(languageIds).toEqual(['python', 'mock']);
     });
 
     it('should handle empty language lists from registry', async () => {
@@ -195,6 +198,37 @@ describe('Server Language Discovery Tests', () => {
       const languageIds = content.languages.map((lang: any) => lang.id);
       expect(languageIds).toContain('python');
       expect(languageIds).toContain('mock');
+    });
+
+    it('ensures python is advertised when running inside a container', async () => {
+      const previous = process.env.MCP_CONTAINER;
+      process.env.MCP_CONTAINER = 'true';
+
+      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['mock']);
+      mockAdapterRegistry.getSupportedLanguages = vi.fn().mockReturnValue(['mock']);
+
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_supported_languages',
+          arguments: {}
+        }
+      });
+
+      expect(result.content[0].type).toBe('text');
+      const content = JSON.parse(result.content[0].text);
+      const installed = content.installed;
+      expect(installed).toContain('python');
+      expect(installed).toContain('mock');
+
+      if (previous === undefined) {
+        delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
+      } else {
+        process.env.MCP_CONTAINER = previous;
+      }
     });
   });
 

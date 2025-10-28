@@ -78,6 +78,7 @@ describe('AdapterRegistry', () => {
   let registry: AdapterRegistry;
 
 beforeEach(() => {
+  delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
   createProductionDependenciesMock.mockClear();
   createProductionDependenciesMock.mockReturnValue({
     fileSystem: {},
@@ -211,4 +212,31 @@ beforeEach(() => {
 
     vi.useRealTimers();
   });
+
+  it('clears auto-dispose timers when adapters reconnect or are unregistered', async () => {
+    vi.useFakeTimers();
+    const autoRegistry = new AdapterRegistry({ autoDisposeTimeout: 200, validateOnRegister: false });
+    const factory = makeFactory();
+    await autoRegistry.register('python', factory);
+
+    const adapter = (await autoRegistry.create('python', baseConfig)) as StubAdapter;
+    adapter.dispose.mockResolvedValue(undefined);
+
+    const disposeTimers = (autoRegistry as unknown as { disposeTimers: Map<IDebugAdapter, NodeJS.Timeout> }).disposeTimers;
+
+    adapter.emit('stateChanged', AdapterState.READY, AdapterState.DISCONNECTED);
+    expect(disposeTimers.size).toBe(1);
+
+    adapter.emit('stateChanged', AdapterState.DISCONNECTED, AdapterState.CONNECTED);
+    expect(disposeTimers.size).toBe(0);
+
+    adapter.emit('stateChanged', AdapterState.READY, AdapterState.DISCONNECTED);
+    expect(disposeTimers.size).toBe(1);
+
+    autoRegistry.unregister('python');
+    expect(disposeTimers.size).toBe(0);
+
+    vi.useRealTimers();
+  });
+
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import net from 'net';
 import { EventEmitter } from 'events';
 import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
@@ -1301,4 +1301,56 @@ describe('MinimalDapClient', () => {
       timeoutClient.shutdown();
     });
   });
+
+  describe('Request error handling and resilience', () => {
+    it('rejects sendRequest when socket write fails and clears pending entry', async () => {
+      const failingClient = new MinimalDapClient('localhost', 8787);
+      const socket = {
+        destroyed: false,
+        end: vi.fn(),
+        destroy: vi.fn(),
+        write: vi.fn((_payload: string, cb?: (err?: Error | null) => void) => {
+          cb?.(new Error('write failed'));
+        })
+      } as unknown as net.Socket;
+      (failingClient as any).socket = socket;
+
+      await expect(failingClient.sendRequest('threads', undefined, 50)).rejects.toThrow('write failed');
+      expect(socket.write).toHaveBeenCalled();
+      expect((failingClient as any).pendingRequests.size).toBe(0);
+
+      failingClient.shutdown();
+    });
+
+    it('rejects sendRequest when socket is missing', async () => {
+      const missingSocketClient = new MinimalDapClient('localhost', 8788);
+
+      await expect(missingSocketClient.sendRequest('initialize')).rejects.toThrow('Socket not connected or destroyed');
+      expect((missingSocketClient as any).pendingRequests.size).toBe(0);
+
+      missingSocketClient.shutdown();
+    });
+
+    it('logs when writeMessage is invoked without an active socket', () => {
+      const loggingClient = new MinimalDapClient('localhost', 8789);
+      (loggingClient as any).socket = { destroyed: true } as net.Socket;
+
+      const logger = loggerInstances.at(-1);
+      expect(logger).toBeDefined();
+      const errorSpy = vi.spyOn(logger as MockLoggerInstance, 'error');
+
+      (loggingClient as any).writeMessage({
+        type: 'event',
+        seq: 1,
+        event: 'terminated'
+      } as DebugProtocol.Event);
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[MinimalDapClient] Cannot write message, socket not connected/destroyed'
+      );
+
+      loggingClient.shutdown();
+    });
+  });
+
 });

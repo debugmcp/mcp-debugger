@@ -10,7 +10,8 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { 
   SessionNotFoundError,
   SessionTerminatedError,
-  ProxyNotRunningError
+  ProxyNotRunningError,
+  PythonNotFoundError
 } from '../../src/errors/debug-errors';
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
 
@@ -114,6 +115,28 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('startProxyManager edge cases', () => {
+    it('bubbles meaningful error when log directory creation fails', async () => {
+      mockDependencies.fileSystem.ensureDir.mockRejectedValueOnce(new Error('disk full'));
+
+      await expect(
+        (operations as any).startProxyManager(mockSession, 'script.py')
+      ).rejects.toThrow('Failed to create session log directory: disk full');
+    });
+
+    it('raises PythonNotFoundError when adapter cannot resolve interpreter', async () => {
+      const adapterStub = {
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('python not found')),
+        buildAdapterCommand: vi.fn()
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      await expect(
+        (operations as any).startProxyManager(mockSession, 'script.py')
+      ).rejects.toBeInstanceOf(PythonNotFoundError);
+    });
   });
 
   describe('Operation Failures with Error Details', () => {
@@ -412,6 +435,22 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       
       expect(result.success).toBe(false);
       expect(result.error).toContain('Request failed');
+    });
+
+    it('maps syntax errors to friendly messages', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest
+        .mockResolvedValueOnce({
+          body: {
+            stackFrames: [{ id: 7 }]
+          }
+        })
+        .mockRejectedValueOnce(new Error('SyntaxError: invalid syntax'));
+
+      const result = await operations.evaluateExpression('test-session', 'def foo(');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Syntax error in expression');
     });
 
     it('should handle evaluateExpression with timeout', async () => {

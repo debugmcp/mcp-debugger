@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Simplified MinimalDapClient using proper buffer management
  * Extracts just the message parsing logic from vscode's implementation
  */
@@ -226,17 +226,17 @@ export class MinimalDapClient extends EventEmitter {
     }
     
     // DIAGNOSTIC: Enhanced logging for ALL messages
-    logger.info(`[MinimalDapClient] 🔍 DAP MESSAGE: ${message.type}`, debugInfo);
+    logger.info(`[MinimalDapClient] DAP message: ${message.type}`, debugInfo);
     if (message.type === 'request') {
       const req = message as DebugProtocol.Request;
-      logger.info(`[MinimalDapClient] 📨 REVERSE REQUEST: ${req.command}`, {
+      logger.info(`[MinimalDapClient] Reverse request: ${req.command}`, {
         command: req.command,
         seq: req.seq,
         arguments: req.arguments
       });
     } else if (message.type === 'event') {
       const evt = message as DebugProtocol.Event;
-      logger.info(`[MinimalDapClient] 🎯 EVENT: ${evt.event}`, {
+      logger.info(`[MinimalDapClient] Event: ${evt.event}`, {
         event: evt.event,
         body: evt.body
       });

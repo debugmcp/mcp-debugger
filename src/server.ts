@@ -33,6 +33,19 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 
+const DEFAULT_LANGUAGES = Object.freeze(['python', 'mock'] as const);
+
+function getDefaultLanguages(): string[] {
+  return [...DEFAULT_LANGUAGES];
+}
+
+function ensureLanguage(
+  languages: readonly string[],
+  language: string
+): string[] {
+  return languages.includes(language) ? [...languages] : [...languages, language];
+}
+
 /**
  * Configuration options for the Debug MCP Server
  */
@@ -91,7 +104,7 @@ export class DebugMcpServer {
     const adapterRegistry = this.getAdapterRegistry();
     // Guard against undefined registry in certain test environments
     if (!adapterRegistry) {
-      return ['python', 'mock'];
+      return getDefaultLanguages();
     }
     // Prefer dynamic discovery if available on the concrete registry
     const dynRegistry = adapterRegistry as unknown as { listLanguages?: () => Promise<string[]> };
@@ -99,7 +112,9 @@ export class DebugMcpServer {
     if (typeof maybeList === 'function') {
       try {
         const langs = await maybeList.call(adapterRegistry);
-        if (Array.isArray(langs) && langs.length > 0) return langs;
+        if (Array.isArray(langs) && langs.length > 0) {
+          return process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, 'python') : langs;
+        }
       } catch (e) {
         this.logger.warn('Dynamic adapter language discovery failed, falling back to registered languages', { error: (e as Error)?.message });
       }
@@ -108,16 +123,16 @@ export class DebugMcpServer {
     const langs = adapterRegistry.getSupportedLanguages?.() || [];
     if (langs.length > 0) {
       // In container runtime, ensure python is advertised even if not yet registered (preload may be async)
-      if (process.env.MCP_CONTAINER === 'true' && !langs.includes('python')) {
-        return [...new Set([...langs, 'python'])];
+      if (process.env.MCP_CONTAINER === 'true') {
+        return ensureLanguage(langs, 'python');
       }
       return langs;
     }
     // Final fallback to known defaults for UX (ensure python listed in container)
     if (process.env.MCP_CONTAINER === 'true') {
-      return ['python', 'mock'];
+      return ensureLanguage(getDefaultLanguages(), 'python');
     }
-    return ['python', 'mock'];
+    return getDefaultLanguages();
   }
 
   // Get language metadata for all supported languages
@@ -1089,9 +1104,15 @@ export class DebugMcpServer {
       const installed = await this.getSupportedLanguagesAsync();
 
       // Also surface known adapters with install status if available from registry
-      let available: Array<{ language: string; package: string; installed: boolean; description?: string }> = [];
-      const dyn = adapterRegistry as unknown as { listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean }>> };
-      if (typeof dyn.listAvailableAdapters === 'function') {
+      let available: Array<{ language: string; package: string; installed: boolean; description?: string }> = installed.map(lang => ({
+        language: lang,
+        package: `@debugmcp/adapter-${lang}`,
+        installed: true
+      }));
+
+      if (adapterRegistry) {
+        const dyn = adapterRegistry as unknown as { listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean }>> };
+        if (typeof dyn.listAvailableAdapters === 'function') {
         try {
           const meta = await dyn.listAvailableAdapters!();
           available = meta.map(m => ({
@@ -1103,13 +1124,7 @@ export class DebugMcpServer {
         } catch (e) {
           this.logger.warn('Failed to query detailed adapter metadata; returning installed list only', { error: (e as Error)?.message });
         }
-      } else {
-        // Fallback: build minimal available list from installed
-        available = installed.map(lang => ({
-          language: lang,
-          package: `@debugmcp/adapter-${lang}`,
-          installed: true
-        }));
+      }
       }
 
       // Also build simple metadata array for backward compatibility with previous payload shape
