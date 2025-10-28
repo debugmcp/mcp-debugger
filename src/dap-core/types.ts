@@ -46,8 +46,9 @@ export interface DAPProcessingResult {
 /**
  * Message types from proxy (matching current ProxyManager implementation)
  */
-export type ProxyStatusMessage = 
+export type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'proxy_minimal_ran_ipc_test'; message?: string }
+  | { type: 'status'; sessionId: string; status: 'init_received'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'dry_run_complete'; command: string; script: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_connected'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_configured_and_launched'; data?: unknown }

@@ -334,6 +334,9 @@ print(f"Fibonacci(5) = {result}")
         }
       });
       const debugResponse = parseSdkToolResult(debugCall);
+      if (!debugResponse.success) {
+        console.error('[E2E] Debug session start failed:', debugResponse);
+      }
       expect(debugResponse.success).toBe(true);
       
       // Wait a bit for the debugger to be ready

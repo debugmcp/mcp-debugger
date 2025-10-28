@@ -259,12 +259,22 @@ export class FakeProxyProcessLauncher implements IProxyProcessLauncher {
     // Simulate spawn event
     proxy.simulateSpawn();
 
-    // Simulate proxy-ready signal after spawn (mimics real proxy behavior)
-    // Only send for non-prepped proxies (prepped proxies control their own messages)
+    // Set up automatic init-received response for non-prepped proxies
     if (!isPreppedProxy) {
-      process.nextTick(() => {
-        proxy.simulateMessage({ type: 'proxy-ready', pid: process.pid });
-      });
+      const originalSendCommand = proxy.sendCommand.bind(proxy);
+      proxy.sendCommand = (command: any) => {
+        originalSendCommand(command);
+        // When init command is received, send init_received acknowledgment
+        if (command.cmd === 'init') {
+          process.nextTick(() => {
+            proxy.simulateMessage({
+              type: 'status',
+              status: 'init_received',
+              sessionId: command.sessionId || proxy.sessionId
+            });
+          });
+        }
+      };
     }
 
     return proxy;

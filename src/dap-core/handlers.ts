@@ -78,7 +78,14 @@ function handleStatusMessage(
         { type: 'killProcess' }
       );
       break;
-    
+
+    case 'init_received':
+      commands.push(
+        { type: 'log', level: 'info', message: '[ProxyManager] Init command acknowledged by proxy' },
+        { type: 'emitEvent', event: 'init-received', args: [] }
+      );
+      break;
+
     case 'dry_run_complete':
       commands.push(
         { type: 'log', level: 'info', message: '[ProxyManager] Dry run complete' },

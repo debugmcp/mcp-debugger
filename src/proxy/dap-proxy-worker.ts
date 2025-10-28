@@ -148,9 +148,20 @@ export class DapProxyWorker {
    * Handle initialization command
    */
   async handleInitCommand(payload: ProxyInitPayload): Promise<void> {
+    // If already initializing, just acknowledge and return (idempotent handling for retries)
+    if (this.state === ProxyState.INITIALIZING) {
+      this.sendStatus('init_received');
+      this.logger?.info('[Worker] Duplicate init command received while already initializing, acknowledging');
+      return;
+    }
+
+    // Only allow init from UNINITIALIZED state for first init
     if (this.state !== ProxyState.UNINITIALIZED) {
       throw new Error(`Invalid state for init: ${this.state}`);
     }
+
+    // Immediately acknowledge receipt of init command
+    this.sendStatus('init_received');
 
     // Validate payload structure
     const validatedPayload = validateProxyInitPayload(payload);

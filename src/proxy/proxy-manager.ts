@@ -70,8 +70,9 @@ export interface IProxyManager extends EventEmitter {
 }
 
 // Message types from proxy
-type ProxyStatusMessage = 
+type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'proxy_minimal_ran_ipc_test'; message?: string }
+  | { type: 'status'; sessionId: string; status: 'init_received'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'dry_run_complete'; command: string; script: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_configured_and_launched'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_connected'; data?: unknown }
@@ -180,64 +181,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Set up event handlers
     this.setupEventHandlers();
 
-    // Wait briefly for proxy to be ready to receive IPC, with safe fallbacks.
-    // This avoids a race where the child hasn't attached its 'message' listener yet.
-    try {
-      await new Promise<void>((resolve) => {
-        let resolved = false;
-        const msgHandler: ((message: unknown) => void) | undefined = (message: unknown) => {
-          const msg = message as { type?: string } | null;
-          if (msg?.type === 'proxy-ready') {
-            this.logger.info('[ProxyManager] Received proxy-ready');
-            cleanup();
-            resolve();
-          }
-        };
+    // Wait a brief moment for the process to start before sending init
+    await new Promise(resolve => setTimeout(resolve, 50));
 
-        const spawnHandler: (() => void) | undefined = () => {
-          // Give the child a short moment to attach handlers
-          setTimeout(() => {
-            if (!resolved) {
-              this.logger.info('[ProxyManager] Proceeding after spawn fallback');
-              cleanup();
-              resolve();
-            }
-          }, 25);
-        };
-
-        // Short timeout fallback to proceed even if proxy-ready is missed
-        const fallbackTimer: NodeJS.Timeout | undefined = setTimeout(() => {
-          if (!resolved) {
-            this.logger.warn('[ProxyManager] Proceeding without explicit proxy-ready (timeout fallback)');
-            cleanup();
-            resolve();
-          }
-        }, 250);
-
-        // Hard fallback to ensure we never block here
-        const hardTimer: NodeJS.Timeout | undefined = setTimeout(() => {
-          if (!resolved) {
-            this.logger.warn('[ProxyManager] Proceeding without proxy-ready after 2s hard fallback');
-            cleanup();
-            resolve();
-          }
-        }, 2000);
-
-        const cleanup = () => {
-          if (resolved) return;
-          resolved = true;
-          if (msgHandler) this.proxyProcess?.removeListener('message', msgHandler);
-          if (spawnHandler) this.proxyProcess?.removeListener('spawn', spawnHandler);
-          if (fallbackTimer) clearTimeout(fallbackTimer);
-          if (hardTimer) clearTimeout(hardTimer);
-        };
-
-        this.proxyProcess?.on('message', msgHandler);
-        this.proxyProcess?.once('spawn', spawnHandler);
-      });
-    } catch {}
-
-    // Send initialization command
+    // Send initialization command with retry logic
     const initCommand = {
       cmd: 'init',
       sessionId: config.sessionId,
@@ -265,11 +212,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       } : null
     });
 
-    // Add a small delay to ensure proxy's IPC handler is fully ready
-    // This avoids a race condition where we send before the proxy can receive
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    this.sendCommand(initCommand);
+    // Send init command with retry logic
+    await this.sendInitWithRetry(initCommand);
 
     // Wait for initialization or dry run completion
     return new Promise((resolve, reject) => {
@@ -537,13 +481,58 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return distPath;
   }
 
+  private async sendInitWithRetry(initCommand: object): Promise<void> {
+    const maxRetries = 5;
+    const delays = [100, 200, 400, 800, 1600]; // Exponential backoff
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // Send init command
+        this.sendCommand(initCommand);
+
+        // Wait for init_received acknowledgment
+        const received = await Promise.race([
+          new Promise<boolean>((resolve) => {
+            const handler = () => {
+              this.removeListener('init-received', handler);
+              resolve(true);
+            };
+            this.on('init-received', handler);
+          }),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), delays[Math.min(attempt, delays.length - 1)])
+          )
+        ]);
+
+        if (received) {
+          this.logger.info(`[ProxyManager] Init command acknowledged on attempt ${attempt + 1}`);
+          return;
+        }
+
+        // If not received, will retry
+        this.logger.warn(`[ProxyManager] Init not acknowledged, attempt ${attempt + 1}/${maxRetries + 1}`);
+      } catch (error) {
+        lastError = error as Error;
+        this.logger.warn(`[ProxyManager] Error sending init on attempt ${attempt + 1}: ${lastError.message}`);
+      }
+
+      // Wait before retry (except on last attempt)
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, delays[Math.min(attempt, delays.length - 1)]));
+      }
+    }
+
+    throw new Error(`Failed to initialize proxy after ${maxRetries + 1} attempts. ${lastError ? `Last error: ${lastError.message}` : 'Init command not acknowledged'}`);
+  }
+
   private sendCommand(command: object): void {
     if (!this.proxyProcess || this.proxyProcess.killed) {
       throw new Error('Proxy process not available');
     }
-    
+
     this.logger.info(`[ProxyManager] Sending command to proxy: ${JSON.stringify(command).substring(0, 500)}`);
-    
+
     try {
       this.proxyProcess.sendCommand(command);
       this.logger.info(`[ProxyManager] Command dispatched via proxy process`);
@@ -587,13 +576,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   private handleProxyMessage(rawMessage: unknown): void {
     this.logger.debug(`[ProxyManager] Received message:`, rawMessage);
-
-    // Special handling for proxy-ready messages (they don't have sessionId)
-    const msg = rawMessage as { type?: string; pid?: number } | null;
-    if (msg?.type === 'proxy-ready') {
-      // proxy-ready is handled in the wait promise, just return
-      return;
-    }
 
     // Validate message format
     if (!isValidProxyMessage(rawMessage)) {
@@ -739,7 +721,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.logger.info(`[ProxyManager] IPC test message received`);
         this.proxyProcess?.kill();
         break;
-      
+
+      case 'init_received':
+        this.logger.info(`[ProxyManager] Init command acknowledged by proxy`);
+        this.emit('init-received');
+        break;
+
       case 'dry_run_complete':
         this.logger.info(`[ProxyManager] Dry run complete`);
         this.emit('dry-run-complete', message.command, message.script);

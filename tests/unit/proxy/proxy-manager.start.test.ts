@@ -33,10 +33,34 @@ describe('ProxyManager.start', () => {
   beforeEach(() => {
     fakeProcess = new FakeProxyProcess();
 
+    // Default mock implementation for sendCommand to handle init-received
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        process.nextTick(() => {
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+          // Also emit dry-run-complete for dry run mode
+          if (cmd.dryRunSpawn) {
+            setImmediate(() => {
+              fakeProcess.emit('message', {
+                type: 'status',
+                status: 'dry_run_complete',
+                sessionId: cmd.sessionId,
+                command: 'node --inspect',
+                script: './tests/fixtures/app.js'
+              });
+            });
+          }
+        });
+      }
+    });
+
     launchProxySpy = vi.fn().mockImplementation((_scriptPath: string, _sessionId: string) => {
       setImmediate(() => {
         fakeProcess.emit('spawn');
-        fakeProcess.emit('message', { type: 'proxy-ready' });
       });
       return fakeProcess;
     });
@@ -76,24 +100,14 @@ describe('ProxyManager.start', () => {
   };
 
   const completeStart = async (config: ProxyConfig = baseConfig): Promise<void> => {
-    const startPromise = proxyManager.start(config);
-    fakeProcess.sendCommand.mockImplementationOnce(() => {
-      setImmediate(() => {
-        proxyManager.emit('dry-run-complete', 'node --inspect', config.scriptPath);
-      });
-    });
-    fakeProcess.emit('message', { type: 'proxy-ready' });
-    await startPromise;
+    // Default mock in beforeEach handles init-received
+    await proxyManager.start(config);
     (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
   };
 
   it('launches the proxy process and sends the init command', async () => {
-    const startPromise = proxyManager.start(baseConfig);
-    setTimeout(() => {
-      proxyManager.emit('dry-run-complete', 'node --inspect', baseConfig.scriptPath);
-    }, 150);
-
-    await startPromise;
+    // Default mock in beforeEach handles init-received
+    await proxyManager.start(baseConfig);
 
     expect(launchProxySpy).toHaveBeenCalled();
     expect(fakeProcess.sendCommand).toHaveBeenCalledWith(
@@ -174,7 +188,6 @@ describe('ProxyManager.start', () => {
   it('attaches listeners for proxy messages and forwards status events', async () => {
     const listener = vi.fn();
     proxyManager.on('dry-run-complete', listener);
-    const startPromise = proxyManager.start(baseConfig);
 
     const statusPayload = {
       type: 'status' as const,
@@ -184,11 +197,8 @@ describe('ProxyManager.start', () => {
       script: baseConfig.scriptPath
     };
 
-    setTimeout(() => {
-      proxyManager.emit('dry-run-complete', statusPayload.command, statusPayload.script);
-    }, 150);
-
-    await startPromise;
+    // Default mock in beforeEach handles init-received
+    await proxyManager.start(baseConfig);
 
     listener.mockClear();
 
@@ -397,7 +407,8 @@ describe('ProxyManager.start', () => {
       dryRunSpawn: false
     };
 
-    fakeProcess.sendCommand.mockImplementationOnce(() => {
+    fakeProcess.sendCommand.mockImplementation(() => {
+      // Simulate proxy exit on first attempt
       setImmediate(() => {
         fakeProcess.emit('exit', 7, null);
       });
@@ -405,7 +416,8 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start(config);
 
-    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization.*Code: 7/);
+    // With retry logic, error message is different
+    await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
   });
 
   it('rejects initialization when proxy exits via signal before readiness', async () => {
@@ -414,7 +426,8 @@ describe('ProxyManager.start', () => {
       dryRunSpawn: false
     };
 
-    fakeProcess.sendCommand.mockImplementationOnce(() => {
+    fakeProcess.sendCommand.mockImplementation(() => {
+      // Simulate proxy exit on first attempt
       setImmediate(() => {
         fakeProcess.emit('exit', null, 'SIGTERM');
       });
@@ -422,7 +435,8 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start(config);
 
-    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization.*Signal: SIGTERM/);
+    // With retry logic, error message is different
+    await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
   });
 
   it('allows multiple concurrent stop calls without errors', async () => {
