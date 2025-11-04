@@ -220,3 +220,4 @@ export async function handleSSECommand(
     exitProcess(1);
   }
 }
+

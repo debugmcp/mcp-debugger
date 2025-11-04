@@ -27,7 +27,8 @@ let defaultLogger: WinstonLoggerType | null = null;
  * @returns A configured winston logger instance
  */
 export function createLogger(namespace: string, options: LoggerOptions = {}): WinstonLoggerType {
-  const level = options.level || 'info';
+  // Check for global log level from environment or options
+  const level = options.level || process.env.DEBUG_MCP_LOG_LEVEL || 'info';
   
   const transports: winston.transport[] = [];
   

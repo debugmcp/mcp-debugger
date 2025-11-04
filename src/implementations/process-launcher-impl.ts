@@ -470,7 +470,28 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
   sendCommand(command: object): void {
     // Send object directly - Node.js IPC will handle serialization
     try {
+      const summary = JSON.stringify({
+        cmd: (command as { cmd?: string }).cmd,
+        requestId: (command as { requestId?: string }).requestId,
+        sessionId: (command as { sessionId?: string }).sessionId
+      });
+      const connectedBefore =
+        'connected' in this.childProcess
+          ? (this.childProcess as { connected?: boolean }).connected
+          : undefined;
+      const pid = this.childProcess.pid;
+      this.emit('ipc-send-start', {
+        pid,
+        connectedBefore,
+        summary,
+        timestamp: Date.now()
+      });
+
+      const queueSizeBefore =
+        (this.childProcess as unknown as { channel?: { writeQueueSize?: number } }).channel?.writeQueueSize;
       const result = this.send(command);
+      const queueSizeAfter =
+        (this.childProcess as unknown as { channel?: { writeQueueSize?: number } }).channel?.writeQueueSize;
       // Log the result for debugging
       if (typeof result === 'boolean') {
         if (!result) {
@@ -478,10 +499,39 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
           const killed = this.killed;
           const hasChildProcess = !!this.childProcess;
           const childProcessKilled = hasChildProcess ? this.childProcess.killed : 'N/A';
+          this.emit('ipc-send-failed', {
+            pid,
+            killed,
+            childProcessKilled,
+            summary,
+            timestamp: Date.now()
+          });
           throw new Error(`Failed to send command via IPC. Send returned false. Adapter killed: ${killed}, Has childProcess: ${hasChildProcess}, Child killed: ${childProcessKilled}`);
         }
+        const connectedAfter =
+          'connected' in this.childProcess
+            ? (this.childProcess as { connected?: boolean }).connected
+            : undefined;
+        this.emit('ipc-send-complete', {
+          pid,
+          connectedAfter,
+          summary,
+          queueSizeBefore,
+          queueSizeAfter,
+          timestamp: Date.now()
+        });
       }
     } catch (error) {
+      this.emit('ipc-send-error', {
+        pid: this.childProcess.pid,
+        error: error instanceof Error ? error.message : String(error),
+        summary: JSON.stringify({
+          cmd: (command as { cmd?: string }).cmd,
+          requestId: (command as { requestId?: string }).requestId,
+          sessionId: (command as { sessionId?: string }).sessionId
+        }),
+        timestamp: Date.now()
+      });
       throw new Error(`IPC send threw error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -571,16 +621,13 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     // This is critical for IPC and path resolution to work correctly
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     
-    // Check if we're in a container - don't detach in containers as it can cause SIGTERM issues
-    const inContainer = processEnv.MCP_CONTAINER === 'true' || process.env.MCP_CONTAINER === 'true';
-    
     const options: IProcessOptions = {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions IPC compatibility
       env: processEnv,
       cwd: projectRoot, // Use project root instead of process.cwd() which might be VS Code's directory
-      // Create new process group on Unix systems to ensure all child processes can be killed together
-      // BUT: Don't detach in containers as it causes SIGTERM issues with PID namespace handling
-      detached: process.platform !== 'win32' && !inContainer
+      // Do NOT detach the process - this can interfere with IPC communication
+      // especially when the debugged process pauses at a breakpoint
+      detached: false
     };
 
     // Get the raw child process directly to avoid double-wrapping

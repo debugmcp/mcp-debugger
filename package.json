@@ -20,7 +20,7 @@
   "scripts": {
     "prepare": "husky",
     "prebuild": "rimraf dist",
-    "build": "pnpm run build:packages && tsc -b -f . && pnpm run postbuild",
+    "build": "pnpm run build:packages && tsc -b -f . && pnpm run postbuild && pnpm run bundle",
     "build:shared": "pnpm --filter @debugmcp/shared build",
     "build:adapters": "pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build",
     "build:adapters:all": "pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build && pnpm --filter @debugmcp/adapter-javascript build",
@@ -86,6 +86,7 @@
     "check:all-personal-paths": "node scripts/check-all-personal-paths.cjs",
     "commit:safe": "scripts/safe-commit.sh",
     "commit:fast": "scripts/safe-commit.sh --skip-tests",
+    "bundle": "pnpm --filter @debugmcp/mcp-debugger run build",
     "postbuild": "node scripts/copy-proxy-files.cjs",
     "clean": "rimraf dist",
     "act:check": "scripts\\act-runner.cmd --version",

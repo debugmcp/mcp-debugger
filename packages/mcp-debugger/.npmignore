@@ -1,0 +1,42 @@
+# Logs should never be included in npm packages
+logs/
+*.log
+
+# Test files
+tests/
+**/*.spec.ts
+**/*.spec.js
+**/*.test.ts
+**/*.test.js
+
+# Development files
+src/
+tsconfig*.json
+vitest.config.ts
+.vscode/
+.idea/
+
+# Build scripts
+scripts/
+
+# Documentation that's not needed in package
+docs/
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Editor files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Package build artifacts (the package/ directory itself)
+package/

@@ -1,242 +1,244 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { EventEmitter } from 'events';
-import path from 'path';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AdapterRegistry } from '../../../src/adapters/adapter-registry.js';
-import { DebugLanguage, AdapterState, DuplicateRegistrationError, FactoryValidationError, AdapterNotFoundError } from '@debugmcp/shared';
-import type { AdapterConfig, IDebugAdapter } from '@debugmcp/shared';
+import { AdapterNotFoundError, DuplicateRegistrationError, FactoryValidationError } from '@debugmcp/shared';
 
-const createProductionDependenciesMock = vi.fn().mockImplementation(() => ({
-  fileSystem: {},
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-  environment: {},
-  processLauncher: {},
-  networkManager: {}
-}));
-
-vi.mock('../../../src/container/dependencies.js', () => ({
-  createProductionDependencies: createProductionDependenciesMock
-}));
-
-class StubAdapter extends EventEmitter implements IDebugAdapter {
-  language = DebugLanguage.PYTHON;
-  name = 'Stub Adapter';
-  initialize = vi.fn().mockResolvedValue(undefined);
-  dispose = vi.fn().mockResolvedValue(undefined);
-  getState = vi.fn().mockReturnValue(AdapterState.READY);
-  isReady = vi.fn().mockReturnValue(true);
-  getCurrentThreadId = vi.fn().mockReturnValue(null);
-  validateEnvironment = vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] });
-  getRequiredDependencies = vi.fn().mockReturnValue([]);
-  resolveExecutablePath = vi.fn().mockResolvedValue('python');
-  getDefaultExecutableName = vi.fn().mockReturnValue('python');
-  getExecutableSearchPaths = vi.fn().mockReturnValue([]);
-  buildAdapterCommand = vi.fn().mockReturnValue({ command: 'python', args: [] });
-  getAdapterModuleName = vi.fn().mockReturnValue('debugpy.adapter');
-  getAdapterInstallCommand = vi.fn().mockReturnValue('pip install debugpy');
-  transformLaunchConfig = vi.fn().mockImplementation(config => config);
-  getDefaultLaunchConfig = vi.fn().mockReturnValue({});
-  sendDapRequest = vi.fn().mockResolvedValue({} as any);
-  handleDapEvent = vi.fn();
-  handleDapResponse = vi.fn();
-  connect = vi.fn().mockResolvedValue(undefined);
-  disconnect = vi.fn().mockResolvedValue(undefined);
-  isConnected = vi.fn().mockReturnValue(false);
-  getInstallationInstructions = vi.fn().mockReturnValue('');
-  getMissingExecutableError = vi.fn().mockReturnValue('');
-  translateErrorMessage = vi.fn().mockImplementation((error: Error) => error.message);
-  supportsFeature = vi.fn().mockReturnValue(false);
-  getFeatureRequirements = vi.fn().mockReturnValue([]);
-  getCapabilities = vi.fn().mockReturnValue({} as any);
-}
-
-const makeFactory = () => {
-  const createAdapter = vi.fn().mockImplementation(() => new StubAdapter());
+const createAdapterStub = () => {
+  const eventHandlers = new Map<string, Array<(...args: unknown[]) => void>>();
   return {
-    createAdapter,
-    getMetadata: vi.fn().mockReturnValue({
-      language: 'python',
-      displayName: 'Python',
-      version: '1.0.0',
-      author: 'Test',
-      description: 'Test adapter'
+    initialize: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+      const handlers = eventHandlers.get(event) ?? [];
+      handlers.push(listener);
+      eventHandlers.set(event, handlers);
     }),
-    validate: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] })
+    once: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+      const wrapped = (...args: unknown[]) => {
+        listener(...args);
+        const handlers = eventHandlers.get(event) ?? [];
+        eventHandlers.set(
+          event,
+          handlers.filter(handler => handler !== wrapped)
+        );
+      };
+      const handlers = eventHandlers.get(event) ?? [];
+      handlers.push(wrapped);
+      eventHandlers.set(event, handlers);
+    }),
+    emit: (event: string, ...args: unknown[]) => {
+      const handlers = eventHandlers.get(event) ?? [];
+      handlers.forEach(handler => handler(...args));
+    },
+    dispose: vi.fn().mockResolvedValue(undefined)
   };
 };
 
-const baseConfig: AdapterConfig = {
-  sessionId: 'session-1',
-  executablePath: 'python',
-  adapterHost: '127.0.0.1',
-  adapterPort: 5678,
-  logDir: path.join(process.cwd(), '.logs'),
-  scriptPath: path.join(process.cwd(), 'app.py'),
-  launchConfig: {}
+const createFactory = (overrides: Partial<ReturnType<typeof getFactory>> = {}) => {
+  const adapter = createAdapterStub();
+  return {
+    validate: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+    getMetadata: vi.fn().mockReturnValue({ name: 'mock', version: '1.0.0' }),
+    createAdapter: vi.fn().mockReturnValue(adapter),
+    __adapter: adapter,
+    ...overrides
+  };
 };
 
-describe('AdapterRegistry', () => {
-  let registry: AdapterRegistry;
-
-beforeEach(() => {
-  delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
-  createProductionDependenciesMock.mockClear();
-  createProductionDependenciesMock.mockReturnValue({
-    fileSystem: {},
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-    environment: {},
-    processLauncher: {},
-    networkManager: {}
-  });
-  registry = new AdapterRegistry({ autoDispose: false });
+const getFactory = () => ({
+  validate: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+  getMetadata: vi.fn().mockReturnValue({ name: 'mock', version: '1.0.0' }),
+  createAdapter: vi.fn().mockReturnValue({
+    initialize: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
+    once: vi.fn(),
+    dispose: vi.fn().mockResolvedValue(undefined)
+  })
 });
 
-  it('registers factories and creates adapters', async () => {
-    const factory = makeFactory();
-    await registry.register('python', factory);
+describe('AdapterRegistry', () => {
+  const originalEnv = process.env.MCP_CONTAINER;
 
-    expect(registry.getSupportedLanguages()).toContain('python');
-
-    const adapter = await registry.create('python', baseConfig);
-
-    expect(factory.createAdapter).toHaveBeenCalled();
-    expect((adapter as StubAdapter).initialize).toHaveBeenCalled();
-    expect(registry.getActiveAdapterCount()).toBe(1);
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    process.env.MCP_CONTAINER = undefined;
   });
 
-  it('prevents duplicate registrations by default', async () => {
-    const factory = makeFactory();
-    await registry.register('python', factory);
-
-    await expect(registry.register('python', makeFactory())).rejects.toThrow(DuplicateRegistrationError);
+  afterEach(() => {
+    process.env.MCP_CONTAINER = originalEnv;
   });
 
-  it('throws when factory validation fails', async () => {
-    const invalidFactory = {
-      createAdapter: vi.fn(),
-      getMetadata: vi.fn().mockReturnValue({
-        language: 'go',
-        displayName: 'Go',
-        version: '0.1.0',
-        author: 'Test',
-        description: 'Invalid adapter'
-      }),
-      validate: vi.fn().mockResolvedValue({ valid: false, errors: ['missing binary'], warnings: [] })
+  it('registers and unregisters factories (with validation)', async () => {
+    const registry = new AdapterRegistry();
+    const factory = createFactory();
+
+    await registry.register('mock', factory as any);
+    expect(factory.validate).toHaveBeenCalled();
+
+    const unregistered = registry.unregister('mock');
+    expect(unregistered).toBe(true);
+    expect(registry.unregister('mock')).toBe(false);
+  });
+
+  it('throws when duplicate registration not allowed', async () => {
+    const registry = new AdapterRegistry();
+    const factory = createFactory();
+
+    await registry.register('mock', factory as any);
+    await expect(registry.register('mock', factory as any)).rejects.toThrow(DuplicateRegistrationError);
+  });
+
+  it('throws FactoryValidationError when validation fails', async () => {
+    const registry = new AdapterRegistry();
+    const factory = createFactory({
+      validate: vi.fn().mockResolvedValue({
+        valid: false,
+        errors: [{ message: 'nope' }],
+        warnings: []
+      })
+    });
+
+    await expect(registry.register('mock', factory as any)).rejects.toThrow(FactoryValidationError);
+  });
+
+  it('creates adapter via registered factory and enforces max instances', async () => {
+    const registry = new AdapterRegistry({ maxInstancesPerLanguage: 1 });
+    const adapterStub = createAdapterStub();
+    const factory = createFactory({
+      createAdapter: vi.fn().mockReturnValue(adapterStub)
+    });
+
+    await registry.register('mock', factory as any);
+
+    const adapterConfig = {
+      sessionId: 's1',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp/logs',
+      scriptPath: '/tmp/app.js',
+      executablePath: '',
+      launchConfig: {}
     };
 
-    await expect(registry.register('go', invalidFactory)).rejects.toThrow(FactoryValidationError);
+    const adapter = await registry.create('mock', adapterConfig);
+    expect(factory.createAdapter).toHaveBeenCalled();
+    expect(registry.getActiveAdapterCount()).toBe(1);
+
+    await expect(registry.create('mock', adapterConfig)).rejects.toThrow(/Maximum adapter instances/);
+
+    await adapter.dispose();
+    expect(adapterStub.dispose).toHaveBeenCalled();
   });
 
-  it('throws when creating an adapter for an unknown language', async () => {
-    await expect(registry.create('ruby', baseConfig)).rejects.toThrow(AdapterNotFoundError);
+  it('dynamically loads adapters when enabled and initial lookup fails', async () => {
+    const loadedAdapter = createAdapterStub();
+    const loadedFactory = createFactory({
+      createAdapter: vi.fn().mockReturnValue(loadedAdapter)
+    });
+
+    const registry = new AdapterRegistry({ enableDynamicLoading: true });
+    const loadSpy = vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+      loadAdapter: vi.fn().mockResolvedValue(loadedFactory)
+    });
+
+    const adapter = await registry.create('dynamic', {
+      sessionId: 's1',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp/logs',
+      scriptPath: '/tmp/app.js',
+      executablePath: '',
+      launchConfig: {}
+    });
+
+    expect(loadSpy).toHaveBeenCalled();
+    expect(adapter).toBeDefined();
   });
 
-  it('enforces maximum instances per language', async () => {
-    const limitedRegistry = new AdapterRegistry({ maxInstancesPerLanguage: 1, autoDispose: false, validateOnRegister: false });
-    const factory = makeFactory();
-    await limitedRegistry.register('python', factory);
+  it('throws AdapterNotFoundError when dynamic load fails', async () => {
+    const registry = new AdapterRegistry({ enableDynamicLoading: true });
+    vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+      loadAdapter: vi.fn().mockRejectedValue(new Error('missing'))
+    });
 
-    (limitedRegistry as unknown as { activeAdapters: Map<string, Set<IDebugAdapter>> }).activeAdapters.set(
-      'python',
-      new Set([new StubAdapter()])
-    );
-
-    expect(createProductionDependenciesMock).not.toHaveBeenCalled();
-    await expect(limitedRegistry.create('python', baseConfig)).rejects.toThrow(/Maximum adapter instances/);
-    expect(createProductionDependenciesMock).not.toHaveBeenCalled();
+    await expect(
+      registry.create('missing', {
+        sessionId: 's1',
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp/logs',
+        scriptPath: '/tmp/app.js',
+        executablePath: '',
+        launchConfig: {}
+      })
+    ).rejects.toBeInstanceOf(AdapterNotFoundError);
   });
 
-  it('unregisters factories and disposes active adapters', async () => {
-    const factory = makeFactory();
-    await registry.register('python', factory);
+  it('auto-disposes adapters on state change and clears timers', async () => {
+    vi.useFakeTimers();
 
-    const adapter = (await registry.create('python', baseConfig)) as StubAdapter;
-    adapter.dispose.mockResolvedValue(undefined);
+    const registry = new AdapterRegistry({
+      autoDispose: true,
+      autoDisposeTimeout: 1000
+    });
 
-    const result = registry.unregister('python');
+    const adapterStub = createAdapterStub();
+    const factory = createFactory({
+      createAdapter: vi.fn().mockReturnValue(adapterStub)
+    });
 
-    expect(result).toBe(true);
-    expect(adapter.dispose).toHaveBeenCalled();
-    expect(registry.isLanguageSupported('python')).toBe(false);
+    await registry.register('mock', factory as any);
+
+    const adapter = await registry.create('mock', {
+      sessionId: 's1',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp',
+      scriptPath: '/tmp/app.js',
+      executablePath: '',
+      launchConfig: {}
+    });
+
+    // Trigger disconnect state to start timer
+    adapterStub.emit('stateChanged', 'debugging', 'disconnected');
+    expect(adapterStub.dispose).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1000);
+    await Promise.resolve();
+    expect(adapterStub.dispose).toHaveBeenCalled();
+
+    // Re-activate and ensure timer clears
+    adapterStub.dispose.mockClear();
+    adapterStub.emit('stateChanged', 'connected', 'debugging');
+    vi.advanceTimersByTime(1000);
+    expect(adapterStub.dispose).not.toHaveBeenCalled();
+
+    await adapter.dispose();
+    vi.useRealTimers();
   });
 
-  it('disposes all adapters and clears registry state', async () => {
-    const factory = makeFactory();
-    await registry.register('python', factory);
-    await registry.create('python', baseConfig);
+  it('disposeAll waits for active adapters and clears factories', async () => {
+    const registry = new AdapterRegistry();
+    const adapterStub = createAdapterStub();
 
-    await registry.disposeAll();
+    const factory = createFactory({
+      createAdapter: vi.fn().mockReturnValue(adapterStub)
+    });
 
-    expect(registry.getSupportedLanguages()).toHaveLength(0);
+    await registry.register('mock', factory as any);
+    const adapter = await registry.create('mock', {
+      sessionId: 's1',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp',
+      scriptPath: '/tmp/app.js',
+      executablePath: '',
+      launchConfig: {}
+    });
+
+    const disposeAllPromise = registry.disposeAll();
+    await disposeAllPromise;
+
+    expect(adapterStub.dispose).toHaveBeenCalled();
     expect(registry.getActiveAdapterCount()).toBe(0);
+    expect(() => adapter.dispose()).not.toThrow();
   });
-
-  it('reports available adapters when dynamic loading is disabled', async () => {
-    const python = makeFactory();
-    const mock = makeFactory();
-
-    await registry.register('python', python);
-    await registry.register('mock', mock);
-
-    const available = await registry.listAvailableAdapters();
-
-    expect(available).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'python', installed: true }),
-        expect.objectContaining({ name: 'mock', installed: true })
-      ])
-    );
-  });
-
-  it('returns registered languages when dynamic loading disabled', async () => {
-    const factory = makeFactory();
-    await registry.register('python', factory);
-
-    const languages = await registry.listLanguages();
-
-    expect(languages).toEqual(['python']);
-  });
-
-  it('auto-disposes idle adapters after the timeout', async () => {
-    vi.useFakeTimers();
-    const autoRegistry = new AdapterRegistry({ autoDisposeTimeout: 50, validateOnRegister: false });
-    const factory = makeFactory();
-    await autoRegistry.register('python', factory);
-
-    const adapter = (await autoRegistry.create('python', baseConfig)) as StubAdapter;
-    adapter.dispose.mockResolvedValue(undefined);
-
-    adapter.emit('stateChanged', AdapterState.READY, AdapterState.DISCONNECTED);
-    await vi.advanceTimersByTimeAsync(60);
-
-    expect(adapter.dispose).toHaveBeenCalledTimes(1);
-
-    vi.useRealTimers();
-  });
-
-  it('clears auto-dispose timers when adapters reconnect or are unregistered', async () => {
-    vi.useFakeTimers();
-    const autoRegistry = new AdapterRegistry({ autoDisposeTimeout: 200, validateOnRegister: false });
-    const factory = makeFactory();
-    await autoRegistry.register('python', factory);
-
-    const adapter = (await autoRegistry.create('python', baseConfig)) as StubAdapter;
-    adapter.dispose.mockResolvedValue(undefined);
-
-    const disposeTimers = (autoRegistry as unknown as { disposeTimers: Map<IDebugAdapter, NodeJS.Timeout> }).disposeTimers;
-
-    adapter.emit('stateChanged', AdapterState.READY, AdapterState.DISCONNECTED);
-    expect(disposeTimers.size).toBe(1);
-
-    adapter.emit('stateChanged', AdapterState.DISCONNECTED, AdapterState.CONNECTED);
-    expect(disposeTimers.size).toBe(0);
-
-    adapter.emit('stateChanged', AdapterState.READY, AdapterState.DISCONNECTED);
-    expect(disposeTimers.size).toBe(1);
-
-    autoRegistry.unregister('python');
-    expect(disposeTimers.size).toBe(0);
-
-    vi.useRealTimers();
-  });
-
 });

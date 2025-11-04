@@ -44,6 +44,9 @@ export class ProxyRunner {
   private messageHandler?: (message: unknown) => Promise<void>;
   private isRunning = false;
   private _initTimeout?: NodeJS.Timeout;
+  private ipcMessageCounter = 0;
+  private heartbeatInterval?: NodeJS.Timeout;
+  private heartbeatTickCounter = 0;
 
   constructor(
     private dependencies: DapProxyDependencies,
@@ -80,6 +83,24 @@ export class ProxyRunner {
 
       this.logger.info('[ProxyRunner] Ready to receive commands');
 
+      if (typeof process.send === 'function') {
+        this.heartbeatInterval = setInterval(() => {
+          try {
+            this.heartbeatTickCounter += 1;
+            this.logger.debug(
+              `[ProxyRunner] Heartbeat tick #${this.heartbeatTickCounter} send attempt (process.connected=${process.connected})`
+            );
+            process.send?.({
+              type: 'ipc-heartbeat-tick',
+              timestamp: Date.now(),
+              counter: this.heartbeatTickCounter
+            });
+          } catch (tickError) {
+            this.logger.warn('[ProxyRunner] Failed to send heartbeat tick:', tickError);
+          }
+        }, 5000);
+      }
+
       // Set up initialization timeout - exit if no init command received
       // This prevents orphaned processes from consuming resources
       // Use much shorter timeout to prevent resource consumption
@@ -108,6 +129,11 @@ export class ProxyRunner {
 
     this.logger.info('[ProxyRunner] Stopping proxy runner...');
     
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = undefined;
+    }
+
     // Shutdown worker
     await this.worker.shutdown();
     
@@ -193,29 +219,63 @@ export class ProxyRunner {
     }
     
     this.logger.info('[ProxyRunner] IPC channel confirmed available');
-    
+
     this.messageHandler = async (message: unknown) => {
-      this.logger.info('[ProxyRunner] IPC message received (raw):', JSON.stringify(message).substring(0, 200));
-      
-      if (typeof message === 'string') {
-        await processMessage(message);
-      } else if (typeof message === 'object' && message !== null) {
-        this.logger.info('[ProxyRunner] Received object message, stringifying');
+      this.ipcMessageCounter += 1;
+      this.logger.info(
+        `[ProxyRunner] IPC message #${this.ipcMessageCounter} received type=${typeof message}`
+      );
+      this.logger.debug(
+        `[ProxyRunner] IPC listener count=${process.listenerCount('message')}`
+      );
+      this.logger.debug(`[ProxyRunner] Raw message snapshot:`, message);
+      this.logger.debug('[ProxyRunner] IPC message received (raw):', JSON.stringify(message).substring(0, 200));
+      this.logger.debug(`[ProxyRunner] IPC channel status on receive: connected=${process.connected}`);
+      if (typeof process.send === 'function') {
         try {
-          await processMessage(JSON.stringify(message));
-        } catch (e) {
-          this.logger.error('[ProxyRunner] Could not process object message:', {
-            message,
-            error: getErrorMessage(e)
+          process.send({
+            type: 'ipc-heartbeat',
+            counter: this.ipcMessageCounter,
+            timestamp: Date.now()
           });
+        } catch (heartbeatError) {
+          this.logger.warn('[ProxyRunner] Failed to send heartbeat:', heartbeatError);
         }
-      } else {
-        this.logger.warn('[ProxyRunner] Received message of unexpected type:', typeof message, message);
+      }
+      try {
+        if (typeof message === 'string') {
+          await processMessage(message);
+          this.logger.debug(`[ProxyRunner] IPC message #${this.ipcMessageCounter} processed successfully (string)`);
+        } else if (typeof message === 'object' && message !== null) {
+          this.logger.debug('[ProxyRunner] Received object message, stringifying');
+          try {
+            await processMessage(JSON.stringify(message));
+            this.logger.debug(`[ProxyRunner] IPC message #${this.ipcMessageCounter} processed successfully (object)`);
+          } catch (e) {
+            this.logger.error('[ProxyRunner] Could not process object message:', {
+              message,
+              error: getErrorMessage(e)
+            });
+            throw e;
+          }
+        } else {
+          this.logger.warn('[ProxyRunner] Received message of unexpected type:', typeof message, message);
+        }
+      } catch (handlerError) {
+        this.logger.error('[ProxyRunner] Error handling IPC message:', handlerError);
       }
     };
 
     process.on('message', this.messageHandler);
     this.logger.info('[ProxyRunner] IPC message handler attached');
+
+    process.on('disconnect', () => {
+      this.logger.warn('[ProxyRunner] IPC channel disconnected');
+    });
+
+    process.on('error', (err: Error) => {
+      this.logger.error('[ProxyRunner] IPC channel error:', err);
+    });
   }
 
   /**

@@ -6,6 +6,7 @@
  * concurrent sessions.
  */
 
+import { randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy } from '@debugmcp/shared';
@@ -15,6 +16,47 @@ import type { MinimalDapClient } from './minimal-dap.js';
 import path from 'path';
 
 const logger = createLogger('child-session-manager');
+
+function createInstanceId(): string {
+  return randomBytes(4).toString('hex');
+}
+
+function createChildSafePolicy(policy: AdapterPolicy): AdapterPolicy {
+  if (!policy.supportsReverseStartDebugging) {
+    return policy;
+  }
+
+  return {
+    ...policy,
+    supportsReverseStartDebugging: false,
+    childSessionStrategy: 'none',
+    shouldDeferParentConfigDone: () => false,
+    getDapClientBehavior: (): DapClientBehavior => {
+      const baseBehavior = policy.getDapClientBehavior();
+      const behavior: DapClientBehavior = {
+        ...baseBehavior,
+        childRoutedCommands: new Set<string>(),
+        mirrorBreakpointsToChild: false,
+        deferParentConfigDone: false,
+        pauseAfterChildAttach: false,
+        stackTraceRequiresChild: false,
+      };
+
+      if (baseBehavior.handleReverseRequest) {
+        behavior.handleReverseRequest = async (request, context) => {
+          const result = await baseBehavior.handleReverseRequest!(request, context);
+          if (!result.handled) {
+            return result;
+          }
+          // Do not spawn grandchildren; acknowledge and stop.
+          return { handled: true };
+        };
+      }
+
+      return behavior;
+    },
+  };
+}
 
 export interface ChildSessionOptions {
   policy: AdapterPolicy;
@@ -41,6 +83,7 @@ export class ChildSessionManager extends EventEmitter {
   // State tracking
   private adoptionInProgress = false;
   private childConfigComplete = false;
+  private readonly instanceId: string;
 
   constructor(options: ChildSessionOptions) {
     super();
@@ -49,6 +92,8 @@ export class ChildSessionManager extends EventEmitter {
     this.parentClient = options.parentClient;
     this.host = options.host;
     this.port = options.port;
+    this.instanceId = createInstanceId();
+    logger.info(`[ChildSessionManager:${this.instanceId}] created`);
   }
 
   /**
@@ -62,6 +107,7 @@ export class ChildSessionManager extends EventEmitter {
    * Check if adoption is currently in progress
    */
   isAdoptionInProgress(): boolean {
+    logger.info(`[ChildSessionManager:${this.instanceId}] isAdoptionInProgress() => ${this.adoptionInProgress}`);
     return this.adoptionInProgress;
   }
 
@@ -69,13 +115,16 @@ export class ChildSessionManager extends EventEmitter {
    * Check if there are any active child sessions
    */
   hasActiveChildren(): boolean {
-    return this.activeChild !== null || this.childSessions.size > 0;
+    const result = this.activeChild !== null || this.childSessions.size > 0;
+    logger.info(`[ChildSessionManager:${this.instanceId}] hasActiveChildren() => ${result} (activeChild: ${!!this.activeChild}, sessions: ${this.childSessions.size})`);
+    return result;
   }
 
   /**
    * Get the active child session
    */
   getActiveChild(): MinimalDapClient | null {
+    logger.info(`[ChildSessionManager:${this.instanceId}] getActiveChild() => ${this.activeChild ? 'active' : 'null'}`);
     return this.activeChild;
   }
 
@@ -83,10 +132,30 @@ export class ChildSessionManager extends EventEmitter {
    * Route a command to the appropriate child session if needed
    */
   shouldRouteToChild(command: string): boolean {
-    if (!this.dapBehavior.childRoutedCommands) {
+    const routedCommands = this.dapBehavior.childRoutedCommands;
+    if (!routedCommands) {
+      logger.info(`[ChildSessionManager:${this.instanceId}] shouldRouteToChild(${command}): false (no routed command set configured)`);
       return false;
     }
-    return this.dapBehavior.childRoutedCommands.has(command);
+
+    if (!routedCommands.has(command)) {
+      logger.info(`[ChildSessionManager:${this.instanceId}] shouldRouteToChild(${command}): false (command not routed)`);
+      return false;
+    }
+
+    const hasActive = this.hasActiveChildren();
+    const adoptionInProg = this.adoptionInProgress;
+
+    if (hasActive) {
+      logger.info(`[ChildSessionManager:${this.instanceId}] shouldRouteToChild(${command}): true (active child session available)`);
+    } else if (adoptionInProg) {
+      logger.info(`[ChildSessionManager:${this.instanceId}] shouldRouteToChild(${command}): true (child adoption in progress)`);
+    } else {
+      // Still return true so callers can queue/await until the child attaches.
+      logger.info(`[ChildSessionManager:${this.instanceId}] shouldRouteToChild(${command}): true (child command with no active child yet)`);
+    }
+
+    return true;
   }
 
   /**
@@ -125,7 +194,7 @@ export class ChildSessionManager extends EventEmitter {
     
     // Check if adoption is in progress or we already have a child
     if (this.adoptionInProgress || this.hasActiveChildren()) {
-      logger.info('Ignoring child session request; adoption in progress or child active', {
+      logger.info(`[ChildSessionManager:${this.instanceId}] Ignoring child session request; adoption in progress or child active`, {
         adoptionInProgress: this.adoptionInProgress,
         hasActiveChild: !!this.activeChild,
         childSessionCount: this.childSessions.size
@@ -134,14 +203,16 @@ export class ChildSessionManager extends EventEmitter {
     }
     
     this.adoptionInProgress = true;
+    logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = true for ${pendingId}`);
     this.adoptedTargets.add(pendingId);
     
     try {
       // Import MinimalDapClient dynamically to avoid circular dependency
       const { MinimalDapClient } = await import('./minimal-dap.js');
       
-      // Create child client with policy for proper multi-session behavior
-      const child = new MinimalDapClient(this.host, this.port, this.policy);
+      // Create child client with a policy that disables recursive reverse debugging
+      const childPolicy = createChildSafePolicy(this.policy);
+      const child = new MinimalDapClient(this.host, this.port, childPolicy);
       await child.connect();
       
       // Wire up event forwarding
@@ -150,6 +221,7 @@ export class ChildSessionManager extends EventEmitter {
       // Store and activate child
       this.childSessions.set(pendingId, child);
       this.activeChild = child;
+      logger.info(`[ChildSessionManager:${this.instanceId}] *** ACTIVE CHILD SET *** for ${pendingId} at timestamp ${Date.now()}`);
       
       // Initialize child session
       await this.initializeChild(child, pendingId, parentConfig);
@@ -169,15 +241,17 @@ export class ChildSessionManager extends EventEmitter {
       }
       
       this.adoptionInProgress = false;
+      logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = false for ${pendingId} (success)`);
       this.childConfigComplete = true;
       
-      logger.info(`Child session created successfully for ${pendingId}`);
+      logger.info(`[ChildSessionManager:${this.instanceId}] Child session created successfully for ${pendingId}`);
       this.emit('childCreated', pendingId, child);
       
     } catch (error) {
       this.adoptionInProgress = false;
+      logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = false for ${pendingId} (error)`);
       const msg = error instanceof Error ? error.message : String(error);
-      logger.error(`Failed to create child session for ${pendingId}: ${msg}`);
+      logger.error(`[ChildSessionManager:${this.instanceId}] Failed to create child session for ${pendingId}: ${msg}`);
       this.emit('childError', pendingId, error);
       throw error;
     }
@@ -349,8 +423,11 @@ export class ChildSessionManager extends EventEmitter {
     });
     
     child.on('close', () => {
-      logger.info('[child] DAP client connection closed');
+      logger.info(`[ChildSessionManager:${this.instanceId}] [child] DAP client connection closed (current count=${this.childSessions.size})`);
       this.emit('childClosed');
+      this.childSessions.clear();
+      this.activeChild = null;
+      logger.info(`[ChildSessionManager:${this.instanceId}] *** ACTIVE CHILD CLEARED *** (child closed) at timestamp ${Date.now()}`);
     });
   }
 
@@ -401,7 +478,7 @@ export class ChildSessionManager extends EventEmitter {
    * Shutdown all child sessions
    */
   async shutdown(): Promise<void> {
-    logger.info('Shutting down child sessions');
+    logger.info(`[ChildSessionManager:${this.instanceId}] Shutting down child sessions`);
     
     for (const [id, child] of this.childSessions) {
       try {

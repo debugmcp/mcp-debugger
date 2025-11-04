@@ -369,7 +369,8 @@ describe('Docker: JavaScript Debugging Smoke Tests', () => {
       name: 'continue_execution',
       arguments: { sessionId }
     });
-    expect(parseSdkToolResult(continueResult).success).toBe(true);
+    const continueParsed = parseSdkToolResult(continueResult);
+    expect(continueParsed.success).toBe(true);
 
     const closeResult = await mcpClient!.callTool({
       name: 'close_debug_session',
@@ -450,7 +451,8 @@ describe('Docker: JavaScript Debugging Smoke Tests', () => {
       name: 'continue_execution',
       arguments: { sessionId }
     });
-    expect(parseSdkToolResult(continueResult).success).toBe(true);
+    const continueParsed = parseSdkToolResult(continueResult);
+    expect(continueParsed.success).toBe(true);
 
     const closeResult = await mcpClient!.callTool({
       name: 'close_debug_session',

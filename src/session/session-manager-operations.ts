@@ -955,6 +955,47 @@ export class SessionManagerOperations extends SessionManagerData {
       }
 
       return { success: false, error: userError };
+  }
+}
+
+  /**
+   * Wait for a session to emit a stopped event after launch to honour the first breakpoint.
+   */
+  private async waitForInitialBreakpointPause(sessionId: string, timeoutMs: number): Promise<boolean> {
+    const session = this._getSessionById(sessionId);
+    const proxyManager = session.proxyManager;
+
+    if (!proxyManager) {
+      return false;
     }
+
+    if (session.state === SessionState.PAUSED) {
+      return true;
+    }
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+
+      const cleanup = () => {
+        proxyManager.removeListener('stopped', onStopped);
+        clearTimeout(timer);
+      };
+
+      const onStopped = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(true);
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(false);
+      }, timeoutMs);
+
+      proxyManager.once('stopped', onStopped);
+    });
   }
 }

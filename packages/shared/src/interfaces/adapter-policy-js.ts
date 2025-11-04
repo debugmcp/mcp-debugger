@@ -613,6 +613,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       mirrorBreakpointsToChild: true,
       deferParentConfigDone: true,
       pauseAfterChildAttach: true,
+      stackTraceRequiresChild: true,
       
       // Normalize adapter ID for initialize
       normalizeAdapterId: (requestedId: string): string => {

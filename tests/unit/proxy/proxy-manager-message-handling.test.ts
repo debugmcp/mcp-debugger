@@ -808,3 +808,27 @@ describe('ProxyManager Message Handling', () => {
     });
   });
 });
+  describe('IPC smoke test status', () => {
+    it('kills proxy process when minimal proxy test status arrives', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const kill = vi.fn();
+      (proxyManager as unknown as { proxyProcess: { kill: () => void } }).proxyProcess = { kill } as never;
+
+      (proxyManager as unknown as { handleStatusMessage: (message: any) => void }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'ipc-session',
+        status: 'proxy_minimal_ran_ipc_test'
+      });
+
+      expect(kill).toHaveBeenCalled();
+    });
+  });

@@ -125,6 +125,15 @@ export class DapProxyWorker {
   async handleCommand(command: ParentCommand): Promise<void> {
     this.currentSessionId = command.sessionId || null;
 
+    const sessionTag = this.currentSessionId ?? 'unknown';
+    const dapLabel =
+      command.cmd === 'dap' && (command as { dapCommand?: string }).dapCommand
+        ? (command as DapCommandPayload).dapCommand
+        : undefined;
+    this.logger?.info(
+      `[Worker] handleCommand cmd=${command.cmd}${dapLabel ? `/${dapLabel}` : ''} session=${sessionTag}`
+    );
+
     try {
       switch (command.cmd) {
         case 'init':
@@ -137,6 +146,13 @@ export class DapProxyWorker {
           await this.handleTerminate();
           break;
       }
+      const completionLabel =
+        command.cmd === 'dap' && 'dapCommand' in command
+          ? `${command.cmd}/${(command as DapCommandPayload).dapCommand}`
+          : command.cmd;
+      this.logger?.info(
+        `[Worker] Completed command ${completionLabel} session=${sessionTag} state=${this.state}`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger?.error(`[Worker] Error handling command ${command.cmd}:`, error);
@@ -430,6 +446,11 @@ export class DapProxyWorker {
    * Handle DAP command
    */
   async handleDapCommand(payload: DapCommandPayload): Promise<void> {
+    const stateLabel = this.state;
+    this.logger?.info(
+      `[Worker] handleDapCommand '${payload.dapCommand}' session=${payload.sessionId} state=${stateLabel} queueLength=${this.commandQueue.length}`
+    );
+
     // If shutting down, fail fast
     if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
       this.sendDapResponse(payload.requestId, false, undefined, 'Proxy is shutting down');
@@ -441,6 +462,9 @@ export class DapProxyWorker {
       if (this.adapterPolicy.requiresCommandQueueing()) {
         this.logger?.info(`[Worker] Queuing '${payload.dapCommand}' until DAP client connected (${this.adapterPolicy.name}).`);
         this.preConnectQueue.push(payload);
+        this.logger?.info(
+          `[Worker] Pre-connect queue length=${this.preConnectQueue.length} (command='${payload.dapCommand}')`
+        );
       } else {
         this.logger?.info(`[Worker] Rejecting '${payload.dapCommand}' before connection: DAP client not connected`);
         this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
@@ -451,6 +475,9 @@ export class DapProxyWorker {
     try {
       // Check if command should be queued based on policy
       const handling = this.adapterPolicy.shouldQueueCommand(payload.dapCommand, this.adapterState);
+      this.logger?.info(
+        `[Worker] Queue decision for '${payload.dapCommand}': shouldQueue=${handling.shouldQueue} shouldDefer=${handling.shouldDefer} queueLength=${this.commandQueue.length}`
+      );
       
       if (handling.shouldQueue) {
         this.logger!.info(`[Worker] ${handling.reason || 'Queuing command'}`);
@@ -475,6 +502,9 @@ export class DapProxyWorker {
         }
         
         this.commandQueue.push(payload);
+        this.logger?.info(
+          `[Worker] Command queued. queueLength=${this.commandQueue.length} (command='${payload.dapCommand}')`
+        );
         await this.drainCommandQueue();
         return;
       }
@@ -500,6 +530,7 @@ export class DapProxyWorker {
       }
 
       // Send request
+      this.logger?.info(`[Worker] Sending '${payload.dapCommand}' to adapter`);
       const response = await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
       
       // Update adapter state if needed
@@ -523,12 +554,12 @@ export class DapProxyWorker {
       
       // Ensure initial stop after launch if needed
       if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
-        try {
-          await this.drainCommandQueue();
-          await this.ensureInitialStop();
-        } catch {
-          // ignore
-        }
+        await this.drainCommandQueue();
+        this.ensureInitialStop().catch((err) => {
+          this.logger?.debug?.(
+            `[Worker] ensureInitialStop encountered error: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
       }
     } catch (error) {
       this.requestTracker.complete(payload.requestId);
@@ -555,9 +586,14 @@ export class DapProxyWorker {
     // Clear queue after ordering
     this.commandQueue = [];
     
+    let remaining = ordered.length;
     for (const payload of ordered) {
+      remaining--;
       try {
         const silent = ((payload as SilentDapCommandPayload).__silent === true);
+        this.logger?.info(
+          `[Worker] Processing queued command '${payload.dapCommand}' silent=${silent} queueRemaining=${remaining}`
+        );
         if (silent) {
           await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
           if (this.adapterPolicy.updateStateOnCommand) {
@@ -578,11 +614,11 @@ export class DapProxyWorker {
         
         const initBehavior = this.adapterPolicy.getInitializationBehavior();
         if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
-          try {
-            await this.ensureInitialStop();
-          } catch {
-            // ignore
-          }
+          this.ensureInitialStop().catch((err) => {
+            this.logger?.debug?.(
+              `[Worker] ensureInitialStop (queued) encountered error: ${err instanceof Error ? err.message : String(err)}`
+            );
+          });
         }
       } catch (error) {
         this.requestTracker.complete(payload.requestId);

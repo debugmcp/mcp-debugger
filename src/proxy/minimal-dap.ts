@@ -32,17 +32,6 @@ type MinimalDapClientOptions = {
 
 const TWO_CRLF = '\r\n\r\n';
 
-function isInitializeResponse(
-  response: unknown
-): response is { command: string; body?: { capabilities?: Record<string, unknown> } } {
-  return (
-    response !== null &&
-    typeof response === 'object' &&
-    'command' in response &&
-    (response as { command: unknown }).command === 'initialize'
-  );
-}
-
 export class MinimalDapClient extends EventEmitter {
   private socket: Socket | null = null;
   private rawData = Buffer.alloc(0);
@@ -81,13 +70,8 @@ export class MinimalDapClient extends EventEmitter {
 
   // When set, the very next configurationDone send will not be deferred
   private suppressNextConfigDoneDeferral = false;
-
-  // Marks that child configuration is finished
-  private childConfigComplete = false;
-  // Prevent handling multiple concurrent startDebugging requests (js-debug may send attach+launch)
-  private adoptionInProgress = false;
-  
-  private supportsConfigDone = true;
+  // Mirror of active children tracked for policy context
+  // Child lifecycle is managed by ChildSessionManager; we only retain a view for policy consumers.
 
   private readonly childClientFactory: (host: string, port: number, policy: AdapterPolicy) => MinimalDapClient;
   private readonly timers: {
@@ -126,10 +110,10 @@ export class MinimalDapClient extends EventEmitter {
       });
       
       // Wire up events from ChildSessionManager
-      this.childSessionManager.on('childCreated', (_pendingId, _child) => {
-        // Child session created successfully
-        void _pendingId;
-        void _child;
+      this.childSessionManager.on('childCreated', (pendingId, child) => {
+        logger.info(`[MinimalDapClient] childCreated event: Setting activeChild for ${pendingId}`);
+        this.childSessions.set(pendingId, child as MinimalDapClient);
+        this.activeChild = child as MinimalDapClient;
       });
       
       this.childSessionManager.on('childEvent', (evt: DebugProtocol.Event) => {
@@ -140,6 +124,12 @@ export class MinimalDapClient extends EventEmitter {
       
       this.childSessionManager.on('childError', (_pendingId, error) => {
         logger.error('[MinimalDapClient] Child session error:', error);
+      });
+
+      this.childSessionManager.on('childClosed', () => {
+        logger.info(`[MinimalDapClient] childClosed event: Clearing activeChild`);
+        this.childSessions.clear();
+        this.activeChild = null;
       });
     }
   }
@@ -253,18 +243,6 @@ export class MinimalDapClient extends EventEmitter {
         this.pendingRequests.delete(response.request_seq);
         
         if (response.success) {
-          // Cache capabilities from initialize response
-          if (response.command === 'initialize' && isInitializeResponse(response)) {
-            try {
-              const caps = response.body?.capabilities;
-              if (caps && typeof caps.supportsConfigurationDoneRequest === 'boolean') {
-                this.supportsConfigDone = !!caps.supportsConfigurationDoneRequest;
-                logger.info(`[MinimalDapClient] initialize capabilities: supportsConfigurationDoneRequest=${this.supportsConfigDone}`);
-              }
-            } catch {
-              // ignore capability parse errors
-            }
-          }
           pending.resolve(response);
         } else {
           pending.reject(new Error(response.message || 'Request failed'));
@@ -414,200 +392,6 @@ export class MinimalDapClient extends EventEmitter {
     }
   }
 
-  private wireChildEvents(child: MinimalDapClient): void {
-    child.on('event', (evt: DebugProtocol.Event) => {
-      try {
-        // Re-emit child events on this parent client so upstream sees a single stream
-        this.emit(evt.event, evt.body);
-        this.emit('event', evt);
-      } catch (e) {
-        logger.warn('[MinimalDapClient] Error forwarding child event:', e);
-      }
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    child.on('error', (err: any) => {
-      logger.error('[MinimalDapClient] Child DAP client error:', err);
-    });
-    child.on('close', () => {
-      logger.info('[MinimalDapClient] Child DAP client connection closed');
-    });
-  }
-
-  private async createChildSession(pendingId: string, configuration: Record<string, unknown>, _policy: AdapterPolicy): Promise<void> {
-    void _policy;
-
-    if (this.childSessions.has(pendingId)) {
-      this.activeChild = this.childSessions.get(pendingId)!;
-      return;
-    }
-
-    const child = this.childClientFactory(this.host, this.port, this.policy);
-    await child.connect();
-    this.wireChildEvents(child);
-    // Make the child discoverable for routed commands as early as possible
-    this.childSessions.set(pendingId, child);
-    // Mark child active immediately so debuggee-scoped commands route to the correct session
-    this.activeChild = child;
-
-    // 1) initialize
-    const initArgs = {
-      clientID: `mcp-child-${pendingId}`,
-      adapterID: 'pwa-node',
-      pathFormat: 'path',
-      linesStartAt1: true,
-      columnsStartAt1: true
-    };
-    logger.info(`[MinimalDapClient] [child:${pendingId}] initialize`);
-    await child.sendRequest('initialize', initArgs);
-
-    // 2) wait for initialized
-    await new Promise<void>((resolve) => {
-      let done = false;
-      const onEvt = (evt: DebugProtocol.Event) => {
-        if (done) return;
-        if (evt && evt.event === 'initialized') {
-          done = true;
-          child.off('event', onEvt);
-          this.timers.clearTimeout(timer);
-          resolve();
-        }
-      };
-      const timer = this.timers.setTimeout(() => {
-        if (done) return;
-        done = true;
-        child.off('event', onEvt);
-        resolve();
-      }, 12000);
-      child.on('event', onEvt);
-    });
-
-    // 3) setExceptionBreakpoints
-    try {
-      logger.info(`[MinimalDapClient] [child:${pendingId}] setExceptionBreakpoints []`);
-      await child.sendRequest('setExceptionBreakpoints', { filters: [] });
-    } catch {
-      logger.warn(`[MinimalDapClient] [child:${pendingId}] setExceptionBreakpoints failed or not supported`);
-    }
-
-    // 4) setBreakpoints for any stored sources
-    try {
-      for (const [srcPath, bps] of this.storedBreakpoints) {
-        const absolutePath = path.isAbsolute(srcPath) ? srcPath : path.resolve(srcPath);
-        logger.info(`[MinimalDapClient] [child:${pendingId}] setBreakpoints -> ${absolutePath} (${bps.length})`);
-        await child.sendRequest('setBreakpoints', { source: { path: absolutePath }, breakpoints: bps });
-      }
-      } catch (e) {
-        const emsg = getErrorMessage(e);
-        logger.warn(`[MinimalDapClient] [child:${pendingId}] setBreakpoints failed: ${emsg}`);
-      }
-
-    // 5) configurationDone (guarded by capability observed on child's initialize)
-    try {
-      if ((child as unknown as MinimalDapClient).supportsConfigDone) {
-        logger.info(`[MinimalDapClient] [child:${pendingId}] configurationDone`);
-        await child.sendRequest('configurationDone', {});
-      } else {
-        logger.info(`[MinimalDapClient] [child:${pendingId}] skipping configurationDone (capability not advertised)`);
-      }
-      this.childConfigComplete = true;
-      // Release any deferred parent configurationDone now that child is configured
-      this.flushDeferredParentConfigDone();
-    } catch {
-      logger.warn('[MinimalDapClient] [child] configurationDone failed or not required; flushing parent deferral to avoid deadlock');
-      this.flushDeferredParentConfigDone();
-    }
-
-    // 6) attach adoption using __pendingTargetId with retries
-    {
-      const type = (typeof configuration?.type === 'string') ? (configuration as { type: string }).type : 'pwa-node';
-      let adopted = false;
-      let lastErr: unknown;
-      for (let i = 0; i < 20 && !adopted; i++) {
-        try {
-          logger.info(`[MinimalDapClient] [child:${pendingId}] attach adopt (__pendingTargetId) attempt ${i + 1}`);
-          await child.sendRequest('attach', {
-            type,
-            request: 'attach',
-            __pendingTargetId: pendingId,
-            continueOnAttach: true
-          }, 20000);
-          adopted = true;
-          break;
-        } catch (e) {
-          lastErr = e;
-          await this.sleep(200);
-        }
-      }
-      if (!adopted) {
-        const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-        logger.warn(`[MinimalDapClient] [child:${pendingId}] attach adoption failed after retries: ${msg}`);
-      }
-    }
-
-    // Post-attach: js-debug may emit another 'initialized'; re-send configs to finalize breakpoint registration
-    try {
-      let sawPostInit = false;
-      await new Promise<void>((resolve) => {
-        let done = false;
-        const onEvt2 = (evt: DebugProtocol.Event) => {
-          if (done) return;
-          if (evt && evt.event === 'initialized') {
-            sawPostInit = true;
-            done = true;
-            child.off('event', onEvt2);
-            this.timers.clearTimeout(t2);
-            resolve();
-          }
-        };
-        const t2 = this.timers.setTimeout(() => {
-          if (done) return;
-          done = true;
-          child.off('event', onEvt2);
-          resolve();
-        }, 3000);
-        child.on('event', onEvt2);
-      });
-      if (sawPostInit) {
-        try { await child.sendRequest('setExceptionBreakpoints', { filters: [] }); } catch {}
-        try {
-          for (const [srcPath, bps] of this.storedBreakpoints) {
-            const absolutePath = path.isAbsolute(srcPath) ? srcPath : path.resolve(srcPath);
-            await child.sendRequest('setBreakpoints', { source: { path: absolutePath }, breakpoints: bps });
-          }
-        } catch {}
-        // Do NOT send configurationDone again after post-attach initialized; it can spuriously resume the target.
-      }
-    } catch {}
-
-    // 7) Wait for stopped; fallback to threads+pause and retry wait
-    try {
-      await new Promise<void>((resolve) => {
-        let done = false;
-        const onEvt = (evt: DebugProtocol.Event) => {
-          if (done) return;
-          if (evt && evt.event === 'stopped') {
-            done = true;
-            child.off('event', onEvt);
-            this.timers.clearTimeout(timer);
-            resolve();
-          }
-        };
-        const timer = this.timers.setTimeout(() => {
-          if (done) return;
-          done = true;
-          child.off('event', onEvt);
-          resolve(); // fallback path will try pause
-        }, 15000);
-        child.on('event', onEvt);
-      });
-    } catch {
-      // ignore
-    }
-
-    this.childSessions.set(pendingId, child);
-    this.activeChild = child;
-  }
-  
   public connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       logger.info(`[MinimalDapClient] Connecting to ${this.host}:${this.port}`);
@@ -703,20 +487,119 @@ export class MinimalDapClient extends EventEmitter {
     }
     
     // Route debuggee-scoped requests to active child session when present using policy
-    if (this.childSessionManager?.shouldRouteToChild(command)) {
-      // If a child session is pending creation, wait briefly
-      if (!this.activeChild && this.childSessionManager.hasActiveChildren()) {
+    const manager = this.childSessionManager;
+    const shouldRouteToChild = manager?.shouldRouteToChild(command) ?? false;
+
+    if (shouldRouteToChild) {
+      const hasActiveChild = manager?.hasActiveChildren?.() ?? false;
+      const adoptionInProgress =
+        typeof manager?.isAdoptionInProgress === 'function'
+          ? manager.isAdoptionInProgress()
+          : false;
+      logger.info(
+        `[MinimalDapClient] Routing '${command}' to child session (hasActiveChild=${hasActiveChild}, adoptionInProgress=${adoptionInProgress})`
+      );
+
+      // Special handling for stackTrace when child isn't ready yet.
+      // Policies can opt-in to waiting for a child session instead of falling back immediately.
+      const stackTraceRequiresChild = this.dapBehavior.stackTraceRequiresChild === true;
+      if (command === 'stackTrace' && !this.activeChild) {
+        const expectChild =
+          stackTraceRequiresChild || adoptionInProgress || hasActiveChild;
+
+        if (expectChild) {
+          logger.info(
+            `[MinimalDapClient] stackTrace requested while child not ready - waiting for child session (policy=${this.policy?.name}, requiresChild=${stackTraceRequiresChild}, adoptionInProgress=${adoptionInProgress}, hasActiveChild=${hasActiveChild})`
+          );
+
+          const maxWaitMs = this.dapBehavior.childInitTimeout ?? 12000;
+          const pollIntervalMs = 50;
+          const maxIterations = maxWaitMs / pollIntervalMs;
+
+          for (let i = 0; i < maxIterations && !this.activeChild; i++) {
+            await this.sleep(pollIntervalMs);
+            this.activeChild = manager?.getActiveChild() || null;
+
+            if (i % 10 === 0 && i > 0) {
+              const elapsedMs = i * pollIntervalMs;
+              const stillAdopting = manager?.isAdoptionInProgress() ?? false;
+              logger.info(
+                `[MinimalDapClient] stackTrace wait ${elapsedMs}ms: activeChild=${!!this.activeChild}, adoptionInProgress=${stillAdopting}`
+              );
+            }
+          }
+
+          if (!this.activeChild) {
+            logger.warn(
+              `[MinimalDapClient] stackTrace: Child still not ready after ${maxWaitMs}ms wait`
+            );
+            if (stackTraceRequiresChild) {
+              const syntheticFailure: DebugProtocol.Response = {
+                type: 'response',
+                seq: this.nextSeq++,
+                request_seq: -1,
+                command,
+                success: false,
+                message: `Child session not ready for '${command}' after waiting ${maxWaitMs}ms`
+              };
+              return syntheticFailure as T;
+            }
+          } else {
+            logger.info('[MinimalDapClient] Child session now ready for stackTrace');
+          }
+        }
+      } else if (!this.activeChild && manager?.hasActiveChildren()) {
+        // For other commands, wait longer if needed
+        logger.info(`[MinimalDapClient] Waiting for active child before routing '${command}'`);
         for (let i = 0; i < 120 && !this.activeChild; i++) {
           await this.sleep(100); // up to ~12s
-          this.activeChild = this.childSessionManager.getActiveChild();
+          this.activeChild = manager.getActiveChild();
         }
       }
       
       if (this.activeChild) {
-        return this.activeChild.sendRequest<T>(command, args as unknown, timeoutMs);
+        try {
+          logger.info(`[MinimalDapClient] Dispatching '${command}' to child session`);
+          return await this.activeChild.sendRequest<T>(command, args as unknown, timeoutMs);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const treatAsGracefulCompletion =
+            command === 'continue' || command === 'disconnect' || command === 'terminate';
+          if (
+            message.includes('DAP client disconnected') ||
+            message.includes('Socket not connected') ||
+            message.includes('write after end')
+          ) {
+            logger.warn(`[MinimalDapClient] Child session unavailable for '${command}' (${message}); falling back to parent session.`);
+            if (treatAsGracefulCompletion) {
+              const syntheticResponse = {
+                type: 'response',
+                seq: this.nextSeq++,
+                request_seq: -1,
+                command,
+                success: true
+              } as DebugProtocol.Response;
+              return syntheticResponse as T;
+            }
+          } else {
+            throw err;
+          }
+        }
+      } else if (command === 'stackTrace') {
+        logger.warn(`[MinimalDapClient] No active child for stackTrace - attempting parent session (may return empty)`);
+        // Fall through to send to parent session
       } else {
         logger.warn(`[MinimalDapClient] No active child available for routed command '${command}'. Forwarding to parent session (may return empty/unsupported).`);
       }
+    } else {
+      const hasActiveChild = this.childSessionManager?.hasActiveChildren?.() ?? false;
+      const adoptionInProgress =
+        typeof this.childSessionManager?.isAdoptionInProgress === 'function'
+          ? this.childSessionManager.isAdoptionInProgress()
+          : false;
+      logger.info(
+        `[MinimalDapClient] Keeping '${command}' on parent session (hasActiveChild=${hasActiveChild}, adoptionInProgress=${adoptionInProgress})`
+      );
     }
     
     // Track and mirror setBreakpoints to child if/when present using ChildSessionManager

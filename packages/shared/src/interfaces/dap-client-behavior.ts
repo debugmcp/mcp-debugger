@@ -81,4 +81,11 @@ export interface DapClientBehavior {
    * Whether to suppress configurationDone after child attach
    */
   suppressPostAttachConfigDone?: boolean;
+
+  /**
+   * Whether stackTrace requests are expected to run against a child session.
+   * When true, callers should wait briefly for the active child to be ready
+   * before issuing stackTrace to avoid empty results.
+   */
+  stackTraceRequiresChild?: boolean;
 }

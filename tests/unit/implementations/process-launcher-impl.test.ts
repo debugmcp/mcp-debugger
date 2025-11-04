@@ -65,6 +65,38 @@ describe('ProcessLauncherImpl', () => {
     platformSpy.mockRestore();
     killSpy.mockRestore();
   });
+
+  it('kills child directly when running inside a container', () => {
+    const originalContainer = process.env.MCP_CONTAINER;
+    process.env.MCP_CONTAINER = 'true';
+
+    const launcher = new ProcessLauncherImpl(processManager);
+    const adapterProcess = launcher.launch('node', ['script.js']);
+
+    const processKillSpy = vi.spyOn(global.process, 'kill');
+    adapterProcess.kill('SIGTERM');
+
+    expect(processKillSpy).not.toHaveBeenCalled();
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+    if (originalContainer === undefined) {
+      delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
+    } else {
+      process.env.MCP_CONTAINER = originalContainer;
+    }
+  });
+
+  it('returns false when child kill throws', () => {
+    const launcher = new ProcessLauncherImpl(processManager);
+    const adapterProcess = launcher.launch('node', ['script.js']);
+
+    child.kill = vi.fn(() => {
+      throw new Error('kill failed');
+    });
+
+    const result = adapterProcess.kill('SIGTERM');
+    expect(result).toBe(false);
+  });
 });
 
 describe('ProxyProcessLauncherImpl', () => {
@@ -164,5 +196,59 @@ describe('ProxyProcessLauncherImpl', () => {
     } else {
       process.env.MCP_CONTAINER = originalContainer;
     }
+  });
+
+  it('reuses initialization promise for concurrent callers', async () => {
+    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-concurrent');
+
+    const promiseSpy = vi.spyOn(proxyProcess as any, 'createInitializationPromise');
+    const first = proxyProcess.waitForInitialization(1000);
+    const second = proxyProcess.waitForInitialization(500);
+    expect(promiseSpy).toHaveBeenCalledTimes(1);
+    expect(first).toBeInstanceOf(Promise);
+    expect(second).toBeInstanceOf(Promise);
+
+    child.emit('message', { type: 'status', status: 'adapter_configured_and_launched' });
+
+    await expect(first).resolves.toBeUndefined();
+
+    // Subsequent calls resolve immediately
+    await expect(proxyProcess.waitForInitialization(100)).resolves.toBeUndefined();
+  });
+
+  it('marks initialization as failed when killed during wait', async () => {
+    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-kill');
+
+    const pending = proxyProcess.waitForInitialization(1000);
+
+    child.kill = vi.fn().mockReturnValue(true);
+    const killResult = proxyProcess.kill('SIGTERM');
+    expect(killResult).toBe(true);
+
+    await expect(pending).rejects.toThrow(/Process killed during initialization/);
+    await expect(proxyProcess.waitForInitialization()).rejects.toThrow(/already completed or failed/);
+  });
+
+  it('fails initialization when process exits before wait is requested', async () => {
+    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-early-exit');
+
+    child.emit('exit', 1, null);
+
+    await expect(proxyProcess.waitForInitialization()).rejects.toThrow(/already completed or failed/);
+  });
+
+  it('returns false when child kill throws', () => {
+    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-kill-error');
+
+    child.kill = vi.fn(() => {
+      throw new Error('kill explosion');
+    });
+
+    const result = proxyProcess.kill('SIGTERM');
+    expect(result).toBe(false);
   });
 });
