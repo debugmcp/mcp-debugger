@@ -263,7 +263,7 @@ Troubleshooting checklist
 - `MCP_CONTAINER=true`
   - Enables dynamic loading by default in the registry
   - Container-friendly behavior and logging locations
-- `DEBUG_MCP_STDIO=1` (set internally for container stdio runs)
+- `CONSOLE_OUTPUT_SILENCED=1` (set internally for transport runs that must suppress console output)
   - Ensures stdio silencer/mirroring is active in container entrypoint
 - Standard logging envs or CLI flags (see README and docs)
 

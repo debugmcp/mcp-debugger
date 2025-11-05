@@ -60,6 +60,7 @@
     "test:e2e:npx": "vitest run tests/e2e/npx",
     "test:all-channels": "pnpm test:e2e:smoke && pnpm test:e2e:container && pnpm test:e2e:npx",
     "test:docker-e2e": "cross-env DOCKER_E2E=1 vitest run tests/e2e/docker/docker-proxy-liveness.test.ts",
+    "test:stress": "cross-env RUN_STRESS_TESTS=true vitest run tests/stress",
     "pretest:coverage": "pnpm run build && pnpm run pretest:docker && node scripts/clean-coverage.js",
     "test:coverage": "vitest run --coverage",
     "posttest:coverage": "node scripts/cleanup-test-processes.js && node analyze-coverage.js",

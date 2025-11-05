@@ -75,7 +75,7 @@ export async function handleStdioCommand(
       logger.warn('[MCP] Stdin ended; ignoring in stdio mode and waiting for transport close or signal.');
     });
 
-    // Add robust exit/signal diagnostics (logged to file; console is disabled in stdio)
+    // Add robust exit/signal diagnostics (logged to file; console output is silenced for protocol safety)
     process.on('SIGTERM', () => {
       logger.warn('[MCP] SIGTERM received, exiting.');
       try { clearInterval(keepAlive); } catch {}
@@ -90,13 +90,13 @@ export async function handleStdioCommand(
       logger.error('[MCP] Process exiting', {
         code,
         argv: process.argv,
-        env_stdio: process.env.DEBUG_MCP_STDIO,
+        env_console_silenced: process.env.CONSOLE_OUTPUT_SILENCED,
         uptime: process.uptime()
       });
     });
   } catch (error) {
     logger.error('Failed to start server in stdio mode', { error });
-    // In stdio mode, we must not write to console as it corrupts MCP protocol
+    // When console output is silenced we must not write to console as it corrupts transports
     exitProcess(1);
   }
 }

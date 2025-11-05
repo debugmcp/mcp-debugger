@@ -6,6 +6,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
@@ -180,6 +181,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       supportsVariableType: true  // JavaScript debugger supports variable type information
     };
   },
+
+  isSessionReady: (state: SessionState, options: { stopOnEntry?: boolean }) =>
+    state === SessionState.PAUSED || (!options.stopOnEntry && state === SessionState.RUNNING),
 
   /**
    * Perform JavaScript-specific handshake sequence for js-debug/pwa-node.

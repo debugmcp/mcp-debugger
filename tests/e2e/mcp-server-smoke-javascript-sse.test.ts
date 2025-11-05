@@ -1,5 +1,27 @@
 /**
  * @jest-environment node
+ * 
+ * CRITICAL WARNING: Console Silencing in SSE Mode
+ * ================================================
+ * 
+ * This test uses inherited stdio to match the production environment (start-sse-server.cmd).
+ * Console output during SSE server operation can CORRUPT IPC channels between parent and child
+ * processes, causing JavaScript debugging to fail with empty stack traces.
+ * 
+ * THE FIX: In src/index.ts, the shouldSilenceConsole logic MUST include:
+ *   hasSSE ||
+ * 
+ * Without this, any console.log during proxy process initialization will corrupt the IPC
+ * channel when stdio is inherited, breaking JavaScript's complex parent-child-grandchild
+ * debugging architecture.
+ * 
+ * SYMPTOMS OF FAILURE:
+ * - Empty stack traces after ~35 second timeout
+ * - No response from debug adapter child processes
+ * - JavaScript debugging fails while Python continues to work
+ * 
+ * This issue took a week to diagnose. The console silencing for SSE mode is CRITICAL
+ * for JavaScript debugging to work properly in production environments.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'path';
@@ -123,6 +145,11 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
 
   /**
    * Start SSE server with comprehensive logging and error handling
+   * 
+   * CRITICAL: This uses 'inherit' stdio to match production environment (start-sse-server.cmd)
+   * This validates that console silencing prevents IPC channel corruption when the SSE server
+   * spawns proxy processes with IPC channels. Without console silencing, any console.log during
+   * proxy initialization would corrupt the IPC channel when stdio is inherited.
    */
   async function startSSEServer(options: { cwd?: string, env?: NodeJS.ProcessEnv } = {}, maxRetries: number = 3): Promise<number> {
     let lastError: Error | null = null;
@@ -133,23 +160,22 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
         
         return await new Promise((resolve, reject) => {
           console.log(`[JS SSE Test] Starting SSE server on port ${port} (attempt ${attempt}/${maxRetries})...`);
+          console.log(`[JS SSE Test] Using INHERITED stdio to match production environment`);
           if (options.cwd) {
             console.log(`[JS SSE Test] Working directory: ${options.cwd}`);
           }
           
-          // Collect all server output for debugging
-          let stdout = '';
-          let stderr = '';
           let hasStarted = false;
           
           // Start server with specific port
+          // CRITICAL: Using 'inherit' stdio to match production environment
           sseServerProcess = spawn(process.execPath, [
             path.join(projectRoot, 'dist', 'index.js'),
             'sse',
             '-p', port.toString(),
             '--log-level', 'debug'
           ], {
-            stdio: ['ignore', 'pipe', 'pipe'],
+            stdio: 'inherit',  // CRITICAL: Matches production (start-sse-server.cmd)
             cwd: options.cwd,
             env: options.env || process.env
           });
@@ -158,34 +184,12 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
           const timeout = setTimeout(() => {
             if (!hasStarted) {
               console.error('[JS SSE Test] Server startup timeout after 30 seconds');
-              console.error('[JS SSE Test] Stdout:', stdout);
-              console.error('[JS SSE Test] Stderr:', stderr);
               reject(new Error(`Timeout waiting for SSE server to start on port ${port}`));
             }
           }, TEST_TIMEOUT);
           
-          // Listen for server output to confirm it started
-          const handleStdout = (data: Buffer) => {
-            const output = data.toString();
-            stdout += output;
-            console.log('[JS SSE Server Stdout]', output.trim());
-          };
-          
-          const handleStderr = (data: Buffer) => {
-            const output = data.toString();
-            stderr += output;
-            console.error('[JS SSE Server Stderr]', output.trim());
-            
-            // Check for EACCES error specifically
-            if (output.includes('EACCES') && output.includes('permission denied')) {
-              hasStarted = true; // Prevent timeout error
-              clearTimeout(timeout);
-              reject(new Error(`EACCES: Permission denied on port ${port}`));
-            }
-          };
-          
-          sseServerProcess.stdout?.on('data', handleStdout);
-          sseServerProcess.stderr?.on('data', handleStderr);
+          // Note: With inherited stdio, we cannot capture stdout/stderr directly
+          // The server output will appear directly in the test console
 
           // Also consider the server ready once the port is accepting connections
           void (async () => {
@@ -213,8 +217,6 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
             if (!hasStarted) {
               clearTimeout(timeout);
               console.error(`[JS SSE Test] Server exited unexpectedly with code ${code}, signal ${signal}`);
-              console.error('[JS SSE Test] Stdout:', stdout);
-              console.error('[JS SSE Test] Stderr:', stderr);
               reject(new Error(`SSE server exited with code ${code}`));
             }
           });

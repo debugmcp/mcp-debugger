@@ -317,44 +317,73 @@ export class SessionManagerOperations extends SessionManagerData {
         }
       }
 
-      // Wait for adapter to be configured or first stop event
-      const waitForReady = new Promise<void>((resolve) => {
-        let resolved = false;
+      // Use policy-defined readiness criteria when available.
+      const sessionStateAfterHandshake = this._getSessionById(sessionId).state;
+      const alreadyReady = policy.isSessionReady
+        ? policy.isSessionReady(sessionStateAfterHandshake, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+        : sessionStateAfterHandshake === SessionState.PAUSED;
 
-        const handleStopped = () => {
-          if (!resolved) {
-            resolved = true;
-            this.logger.info(`[SessionManager] Session ${sessionId} stopped on entry`);
-            resolve();
-          }
-        };
+      if (!alreadyReady) {
+        // Wait for adapter to be configured or first stop event
+        const waitForReady = new Promise<void>((resolve) => {
+          let resolved = false;
 
-        const handleConfigured = () => {
-          if (!resolved && !dapLaunchArgs?.stopOnEntry) {
-            resolved = true;
-            this.logger.info(
-              `[SessionManager] Session ${sessionId} running (stopOnEntry=false)`
-            );
-            resolve();
-          }
-        };
+          const handleStopped = () => {
+            if (!resolved) {
+              resolved = true;
+              this.logger.info(`[SessionManager] Session ${sessionId} stopped on entry`);
+              resolve();
+            }
+          };
 
-        session.proxyManager?.once('stopped', handleStopped);
-        session.proxyManager?.once('adapter-configured', handleConfigured);
+          const handleConfigured = () => {
+            const readyOnRunning = policy.isSessionReady
+              ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+              : !dapLaunchArgs?.stopOnEntry;
+            if (!resolved && readyOnRunning) {
+              resolved = true;
+              this.logger.info(
+                `[SessionManager] Session ${sessionId} running (stopOnEntry=${dapLaunchArgs?.stopOnEntry ?? false})`
+              );
+              resolve();
+            }
+          };
 
-        // Timeout after 30 seconds
-        setTimeout(() => {
-          if (!resolved) {
+          session.proxyManager?.once('stopped', handleStopped);
+          session.proxyManager?.once('adapter-configured', handleConfigured);
+
+          // In case the adapter already reached the desired state before listeners were attached,
+          // perform a synchronous state check to avoid waiting for an event that already fired.
+          const currentState = this._getSessionById(sessionId).state;
+          const readyNow = policy.isSessionReady
+            ? policy.isSessionReady(currentState, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+            : currentState === SessionState.PAUSED;
+          if (readyNow) {
             resolved = true;
             session.proxyManager?.removeListener('stopped', handleStopped);
             session.proxyManager?.removeListener('adapter-configured', handleConfigured);
-            this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
             resolve();
+            return;
           }
-        }, 30000);
-      });
 
-      await waitForReady;
+          // Timeout after 30 seconds
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              session.proxyManager?.removeListener('stopped', handleStopped);
+              session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+              this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
+              resolve();
+            }
+          }, 30000);
+        });
+
+        await waitForReady;
+      } else {
+        this.logger.info(
+          `[SessionManager] Session ${sessionId} already ${sessionStateAfterHandshake} after handshake - skipping adapter readiness wait`
+        );
+      }
 
       // Re-fetch session to get the most up-to-date state
       const finalSession = this._getSessionById(sessionId);

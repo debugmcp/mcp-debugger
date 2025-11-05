@@ -156,183 +156,151 @@ describe('SSE Command Handler', () => {
   });
 
   describe('GET /sse route handler', () => {
-    let getHandler: Function;
-    let mockReq: any;
-    let mockRes: any;
-    let app: any;
-
-    beforeEach(() => {
-      const mockApp = {
+    const setupGetRoute = (
+      overrides: { logger?: WinstonLoggerType; serverFactory?: typeof mockServerFactory } = {}
+    ) => {
+      const expressApp = {
         use: vi.fn(),
         get: vi.fn(),
         post: vi.fn(),
         listen: vi.fn()
       };
-      
-      vi.mocked(express).mockReturnValue(mockApp as any);
-      
+      vi.mocked(express).mockImplementationOnce(() => expressApp as any);
+
       const options = { port: '3001', logLevel: 'info' };
-      app = createSSEApp(options, { logger: mockLogger, serverFactory: mockServerFactory });
-      
-      // Extract the GET /sse handler
-      const getCall = mockApp.get.mock.calls.find(call => call[0] === '/sse');
-      getHandler = getCall ? getCall[1] : undefined;
-      
-      // Create comprehensive mocks with EventEmitter
-      mockReq = Object.assign(new EventEmitter(), {
+      const logger = overrides.logger ?? mockLogger;
+      const serverFactory = overrides.serverFactory ?? mockServerFactory;
+      const appInstance = createSSEApp(options, { logger, serverFactory });
+
+      const getCall = expressApp.get.mock.calls.find(call => call[0] === '/sse');
+      const getHandler = getCall ? getCall[1] : undefined;
+
+      const req = Object.assign(new EventEmitter(), {
         headers: {},
         query: {}
       });
-      
-      mockRes = {
+
+      const res = {
         write: vi.fn(),
         status: vi.fn().mockReturnThis(),
         end: vi.fn(),
         headersSent: false
       };
-    });
+
+      return {
+        appInstance,
+        getHandler,
+        req,
+        res,
+        expressApp
+      };
+    };
 
     it('should establish SSE connection successfully', async () => {
+      const { getHandler, req, res, appInstance } = setupGetRoute();
       vi.useFakeTimers();
-      
-      expect(getHandler).toBeDefined();
-      await getHandler(mockReq, mockRes);
 
-      // Verify server factory was called
+      expect(getHandler).toBeDefined();
+      await getHandler(req, res);
+
       expect(mockServerFactory).toHaveBeenCalledWith({
         logLevel: 'info',
         logFile: undefined
       });
-
-      // Verify transport was created
-      expect(MockedSSEServerTransport).toHaveBeenCalledWith('/sse', mockRes);
-
-      // Verify server connection
+      expect(MockedSSEServerTransport).toHaveBeenCalledWith('/sse', res);
       expect(mockServer.server.connect).toHaveBeenCalledWith(mockTransport);
-
-      // Verify session was stored
-      expect((app as any).sseTransports.size).toBe(1);
-      expect((app as any).sseTransports.has(mockTransport.sessionId)).toBe(true);
-
-      // Verify logging
+      expect((appInstance as any).sseTransports.size).toBe(1);
+      expect((appInstance as any).sseTransports.has(mockTransport.sessionId)).toBe(true);
       expect(mockLogger.info).toHaveBeenCalledWith(`SSE connection established: ${mockTransport.sessionId}`);
 
-      // Verify ping interval is set up
       vi.advanceTimersByTime(30000);
-      expect(mockRes.write).toHaveBeenCalledWith(':ping\n\n');
-
+      expect(res.write).toHaveBeenCalledWith(':ping\n\n');
       vi.useRealTimers();
     });
 
-    it('should handle server factory errors', async () => {
+    it('should surface server factory errors', () => {
       const error = new Error('Server factory failed');
-      mockServerFactory.mockImplementation(() => {
+      const failingFactory = vi.fn(() => {
         throw error;
       });
 
-      await getHandler(mockReq, mockRes);
-
-      expect(mockLogger.error).toHaveBeenCalledWith('Error establishing SSE connection:', error);
-      expect(mockRes.status).toHaveBeenCalledWith(500);
-      expect(mockRes.end).toHaveBeenCalled();
+      expect(() => setupGetRoute({ serverFactory: failingFactory })).toThrow(error);
     });
 
     it('should handle server connection errors', async () => {
+      const { getHandler, req, res } = setupGetRoute();
       const error = new Error('Connection failed');
       (mockServer.server.connect as Mock).mockRejectedValue(error);
 
-      await getHandler(mockReq, mockRes);
+      await getHandler(req, res);
 
       expect(mockLogger.error).toHaveBeenCalledWith('Error establishing SSE connection:', error);
-      expect(mockRes.status).toHaveBeenCalledWith(500);
-      expect(mockRes.end).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.end).toHaveBeenCalled();
     });
 
     it('should handle connection close event', async () => {
-      await getHandler(mockReq, mockRes);
-      
+      const { getHandler, req, res, appInstance } = setupGetRoute();
+      await getHandler(req, res);
+
       const sessionId = mockTransport.sessionId;
-      expect((app as any).sseTransports.size).toBe(1);
+      expect((appInstance as any).sseTransports.size).toBe(1);
 
-      // Trigger close through transport
       mockTransport.triggerClose();
-
-      // Allow setImmediate to run
       await new Promise(resolve => setImmediate(resolve));
 
       expect(mockLogger.info).toHaveBeenCalledWith(`SSE connection closed: ${sessionId}`);
-      expect((app as any).sseTransports.size).toBe(0);
-      expect(mockServer.stop).toHaveBeenCalled();
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        `SSE transport cleaned up for session ${sessionId}. Debug sessions remain active.`
+      );
+      expect((appInstance as any).sseTransports.size).toBe(0);
+      expect(mockServer.stop).not.toHaveBeenCalled();
     });
 
     it('should handle client disconnect event', async () => {
-      await getHandler(mockReq, mockRes);
-      
+      const { getHandler, req, res, appInstance } = setupGetRoute();
+      await getHandler(req, res);
+
       const sessionId = mockTransport.sessionId;
-      const initialListenerCount = mockReq.listenerCount('close');
-      
-      expect((app as any).sseTransports.size).toBe(1);
+      const initialListenerCount = req.listenerCount('close');
+      expect((appInstance as any).sseTransports.size).toBe(1);
 
-      // Trigger client disconnect
-      mockReq.emit('close');
-
-      // Allow setImmediate to run
+      req.emit('close');
       await new Promise(resolve => setImmediate(resolve));
 
       expect(mockLogger.info).toHaveBeenCalledWith(`SSE connection closed: ${sessionId}`);
-      expect((app as any).sseTransports.size).toBe(0);
-      expect(mockServer.stop).toHaveBeenCalled();
-      
-      // Verify no memory leaks
-      expect(mockReq.listenerCount('close')).toBeLessThanOrEqual(initialListenerCount);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        `SSE transport cleaned up for session ${sessionId}. Debug sessions remain active.`
+      );
+      expect((appInstance as any).sseTransports.size).toBe(0);
+      expect(mockServer.stop).not.toHaveBeenCalled();
+      expect(req.listenerCount('close')).toBeLessThanOrEqual(initialListenerCount);
     });
 
     it('should prevent recursive close', async () => {
-      await getHandler(mockReq, mockRes);
-      
+      const { getHandler, req, res } = setupGetRoute();
+      await getHandler(req, res);
+
       const sessionId = mockTransport.sessionId;
 
-      // Trigger close multiple times
       mockTransport.triggerClose();
       mockTransport.triggerClose();
-      mockReq.emit('close');
-      mockReq.emit('end');
+      req.emit('close');
+      req.emit('end');
 
-      // Allow setImmediate to run
       await new Promise(resolve => setImmediate(resolve));
 
-      // Should only log once
       expect(mockLogger.info).toHaveBeenCalledWith(`SSE connection closed: ${sessionId}`);
-      expect(mockLogger.info).toHaveBeenCalledTimes(2); // Once for establish, once for close
-      
-      // Should only stop server once
-      expect(mockServer.stop).toHaveBeenCalledTimes(1);
-    });
-
-    it('should handle server stop error during close', async () => {
-      await getHandler(mockReq, mockRes);
-      
-      const sessionId = mockTransport.sessionId;
-      const stopError = new Error('Server stop failed');
-      
-      // Make stop reject with an error
-      (mockServer.stop as Mock).mockRejectedValueOnce(stopError);
-
-      // Trigger close
-      mockTransport.triggerClose();
-
-      // Allow setImmediate to run
-      await new Promise(resolve => setImmediate(resolve));
-
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        `Error stopping server for session ${sessionId}:`,
-        stopError
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        `SSE transport cleaned up for session ${sessionId}. Debug sessions remain active.`
       );
+      expect(mockServer.stop).not.toHaveBeenCalled();
     });
 
     it('should handle transport errors', async () => {
-      await getHandler(mockReq, mockRes);
-      
+      const { getHandler, req, res } = setupGetRoute();
+      await getHandler(req, res);
+
       const error = new Error('Transport error');
       mockTransport.triggerError(error);
 
@@ -343,63 +311,53 @@ describe('SSE Command Handler', () => {
     });
 
     it('should not send status when headers are already sent', async () => {
-      mockRes.headersSent = true;
+      const { getHandler, req, res } = setupGetRoute();
+      res.headersSent = true;
       const error = new Error('Connection failed');
-      mockServerFactory.mockImplementation(() => {
-        throw error;
-      });
+      (mockServer.server.connect as Mock).mockRejectedValue(error);
 
-      await getHandler(mockReq, mockRes);
+      await getHandler(req, res);
 
       expect(mockLogger.error).toHaveBeenCalledWith('Error establishing SSE connection:', error);
-      expect(mockRes.status).not.toHaveBeenCalled();
-      expect(mockRes.end).not.toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+      expect(res.end).not.toHaveBeenCalled();
     });
 
     it('should handle multiple concurrent connections', async () => {
+      const { getHandler, req, res, appInstance } = setupGetRoute();
       const sessions: string[] = [];
-      
-      // Create multiple connections
+
       for (let i = 0; i < 3; i++) {
-        await getHandler(mockReq, mockRes);
+        await getHandler(req, res);
         sessions.push(mockTransport.sessionId);
       }
-      
-      expect((app as any).sseTransports.size).toBe(3);
-      
-      // Close one connection
-      const sseTransports = (app as any).sseTransports as Map<string, any>;
+
+      expect((appInstance as any).sseTransports.size).toBe(3);
+
+      const sseTransports = (appInstance as any).sseTransports as Map<string, any>;
       const firstSession = sseTransports.get(sessions[0]);
       if (firstSession && firstSession.transport && firstSession.transport.onclose) {
-        // Directly invoke the onclose handler
         const closeHandler = firstSession.transport.onclose;
         closeHandler();
       }
-      
-      // Allow setImmediate to run
+
       await new Promise(resolve => setImmediate(resolve));
-      
-      // Verify only one was removed
-      expect((app as any).sseTransports.size).toBe(2);
-      expect((app as any).sseTransports.has(sessions[0])).toBe(false);
-      expect((app as any).sseTransports.has(sessions[1])).toBe(true);
-      expect((app as any).sseTransports.has(sessions[2])).toBe(true);
+
+      expect((appInstance as any).sseTransports.size).toBe(2);
+      expect((appInstance as any).sseTransports.has(sessions[0])).toBe(false);
+      expect((appInstance as any).sseTransports.has(sessions[1])).toBe(true);
+      expect((appInstance as any).sseTransports.has(sessions[2])).toBe(true);
     });
 
     it('should stop ping interval when session is removed', async () => {
+      const { getHandler, req, res, appInstance } = setupGetRoute();
       vi.useFakeTimers();
-      
-      await getHandler(mockReq, mockRes);
-      
-      // Remove session from map
-      (app as any).sseTransports.clear();
-      
-      // Advance time
-      vi.advanceTimersByTime(30000);
-      
-      // Should not write ping since session is gone
-      expect(mockRes.write).not.toHaveBeenCalled();
 
+      await getHandler(req, res);
+      (appInstance as any).sseTransports.clear();
+
+      vi.advanceTimersByTime(30000);
+      expect(res.write).not.toHaveBeenCalled();
       vi.useRealTimers();
     });
   });
@@ -743,7 +701,8 @@ describe('SSE Command Handler', () => {
           callback();
           return mockServer;
         }),
-        sseTransports: new Map()
+        sseTransports: new Map(),
+        sharedDebugServer: null as any
       };
 
       vi.mocked(express).mockReturnValue(mockApp as any);
@@ -762,17 +721,13 @@ describe('SSE Command Handler', () => {
       });
 
       // Add some mock sessions
-      const mockSession1 = {
-        transport: { close: vi.fn() },
-        server: { stop: vi.fn() }
-      };
-      const mockSession2 = {
-        transport: { close: vi.fn() },
-        server: { stop: vi.fn() }
-      };
+      const mockSession1 = { transport: { close: vi.fn() } };
+      const mockSession2 = { transport: { close: vi.fn() } };
+      const sharedServer = { stop: vi.fn().mockResolvedValue(undefined) } as unknown as DebugMcpServer;
       
       mockApp.sseTransports.set('session1', mockSession1 as any);
       mockApp.sseTransports.set('session2', mockSession2 as any);
+      mockApp.sharedDebugServer = sharedServer;
 
       // Mock server.close to call callback immediately
       mockServer.close.mockImplementation((callback: Function) => {
@@ -784,9 +739,9 @@ describe('SSE Command Handler', () => {
 
       expect(mockLogger.info).toHaveBeenCalledWith('Shutting down SSE server...');
       expect(mockSession1.transport.close).toHaveBeenCalled();
-      expect(mockSession1.server.stop).toHaveBeenCalled();
       expect(mockSession2.transport.close).toHaveBeenCalled();
-      expect(mockSession2.server.stop).toHaveBeenCalled();
+      expect(mockLogger.info).toHaveBeenCalledWith('Stopping shared Debug MCP Server...');
+      expect(sharedServer.stop).toHaveBeenCalled();
       expect(mockServer.close).toHaveBeenCalled();
       expect(mockExitProcess).toHaveBeenCalledWith(0);
     });

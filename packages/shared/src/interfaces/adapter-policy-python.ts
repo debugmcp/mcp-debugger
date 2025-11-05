@@ -5,6 +5,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
@@ -121,6 +122,8 @@ export const PythonAdapterPolicy: AdapterPolicy = {
       supportsVariableType: true  // Python debugpy supports variable type information
     };
   },
+
+  isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
   
   /**
    * Validate that a Python command is a real Python executable, not a Windows Store alias.

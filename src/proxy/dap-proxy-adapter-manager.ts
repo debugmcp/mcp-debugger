@@ -74,11 +74,32 @@ export class GenericAdapterManager {
       spawnOptions.cwd = cwd;
     }
 
+    // Log critical environment variables for debugging
+    const criticalEnvVars = {
+      NODE_OPTIONS: spawnOptions.env?.NODE_OPTIONS || '<not set>',
+      NODE_DEBUG: spawnOptions.env?.NODE_DEBUG || '<not set>',
+      NODE_ENV: spawnOptions.env?.NODE_ENV || '<not set>',
+      DEBUG: spawnOptions.env?.DEBUG || '<not set>',
+      VSCODE_INSPECTOR_OPTIONS: spawnOptions.env?.VSCODE_INSPECTOR_OPTIONS || '<not set>',
+      // Check for any inspector-related variables
+      hasInspectVars: Object.keys(spawnOptions.env || {}).some(k => 
+        k.includes('INSPECT') || k.includes('DEBUG')
+      )
+    };
+
     this.logger.info('[AdapterManager] Spawn configuration:', {
       command: command,
       args: args,
       cwd: cwd || 'inherited',
-      envVars: Object.keys(spawnOptions.env || {}).length
+      envVars: Object.keys(spawnOptions.env || {}).length,
+      criticalEnvVars
+    });
+
+    // Log the full command being executed
+    this.logger.info('[AdapterManager] Full command to execute:', {
+      fullCommand: fullCommand,
+      execArgv: args.filter(arg => arg.startsWith('--inspect')),
+      hasInspectFlag: args.some(arg => arg.includes('--inspect'))
     });
 
     // Spawn the process

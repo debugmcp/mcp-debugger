@@ -15,6 +15,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
+import type { SessionState } from '@debugmcp/shared';
 
 export type ChildSessionStrategy =
   | 'none'                     // No child session expected/created
@@ -155,6 +156,15 @@ export interface AdapterPolicy {
     supportsVariableType?: boolean;
     // Additional debugger-specific configuration can be added here
   };
+
+  /**
+   * Determine if the adapter/session should be considered "ready" after launch/handshake.
+   * If omitted, default logic will be used (paused, or running when stopOnEntry=false).
+   */
+  isSessionReady?(
+    state: SessionState,
+    options: { stopOnEntry?: boolean }
+  ): boolean;
 
   /**
    * Validate that the resolved executable is actually usable for this language.

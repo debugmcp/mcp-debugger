@@ -17,8 +17,8 @@ process.on('uncaughtException', (err) => {
   console.error('[Test] UncaughtException:', err instanceof Error ? err.message : err);
 });
 
-// Ensure stdio mode is disabled in unit tests unless explicitly set
-delete process.env.DEBUG_MCP_STDIO;
+// Ensure console silencing is disabled in unit tests unless explicitly set
+delete process.env.CONSOLE_OUTPUT_SILENCED;
 
 // Add type declarations for global test helpers
 declare global {

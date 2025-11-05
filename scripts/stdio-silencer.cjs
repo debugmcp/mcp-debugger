@@ -12,10 +12,32 @@
     const fs = require('fs');
     const path = require('path');
 
-    const argvJoined = Array.isArray(process.argv) ? process.argv.join(' ').toLowerCase() : '';
-    const isStdio = argvJoined.includes('stdio') || process.env.DEBUG_MCP_STDIO === '1';
+    const stripQuotes = (value) => typeof value === 'string'
+      ? value.toLowerCase().replace(/^["']|["']$/g, '')
+      : '';
+    const matchesKeyword = (arg, keyword) => {
+      const normalized = stripQuotes(arg);
+      if (!normalized) {
+        return false;
+      }
+      if (normalized === keyword) {
+        return true;
+      }
+      if (normalized.endsWith('=' + keyword) || normalized.endsWith(':' + keyword)) {
+        return true;
+      }
+      if (normalized.startsWith('--transport') && normalized.includes('=' + keyword)) {
+        return true;
+      }
+      return false;
+    };
 
-    if (!isStdio) {
+    const argvValues = Array.isArray(process.argv) ? process.argv : [];
+    const shouldSilence = argvValues.some(arg => matchesKeyword(arg, 'stdio')) ||
+                          argvValues.some(arg => matchesKeyword(arg, 'sse')) ||
+                          process.env.CONSOLE_OUTPUT_SILENCED === '1';
+
+    if (!shouldSilence) {
       return;
     }
 

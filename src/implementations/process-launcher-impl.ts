@@ -621,6 +621,18 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     // This is critical for IPC and path resolution to work correctly
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     
+    // Log critical environment variables being passed to proxy worker
+    console.log('[ProxyProcessLauncher] Environment check for proxy worker:', {
+      NODE_OPTIONS: processEnv.NODE_OPTIONS || '<not set>',
+      NODE_DEBUG: processEnv.NODE_DEBUG || '<not set>',
+      NODE_ENV: processEnv.NODE_ENV || '<not set>',
+      DEBUG: processEnv.DEBUG || '<not set>',
+      hasInspectInNodeOptions: processEnv.NODE_OPTIONS?.includes('--inspect') || false,
+      launchingFrom: process.cwd(),
+      targetCwd: projectRoot,
+      sessionId
+    });
+    
     const options: IProcessOptions = {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'] as any, // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions IPC compatibility
       env: processEnv,

@@ -32,12 +32,11 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
   
   const transports: winston.transport[] = [];
   
-  // In stdio mode, we MUST NOT write to stdout as it corrupts the MCP protocol
-  // Rely on explicit env flag set by CLI/bootstrap to avoid false positives in tests
-  const isStdioMode = process.env.DEBUG_MCP_STDIO === '1';
+  // When console output is silenced we MUST NOT write to stdout as it corrupts transports
+  const isConsoleSilenced = process.env.CONSOLE_OUTPUT_SILENCED === '1';
   
-  if (!isStdioMode) {
-    // Only add console transport when NOT in stdio mode
+  if (!isConsoleSilenced) {
+    // Only add console transport when NOT silencing console output
     transports.push(
       new winston.transports.Console({
         format: winston.format.combine(
@@ -81,8 +80,8 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
       fs.mkdirSync(logDir, { recursive: true });
     }
   } catch (e) {
-    // In stdio mode, we must not write to console as it corrupts MCP protocol
-    if (!isStdioMode) {
+    // When console output is silenced we must not write to console as it corrupts transports
+    if (!isConsoleSilenced) {
       console.error(`[Logger Init Error] Failed to ensure log directory for ${logFilePath}:`, e);
     }
   }
@@ -98,8 +97,8 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
       })
     );
   } catch (fileTransportError) {
-    // In stdio mode, we must not write to console as it corrupts MCP protocol
-    if (!isStdioMode) {
+    // When console output is silenced we must not write to console as it corrupts transports
+    if (!isConsoleSilenced) {
       console.error(`[Logger Init Error] Failed to create file transport for ${logFilePath}:`, fileTransportError);
     }
   }
@@ -112,8 +111,8 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
   });
 
   logger.on('error', (error: Error) => {
-    // In stdio mode, we must not write to console as it corrupts MCP protocol
-    if (!isStdioMode) {
+    // When console output is silenced we must not write to console as it corrupts transports
+    if (!isConsoleSilenced) {
       console.error('[Winston Logger Internal Error] Failed to write to a transport:', error);
     }
   });

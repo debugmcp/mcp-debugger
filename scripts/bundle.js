@@ -44,16 +44,32 @@ async function bundle() {
     
     const consoleSilencer = `#!/usr/bin/env node
 // CRITICAL: Console silencing MUST be first - before ANY code runs
-// This prevents stdout pollution in stdio mode which breaks MCP protocol
+// This prevents stdout pollution in transport modes (stdio/SSE) which breaks MCP protocol
 (function() {
-  // Handle both quoted and unquoted stdio arguments
-  const hasStdio = process.argv.some(arg => 
-    arg === 'stdio' || 
-    arg === '"stdio"' || 
-    arg.includes('stdio')
-  );
+  const stripQuotes = (value) => typeof value === 'string'
+    ? value.toLowerCase().replace(/^["']|["']$/g, '')
+    : '';
+  const matchesKeyword = (arg, keyword) => {
+    const normalized = stripQuotes(arg);
+    if (!normalized) {
+      return false;
+    }
+    if (normalized === keyword) {
+      return true;
+    }
+    if (normalized.endsWith('=' + keyword) || normalized.endsWith(':' + keyword)) {
+      return true;
+    }
+    if (normalized.startsWith('--transport') && normalized.includes('=' + keyword)) {
+      return true;
+    }
+    return false;
+  };
+
+  const hasStdio = process.argv.some(arg => matchesKeyword(arg, 'stdio'));
+  const hasSse = process.argv.some(arg => matchesKeyword(arg, 'sse'));
   
-  if (hasStdio || process.env.DEBUG_MCP_STDIO === '1') {
+  if (hasStdio || hasSse || process.env.CONSOLE_OUTPUT_SILENCED === '1') {
     const noop = () => {};
     console.log = noop;
     console.error = noop;

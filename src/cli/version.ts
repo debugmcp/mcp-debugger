@@ -37,7 +37,7 @@ export function getVersion(): string {
       }
     } catch (error) {
       // Only emit diagnostics when not running in stdio mode
-      if (process.env.DEBUG_MCP_STDIO !== '1') {
+      if (process.env.CONSOLE_OUTPUT_SILENCED !== '1') {
         console.error('Failed to read version from package.json:', error);
       }
     }

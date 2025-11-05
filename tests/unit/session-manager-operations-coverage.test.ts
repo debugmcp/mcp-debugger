@@ -513,7 +513,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       // Make the "adapter-configured" event fire immediately to avoid 30s wait
       mockProxyManager.once.mockImplementation((event: string, callback: Function) => {
-        if (event === 'adapter-configured') {
+        if (event === 'adapter-configured' || event === 'stopped') {
           callback();
         }
       });
