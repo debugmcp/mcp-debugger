@@ -100,22 +100,32 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
   console.log(`[Docker Test] Starting container ${containerName}...`);
   
   // Use docker run with stdio transport
-  // Run as current user to avoid permission issues with mounted volumes
+  // Build args array conditionally
+  const dockerArgs = [
+    'run',
+    '--rm',
+    '-i',
+  ];
+
+  // Only add --user flag for local Unix development (not Windows, not CI)
+  // This prevents root-owned files locally but avoids permission issues in CI
+  if (process.platform !== 'win32' && process.env.CI !== 'true' && typeof process.getuid === 'function') {
+    dockerArgs.push('--user', `${process.getuid()}:${process.getgid()}`);
+  }
+
+  dockerArgs.push(
+    '--name', containerName,
+    '-v', `${workspaceMount}:/workspace:rw`,
+    '-v', `${ROOT}/logs:/tmp:rw`,
+    imageName,
+    'stdio',
+    '--log-level', logLevel,
+    '--log-file', '/tmp/docker-test.log'
+  );
+
   const transport = new StdioClientTransport({
     command: 'docker',
-    args: [
-      'run',
-      '--rm',
-      '-i',
-      '--user', `${process.getuid()}:${process.getgid()}`,
-      '--name', containerName,
-      '-v', `${workspaceMount}:/workspace:rw`,
-      '-v', `${ROOT}/logs:/tmp:rw`,
-      imageName,
-      'stdio',
-      '--log-level', logLevel,
-      '--log-file', '/tmp/docker-test.log'
-    ],
+    args: dockerArgs,
     env: {
       ...process.env,
       NODE_ENV: 'test'
