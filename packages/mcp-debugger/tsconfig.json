@@ -12,6 +12,9 @@
   "include": ["./src/**/*"],
   "references": [
     { "path": "../shared" },
+    { "path": "../adapter-javascript" },
+    { "path": "../adapter-python" },
+    { "path": "../adapter-mock" },
     { "path": "../../tsconfig.src.json" }
   ]
 }
