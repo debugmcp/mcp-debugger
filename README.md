@@ -35,9 +35,10 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
+- 🟨 **JavaScript/TypeScript debugging via js-debug** – VSCode's proven debugger
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- 🔄 **STDIO and SSE transport modes** – Works with any MCP client
-- 📊 1019 tests passing – battle-tested end-to-end
+- � **STDIO and SSE transport modes** – Works with any MCP client
+- �📊 1019 tests passing – battle-tested end-to-end
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
 - 🛡️ **Path validation** – Prevents crashes from non-existent files
@@ -116,7 +117,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",  // or "mock" for testing
+  "language": "python",  // or "javascript" or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -181,12 +182,12 @@ Version 0.10.0 introduces a clean adapter pattern that separates language-agnost
                     │ ProxyManager │◀─────│ Language Adapter│
                     └──────────────┘      └─────────────────┘
                                                    │
-                                          ┌────────┴────────┐
-                                          │                 │
-                                    ┌─────▼──────┐   ┌─────▼──────┐
-                                    │Python      │   │Mock        │
-                                    │Adapter     │   │Adapter     │
-                                    └────────────┘   └────────────┘
+                                    ┌──────────────┴───────────────┐
+                                    │                               │
+                              ┌─────▼──────┐   ┌──────▼──────┐   ┌─────▼──────┐
+                              │Python      │   │JavaScript   │   │Mock        │
+                              │Adapter     │   │Adapter      │   │Adapter     │
+                              └────────────┘   └─────────────┘   └────────────┘
 ```
 
 ### Adding Language Support
@@ -337,6 +338,7 @@ Then get the local variables:
 - 🧩 [Adapter API Reference](./docs/architecture/adapter-api-reference.md) – Adapter, factory, loader, and registry contracts
 - 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading to v0.15.0 (dynamic loading)
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
+- 🟨 [JavaScript Debugging Guide](./docs/javascript/README.md) – JavaScript/TypeScript features
 - 🤖 [AI Integration Guide](./docs/ai-integration.md) – Leverage AI-friendly features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
