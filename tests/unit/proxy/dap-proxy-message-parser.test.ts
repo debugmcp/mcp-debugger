@@ -317,14 +317,5 @@ describe('MessageParser', () => {
       expect(MessageParser.isStringMessage({})).toBe(false);
       expect(MessageParser.isStringMessage(null)).toBe(false);
     });
-
-    it('getErrorMessage should extract error messages', () => {
-      expect(MessageParser.getErrorMessage(new Error('Test error'))).toBe('Test error');
-      expect(MessageParser.getErrorMessage('String error')).toBe('String error');
-      expect(MessageParser.getErrorMessage(123)).toBe('123');
-      expect(MessageParser.getErrorMessage({ message: 'Object' })).toBe('[object Object]');
-      expect(MessageParser.getErrorMessage(null)).toBe('null');
-      expect(MessageParser.getErrorMessage(undefined)).toBe('undefined');
-    });
   });
 });

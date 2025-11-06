@@ -11,7 +11,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "mcp-debugger": "./dist/cli.cjs"
+    "mcp-debugger": "./dist/cli"
   },
   "files": [
     "dist",
@@ -28,5 +28,12 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@debugmcp/adapter-javascript": "workspace:*",
+    "@debugmcp/adapter-python": "workspace:*",
+    "@debugmcp/adapter-mock": "workspace:*",
+    "@debugmcp/shared": "workspace:*"
   }
 }

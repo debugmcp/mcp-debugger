@@ -22,7 +22,26 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Includes Docker availability check with graceful skip
 - Tests volume mounting and environment variable handling
 
-### 4. `smoke-test-utils.ts` (New)
+### 4. `mcp-server-smoke-javascript.test.ts` (New)
+- Tests JavaScript adapter through MCP interface
+- Validates known quirks:
+  - Breakpoints may report "unverified" initially but still work
+  - Stack traces include Node internal frames
+  - Variable references change after steps (refresh pattern required)
+- Tests core functionality: breakpoints, stepping, variables, expressions
+- Multiple test scenarios including multiple breakpoints and step-into
+
+### 5. `mcp-server-smoke-python.test.ts` (New)
+- Tests Python adapter through MCP interface
+- Validates Python-specific behaviors:
+  - Breakpoints verify immediately (unlike JavaScript)
+  - Clean stack traces without internal frames
+  - Stable variable references (no refresh needed)
+  - Requires absolute paths for script execution
+  - Expression-only evaluation (statements rejected)
+- Comprehensive test coverage including step-into operations
+
+### 6. `smoke-test-utils.ts` (New)
 - Shared utilities for all smoke tests
 - Common debug sequence execution
 - Docker and SSE helper functions
@@ -40,6 +59,8 @@ npm run test:e2e:smoke
 # Run individual smoke test
 npx vitest run tests/e2e/mcp-server-smoke-sse.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-container.test.ts
+npx vitest run tests/e2e/mcp-server-smoke-javascript.test.ts
+npx vitest run tests/e2e/mcp-server-smoke-python.test.ts
 ```
 
 ## Prerequisites
@@ -55,9 +76,25 @@ npx vitest run tests/e2e/mcp-server-smoke-container.test.ts
 
 The smoke tests provide comprehensive coverage of:
 1. **Transport Methods**: stdio, SSE, containerized stdio
-2. **Path Resolution**: Different working directories, path translation
-3. **Environment Handling**: Container environment variables, volume mounts
-4. **Error Scenarios**: Proper cleanup on failure, detailed error logging
+2. **Language Adapters**: JavaScript and Python debugging adapters
+3. **Path Resolution**: Different working directories, path translation, absolute vs relative paths
+4. **Environment Handling**: Container environment variables, volume mounts
+5. **Error Scenarios**: Proper cleanup on failure, detailed error logging
+6. **Adapter Quirks**: Tests actual behavior, not idealized expectations
+
+### JavaScript Adapter Coverage
+- Unverified breakpoint handling
+- Node internal frame filtering
+- Variable reference refresh pattern
+- Expression evaluation
+- Source context retrieval
+
+### Python Adapter Coverage  
+- Immediate breakpoint verification
+- Clean stack traces
+- Stable variable references
+- Absolute path requirements
+- Expression vs statement evaluation
 
 ## Key Features
 

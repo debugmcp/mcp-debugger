@@ -38,7 +38,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   private readonly factories: AdapterFactoryMap = new Map();
   private readonly activeAdapters: ActiveAdapterMap = new Map();
   private readonly config: Required<AdapterRegistryConfig>;
-  private readonly disposeTimers = new Map<string, NodeJS.Timeout>();
+  private readonly disposeTimers = new Map<IDebugAdapter, NodeJS.Timeout>();
   private readonly loader = new AdapterLoader();
   // Dynamic loading is opt-in via constructor config to preserve backward compatibility in unit tests
   private readonly dynamicEnabled: boolean;
@@ -91,15 +91,9 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
         adapter.dispose().catch(err => {
           this.emit('error', new Error(`Failed to dispose adapter: ${err.message}`));
         });
+        this.clearDisposeTimer(adapter);
       }
       this.activeAdapters.delete(language);
-    }
-
-    // Clear any dispose timers
-    const timer = this.disposeTimers.get(language);
-    if (timer) {
-      clearTimeout(timer);
-      this.disposeTimers.delete(language);
     }
 
     // Remove the factory
@@ -229,29 +223,69 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
    * List languages that are actually installed and available via dynamic loader
    */
   async listLanguages(): Promise<string[]> {
+    const registered = this.getSupportedLanguages();
+
     if (!this.dynamicEnabled) {
-      // Fall back to currently registered languages
-      return this.getSupportedLanguages();
+      // Without dynamic loading, advertise the statically registered adapters.
+      return registered;
     }
-    const adapters = await this.loader.listAvailableAdapters();
-    return adapters.filter(a => a.installed).map(a => a.name);
+
+    const installed = new Set<string>();
+
+    try {
+      const adapters = await this.loader.listAvailableAdapters();
+      for (const adapter of adapters) {
+        if (adapter.installed) {
+          installed.add(adapter.name);
+        }
+      }
+    } catch {
+      // Ignore loader errors in bundled environments where adapters are embedded.
+    }
+
+    // Always include statically registered adapters so bundled builds expose them.
+    for (const language of registered) {
+      installed.add(language);
+    }
+
+    return Array.from(installed);
   }
 
   /**
    * List detailed adapter metadata (known + install status)
    */
   async listAvailableAdapters(): Promise<AdapterMetadata[]> {
+    const registered = new Set(this.getSupportedLanguages());
+
+    const buildEntry = (language: string): AdapterMetadata => ({
+      name: language,
+      packageName: `@debugmcp/adapter-${language}`,
+      description: undefined,
+      installed: true
+    });
+
     if (!this.dynamicEnabled) {
       // Provide minimal metadata from registered factories
-      const langs = this.getSupportedLanguages();
-      return langs.map(l => ({
-        name: l,
-        packageName: `@debugmcp/adapter-${l}`,
-        description: undefined,
-        installed: true
-      }));
+      return Array.from(registered).map(buildEntry);
     }
-    return this.loader.listAvailableAdapters();
+
+    const results = new Map<string, AdapterMetadata>();
+    try {
+      const adapters = await this.loader.listAvailableAdapters();
+      for (const adapter of adapters) {
+        const installed = registered.has(adapter.name) ? true : adapter.installed;
+        results.set(adapter.name, { ...adapter, installed });
+        registered.delete(adapter.name);
+      }
+    } catch {
+      // Ignore loader failures and fall back to registered adapters.
+    }
+
+    for (const language of registered) {
+      results.set(language, buildEntry(language));
+    }
+
+    return Array.from(results.values());
   }
 
   /**
@@ -323,11 +357,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
    * Set up auto-dispose for an adapter
    */
   private setupAutoDispose(language: string, adapter: IDebugAdapter): void {
-    // Clear any existing timer for this language
-    const existingTimer = this.disposeTimers.get(`${language}-${adapter}`);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
+    this.clearDisposeTimer(adapter);
 
     // Listen for adapter state changes
     adapter.on('stateChanged', (oldState, newState) => {
@@ -339,16 +369,20 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
           });
         }, this.config.autoDisposeTimeout);
 
-        this.disposeTimers.set(`${language}-${adapter}`, timer);
+        this.disposeTimers.set(adapter, timer);
       } else if (newState === 'connected' || newState === 'debugging') {
         // Cancel dispose timer if adapter becomes active again
-        const timer = this.disposeTimers.get(`${language}-${adapter}`);
-        if (timer) {
-          clearTimeout(timer);
-          this.disposeTimers.delete(`${language}-${adapter}`);
-        }
+        this.clearDisposeTimer(adapter);
       }
     });
+  }
+
+  private clearDisposeTimer(adapter: IDebugAdapter): void {
+    const timer = this.disposeTimers.get(adapter);
+    if (timer) {
+      clearTimeout(timer);
+      this.disposeTimers.delete(adapter);
+    }
   }
 }
 

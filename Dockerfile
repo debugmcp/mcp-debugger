@@ -18,6 +18,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/package.json
 COPY packages/adapter-mock/package.json ./packages/adapter-mock/package.json
 COPY packages/adapter-python/package.json ./packages/adapter-python/package.json
+COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
@@ -30,6 +31,7 @@ COPY tsconfig*.json ./
 COPY packages/shared/tsconfig*.json ./packages/shared/
 COPY packages/adapter-mock/tsconfig*.json ./packages/adapter-mock/
 COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
+COPY packages/adapter-javascript/tsconfig*.json ./packages/adapter-javascript/
 
 COPY src ./src
 COPY scripts ./scripts/
@@ -52,37 +54,59 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     mkdir -p /app/node_modules/@debugmcp/shared && \
     mkdir -p /app/node_modules/@debugmcp/adapter-mock && \
     mkdir -p /app/node_modules/@debugmcp/adapter-python && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-javascript && \
     cp -r /app/packages/shared/dist /app/node_modules/@debugmcp/shared/ && \
     cp /app/packages/shared/package.json /app/node_modules/@debugmcp/shared/ && \
     cp -r /app/packages/adapter-mock/dist /app/node_modules/@debugmcp/adapter-mock/ && \
     cp /app/packages/adapter-mock/package.json /app/node_modules/@debugmcp/adapter-mock/ && \
     cp -r /app/packages/adapter-python/dist /app/node_modules/@debugmcp/adapter-python/ && \
-    cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/
+    cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/ && \
+    cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
+    cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
+    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/
 
 # Stage 2: Create minimal runtime image
-FROM python:3.11-alpine
+# Use Debian-slim for glibc compatibility with js-debug binary
+FROM python:3.11-slim
 
 # Set application directory
 WORKDIR /app
 
 # Set container marker for runtime
 ENV MCP_CONTAINER=true
+# Set default workspace mount location (can be overridden at runtime)
+ENV MCP_WORKSPACE_ROOT=/workspace
 
-# Install only Node.js runtime (no npm) and Python deps
-RUN apk add --no-cache nodejs && \
+# Install Node.js runtime, Python debugging support, tini for signal handling, and debugging tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    strace \
+    procps \
+    lsof \
+    tini && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
     pip3 install --no-cache-dir "debugpy>=1.8.14"
 
-# Copy the bundled application, all dist files for proxy dependencies, and package.json
-COPY --from=builder /app/dist/ /app/dist/
-COPY --from=builder /app/package.json /app/package.json
+# Copy ONLY the bundled server and proxy files (everything else is bundled)
+COPY --from=builder /app/dist/bundle.cjs /app/dist/bundle.cjs
+COPY --from=builder /app/dist/proxy/proxy-bootstrap.js /app/dist/proxy/proxy-bootstrap.js
+COPY --from=builder /app/dist/proxy/proxy-bundle.cjs /app/dist/proxy/proxy-bundle.cjs
+COPY --from=builder /app/dist/proxy/utils /app/dist/proxy/utils
 
-# Copy packages for potential runtime references (workspace symlinks / dist artifacts)
-COPY --from=builder /app/packages/shared/dist/ /app/packages/shared/dist/
-COPY --from=builder /app/packages/adapter-mock/dist/ /app/packages/adapter-mock/dist/
-COPY --from=builder /app/packages/adapter-python/dist/ /app/packages/adapter-python/dist/
+# Copy ONLY the runtime adapter packages (not entire node_modules)
+# These are loaded dynamically at runtime via import()
+COPY --from=builder /app/node_modules/@debugmcp /app/node_modules/@debugmcp
 
-# Copy node_modules (already dereferenced in builder stage)
-COPY --from=builder /app/node_modules /app/node_modules
+# Copy ONLY the production runtime dependencies needed by adapters
+# Use a minimal set - the bundle already includes most dependencies
+COPY --from=builder /app/node_modules/@vscode /app/node_modules/@vscode
+COPY --from=builder /app/node_modules/which /app/node_modules/which
+COPY --from=builder /app/node_modules/.pnpm/isexe@3.1.1/node_modules/isexe /app/node_modules/isexe
 
 # Expose ports
 EXPOSE 3000 5679
@@ -90,10 +114,10 @@ EXPOSE 3000 5679
 # Copy stdio silencer preloader into runtime image
 COPY --from=builder /app/scripts/stdio-silencer.cjs /app/scripts/stdio-silencer.cjs
 # Create an entrypoint wrapper that logs early startup context and preloads the silencer, then execs the server
-RUN printf '#!/bin/sh\nmkdir -p /app/logs\n{\n  echo \"==== entry.sh ====\";\n  date;\n  echo \"argv: $*\";\n} >> /app/logs/entry.log 2>&1\nexec node --no-warnings -r /app/scripts/stdio-silencer.cjs dist/bundle.cjs \"$@\"\n' > /app/entry.sh && chmod +x /app/entry.sh
+RUN printf '#!/bin/sh\nmkdir -p /app/logs\n{\n  echo \"==== entry.sh ====\";\n  date;\n  echo \"argv: $*\";\n} >> /app/logs/entry.log 2>&1\nexport MCP_WORKSPACE_ROOT="${MCP_WORKSPACE_ROOT:-/workspace}"\nexec node --no-warnings -r /app/scripts/stdio-silencer.cjs dist/bundle.cjs \"$@\"\n' > /app/entry.sh && chmod +x /app/entry.sh
 
-# Use the wrapper as entrypoint
-ENTRYPOINT ["/app/entry.sh"]
+# Use tini as PID1 to properly handle signals, then run our wrapper
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/entry.sh"]
 
 # Default command arguments
 CMD ["stdio"]

@@ -39,7 +39,7 @@ export function createProductionDependencies(): DapProxyDependencies {
     },
     
     dapClientFactory: {
-      create: (host: string, port: number) => new MinimalDapClient(host, port) as any // eslint-disable-line @typescript-eslint/no-explicit-any -- MinimalDapClient implements IDapClient but has type compatibility issues
+      create: (host: string, port: number, policy?: any) => new MinimalDapClient(host, port, policy) as any // eslint-disable-line @typescript-eslint/no-explicit-any -- MinimalDapClient implements IDapClient but has type compatibility issues
     },
     
     messageSender: {

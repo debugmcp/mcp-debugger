@@ -32,8 +32,8 @@ export function setupStdioCommand(program: Command, handler: StdioHandler): void
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
     .action(async (options: StdioOptions, command: Command) => {
-      // Explicitly mark stdio mode to ensure logger avoids console output even under bundling
-      process.env.DEBUG_MCP_STDIO = '1';
+      // Explicitly mark console silencing to ensure logger avoids console output even under bundling
+      process.env.CONSOLE_OUTPUT_SILENCED = '1';
       await handler(options, command);
     });
 }
@@ -45,5 +45,9 @@ export function setupSSECommand(program: Command, handler: SSEHandler): void {
     .option('-p, --port <number>', 'Port to listen on', '3001')
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
-    .action(handler);
+    .action(async (options: SSEOptions, command: Command) => {
+      // Silencing also applies to SSE to protect transports used for JS debugging
+      process.env.CONSOLE_OUTPUT_SILENCED = '1';
+      await handler(options, command);
+    });
 }

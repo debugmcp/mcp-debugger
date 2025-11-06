@@ -13,6 +13,9 @@ export default [
       "*.log",
       "sessions/",
       
+      // Exclude experimental/probe scripts
+      "scripts/experiments/**",
+      
       // Exclude build artifacts and manual test files
       "tests/manual/build/**",
       "tests/jest-register.js",

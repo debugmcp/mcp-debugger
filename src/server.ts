@@ -33,6 +33,19 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 
+const DEFAULT_LANGUAGES = Object.freeze(['python', 'mock'] as const);
+
+function getDefaultLanguages(): string[] {
+  return [...DEFAULT_LANGUAGES];
+}
+
+function ensureLanguage(
+  languages: readonly string[],
+  language: string
+): string[] {
+  return languages.includes(language) ? [...languages] : [...languages, language];
+}
+
 /**
  * Configuration options for the Debug MCP Server
  */
@@ -71,6 +84,7 @@ interface ToolArguments {
   frameId?: number;
   expression?: string;
   linesContext?: number;
+  includeInternals?: boolean;
 }
 
 /**
@@ -90,7 +104,7 @@ export class DebugMcpServer {
     const adapterRegistry = this.getAdapterRegistry();
     // Guard against undefined registry in certain test environments
     if (!adapterRegistry) {
-      return ['python', 'mock'];
+      return getDefaultLanguages();
     }
     // Prefer dynamic discovery if available on the concrete registry
     const dynRegistry = adapterRegistry as unknown as { listLanguages?: () => Promise<string[]> };
@@ -98,7 +112,9 @@ export class DebugMcpServer {
     if (typeof maybeList === 'function') {
       try {
         const langs = await maybeList.call(adapterRegistry);
-        if (Array.isArray(langs) && langs.length > 0) return langs;
+        if (Array.isArray(langs) && langs.length > 0) {
+          return process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, 'python') : langs;
+        }
       } catch (e) {
         this.logger.warn('Dynamic adapter language discovery failed, falling back to registered languages', { error: (e as Error)?.message });
       }
@@ -107,16 +123,16 @@ export class DebugMcpServer {
     const langs = adapterRegistry.getSupportedLanguages?.() || [];
     if (langs.length > 0) {
       // In container runtime, ensure python is advertised even if not yet registered (preload may be async)
-      if (process.env.MCP_CONTAINER === 'true' && !langs.includes('python')) {
-        return [...new Set([...langs, 'python'])];
+      if (process.env.MCP_CONTAINER === 'true') {
+        return ensureLanguage(langs, 'python');
       }
       return langs;
     }
     // Final fallback to known defaults for UX (ensure python listed in container)
     if (process.env.MCP_CONTAINER === 'true') {
-      return ['python', 'mock'];
+      return ensureLanguage(getDefaultLanguages(), 'python');
     }
-    return ['python', 'mock'];
+    return getDefaultLanguages();
   }
 
   // Get language metadata for all supported languages
@@ -140,6 +156,14 @@ export class DebugMcpServer {
             displayName: 'Mock',
             version: '1.0.0',
             requiresExecutable: false
+          };
+        case 'javascript':
+          return {
+            id: 'javascript',
+            displayName: 'JavaScript/TypeScript',
+            version: '1.0.0',
+            requiresExecutable: true,
+            defaultExecutable: 'node'
           };
         default:
           return {
@@ -204,17 +228,19 @@ export class DebugMcpServer {
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
     this.validateSession(sessionId);
     
-    // Check script file exists for immediate feedback (hands-off: no path manipulation)
+    // Check script file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(scriptPath);
     if (!fileCheck.exists) {
       throw new McpError(McpErrorCode.InvalidParams, 
         `Script file not found: '${scriptPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
     }
     
-    this.logger.info(`[DebugMcpServer.startDebugging] Script file exists: ${scriptPath}`);
+    this.logger.info(`[DebugMcpServer.startDebugging] Script file exists: ${fileCheck.effectivePath} (original: ${scriptPath})`);
+    
+    // Pass the effective path (which has been resolved for container) to session manager
     const result = await this.sessionManager.startDebugging(
       sessionId, 
-      scriptPath, 
+      fileCheck.effectivePath, 
       args, 
       dapLaunchArgs, 
       dryRunSpawn
@@ -229,15 +255,17 @@ export class DebugMcpServer {
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
     
-    // Check file exists for immediate feedback (hands-off: no path manipulation)
+    // Check file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(file);
     if (!fileCheck.exists) {
       throw new McpError(McpErrorCode.InvalidParams, 
         `Breakpoint file not found: '${file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
     }
     
-    this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${file}`);
-    return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
+    this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${fileCheck.effectivePath} (original: ${file})`);
+    
+    // Pass the effective path (which has been resolved for container) to session manager
+    return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -245,19 +273,28 @@ export class DebugMcpServer {
     return this.sessionManager.getVariables(sessionId, variablesReference);
   }
 
-  public async getStackTrace(sessionId: string): Promise<StackFrame[]> {
+  public async getStackTrace(sessionId: string, includeInternals: boolean = false): Promise<StackFrame[]> {
     this.validateSession(sessionId);
     const session = this.sessionManager.getSession(sessionId);
     const currentThreadId = session?.proxyManager?.getCurrentThreadId();
-    if (!session || !session.proxyManager || !currentThreadId) {
+    if (!session || !session.proxyManager || typeof currentThreadId !== 'number') {
         throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
     }
-    return this.sessionManager.getStackTrace(sessionId, currentThreadId);
+    return this.sessionManager.getStackTrace(sessionId, currentThreadId, includeInternals);
   }
 
   public async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {
     this.validateSession(sessionId);
     return this.sessionManager.getScopes(sessionId, frameId);
+  }
+
+  public async getLocalVariables(sessionId: string, includeSpecial: boolean = false): Promise<{
+    variables: Variable[];
+    frame: { name: string; file: string; line: number } | null;
+    scopeName: string | null;
+  }> {
+    this.validateSession(sessionId);
+    return this.sessionManager.getLocalVariables(sessionId, includeSpecial);
   }
 
   public async continueExecution(sessionId: string): Promise<boolean> {
@@ -420,9 +457,10 @@ export class DebugMcpServer {
           { name: 'continue_execution', description: 'Continue execution', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'pause_execution', description: 'Pause execution (Not Implemented)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
-          { name: 'get_stack_trace', description: 'Get stack trace', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' } }, required: ['sessionId'] } },
+          { name: 'get_stack_trace', description: 'Get stack trace', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' } }, required: ['sessionId'] } },
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
-          { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context (defaults to 0 - top frame)' } }, required: ['sessionId', 'expression'] } },
+          { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically' } }, required: ['sessionId', 'expression'] } },
           { name: 'get_source_context', description: 'Get source context around a specific line in a file', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number to get context for' }, linesContext: { type: 'number', description: 'Number of lines before and after to include (default: 5)' } }, required: ['sessionId', 'file', 'line'] } },
         ],
       };
@@ -536,6 +574,22 @@ export class DebugMcpServer {
                   // Include context if available
                   context: context || undefined
                 }) }] };
+                const contentEntry = Array.isArray(result.content) ? result.content[0] : undefined;
+                const textContent = contentEntry && typeof (contentEntry as { text?: unknown }).text === 'string'
+                  ? (contentEntry as { text: string }).text
+                  : undefined;
+                let parsedResponse: Record<string, unknown> | null = null;
+                if (typeof textContent === 'string') {
+                  try {
+                    parsedResponse = JSON.parse(textContent) as Record<string, unknown>;
+                  } catch {
+                    parsedResponse = null;
+                  }
+                }
+                this.logger.info('tool:set_breakpoint:result', {
+                  sessionId: args.sessionId,
+                  response: parsedResponse
+                });
               } catch (error) {
                 // Handle session state errors specifically
                 if (error instanceof McpError && 
@@ -707,8 +761,10 @@ export class DebugMcpServer {
               }
               
               try {
-                const stackFrames = await this.getStackTrace(args.sessionId);
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, stackFrames, count: stackFrames.length }) }] };
+                // Default to false for cleaner output
+                const includeInternals = args.includeInternals ?? false;
+                const stackFrames = await this.getStackTrace(args.sessionId, includeInternals);
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, stackFrames, count: stackFrames.length, includeInternals }) }] };
               } catch (error) {
                 // Handle validation errors specifically
                 if (error instanceof SessionTerminatedError ||
@@ -749,6 +805,10 @@ export class DebugMcpServer {
             }
             case 'get_source_context': {
               result = await this.handleGetSourceContext(args as { sessionId: string; file: string; line: number; linesContext?: number });
+              break;
+            }
+            case 'get_local_variables': {
+              result = await this.handleGetLocalVariables(args as { sessionId: string; includeSpecial?: boolean });
               break;
             }
             case 'list_supported_languages': {
@@ -832,12 +892,12 @@ export class DebugMcpServer {
         throw new McpError(McpErrorCode.InvalidParams, 'Expression too long (max 10KB)');
       }
       
-      // Call SessionManager's evaluateExpression method
+      // Call SessionManager's evaluateExpression method (uses 'watch' context by default for variable access)
       const result = await this.sessionManager.evaluateExpression(
         args.sessionId,
         args.expression,
-        args.frameId,
-        'repl' // Default context for AI/user evaluation
+        args.frameId
+        // Let SessionManager use its default context ('watch') for proper variable access
       );
       
       // Log for audit trail
@@ -889,14 +949,14 @@ export class DebugMcpServer {
       // Validate session
       this.validateSession(args.sessionId);
       
-      // Check file exists for immediate feedback (hands-off: no path manipulation)
+      // Check file exists for immediate feedback
       const fileCheck = await this.fileChecker.checkExists(args.file);
       if (!fileCheck.exists) {
         throw new McpError(McpErrorCode.InvalidParams, 
           `Line context file not found: '${args.file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
       }
       
-      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${args.file}, line: ${args.line}`);
+      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${fileCheck.effectivePath}, line: ${args.line}`);
       
       // Get line context using the line reader
       const contextLines = args.linesContext ?? 5; // Default to 5 lines of context
@@ -951,6 +1011,92 @@ export class DebugMcpServer {
     }
   }
 
+  private async handleGetLocalVariables(args: { sessionId: string; includeSpecial?: boolean }): Promise<ServerResult> {
+    try {
+      // Validate session
+      this.validateSession(args.sessionId);
+      
+      // Get local variables using the new convenience method
+      const result = await this.getLocalVariables(
+        args.sessionId,
+        args.includeSpecial ?? false
+      );
+      
+      // Log for debugging
+      this.logger.info('tool:get_local_variables', {
+        sessionId: args.sessionId,
+        sessionName: this.getSessionName(args.sessionId),
+        includeSpecial: args.includeSpecial ?? false,
+        variableCount: result.variables.length,
+        frame: result.frame,
+        scopeName: result.scopeName,
+        timestamp: Date.now()
+      });
+      
+      // Format response
+      const response: Record<string, unknown> = {
+        success: true,
+        variables: result.variables,
+        count: result.variables.length
+      };
+      
+      // Include frame information if available
+      if (result.frame) {
+        response.frame = result.frame;
+      }
+      
+      // Include scope name if available
+      if (result.scopeName) {
+        response.scopeName = result.scopeName;
+      }
+      
+      // Add helpful messages for edge cases
+      if (result.variables.length === 0) {
+        if (!result.frame) {
+          response.message = 'No stack frames available. The debugger may not be paused.';
+        } else if (!result.scopeName) {
+          response.message = 'No local scope found in the current frame.';
+        } else {
+          response.message = `The ${result.scopeName} scope is empty.`;
+        }
+      }
+      
+      return { 
+        content: [{ 
+          type: 'text', 
+          text: JSON.stringify(response) 
+        }] 
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Log the error
+      this.logger.error('tool:get_local_variables:error', {
+        sessionId: args.sessionId,
+        error: errorMessage,
+        timestamp: Date.now()
+      });
+      
+      // Handle session state errors specifically
+      if (error instanceof McpError && 
+          (error.message.includes('terminated') || 
+           error.message.includes('closed') || 
+           error.message.includes('not found') ||
+           error.message.includes('not paused'))) {
+        return { content: [{ type: 'text', text: JSON.stringify({ 
+          success: false, 
+          error: error.message,
+          message: 'Cannot get local variables. The session must be paused at a breakpoint.'
+        }) }] };
+      } else if (error instanceof McpError) {
+        throw error;
+      } else {
+        // Wrap unexpected errors
+        throw new McpError(McpErrorCode.InternalError, `Failed to get local variables: ${errorMessage}`);
+      }
+    }
+  }
+
   private async handleListSupportedLanguages(): Promise<ServerResult> {
     try {
       const adapterRegistry = this.getAdapterRegistry();
@@ -958,9 +1104,15 @@ export class DebugMcpServer {
       const installed = await this.getSupportedLanguagesAsync();
 
       // Also surface known adapters with install status if available from registry
-      let available: Array<{ language: string; package: string; installed: boolean; description?: string }> = [];
-      const dyn = adapterRegistry as unknown as { listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean }>> };
-      if (typeof dyn.listAvailableAdapters === 'function') {
+      let available: Array<{ language: string; package: string; installed: boolean; description?: string }> = installed.map(lang => ({
+        language: lang,
+        package: `@debugmcp/adapter-${lang}`,
+        installed: true
+      }));
+
+      if (adapterRegistry) {
+        const dyn = adapterRegistry as unknown as { listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean }>> };
+        if (typeof dyn.listAvailableAdapters === 'function') {
         try {
           const meta = await dyn.listAvailableAdapters!();
           available = meta.map(m => ({
@@ -972,13 +1124,7 @@ export class DebugMcpServer {
         } catch (e) {
           this.logger.warn('Failed to query detailed adapter metadata; returning installed list only', { error: (e as Error)?.message });
         }
-      } else {
-        // Fallback: build minimal available list from installed
-        available = installed.map(lang => ({
-          language: lang,
-          package: `@debugmcp/adapter-${lang}`,
-          installed: true
-        }));
+      }
       }
 
       // Also build simple metadata array for backward compatibility with previous payload shape

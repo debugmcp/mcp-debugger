@@ -78,13 +78,27 @@ function handleStatusMessage(
         { type: 'killProcess' }
       );
       break;
-    
+
+    case 'init_received':
+      commands.push(
+        { type: 'log', level: 'info', message: '[ProxyManager] Init command acknowledged by proxy' },
+        { type: 'emitEvent', event: 'init-received', args: [] }
+      );
+      break;
+
     case 'dry_run_complete':
       commands.push(
         { type: 'log', level: 'info', message: '[ProxyManager] Dry run complete' },
         { type: 'emitEvent', event: 'dry-run-complete', args: [message.command, message.script] }
       );
       break;
+
+    case 'adapter_connected':
+      commands.push(
+        { type: 'log', level: 'info', message: '[ProxyManager] Adapter transport connected' },
+        { type: 'emitEvent', event: 'initialized', args: [] }
+      );
+      return { commands, newState: setInitialized(state, true) };
     
     case 'adapter_configured_and_launched':
       commands.push(
@@ -225,7 +239,7 @@ function handleDapResponse(
     return {
       commands: [{
         type: 'log',
-        level: 'warn',
+        level: 'debug',
         message: `[ProxyManager] Received response for unknown request: ${message.requestId}`
       }]
     };

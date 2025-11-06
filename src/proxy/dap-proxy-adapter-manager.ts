@@ -65,7 +65,8 @@ export class GenericAdapterManager {
     const spawnOptions: any = {
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'] as ('ignore' | 'pipe' | 'inherit' | 'ipc' | number)[],
       env: env || process.env,
-      detached: true
+      detached: true,
+      windowsHide: true
     };
 
     // Only set cwd if explicitly provided
@@ -73,11 +74,32 @@ export class GenericAdapterManager {
       spawnOptions.cwd = cwd;
     }
 
+    // Log critical environment variables for debugging
+    const criticalEnvVars = {
+      NODE_OPTIONS: spawnOptions.env?.NODE_OPTIONS || '<not set>',
+      NODE_DEBUG: spawnOptions.env?.NODE_DEBUG || '<not set>',
+      NODE_ENV: spawnOptions.env?.NODE_ENV || '<not set>',
+      DEBUG: spawnOptions.env?.DEBUG || '<not set>',
+      VSCODE_INSPECTOR_OPTIONS: spawnOptions.env?.VSCODE_INSPECTOR_OPTIONS || '<not set>',
+      // Check for any inspector-related variables
+      hasInspectVars: Object.keys(spawnOptions.env || {}).some(k => 
+        k.includes('INSPECT') || k.includes('DEBUG')
+      )
+    };
+
     this.logger.info('[AdapterManager] Spawn configuration:', {
       command: command,
       args: args,
       cwd: cwd || 'inherited',
-      envVars: Object.keys(spawnOptions.env || {}).length
+      envVars: Object.keys(spawnOptions.env || {}).length,
+      criticalEnvVars
+    });
+
+    // Log the full command being executed
+    this.logger.info('[AdapterManager] Full command to execute:', {
+      fullCommand: fullCommand,
+      execArgv: args.filter(arg => arg.startsWith('--inspect')),
+      hasInspectFlag: args.some(arg => arg.includes('--inspect'))
     });
 
     // Spawn the process
@@ -87,9 +109,16 @@ export class GenericAdapterManager {
       throw new Error('Failed to spawn adapter process or get PID');
     }
 
-    // Detach the process
-    adapterProcess.unref();
-    this.logger.info(`[AdapterManager] Called unref() on adapter process PID: ${adapterProcess.pid}`);
+    // Detach and unref so proxy lifecycle is not blocked by child adapter
+    try {
+      adapterProcess.unref();
+      this.logger.info(`[AdapterManager] Called unref() on adapter process PID: ${adapterProcess.pid}`);
+    } catch {
+      // ignore unref errors (older Node or platform quirk)
+    }
+
+    // Spawned adapter process; hide console on Windows and keep attached for lifecycle management
+    this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers
     this.setupProcessHandlers(adapterProcess);
@@ -134,7 +163,24 @@ export class GenericAdapterManager {
 
         if (!process.killed) {
           this.logger.warn(`[AdapterManager] Adapter process PID: ${process.pid} did not exit after SIGTERM. Sending SIGKILL.`);
-          process.kill('SIGKILL');
+          try {
+            process.kill('SIGKILL');
+          } catch {
+            // ignore SIGKILL errors
+          }
+
+          // Windows-specific fallback: force kill entire process tree
+          if (globalThis.process.platform === 'win32' && process.pid) {
+            try {
+              this.logger.warn(`[AdapterManager] Forcing termination via taskkill /T /F for PID: ${process.pid}`);
+              this.processSpawner.spawn('taskkill', ['/PID', String(process.pid), '/T', '/F'], {
+                stdio: 'ignore',
+                windowsHide: true
+              });
+            } catch (tkErr) {
+              this.logger.error('[AdapterManager] taskkill fallback failed:', tkErr as Error);
+            }
+          }
         } else {
           this.logger.info(`[AdapterManager] Adapter process PID: ${process.pid} exited after SIGTERM.`);
         }
@@ -148,56 +194,4 @@ export class GenericAdapterManager {
   }
 }
 
-/**
- * Python-specific adapter manager for backward compatibility
- */
-export class DebugpyAdapterManager extends GenericAdapterManager {
-  /**
-   * Build the command and arguments for spawning debugpy adapter
-   */
-  buildSpawnCommand(executablePath: string, host: string, port: number, logDir: string): {
-    command: string;
-    args: string[];
-  } {
-    const args = [
-      '-m', 'debugpy.adapter',
-      '--host', host,
-      '--port', String(port),
-      '--log-dir', logDir
-    ];
-
-    return {
-      command: executablePath,
-      args
-    };
-  }
-
-  /**
-   * Spawn the debugpy adapter process (backward compatibility)
-   */
-  async spawnDebugpy(config: {
-    pythonPath: string;  // Keep parameter name for backward compatibility with proxy-worker
-    host: string;
-    port: number;
-    logDir: string;
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-  }): Promise<AdapterSpawnResult> {
-    const { command, args } = this.buildSpawnCommand(
-      config.pythonPath,  // Will be the executablePath value passed from proxy-worker
-      config.host,
-      config.port,
-      config.logDir
-    );
-
-    return this.spawn({
-      command,
-      args,
-      host: config.host,
-      port: config.port,
-      logDir: config.logDir,
-      cwd: config.cwd,
-      env: config.env
-    });
-  }
-}
+// DebugpyAdapterManager removed - functionality moved to PythonAdapterPolicy

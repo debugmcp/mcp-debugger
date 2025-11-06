@@ -8,6 +8,8 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { AdapterLoader, AdapterMetadata } from '../../../src/adapters/adapter-loader.js';
 import { IAdapterFactory } from '@debugmcp/shared';
 import { createLogger } from '../../../src/utils/logger.js';
+import type { ModuleLoader } from '../../../src/adapters/adapter-loader.js';
+import type { Mock } from 'vitest';
 
 // Mock the dynamic imports and createRequire
 vi.mock('module', () => ({
@@ -109,9 +111,9 @@ describe('AdapterLoader', () => {
       // Module loader will fail on all paths
       (mockModuleLoader.load as Mock).mockRejectedValue(new Error('Import failed'));
 
-      const mockRequire = vi.fn().mockReturnValue(mockModule);
+      const mockRequire = vi.fn().mockReturnValue(mockModule) as unknown as NodeJS.Require;
       const { createRequire } = await import('module');
-      vi.mocked(createRequire).mockReturnValue(mockRequire);
+      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
 
       const factory = await adapterLoader.loadAdapter('mock');
 
@@ -134,8 +136,8 @@ describe('AdapterLoader', () => {
         const error = new Error('Module not found');
         (error as any).code = 'MODULE_NOT_FOUND';
         throw error;
-      });
-      vi.mocked(createRequire).mockReturnValue(mockRequire);
+      }) as unknown as NodeJS.Require;
+      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
 
       await expect(adapterLoader.loadAdapter('nonexistent')).rejects.toThrow(
         "Failed to load adapter for 'nonexistent' from package '@debugmcp/adapter-nonexistent'. Adapter not installed. Install with: npm install @debugmcp/adapter-nonexistent"
@@ -150,9 +152,9 @@ describe('AdapterLoader', () => {
       (mockModuleLoader.load as Mock).mockResolvedValue(mockModule);
 
       const { createRequire } = await import('module');
-      vi.mocked(createRequire).mockReturnValue(vi.fn().mockImplementation(() => {
+      vi.mocked(createRequire as any).mockReturnValue(vi.fn().mockImplementation(() => {
         throw new Error('Module not found');
-      }));
+      }) as any);
 
       await expect(adapterLoader.loadAdapter('python')).rejects.toThrow(
         'Factory class PythonAdapterFactory not found in @debugmcp/adapter-python'
@@ -165,14 +167,67 @@ describe('AdapterLoader', () => {
       const { createRequire } = await import('module');
       const mockRequire = vi.fn().mockImplementation(() => {
         throw new Error('Network error');
-      });
-      vi.mocked(createRequire).mockReturnValue(mockRequire);
+      }) as unknown as NodeJS.Require;
+      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
 
       await expect(adapterLoader.loadAdapter('python')).rejects.toThrow(
         /Failed to load adapter for 'python' from package '@debugmcp\/adapter-python'/
       );
 
       expect(mockLogger.error).toHaveBeenCalled();
+    });
+
+    it('should successfully load and cache a javascript adapter', async () => {
+      const mockFactory = createMockAdapterFactory('javascript');
+      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockModule = { JavascriptAdapterFactory: mockFactoryClass };
+
+      // Configure mock module loader
+      (mockModuleLoader.load as Mock).mockImplementation((path: string) => {
+        if (path === '@debugmcp/adapter-javascript') {
+          return Promise.resolve(mockModule);
+        }
+        throw new Error(`Module not found: ${path}`);
+      });
+
+      const factory = await adapterLoader.loadAdapter('javascript');
+
+      expect(factory).toBe(mockFactory);
+      expect(mockFactoryClass).toHaveBeenCalled();
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining("Loaded adapter 'javascript' from @debugmcp/adapter-javascript")
+      );
+
+      // Test caching - second call should return cached instance
+      const factory2 = await adapterLoader.loadAdapter('javascript');
+      expect(factory2).toBe(mockFactory);
+    });
+
+    it('should use fallback paths when primary import fails for javascript', async () => {
+      const mockFactory = createMockAdapterFactory('javascript');
+      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockModule = { JavascriptAdapterFactory: mockFactoryClass };
+
+      let loadCount = 0;
+      (mockModuleLoader.load as Mock).mockImplementation((path: string) => {
+        loadCount++;
+        if (loadCount === 1 && path === '@debugmcp/adapter-javascript') {
+          // First attempt fails
+          throw new Error('Module not found');
+        } else if (path.includes('node_modules/@debugmcp/adapter-javascript')) {
+          // Fallback succeeds
+          return Promise.resolve(mockModule);
+        }
+        throw new Error(`Module not found: ${path}`);
+      });
+
+      const factory = await adapterLoader.loadAdapter('javascript');
+
+      expect(factory).toBe(mockFactory);
+      expect(mockFactoryClass).toHaveBeenCalled();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Primary import failed for @debugmcp/adapter-javascript, trying fallback URL')
+      );
     });
   });
 
@@ -194,8 +249,8 @@ describe('AdapterLoader', () => {
       const { createRequire } = await import('module');
       const mockRequire = vi.fn().mockImplementation(() => {
         throw new Error('Module not found');
-      });
-      vi.mocked(createRequire).mockReturnValue(mockRequire);
+      }) as unknown as NodeJS.Require;
+      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
 
       const available = await adapterLoader.isAdapterAvailable('nonexistent');
       expect(available).toBe(false);
@@ -234,12 +289,12 @@ describe('AdapterLoader', () => {
       const { createRequire } = await import('module');
       const mockRequire = vi.fn().mockImplementation(() => {
         throw new Error('Module not found');
-      });
-      vi.mocked(createRequire).mockReturnValue(mockRequire);
+      }) as unknown as NodeJS.Require;
+      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
-      expect(adapters).toHaveLength(2);
+      expect(adapters).toHaveLength(3);
 
       const pythonAdapter = adapters.find(a => a.name === 'python');
       expect(pythonAdapter).toEqual({
@@ -256,7 +311,66 @@ describe('AdapterLoader', () => {
         description: 'Mock adapter for testing',
         installed: false
       });
+
+      const jsAdapter = adapters.find(a => a.name === 'javascript');
+      expect(jsAdapter).toEqual({
+        name: 'javascript',
+        packageName: '@debugmcp/adapter-javascript',
+        description: 'JavaScript/TypeScript debugger using js-debug',
+        installed: false
+      });
     });
+
+    it('should include javascript with installed true when available', async () => {
+      const spy = vi.spyOn(adapterLoader, 'isAdapterAvailable');
+      spy.mockImplementation(async (language: string) => language === 'javascript');
+
+      const adapters = await adapterLoader.listAvailableAdapters();
+      const jsAdapter = adapters.find(a => a.name === 'javascript');
+
+      expect(jsAdapter).toEqual({
+        name: 'javascript',
+        packageName: '@debugmcp/adapter-javascript',
+        description: 'JavaScript/TypeScript debugger using js-debug',
+        installed: true
+      });
+    });
+  });
+
+  // Monorepo fallback should mark javascript installed:true when packages/adapter-javascript/dist exists
+  it('should mark javascript installed:true when resolved from monorepo packages fallback', async () => {
+    const mockFactory = createMockAdapterFactory('javascript');
+    const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+    const jsModule = { JavascriptAdapterFactory: mockFactoryClass };
+
+    // Primary package import fails
+    (mockModuleLoader.load as Mock).mockImplementation((path: string) => {
+      if (path === '@debugmcp/adapter-javascript') {
+        throw Object.assign(new Error('Module not found'), { code: 'ERR_MODULE_NOT_FOUND' });
+      }
+      // Simulate fallback path resolution in monorepo to packages/adapter-javascript/dist/index.js
+      if (path.includes('packages/adapter-javascript/dist/index.js')) {
+        return Promise.resolve(jsModule);
+      }
+      throw new Error(`Module not found: ${path}`);
+    });
+
+    // Ensure createRequire path is not taken (force using module loader load on fallback URL)
+    const { createRequire } = await import('module');
+    vi.mocked(createRequire as any).mockReturnValue(
+      vi.fn().mockImplementation(() => { throw Object.assign(new Error('Module not found'), { code: 'MODULE_NOT_FOUND' }); }) as any
+    );
+
+    const adapters = await adapterLoader.listAvailableAdapters();
+    const jsAdapter = adapters.find(a => a.name === 'javascript');
+    expect(jsAdapter).toEqual({
+      name: 'javascript',
+      packageName: '@debugmcp/adapter-javascript',
+      description: 'JavaScript/TypeScript debugger using js-debug',
+      installed: true
+    });
+    // And factory constructor should have been invoked via fallback
+    expect(mockFactoryClass).toHaveBeenCalled();
   });
 
   describe('private methods behavior', () => {
@@ -270,6 +384,7 @@ describe('AdapterLoader', () => {
       // Test the factory class name generation indirectly
       expect(adapterLoader['getFactoryClassName']('python')).toBe('PythonAdapterFactory');
       expect(adapterLoader['getFactoryClassName']('mock')).toBe('MockAdapterFactory');
+      expect(adapterLoader['getFactoryClassName']('javascript')).toBe('JavascriptAdapterFactory');
     });
 
     it('should generate correct fallback paths', () => {

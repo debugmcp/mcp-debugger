@@ -32,6 +32,12 @@ import { ProxyManagerFactory, IProxyManagerFactory } from '../factories/proxy-ma
 import { IAdapterRegistry, AdapterRegistryConfig } from '@debugmcp/shared';
 import { AdapterRegistry } from '../adapters/adapter-registry.js';
 
+type BundledAdapterEntry = {
+  language: string;
+  factoryCtor: new () => IAdapterFactory;
+};
+const BUNDLED_ADAPTERS_KEY = '__DEBUG_MCP_BUNDLED_ADAPTERS__';
+
 /**
  * Complete set of application dependencies
  */
@@ -77,7 +83,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   
   // Create process launchers
   const processLauncher = new ProcessLauncherImpl(processManager);
-  const proxyProcessLauncher = new ProxyProcessLauncherImpl(processLauncher);
+  const proxyProcessLauncher = new ProxyProcessLauncherImpl(processLauncher, processManager);
   const debugTargetLauncher = new DebugTargetLauncherImpl(processLauncher, networkManager);
   
   // Create factories
@@ -99,10 +105,26 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   };
   const adapterRegistry = new AdapterRegistry(dynConfig);
 
+  const bundledAdapters = (globalThis as unknown as Record<string, BundledAdapterEntry[] | undefined>)[BUNDLED_ADAPTERS_KEY];
+  if (Array.isArray(bundledAdapters)) {
+    bundledAdapters.forEach(({ language, factoryCtor }) => {
+      try {
+        const registration = adapterRegistry.register(language, new factoryCtor());
+        if (registration && typeof (registration as Promise<void>).then === 'function') {
+          (registration as Promise<void>).catch((error) => {
+            logger.warn?.(`[AdapterRegistry] Failed to register bundled adapter '${language}': ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
+      } catch (error) {
+        logger.warn?.(`[AdapterRegistry] Failed to register bundled adapter '${language}': ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+  }
+
   // Adapters are loaded dynamically on-demand by the AdapterRegistry via AdapterLoader.
   // In container runtime, pre-register known adapters using dynamic import (fire-and-forget)
   if (process.env.MCP_CONTAINER === 'true') {
-    const tryRegister = (lang: 'mock' | 'python', factoryName: string) => {
+    const tryRegister = (lang: 'mock' | 'python' | 'javascript', factoryName: string) => {
       const url = new URL(`../node_modules/@debugmcp/adapter-${lang}/dist/index.js`, import.meta.url).href;
       // Fire-and-forget; do not block dependency creation
       import(
@@ -122,6 +144,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 
     tryRegister('mock', 'MockAdapterFactory');
     tryRegister('python', 'PythonAdapterFactory');
+    tryRegister('javascript', 'JavascriptAdapterFactory');
   }
   
   return {

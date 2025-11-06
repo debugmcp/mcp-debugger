@@ -17,6 +17,7 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
  */
 export enum DebugLanguage {
   PYTHON = 'python',
+  JAVASCRIPT = 'javascript',
   MOCK = 'mock',  // Mock adapter for testing
 }
 

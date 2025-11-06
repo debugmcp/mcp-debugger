@@ -2,7 +2,10 @@
 
 ## Overview
 
-The Debug Adapter Pattern transforms mcp-debugger from a Python-specific tool into a multi-language debugging platform. This design introduces a language-agnostic adapter interface that encapsulates all language-specific behavior while maintaining backward compatibility with existing functionality.
+The Debug Adapter Pattern transforms mcp-debugger from a Python-specific tool into a multi-language debugging platform. This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
+
+1. **IDebugAdapter Interface**: Complete adapter implementations for full language support
+2. **AdapterPolicy Interface**: Lightweight policies for language-specific session management behaviors
 
 ### Design Philosophy
 
@@ -11,6 +14,60 @@ The Debug Adapter Pattern transforms mcp-debugger from a Python-specific tool in
 3. **Dependency Inversion**: Core depends on interfaces, not implementations
 4. **Open/Closed**: Open for extension (new languages), closed for modification
 5. **Single Responsibility**: Each adapter handles one language
+
+## Dual-Pattern Architecture: IDebugAdapter and AdapterPolicy
+
+### The Two Patterns Work Together
+
+The mcp-debugger architecture uses both patterns in complementary roles:
+
+#### IDebugAdapter (Complete Adapter)
+- **Scope**: Full language support implementation
+- **Lifecycle**: Created per debugging session
+- **Responsibility**: DAP protocol, process management, environment setup
+- **Location**: `packages/adapter-<language>/`
+- **State**: Instance-based, stateful
+
+#### AdapterPolicy (Lightweight Policy)
+- **Scope**: Language-specific behaviors for session management
+- **Lifecycle**: Static/singleton pattern
+- **Responsibility**: Validation, filtering, extraction policies
+- **Location**: `packages/shared/src/interfaces/adapter-policy-*.ts`
+- **State**: Stateless policy object
+
+### Pattern Interaction
+
+```typescript
+// During session creation
+const adapter = await adapterRegistry.create(session.language); // IDebugAdapter
+const policy = this.selectPolicy(session.language);             // AdapterPolicy
+
+// IDebugAdapter handles core debugging
+await adapter.validateEnvironment();
+const command = adapter.buildAdapterCommand(config);
+
+// AdapterPolicy handles session behaviors
+if (policy.validateExecutable) {
+  await policy.validateExecutable(executablePath);
+}
+if (policy.performHandshake) {
+  await policy.performHandshake(context);
+}
+```
+
+### Why Two Patterns?
+
+1. **Historical Evolution**: The codebase originally had language-specific conditionals scattered throughout. The refactoring introduced AdapterPolicy to centralize these behaviors without requiring full adapter rewrites.
+
+2. **Separation of Concerns**: 
+   - IDebugAdapter = "How to debug this language"
+   - AdapterPolicy = "How to manage sessions for this language"
+
+3. **Flexibility**: Policies can be modified without touching adapter implementations
+
+4. **Testing**: Policies are simple objects that are easier to test than full adapter implementations
+
+For more details on AdapterPolicy, see [Adapter Policy Pattern Documentation](./adapter-policy-pattern.md).
 
 ## Architecture Diagram
 

@@ -138,6 +138,7 @@ export class AdapterLoader {
     const known = [
       { name: 'mock', packageName: '@debugmcp/adapter-mock', description: 'Mock adapter for testing' },
       { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy' },
+      { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug' },
     ];
 
     const results: AdapterMetadata[] = [];

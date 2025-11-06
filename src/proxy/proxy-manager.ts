@@ -15,7 +15,10 @@ import {
   createInitialState, 
   handleProxyMessage, 
   isValidProxyMessage,
-  DAPSessionState
+  DAPSessionState,
+  addPendingRequest,
+  removePendingRequest,
+  clearPendingRequests
 } from '../dap-core/index.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
@@ -67,10 +70,12 @@ export interface IProxyManager extends EventEmitter {
 }
 
 // Message types from proxy
-type ProxyStatusMessage = 
+type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'proxy_minimal_ran_ipc_test'; message?: string }
+  | { type: 'status'; sessionId: string; status: 'init_received'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'dry_run_complete'; command: string; script: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_configured_and_launched'; data?: unknown }
+  | { type: 'status'; sessionId: string; status: 'adapter_connected'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; data?: unknown };
 
 type ProxyDapEventMessage = { 
@@ -101,6 +106,16 @@ type ProxyErrorMessage = {
 
 type ProxyMessage = ProxyStatusMessage | ProxyDapEventMessage | ProxyDapResponseMessage | ProxyErrorMessage;
 
+interface ProxyRuntimeEnvironment {
+  moduleUrl: string;
+  cwd: () => string;
+}
+
+const DEFAULT_RUNTIME_ENVIRONMENT: ProxyRuntimeEnvironment = {
+  moduleUrl: import.meta.url,
+  cwd: () => process.cwd()
+};
+
 /**
  * Concrete implementation of ProxyManager
  */
@@ -118,14 +133,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private adapterConfigured = false;
   private dapState: DAPSessionState | null = null;
   private stderrBuffer: string[] = [];
+  private readonly runtimeEnv: ProxyRuntimeEnvironment;
+  
+  // Track js-debug launch state for proper synchronization
+  private jsDebugLaunchPending = false;
+  private jsDebugLaunchResolvers: Array<() => void> = [];
+  private proxyMessageCounter = 0;
 
   constructor(
     private adapter: IDebugAdapter | null,  // Optional adapter for language-agnostic support
     private proxyProcessLauncher: IProxyProcessLauncher,
     private fileSystem: IFileSystem,
-    private logger: ILogger
+    private logger: ILogger,
+    runtimeEnv: ProxyRuntimeEnvironment = DEFAULT_RUNTIME_ENVIRONMENT
   ) {
     super();
+    this.runtimeEnv = runtimeEnv;
   }
 
   async start(config: ProxyConfig): Promise<void> {
@@ -139,37 +162,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Initialize functional core state
     this.dapState = createInitialState(config.sessionId);
     
-    // Use adapter to validate environment and resolve executable if available
-    let executablePath: string | undefined = config.executablePath;
-    if (this.adapter) {
-      // Validate environment first
-      const validation = await this.adapter.validateEnvironment();
-      if (!validation.valid) {
-        throw new Error(
-          `Invalid environment for ${this.adapter.language}: ${validation.errors[0].message}`
-        );
-      }
-      
-      // Resolve executable path if not provided
-      if (!executablePath) {
-        executablePath = await this.adapter.resolveExecutablePath();
-        this.logger.info(`[ProxyManager] Adapter resolved executable path: ${executablePath}`);
-      }
-    } else if (!executablePath) {
-      throw new Error('No executable path provided and no adapter available to resolve it');
-    }
-    
-    // Find proxy bootstrap script
-    const proxyScriptPath = await this.findProxyScript();
-    
-    // Use environment as-is without any path manipulation
-    // Filter out undefined values to satisfy TypeScript
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) {
-        env[key] = value;
-      }
-    }
+    const { executablePath, proxyScriptPath, env } = await this.prepareSpawnContext(config);
 
     this.logger.info(`[ProxyManager] Spawning proxy for session ${config.sessionId}. Path: ${proxyScriptPath}`);
     
@@ -193,26 +186,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Set up event handlers
     this.setupEventHandlers();
 
-    // Wait for proxy to be ready before sending init command
-    await new Promise<void>((resolve, reject) => {
-      const readyTimeout = setTimeout(() => {
-        reject(new Error('Proxy did not send ready signal within 5 seconds'));
-      }, 5000);
+    // Wait a brief moment for the process to start before sending init
+    await new Promise(resolve => setTimeout(resolve, 50));
 
-      const handleProxyReady = (message: unknown) => {
-        const msg = message as { type?: string } | null;
-        if (msg?.type === 'proxy-ready') {
-          clearTimeout(readyTimeout);
-          this.proxyProcess?.removeListener('message', handleProxyReady);
-          this.logger.info('[ProxyManager] Proxy is ready to receive commands');
-          resolve();
-        }
-      };
-
-      this.proxyProcess?.on('message', handleProxyReady);
-    });
-
-    // Send initialization command
+    // Send initialization command with retry logic
     const initCommand = {
       cmd: 'init',
       sessionId: config.sessionId,
@@ -240,7 +217,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       } : null
     });
 
-    this.sendCommand(initCommand);
+    // Send init command with retry logic
+    await this.sendInitWithRetry(initCommand);
 
     // Wait for initialization or dry run completion
     return new Promise((resolve, reject) => {
@@ -345,6 +323,66 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     if (!this.proxyProcess || !this.isInitialized) {
       throw new Error('Proxy not initialized');
     }
+    
+    // For js-debug, implement proper synchronization for launch command
+    const isJsDebug =
+      !!this.adapter &&
+      typeof (this.adapter as IDebugAdapter).getAdapterModuleName === 'function' &&
+      (this.adapter as IDebugAdapter).getAdapterModuleName() === 'js-debug';
+    
+    if (isJsDebug && command === 'launch') {
+      const requestId = uuidv4();
+      const commandToSend = {
+        cmd: 'dap',
+        sessionId: this.sessionId,
+        requestId,
+        dapCommand: command,
+        dapArgs: args
+      };
+      
+      this.logger.info(`[ProxyManager] (js-debug) Sending launch command with proper synchronization: ${command}, requestId: ${requestId}`);
+      
+      // Mark that we're waiting for js-debug to be ready
+      this.jsDebugLaunchPending = true;
+      
+      try {
+        this.sendCommand(commandToSend);
+      } catch (error) {
+        this.jsDebugLaunchPending = false;
+        throw error;
+      }
+      
+      // Wait for either a stopped event (indicating ready) or a timeout
+      const LAUNCH_READY_TIMEOUT = 5000; // 5 seconds should be enough
+      
+      return new Promise<T>((resolve) => {
+        let resolved = false;
+        
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            this.jsDebugLaunchPending = false;
+            // Don't reject, just resolve with empty response
+            // The adapter might still be initializing
+            this.logger.warn(`[ProxyManager] js-debug launch timeout after ${LAUNCH_READY_TIMEOUT}ms, proceeding anyway`);
+            resolve({} as T);
+          }
+        }, LAUNCH_READY_TIMEOUT);
+        
+        // Store resolver to be called when we detect readiness
+        const resolveWhenReady = () => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            this.jsDebugLaunchPending = false;
+            this.logger.info(`[ProxyManager] js-debug launch confirmed ready`);
+            resolve({} as T);
+          }
+        };
+        
+        this.jsDebugLaunchResolvers.push(resolveWhenReady);
+      });
+    }
 
     const requestId = uuidv4();
     const commandToSend = {
@@ -363,6 +401,16 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         reject,
         command
       });
+
+      // Mirror into functional core for observability (ProxyManager remains authoritative)
+      if (this.dapState) {
+        this.dapState = addPendingRequest(this.dapState, {
+          requestId,
+          command,
+          seq: 0,
+          timestamp: Date.now()
+        });
+      }
 
       try {
         this.sendCommand(commandToSend);
@@ -389,45 +437,181 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return this.currentThreadId;
   }
 
+  private async prepareSpawnContext(config: ProxyConfig): Promise<{
+    executablePath: string;
+    proxyScriptPath: string;
+    env: Record<string, string>;
+  }> {
+    let executablePath = config.executablePath;
+
+    if (this.adapter) {
+      const validation = await this.adapter.validateEnvironment();
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid environment for ${this.adapter.language}: ${validation.errors[0].message}`
+        );
+      }
+
+      if (!executablePath) {
+        executablePath = await this.adapter.resolveExecutablePath();
+        this.logger.info(`[ProxyManager] Adapter resolved executable path: ${executablePath}`);
+      }
+    } else if (!executablePath) {
+      throw new Error('No executable path provided and no adapter available to resolve it');
+    }
+
+    const proxyScriptPath = await this.findProxyScript();
+
+    if (!executablePath) {
+      throw new Error('Executable path could not be determined after validation');
+    }
+
+    const env = this.cloneProcessEnv();
+
+    return {
+      executablePath,
+      proxyScriptPath,
+      env
+    };
+  }
+
+  private cloneProcessEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+    return env;
+  }
+
   private async findProxyScript(): Promise<string> {
-    // Check if we're running from a bundled environment
-    const isBundled = fileURLToPath(import.meta.url).includes('bundle.cjs');
-    
+    const modulePath = fileURLToPath(this.runtimeEnv.moduleUrl);
+    const moduleDir = path.dirname(modulePath);
+    const dirParts = moduleDir.split(path.sep);
+    const cwd = this.runtimeEnv.cwd();
+    const lastPart = dirParts[dirParts.length - 1];
+    const secondLast = dirParts[dirParts.length - 2];
+
     let distPath: string;
-    if (isBundled) {
-      // In bundled environment (e.g., Docker container), proxy-bootstrap.js is in same dist directory
-      distPath = path.resolve(process.cwd(), 'dist/proxy/proxy-bootstrap.js');
+    if (lastPart === 'dist') {
+      distPath = path.join(moduleDir, 'proxy', 'proxy-bootstrap.js');
+    } else if (lastPart === 'proxy' && secondLast === 'dist') {
+      distPath = path.join(moduleDir, 'proxy-bootstrap.js');
     } else {
-      // In development/non-bundled environment, resolve relative to this module's location
-      const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+      // Fallback to development layout
       distPath = path.resolve(moduleDir, '../../dist/proxy/proxy-bootstrap.js');
     }
-    
-    this.logger.info(`[ProxyManager] Checking for proxy script at: ${distPath} (bundled: ${isBundled})`);
-    
+
+    this.logger.info(`[ProxyManager] Checking for proxy script at: ${distPath}`);
+
     if (!(await this.fileSystem.pathExists(distPath))) {
-      const moduleDir = path.dirname(fileURLToPath(import.meta.url));
       throw new Error(
         `Bootstrap worker script not found at: ${distPath}\n` +
         `Module directory: ${moduleDir}\n` +
-        `Current working directory: ${process.cwd()}\n` +
-        `Is bundled: ${isBundled}\n` +
+        `Current working directory: ${cwd}\n` +
         `This usually means:\n` +
         `  1. You need to run 'npm run build' first\n` +
         `  2. The build failed to copy proxy files\n` +
         `  3. The TypeScript compilation structure is unexpected`
       );
     }
-    
+
     return distPath;
+  }
+
+  private async sendInitWithRetry(initCommand: object): Promise<void> {
+    const maxRetries = 5;
+    const delays = [100, 200, 400, 800, 1600]; // Exponential backoff
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // Send init command
+        this.sendCommand(initCommand);
+
+        // Wait for init_received acknowledgment
+        const received = await Promise.race([
+          new Promise<boolean>((resolve) => {
+            const handler = () => {
+              this.removeListener('init-received', handler);
+              resolve(true);
+            };
+            this.on('init-received', handler);
+          }),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), delays[Math.min(attempt, delays.length - 1)])
+          )
+        ]);
+
+        if (received) {
+          this.logger.info(`[ProxyManager] Init command acknowledged on attempt ${attempt + 1}`);
+          return;
+        }
+
+        // If not received, will retry
+        this.logger.warn(`[ProxyManager] Init not acknowledged, attempt ${attempt + 1}/${maxRetries + 1}`);
+      } catch (error) {
+        lastError = error as Error;
+        this.logger.warn(`[ProxyManager] Error sending init on attempt ${attempt + 1}: ${lastError.message}`);
+      }
+
+      // Wait before retry (except on last attempt)
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, delays[Math.min(attempt, delays.length - 1)]));
+      }
+    }
+
+    throw new Error(`Failed to initialize proxy after ${maxRetries + 1} attempts. ${lastError ? `Last error: ${lastError.message}` : 'Init command not acknowledged'}`);
   }
 
   private sendCommand(command: object): void {
     if (!this.proxyProcess || this.proxyProcess.killed) {
       throw new Error('Proxy process not available');
     }
-    
-    this.proxyProcess.sendCommand(command);
+
+    const rawChild =
+      (this.proxyProcess as unknown as { childProcess?: { connected?: boolean; pid?: number; killed?: boolean } })
+        .childProcess;
+    const requestId = (command as { requestId?: string }).requestId;
+    const cmd = (command as { cmd?: string }).cmd;
+    const dapCommand = (command as { dapCommand?: string }).dapCommand;
+
+    const connectedBefore =
+      rawChild && typeof rawChild.connected === 'boolean' ? rawChild.connected : undefined;
+    const childPid = rawChild?.pid;
+
+    this.logger.debug(
+      `[ProxyManager] IPC pre-send pid=${childPid ?? 'unknown'} connected=${connectedBefore} cmd=${cmd}${
+        dapCommand ? `/${dapCommand}` : ''
+      } requestId=${requestId ?? 'n/a'}`
+    );
+
+    this.logger.info(`[ProxyManager] Sending command to proxy: ${JSON.stringify(command).substring(0, 500)}`);
+
+    try {
+      this.proxyProcess.sendCommand(command);
+      this.logger.info(`[ProxyManager] Command dispatched via proxy process`);
+
+      const connectedAfter =
+        rawChild && typeof rawChild.connected === 'boolean' ? rawChild.connected : undefined;
+      this.logger.debug(
+        `[ProxyManager] IPC post-send pid=${childPid ?? 'unknown'} connected=${connectedAfter} cmd=${cmd}${
+          dapCommand ? `/${dapCommand}` : ''
+        } requestId=${requestId ?? 'n/a'}`
+      );
+    } catch (error) {
+      const connectedAfter =
+        rawChild && typeof rawChild.connected === 'boolean' ? rawChild.connected : undefined;
+      this.logger.error(
+        `[ProxyManager] Failed to send command (pid=${childPid ?? 'unknown'} connected=${connectedAfter} cmd=${cmd}${
+          dapCommand ? `/${dapCommand}` : ''
+        } requestId=${requestId ?? 'n/a'})`,
+        error
+      );
+      this.logger.error(`[ProxyManager] Failed to send command:`, error);
+      throw error;
+    }
   }
 
   private setupEventHandlers(): void {
@@ -436,6 +620,30 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Handle IPC messages
     this.proxyProcess.on('message', (rawMessage: unknown) => {
       this.handleProxyMessage(rawMessage);
+    });
+
+    this.proxyProcess.on('ipc-send-start', (data: { pid?: number; connectedBefore?: boolean; summary?: string; timestamp?: number }) => {
+      this.logger.debug(
+        `[ProxyManager] IPC send start pid=${data?.pid ?? 'unknown'} connected=${data?.connectedBefore} summary=${data?.summary ?? 'n/a'}`
+      );
+    });
+
+    this.proxyProcess.on('ipc-send-complete', (data: { pid?: number; connectedAfter?: boolean; summary?: string; timestamp?: number; queueSizeBefore?: number; queueSizeAfter?: number }) => {
+      this.logger.debug(
+        `[ProxyManager] IPC send complete pid=${data?.pid ?? 'unknown'} connected=${data?.connectedAfter} summary=${data?.summary ?? 'n/a'} queueBefore=${data?.queueSizeBefore ?? 'n/a'} queueAfter=${data?.queueSizeAfter ?? 'n/a'}`
+      );
+    });
+
+    this.proxyProcess.on('ipc-send-failed', (data: { pid?: number; killed?: boolean; childProcessKilled?: boolean | string; summary?: string; timestamp?: number }) => {
+      this.logger.warn(
+        `[ProxyManager] IPC send returned false pid=${data?.pid ?? 'unknown'} killed=${data?.killed} childKilled=${data?.childProcessKilled} summary=${data?.summary ?? 'n/a'}`
+      );
+    });
+
+    this.proxyProcess.on('ipc-send-error', (data: { pid?: number; error?: string; summary?: string; timestamp?: number }) => {
+      this.logger.error(
+        `[ProxyManager] IPC send error pid=${data?.pid ?? 'unknown'} error=${data?.error ?? 'unknown'} summary=${data?.summary ?? 'n/a'}`
+      );
     });
 
     // Handle stderr
@@ -463,7 +671,25 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   private handleProxyMessage(rawMessage: unknown): void {
-    this.logger.debug(`[ProxyManager] Received message:`, rawMessage);
+    if ((rawMessage as { type?: string })?.type === 'ipc-heartbeat') {
+      const heartbeat = rawMessage as { counter?: number; timestamp?: number };
+      this.logger.debug(
+        `[ProxyManager] Received worker heartbeat counter=${heartbeat.counter ?? 'n/a'} timestamp=${heartbeat.timestamp ?? 'n/a'}`
+      );
+      return;
+    }
+    if ((rawMessage as { type?: string })?.type === 'ipc-heartbeat-tick') {
+      const heartbeatTick = rawMessage as { timestamp?: number };
+      this.logger.debug(
+        `[ProxyManager] Received worker heartbeat tick timestamp=${heartbeatTick.timestamp ?? 'n/a'}`
+      );
+      return;
+    }
+    this.proxyMessageCounter += 1;
+    this.logger.debug(
+      `[ProxyManager] Received message #${this.proxyMessageCounter}:`,
+      rawMessage
+    );
 
     // Validate message format
     if (!isValidProxyMessage(rawMessage)) {
@@ -472,6 +698,16 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     const message = rawMessage as ProxyMessage;
+
+    // Fast-path: always forward DAP events to consumers to avoid missing stops/output
+    if (message.type === 'dapEvent') {
+      this.handleDapEvent(message as ProxyDapEventMessage);
+    }
+    
+    // Handle status messages
+    if (message.type === 'status') {
+      this.handleStatusMessage(message as ProxyStatusMessage);
+    }
 
     // Use functional core if state is initialized
     if (this.dapState) {
@@ -485,8 +721,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
             break;
             
           case 'emitEvent':
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event args must support variable argument counts, any[] required for spread operator
-            this.emit(command.event as keyof ProxyManagerEvents, ...(command.args as [any, any]));
+            {
+              const args = (command.args as unknown[]) ?? [];
+              this.emit(command.event as keyof ProxyManagerEvents, ...(args as never[]));
+            }
             break;
             
           case 'killProcess':
@@ -508,7 +746,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // Sync local state with functional core state
         this.isInitialized = result.newState.initialized;
         this.adapterConfigured = result.newState.adapterConfigured;
-        this.currentThreadId = result.newState.currentThreadId ?? null;
+        // Only update currentThreadId if the core provided a concrete number.
+        // Avoid overwriting the value we set in the fast-path dapEvent handler with null/undefined.
+        const coreTid = (result.newState as { currentThreadId?: number | null }).currentThreadId;
+        if (typeof coreTid === 'number') {
+          this.currentThreadId = coreTid;
+        }
       }
       
       // Handle pending DAP responses (still done imperatively for now)
@@ -532,8 +775,26 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     this.pendingDapRequests.delete(message.requestId);
+    // Mirror completion into functional core
+    if (this.dapState) {
+      this.dapState = removePendingRequest(this.dapState, message.requestId);
+    }
 
     if (message.success) {
+      // If this was a 'threads' response, opportunistically capture a usable thread id
+      try {
+        if (pending.command === 'threads') {
+          const resp = (message.response || message.body) as DebugProtocol.ThreadsResponse | undefined;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const threads = (resp && (resp as any).body && Array.isArray((resp as any).body.threads)) ? (resp as any).body.threads : [];
+          const first = threads.length ? threads[0]?.id : undefined;
+          if (typeof first === 'number') {
+            this.currentThreadId = first;
+          }
+        }
+      } catch {
+        // ignore capture errors
+      }
       pending.resolve((message.response || message.body) as DebugProtocol.Response);
     } else {
       pending.reject(new Error(message.error || `DAP request '${pending.command}' failed`));
@@ -546,12 +807,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     switch (message.event) {
       case 'stopped':
         const stoppedBody = message.body as { threadId?: number; reason?: string } | undefined;
-        const threadId = stoppedBody?.threadId || 0;
+        const threadIdMaybe = (typeof stoppedBody?.threadId === 'number') ? stoppedBody!.threadId! : undefined;
         const reason = stoppedBody?.reason || 'unknown';
-        if (threadId) {
-          this.currentThreadId = threadId;
+        if (typeof threadIdMaybe === 'number') {
+          this.currentThreadId = threadIdMaybe;
         }
-        this.emit('stopped', threadId, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
+        
+        // If js-debug launch is pending, resolve it now
+        if (this.jsDebugLaunchPending && this.jsDebugLaunchResolvers.length > 0) {
+          this.logger.info(`[ProxyManager] js-debug stopped event received, resolving pending launch`);
+          const resolvers = this.jsDebugLaunchResolvers;
+          this.jsDebugLaunchResolvers = [];
+          resolvers.forEach(resolve => resolve());
+        }
+        
+        // Do not fabricate a threadId; emit undefined if adapter omitted it
+        this.emit('stopped', threadIdMaybe as unknown as number, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
         break;
       
       case 'continued':
@@ -578,7 +849,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.logger.info(`[ProxyManager] IPC test message received`);
         this.proxyProcess?.kill();
         break;
-      
+
+      case 'init_received':
+        this.logger.info(`[ProxyManager] Init command acknowledged by proxy`);
+        this.emit('init-received');
+        break;
+
       case 'dry_run_complete':
         this.logger.info(`[ProxyManager] Dry run complete`);
         this.emit('dry-run-complete', message.command, message.script);
@@ -591,6 +867,29 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         if (!this.isInitialized) {
           this.isInitialized = true;
           this.emit('initialized');
+        }
+        break;
+      
+      case 'adapter_connected':
+        // JS adapter transport is up; allow client to proceed with DAP handshake.
+        this.logger.info(`[ProxyManager] Adapter transport connected (JS). Marking initialized to unblock client handshake.`);
+        if (!this.isInitialized) {
+          this.isInitialized = true;
+          this.emit('initialized');
+        }
+        
+        // If js-debug launch is pending and we haven't gotten a stopped event, 
+        // consider the adapter ready after connection
+        if (this.jsDebugLaunchPending && this.jsDebugLaunchResolvers.length > 0) {
+          // Give it a small delay to ensure adapter is fully ready
+          setTimeout(() => {
+            if (this.jsDebugLaunchPending && this.jsDebugLaunchResolvers.length > 0) {
+              this.logger.info(`[ProxyManager] js-debug adapter connected, resolving pending launch`);
+              const resolvers = this.jsDebugLaunchResolvers;
+              this.jsDebugLaunchResolvers = [];
+              resolvers.forEach(resolve => resolve());
+            }
+          }, 500);
         }
         break;
       
@@ -626,6 +925,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       }
       this.pendingDapRequests.clear();
     }
+    // Clear functional core mirror
+    if (this.dapState) {
+      this.dapState = clearPendingRequests(this.dapState);
+    }
+    
+    // Clear js-debug launch state
+    this.jsDebugLaunchPending = false;
+    this.jsDebugLaunchResolvers = [];
     
     this.proxyProcess = null;
     this.isInitialized = false;

@@ -102,7 +102,11 @@ describe('SimpleFileChecker', () => {
   describe('Container Mode', () => {
     beforeEach(() => {
       (mockEnvironment.get as MockedFunction<(key: string) => string | undefined>)
-        .mockImplementation((key) => key === 'MCP_CONTAINER' ? 'true' : undefined);
+        .mockImplementation((key) => {
+          if (key === 'MCP_CONTAINER') return 'true';
+          if (key === 'MCP_WORKSPACE_ROOT') return '/workspace';
+          return undefined;
+        });
     });
 
     it('should prepend /workspace/ to relative paths', async () => {

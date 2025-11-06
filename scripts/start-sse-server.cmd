@@ -45,6 +45,28 @@ echo ========================================
 echo.
 
 REM Start the server
-node dist/index.js sse --port 3001 --log-level debug --log-file logs/debug-mcp-server.log
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "ROOT_DIR=%%~fI"
+set "DIST_PATH=%ROOT_DIR%\dist\index.js"
+set "LOG_DIR=%ROOT_DIR%\logs"
+set "LOG_FILE=%LOG_DIR%\debug-mcp-server.log"
+
+if not exist "%DIST_PATH%" (
+    echo ERROR: Build output not found at "%DIST_PATH%"
+    echo Please run: pnpm build
+    pause
+    exit /b 1
+)
+
+if not exist "%LOG_DIR%" (
+    mkdir "%LOG_DIR%" >nul 2>&1
+)
+
+echo [OK] Build artifact located at: "%DIST_PATH%"
+echo.
+
+pushd "%ROOT_DIR%" >nul
+node "%DIST_PATH%" sse --port 3001 --log-level debug --log-file "%LOG_FILE%"
+popd >nul
 
 endlocal

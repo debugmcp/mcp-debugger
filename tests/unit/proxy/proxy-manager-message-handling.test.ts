@@ -7,10 +7,13 @@
  * SIMPLIFIED: Uses TestProxyManager to avoid complex async initialization
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'path';
+import { pathToFileURL } from 'url';
 import { TestProxyManager } from '../test-utils/test-proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
-import { DebugLanguage } from '@debugmcp/shared';
-import { createMockLogger } from '../test-utils/mock-factories.js';
+import { DebugLanguage, type IDebugAdapter } from '@debugmcp/shared';
+import { createMockLogger, createMockFileSystem } from '../test-utils/mock-factories.js';
+import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 
 describe('ProxyManager Message Handling', () => {
   let proxyManager: TestProxyManager;
@@ -459,4 +462,373 @@ describe('ProxyManager Message Handling', () => {
       await expect(dryRunManager.start(dryRunConfig)).resolves.not.toThrow();
     });
   });
+
+  describe('resilience scenarios', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('logs and ignores invalid proxy messages', () => {
+      const logger = createMockLogger();
+      const warnSpy = logger.warn;
+      const manager = new TestProxyManager(logger);
+
+      manager.simulateMessage({ type: 'unknown' });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid message format'),
+        expect.objectContaining({ type: 'unknown' })
+      );
+    });
+
+    it('rejects pending DAP requests that time out', async () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      (proxyManager as unknown as { sessionId: string }).sessionId = 'timeout-session';
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { proxyProcess: unknown }).proxyProcess = {
+        sendCommand: vi.fn(),
+        killed: false
+      };
+
+      vi.useFakeTimers();
+
+      const request = proxyManager.sendDapRequest('threads');
+
+      await vi.advanceTimersByTimeAsync(35_000);
+
+      await expect(request).rejects.toThrow(/Debug adapter did not respond/i);
+
+      const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
+      expect(pending.size).toBe(0);
+    });
+
+    it('throws helpful error when proxy bootstrap is missing', async () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+      fileSystem.pathExists.mockResolvedValue(false);
+
+      const runtimeEnv = {
+        moduleUrl: pathToFileURL(path.join(process.cwd(), 'fake', 'src', 'proxy', 'proxy-manager.ts')).href,
+        cwd: () => path.join(process.cwd(), 'fake')
+      };
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger,
+        runtimeEnv
+      );
+
+      await expect(
+        (proxyManager as unknown as {
+          prepareSpawnContext: (config: ProxyConfig) => Promise<unknown>;
+        }).prepareSpawnContext({
+          sessionId: 'missing-bootstrap',
+          language: DebugLanguage.JAVASCRIPT,
+          executablePath: 'node',
+          adapterHost: '127.0.0.1',
+          adapterPort: 9229,
+          logDir: '/tmp/logs',
+          scriptPath: '/app/index.js'
+        } as ProxyConfig)
+      ).rejects.toThrow('Bootstrap worker script not found');
+    });
+
+    it('propagates transport errors when sending commands', async () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const sendCommand = vi.fn().mockImplementation(() => {
+        throw new Error('send failed');
+      });
+
+      (proxyManager as unknown as { sessionId: string }).sessionId = 'transport-session';
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { proxyProcess: unknown }).proxyProcess = {
+        sendCommand,
+        killed: false
+      };
+
+      vi.useFakeTimers();
+
+      const request = proxyManager.sendDapRequest('initialize');
+
+      await expect(request).rejects.toThrow('send failed');
+
+      const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
+      expect(pending.size).toBe(0);
+    });
+
+    it('throws when adapter validation fails during spawn preparation', async () => {
+      const adapter = {
+        language: DebugLanguage.JAVASCRIPT,
+        validateEnvironment: vi.fn().mockResolvedValue({
+          valid: false,
+          errors: [{ message: 'bad env' }],
+          warnings: []
+        })
+      } as unknown as IDebugAdapter;
+
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        adapter,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      await expect(
+        (proxyManager as unknown as {
+          prepareSpawnContext: (config: ProxyConfig) => Promise<unknown>;
+        }).prepareSpawnContext({
+          sessionId: 'spawn-session',
+          language: DebugLanguage.JAVASCRIPT,
+          executablePath: '',
+          adapterHost: '127.0.0.1',
+          adapterPort: 9229,
+          logDir: '/tmp/logs',
+          scriptPath: '/app/index.js'
+        })
+      ).rejects.toThrow(/Invalid environment/);
+    });
+
+    it('sends launch fire-and-forget for js-debug adapters', async () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const adapter = {
+        language: DebugLanguage.JAVASCRIPT,
+        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
+        getAdapterModuleName: () => 'js-debug'
+      } as unknown as IDebugAdapter;
+
+      const proxyManager = new ProxyManager(
+        adapter,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const sendCommand = vi.fn();
+      (proxyManager as unknown as { proxyProcess: unknown }).proxyProcess = {
+        sendCommand,
+        killed: false
+      };
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { sessionId: string }).sessionId = 'js-session';
+
+      const response = await proxyManager.sendDapRequest('launch', { foo: 'bar' });
+
+      expect(sendCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dapCommand: 'launch',
+          sessionId: 'js-session'
+        })
+      );
+      expect(response).toEqual({});
+    });
+  });
+
+  describe('status and lifecycle handling', () => {
+    it('emits initialized when adapter transport connects', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const initialized = vi.fn();
+      proxyManager.on('initialized', initialized);
+
+      (proxyManager as unknown as {
+        handleStatusMessage: (status: any) => void;
+      }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'adapter_connected'
+      });
+
+      expect(initialized).toHaveBeenCalled();
+    });
+
+    it('emits exit when adapter exits', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const exitSpy = vi.fn();
+      proxyManager.on('exit', exitSpy);
+
+      (proxyManager as unknown as {
+        handleStatusMessage: (status: any) => void;
+      }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'adapter_exited',
+        code: 7,
+        signal: 'SIGTERM'
+      });
+
+      expect(exitSpy).toHaveBeenCalledWith(7, 'SIGTERM');
+    });
+
+    it('rejects pending requests when proxy exits', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const rejectSpy = vi.fn();
+      (proxyManager as unknown as {
+        pendingDapRequests: Map<string, { resolve: () => void; reject: (error: Error) => void }>;
+      }).pendingDapRequests.set('req-1', {
+        resolve: vi.fn(),
+        reject: rejectSpy
+      });
+
+      (proxyManager as unknown as {
+        handleProxyExit: (code: number | null, signal: string | null) => void;
+      }).handleProxyExit(0, null);
+
+      expect(rejectSpy).toHaveBeenCalledWith(new Error('Proxy exited'));
+      const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
+      expect(pending.size).toBe(0);
+    });
+  });
+
+  describe('status transitions and cleanup', () => {
+    it('emits initialized when adapter transport connects', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const initialized = vi.fn();
+      proxyManager.on('initialized', initialized);
+
+      (proxyManager as unknown as { handleStatusMessage: (message: any) => void }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'adapter_connected'
+      });
+
+      expect(initialized).toHaveBeenCalled();
+    });
+
+    it('emits exit when adapter reports termination', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+      fileSystem as never,
+        logger
+      );
+
+      const exitSpy = vi.fn();
+      proxyManager.on('exit', exitSpy);
+
+      (proxyManager as unknown as { handleStatusMessage: (message: any) => void }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'adapter_exited',
+        code: 9,
+        signal: 'SIGTERM'
+      });
+
+      expect(exitSpy).toHaveBeenCalledWith(9, 'SIGTERM');
+    });
+
+    it('rejects pending requests when proxy exits', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const rejectSpy = vi.fn();
+      (proxyManager as unknown as {
+        pendingDapRequests: Map<string, { resolve: () => void; reject: (error: Error) => void }>;
+      }).pendingDapRequests.set('req-1', {
+        resolve: vi.fn(),
+        reject: rejectSpy
+      });
+
+      (proxyManager as unknown as { handleProxyExit: (code: number | null, signal: string | null) => void }).handleProxyExit(
+        0,
+        null
+      );
+
+      expect(rejectSpy).toHaveBeenCalledWith(new Error('Proxy exited'));
+      const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
+      expect(pending.size).toBe(0);
+    });
+  });
 });
+  describe('IPC smoke test status', () => {
+    it('kills proxy process when minimal proxy test status arrives', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const kill = vi.fn();
+      (proxyManager as unknown as { proxyProcess: { kill: () => void } }).proxyProcess = { kill } as never;
+
+      (proxyManager as unknown as { handleStatusMessage: (message: any) => void }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'ipc-session',
+        status: 'proxy_minimal_ran_ipc_test'
+      });
+
+      expect(kill).toHaveBeenCalled();
+    });
+  });

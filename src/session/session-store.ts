@@ -12,12 +12,14 @@ import {
   SessionLifecycleState,
   ExecutionState,
   DebugSessionInfo,
-  Breakpoint 
+  Breakpoint,
+  AdapterPolicy,
+  DefaultAdapterPolicy,
+  PythonAdapterPolicy,
+  JsDebugAdapterPolicy,
+  MockAdapterPolicy
 } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
-
-// Platform-aware default Python command
-const DEFAULT_PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 
 /**
  * Parameters for creating a new debug session
@@ -50,6 +52,22 @@ export class SessionStore {
   private sessions: Map<string, ManagedSession> = new Map();
 
   /**
+   * Selects the appropriate adapter policy based on language
+   */
+  private selectPolicy(language: DebugLanguage): AdapterPolicy {
+    switch (language) {
+      case DebugLanguage.PYTHON:
+        return PythonAdapterPolicy;
+      case DebugLanguage.JAVASCRIPT:
+        return JsDebugAdapterPolicy;
+      case DebugLanguage.MOCK:
+        return MockAdapterPolicy;
+      default:
+        return DefaultAdapterPolicy;
+    }
+  }
+
+  /**
    * Creates a new debug session
    */
   createSession(params: CreateSessionParams): DebugSessionInfo {
@@ -59,16 +77,12 @@ export class SessionStore {
     
     // Validate language
     if (!Object.values(DebugLanguage).includes(language)) {
-      throw new Error(`Language '${language}' is not supported. Only 'python' is currently implemented.`);
+      throw new Error(`Language '${language}' is not supported.`);
     }
     
-    // For Python, provide a default if not specified. For Mock, leave undefined if not specified.
-    let effectiveExecutablePath: string | undefined;
-    if (language === DebugLanguage.PYTHON) {
-      effectiveExecutablePath = executablePath || process.env.PYTHON_PATH || DEFAULT_PYTHON;
-    } else {
-      effectiveExecutablePath = executablePath;
-    }
+    // Use policy to resolve executable path
+    const policy = this.selectPolicy(language);
+    const effectiveExecutablePath = policy.resolveExecutablePath(executablePath);
     
     const session: ManagedSession = {
       id: sessionId, 

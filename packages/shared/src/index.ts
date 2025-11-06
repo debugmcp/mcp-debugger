@@ -166,5 +166,29 @@ export {
 
 export { AdapterFactory } from './factories/adapter-factory.js';
 
+// Adapter Policy interfaces and implementations
+export type { 
+  AdapterPolicy, 
+  ChildSessionStrategy,
+  AdapterSpecificState,
+  CommandHandling 
+} from './interfaces/adapter-policy.js';
+export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
+export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
+export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
+export { MockAdapterPolicy } from './interfaces/adapter-policy-mock.js';
+
+// DAP Client Behavior interfaces for adapter policies
+export type {
+  DapClientBehavior,
+  DapClientContext,
+  ReverseRequestResult,
+  ChildSessionConfig
+} from './interfaces/dap-client-behavior.js';
+
+// FileSystem abstraction for dependency injection
+export type { FileSystem } from './interfaces/filesystem.js';
+export { NodeFileSystem, setDefaultFileSystem, getDefaultFileSystem } from './interfaces/filesystem.js';
+
 // ===== Re-export VSCode Debug Protocol types for convenience =====
 export type { DebugProtocol } from '@vscode/debugprotocol';

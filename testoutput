@@ -1,0 +1,1766 @@
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 166 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/e2e/adapter-switching.test.ts > Adapter Switching E2E > should handle multiple language sessions concurrently
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/e2e/adapter-switching.test.ts:157:39
+    155|     });
+    156|     const pythonDebugResult = parseSdkToolResult(pythonDebugResponse);
+    157|     expect(pythonDebugResult.success).toBe(true);
+       |                                       ^
+    158|
+    159|     // Wait for Python session to be paused
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/196]⎯
+
+ FAIL  tests/e2e/adapter-switching.test.ts > Adapter Switching E2E > should maintain session isolation between languages
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/e2e/adapter-switching.test.ts:268:39
+    266|     });
+    267|     const pythonDebugResult = parseSdkToolResult(pythonDebugResponse);
+    268|     expect(pythonDebugResult.success).toBe(true);
+       |                                       ^
+    269|
+    270|     // Wait for session to hit breakpoint or start running
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/196]⎯
+
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Language Support Errors > should reject unsupported language (fakelang)
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Session Management Errors > should handle invalid session ID
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Session Management Errors > should handle operations on closed session
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > File and Path Errors > should handle non-existent file for breakpoint
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > File and Path Errors > should handle invalid script path for debugging
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Debug Operation Errors > should handle step operations when not paused
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Debug Operation Errors > should handle get_stack_trace when not paused
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Invalid Parameters > should handle invalid breakpoint line numbers
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Invalid Parameters > should handle missing required parameters
+ FAIL  tests/e2e/error-scenarios.test.ts > Error Scenarios E2E > Session State Errors > should handle operations when session is in wrong state
+ FAIL  tests/e2e/evaluate-expression.test.ts > evaluate_expression E2E > should evaluate expressions without providing frameId
+Error: spawn cmd.exe ENOENT
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/196]⎯
+
+ FAIL  tests/e2e/full-debug-session.test.ts > Full Debug Session E2E > python debugging > should complete full debugging workflow
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/e2e/full-debug-session.test.ts:271:37
+    269|         console.log(`[E2E Full Debug] Starting debugging...`);
+    270|         const debugResult = await startDebugging(sessionId, config.scriptPath);
+    271|         expect(debugResult.success).toBe(true);
+       |                                     ^
+    272|         expect(debugResult.state).toBe('paused'); // Should be paused due to stopOnEntry
+    273|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/196]⎯
+
+ FAIL  tests/e2e/full-debug-session.test.ts > Full Debug Session E2E > python debugging > should handle multiple breakpoints correctly
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/e2e/full-debug-session.test.ts:402:32
+    400|         });
+    401|         const result = parseSdkToolResult(response);
+    402|         expect(result.success).toBe(true);
+       |                                ^
+    403|
+    404|         // Should run to first breakpoint
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/196]⎯
+
+ FAIL  tests/e2e/full-debug-session.test.ts > Full Debug Session E2E > mock debugging > should complete full debugging workflow
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/e2e/full-debug-session.test.ts:255:7
+    253|     describe(`${langName} debugging`, () => {
+    254|       // TODO: Add tags when Vitest supports them properly: ['@requires-python', '@requires-real-debugpy']
+    255|       it('should complete full debugging workflow', async () => {
+       |       ^
+    256|         console.log(`\n[E2E Full Debug] Testing ${langName} debugging workflow...`);
+    257|         const eventRecorder = new EventRecorder();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/196]⎯
+
+ FAIL  tests/e2e/full-debug-session.test.ts > Full Debug Session E2E > mock debugging > should handle multiple breakpoints correctly
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/e2e/full-debug-session.test.ts:382:7
+    380|       }, TEST_TIMEOUT);
+    381|
+    382|       it('should handle multiple breakpoints correctly', async () => {
+       |       ^
+    383|         console.log(`\n[E2E Full Debug] Testing ${langName} multiple breakpoints...`);
+    384|         const eventRecorder = new EventRecorder();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/196]⎯
+
+ FAIL  tests/e2e/mcp-server-smoke-container.test.ts > MCP Server E2E Container Smoke Test > should successfully debug fibonacci.py in containerized server
+Error: Docker is required for this test but is not available. Please install Docker and ensure it is running.
+ ❯ timeout tests/e2e/mcp-server-smoke-container.test.ts:70:13
+     68|     const dockerAvailable = await isDockerAvailable();
+     69|     if (!dockerAvailable) {
+     70|       throw new Error('Docker is required for this test but is not available. Please install Docker and en…
+       |             ^
+     71|     }
+     72|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/196]⎯
+
+ FAIL  tests/e2e/mcp-server-smoke-container.test.ts > MCP Server E2E Container Smoke Test > should handle paths naturally in container mode
+Error: Docker is required for this test but is not available. Please install Docker and ensure it is running.
+ ❯ timeout tests/e2e/mcp-server-smoke-container.test.ts:173:13
+    171|     const dockerAvailable = await isDockerAvailable();
+    172|     if (!dockerAvailable) {
+    173|       throw new Error('Docker is required for this test but is not available. Please install Docker and en…
+       |             ^
+    174|     }
+    175|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/196]⎯
+
+ FAIL  tests/e2e/mcp-server-smoke.test.ts > MCP Server E2E Smoke Test > should successfully debug fibonacci.py in production build
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/e2e/mcp-server-smoke.test.ts:100:37
+     98|       });
+     99|       const debugResponse = parseSdkToolResult(debugCall);
+    100|       expect(debugResponse.success).toBe(true);
+       |                                     ^
+    101|       expect(debugResponse.state).toBe('paused'); // Should be paused due to stopOnEntry
+    102|       console.log('[E2E Smoke Test] Debugging started successfully.');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/196]⎯
+
+ FAIL  tests/e2e/mcp-server-smoke.test.ts > MCP Server E2E Smoke Test > should work when server is spawned from different working directory
+Error: spawn C:\Program Files\nodejs\node.exe ENOENT
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/196]⎯
+
+ FAIL  tests/unit/proxy-manager-coverage.test.ts > Proxy Manager Coverage - Error Paths and Edge Cases > Initialization Error Scenarios > should handle proxy ready timeout
+AssertionError: expected [Function] to throw error including 'Proxy did not send ready signal' but got 'Debug proxy initialization did not co…'
+
+Expected: "Proxy did not send ready signal"
+Received: "Debug proxy initialization did not complete within 30s. This may indicate that the debug adapter failed to start or is not properly configured. Check that the required debug adapter is installed and accessible."
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/196]⎯
+
+ FAIL  tests/unit/proxy-manager-coverage.test.ts > Proxy Manager Coverage - Error Paths and Edge Cases > Error Recovery > should handle proxy exit during initialization
+ FAIL  tests/unit/proxy-manager-coverage.test.ts > Proxy Manager Coverage - Error Paths and Edge Cases > Edge Cases > should capture stderr during initialization
+AssertionError: expected [Function] to throw error including 'Proxy exited during initialization' but got 'Proxy process not available'
+
+Expected: "Proxy exited during initialization"
+Received: "Proxy process not available"
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/196]⎯
+
+ FAIL  tests/core/integration/proxy-error-handling.test.ts > Proxy Error Handling Integration > Script Path Validation > should fail quickly when script path does not exist
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/integration/proxy-error-handling.test.ts:144:5
+    142|
+    143|   describe('Script Path Validation', () => {
+    144|     it('should fail quickly when script path does not exist', async () => {
+       |     ^
+    145|       // Mock file system to simulate script not found
+    146|       vi.mocked(dependencies.fileSystem.pathExists)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/196]⎯
+
+ FAIL  tests/core/integration/proxy-error-handling.test.ts > Proxy Error Handling Integration > Script Path Validation > should fail quickly with meaningful error message
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/integration/proxy-error-handling.test.ts:182:5
+    180|     });
+    181|
+    182|     it('should fail quickly with meaningful error message', async () => {
+       |     ^
+    183|       // Mock file system to simulate script not found
+    184|       vi.mocked(dependencies.fileSystem.pathExists)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/196]⎯
+
+ FAIL  tests/core/integration/proxy-error-handling.test.ts > Proxy Error Handling Integration > Script Path Validation > should handle relative script paths in container mode
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/integration/proxy-error-handling.test.ts:209:5
+    207|     });
+    208|
+    209|     it('should handle relative script paths in container mode', async () => {
+       |     ^
+    210|       // Temporarily set container environment
+    211|       const originalEnv = process.env.MCP_CONTAINER;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/196]⎯
+
+ FAIL  tests/core/integration/proxy-error-handling.test.ts > Proxy Error Handling Integration > Timing Behavior > should not hang for 30 seconds on initialization errors
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/integration/proxy-error-handling.test.ts:296:5
+    294|
+    295|   describe('Timing Behavior', () => {
+    296|     it('should not hang for 30 seconds on initialization errors', async () => {
+       |     ^
+    297|       // Test various initialization errors to ensure none cause hanging
+    298|       const errorScenarios = [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/196]⎯
+
+ FAIL  tests/core/integration/proxy-startup.test.ts > Proxy Startup Integration > should start proxy when spawned via bootstrap
+Error: Failed to spawn proxy: spawn node ENOENT
+ ❯ ChildProcess.<anonymous> tests/core/integration/proxy-startup.test.ts:99:16
+     97|       proxy!.on('error', (err) => {
+     98|         clearTimeout(timeout);
+     99|         reject(new Error(`Failed to spawn proxy: ${err.message}`));
+       |                ^
+    100|       });
+    101|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/196]⎯
+
+ FAIL  tests/core/integration/proxy-startup.test.ts > Proxy Startup Integration > should start proxy when spawned via bootstrap
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/core/integration/proxy-startup.test.ts:29:3
+     27|   let proxy: ChildProcess | null = null;
+     28|
+     29|   afterEach(async () => {
+       |   ^
+     30|     // Clean up any spawned processes
+     31|     if (proxy) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/196]⎯
+
+ FAIL  tests/e2e/docker/docker-proxy-liveness.test.ts > Docker E2E - Proxy Liveness > maintains proxy connectivity across time and DAP ops (container)
+Error: spawnSync cmd.exe ENOENT
+ ❯ tests/e2e/docker/docker-proxy-liveness.test.ts:38:9
+     36|       } catch {
+     37|         console.log('Building Docker image...');
+     38|         execSync('docker build . -t mcp-debugger:local', { stdio: 'inherit' });
+       |         ^
+     39|       }
+     40|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/196]⎯
+
+ FAIL  tests/e2e/javascript/async-worker.e2e.test.ts > E2E JS - async + worker_threads (multi-thread) > hits breakpoints in main and worker; thread IDs differ; step in async path
+Error: Debug adapter did not respond to 'stackTrace' request within 35s. This typically means the debug adapter has crashed or lost connection. Try restarting your debug session. If the problem persists, check the debug adapter logs.
+ ❯ Timeout._onTimeout src/proxy/proxy-manager.ts:712:9
+    710|       case 'exited':
+    711|         this.emit('exited');
+    712|         break;
+       |         ^
+    713|
+    714|       // Forward other events as generic DAP events
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/196]⎯
+
+ FAIL  tests/e2e/javascript/attach-adoption.e2e.test.ts > E2E JS - attach + adoption (parent attach by port, child __pendingTargetId) > stops at breakpoint (or pause fallback), variables/evaluate ok, step/continue to termination, no DI ambiguity in logs
+Error: Test timed out in 90000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/e2e/javascript/attach-adoption.e2e.test.ts:175:3
+    173|   });
+    174|
+    175|   test('stops at breakpoint (or pause fallback), variables/evaluate ok, step/continue to termination, no D…
+       |   ^
+    176|     // Wait for first stopped, with fallback: threads + pause if not emitted yet
+    177|     let threadId: number;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/196]⎯
+
+ FAIL  tests/e2e/javascript/simple-script.e2e.test.ts > E2E JS - simple script (breakpoint + step) > hits breakpoint, can evaluate, step, and continue to termination
+Error: Debug adapter did not respond to 'threads' request within 35s. This typically means the debug adapter has crashed or lost connection. Try restarting your debug session. If the problem persists, check the debug adapter logs.
+ ❯ Timeout._onTimeout src/proxy/proxy-manager.ts:712:9
+    710|       case 'exited':
+    711|         this.emit('exited');
+    712|         break;
+       |         ^
+    713|
+    714|       // Forward other events as generic DAP events
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/196]⎯
+
+ FAIL  tests/e2e/javascript/typescript-tsx.e2e.test.ts > E2E JS/TS - TypeScript via tsx (source maps) > hits TS breakpoint and maps to .ts source
+Error: Timeout waiting for event: stopped
+ ❯ Timeout._onTimeout tests/test-utils/helpers/test-utils.ts:71:14
+     69|     const timer = setTimeout(() => {
+     70|       emitter.removeListener(event, handler);
+     71|       reject(new Error(`Timeout waiting for event: ${event}`));
+       |              ^
+     72|     }, timeout);
+     73|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should handle process termination without initialization request
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:88:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should not create initialization promise until requested
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:107:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should properly reject initialization promise when process exits
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:131:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should handle multiple initialization requests correctly
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:151:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should not cause unhandled rejections in typical test cleanup
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:177:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should handle multiple adapters being killed without initialization
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:204:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should handle process errors during initialization gracefully
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:225:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-prerequisites.test.ts > ProxyProcessAdapter - Prerequisites (Promise Lifecycle) > should clear initialization promise after successful initialization
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-prerequisites.test.ts:258:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Proxy Launch > should launch proxy with correct configuration
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:85:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Proxy Launch > should use process.env when no env provided
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:108:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Command Sending > should send commands as JSON
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:136:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Command Sending > should handle complex command objects
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:149:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should resolve on adapter_configured_and_launched message
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:173:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should resolve on dry_run_complete message
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:191:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should ignore non-status messages during initialization
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:209:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should handle malformed initialization messages
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:245:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should only resolve initialization once
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:275:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should handle initialization timeout using critical async pattern
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:305:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should reject if process exits before initialization
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:322:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[48/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Initialization Handling > should handle multiple calls to waitForInitialization
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:339:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[49/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Event Forwarding > should forward spawn, message, close, and exit events
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:363:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[50/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Event Forwarding > should forward error events from the process
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:394:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[51/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Process State > should track exit code and signal
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:418:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[52/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Process State > should provide access to process properties
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:434:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[53/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > DAP Compliance - Error Handling > should reject promise AND emit event when adapter crashes during init
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:450:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[54/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > DAP Compliance - Error Handling > should support configurable initialization timeout
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:472:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[55/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > DAP Compliance - Error Handling > should handle rapid start/stop cycles
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:489:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[56/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > DAP Compliance - Error Handling > should handle errors after successful initialization
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:510:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[57/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Resource Cleanup > should remove all event listeners on disposal
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:537:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[58/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Resource Cleanup > should handle cleanup when process is already killed
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:563:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[59/196]⎯
+
+ FAIL  tests/unit/implementations/process-launcher-impl-proxy.test.ts > ProxyProcessAdapter > Resource Cleanup > should clean up initialization state on exit
+TypeError: Cannot read properties of undefined (reading 'spawn')
+ ❯ ProxyProcessLauncherImpl.launchProxy src/implementations/process-launcher-impl.ts:6230:74
+    612|     return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    613|   }
+    614| }
+       |   ^
+    615|
+ ❯ tests/unit/implementations/process-launcher-impl-proxy.test.ts:579:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[60/196]⎯
+
+ FAIL  tests/unit/session/session-manager-evaluate.test.ts > SessionManager - evaluateExpression > Success cases > should evaluate a simple variable
+AssertionError: expected 2nd "spy" call to have been called with [ 'evaluate', …(1) ]
+
+- Expected
++ Received
+
+  [
+    "evaluate",
+    {
+-     "context": "repl",
++     "context": "variables",
+      "expression": "x",
+      "frameId": 2,
+    },
+  ]
+
+ ❯ tests/unit/session/session-manager-evaluate.test.ts:124:47
+    122|
+    123|       // Verify evaluate was called with the frame from stack trace
+    124|       expect(mockProxyManager.sendDapRequest).toHaveBeenNthCalledWith(2, 'evaluate', {
+       |                                               ^
+    125|         expression: 'x',
+    126|         frameId: 2,  // Frame ID from stack trace
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[61/196]⎯
+
+ FAIL  tests/unit/session/session-manager-evaluate.test.ts > SessionManager - evaluateExpression > Success cases > should use provided frameId
+AssertionError: expected "spy" to be called with arguments: [ 'evaluate', …(1) ]
+
+Received:
+
+  1st spy call:
+
+  [
+    "evaluate",
+    {
+-     "context": "repl",
++     "context": "variables",
+      "expression": "local_var",
+      "frameId": 2,
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ tests/unit/session/session-manager-evaluate.test.ts:255:47
+    253|
+    254|       // Verify DAP request was made with correct frameId
+    255|       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('evaluate', {
+       |                                               ^
+    256|         expression: 'local_var',
+    257|         frameId: 2,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[62/196]⎯
+
+ FAIL  tests/unit/session/session-manager-operations-coverage.test.ts > Session Manager Operations Coverage - Error Paths and Edge Cases > Start Debugging Error Scenarios > should handle startDebugging with proxy creation failure
+AssertionError: expected 'MCP error -32602: Python runtime not …' to contain 'Port allocation failed'
+
+Expected: "Port allocation failed"
+Received: "MCP error -32602: Python runtime not found at: python"
+
+ ❯ tests/unit/session/session-manager-operations-coverage.test.ts:454:28
+    452|
+    453|       expect(result.success).toBe(false);
+    454|       expect(result.error).toContain('Port allocation failed');
+       |                            ^
+    455|     });
+    456|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[63/196]⎯
+
+ FAIL  tests/unit/session/session-manager-operations-coverage.test.ts > Session Manager Operations Coverage - Error Paths and Edge Cases > Start Debugging Error Scenarios > should handle startDebugging with launch failure
+AssertionError: expected 'MCP error -32602: Python runtime not …' to contain 'Failed to launch debuggee'
+
+Expected: "Failed to launch debuggee"
+Received: "MCP error -32602: Python runtime not found at: python"
+
+ ❯ tests/unit/session/session-manager-operations-coverage.test.ts:463:28
+    461|
+    462|       expect(result.success).toBe(false);
+    463|       expect(result.error).toContain('Failed to launch debuggee');
+       |                            ^
+    464|     });
+    465|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[64/196]⎯
+
+ FAIL  tests/unit/session/session-manager-operations.test.ts > SessionManagerOperations > isValidPythonExecutable > should return true for valid Python executable
+TypeError: this.isValidPythonExecutable is not a function
+ ❯ TestSessionManagerOperations.testIsValidPythonExecutable tests/unit/session/session-manager-operations.test.ts:196:24
+    194|
+    195| public async testIsValidPythonExecutable(pythonCmd: string) {
+    196|   return (this as any).isValidPythonExecutable(pythonCmd);
+       |                        ^
+    197| }
+    198|
+ ❯ tests/unit/session/session-manager-operations.test.ts:359:44
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[65/196]⎯
+
+ FAIL  tests/unit/session/session-manager-operations.test.ts > SessionManagerOperations > isValidPythonExecutable > should return false for invalid Python executable
+TypeError: this.isValidPythonExecutable is not a function
+ ❯ TestSessionManagerOperations.testIsValidPythonExecutable tests/unit/session/session-manager-operations.test.ts:196:24
+    194|
+    195| public async testIsValidPythonExecutable(pythonCmd: string) {
+    196|   return (this as any).isValidPythonExecutable(pythonCmd);
+       |                        ^
+    197| }
+    198|
+ ❯ tests/unit/session/session-manager-operations.test.ts:368:44
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[66/196]⎯
+
+ FAIL  tests/unit/session/session-manager-operations.test.ts > SessionManagerOperations > isValidPythonExecutable > should handle spawn errors
+Error: ENOENT
+ ❯ tests/unit/session/session-manager-operations.test.ts:382:35
+    380|       // Simulate spawn error
+    381|       setTimeout(() => {
+    382|         mockProcess.emit('error', new Error('ENOENT'));
+       |                                   ^
+    383|       }, 10);
+    384|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[67/196]⎯
+
+ FAIL  tests/unit/session/session-manager-operations.test.ts > SessionManagerOperations > isValidPythonExecutable > should timeout long-running validation
+TypeError: this.isValidPythonExecutable is not a function
+ ❯ TestSessionManagerOperations.testIsValidPythonExecutable tests/unit/session/session-manager-operations.test.ts:196:24
+    194|
+    195| public async testIsValidPythonExecutable(pythonCmd: string) {
+    196|   return (this as any).isValidPythonExecutable(pythonCmd);
+       |                        ^
+    197| }
+    198|
+ ❯ tests/unit/session/session-manager-operations.test.ts:402:44
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[68/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-dependencies.test.ts > DAP Proxy Dependencies > setupGlobalErrorHandlers > uncaughtException handler > should log error, send message, shutdown and exit
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/unit/proxy/dap-proxy-dependencies.test.ts:292:7
+    290|
+    291|     describe('uncaughtException handler', () => {
+    292|       it('should log error, send message, shutdown and exit', async () => {
+       |       ^
+    293|         setupGlobalErrorHandlers(mockLogger, mockMessageSender, mockShutdownFn, mockGetCurrentSessionId);
+    294|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[69/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-process-manager.test.ts > DebugpyAdapterManager > shutdown > should perform graceful shutdown with SIGTERM
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/unit/proxy/dap-proxy-process-manager.test.ts:305:5
+    303|     });
+    304|
+    305|     it('should perform graceful shutdown with SIGTERM', async () => {
+       |     ^
+    306|       // Process dies immediately after SIGTERM
+    307|       mockChildProcess.killed = false;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[70/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-process-manager.test.ts > DebugpyAdapterManager > integration scenarios > should handle full lifecycle: spawn, error, and shutdown
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/unit/proxy/dap-proxy-process-manager.test.ts:397:5
+    395|
+    396|   describe('integration scenarios', () => {
+    397|     it('should handle full lifecycle: spawn, error, and shutdown', async () => {
+       |     ^
+    398|       // Spawn process
+    399|       const spawnResult = await manager.spawnDebugpy({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[71/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > initialization > should handle init command successfully
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:111:5
+    109|     });
+    110|
+    111|     it('should handle init command successfully', async () => {
+       |     ^
+    112|       const initPayload: ProxyInitPayload = {
+    113|         cmd: 'init',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[72/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > initialization > should handle init command successfully
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > initialization > should reject init if already initialized
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > DAP command handling > should forward DAP commands to client
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > DAP command handling > should handle DAP command errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > DAP command handling > should reject DAP commands before connection
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > terminate handling > should handle terminate command
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > event handling > should handle stopped event
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > event handling > should handle output event
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > event handling > should handle terminated event and shutdown
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > shutdown > should clean up resources on shutdown
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle request timeout
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle adapter process errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle DAP client connection errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle DAP client connection close
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle adapter process exit events
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle adapter process exit with signal
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle invalid command errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle initialization errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle DAP connection initialization errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > status message handling > should send adapter_configured_and_launched status after initialization
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > status message handling > should send error message when status sending fails
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:83:3
+     81|   });
+     82|
+     83|   afterEach(async () => {
+       |   ^
+     84|     // Clear all timers first to prevent timeout errors
+     85|     vi.clearAllTimers();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[73/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > initialization > should reject init if already initialized
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:142:5
+    140|     });
+    141|
+    142|     it('should reject init if already initialized', async () => {
+       |     ^
+    143|       const initPayload: ProxyInitPayload = {
+    144|         cmd: 'init',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[74/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > DAP command handling > should forward DAP commands to client
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > DAP command handling > should handle DAP command errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > DAP command handling > should reject DAP commands before connection
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:199:5
+    197|
+    198|   describe('DAP command handling', () => {
+    199|     beforeEach(async () => {
+       |     ^
+    200|       // Initialize worker first
+    201|       const initPayload: ProxyInitPayload = {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[75/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > terminate handling > should handle terminate command
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:297:5
+    295|
+    296|   describe('terminate handling', () => {
+    297|     beforeEach(async () => {
+       |     ^
+    298|       // Initialize worker first to ensure logger is available
+    299|       const initPayload: ProxyInitPayload = {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[76/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > event handling > should handle stopped event
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > event handling > should handle output event
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > event handling > should handle terminated event and shutdown
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:333:5
+    331|     let eventHandlers: Record<string, (...args: unknown[]) => void>;
+    332|
+    333|     beforeEach(async () => {
+       |     ^
+    334|       // Initialize worker
+    335|       const initPayload: ProxyInitPayload = {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[77/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > shutdown > should clean up resources on shutdown
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:414:5
+    412|
+    413|   describe('shutdown', () => {
+    414|     it('should clean up resources on shutdown', async () => {
+       |     ^
+    415|       // Initialize worker with all resources
+    416|       const initPayload: ProxyInitPayload = {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[78/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle request timeout
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle adapter process errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle DAP client connection errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle DAP client connection close
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle adapter process exit events
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle adapter process exit with signal
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle invalid command errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle initialization errors
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > error handling and timeouts > should handle DAP connection initialization errors
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:451:5
+    449|
+    450|   describe('error handling and timeouts', () => {
+    451|     beforeEach(async () => {
+       |     ^
+    452|       // Initialize worker for error tests
+    453|       const initPayload: ProxyInitPayload = {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[79/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > status message handling > should send adapter_configured_and_launched status after initialization
+ FAIL  tests/unit/proxy/dap-proxy-worker.test.ts > DapProxyWorker > status message handling > should send error message when status sending fails
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/unit/proxy/dap-proxy-worker.test.ts:772:5
+    770|
+    771|   describe('status message handling', () => {
+    772|     beforeEach(async () => {
+       |     ^
+    773|       const initPayload: ProxyInitPayload = {
+    774|         cmd: 'init',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[80/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy.test.ts > dap-proxy-core > ProxyRunner > message processing > should process object messages by stringifying
+AssertionError: expected "spy" to be called with arguments: [ …(2) ]
+
+Number of calls: 0
+
+ ❯ tests/unit/proxy/dap-proxy.test.ts:247:34
+    245|         await messageHandler?.(testCommand);
+    246|
+    247|         expect(mockLogger.debug).toHaveBeenCalledWith(
+       |                                  ^
+    248|           '[ProxyRunner] Received object message, stringifying:',
+    249|           testCommand
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[81/196]⎯
+
+ FAIL  tests/unit/proxy/dap-proxy.test.ts > dap-proxy-core > ProxyRunner > global error handlers > should handle uncaught exceptions
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/unit/proxy/dap-proxy.test.ts:318:7
+    316|       });
+    317|
+    318|       it('should handle uncaught exceptions', async () => {
+       |       ^
+    319|         const errorShutdown = vi.fn().mockResolvedValue(undefined);
+    320|         const getCurrentSessionId = vi.fn().mockReturnValue('test-session');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[82/196]⎯
+
+ FAIL  tests/core/unit/adapters/adapter-registry.test.ts > AdapterRegistry > auto-dispose > should auto-dispose disconnected adapters after timeout
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/adapter-registry.test.ts:320:5
+    318|
+    319|   describe('auto-dispose', () => {
+    320|     it('should auto-dispose disconnected adapters after timeout', async () => {
+       |     ^
+    321|       const registry = new AdapterRegistry({
+    322|         validateOnRegister: false,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[83/196]⎯
+
+ FAIL  tests/core/unit/adapters/adapter-registry.test.ts > AdapterRegistry > auto-dispose > should cancel auto-dispose if adapter reconnects
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/adapter-registry.test.ts:350:5
+    348|     });
+    349|
+    350|     it('should cancel auto-dispose if adapter reconnects', async () => {
+       |     ^
+    351|       const registry = new AdapterRegistry({
+    352|         validateOnRegister: false,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[84/196]⎯
+
+ FAIL  tests/core/unit/adapters/mock-adapter.test.ts > MockDebugAdapter > state management > should report current thread ID only when debugging
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/mock-adapter.test.ts:98:5
+     96|     });
+     97|
+     98|     it('should report current thread ID only when debugging', async () => {
+       |     ^
+     99|       expect(adapter.getCurrentThreadId()).toBeNull();
+    100|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[85/196]⎯
+
+ FAIL  tests/core/unit/adapters/mock-adapter.test.ts > MockDebugAdapter > event handling > should handle terminated event
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/mock-adapter.test.ts:279:5
+    277|     });
+    278|
+    279|     it('should handle terminated event', async () => {
+       |     ^
+    280|       const terminatedSpy = vi.fn();
+    281|       adapter.on('terminated', terminatedSpy);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[86/196]⎯
+
+ FAIL  tests/core/unit/adapters/mock-adapter.test.ts > MockDebugAdapter > connection management > should connect successfully
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/mock-adapter.test.ts:347:5
+    345|
+    346|   describe('connection management', () => {
+    347|     it('should connect successfully', async () => {
+       |     ^
+    348|       await adapter.initialize();
+    349|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[87/196]⎯
+
+ FAIL  tests/core/unit/adapters/mock-adapter.test.ts > MockDebugAdapter > connection management > should handle connection timeout
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/mock-adapter.test.ts:360:5
+    358|     });
+    359|
+    360|     it('should handle connection timeout', async () => {
+       |     ^
+    361|       await adapter.initialize();
+    362|       adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[88/196]⎯
+
+ FAIL  tests/core/unit/adapters/mock-adapter.test.ts > MockDebugAdapter > connection management > should disconnect successfully
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/mock-adapter.test.ts:368:5
+    366|     });
+    367|
+    368|     it('should disconnect successfully', async () => {
+       |     ^
+    369|       await adapter.initialize();
+    370|       await adapter.connect('localhost', 1234);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[89/196]⎯
+
+ FAIL  tests/core/unit/adapters/mock-adapter.test.ts > MockDebugAdapter > configuration options > should respect timing configuration
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/adapters/mock-adapter.test.ts:384:5
+    382|
+    383|   describe('configuration options', () => {
+    384|     it('should respect timing configuration', async () => {
+       |     ^
+    385|       const adapter = new MockDebugAdapter(dependencies, {
+    386|         defaultDelay: 0,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[90/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > sendDapRequest() > should send DAP request and receive response
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > sendDapRequest() > should handle DAP request failure
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > sendDapRequest() > should handle DAP request timeout
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > sendDapRequest() > should reject DAP request when proxy not initialized
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > sendDapRequest() > should handle concurrent DAP requests
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > sendDapRequest() > should track pending requests correctly
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > sendDapRequest() > should handle response for unknown request ID
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > Event Emission > should emit stopped event with thread ID
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > Event Emission > should emit continued event
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > Event Emission > should emit terminated event
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > Event Emission > should emit exited event
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > Event Emission > should handle stopped event without thread ID
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > Message Validation > should ignore invalid message format
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > Message Validation > should handle messages with missing session ID
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > IPC Communication > should send commands as JSON via IPC
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > IPC Communication > should handle process stderr output
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > State Updates > should update thread ID from stopped events
+ FAIL  tests/core/unit/proxy/proxy-manager-communication.test.ts > ProxyManager - Communication > State Updates > should handle status messages that update state
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-communication.test.ts:31:3
+     29|   };
+     30|
+     31|   beforeEach(async () => {
+       |   ^
+     32|     fakeLauncher = new FakeProxyProcessLauncher();
+     33|     mockLogger = createMockLogger();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[91/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Initialization Errors > should handle error event during initialization
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:106:5
+    104|
+    105|   describe('Initialization Errors', () => {
+    106|     it('should handle error event during initialization', async () => {
+       |     ^
+    107|       prepareProxyWithReady((proxy) => {
+    108|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[92/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Initialization Errors > should handle exit with non-zero code during initialization
+AssertionError: expected [Function] to throw error including 'Proxy exited during initialization. C…' but got 'Proxy process not available'
+
+Expected: "Proxy exited during initialization. Code: 1, Signal: undefined"
+Received: "Proxy process not available"
+
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:124:7
+    122|       });
+    123|
+    124|       await expect(proxyManager.start(defaultConfig))
+       |       ^
+    125|         .rejects.toThrow('Proxy exited during initialization. Code: 1, Signal: undefined');
+    126|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[93/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Initialization Errors > should handle exit with signal during initialization
+AssertionError: expected [Function] to throw error including 'Proxy exited during initialization. C…' but got 'Proxy process not available'
+
+Expected: "Proxy exited during initialization. Code: 0, Signal: SIGKILL"
+Received: "Proxy process not available"
+
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:135:7
+    133|       });
+    134|
+    135|       await expect(proxyManager.start(defaultConfig))
+       |       ^
+    136|         .rejects.toThrow('Proxy exited during initialization. Code: 0, Signal: SIGKILL');
+    137|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[94/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Initialization Errors > should handle error message from proxy
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:139:5
+    137|     });
+    138|
+    139|     it('should handle error message from proxy', async () => {
+       |     ^
+    140|       let errorCount = 0;
+    141|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[95/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Runtime Errors > should handle process crash during operation
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Runtime Errors > should handle malformed DAP response
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Runtime Errors > should handle send command failure
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Runtime Errors > should handle multiple rapid errors
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:178:5
+    176|
+    177|   describe('Runtime Errors', () => {
+    178|     beforeEach(async () => {
+       |     ^
+    179|       // Start proxy successfully first
+    180|       prepareProxyWithReady((proxy) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[96/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Timeout Handling > should handle DAP request timeout and cleanup
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:266:5
+    264|
+    265|   describe('Timeout Handling', () => {
+    266|     it('should handle DAP request timeout and cleanup', async () => {
+       |     ^
+    267|       // Start proxy
+    268|       prepareProxyWithReady((proxy) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[97/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Timeout Handling > should handle initialization timeout with cleanup
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:322:5
+    320|     });
+    321|
+    322|     it('should handle initialization timeout with cleanup', async () => {
+       |     ^
+    323|       vi.useFakeTimers();
+    324|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[98/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Error Recovery > should allow restart after error
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:356:5
+    354|
+    355|   describe('Error Recovery', () => {
+    356|     it('should allow restart after error', async () => {
+       |     ^
+    357|       // First start with error
+    358|       prepareProxyWithReady((proxy) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[99/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Edge Cases > should handle adapter exit status messages
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:394:5
+    392|
+    393|   describe('Edge Cases', () => {
+    394|     it('should handle adapter exit status messages', async () => {
+       |     ^
+    395|       prepareProxyWithReady((proxy) => {
+    396|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[100/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Edge Cases > should handle terminated status message
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:426:5
+    424|     });
+    425|
+    426|     it('should handle terminated status message', async () => {
+       |     ^
+    427|       prepareProxyWithReady((proxy) => {
+    428|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[101/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-error.test.ts > ProxyManager - Error Handling > Edge Cases > should handle missing DAP state
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-error.test.ts:455:5
+    453|     });
+    454|
+    455|     it('should handle missing DAP state', async () => {
+       |     ^
+    456|       // Simulate a scenario where DAP state is not initialized
+    457|       // This is an edge case that shouldn't happen normally
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[102/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > start() > should start proxy process with correct configuration
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:74:5
+     72|
+     73|   describe('start()', () => {
+     74|     it('should start proxy process with correct configuration', async () => {
+       |     ^
+     75|       // Prepare a fake process that will simulate successful initialization
+     76|       prepareProxyWithReady((proxy) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[103/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > start() > should handle dry run mode
+Error: Proxy process not available
+ ❯ ProxyManager.sendCommand src/proxy/proxy-manager.ts:777:12
+    775|     // Clear pending DAP requests to avoid "unknown request" warnings during shutdown
+    776|     if (this.pendingDapRequests.size > 0) {
+    777|       this.logger.debug(`[ProxyManager] Clearing ${this.pendingDapRequests.size} pending DAP requests duri…
+       |            ^
+    778|       for (const pending of this.pendingDapRequests.values()) {
+    779|         pending.reject(new Error(`Request cancelled during proxy shutdown: ${pending.command}`));
+ ❯ ProxyManager.start src/proxy/proxy-manager.ts:477:3
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:126:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[104/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > start() > should reject if proxy already running
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:133:5
+    131|     });
+    132|
+    133|     it('should reject if proxy already running', async () => {
+       |     ^
+    134|       prepareProxyWithReady((proxy) => {
+    135|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[105/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > start() > should handle initialization timeout
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:158:5
+    156|     });
+    157|
+    158|     it('should handle initialization timeout', async () => {
+       |     ^
+    159|       // Setup fake timers before any async operations
+    160|       vi.useFakeTimers();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[106/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > start() > should handle process exit during initialization
+AssertionError: expected [Function] to throw error including 'Proxy exited during initialization. C…' but got 'Proxy process not available'
+
+Expected: "Proxy exited during initialization. Code: 1, Signal: SIGTERM"
+Received: "Proxy process not available"
+
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:187:7
+    185|       });
+    186|
+    187|       await expect(proxyManager.start(defaultConfig))
+       |       ^
+    188|         .rejects.toThrow('Proxy exited during initialization. Code: 1, Signal: SIGTERM');
+    189|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[107/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > start() > should handle error during initialization
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:191:5
+    189|     });
+    190|
+    191|     it('should handle error during initialization', async () => {
+       |     ^
+    192|       prepareProxyWithReady((proxy) => {
+    193|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[108/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > start() > should set up initial breakpoints if provided
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:202:5
+    200|     });
+    201|
+    202|     it('should set up initial breakpoints if provided', async () => {
+       |     ^
+    203|       const configWithBreakpoints = {
+    204|         ...defaultConfig,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[109/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > stop() > should stop running proxy gracefully
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > stop() > should force kill proxy after timeout
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > stop() > should handle stop when proxy not running
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > stop() > should handle error sending terminate command
+Error: Hook timed out in 10000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:230:5
+    228|
+    229|   describe('stop()', () => {
+    230|     beforeEach(async () => {
+       |     ^
+    231|       // Start proxy first
+    232|       prepareProxyWithReady((proxy) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[110/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > isRunning() > should return true when proxy is running
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:318:5
+    316|     });
+    317|
+    318|     it('should return true when proxy is running', async () => {
+       |     ^
+    319|       prepareProxyWithReady((proxy) => {
+    320|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[111/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > isRunning() > should return false after proxy exits
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:333:5
+    331|     });
+    332|
+    333|     it('should return false after proxy exits', async () => {
+       |     ^
+    334|       prepareProxyWithReady((proxy) => {
+    335|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[112/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > getCurrentThreadId() > should return thread ID after stopped event
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:359:5
+    357|     });
+    358|
+    359|     it('should return thread ID after stopped event', async () => {
+       |     ^
+    360|       prepareProxyWithReady((proxy) => {
+    361|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[113/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > getCurrentThreadId() > should return null after stop
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:385:5
+    383|     });
+    384|
+    385|     it('should return null after stop', async () => {
+       |     ^
+    386|       prepareProxyWithReady((proxy) => {
+    387|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[114/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > Process Exit Handling > should emit exit event when proxy process exits
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:420:5
+    418|
+    419|   describe('Process Exit Handling', () => {
+    420|     it('should emit exit event when proxy process exits', async () => {
+       |     ^
+    421|       prepareProxyWithReady((proxy) => {
+    422|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[115/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > Process Exit Handling > should clean up pending DAP requests on exit
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:446:5
+    444|     });
+    445|
+    446|     it('should clean up pending DAP requests on exit', async () => {
+       |     ^
+    447|       prepareProxyWithReady((proxy) => {
+    448|         setTimeout(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[116/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > Status Message Handling > should emit dry-run-complete event
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:512:5
+    510|     });
+    511|
+    512|     it('should emit dry-run-complete event', async () => {
+       |     ^
+    513|       const config = { ...defaultConfig, dryRunSpawn: true };
+    514|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[117/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > Status Message Handling > should emit adapter-configured event
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:538:5
+    536|     });
+    537|
+    538|     it('should emit adapter-configured event', async () => {
+       |     ^
+    539|       const adapterConfiguredPromise = new Promise<void>((resolve) => {
+    540|         proxyManager.once('adapter-configured', resolve);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[118/196]⎯
+
+ FAIL  tests/core/unit/proxy/proxy-manager-lifecycle.test.ts > ProxyManager - Lifecycle > Multiple Initialization > should only emit initialized once
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/core/unit/proxy/proxy-manager-lifecycle.test.ts:562:5
+    560|
+    561|   describe('Multiple Initialization', () => {
+    562|     it('should only emit initialized once', async () => {
+       |     ^
+    563|       let initCount = 0;
+    564|       proxyManager.on('initialized', () => initCount++);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[119/196]⎯
+
+ FAIL  tests/core/unit/session/session-store.test.ts > SessionStore > createSession > should throw error for unsupported language
+AssertionError: expected [Function] to throw error including 'Language \'unsupported\' is not suppo…' but got 'Language \'unsupported\' is not suppo…'
+
+Expected: "Language 'unsupported' is not supported. Only 'python' is currently implemented."
+Received: "Language 'unsupported' is not supported."
+
+ ❯ tests/core/unit/session/session-store.test.ts:115:49
+    113|       };
+    114|
+    115|       expect(() => store.createSession(params)).toThrow(
+       |                                                 ^
+    116|         "Language 'unsupported' is not supported. Only 'python' is currently implemented."
+    117|       );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[120/196]⎯
+
+ FAIL  tests/adapters/javascript/integration/javascript-proxy-dap-forwarding.test.ts > JavaScript adapter - DAP forwarding (integration) > propagates stopped/output events and tracks threadId
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/adapters/javascript/integration/javascript-proxy-dap-forwarding.test.ts:40:3
+     38|   });
+     39|
+     40|   it('propagates stopped/output events and tracks threadId', async () => {
+       |   ^
+     41|     // Arrange registry + adapter
+     42|     const registry = getAdapterRegistry({ validateOnRegister: false });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[121/196]⎯
+
+ FAIL  tests/adapters/javascript/integration/javascript-proxy-startup.test.ts > JavaScript adapter - proxy startup (integration) > wires adapterCommand into ProxyManager init and supports dry run
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/adapters/javascript/integration/javascript-proxy-startup.test.ts:42:3
+     40|   });
+     41|
+     42|   it('wires adapterCommand into ProxyManager init and supports dry run', async () => {
+       |   ^
+     43|     // Arrange: registry and adapter
+     44|     const registry = getAdapterRegistry({ validateOnRegister: false });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[122/196]⎯
+
+ FAIL  tests/adapters/python/integration/python-discovery.failure.test.ts > Python Discovery - Failure Scenario > should error when Python is not found in PATH
+McpError: MCP error -32602: Script file not found: 'C:\Users\johnf\Dropbox\projects\250106 AGENTS\debug-mcp-server\examples\python\fibonacci.py'
+Looked for: '/workspace/C:\Users\johnf\Dropbox\projects\250106 AGENTS\debug-mcp-server\examples\python\fibonacci.py'
+ ❯ DebugMcpServer.startDebugging src/server.ts:309:10
+    307|
+    308|   public async stepOut(sessionId: string): Promise<boolean> {
+    309|     this.validateSession(sessionId);
+       |          ^
+    310|     const result = await this.sessionManager.stepOut(sessionId);
+    311|     if (!result.success) {
+ ❯ tests/adapters/python/integration/python-discovery.failure.test.ts:35:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[123/196]⎯
+
+ FAIL  tests/adapters/python/integration/python-discovery.success.test.ts > Python Discovery - Success Scenarios > should find Python on Windows/Linux without explicit path and start debugging successfully
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/adapters/python/integration/python-discovery.success.test.ts:32:3
+     30|   });
+     31|
+     32|   it('should find Python on Windows/Linux without explicit path and start debugging successfully', async (…
+       |   ^
+     33|     // This test runs in the standard Vitest environment, which should have Python in PATH
+     34|     // DO NOT mock Python discovery
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[124/196]⎯
+
+ FAIL  tests/adapters/python/unit/python-adapter.test.ts > PythonDebugAdapter > virtual environment detection > should detect virtual environment
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/adapters/python/unit/python-adapter.test.ts:320:5
+    318|
+    319|   describe('virtual environment detection', () => {
+    320|     it('should detect virtual environment', async () => {
+       |     ^
+    321|       vi.mocked(pythonUtils.findPythonExecutable).mockResolvedValue('/venv/bin/python');
+    322|       vi.mocked(pythonUtils.getPythonVersion).mockResolvedValue('3.9.0');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[125/196]⎯
+
+ FAIL  tests/core/unit/utils/logger.test.ts > Logger > Path resolution > should resolve paths correctly
+AssertionError: expected "spy" to be called with arguments: [ { …(2) } ]
+
+Received:
+
+  1st spy call:
+
+  [
+    {
+-     "filename": StringMatching /[/\\]project[/\\]logs[/\\]debug-mcp-server\.log$/,
+-     "format": Anything,
++     "filename": "/app/logs/debug-mcp-server.log",
++     "format": {
++       "transform": [Function spy],
++     },
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ tests/core/unit/utils/logger.test.ts:321:39
+    319|
+    320|       // Should resolve to project root logs directory
+    321|       expect(winston.transports.File).toHaveBeenCalledWith({
+       |                                       ^
+    322|         filename: expect.stringMatching(/[/\\]project[/\\]logs[/\\]debug-mcp-server\.log$/),
+    323|         format: expect.anything()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[126/196]⎯
+
+
+ Test Files  41 failed | 81 passed (122)
+      Tests  166 failed | 1215 passed | 16 skipped (1397)
+   Start at  09:30:12
+   Duration  2487.29s (transform 3.54s, setup 334ms, collect 4.75s, tests 2473.88s, environment 0ms, prepare 98ms)
+
+ % Coverage report from istanbul
+---------------------------------------|---------|----------|---------|---------|-----------------------------------
+File                                   | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+---------------------------------------|---------|----------|---------|---------|-----------------------------------
+All files                              |   71.92 |    60.63 |   72.79 |   72.52 |
+ packages/adapter-javascript/src       |   92.41 |    79.67 |   95.23 |   92.47 |
+  javascript-adapter-factory.ts        |     100 |       90 |     100 |     100 | 55,80,111
+  javascript-debug-adapter.ts          |   91.27 |    78.57 |   94.59 |   91.42 | ...75,470-479,663,756-775,820,843
+ packages/adapter-javascript/src/utils |   97.91 |    90.62 |   85.71 |   97.82 |
+  config-transformer.ts                |   97.95 |    94.87 |      80 |   97.87 | 132
+  executable-resolver.ts               |   96.29 |     87.5 |      80 |      96 | 98
+  typescript-detector.ts               |     100 |    77.77 |     100 |     100 | 32,60
+ packages/adapter-mock/src             |   78.33 |    67.53 |   89.18 |   77.96 |
+  mock-adapter-factory.ts              |   66.66 |    46.15 |      80 |   66.66 | 63,68,73-77,97
+  mock-debug-adapter.ts                |      80 |    71.87 |   90.62 |   79.61 | ...92-295,365-368,378,389-414,431
+ packages/adapter-python/src           |   72.06 |    59.57 |   69.38 |   73.25 |
+  python-adapter-factory.ts            |   84.61 |     64.7 |    87.5 |    87.5 | 62-65,71
+  python-debug-adapter.ts              |   69.93 |    58.44 |   65.85 |   70.94 | ...04,458,501-506,585,592,605,622
+ packages/adapter-python/src/utils     |    91.5 |    82.45 |   91.66 |   92.85 |
+  python-utils.ts                      |    91.5 |    82.45 |   91.66 |   92.85 | 40,145-148,164-167
+ packages/shared/src/interfaces        |   31.17 |     9.62 |   20.96 |   30.85 |
+  adapter-policy-js.ts                 |     0.9 |        0 |       0 |    0.92 | 15-341
+  adapter-policy-mock.ts               |   15.78 |    13.33 |   22.22 |   15.78 | 14-19,40-70,82
+  adapter-policy-python.ts             |   33.33 |    23.07 |   26.66 |   34.04 | 14-93,115,138,150
+  adapter-policy.ts                    |    5.26 |        0 |       0 |    5.26 | 174-235
+  adapter-registry.ts                  |   68.75 |        0 |    37.5 |   68.75 | 192-200,274-287
+  debug-adapter.ts                     |     100 |      100 |     100 |     100 |
+ packages/shared/src/models            |     100 |      100 |     100 |     100 |
+  index.ts                             |     100 |      100 |     100 |     100 |
+ src                                   |   78.64 |     69.6 |   87.23 |   78.77 |
+  index.ts                             |   88.88 |    68.75 |      80 |   88.88 | 101,138-144
+  server.ts                            |   77.03 |     69.7 |   89.18 |   77.15 | ...846,856-879,903-1060,1084-1088
+ src/adapters                          |   88.32 |    81.48 |   75.67 |   89.11 |
+  adapter-loader.ts                    |   97.14 |    81.81 |      90 |   97.14 | 91,163
+  adapter-registry.ts                  |   83.46 |    81.35 |   70.37 |   84.55 | ...54,268,276,329,337-338,345-348
+ src/cli                               |   89.58 |     93.1 |   80.64 |   91.48 |
+  error-handlers.ts                    |     100 |      100 |     100 |     100 |
+  setup.ts                             |     100 |      100 |     100 |     100 |
+  sse-command.ts                       |     100 |    95.23 |     100 |     100 | 206
+  stdio-command.ts                     |    64.1 |      100 |      25 |   69.44 | 51-53,62,80-82,85-87,90
+  version.ts                           |    90.9 |       75 |     100 |    90.9 | 13
+ src/container                         |   86.95 |       60 |      75 |   86.95 |
+  dependencies.ts                      |   86.95 |       60 |      75 |   86.95 | 112-116
+ src/dap-core                          |     100 |    97.29 |     100 |     100 |
+  handlers.ts                          |     100 |    97.29 |     100 |     100 | 176
+  state.ts                             |     100 |      100 |     100 |     100 |
+ src/factories                         |     100 |      100 |     100 |     100 |
+  proxy-manager-factory.ts             |     100 |      100 |     100 |     100 |
+  session-store-factory.ts             |     100 |      100 |     100 |     100 |
+ src/implementations                   |   68.13 |    43.08 |   77.77 |   68.53 |
+  environment-impl.ts                  |      50 |      100 |      50 |      50 | 32-39
+  file-system-impl.ts                  |      95 |      100 |   93.33 |      95 | 64
+  network-manager-impl.ts              |     100 |      100 |     100 |     100 |
+  process-launcher-impl.ts             |   61.68 |    27.65 |   73.33 |   62.38 | ...34-438,454,463-507,512,517,523
+  process-manager-impl.ts              |     100 |      100 |     100 |     100 |
+  which-command-finder.ts              |   81.81 |    71.42 |   66.66 |   81.81 | 27,49
+ src/interfaces                        |     100 |      100 |     100 |     100 |
+  command-finder.ts                    |     100 |      100 |     100 |     100 |
+ src/proxy                             |   55.67 |    46.09 |   58.77 |   56.78 |
+  dap-proxy-adapter-manager.ts         |   94.73 |    85.71 |     100 |   94.64 | 74,160-164
+  dap-proxy-connection-manager.ts      |   94.79 |       85 |     100 |   94.56 | 67,93-96
+  dap-proxy-core.ts                    |   76.85 |    85.71 |   54.16 |   77.57 | ...23-229,277-280,289-291,297-299
+  dap-proxy-dependencies.ts            |     100 |    83.33 |     100 |     100 | 93
+  dap-proxy-interfaces.ts              |     100 |      100 |     100 |     100 |
+  dap-proxy-message-parser.ts          |   96.66 |    95.89 |     100 |   96.66 | 103,153
+  dap-proxy-request-tracker.ts         |     100 |    71.42 |     100 |     100 | 11,25,111-114
+  dap-proxy-worker.ts                  |   23.32 |    10.74 |   18.18 |   24.53 | ...72-585,605,610,625-762,779-808
+  minimal-dap.ts                       |    34.2 |    31.46 |    30.5 |   35.62 | ...894-897,901-985,1004,1009-1010
+  proxy-manager.ts                     |   80.83 |    61.58 |      85 |   81.04 | ...19,646,670-675,683,721-756,763
+ src/proxy/utils                       |   33.33 |    66.66 |      50 |   33.33 |
+  orphan-check.ts                      |   33.33 |    66.66 |      50 |   33.33 | 24-25
+ src/session                           |   83.67 |    71.95 |    92.2 |   83.73 |
+  session-manager-core.ts              |   93.66 |    84.37 |    91.3 |   93.61 | 169,284-287,311,356-357,389
+  session-manager-data.ts              |    61.6 |    54.11 |   81.81 |    60.5 | 33,38,169-255
+  session-manager-operations.ts        |   86.78 |    76.88 |   96.42 |      87 | ...93-694,726-729,842-845,869-881
+  session-manager.ts                   |     100 |      100 |     100 |     100 |
+  session-store.ts                     |   91.66 |    83.33 |   92.85 |   91.42 | 62,66,136
+ src/utils                             |      95 |    89.83 |   93.75 |   94.91 |
+  container-path-utils.ts              |     100 |      100 |     100 |     100 |
+  error-messages.ts                    |      80 |      100 |      75 |      80 | 52
+  line-reader.ts                       |   95.23 |    91.89 |     100 |   95.08 | 60,173,181
+  logger.ts                            |   86.84 |       72 |      75 |   86.84 | 64,101-102,115-116
+  simple-file-checker.ts               |     100 |       50 |     100 |     100 | 51
+  type-guards.ts                       |     100 |    98.07 |     100 |     100 | 161
+---------------------------------------|---------|----------|---------|---------|-----------------------------------

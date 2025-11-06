@@ -1,6 +1,6 @@
 /**
- * Core worker class for DAP Proxy functionality
- * Encapsulates all business logic in a testable form
+ * Core worker class for DAP Proxy functionality - REFACTORED VERSION
+ * Uses the Adapter Policy pattern to eliminate language-specific hardcoding
  */
 
 import { ChildProcess } from 'child_process';
@@ -20,13 +20,34 @@ import {
   ErrorMessage
 } from './dap-proxy-interfaces.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
-import { GenericAdapterManager, DebugpyAdapterManager } from './dap-proxy-adapter-manager.js';
+import { GenericAdapterManager } from './dap-proxy-adapter-manager.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
-  validateProxyInitPayload, 
-  validateAdapterCommand,
-  logAdapterCommandValidation 
+  validateProxyInitPayload
 } from '../utils/type-guards.js';
+import { SilentDapCommandPayload } from './dap-extensions.js';
+// Import adapter policies from shared package
+import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
+import { 
+  DefaultAdapterPolicy,
+  JsDebugAdapterPolicy,
+  PythonAdapterPolicy,
+  MockAdapterPolicy
+} from '@debugmcp/shared';
+
+export type DapProxyWorkerHooks = {
+  /**
+   * Custom exit handler used when the worker encounters a fatal error.
+   * Defaults to process.exit for production usage.
+   */
+  exit?: (code: number) => void;
+
+  /**
+   * Factory responsible for configuring DAP frame tracing.
+   * Should return the path used for logging if tracing is enabled.
+   */
+  createTraceFile?: (sessionId: string, logDir: string) => string | undefined;
+};
 
 export class DapProxyWorker {
   private logger: ILogger | null = null;
@@ -38,11 +59,57 @@ export class DapProxyWorker {
   private requestTracker: CallbackRequestTracker;
   private processManager: GenericAdapterManager | null = null;
   private connectionManager: DapConnectionManager | null = null;
+  
+  // Policy-based state management
+  private adapterPolicy: AdapterPolicy = DefaultAdapterPolicy;
+  private adapterState: AdapterSpecificState;
+  private commandQueue: (DapCommandPayload | SilentDapCommandPayload)[] = [];
+  private preConnectQueue: DapCommandPayload[] = [];
 
-  constructor(private dependencies: DapProxyDependencies) {
+  private readonly exitHook: (code: number) => void;
+  private readonly traceFileFactory: (sessionId: string, logDir: string) => string | undefined;
+
+  constructor(
+    private dependencies: DapProxyDependencies,
+    hooks: DapProxyWorkerHooks = {}
+  ) {
     this.requestTracker = new CallbackRequestTracker(
       (requestId, command) => this.handleRequestTimeout(requestId, command)
     );
+    this.adapterState = DefaultAdapterPolicy.createInitialState();
+
+    this.exitHook = hooks.exit ?? ((code: number) => {
+      // Default to preserving existing behaviour in production.
+      process.exit(code);
+    });
+
+    this.traceFileFactory = hooks.createTraceFile ?? ((sessionId: string, logDir: string) => {
+      const tracePath = path.join(logDir, `dap-trace-${sessionId}.ndjson`);
+      process.env.DAP_TRACE_FILE = tracePath;
+      return tracePath;
+    });
+  }
+
+  /**
+   * Select the appropriate adapter policy based on the adapter command
+   */
+  private selectAdapterPolicy(adapterCommand?: { command: string; args: string[] }): AdapterPolicy {
+    if (!adapterCommand) {
+      // Legacy Python mode
+      return PythonAdapterPolicy;
+    }
+    
+    // Check each policy's matcher
+    if (JsDebugAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return JsDebugAdapterPolicy;
+    } else if (PythonAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return PythonAdapterPolicy;
+    } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return MockAdapterPolicy;
+    }
+    
+    // Fallback to default
+    return DefaultAdapterPolicy;
   }
 
   /**
@@ -58,6 +125,15 @@ export class DapProxyWorker {
   async handleCommand(command: ParentCommand): Promise<void> {
     this.currentSessionId = command.sessionId || null;
 
+    const sessionTag = this.currentSessionId ?? 'unknown';
+    const dapLabel =
+      command.cmd === 'dap' && (command as { dapCommand?: string }).dapCommand
+        ? (command as DapCommandPayload).dapCommand
+        : undefined;
+    this.logger?.info(
+      `[Worker] handleCommand cmd=${command.cmd}${dapLabel ? `/${dapLabel}` : ''} session=${sessionTag}`
+    );
+
     try {
       switch (command.cmd) {
         case 'init':
@@ -70,6 +146,13 @@ export class DapProxyWorker {
           await this.handleTerminate();
           break;
       }
+      const completionLabel =
+        command.cmd === 'dap' && 'dapCommand' in command
+          ? `${command.cmd}/${(command as DapCommandPayload).dapCommand}`
+          : command.cmd;
+      this.logger?.info(
+        `[Worker] Completed command ${completionLabel} session=${sessionTag} state=${this.state}`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger?.error(`[Worker] Error handling command ${command.cmd}:`, error);
@@ -81,12 +164,28 @@ export class DapProxyWorker {
    * Handle initialization command
    */
   async handleInitCommand(payload: ProxyInitPayload): Promise<void> {
+    // If already initializing, just acknowledge and return (idempotent handling for retries)
+    if (this.state === ProxyState.INITIALIZING) {
+      this.sendStatus('init_received');
+      this.logger?.info('[Worker] Duplicate init command received while already initializing, acknowledging');
+      return;
+    }
+
+    // Only allow init from UNINITIALIZED state for first init
     if (this.state !== ProxyState.UNINITIALIZED) {
       throw new Error(`Invalid state for init: ${this.state}`);
     }
 
+    // Immediately acknowledge receipt of init command
+    this.sendStatus('init_received');
+
     // Validate payload structure
     const validatedPayload = validateProxyInitPayload(payload);
+    
+    // Select adapter policy
+    this.adapterPolicy = this.selectAdapterPolicy(validatedPayload.adapterCommand);
+    this.adapterState = this.adapterPolicy.createInitialState();
+    this.logger?.info(`[Worker] Selected adapter policy: ${this.adapterPolicy.name}`);
     
     this.state = ProxyState.INITIALIZING;
     this.currentInitPayload = validatedPayload;
@@ -97,30 +196,34 @@ export class DapProxyWorker {
       await this.dependencies.fileSystem.ensureDir(path.dirname(logPath));
       this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
+      this.logger.info(`[Worker] Using adapter policy: ${this.adapterPolicy.name}`);
 
-      // Create managers with logger
-      // Use generic adapter manager if adapter command is provided, otherwise fall back to Python
-      if (payload.adapterCommand) {
-        this.processManager = new GenericAdapterManager(
-          this.dependencies.processSpawner,
-          this.logger,
-          this.dependencies.fileSystem
-        );
-      } else {
-        // Backward compatibility - use Python adapter manager
-        this.processManager = new DebugpyAdapterManager(
-          this.dependencies.processSpawner,
-          this.logger,
-          this.dependencies.fileSystem
-        );
+      // Enable per-session DAP frame tracing for diagnostics
+      try {
+        const tracePath = this.traceFileFactory(payload.sessionId, payload.logDir);
+        if (tracePath) {
+          this.logger?.info(`[Worker] DAP trace enabled at: ${tracePath}`);
+        } else {
+          this.logger?.debug?.('[Worker] Trace file factory returned no path - tracing disabled');
+        }
+      } catch (e) {
+        this.logger.warn?.('[Worker] Failed to configure DAP trace file', e as Error);
       }
+
+      // Create generic adapter manager
+      this.processManager = new GenericAdapterManager(
+        this.dependencies.processSpawner,
+        this.logger,
+        this.dependencies.fileSystem
+      );
       
       this.connectionManager = new DapConnectionManager(
         this.dependencies.dapClientFactory,
         this.logger
       );
+      // Set the adapter policy for DAP client creation
+      this.connectionManager.setAdapterPolicy(this.adapterPolicy);
 
-      // No path validation - let debugpy handle it
       this.logger.info(`[Worker] Script path to debug: ${payload.scriptPath}`);
 
       // Handle dry run
@@ -135,10 +238,8 @@ export class DapProxyWorker {
       this.state = ProxyState.UNINITIALIZED;
       const message = error instanceof Error ? error.message : String(error);
       this.logger?.error(`[Worker] Critical initialization error: ${message}`, error);
-      // For any initialization error, ensure we shut down
       await this.shutdown();
-      // Exit the process to trigger the 'exit' event in ProxyManager
-      process.exit(1);
+      this.exitHook(1);
     }
   }
 
@@ -146,90 +247,51 @@ export class DapProxyWorker {
    * Handle dry run mode
    */
   private handleDryRun(payload: ProxyInitPayload): void {
-    let command: string;
-    let args: string[];
+    // Get adapter spawn config from policy
+    const spawnConfig = this.adapterPolicy.getAdapterSpawnConfig?.({
+      executablePath: payload.executablePath,
+      adapterHost: payload.adapterHost,
+      adapterPort: payload.adapterPort,
+      logDir: payload.logDir,
+      scriptPath: payload.scriptPath,
+      adapterCommand: payload.adapterCommand
+    });
     
-    if (payload.adapterCommand) {
-      // Use provided adapter command
-      command = payload.adapterCommand.command;
-      args = payload.adapterCommand.args;
-    } else if (this.processManager instanceof DebugpyAdapterManager) {
-      // Use Python-specific command building
-      const spawnCommand = this.processManager.buildSpawnCommand(
-        payload.executablePath,
-        payload.adapterHost,
-        payload.adapterPort,
-        payload.logDir
-      );
-      command = spawnCommand.command;
-      args = spawnCommand.args;
-    } else {
-      throw new Error('Cannot determine adapter command for dry run');
+    if (!spawnConfig) {
+      throw new Error(`Cannot determine adapter command for dry run (policy: ${this.adapterPolicy.name})`);
     }
     
-    const fullCommand = `${command} ${args.join(' ')}`;
+    const fullCommand = `${spawnConfig.command} ${spawnConfig.args.join(' ')}`;
     
     this.logger!.warn(`[Worker DRY_RUN] Would execute: ${fullCommand}`);
     this.logger!.warn(`[Worker DRY_RUN] Script to debug: ${payload.scriptPath}`);
     
     this.sendStatus('dry_run_complete', { command: fullCommand, script: payload.scriptPath });
     
-    // Indicate that the process should terminate
     this.state = ProxyState.TERMINATED;
     this.logger!.info('[Worker DRY_RUN] Dry run complete. State set to TERMINATED.');
   }
 
   /**
-   * Start debugpy adapter and establish connection
+   * Start adapter and establish connection
    */
   private async startDebugpyAdapterAndConnect(payload: ProxyInitPayload): Promise<void> {
-    // Spawn adapter process
-    let spawnResult;
+    // Get adapter spawn config from policy
+    const spawnConfig = this.adapterPolicy.getAdapterSpawnConfig?.({
+      executablePath: payload.executablePath,
+      adapterHost: payload.adapterHost,
+      adapterPort: payload.adapterPort,
+      logDir: payload.logDir,
+      scriptPath: payload.scriptPath,
+      adapterCommand: payload.adapterCommand
+    });
     
-    if (payload.adapterCommand) {
-      // Validate adapter command with detailed logging
-      try {
-        const validatedCommand = validateAdapterCommand(payload.adapterCommand, 'proxy-worker-init');
-        logAdapterCommandValidation(validatedCommand, 'proxy-worker-init', true, {
-          executablePath: payload.executablePath,
-          scriptPath: payload.scriptPath
-        });
-        
-        this.logger!.info('[Worker] Adapter command validated successfully:', {
-          command: validatedCommand.command,
-          argsLength: validatedCommand.args.length,
-          hasEnv: !!validatedCommand.env
-        });
-      } catch (validationError) {
-        logAdapterCommandValidation(payload.adapterCommand, 'proxy-worker-init', false, {
-          error: validationError instanceof Error ? validationError.message : String(validationError),
-          rawPayload: payload
-        });
-        throw validationError;
-      }
-      
-      // Use validated adapter command
-      const validatedCommand = validateAdapterCommand(payload.adapterCommand, 'proxy-worker-spawn');
-      
-      spawnResult = await this.processManager!.spawn({
-        command: validatedCommand.command,
-        args: validatedCommand.args,
-        host: payload.adapterHost,
-        port: payload.adapterPort,
-        logDir: payload.logDir,
-        env: validatedCommand.env
-      });
-    } else if (this.processManager instanceof DebugpyAdapterManager) {
-      // Use Python-specific spawning
-      spawnResult = await this.processManager.spawnDebugpy({
-        pythonPath: payload.executablePath,
-        host: payload.adapterHost,
-        port: payload.adapterPort,
-        logDir: payload.logDir
-      });
-    } else {
-      throw new Error('Cannot determine how to spawn adapter');
+    if (!spawnConfig) {
+      throw new Error(`Adapter policy ${this.adapterPolicy.name} does not provide spawn configuration`);
     }
+    
+    // Spawn adapter process using the config from the policy
+    const spawnResult = await this.processManager!.spawn(spawnConfig);
 
     this.adapterProcess = spawnResult.process;
     this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
@@ -255,23 +317,31 @@ export class DapProxyWorker {
       // Set up event handlers
       this.setupDapEventHandlers();
 
-      // Initialize DAP session
-      await this.connectionManager!.initializeSession(this.dapClient, payload.sessionId);
-
-      // Send launch request
-      // DIAGNOSTIC: Log the scriptPath before sending to connection manager
-      this.logger!.info('[Worker] DIAGNOSTIC: About to send launch request with scriptPath:', payload.scriptPath);
-      this.logger!.info('[Worker] DIAGNOSTIC: scriptPath type:', typeof payload.scriptPath);
-      this.logger!.info('[Worker] DIAGNOSTIC: scriptPath length:', payload.scriptPath.length);
-      this.logger!.info('[Worker] DIAGNOSTIC: Full payload object:', JSON.stringify(payload, null, 2));
-      
-      await this.connectionManager!.sendLaunchRequest(
-        this.dapClient,
-        payload.scriptPath,
-        payload.scriptArgs,
-        payload.stopOnEntry,
-        payload.justMyCode
-      );
+      // Check if adapter requires command queueing
+      if (this.adapterPolicy.requiresCommandQueueing()) {
+        this.logger!.info(`[Worker] ${this.adapterPolicy.name} adapter detected; command queueing enabled`);
+        this.state = ProxyState.CONNECTED;
+        this.sendStatus('adapter_connected');
+        await this.drainPreConnectQueue();
+      } else {
+        // Initialize DAP session with correct adapterId
+        await this.connectionManager!.initializeSession(
+          this.dapClient,
+          payload.sessionId,
+          this.adapterPolicy.getDapAdapterConfiguration().type
+        );
+        
+        // Send automatic launch request for non-queueing adapters
+        this.logger!.info('[Worker] Sending launch request with scriptPath:', payload.scriptPath);
+        
+        await this.connectionManager!.sendLaunchRequest(
+          this.dapClient,
+          payload.scriptPath,
+          payload.scriptArgs,
+          payload.stopOnEntry,
+          payload.justMyCode
+        );
+      }
 
       this.logger!.info('[Worker] Waiting for "initialized" event from adapter.');
     } catch (error) {
@@ -288,7 +358,18 @@ export class DapProxyWorker {
 
     this.connectionManager.setupEventHandlers(this.dapClient, {
       onInitialized: async () => {
-        await this.handleInitializedEvent();
+        // Update adapter state
+        if (this.adapterPolicy.updateStateOnEvent) {
+          this.adapterPolicy.updateStateOnEvent('initialized', {}, this.adapterState);
+        }
+        
+        if (this.adapterPolicy.requiresCommandQueueing()) {
+          this.logger!.info(`[Worker] DAP "initialized" (${this.adapterPolicy.name}) received; forwarding event and draining queue.`);
+          this.sendDapEvent('initialized', {});
+          await this.drainCommandQueue();
+        } else {
+          await this.handleInitializedEvent();
+        }
       },
       onOutput: (body) => {
         this.logger!.debug('[Worker] DAP event: output', body);
@@ -365,12 +446,69 @@ export class DapProxyWorker {
    * Handle DAP command
    */
   async handleDapCommand(payload: DapCommandPayload): Promise<void> {
-    if (this.state !== ProxyState.CONNECTED || !this.dapClient) {
-      this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
+    const stateLabel = this.state;
+    this.logger?.info(
+      `[Worker] handleDapCommand '${payload.dapCommand}' session=${payload.sessionId} state=${stateLabel} queueLength=${this.commandQueue.length}`
+    );
+
+    // If shutting down, fail fast
+    if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
+      this.sendDapResponse(payload.requestId, false, undefined, 'Proxy is shutting down');
+      return;
+    }
+
+    // Queue or fail-fast any DAP requests until the transport is connected
+    if (!this.dapClient || this.state !== ProxyState.CONNECTED) {
+      if (this.adapterPolicy.requiresCommandQueueing()) {
+        this.logger?.info(`[Worker] Queuing '${payload.dapCommand}' until DAP client connected (${this.adapterPolicy.name}).`);
+        this.preConnectQueue.push(payload);
+        this.logger?.info(
+          `[Worker] Pre-connect queue length=${this.preConnectQueue.length} (command='${payload.dapCommand}')`
+        );
+      } else {
+        this.logger?.info(`[Worker] Rejecting '${payload.dapCommand}' before connection: DAP client not connected`);
+        this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
+      }
       return;
     }
 
     try {
+      // Check if command should be queued based on policy
+      const handling = this.adapterPolicy.shouldQueueCommand(payload.dapCommand, this.adapterState);
+      this.logger?.info(
+        `[Worker] Queue decision for '${payload.dapCommand}': shouldQueue=${handling.shouldQueue} shouldDefer=${handling.shouldDefer} queueLength=${this.commandQueue.length}`
+      );
+      
+      if (handling.shouldQueue) {
+        this.logger!.info(`[Worker] ${handling.reason || 'Queuing command'}`);
+        
+        // Check if we need to inject configurationDone
+        const initBehavior = this.adapterPolicy.getInitializationBehavior();
+        if (handling.shouldDefer && initBehavior.deferConfigDone) {
+          const hasQueuedConfigDone = this.commandQueue.some(p => p.dapCommand === 'configurationDone');
+          if (!hasQueuedConfigDone) {
+            // Inject a silent configurationDone
+            const silentCommand: SilentDapCommandPayload = { 
+              requestId: `__silent_configDone_${Date.now()}`, 
+              dapCommand: 'configurationDone', 
+              dapArgs: {},
+              sessionId: payload.sessionId,
+              cmd: 'dap',
+              // Mark as silent so we don't send response
+              __silent: true
+            };
+            this.commandQueue.push(silentCommand);
+          }
+        }
+        
+        this.commandQueue.push(payload);
+        this.logger?.info(
+          `[Worker] Command queued. queueLength=${this.commandQueue.length} (command='${payload.dapCommand}')`
+        );
+        await this.drainCommandQueue();
+        return;
+      }
+
       // Track request
       this.requestTracker.track(payload.requestId, payload.dapCommand);
 
@@ -379,46 +517,161 @@ export class DapProxyWorker {
         this.logger!.info(`[Worker] Sending 'setBreakpoints' command. Args:`, payload.dapArgs);
       }
 
+      // Add runtimeExecutable from executablePath if needed
+      let dapArgs = payload.dapArgs;
+      const initBehavior = this.adapterPolicy.getInitializationBehavior();
+      if (initBehavior.addRuntimeExecutable && payload.dapCommand === 'launch' && this.currentInitPayload?.executablePath) {
+        const launchArgs = dapArgs as Record<string, unknown>;
+        if (!launchArgs.runtimeExecutable) {
+          launchArgs.runtimeExecutable = this.currentInitPayload.executablePath;
+          this.logger!.info(`[Worker] Added runtimeExecutable to launch args: ${launchArgs.runtimeExecutable}`);
+          dapArgs = launchArgs;
+        }
+      }
+
       // Send request
-      const response = await this.dapClient.sendRequest(payload.dapCommand, payload.dapArgs);
+      this.logger?.info(`[Worker] Sending '${payload.dapCommand}' to adapter`);
+      const response = await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
+      
+      // Update adapter state if needed
+      if (this.adapterPolicy.updateStateOnCommand) {
+        this.adapterPolicy.updateStateOnCommand(payload.dapCommand, dapArgs, this.adapterState);
+      }
+
+      // Mark initialize response received if needed
+      if (this.adapterPolicy.updateStateOnResponse) {
+        this.adapterPolicy.updateStateOnResponse(payload.dapCommand, response, this.adapterState);
+      } else if (initBehavior.trackInitializeResponse && payload.dapCommand === 'initialize') {
+        // Fallback for policies that rely on worker-managed initialize tracking.
+        (this.adapterState as AdapterSpecificState & { initializeResponded?: boolean }).initializeResponded = true;
+      }
 
       // Complete tracking
       this.requestTracker.complete(payload.requestId);
 
-      // Log setBreakpoints response with full details
-      if (payload.dapCommand === 'setBreakpoints') {
-        this.logger!.info(`[Worker] Response from adapter for 'setBreakpoints':`, response);
-        
-        // TEMPORARY DEBUG: Log complete response structure
-        console.error('[DEBUG-DAP] Full setBreakpoints response:', JSON.stringify(response, null, 2));
-        
-        // Log individual breakpoint details if available
-        if (response && typeof response === 'object' && 'body' in response) {
-          const typedResponse = response as DebugProtocol.SetBreakpointsResponse;
-          const body = typedResponse.body;
-          if (body && body.breakpoints && Array.isArray(body.breakpoints)) {
-            body.breakpoints.forEach((bp: DebugProtocol.Breakpoint, index: number) => {
-              console.error(`[DEBUG-DAP] Breakpoint ${index}:`, {
-                id: bp.id,
-                verified: bp.verified,
-                message: bp.message,
-                line: bp.line,
-                column: bp.column,
-                source: bp.source,
-                instructionReference: bp.instructionReference
-              });
-            });
-          }
-        }
-      }
-
       // Send response
       this.sendDapResponse(payload.requestId, true, response);
+      
+      // Ensure initial stop after launch if needed
+      if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+        await this.drainCommandQueue();
+        this.ensureInitialStop().catch((err) => {
+          this.logger?.debug?.(
+            `[Worker] ensureInitialStop encountered error: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
+      }
     } catch (error) {
       this.requestTracker.complete(payload.requestId);
       const message = error instanceof Error ? error.message : String(error);
       this.logger!.error(`[Worker] DAP command ${payload.dapCommand} failed:`, { error: message });
       this.sendDapResponse(payload.requestId, false, undefined, message);
+    }
+  }
+
+  /**
+   * Drain the command queue
+   */
+  private async drainCommandQueue(): Promise<void> {
+    if (!this.dapClient || this.commandQueue.length === 0) return;
+    
+    this.logger!.info(`[Worker] Draining command queue. Count: ${this.commandQueue.length}`);
+    
+    // Process commands through policy if it has a processor
+    let ordered = this.commandQueue;
+    if (this.adapterPolicy.processQueuedCommands) {
+      ordered = this.adapterPolicy.processQueuedCommands(this.commandQueue, this.adapterState) as DapCommandPayload[];
+    }
+    
+    // Clear queue after ordering
+    this.commandQueue = [];
+    
+    let remaining = ordered.length;
+    for (const payload of ordered) {
+      remaining--;
+      try {
+        const silent = ((payload as SilentDapCommandPayload).__silent === true);
+        this.logger?.info(
+          `[Worker] Processing queued command '${payload.dapCommand}' silent=${silent} queueRemaining=${remaining}`
+        );
+        if (silent) {
+          await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
+          if (this.adapterPolicy.updateStateOnCommand) {
+            this.adapterPolicy.updateStateOnCommand(payload.dapCommand, payload.dapArgs || {}, this.adapterState);
+          }
+          continue;
+        }
+
+        this.requestTracker.track(payload.requestId, payload.dapCommand);
+        const response = await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
+        
+        if (this.adapterPolicy.updateStateOnCommand) {
+          this.adapterPolicy.updateStateOnCommand(payload.dapCommand, payload.dapArgs || {}, this.adapterState);
+        }
+        
+        this.requestTracker.complete(payload.requestId);
+        this.sendDapResponse(payload.requestId, true, response);
+        
+        const initBehavior = this.adapterPolicy.getInitializationBehavior();
+        if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
+          this.ensureInitialStop().catch((err) => {
+            this.logger?.debug?.(
+              `[Worker] ensureInitialStop (queued) encountered error: ${err instanceof Error ? err.message : String(err)}`
+            );
+          });
+        }
+      } catch (error) {
+        this.requestTracker.complete(payload.requestId);
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger!.error(`[Worker] Queued DAP command ${payload.dapCommand} failed:`, { error: message });
+        this.sendDapResponse(payload.requestId, false, undefined, message);
+      }
+    }
+  }
+
+  /**
+   * Ensure initial stop for JavaScript debugging
+   */
+  private async ensureInitialStop(timeoutMs: number = 12000): Promise<void> {
+    if (!this.dapClient) return;
+    const start = Date.now();
+
+    try {
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const threadsResp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
+          const first = threadsResp?.body?.threads?.[0]?.id;
+          if (typeof first === 'number' && first > 0) {
+            const pauseTid = first;
+            this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
+            try {
+              await this.dapClient.sendRequest('pause', { threadId: pauseTid });
+            } catch {
+              // ignore pause errors
+            }
+            return;
+          }
+        } catch {
+          // ignore threads errors
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      this.logger?.warn('[Worker] ensureInitialStop: no threads discovered within timeout');
+    } finally {
+      // nothing to unsubscribe
+    }
+  }
+
+  /**
+   * Drain pre-connect queue
+   */
+  private async drainPreConnectQueue(): Promise<void> {
+    if (!this.dapClient || !this.preConnectQueue.length) return;
+    this.logger!.info('[Worker] Draining pre-connect DAP request queue. Count:', this.preConnectQueue.length);
+    const queued = [...this.preConnectQueue];
+    this.preConnectQueue = [];
+    for (const payload of queued) {
+      await this.handleDapCommand(payload);
     }
   }
 
@@ -434,7 +687,14 @@ export class DapProxyWorker {
    * Handle terminate command
    */
   async handleTerminate(): Promise<void> {
-    this.logger!.info('[Worker] Received terminate command.');
+    // Check if already shutting down or terminated for idempotent behavior
+    if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
+      this.logger?.info('[Worker] Already shutting down or terminated.');
+      return;
+    }
+    
+    // Use optional chaining since logger might be null if not initialized
+    this.logger?.info('[Worker] Received terminate command.');
     await this.shutdown();
     this.sendStatus('terminated');
   }

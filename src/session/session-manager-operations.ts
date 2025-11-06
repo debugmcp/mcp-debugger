@@ -3,21 +3,21 @@
  * continuing, and breakpoint management.
  */
 import { v4 as uuidv4 } from 'uuid';
-import { Breakpoint, SessionState, SessionLifecycleState } from '@debugmcp/shared';
+import { 
+  Breakpoint, 
+  SessionState, 
+  SessionLifecycleState
+} from '@debugmcp/shared';
 import { ManagedSession } from './session-store.js';
-import { DebugProtocol } from '@vscode/debugprotocol'; 
+import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { SessionManagerData } from './session-manager-data.js';
-import { WhichCommandFinder } from '../implementations/which-command-finder.js';
-import { spawn } from 'child_process';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import { AdapterConfig } from '@debugmcp/shared';
-import { translatePathForContainer, isContainerMode } from '../utils/container-path-utils.js';
-import { 
-  SessionTerminatedError, 
+import {
+  SessionTerminatedError,
   ProxyNotRunningError,
   DebugSessionCreationError,
   PythonNotFoundError
@@ -43,10 +43,10 @@ export interface EvaluateResult {
  */
 export class SessionManagerOperations extends SessionManagerData {
   protected async startProxyManager(
-    session: ManagedSession, 
-    scriptPath: string, 
-    scriptArgs?: string[], 
-    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, 
+    session: ManagedSession,
+    scriptPath: string,
+    scriptArgs?: string[],
+    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
     dryRunSpawn?: boolean
   ): Promise<void> {
     const sessionId = session.id;
@@ -60,7 +60,7 @@ export class SessionManagerOperations extends SessionManagerData {
       if (!dirExists) {
         throw new Error(`Log directory ${sessionLogDir} could not be created`);
       }
-    } catch (err: unknown) { 
+    } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`[SessionManager] Failed to create log directory:`, err);
       throw new Error(`Failed to create session log directory: ${message}`);
@@ -69,70 +69,14 @@ export class SessionManagerOperations extends SessionManagerData {
     // Get free port for adapter
     const adapterPort = await this.findFreePort();
 
-    // Resolve paths
-    const projectRoot = path.resolve(fileURLToPath(import.meta.url), '../../../'); // Path to the MCP debugger server's root
-    
-    const initialBreakpoints = Array.from(session.breakpoints.values()).map(bp => {
-        // Breakpoint file path has been validated by server.ts before reaching here
-        return {
-            file: bp.file, // Use the validated path
-            line: bp.line, 
-            condition: bp.condition
-        };
+    const initialBreakpoints = Array.from(session.breakpoints.values()).map((bp) => {
+      // Breakpoint file path has been validated by server.ts before reaching here
+      return {
+        file: bp.file, // Use the validated path
+        line: bp.line,
+        condition: bp.condition,
+      };
     });
-    
-    // scriptPath has been validated by server.ts before reaching here
-    const translatedScriptPath = translatePathForContainer(scriptPath, this.environment);
-    if (isContainerMode(this.environment) && translatedScriptPath !== scriptPath) {
-      this.logger.info(`[SessionManager] Container mode: translated path from '${scriptPath}' to '${translatedScriptPath}'`);
-    }
-
-    // Resolve executable path based on language
-    let resolvedExecutablePath: string;
-    
-    if (session.language === 'python') {
-      // Python-specific path resolution
-      const executablePathFromSession = session.executablePath!;
-
-      if (path.isAbsolute(executablePathFromSession)) {
-        // Absolute path provided - use as-is
-        resolvedExecutablePath = executablePathFromSession;
-      } else if (['python', 'python3', 'py'].includes(executablePathFromSession.toLowerCase())) {
-        // Resolve common Python commands using local command finder with validation
-        const finder = new WhichCommandFinder();
-        try {
-          const resolved = await finder.find(executablePathFromSession);
-          const valid = await this.isValidPythonExecutable(resolved);
-          if (!valid) {
-            throw new PythonNotFoundError(executablePathFromSession);
-          }
-          resolvedExecutablePath = resolved;
-          this.logger.info(`[SessionManager] Auto-detected Python executable: ${resolvedExecutablePath}`);
-        } catch (error) {
-          // If it's already a typed error, re-throw it
-          if (error instanceof PythonNotFoundError) {
-            throw error;
-          }
-          const msg = error instanceof Error ? error.message : String(error);
-          // Convert generic "not found" errors to typed Python error
-          if (msg.includes('not found')) {
-            throw new PythonNotFoundError(executablePathFromSession);
-          }
-          // For other errors, wrap them
-          this.logger.error(`[SessionManager] Failed to resolve Python executable '${executablePathFromSession}':`, msg);
-          throw new DebugSessionCreationError(`Failed to resolve Python: ${msg}`, error instanceof Error ? error : undefined);
-        }
-      } else {
-        // Relative path - resolve from project root (MCP server's root)
-        resolvedExecutablePath = path.resolve(projectRoot, executablePathFromSession);
-      }
-
-      this.logger.info(`[SessionManager] Using Python path: ${resolvedExecutablePath}`);
-    } else {
-      // For non-Python languages (like mock), use a generic executable path
-      resolvedExecutablePath = session.executablePath || process.execPath; // Use node as fallback for mock
-      this.logger.info(`[SessionManager] Using ${session.language} executable: ${resolvedExecutablePath}`);
-    }
 
     // Merge launch args
     const effectiveLaunchArgs = {
@@ -140,38 +84,64 @@ export class SessionManagerOperations extends SessionManagerData {
       ...(dapLaunchArgs || {}),
     };
 
-    // Create the adapter for this language
+    // Create the adapter for this language first
     const adapterConfig: AdapterConfig = {
       sessionId,
-      executablePath: resolvedExecutablePath,
+      executablePath: '', // Will be resolved by adapter
       adapterHost: '127.0.0.1',
       adapterPort,
       logDir: sessionLogDir,
-      scriptPath: translatedScriptPath,
+      scriptPath,
       scriptArgs,
-      launchConfig: effectiveLaunchArgs
+      launchConfig: effectiveLaunchArgs,
     };
-    
+
     const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
-    
+
+    // Use the adapter to resolve the executable path
+    let resolvedExecutablePath: string;
+    try {
+      resolvedExecutablePath = await adapter.resolveExecutablePath(session.executablePath);
+      this.logger.info(`[SessionManager] Adapter resolved executable path: ${resolvedExecutablePath}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[SessionManager] Failed to resolve executable for ${session.language}:`,
+        msg
+      );
+
+      // Convert to appropriate error type based on language
+      if (session.language === 'python' && msg.includes('not found')) {
+        throw new PythonNotFoundError(session.executablePath || 'python');
+      }
+
+      throw new DebugSessionCreationError(
+        `Failed to resolve ${session.language} executable: ${msg}`,
+        error instanceof Error ? error : undefined
+      );
+    }
+
+    // Update adapter config with resolved executable path
+    adapterConfig.executablePath = resolvedExecutablePath;
+
     // Build adapter command using the adapter
     const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
 
     // Create ProxyConfig
     const proxyConfig: ProxyConfig = {
       sessionId,
-      language: session.language,  // Add language from session
+      language: session.language, // Add language from session
       executablePath: resolvedExecutablePath,
       adapterHost: '127.0.0.1',
       adapterPort,
       logDir: sessionLogDir,
-      scriptPath: translatedScriptPath, // Use the already translated script path
+      scriptPath, // Path already resolved by server
       scriptArgs,
       stopOnEntry: effectiveLaunchArgs.stopOnEntry,
       justMyCode: effectiveLaunchArgs.justMyCode,
       initialBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
-      adapterCommand // Pass the adapter command
+      adapterCommand, // Pass the adapter command
     };
 
     // Create and start ProxyManager with the adapter
@@ -189,33 +159,41 @@ export class SessionManagerOperations extends SessionManagerData {
    * Helper method to wait for dry run completion with timeout
    */
   private async waitForDryRunCompletion(
-    session: ManagedSession, 
+    session: ManagedSession,
     timeoutMs: number
   ): Promise<boolean> {
     let handler: (() => void) | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
-    
+
     try {
       return await Promise.race([
         new Promise<boolean>((resolve) => {
           handler = () => {
-            this.logger.info(`[SessionManager] Dry run completion event received for session ${session.id}`);
+            this.logger.info(
+              `[SessionManager] Dry run completion event received for session ${session.id}`
+            );
             resolve(true);
           };
-          this.logger.info(`[SessionManager] Setting up dry-run-complete listener for session ${session.id}`);
+          this.logger.info(
+            `[SessionManager] Setting up dry-run-complete listener for session ${session.id}`
+          );
           session.proxyManager?.once('dry-run-complete', handler);
         }),
         new Promise<boolean>((resolve) => {
           timeoutId = setTimeout(() => {
-            this.logger.warn(`[SessionManager] Dry run timeout after ${timeoutMs}ms for session ${session.id}`);
+            this.logger.warn(
+              `[SessionManager] Dry run timeout after ${timeoutMs}ms for session ${session.id}`
+            );
             resolve(false);
           }, timeoutMs);
-        })
+        }),
       ]);
     } finally {
       // Clean up immediately
       if (handler && session.proxyManager) {
-        this.logger.info(`[SessionManager] Removing dry-run-complete listener for session ${session.id}`);
+        this.logger.info(
+          `[SessionManager] Removing dry-run-complete listener for session ${session.id}`
+        );
         session.proxyManager.removeListener('dry-run-complete', handler);
       }
       if (timeoutId) {
@@ -225,145 +203,220 @@ export class SessionManagerOperations extends SessionManagerData {
   }
 
   async startDebugging(
-    sessionId: string, 
-    scriptPath: string, 
-    scriptArgs?: string[], 
-    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, 
+    sessionId: string,
+    scriptPath: string,
+    scriptArgs?: string[],
+    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
     dryRunSpawn?: boolean
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
-    this.logger.info(`Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`, dapLaunchArgs);
+    this.logger.info(
+      `Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`,
+      dapLaunchArgs
+    );
 
     if (session.proxyManager) {
-      this.logger.warn(`[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`);
-      await this.closeSession(sessionId); 
+      this.logger.warn(
+        `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`
+      );
+      await this.closeSession(sessionId);
     }
-    
+
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this._updateSessionState(session, SessionState.INITIALIZING);
-    
+
     // Explicitly set lifecycle state to ACTIVE when starting debugging
     this.sessionStore.update(sessionId, {
-      sessionLifecycle: SessionLifecycleState.ACTIVE
+      sessionLifecycle: SessionLifecycleState.ACTIVE,
     });
     this.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
-    
+
     try {
       // For dry run, start the proxy and wait for completion
       if (dryRunSpawn) {
         // Mark that we're setting up a dry run handler
         const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
         sessionWithSetup._dryRunHandlerSetup = true;
-        
+
         // Start the proxy manager
         await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
         this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
-        
+
         // Check if already completed before waiting
         const refreshedSession = this._getSessionById(sessionId);
         this.logger.info(`[SessionManager] Checking state after start: ${refreshedSession.state}`);
         if (refreshedSession.state === SessionState.STOPPED) {
-          this.logger.info(`[SessionManager] Dry run already completed for session ${sessionId}`);
+          this.logger.info(
+            `[SessionManager] Dry run already completed for session ${sessionId}`
+          );
           delete sessionWithSetup._dryRunHandlerSetup;
-          return { 
-            success: true, 
+          return {
+            success: true,
             state: SessionState.STOPPED,
-            data: { dryRun: true, message: "Dry run spawn command logged by proxy." } 
+            data: { dryRun: true, message: 'Dry run spawn command logged by proxy.' },
           };
         }
-        
+
         // Wait for completion with timeout
-        this.logger.info(`[SessionManager] Waiting for dry run completion with timeout ${this.dryRunTimeoutMs}ms`);
-        const dryRunCompleted = await this.waitForDryRunCompletion(refreshedSession, this.dryRunTimeoutMs);
+        this.logger.info(
+          `[SessionManager] Waiting for dry run completion with timeout ${this.dryRunTimeoutMs}ms`
+        );
+        const dryRunCompleted = await this.waitForDryRunCompletion(
+          refreshedSession,
+          this.dryRunTimeoutMs
+        );
         delete sessionWithSetup._dryRunHandlerSetup;
-        
+
         if (dryRunCompleted) {
-          this.logger.info(`[SessionManager] Dry run completed for session ${sessionId}, final state: ${refreshedSession.state}`);
-          return { 
-            success: true, 
+          this.logger.info(
+            `[SessionManager] Dry run completed for session ${sessionId}, final state: ${refreshedSession.state}`
+          );
+          return {
+            success: true,
             state: SessionState.STOPPED,
-            data: { dryRun: true, message: "Dry run spawn command logged by proxy." } 
+            data: { dryRun: true, message: 'Dry run spawn command logged by proxy.' },
           };
         } else {
           // Timeout occurred
           const finalSession = this._getSessionById(sessionId);
           this.logger.error(
             `[SessionManager] Dry run timeout for session ${sessionId}. ` +
-            `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`
+              `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`
           );
-          return { 
-            success: false, 
-            error: `Dry run timed out after ${this.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`, 
-            state: finalSession.state 
+          return {
+            success: false,
+            error: `Dry run timed out after ${this.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`,
+            state: finalSession.state,
           };
         }
       }
-      
+
       // Normal (non-dry-run) flow
       // Start the proxy manager
       await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
-      
-      // Wait for adapter to be configured or first stop event
-      const waitForReady = new Promise<void>((resolve) => {
-        let resolved = false;
-        
-        const handleStopped = () => {
-          if (!resolved) {
-            resolved = true;
-            this.logger.info(`[SessionManager] Session ${sessionId} stopped on entry`);
-            resolve();
-          }
-        };
-        
-        const handleConfigured = () => {
-          if (!resolved && !dapLaunchArgs?.stopOnEntry) {
-            resolved = true;
-            this.logger.info(`[SessionManager] Session ${sessionId} running (stopOnEntry=false)`);
-            resolve();
-          }
-        };
-        
-        session.proxyManager?.once('stopped', handleStopped);
-        session.proxyManager?.once('adapter-configured', handleConfigured);
-        
-        // Timeout after 30 seconds
-        setTimeout(() => {
-          if (!resolved) {
+
+      // Perform language-specific handshake if required
+      const policy = this.selectPolicy(session.language);
+      if (policy.performHandshake) {
+        try {
+          await policy.performHandshake({
+            proxyManager: session.proxyManager,
+            sessionId: session.id,
+            dapLaunchArgs,
+            scriptPath,
+            scriptArgs,
+            breakpoints: session.breakpoints
+          });
+        } catch (handshakeErr) {
+          this.logger.warn(
+            `[SessionManager] Language handshake returned with warning/error: ${
+              handshakeErr instanceof Error ? handshakeErr.message : String(handshakeErr)
+            }`
+          );
+        }
+      }
+
+      // Use policy-defined readiness criteria when available.
+      const sessionStateAfterHandshake = this._getSessionById(sessionId).state;
+      const alreadyReady = policy.isSessionReady
+        ? policy.isSessionReady(sessionStateAfterHandshake, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+        : sessionStateAfterHandshake === SessionState.PAUSED;
+
+      if (!alreadyReady) {
+        // Wait for adapter to be configured or first stop event
+        const waitForReady = new Promise<void>((resolve) => {
+          let resolved = false;
+
+          const handleStopped = () => {
+            if (!resolved) {
+              resolved = true;
+              this.logger.info(`[SessionManager] Session ${sessionId} stopped on entry`);
+              resolve();
+            }
+          };
+
+          const handleConfigured = () => {
+            const readyOnRunning = policy.isSessionReady
+              ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+              : !dapLaunchArgs?.stopOnEntry;
+            if (!resolved && readyOnRunning) {
+              resolved = true;
+              this.logger.info(
+                `[SessionManager] Session ${sessionId} running (stopOnEntry=${dapLaunchArgs?.stopOnEntry ?? false})`
+              );
+              resolve();
+            }
+          };
+
+          session.proxyManager?.once('stopped', handleStopped);
+          session.proxyManager?.once('adapter-configured', handleConfigured);
+
+          // In case the adapter already reached the desired state before listeners were attached,
+          // perform a synchronous state check to avoid waiting for an event that already fired.
+          const currentState = this._getSessionById(sessionId).state;
+          const readyNow = policy.isSessionReady
+            ? policy.isSessionReady(currentState, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+            : currentState === SessionState.PAUSED;
+          if (readyNow) {
             resolved = true;
             session.proxyManager?.removeListener('stopped', handleStopped);
             session.proxyManager?.removeListener('adapter-configured', handleConfigured);
-            this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
             resolve();
+            return;
           }
-        }, 30000);
-      });
-      
-      await waitForReady;
-      
+
+          // Timeout after 30 seconds
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              session.proxyManager?.removeListener('stopped', handleStopped);
+              session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+              this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
+              resolve();
+            }
+          }, 30000);
+        });
+
+        await waitForReady;
+      } else {
+        this.logger.info(
+          `[SessionManager] Session ${sessionId} already ${sessionStateAfterHandshake} after handshake - skipping adapter readiness wait`
+        );
+      }
+
       // Re-fetch session to get the most up-to-date state
       const finalSession = this._getSessionById(sessionId);
       const finalState = finalSession.state;
-      
-      this.logger.info(`[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`);
-      
-      return { 
-        success: true, 
-        state: finalState, 
-        data: { 
+
+      this.logger.info(
+        `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
+      );
+
+      return {
+        success: true,
+        state: finalState,
+        data: {
           message: `Debugging started for ${scriptPath}. Current state: ${finalState}`,
-          reason: finalState === SessionState.PAUSED ? (dapLaunchArgs?.stopOnEntry ? 'entry' : 'breakpoint') : undefined,
-          stopOnEntrySuccessful: dapLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
-        } 
+          reason:
+            finalState === SessionState.PAUSED
+              ? dapLaunchArgs?.stopOnEntry
+                ? 'entry'
+                : 'breakpoint'
+              : undefined,
+          stopOnEntrySuccessful: !!dapLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
+        },
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : 'No stack available';
-      
-      this.logger.error(`[SessionManager] Error during startDebugging for session ${sessionId}: ${errorMessage}. Stack: ${errorStack}`);
-      
+
+      this.logger.error(
+        `[SessionManager] Error during startDebugging for session ${sessionId}: ${errorMessage}. Stack: ${errorStack}`
+      );
+
       this._updateSessionState(session, SessionState.ERROR);
-      
+
       if (session.proxyManager) {
         await session.proxyManager.stop();
         session.proxyManager = undefined;
@@ -382,56 +435,88 @@ export class SessionManagerOperations extends SessionManagerData {
       return { success: false, error: errorMessage, state: session.state, errorType, errorCode };
     }
   }
-  
-  async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
+
+
+  async setBreakpoint(
+    sessionId: string,
+    file: string,
+    line: number,
+    condition?: string
+  ): Promise<Breakpoint> {
     const session = this._getSessionById(sessionId);
-    
+
     // Check if session is terminated
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
       throw new SessionTerminatedError(sessionId);
     }
-    
+
     const bpId = uuidv4();
 
     // The file path has been validated and translated by server.ts before reaching here
-    this.logger.info(`[SessionManager setBreakpoint] Using validated file path "${file}" for session ${sessionId}`);
+    this.logger.info(
+      `[SessionManager setBreakpoint] Using validated file path "${file}" for session ${sessionId}`
+    );
 
     const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, verified: false };
 
     if (!session.breakpoints) session.breakpoints = new Map();
     session.breakpoints.set(bpId, newBreakpoint);
-    this.logger.info(`[SessionManager] Breakpoint ${bpId} queued for ${file}:${line} in session ${sessionId}.`);
+    this.logger.info(
+      `[SessionManager] Breakpoint ${bpId} queued for ${file}:${line} in session ${sessionId}.`
+    );
 
-    if (session.proxyManager && session.proxyManager.isRunning() && (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)) {
+    if (
+      session.proxyManager &&
+      session.proxyManager.isRunning() &&
+      (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
+    ) {
       try {
-          this.logger.info(`[SessionManager] Active proxy for session ${sessionId}, sending breakpoint ${bpId}.`);
-          const response = await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', { 
-              source: { path: newBreakpoint.file }, 
-              breakpoints: [{ line: newBreakpoint.line, condition: newBreakpoint.condition }]
-          });
-          if (response && response.body && response.body.breakpoints && response.body.breakpoints.length > 0) {
-              const bpInfo = response.body.breakpoints[0]; 
-              newBreakpoint.verified = bpInfo.verified;
-              newBreakpoint.line = bpInfo.line || newBreakpoint.line;
-              newBreakpoint.message = bpInfo.message; // Capture validation message
-              this.logger.info(`[SessionManager] Breakpoint ${bpId} sent and response received. Verified: ${newBreakpoint.verified}${bpInfo.message ? `, Message: ${bpInfo.message}` : ''}`);
-              
-              // Log breakpoint verification with structured logging
-              if (newBreakpoint.verified) {
-                this.logger.info('debug:breakpoint', {
-                  event: 'verified',
-                  sessionId: sessionId,
-                  sessionName: session.name,
-                  breakpointId: bpId,
-                  file: newBreakpoint.file,
-                  line: newBreakpoint.line,
-                  verified: true,
-                  timestamp: Date.now()
-                });
-              }
+        this.logger.info(
+          `[SessionManager] Active proxy for session ${sessionId}, sending breakpoint ${bpId}.`
+        );
+        const response =
+          await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>(
+            'setBreakpoints',
+            {
+              source: { path: newBreakpoint.file },
+              breakpoints: [{ line: newBreakpoint.line, condition: newBreakpoint.condition }],
+            }
+          );
+        if (
+          response &&
+          response.body &&
+          response.body.breakpoints &&
+          response.body.breakpoints.length > 0
+        ) {
+          const bpInfo = response.body.breakpoints[0];
+          newBreakpoint.verified = bpInfo.verified;
+          newBreakpoint.line = bpInfo.line || newBreakpoint.line;
+          newBreakpoint.message = bpInfo.message; // Capture validation message
+          this.logger.info(
+            `[SessionManager] Breakpoint ${bpId} sent and response received. Verified: ${newBreakpoint.verified}${
+              bpInfo.message ? `, Message: ${bpInfo.message}` : ''
+            }`
+          );
+
+          // Log breakpoint verification with structured logging
+          if (newBreakpoint.verified) {
+            this.logger.info('debug:breakpoint', {
+              event: 'verified',
+              sessionId: sessionId,
+              sessionName: session.name,
+              breakpointId: bpId,
+              file: newBreakpoint.file,
+              line: newBreakpoint.line,
+              verified: true,
+              timestamp: Date.now(),
+            });
           }
+        }
       } catch (error) {
-          this.logger.error(`[SessionManager] Error sending setBreakpoint to proxy for session ${sessionId}:`, error);
+        this.logger.error(
+          `[SessionManager] Error sending setBreakpoint to proxy for session ${sessionId}:`,
+          error
+        );
       }
     }
     return newBreakpoint;
@@ -439,15 +524,17 @@ export class SessionManagerOperations extends SessionManagerData {
 
   async stepOver(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
-    
+
     // Check if session is terminated
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
       throw new SessionTerminatedError(sessionId);
     }
-    
+
     const threadId = session.proxyManager?.getCurrentThreadId();
-    this.logger.info(`[SM stepOver ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
-    
+    this.logger.info(
+      `[SM stepOver ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`
+    );
+
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       throw new ProxyNotRunningError(sessionId, 'step over');
     }
@@ -455,36 +542,19 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.warn(`[SM stepOver ${sessionId}] Not paused. State: ${session.state}`);
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
+    if (typeof threadId !== 'number') {
       this.logger.warn(`[SM stepOver ${sessionId}] No current thread ID.`);
       return { success: false, error: 'No current thread ID', state: session.state };
     }
-    
+
     this.logger.info(`[SM stepOver ${sessionId}] Sending DAP 'next' for threadId ${threadId}`);
-    
+
     try {
-      // Send step request
-      await session.proxyManager.sendDapRequest('next', { threadId });
-      
-      // Update state to running
-      this._updateSessionState(session, SessionState.RUNNING);
-      
-      // Wait for stopped event
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped event`);
-          resolve({ 
-            success: false, 
-            error: ErrorMessages.stepTimeout(5), 
-            state: session.state 
-          });
-        }, 5000);
-        
-        session.proxyManager?.once('stopped', () => {
-          clearTimeout(timeout);
-          this.logger.info(`[SM stepOver ${sessionId}] Step completed. Current state: ${session.state}`);
-          resolve({ success: true, state: session.state, data: { message: "Step over completed." } });
-        });
+      return await this._executeStepOperation(session, sessionId, {
+        command: 'next',
+        threadId,
+        logTag: 'stepOver',
+        successMessage: 'Step completed.',
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -496,15 +566,17 @@ export class SessionManagerOperations extends SessionManagerData {
 
   async stepInto(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
-    
+
     // Check if session is terminated
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
       throw new SessionTerminatedError(sessionId);
     }
-    
+
     const threadId = session.proxyManager?.getCurrentThreadId();
-    this.logger.info(`[SM stepInto ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
-    
+    this.logger.info(
+      `[SM stepInto ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`
+    );
+
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       throw new ProxyNotRunningError(sessionId, 'step into');
     }
@@ -512,36 +584,19 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.warn(`[SM stepInto ${sessionId}] Not paused. State: ${session.state}`);
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
+    if (typeof threadId !== 'number') {
       this.logger.warn(`[SM stepInto ${sessionId}] No current thread ID.`);
       return { success: false, error: 'No current thread ID', state: session.state };
     }
-    
+
     this.logger.info(`[SM stepInto ${sessionId}] Sending DAP 'stepIn' for threadId ${threadId}`);
-    
+
     try {
-      // Send step request
-      await session.proxyManager.sendDapRequest('stepIn', { threadId });
-      
-      // Update state to running
-      this._updateSessionState(session, SessionState.RUNNING);
-      
-      // Wait for stopped event
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          this.logger.warn(`[SM stepInto ${sessionId}] Timeout waiting for stopped event`);
-          resolve({ 
-            success: false, 
-            error: ErrorMessages.stepTimeout(5), 
-            state: session.state 
-          });
-        }, 5000);
-        
-        session.proxyManager?.once('stopped', () => {
-          clearTimeout(timeout);
-          this.logger.info(`[SM stepInto ${sessionId}] Step completed. Current state: ${session.state}`);
-          resolve({ success: true, state: session.state, data: { message: "Step into completed." } });
-        });
+      return await this._executeStepOperation(session, sessionId, {
+        command: 'stepIn',
+        threadId,
+        logTag: 'stepInto',
+        successMessage: 'Step into completed.',
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -553,15 +608,17 @@ export class SessionManagerOperations extends SessionManagerData {
 
   async stepOut(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
-    
+
     // Check if session is terminated
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
       throw new SessionTerminatedError(sessionId);
     }
-    
+
     const threadId = session.proxyManager?.getCurrentThreadId();
-    this.logger.info(`[SM stepOut ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`);
-    
+    this.logger.info(
+      `[SM stepOut ${sessionId}] Entered. Current state: ${session.state}, ThreadID: ${threadId}`
+    );
+
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       throw new ProxyNotRunningError(sessionId, 'step out');
     }
@@ -569,36 +626,19 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.warn(`[SM stepOut ${sessionId}] Not paused. State: ${session.state}`);
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
+    if (typeof threadId !== 'number') {
       this.logger.warn(`[SM stepOut ${sessionId}] No current thread ID.`);
       return { success: false, error: 'No current thread ID', state: session.state };
     }
-    
+
     this.logger.info(`[SM stepOut ${sessionId}] Sending DAP 'stepOut' for threadId ${threadId}`);
-    
+
     try {
-      // Send step request
-      await session.proxyManager.sendDapRequest('stepOut', { threadId });
-      
-      // Update state to running
-      this._updateSessionState(session, SessionState.RUNNING);
-      
-      // Wait for stopped event
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          this.logger.warn(`[SM stepOut ${sessionId}] Timeout waiting for stopped event`);
-          resolve({ 
-            success: false, 
-            error: ErrorMessages.stepTimeout(5), 
-            state: session.state 
-          });
-        }, 5000);
-        
-        session.proxyManager?.once('stopped', () => {
-          clearTimeout(timeout);
-          this.logger.info(`[SM stepOut ${sessionId}] Step completed. Current state: ${session.state}`);
-          resolve({ success: true, state: session.state, data: { message: "Step out completed." } });
-        });
+      return await this._executeStepOperation(session, sessionId, {
+        command: 'stepOut',
+        threadId,
+        logTag: 'stepOut',
+        successMessage: 'Step out completed.',
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -608,90 +648,160 @@ export class SessionManagerOperations extends SessionManagerData {
     }
   }
 
+  private _executeStepOperation(
+    session: ManagedSession,
+    sessionId: string,
+    options: {
+      command: 'next' | 'stepIn' | 'stepOut';
+      threadId: number;
+      logTag: string;
+      successMessage: string;
+      terminatedMessage?: string;
+      exitedMessage?: string;
+    }
+  ): Promise<DebugResult> {
+    const proxyManager = session.proxyManager;
+
+    if (!proxyManager) {
+      return Promise.resolve({
+        success: false,
+        error: 'Proxy manager unavailable',
+        state: session.state,
+      });
+    }
+
+    const terminatedMessage =
+      options.terminatedMessage ?? 'Step completed as session terminated.';
+    const exitedMessage = options.exitedMessage ?? 'Step completed as session exited.';
+
+    return new Promise((resolve) => {
+      let settled = false;
+
+      const cleanup = () => {
+        proxyManager.off('stopped', onStopped);
+        proxyManager.off('terminated', onTerminated);
+        proxyManager.off('exited', onExited);
+        proxyManager.off('exit', onExit);
+        clearTimeout(timeout);
+      };
+
+      const settle = (result: DebugResult) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+
+      const success = (message: string) => {
+        this.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
+        settle({
+          success: true,
+          state: session.state,
+          data: { message },
+        });
+      };
+
+      const onStopped = () => success(options.successMessage);
+      const onTerminated = () => success(terminatedMessage);
+      const onExited = () => success(exitedMessage);
+      const onExit = () => success(exitedMessage);
+
+      const timeout = setTimeout(() => {
+        this.logger.warn(
+          `[SM ${options.logTag} ${sessionId}] Timeout waiting for stopped or termination event`
+        );
+        settle({
+          success: false,
+          error: ErrorMessages.stepTimeout(5),
+          state: session.state,
+        });
+      }, 5000);
+
+      proxyManager.on('stopped', onStopped);
+      proxyManager.on('terminated', onTerminated);
+      proxyManager.on('exited', onExited);
+      proxyManager.on('exit', onExit);
+
+      this._updateSessionState(session, SessionState.RUNNING);
+
+      proxyManager
+        .sendDapRequest(options.command, { threadId: options.threadId })
+        .catch((error: unknown) => {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `[SM ${options.logTag} ${sessionId}] Error during step request:`,
+            error
+          );
+          this._updateSessionState(session, SessionState.ERROR);
+          settle({ success: false, error: errorMessage, state: session.state });
+        });
+    });
+  }
+
   async continue(sessionId: string): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
-    
+
     // Check if session is terminated
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
       throw new SessionTerminatedError(sessionId);
     }
-    
+
     const threadId = session.proxyManager?.getCurrentThreadId();
-    this.logger.info(`[SessionManager continue] Called for session ${sessionId}. Current state: ${session.state}, ThreadID: ${threadId}`);
-    
+    this.logger.info(
+      `[SessionManager continue] Called for session ${sessionId}. Current state: ${session.state}, ThreadID: ${threadId}`
+    );
+
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       throw new ProxyNotRunningError(sessionId, 'continue');
     }
     if (session.state !== SessionState.PAUSED) {
-      this.logger.warn(`[SessionManager continue] Session ${sessionId} not paused. State: ${session.state}.`);
+      this.logger.warn(
+        `[SessionManager continue] Session ${sessionId} not paused. State: ${session.state}.`
+      );
       return { success: false, error: 'Not paused', state: session.state };
     }
-    if (!threadId) {
-      this.logger.warn(`[SessionManager continue] No current thread ID for session ${sessionId}.`);
+    if (typeof threadId !== 'number') {
+      this.logger.warn(
+        `[SessionManager continue] No current thread ID for session ${sessionId}.`
+      );
       return { success: false, error: 'No current thread ID', state: session.state };
     }
-    
+
     try {
-      this.logger.info(`[SessionManager continue] Sending DAP 'continue' for session ${sessionId}, threadId ${threadId}.`);
+      this.logger.info(
+        `[SessionManager continue] Sending DAP 'continue' for session ${sessionId}, threadId ${threadId}.`
+      );
       await session.proxyManager.sendDapRequest('continue', { threadId });
       this._updateSessionState(session, SessionState.RUNNING);
-      this.logger.info(`[SessionManager continue] DAP 'continue' sent, session ${sessionId} state updated to RUNNING.`);
+      this.logger.info(
+        `[SessionManager continue] DAP 'continue' sent, session ${sessionId} state updated to RUNNING.`
+      );
       return { success: true, state: session.state };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`);
-      throw error; 
+      this.logger.error(
+        `[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`
+      );
+      throw error;
     }
   }
 
-  /**
-   * Validate that a Python command is a real Python executable, not a Windows Store alias.
-   * Mirrors the validation approach used in the python adapter utilities.
-   */
-  private async isValidPythonExecutable(pythonCmd: string): Promise<boolean> {
-    this.logger.debug?.(`[SessionManager] Validating Python executable: ${pythonCmd}`);
-    return new Promise((resolve) => {
-      const child = spawn(pythonCmd, ['-c', 'import sys; sys.exit(0)'], {
-        stdio: ['ignore', 'ignore', 'pipe']
-      });
-
-      let stderrData = '';
-      child.stderr?.on('data', (data) => {
-        stderrData += data.toString();
-      });
-
-      child.on('error', () => resolve(false));
-      child.on('exit', (code) => {
-        const storeAlias =
-          code === 9009 ||
-          stderrData.includes('Microsoft Store') ||
-          stderrData.includes('Windows Store') ||
-          stderrData.includes('AppData\\Local\\Microsoft\\WindowsApps');
-        if (storeAlias) {
-          this.logger.error(`[SessionManager] ${pythonCmd} appears to be a Windows Store alias, skipping...`);
-          resolve(false);
-        } else {
-          resolve(code === 0);
-        }
-      });
-    });
-  }
 
   /**
    * Helper method to truncate long strings for logging
    */
   private truncateForLog(value: string, maxLength: number = 1000): string {
     if (!value) return '';
-    return value.length > maxLength 
-      ? value.substring(0, maxLength) + '... (truncated)'
-      : value;
+    return value.length > maxLength ? value.substring(0, maxLength) + '... (truncated)' : value;
   }
 
   /**
    * Evaluate an expression in the context of the current debug session.
    * The debugger must be paused for evaluation to work.
    * Expressions CAN and SHOULD be able to modify program state (this is a feature).
-   * 
+   *
    * @param sessionId - The session ID
    * @param expression - The expression to evaluate
    * @param frameId - Optional stack frame ID for context (defaults to current frame)
@@ -702,10 +812,15 @@ export class SessionManagerOperations extends SessionManagerData {
     sessionId: string,
     expression: string,
     frameId?: number,
-    context: 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables' = 'repl'
+    context: 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables' = 'variables'
   ): Promise<EvaluateResult> {
     const session = this._getSessionById(sessionId);
-    this.logger.info(`[SM evaluateExpression ${sessionId}] Entered. Expression: "${this.truncateForLog(expression, 100)}", frameId: ${frameId}, context: ${context}, state: ${session.state}`);
+    this.logger.info(
+      `[SM evaluateExpression ${sessionId}] Entered. Expression: "${this.truncateForLog(
+        expression,
+        100
+      )}", frameId: ${frameId}, context: ${context}, state: ${session.state}`
+    );
 
     // Basic sanity checks
     if (!expression || expression.trim().length === 0) {
@@ -720,49 +835,78 @@ export class SessionManagerOperations extends SessionManagerData {
     }
 
     if (session.state !== SessionState.PAUSED) {
-      this.logger.warn(`[SM evaluateExpression ${sessionId}] Cannot evaluate: session not paused. State: ${session.state}`);
-      return { success: false, error: 'Cannot evaluate: debugger not paused. Ensure the debugger is stopped at a breakpoint.' };
+      this.logger.warn(
+        `[SM evaluateExpression ${sessionId}] Cannot evaluate: session not paused. State: ${session.state}`
+      );
+      return {
+        success: false,
+        error: 'Cannot evaluate: debugger not paused. Ensure the debugger is stopped at a breakpoint.',
+      };
     }
 
     // Handle frameId - get current frame from stack trace if not provided
     if (frameId === undefined) {
       try {
         const threadId = session.proxyManager.getCurrentThreadId();
-        if (!threadId) {
-          this.logger.warn(`[SM evaluateExpression ${sessionId}] No current thread ID to get stack trace`);
-          return { success: false, error: 'Unable to find thread for evaluation. Ensure the debugger is paused at a breakpoint.' };
+        if (typeof threadId !== 'number') {
+          this.logger.warn(
+            `[SM evaluateExpression ${sessionId}] No current thread ID to get stack trace`
+          );
+          return {
+            success: false,
+            error: 'Unable to find thread for evaluation. Ensure the debugger is paused at a breakpoint.',
+          };
         }
 
-        this.logger.info(`[SM evaluateExpression ${sessionId}] No frameId provided, getting current frame from stack trace`);
-        const stackResponse = await session.proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', {
-          threadId,
-          startFrame: 0,
-          levels: 1  // We only need the first frame
-        });
+        this.logger.info(
+          `[SM evaluateExpression ${sessionId}] No frameId provided, getting current frame from stack trace`
+        );
+        const stackResponse = await session.proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
+          'stackTrace',
+          {
+            threadId,
+            startFrame: 0,
+            levels: 1, // We only need the first frame
+          }
+        );
 
         if (stackResponse?.body?.stackFrames && stackResponse.body.stackFrames.length > 0) {
           frameId = stackResponse.body.stackFrames[0].id;
-          this.logger.info(`[SM evaluateExpression ${sessionId}] Using current frame ID: ${frameId} from stack trace`);
+          this.logger.info(
+            `[SM evaluateExpression ${sessionId}] Using current frame ID: ${frameId} from stack trace`
+          );
         } else {
           this.logger.warn(`[SM evaluateExpression ${sessionId}] No stack frames available`);
-          return { success: false, error: 'No active stack frame. Ensure the debugger is paused at a breakpoint.' };
+          return {
+            success: false,
+            error: 'No active stack frame. Ensure the debugger is paused at a breakpoint.',
+          };
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        this.logger.error(`[SM evaluateExpression ${sessionId}] Error getting stack trace for default frame:`, error);
+        this.logger.error(
+          `[SM evaluateExpression ${sessionId}] Error getting stack trace for default frame:`,
+          error
+        );
         return { success: false, error: `Unable to determine current frame: ${errorMessage}` };
       }
     }
 
     try {
       // Send DAP evaluate request
-      this.logger.info(`[SM evaluateExpression ${sessionId}] Sending DAP 'evaluate' request. Expression: "${this.truncateForLog(expression, 100)}", frameId: ${frameId}, context: ${context}`);
-      
-      const response = await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>('evaluate', {
-        expression,
-        frameId,
-        context
-      });
+      this.logger.info(
+        `[SM evaluateExpression ${sessionId}] Sending DAP 'evaluate' request. Expression: "${this.truncateForLog(
+          expression,
+          100
+        )}", frameId: ${frameId}, context: ${context}`
+      );
+
+      const response =
+        await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>('evaluate', {
+          expression,
+          frameId,
+          context,
+        });
 
       // Log raw response in debug mode
       this.logger.debug(`[SM evaluateExpression ${sessionId}] DAP evaluate raw response:`, response);
@@ -770,16 +914,16 @@ export class SessionManagerOperations extends SessionManagerData {
       // Process response
       if (response && response.body) {
         const body = response.body;
-        
+
         // Note: debugpy automatically truncates collections at 300 items for performance
         const result: EvaluateResult = {
           success: true,
-          result: body.result || '',  // Default to empty string if no result
-          type: body.type,  // Optional, can be undefined
-          variablesReference: body.variablesReference || 0,  // Default to 0 (no children)
+          result: body.result || '', // Default to empty string if no result
+          type: body.type, // Optional, can be undefined
+          variablesReference: body.variablesReference || 0, // Default to 0 (no children)
           namedVariables: body.namedVariables,
           indexedVariables: body.indexedVariables,
-          presentationHint: body.presentationHint
+          presentationHint: body.presentationHint,
         };
 
         // Log the evaluation result with structured logging
@@ -795,11 +939,16 @@ export class SessionManagerOperations extends SessionManagerData {
           variablesReference: result.variablesReference,
           namedVariables: result.namedVariables,
           indexedVariables: result.indexedVariables,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
 
-        this.logger.info(`[SM evaluateExpression ${sessionId}] Evaluation successful. Result: "${this.truncateForLog(result.result || '', 200)}", Type: ${result.type}, VarRef: ${result.variablesReference}`);
-        
+        this.logger.info(
+          `[SM evaluateExpression ${sessionId}] Evaluation successful. Result: "${this.truncateForLog(
+            result.result || '',
+            200
+          )}", Type: ${result.type}, VarRef: ${result.variablesReference}`
+        );
+
         return result;
       } else {
         this.logger.warn(`[SM evaluateExpression ${sessionId}] No body in evaluate response`);
@@ -807,7 +956,7 @@ export class SessionManagerOperations extends SessionManagerData {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      
+
       // Log the error
       this.logger.error('debug:evaluate', {
         event: 'error',
@@ -817,11 +966,11 @@ export class SessionManagerOperations extends SessionManagerData {
         frameId,
         context,
         error: errorMessage,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
 
       this.logger.error(`[SM evaluateExpression ${sessionId}] Error evaluating expression:`, error);
-      
+
       // Determine error type for better user feedback
       let userError = errorMessage;
       if (errorMessage.includes('SyntaxError')) {
@@ -833,8 +982,49 @@ export class SessionManagerOperations extends SessionManagerData {
       } else if (errorMessage.includes('frame')) {
         userError = `Invalid frame context: ${errorMessage}`;
       }
-      
+
       return { success: false, error: userError };
+  }
+}
+
+  /**
+   * Wait for a session to emit a stopped event after launch to honour the first breakpoint.
+   */
+  private async waitForInitialBreakpointPause(sessionId: string, timeoutMs: number): Promise<boolean> {
+    const session = this._getSessionById(sessionId);
+    const proxyManager = session.proxyManager;
+
+    if (!proxyManager) {
+      return false;
     }
+
+    if (session.state === SessionState.PAUSED) {
+      return true;
+    }
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+
+      const cleanup = () => {
+        proxyManager.removeListener('stopped', onStopped);
+        clearTimeout(timer);
+      };
+
+      const onStopped = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(true);
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(false);
+      }, timeoutMs);
+
+      proxyManager.once('stopped', onStopped);
+    });
   }
 }

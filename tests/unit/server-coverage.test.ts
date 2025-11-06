@@ -359,6 +359,62 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     });
   });
 
+  describe('Successful execution paths', () => {
+    beforeEach(() => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        proxyManager: { getCurrentThreadId: () => 1 }
+      });
+    });
+
+    it('continueExecution resolves when session manager succeeds', async () => {
+      mockSessionManager.continue.mockResolvedValue({ success: true });
+
+      await expect(server.continueExecution('test-session')).resolves.toBe(true);
+      expect(mockSessionManager.continue).toHaveBeenCalledWith('test-session');
+    });
+
+    it('step operations resolve when session manager succeeds', async () => {
+      mockSessionManager.stepOver.mockResolvedValue({ success: true });
+      mockSessionManager.stepInto.mockResolvedValue({ success: true });
+      mockSessionManager.stepOut.mockResolvedValue({ success: true });
+
+      await expect(server.stepOver('test-session')).resolves.toBe(true);
+      await expect(server.stepInto('test-session')).resolves.toBe(true);
+      await expect(server.stepOut('test-session')).resolves.toBe(true);
+    });
+
+    it('handleListDebugSessions maps active sessions', async () => {
+      const now = new Date();
+      mockSessionManager.getAllSessions.mockReturnValue([{
+        id: 'session-1',
+        name: 'Test Session',
+        language: 'python',
+        state: 'active',
+        createdAt: now,
+        updatedAt: now
+      }]);
+
+      const result = await (server as any).handleListDebugSessions();
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.count).toBe(1);
+      expect(payload.sessions[0]).toMatchObject({
+        id: 'session-1',
+        name: 'Test Session',
+        language: 'python'
+      });
+    });
+
+    it('handlePause surfaces standardized error response', async () => {
+      await expect((server as any).handlePause({ sessionId: 'test-session' })).rejects.toThrow('Pause execution not yet implemented with proxy.');
+      expect(mockLogger.info).toHaveBeenCalledWith('Pause requested for session: test-session');
+      expect(mockLogger.error).toHaveBeenCalled();
+    });
+  });
+
   describe('Get Session Name Error Handling', () => {
     it('should handle session name retrieval failure gracefully', () => {
       mockSessionManager.getSession.mockImplementation(() => {

@@ -43,13 +43,13 @@ const hasTransportArg = process.argv.some(arg =>
 );
 const isStdinPipe = !process.stdin.isTTY;
 const shouldSilenceConsole = hasStdio ||
-                             process.env.DEBUG_MCP_STDIO === '1' ||
+                             process.env.CONSOLE_OUTPUT_SILENCED === '1' ||
                              (!hasTransportArg && isStdinPipe);
 ```
 
 This detects STDIO mode by checking:
 1. Explicit "stdio" argument (most reliable)
-2. Environment variable `DEBUG_MCP_STDIO=1`
+2. Environment variable `CONSOLE_OUTPUT_SILENCED=1`
 3. No transport argument + stdin is a pipe (typical for MCP STDIO)
 
 ### Step 3: Documentation Updates
@@ -176,7 +176,7 @@ Consider creating a dedicated MCP entry point that always suppresses console:
 
 ```javascript
 // mcp-entry.js
-process.env.DEBUG_MCP_STDIO = '1';
+process.env.CONSOLE_OUTPUT_SILENCED = '1';
 require('./dist/index.js');
 ```
 
@@ -222,7 +222,7 @@ npm run test:mcp-integration
 ```
 
 ### Environment Variables
-- `DEBUG_MCP_STDIO=1` - Forces console suppression
+- `CONSOLE_OUTPUT_SILENCED=1` - Forces console suppression
 - `MCP_CONTAINER=true` - Indicates running in container mode
 
 ## Related Files

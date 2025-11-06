@@ -1,0 +1,51 @@
+{
+  "name": "@debugmcp/adapter-javascript",
+  "version": "0.1.0",
+  "description": "JavaScript/TypeScript debug adapter skeleton for MCP debugger (Task 1 scaffolding)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "vendor/js-debug"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "postbuild": "node ./scripts/build-js-debug.js",
+    "build:ci": "tsc -b -f",
+    "clean": "tsc -b --clean",
+    "test": "vitest run",
+    "test:cov": "vitest run --coverage",
+    "lint": "eslint .",
+    "build:adapter": "node ./scripts/build-js-debug.js"
+  },
+  "dependencies": {
+    "@debugmcp/shared": "workspace:*",
+    "@vscode/debugprotocol": "^1.68.0"
+  },
+  "peerDependencies": {
+    "@debugmcp/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@vitest/coverage-v8": "3.2.4",
+    "eslint": "^9.27.0",
+    "extract-zip": "^2.0.1",
+    "fs-extra": "^11.2.0",
+    "tar": "^6.2.1",
+    "typescript": "^5.2.2",
+    "vitest": "^3.2.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

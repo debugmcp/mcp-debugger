@@ -21,6 +21,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [get_stack_trace](#get_stack_trace)
    - [get_scopes](#get_scopes)
    - [get_variables](#get_variables)
+   - [get_local_variables](#get_local_variables)
    - [evaluate_expression](#evaluate_expression) *(Not Implemented)*
    - [get_source_context](#get_source_context)
 
@@ -410,6 +411,132 @@ Gets variables within a scope.
 
 ---
 
+### get_local_variables
+
+Gets local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack→scopes→variables manually.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `includeSpecial` (boolean, optional): Include special/internal variables like `this`, `__proto__`, `__builtins__`, etc. Default: false.
+
+**Response:**
+```json
+{
+  "success": true,
+  "variables": [
+    {
+      "name": "x",
+      "value": "10",
+      "type": "int",
+      "variablesReference": 0,
+      "expandable": false
+    },
+    {
+      "name": "y",
+      "value": "20",
+      "type": "int",
+      "variablesReference": 0,
+      "expandable": false
+    }
+  ],
+  "count": 2,
+  "frame": {
+    "name": "main",
+    "file": "C:\\path\\to\\script.py",
+    "line": 31
+  },
+  "scopeName": "Locals"
+}
+```
+
+**Example - Python:**
+```json
+// Request
+{
+  "sessionId": "842ef9bb-037a-4d3c-960c-ad79a63ccfab",
+  "includeSpecial": false
+}
+
+// Response
+{
+  "success": true,
+  "variables": [
+    {"name": "x", "value": "10", "type": "int", "variablesReference": 0, "expandable": false},
+    {"name": "y", "value": "20", "type": "int", "variablesReference": 0, "expandable": false}
+  ],
+  "count": 2,
+  "frame": {
+    "name": "main",
+    "file": "C:\\path\\to\\test-scripts\\python_test_comprehensive.py",
+    "line": 31
+  },
+  "scopeName": "Locals"
+}
+```
+
+**Example - JavaScript:**
+```json
+// Request
+{
+  "sessionId": "ec46719a-68d9-4755-9c28-70478e0cde7d",
+  "includeSpecial": false
+}
+
+// Response
+{
+  "success": true,
+  "variables": [
+    {"name": "x", "value": "10", "type": "number", "variablesReference": 0, "expandable": false}
+  ],
+  "count": 1,
+  "frame": {
+    "name": "main",
+    "file": "c:\\path\\to\\test-scripts\\javascript_test_comprehensive.js",
+    "line": 40
+  },
+  "scopeName": "Local"
+}
+```
+
+**Edge Cases:**
+```json
+// Empty locals
+{
+  "success": true,
+  "variables": [],
+  "count": 0,
+  "frame": {"name": "<module>", "file": "script.py", "line": 2},
+  "scopeName": "Locals",
+  "message": "The Locals scope is empty."
+}
+
+// Session not paused
+{
+  "success": false,
+  "error": "Session is not paused",
+  "message": "Cannot get local variables. The session must be paused at a breakpoint."
+}
+```
+
+**Key Advantages:**
+- **Single Call**: Get local variables with one tool call instead of three (stack_trace → scopes → variables)
+- **Language-Aware Filtering**: Automatically filters out internal/special variables based on language
+- **Consistent Format**: Returns a consistent structure across Python and JavaScript
+- **Smart Defaults**: By default, excludes noise like `__proto__`, `this`, `__builtins__` unless explicitly requested
+
+**Language-Specific Behavior:**
+- **Python**: Looks for "Locals" scope, filters out `__builtins__`, special variables, and internal debugger variables
+- **JavaScript**: Looks for "Local", "Local:", or "Block:" scopes, filters out `this`, `__proto__`, and V8 internals
+- **Other Languages**: Falls back to generic behavior (first non-global scope)
+
+**Notes:**
+- Session must be paused at a breakpoint for this tool to work
+- The tool automatically uses the top frame of the call stack
+- When `includeSpecial` is true, all variables including internals are returned
+- This is especially useful for AI agents that need quick access to current local state
+
+---
+
 ### evaluate_expression
 
 Evaluates an expression in the context of the current debug session.
@@ -589,4 +716,4 @@ All tools follow consistent error patterns:
 
 ---
 
-*Last updated: 2025-07-28 based on actual testing with mcp-debugger v0.12.0*
+*Last updated: 2025-10-10 based on actual testing with mcp-debugger v0.15.4*

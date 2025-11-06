@@ -18,7 +18,6 @@ export interface SSECommandDependencies {
 
 interface SessionData {
   transport: SSEServerTransport;
-  server: DebugMcpServer;
   isClosing?: boolean;
 }
 
@@ -28,6 +27,13 @@ export function createSSEApp(
 ): express.Application {
   const { logger, serverFactory } = dependencies;
   const app = express();
+  
+  // Create a single shared Debug MCP Server instance for all connections
+  const sharedDebugServer = serverFactory({
+    logLevel: options.logLevel,
+    logFile: options.logFile,
+  });
+  logger.info('Created shared Debug MCP Server instance for SSE mode');
   
   // Store active SSE transports by session ID
   const sseTransports = new Map<string, SessionData>();
@@ -47,21 +53,15 @@ export function createSSEApp(
   // SSE endpoint - for server-to-client messages
   app.get('/sse', async (req, res) => {
     try {
-      // Create a new Debug MCP Server instance for this connection
-      const debugMcpServer = serverFactory({
-        logLevel: options.logLevel,
-        logFile: options.logFile,
-      });
-
       // Create SSE transport with the response object
       const transport = new SSEServerTransport('/sse', res as ServerResponse);
       
-      // Connect the server to the transport (this automatically calls start())
-      await debugMcpServer.server.connect(transport);
+      // Connect the shared server to the transport (this automatically calls start())
+      await sharedDebugServer.server.connect(transport);
       
-      // Store the transport and server by session ID
+      // Store the transport by session ID
       const sessionId = transport.sessionId;
-      const sessionData: SessionData = { transport, server: debugMcpServer, isClosing: false };
+      const sessionData: SessionData = { transport, isClosing: false };
       sseTransports.set(sessionId, sessionData);
       
       logger.info(`SSE connection established: ${sessionId}`);
@@ -91,12 +91,9 @@ export function createSSEApp(
         // Remove from map first to prevent any further operations
         sseTransports.delete(sessionId);
         
-        // Stop the server asynchronously
-        setImmediate(() => {
-          debugMcpServer.stop().catch(error => {
-            logger.error(`Error stopping server for session ${sessionId}:`, error);
-          });
-        });
+        // Clean up only the transport, NOT the shared server
+        // The shared server persists across connections
+        logger.info(`SSE transport cleaned up for session ${sessionId}. Debug sessions remain active.`);
       };
       
       transport.onclose = closeHandler;
@@ -171,8 +168,9 @@ export function createSSEApp(
     });
   });
 
-  // Expose the transports map for graceful shutdown
+  // Expose the transports map and shared server for graceful shutdown
   (app as any).sseTransports = sseTransports; // eslint-disable-line @typescript-eslint/no-explicit-any
+  (app as any).sharedDebugServer = sharedDebugServer; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   return app;
 }
@@ -204,9 +202,17 @@ export async function handleSSECommand(
       // Close all SSE connections
       const sseTransports = (app as any).sseTransports as Map<string, SessionData> | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (sseTransports) {
-        sseTransports.forEach(({ transport, server }) => {
+        sseTransports.forEach(({ transport }) => {
           transport.close();
-          server.stop();
+        });
+      }
+      
+      // Stop the shared debug server
+      const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (sharedDebugServer) {
+        logger.info('Stopping shared Debug MCP Server...');
+        sharedDebugServer.stop().catch((error) => {
+          logger.error('Error stopping shared Debug MCP Server:', error);
         });
       }
       

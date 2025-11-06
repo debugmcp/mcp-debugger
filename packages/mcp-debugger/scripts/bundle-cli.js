@@ -1,79 +1,156 @@
 #!/usr/bin/env node
 /**
- * Bundle the MCP debugger CLI for npx distribution
+ * Bundle the MCP debugger CLI and proxy assets for distribution.
+ *
+ * This script produces three artifacts:
+ *  - packages/mcp-debugger/dist/**               (runtime bundle used by the CLI)
+ *  - packages/mcp-debugger/package/dist/**       (mirrors the bundle for npm pack)
+ *  - packages/mcp-debugger/package/debugmcp-*.tgz (fresh npm pack tarball)
+ * It also regenerates dist/proxy/proxy-bundle.cjs for SSE/stdio transports.
  */
 
-import * as esbuild from 'esbuild';
-import fs from 'fs';
+import { build } from 'tsup';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
-async function bundleCLI() {
-  console.log('Bundling MCP debugger CLI...');
-  
-  try {
-    // Bundle the CLI entry point directly from TypeScript source
-    const result = await esbuild.build({
-      entryPoints: ['src/cli-entry.ts'],
-      bundle: true,
-      platform: 'node',
-      target: 'node18',
-      format: 'cjs',
-      outfile: 'dist/cli.cjs',
-      define: {
-        'import.meta.url': JSON.stringify('file:///app/dist/cli.cjs'),
-        '__dirname': JSON.stringify('/app/dist')
-      },
-      external: [
-        // Keep adapter packages external for dynamic loading
-        '@debugmcp/adapter-python',
-        '@debugmcp/adapter-mock',
-        // Keep native modules external
-        'fsevents'
-      ],
-      minify: false, // Keep readable for debugging
-      sourcemap: false,
-      metafile: true,
-      logLevel: 'info',
-      loader: {
-        '.ts': 'ts',
-        '.js': 'js'
-      }
-    });
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const packageRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(packageRoot, '..', '..');
 
-    // Write metafile for analysis
-    fs.writeFileSync('dist/bundle-meta.json', JSON.stringify(result.metafile));
-    
-    // Make the bundle executable
-    const bundlePath = 'dist/cli.cjs';
-    if (fs.existsSync(bundlePath)) {
-      // Add shebang if not present
-      let bundleContent = fs.readFileSync(bundlePath, 'utf8');
-      if (!bundleContent.startsWith('#!/usr/bin/env node')) {
-        bundleContent = '#!/usr/bin/env node\n' + bundleContent;
-        fs.writeFileSync(bundlePath, bundleContent);
-      }
-      
-      // Make executable on Unix-like systems
-      if (process.platform !== 'win32') {
-        fs.chmodSync(bundlePath, '755');
-      }
-    }
+async function bundleProxy() {
+  console.log('Bundling proxy with tsup...');
 
-    // Calculate bundle size
-    const stats = fs.statSync(bundlePath);
-    const sizeInKB = (stats.size / 1024).toFixed(2);
-    console.log(`CLI bundle created successfully: ${sizeInKB} KB`);
-    
-    // Show what's included
-    const text = await esbuild.analyzeMetafile(result.metafile, {
-      verbose: false
-    });
-    console.log('\nBundle analysis:');
-    console.log(text);
-    
-  } catch (error) {
-    console.error('Bundle failed:', error);
-    process.exit(1);
-  }
+  await build({
+    entry: {
+      'proxy-bundle': path.join(repoRoot, 'dist/proxy/dap-proxy-entry.js')
+    },
+    format: ['cjs'],
+    platform: 'node',
+    target: 'node18',
+    splitting: false,
+    sourcemap: false,
+    clean: false,
+    outDir: 'dist/proxy',
+    shims: true,
+    noExternal: [/./],
+    cwd: packageRoot,
+    skipNodeModulesBundle: false,
+    silent: true
+  });
+
+  console.log('Proxy bundle refreshed at packages/mcp-debugger/dist/proxy/proxy-bundle.cjs');
 }
 
-bundleCLI();
+async function bundleCLI() {
+  console.log('Bundling MCP debugger CLI with tsup...');
+  console.log(`Working directory: ${process.cwd()}`);
+
+  const distDir = path.join(packageRoot, 'dist');
+  fs.rmSync(distDir, { recursive: true, force: true });
+
+  await build({
+    entry: {
+      cli: 'src/cli-entry.ts'
+    },
+    format: ['esm'],
+    platform: 'node',
+    target: 'node18',
+    splitting: false,
+    sourcemap: false,
+    clean: true,
+    outDir: 'dist',
+    shims: false,
+    noExternal: [/./],
+    cwd: packageRoot,
+    banner: {
+      js: [
+        'import { createRequire as __createRequire } from "module";',
+        'const require = __createRequire(import.meta.url);'
+      ].join('\n')
+    },
+    outExtension() {
+      return { js: '.mjs' };
+    }
+  });
+
+  const bundlePath = path.join(distDir, 'cli.mjs');
+  const wrapperPath = path.join(distDir, 'cli');
+  const wrapperContent = [
+    '#!/usr/bin/env node',
+    "import('./cli.mjs').catch((error) => {",
+    "  console.error('Fatal error:', error);",
+    '  process.exit(1);',
+    '});',
+    ''
+  ].join('\n');
+
+  fs.writeFileSync(wrapperPath, wrapperContent);
+  if (process.platform !== 'win32') {
+    fs.chmodSync(wrapperPath, 0o755);
+  }
+
+  const sizeInKB = (fs.statSync(bundlePath).size / 1024).toFixed(2);
+  console.log(`CLI bundle created successfully (${sizeInKB} KB).`);
+
+  console.log('\nCopying runtime assets...');
+  const rootDistDir = path.join(repoRoot, 'dist');
+  const dirsToCopy = ['proxy', 'errors', 'adapters', 'session', 'utils'];
+
+  for (const dir of dirsToCopy) {
+    const srcDir = path.join(rootDistDir, dir);
+    if (!fs.existsSync(srcDir)) {
+      continue;
+    }
+
+    const destDir = path.join(distDir, dir);
+    fs.cpSync(srcDir, destDir, {
+      recursive: true,
+      filter: (src) => {
+        const stat = fs.statSync(src);
+        if (stat.isDirectory()) return true;
+        return src.endsWith('.js') && !src.endsWith('.d.ts');
+      }
+    });
+    console.log(`Copied ${dir}/ from repo dist.`);
+  }
+
+  console.log('\nBundling proxy from fresh dist...');
+  await bundleProxy();
+
+  const jsDebugSrc = path.join(repoRoot, 'packages/adapter-javascript/vendor/js-debug');
+  if (fs.existsSync(jsDebugSrc)) {
+    const jsDebugDest = path.join(distDir, 'vendor/js-debug');
+    fs.cpSync(jsDebugSrc, jsDebugDest, { recursive: true });
+    console.log('Copied js-debug adapter payload.');
+  } else {
+    console.warn('Warning: js-debug adapter vendor directory not found; JavaScript debugging may fail.');
+    console.warn('Run: pnpm -w -F @debugmcp/adapter-javascript run build:adapter');
+  }
+
+  // Mirror dist into the package/ directory used by npm pack artifacts.
+  const packageDir = path.join(packageRoot, 'package');
+  const packageDistDir = path.join(packageDir, 'dist');
+  fs.mkdirSync(packageDir, { recursive: true });
+  fs.rmSync(packageDistDir, { recursive: true, force: true });
+  fs.cpSync(distDir, packageDistDir, { recursive: true });
+  console.log('Copied bundle into packages/mcp-debugger/package/dist/.');
+
+  console.log('\nGenerating npm pack tarball...');
+  execSync('pnpm pack --pack-destination package', {
+    cwd: packageRoot,
+    stdio: 'inherit'
+  });
+  console.log('npm pack artifact refreshed in packages/mcp-debugger/package/.');
+
+  console.log('\nBundle pipeline complete.');
+}
+
+try {
+  await bundleCLI();
+} catch (error) {
+  console.error('Bundle failed:', error);
+  process.exit(1);
+}
