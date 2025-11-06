@@ -85,12 +85,21 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Lifecycle Management =====
   
   async initialize(): Promise<void> {
+    if (process.env.CI === 'true') {
+      console.error('[PythonDebugAdapter] Starting initialize()');
+    }
     this.transitionTo(AdapterState.INITIALIZING);
-    
+
     try {
       // Validate environment
+      if (process.env.CI === 'true') {
+        console.error('[PythonDebugAdapter] Calling validateEnvironment()');
+      }
       const validation = await this.validateEnvironment();
       if (!validation.valid) {
+        if (process.env.CI === 'true') {
+          console.error('[PythonDebugAdapter] Validation failed:', validation.errors);
+        }
         this.transitionTo(AdapterState.ERROR);
         throw new AdapterError(
           validation.errors[0]?.message || 'Python environment validation failed',
@@ -141,10 +150,16 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   async validateEnvironment(): Promise<ValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
-    
+
     try {
       // Check Python executable
+      if (process.env.CI === 'true') {
+        console.error('[PythonDebugAdapter] Resolving Python executable path...');
+      }
       const pythonPath = await this.resolveExecutablePath();
+      if (process.env.CI === 'true') {
+        console.error('[PythonDebugAdapter] Resolved Python path:', pythonPath);
+      }
       
       // Check Python version
       const version = await this.checkPythonVersion(pythonPath);
@@ -181,6 +196,9 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       }
       
     } catch (error) {
+      if (process.env.CI === 'true') {
+        console.error('[PythonDebugAdapter] validateEnvironment catch block error:', error);
+      }
       errors.push({
         code: 'PYTHON_NOT_FOUND',
         message: error instanceof Error ? error.message : 'Python executable not found',

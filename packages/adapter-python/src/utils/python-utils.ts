@@ -81,7 +81,29 @@ class WhichCommandFinder implements CommandFinder {
           }
         }
       }
-      const resolved = await which(cmd);
+      // On Windows, try with .exe extension if the command doesn't already have it
+      let resolved: string;
+      try {
+        resolved = await which(cmd);
+      } catch (firstError) {
+        // If on Windows and command doesn't end with .exe, try with .exe
+        if (process.platform === 'win32' && !cmd.endsWith('.exe')) {
+          if (process.env.CI === 'true') {
+            console.error(`[Python Discovery] Trying ${cmd}.exe after ${cmd} failed`);
+          }
+          try {
+            resolved = await which(`${cmd}.exe`);
+            if (process.env.CI === 'true') {
+              console.error(`[Python Discovery] Found ${cmd}.exe at: ${resolved}`);
+            }
+          } catch (secondError) {
+            // Both attempts failed, throw the original error
+            throw firstError;
+          }
+        } else {
+          throw firstError;
+        }
+      }
       if (this.useCache) this.cache.set(cmd, resolved);
       return resolved;
     } catch (error) {
