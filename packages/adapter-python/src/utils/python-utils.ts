@@ -40,6 +40,12 @@ class WhichCommandFinder implements CommandFinder {
       return this.cache.get(cmd)!;
     }
     try {
+      // Fix for Windows: which library fails if PATH is undefined but Path exists
+      // Windows env vars are case-insensitive, but Node.js treats them as case-sensitive
+      // GitHub Actions on Windows may have Path but not PATH
+      if (process.platform === 'win32' && !process.env.PATH && process.env.Path) {
+        process.env.PATH = process.env.Path;
+      }
       const resolved = await which(cmd);
       if (this.useCache) this.cache.set(cmd, resolved);
       return resolved;
