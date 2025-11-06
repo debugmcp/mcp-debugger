@@ -39,10 +39,12 @@ class WhichCommandFinder implements CommandFinder {
     if (this.useCache && this.cache.has(cmd)) {
       return this.cache.get(cmd)!;
     }
+
+    const isWindows = process.platform === 'win32';
     try {
       // Fix for Windows: which library fails if PATH is undefined but Path exists
       // Windows env vars are case-insensitive, but Node.js treats them as case-sensitive
-      if (process.platform === 'win32') {
+      if (isWindows) {
         // Diagnostic logging in CI to understand the issue
         if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
           const pathEntries = process.env.PATH?.split(';') || [];
@@ -59,12 +61,12 @@ class WhichCommandFinder implements CommandFinder {
           if (process.env.PATH) {
             console.error(`[Python Discovery] First 10 PATH entries:`);
             pathEntries.slice(0, 10).forEach((entry, idx) => {
-              const info = entry.includes('python') ? ' [CONTAINS PYTHON]' : '';
+              const info = entry.toLowerCase().includes('python') ? ' [CONTAINS PYTHON]' : '';
               console.error(`  ${idx}: ${entry}${info}`);
             });
 
             // Check for common PATH issues
-            const pathIssues = [];
+            const pathIssues: string[] = [];
             if (process.env.PATH.includes(';;')) pathIssues.push('empty entries (;;)');
             if (process.env.PATH.includes('"')) pathIssues.push('contains quotes');
             if (process.env.PATH.trim() !== process.env.PATH) pathIssues.push('has leading/trailing spaces');
@@ -81,30 +83,65 @@ class WhichCommandFinder implements CommandFinder {
           }
         }
       }
-      // On Windows, try with .exe extension if the command doesn't already have it
-      let resolved: string;
-      try {
-        resolved = await which(cmd);
-      } catch (firstError) {
-        // If on Windows and command doesn't end with .exe, try with .exe
-        if (process.platform === 'win32' && !cmd.endsWith('.exe')) {
-          if (process.env.CI === 'true') {
-            console.error(`[Python Discovery] Trying ${cmd}.exe after ${cmd} failed`);
+
+      const shimPattern = /\\microsoft\\windowsapps\\(python(\d+)?|py)\.exe$/;
+
+      const filterWindowsStoreAliases = (candidates: string[]): string[] => {
+        if (!isWindows) {
+          return candidates;
+        }
+        return candidates.filter((candidate) => {
+          const normalized = candidate.replace(/\//g, '\\').toLowerCase();
+          const isShim = shimPattern.test(normalized);
+          if (isShim && (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY)) {
+            console.error(`[Python Discovery] Skipping Windows Store alias for ${cmd}: ${candidate}`);
           }
-          try {
-            resolved = await which(`${cmd}.exe`);
-            if (process.env.CI === 'true') {
-              console.error(`[Python Discovery] Found ${cmd}.exe at: ${resolved}`);
+          return !isShim;
+        });
+      };
+
+      const resolveAllCandidates = async (command: string): Promise<string[]> => {
+        try {
+          const result = await which(command, { all: true });
+          const list = Array.isArray(result) ? result : [result];
+          return filterWindowsStoreAliases(list);
+        } catch (firstError) {
+          if (isWindows && !command.endsWith('.exe')) {
+            try {
+              const exeResult = await which(`${command}.exe`, { all: true });
+              const exeList = Array.isArray(exeResult) ? exeResult : [exeResult];
+              return filterWindowsStoreAliases(exeList);
+            } catch {
+              throw firstError;
             }
-          } catch {
-            // Both attempts failed, throw the original error
-            throw firstError;
           }
-        } else {
           throw firstError;
         }
+      };
+
+      const candidateSet = new Set<string>();
+      const primaryCandidates = await resolveAllCandidates(cmd);
+      primaryCandidates.forEach((candidate) => candidateSet.add(candidate));
+
+      if (isWindows && !cmd.endsWith('.exe')) {
+        try {
+          const exeCandidates = await resolveAllCandidates(`${cmd}.exe`);
+          exeCandidates.forEach((candidate) => candidateSet.add(candidate));
+        } catch {
+          // Ignore follow-up errors; the primary resolution already attempted logging
+        }
       }
-      if (this.useCache) this.cache.set(cmd, resolved);
+
+      const candidates = Array.from(candidateSet);
+      const resolved = candidates[0];
+
+      if (!resolved) {
+        throw new CommandNotFoundError(cmd);
+      }
+
+      if (this.useCache) {
+        this.cache.set(cmd, resolved);
+      }
       return resolved;
     } catch (error) {
       if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
