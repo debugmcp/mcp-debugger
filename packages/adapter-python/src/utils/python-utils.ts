@@ -86,7 +86,12 @@ class WhichCommandFinder implements CommandFinder {
       return resolved;
     } catch (error) {
       if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
-        const err = error as any;
+        const err = error as Error & {
+          code?: string;
+          errno?: number;
+          syscall?: string;
+          path?: string;
+        };
         console.error(`[Python Discovery] which failed for ${cmd}:`, {
           message: err.message,
           code: err.code,
