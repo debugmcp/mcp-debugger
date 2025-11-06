@@ -221,7 +221,7 @@ describe.sequential('NPX: JavaScript Debugging Smoke Tests', () => {
     expect(stepResponse.success).toBe(true);
     console.log('[NPX JavaScript] ✓ Step executed');
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Step 6: Get variables after swap
     console.log('[NPX JavaScript] Getting variables after swap...');

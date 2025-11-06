@@ -100,12 +100,14 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
   console.log(`[Docker Test] Starting container ${containerName}...`);
   
   // Use docker run with stdio transport
+  // Run as current user to avoid permission issues with mounted volumes
   const transport = new StdioClientTransport({
     command: 'docker',
     args: [
       'run',
       '--rm',
       '-i',
+      '--user', `${process.getuid()}:${process.getgid()}`,
       '--name', containerName,
       '-v', `${workspaceMount}:/workspace:rw`,
       '-v', `${ROOT}/logs:/tmp:rw`,
