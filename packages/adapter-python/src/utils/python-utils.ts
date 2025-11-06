@@ -156,6 +156,22 @@ export async function findPythonExecutable(
 
   logger.debug?.(`[Python Detection] Starting discovery...`);
 
+  // Force visible logging in CI
+  if (process.env.CI === 'true' && isWindows) {
+    const debugInfo = {
+      platform: process.platform,
+      CI: process.env.CI,
+      GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+      PATH_defined: !!process.env.PATH,
+      Path_defined: !!process.env.Path,
+      preferredPath: preferredPath || 'none'
+    };
+    console.log('[PYTHON_DISCOVERY_DEBUG]', JSON.stringify(debugInfo));
+    // Also log to error and use logger
+    console.error('[PYTHON_DISCOVERY_DEBUG]', JSON.stringify(debugInfo));
+    logger.error?.('[PYTHON_DISCOVERY_DEBUG] ' + JSON.stringify(debugInfo));
+  }
+
   // 1. User-specified path (if provided, prefer it regardless of debugpy)
   if (preferredPath) {
     try {
@@ -238,6 +254,20 @@ export async function findPythonExecutable(
 
   // No Python found at all
   const triedList = triedPaths.map(p => `  - ${p}`).join('\n');
+
+  // Log failure details in CI
+  if (process.env.CI === 'true') {
+    const failureInfo = {
+      platform: process.platform,
+      triedPaths: triedPaths,
+      validPythonPaths: validPythonPaths,
+      PATH: process.env.PATH ? 'defined' : 'undefined',
+      Path: process.env.Path ? 'defined' : 'undefined'
+    };
+    console.log('[PYTHON_DISCOVERY_FAILED]', JSON.stringify(failureInfo, null, 2));
+    console.error('[PYTHON_DISCOVERY_FAILED]', JSON.stringify(failureInfo, null, 2));
+  }
+
   throw new Error(
     `Python not found.\nTried:\n${triedList}\n` +
     'Please install Python 3 or specify the Python path.'
