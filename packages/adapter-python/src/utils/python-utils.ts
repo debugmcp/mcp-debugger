@@ -45,13 +45,33 @@ class WhichCommandFinder implements CommandFinder {
       if (process.platform === 'win32') {
         // Diagnostic logging in CI to understand the issue
         if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
+          const pathEntries = process.env.PATH?.split(';') || [];
           console.error(`[Python Discovery] Looking for command: ${cmd}`);
           console.error(`[Python Discovery] Environment:`, {
             CI: process.env.CI,
             GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
-            PATH: process.env.PATH ? `defined (${process.env.PATH.split(';').length} entries)` : 'undefined',
+            PATH: process.env.PATH ? `defined (${pathEntries.length} entries)` : 'undefined',
             Path: process.env.Path ? `defined (${process.env.Path?.split(';').length} entries)` : 'undefined',
+            PATHEXT: process.env.PATHEXT,
           });
+
+          // Show first 10 PATH entries to see what's being searched
+          if (process.env.PATH) {
+            console.error(`[Python Discovery] First 10 PATH entries:`);
+            pathEntries.slice(0, 10).forEach((entry, idx) => {
+              const info = entry.includes('python') ? ' [CONTAINS PYTHON]' : '';
+              console.error(`  ${idx}: ${entry}${info}`);
+            });
+
+            // Check for common PATH issues
+            const pathIssues = [];
+            if (process.env.PATH.includes(';;')) pathIssues.push('empty entries (;;)');
+            if (process.env.PATH.includes('"')) pathIssues.push('contains quotes');
+            if (process.env.PATH.trim() !== process.env.PATH) pathIssues.push('has leading/trailing spaces');
+            if (pathIssues.length > 0) {
+              console.error(`[Python Discovery] PATH issues found:`, pathIssues);
+            }
+          }
         }
 
         if (!process.env.PATH && process.env.Path) {
@@ -66,7 +86,53 @@ class WhichCommandFinder implements CommandFinder {
       return resolved;
     } catch (error) {
       if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
-        console.error(`[Python Discovery] Failed to find ${cmd}:`, (error as Error).message);
+        const err = error as any;
+        console.error(`[Python Discovery] which failed for ${cmd}:`, {
+          message: err.message,
+          code: err.code,
+          errno: err.errno,
+          syscall: err.syscall,
+          path: err.path
+        });
+
+        // Test if we can spawn the command directly without 'which'
+        if (process.platform === 'win32') {
+          console.error(`[Python Discovery] Testing direct spawn of ${cmd}...`);
+          const { spawn } = await import('child_process');
+          const testResult = await new Promise<string>((resolve) => {
+            const child = spawn(cmd, ['--version'], {
+              stdio: 'pipe',
+              shell: false,
+              windowsHide: true
+            });
+
+            let output = '';
+            let errorOutput = '';
+
+            child.stdout?.on('data', (data) => { output += data.toString(); });
+            child.stderr?.on('data', (data) => { errorOutput += data.toString(); });
+
+            child.on('error', (spawnError) => {
+              resolve(`spawn error: ${spawnError.message}`);
+            });
+
+            child.on('exit', (code) => {
+              if (code === 0) {
+                resolve(`SUCCESS: ${output.trim()}`);
+              } else {
+                resolve(`exit code ${code}: ${errorOutput || 'no output'}`);
+              }
+            });
+
+            // Timeout after 2 seconds
+            setTimeout(() => {
+              child.kill();
+              resolve('timeout after 2s');
+            }, 2000);
+          });
+
+          console.error(`[Python Discovery] Direct spawn result: ${testResult}`);
+        }
       }
       throw new CommandNotFoundError(cmd);
     }
@@ -158,18 +224,31 @@ export async function findPythonExecutable(
 
   // Force visible logging in CI
   if (process.env.CI === 'true' && isWindows) {
+    const pathEntries = process.env.PATH?.split(';') || [];
+    const pythonPaths = pathEntries.filter(p => p.toLowerCase().includes('python'));
+
     const debugInfo = {
       platform: process.platform,
       CI: process.env.CI,
       GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
       PATH_defined: !!process.env.PATH,
       Path_defined: !!process.env.Path,
-      preferredPath: preferredPath || 'none'
+      PATH_entries: pathEntries.length,
+      PATH_with_python: pythonPaths.length,
+      preferredPath: preferredPath || 'none',
+      cwd: process.cwd(),
+      nodeVersion: process.version
     };
     console.log('[PYTHON_DISCOVERY_DEBUG]', JSON.stringify(debugInfo));
     // Also log to error and use logger
     console.error('[PYTHON_DISCOVERY_DEBUG]', JSON.stringify(debugInfo));
     logger.error?.('[PYTHON_DISCOVERY_DEBUG] ' + JSON.stringify(debugInfo));
+
+    // Show Python-related PATH entries
+    if (pythonPaths.length > 0) {
+      console.error('[PYTHON_DISCOVERY_DEBUG] Python PATH entries found:');
+      pythonPaths.forEach(p => console.error(`  - ${p}`));
+    }
   }
 
   // 1. User-specified path (if provided, prefer it regardless of debugpy)
