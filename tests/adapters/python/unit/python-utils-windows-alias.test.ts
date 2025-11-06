@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, isolateModules } from 'vitest';
 import { EventEmitter } from 'events';
 
 describe('WhichCommandFinder (Windows alias handling)', () => {
@@ -16,13 +16,11 @@ describe('WhichCommandFinder (Windows alias handling)', () => {
       proc.stdout = new EventEmitter();
       proc.stderr = new EventEmitter();
 
-      // Simulate successful validation/debugpy checks for real Python path
-      const exitCode = 0;
       process.nextTick(() => {
         if (args?.[0] === '-c' && args[1]?.includes('import debugpy')) {
           proc.stdout.emit('data', Buffer.from('1.8.0'));
         }
-        proc.emit('exit', exitCode);
+        proc.emit('exit', 0);
       });
 
       return proc;
@@ -53,10 +51,10 @@ describe('WhichCommandFinder (Windows alias handling)', () => {
       default: whichMock,
     }));
 
+    vi.stubGlobal('process', { ...process, platform: 'win32' });
+
     const module = await import('@debugmcp/adapter-python');
     const { findPythonExecutable } = module;
-
-    vi.stubGlobal('process', { ...process, platform: 'win32' });
 
     const resolved = await findPythonExecutable();
     expect(resolved).toBe('C:\\hostedtoolcache\\windows\\Python\\3.11.5\\x64\\python.exe');
@@ -64,5 +62,8 @@ describe('WhichCommandFinder (Windows alias handling)', () => {
     expect(whichMock).toHaveBeenCalledWith('python', expect.objectContaining({ all: true }));
     expect(whichMock).toHaveBeenCalledWith('python.exe', expect.objectContaining({ all: true }));
     expect(spawnMock).toHaveBeenCalled();
+
+    vi.unmock?.('child_process');
+    vi.unmock?.('which');
   });
 });
