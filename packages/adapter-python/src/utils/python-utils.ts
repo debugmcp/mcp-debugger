@@ -42,14 +42,32 @@ class WhichCommandFinder implements CommandFinder {
     try {
       // Fix for Windows: which library fails if PATH is undefined but Path exists
       // Windows env vars are case-insensitive, but Node.js treats them as case-sensitive
-      // GitHub Actions on Windows may have Path but not PATH
-      if (process.platform === 'win32' && !process.env.PATH && process.env.Path) {
-        process.env.PATH = process.env.Path;
+      if (process.platform === 'win32') {
+        // Diagnostic logging in CI to understand the issue
+        if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
+          console.error(`[Python Discovery] Looking for command: ${cmd}`);
+          console.error(`[Python Discovery] Environment:`, {
+            CI: process.env.CI,
+            GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+            PATH: process.env.PATH ? `defined (${process.env.PATH.split(';').length} entries)` : 'undefined',
+            Path: process.env.Path ? `defined (${process.env.Path?.split(';').length} entries)` : 'undefined',
+          });
+        }
+
+        if (!process.env.PATH && process.env.Path) {
+          process.env.PATH = process.env.Path;
+          if (process.env.CI === 'true') {
+            console.error(`[Python Discovery] Copied Path to PATH`);
+          }
+        }
       }
       const resolved = await which(cmd);
       if (this.useCache) this.cache.set(cmd, resolved);
       return resolved;
-    } catch {
+    } catch (error) {
+      if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
+        console.error(`[Python Discovery] Failed to find ${cmd}:`, (error as Error).message);
+      }
       throw new CommandNotFoundError(cmd);
     }
   }
@@ -198,6 +216,7 @@ export async function findPythonExecutable(
       }
     }
   }
+
 
   // 4. Check each valid Python for debugpy and return the first one that has it
   logger.debug?.(`[Python Detection] Checking ${validPythonPaths.length} Python installations for debugpy...`);
