@@ -96,7 +96,7 @@ class WhichCommandFinder implements CommandFinder {
             if (process.env.CI === 'true') {
               console.error(`[Python Discovery] Found ${cmd}.exe at: ${resolved}`);
             }
-          } catch (secondError) {
+          } catch {
             // Both attempts failed, throw the original error
             throw firstError;
           }
