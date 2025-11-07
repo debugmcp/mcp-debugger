@@ -11,6 +11,7 @@ export {
   findPythonExecutable,
   getPythonVersion,
   setDefaultCommandFinder,
+  resetDefaultCommandFinder,
   CommandNotFoundError
 } from './utils/python-utils.js';
 

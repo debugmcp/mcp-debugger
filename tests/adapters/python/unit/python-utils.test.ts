@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn } from 'child_process';
-import { findPythonExecutable, getPythonVersion, setDefaultCommandFinder } from '@debugmcp/adapter-python';
+import { findPythonExecutable, getPythonVersion, setDefaultCommandFinder, resetDefaultCommandFinder } from '@debugmcp/adapter-python';
 import { MockCommandFinder } from '../../../test-utils/mocks/mock-command-finder.js';
 import { CommandNotFoundError } from '@debugmcp/adapter-python';
 import { EventEmitter } from 'events';
@@ -47,6 +47,7 @@ describe('python-utils', () => {
   afterEach(() => {
     vi.clearAllMocks();
     mockCommandFinder.reset();
+    resetDefaultCommandFinder();
   });
 
   describe('findPythonExecutable', () => {

@@ -215,6 +215,14 @@ export function setDefaultCommandFinder(finder: CommandFinder): void {
 }
 
 /**
+ * Reset the default command finder to the built-in which-based implementation.
+ * This is primarily used by test suites to avoid cross-test pollution.
+ */
+export function resetDefaultCommandFinder(): void {
+  defaultCommandFinder = new WhichCommandFinder();
+}
+
+/**
  * Validate that a Python command is a real Python executable, not a Windows Store alias
  */
 async function isValidPythonExecutable(pythonCmd: string, logger: Logger = noopLogger): Promise<boolean> {
