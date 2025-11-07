@@ -1,11 +1,10 @@
-# JavaScript/TypeScript Debugging Guide
+# JavaScript Debugging Guide
 
 ## Overview
 
 The JavaScript adapter provides full debugging support for Node.js applications using Microsoft's proven `js-debug` (pwa-node) debugger from VSCode. This includes support for:
 
 - Node.js applications
-- TypeScript with source maps
 - ES modules and CommonJS
 - Child process debugging
 - Multi-session debugging architecture
@@ -92,7 +91,6 @@ console.log(`Result: ${sum}`);
 The JavaScript adapter automatically configures:
 
 - **Runtime**: Uses system Node.js or specified executable
-- **Source Maps**: Automatically enabled for TypeScript
 - **Console**: Captures stdout/stderr
 - **Smart Stepping**: Skips node internals
 
@@ -117,27 +115,6 @@ You can provide custom DAP launch arguments:
 }
 ```
 
-## TypeScript Support
-
-TypeScript is fully supported with automatic source map resolution:
-
-```typescript
-// app.ts
-interface User {
-  name: string;
-  age: number;
-}
-
-function greetUser(user: User): string {
-  const message = `Hello, ${user.name}!`;  // Breakpoint works here
-  return message;
-}
-```
-
-No special configuration needed - the adapter automatically handles:
-- Source map resolution
-- Path mapping
-- TypeScript compilation artifacts
 
 ## Advanced Features
 
@@ -187,7 +164,6 @@ const child = spawn('node', ['child.js']);
 
 1. **Breakpoints Not Hitting**
    - Ensure file paths are correct (use absolute paths when possible)
-   - Check that source maps are generated for TypeScript
    - Verify the code is actually executing
 
 2. **Session Not Starting**
@@ -217,9 +193,30 @@ Enable detailed logging to troubleshoot issues:
 }
 ```
 
-## Limitations
+## Known Limitations
 
-Current limitations of the JavaScript adapter:
+### TypeScript Source Mapping (In Development)
+
+TypeScript debugging with source maps is currently under active development. While you can debug compiled JavaScript files, automatic source map resolution to TypeScript source files is not yet fully functional.
+
+**Current Workaround Options:**
+
+1. **Debug the compiled JavaScript directly** - Set breakpoints in the `.js` files instead of `.ts`
+2. **Use runtime transpilers** - Tools like `tsx` or `ts-node` that handle TypeScript at runtime:
+   ```json
+   {
+     "tool": "start_debugging",
+     "params": {
+       "sessionId": "session-id",
+       "scriptPath": "app.ts",  // Works with tsx/ts-node installed
+       "args": []
+     }
+   }
+   ```
+
+For technical details and planned improvements, see [TypeScript Source Map Investigation](./typescript-source-map-investigation.md).
+
+### Other Limitations
 
 - Chrome debugging (`chrome-pwa`) not yet supported (Node.js only)
 - Remote debugging requires manual configuration

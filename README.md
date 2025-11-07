@@ -35,7 +35,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
-- 🟨 **JavaScript/TypeScript debugging via js-debug** – VSCode's proven debugger
+- 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger
 - 🧪 **Mock adapter for testing** – Test without external dependencies
 - � **STDIO and SSE transport modes** – Works with any MCP client
 - �📊 1019 tests passing – battle-tested end-to-end
