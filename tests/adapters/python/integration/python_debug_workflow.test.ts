@@ -86,6 +86,43 @@ async function stopTestServer(): Promise<void> {
 // Helper to introduce delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const parseToolResult = (rawResult: any) => {
+  const anyResult = rawResult as any;
+  if (!anyResult || !anyResult.content || !anyResult.content[0] || anyResult.content[0].type !== 'text') {
+    console.error('Invalid ServerResult structure received:', rawResult);
+    throw new Error('Invalid ServerResult structure');
+  }
+  return JSON.parse(anyResult.content[0].text);
+};
+
+async function waitForStackFrames(
+  client: Client,
+  sessionId: string,
+  timeoutMs = 15000,
+  pollInterval = 500
+) {
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    const stackTraceRawResult = await client.callTool({ name: 'get_stack_trace', arguments: { sessionId } });
+    const stackTraceResult = parseToolResult(stackTraceRawResult);
+
+    if (
+      stackTraceResult.success &&
+      Array.isArray(stackTraceResult.stackFrames) &&
+      stackTraceResult.stackFrames.length > 0
+    ) {
+      return stackTraceResult;
+    }
+
+    await delay(pollInterval);
+  }
+
+  const finalResult = parseToolResult(await client.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+  console.error('[Test] Timed out waiting for stack frames. Last result:', JSON.stringify(finalResult, null, 2));
+  throw new Error(`Timed out waiting for stack frames for session ${sessionId}`);
+}
+
 describe('Python Debugging Workflow - Integration Test @requires-python', () => {
   let sessionId: string;
   const scriptPath = path.resolve('tests/fixtures/python/debug_test_simple.py'); // Absolute path
@@ -109,15 +146,6 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
     }
 
     // Helper to parse ServerResult
-    const parseToolResult = (rawResult: any) => { // Accept any directly
-      const anyResult = rawResult as any; 
-      if (!anyResult || !anyResult.content || !anyResult.content[0] || anyResult.content[0].type !== 'text') {
-        console.error("Invalid ServerResult structure received:", rawResult);
-        throw new Error('Invalid ServerResult structure');
-      }
-      return JSON.parse(anyResult.content[0].text);
-    };
-
     // 1. List Sessions (simpler first call)
     // Do not type listRawResult as ServerResult if its type is problematic
     const listRawResult = await client.callTool({ name: 'list_debug_sessions', arguments: {} });
@@ -156,11 +184,9 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
     const continueResult = parseToolResult(continueRawResult);
     expect(continueResult.success).toBe(true);
     console.log('[Test] Continued execution. Waiting for breakpoint...');
-    await delay(3000); 
 
     // 6. Get Stack Trace (at breakpoint)
-    const stackTraceRawResult = await client.callTool({ name: 'get_stack_trace', arguments: { sessionId } });
-    const stackTraceResult = parseToolResult(stackTraceRawResult);
+    const stackTraceResult = await waitForStackFrames(client, sessionId);
     expect(stackTraceResult.success).toBe(true);
     expect(stackTraceResult.stackFrames).toBeInstanceOf(Array);
     expect(stackTraceResult.stackFrames.length).toBeGreaterThanOrEqual(1);
@@ -214,15 +240,6 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
     if (!client) {
       throw new Error("MCP Client not initialized. Cannot run test.");
     }
-    const parseToolResult = (rawResult: any) => {
-      const anyResult = rawResult as any;
-      if (!anyResult || !anyResult.content || !anyResult.content[0] || anyResult.content[0].type !== 'text') {
-        console.error("Invalid ServerResult structure received:", rawResult);
-        throw new Error('Invalid ServerResult structure');
-      }
-      return JSON.parse(anyResult.content[0].text);
-    };
-
     console.log('[Test] === Test: Dry Run for start_debugging ===');
     const scriptToDryRun = path.resolve('tests/fixtures/python/debug_test_simple.py'); // Absolute path
 
