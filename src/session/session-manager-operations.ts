@@ -50,6 +50,22 @@ export class SessionManagerOperations extends SessionManagerData {
     dryRunSpawn?: boolean
   ): Promise<void> {
     const sessionId = session.id;
+    
+    // Log entrance for Windows CI debugging
+    this.logger.info(
+      `[SessionManager] Entering startProxyManager for session ${sessionId}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`
+    );
+    if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
+      console.error(`[SessionManager] Windows CI Debug - startProxyManager entrance:`, {
+        sessionId,
+        dryRunSpawn,
+        scriptPath,
+        language: session.language,
+        hasBreakpoints: session.breakpoints?.size > 0,
+        platform: process.platform,
+        cwd: process.cwd()
+      });
+    }
 
     // Create session log directory
     const sessionLogDir = path.join(this.logDirBase, sessionId, `run-${Date.now()}`);
@@ -408,12 +424,37 @@ export class SessionManagerOperations extends SessionManagerData {
         },
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : 'No stack available';
+      // Comprehensive error capture for debugging Windows CI issues
+      const errorDetails: Record<string, unknown> = {
+        type: error?.constructor?.name || 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : 'No stack available',
+        code: (error as Record<string, unknown>)?.code,
+        errno: (error as Record<string, unknown>)?.errno,
+        syscall: (error as Record<string, unknown>)?.syscall,
+        path: (error as Record<string, unknown>)?.path,
+        toString: error?.toString ? error.toString() : 'No toString'
+      };
 
+      // Try to capture raw error object
+      try {
+        errorDetails.raw = JSON.stringify(error);
+      } catch {
+        errorDetails.raw = 'Error not JSON serializable';
+      }
+
+      // Log comprehensive error details
       this.logger.error(
-        `[SessionManager] Error during startDebugging for session ${sessionId}: ${errorMessage}. Stack: ${errorStack}`
+        `[SessionManager] Detailed error in startDebugging for session ${sessionId}:`,
+        errorDetails
       );
+      
+      // Also log to console for CI visibility
+      if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
+        console.error('[SessionManager] Windows CI Debug - Full error details:', errorDetails);
+      }
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       this._updateSessionState(session, SessionState.ERROR);
 
