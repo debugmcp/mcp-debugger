@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn } from 'child_process';
-import { findPythonExecutable, getPythonVersion, setDefaultCommandFinder, resetDefaultCommandFinder } from '@debugmcp/adapter-python';
+import fs from 'node:fs';
+import path from 'node:path';
+import { findPythonExecutable, getPythonVersion, setDefaultCommandFinder } from '@debugmcp/adapter-python';
 import { MockCommandFinder } from '../../../test-utils/mocks/mock-command-finder.js';
 import { CommandNotFoundError } from '@debugmcp/adapter-python';
 import { EventEmitter } from 'events';
@@ -27,6 +29,8 @@ describe('python-utils', () => {
     // Reset environment variables
     delete process.env.PYTHON_PATH;
     delete process.env.PYTHON_EXECUTABLE;
+    delete process.env.pythonLocation;
+    delete process.env.PythonLocation;
     
     // Create a fresh mock command finder for each test
     mockCommandFinder = new MockCommandFinder();
@@ -47,7 +51,8 @@ describe('python-utils', () => {
   afterEach(() => {
     vi.clearAllMocks();
     mockCommandFinder.reset();
-    resetDefaultCommandFinder();
+    delete process.env.pythonLocation;
+    delete process.env.PythonLocation;
   });
 
   describe('findPythonExecutable', () => {
@@ -86,6 +91,23 @@ describe('python-utils', () => {
         expect(result).toBe('/env/exec/python');
         expect(mockCommandFinder.getCallHistory()).toContain('/env/exec/python');
       });
+
+      if (platform === 'win32') {
+        it('should use pythonLocation path when available (GitHub Actions)', async () => {
+          const pythonRoot = 'C:\\hostedtoolcache\\windows\\Python\\3.11.9\\x64';
+          process.env.pythonLocation = pythonRoot;
+
+          const existsSpy = vi.spyOn(fs, 'existsSync').mockImplementation((candidate) => {
+            return candidate === path.join(pythonRoot, 'python.exe');
+          });
+
+          const result = await findPythonExecutable(undefined, undefined, mockCommandFinder);
+          expect(result).toBe(path.join(pythonRoot, 'python.exe'));
+          expect(mockCommandFinder.getCallHistory()).toEqual([]);
+
+          existsSpy.mockRestore();
+        });
+      }
 
       it('should auto-detect python commands in platform-specific order', async () => {
         // Mock hasDebugpy check - first valid Python has debugpy
@@ -396,11 +418,16 @@ describe('python-utils', () => {
       const customFinder = new MockCommandFinder();
       customFinder.setResponse('python', '/custom/global/python');
       
-      setDefaultCommandFinder(customFinder);
+      const previousFinder = setDefaultCommandFinder(customFinder);
       
       // Call without passing a commandFinder - should use the default
       const result = await findPythonExecutable();
       expect(result).toBe('/custom/global/python');
+
+      // Restore previous finder to avoid cross-test pollution
+      if (previousFinder) {
+        setDefaultCommandFinder(previousFinder);
+      }
     });
   });
 });

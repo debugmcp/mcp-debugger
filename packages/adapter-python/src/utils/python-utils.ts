@@ -2,6 +2,8 @@
  * Python executable detection utilities using the 'which' library.
  */
 import { spawn } from 'child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import which from 'which';
 
 // Simple logger interface (kept local to avoid external coupling)
@@ -210,16 +212,10 @@ let defaultCommandFinder: CommandFinder = new WhichCommandFinder();
  * Set the default command finder (useful for testing)
  * @param finder The CommandFinder to use as default
  */
-export function setDefaultCommandFinder(finder: CommandFinder): void {
+export function setDefaultCommandFinder(finder: CommandFinder): CommandFinder {
+  const previous = defaultCommandFinder;
   defaultCommandFinder = finder;
-}
-
-/**
- * Reset the default command finder to the built-in which-based implementation.
- * This is primarily used by test suites to avoid cross-test pollution.
- */
-export function resetDefaultCommandFinder(): void {
-  defaultCommandFinder = new WhichCommandFinder();
+  return previous;
 }
 
 /**
@@ -356,6 +352,37 @@ export async function findPythonExecutable(
         triedPaths.push(`${envPython} → not found`);
       } else {
         throw error;
+      }
+    }
+  }
+
+  // 2.5. GitHub Actions exposes pythonLocation (and sometimes PythonLocation) for setup-python
+  const pythonLocation = process.env.pythonLocation || process.env.PythonLocation;
+  if (pythonLocation) {
+    const locationCandidates = isWindows
+      ? [
+          path.join(pythonLocation, 'python.exe'),
+          path.join(pythonLocation, 'python'),
+        ]
+      : [
+          path.join(pythonLocation, 'bin', 'python3'),
+          path.join(pythonLocation, 'python3'),
+          path.join(pythonLocation, 'bin', 'python'),
+          path.join(pythonLocation, 'python'),
+        ];
+
+    for (const candidate of locationCandidates) {
+      if (!candidate) continue;
+
+      if (!fs.existsSync(candidate)) {
+        triedPaths.push(`${candidate} → not found`);
+        continue;
+      }
+
+      triedPaths.push(`${candidate} → exists`);
+      if (!isWindows || (await isValidPythonExecutable(candidate, logger))) {
+        logger.debug?.(`[Python Detection] Using pythonLocation Python: ${candidate}`);
+        return candidate;
       }
     }
   }
