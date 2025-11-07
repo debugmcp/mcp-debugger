@@ -35,7 +35,7 @@ describe('SessionManager - Integration Tests', () => {
     it('should forward ProxyManager events correctly', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -55,7 +55,7 @@ describe('SessionManager - Integration Tests', () => {
     it('should handle auto-continue for stopOnEntry=false', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       // Configure logger spy
@@ -78,7 +78,7 @@ describe('SessionManager - Integration Tests', () => {
     it('should log all major operations', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       expect(dependencies.logger.info).toHaveBeenCalledWith(
@@ -102,7 +102,7 @@ describe('SessionManager - Integration Tests', () => {
     it('should log errors appropriately', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       dependencies.mockProxyManager.shouldFailStart = true;
@@ -112,7 +112,7 @@ describe('SessionManager - Integration Tests', () => {
       // The error logger is called with the full error message as one argument
       expect(dependencies.logger.error).toHaveBeenCalled();
       const errorCall = (dependencies.logger.error as any).mock.calls.find((call: any[]) => 
-        call[0].includes('Error during startDebugging')
+        call[0].includes('Detailed error in startDebugging')
       );
       expect(errorCall).toBeDefined();
     });
@@ -123,12 +123,12 @@ describe('SessionManager - Integration Tests', () => {
       const session1 = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
         name: 'Session 1',
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       const session2 = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
         name: 'Session 2',
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       // Check they're in the store
@@ -145,7 +145,7 @@ describe('SessionManager - Integration Tests', () => {
     it('should update session state in store', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        executablePath: 'python'
       });
       
       const initialUpdatedAt = session.updatedAt;
