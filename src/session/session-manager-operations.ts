@@ -81,6 +81,8 @@ export class SessionManagerOperations extends SessionManagerData {
       this.logger.error(`[SessionManager] Failed to create log directory:`, err);
       throw new Error(`Failed to create session log directory: ${message}`);
     }
+    // Persist log directory on session for diagnostics
+    this.sessionStore.update(sessionId, { logDir: sessionLogDir });
 
     // Get free port for adapter
     const adapterPort = await this.findFreePort();
@@ -481,14 +483,18 @@ export class SessionManagerOperations extends SessionManagerData {
     } catch (error) {
       // Attempt to capture proxy log tail for debugging initialization failures
       let proxyLogTail: string | undefined;
-      const proxyLogPath = path.join(sessionLogDir, `proxy-${sessionId}.log`);
+      let proxyLogPath: string | undefined;
       try {
-        const logExists = await this.fileSystem.pathExists(proxyLogPath);
-        if (logExists) {
-          const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
-          const maxTailLength = 4000;
-          proxyLogTail =
-            logContent.length > maxTailLength ? logContent.slice(-maxTailLength) : logContent;
+        const latestSession = this._getSessionById(sessionId);
+        if (latestSession.logDir) {
+          proxyLogPath = path.join(latestSession.logDir, `proxy-${sessionId}.log`);
+          const logExists = await this.fileSystem.pathExists(proxyLogPath);
+          if (logExists) {
+            const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
+            const maxTailLength = 4000;
+            proxyLogTail =
+              logContent.length > maxTailLength ? logContent.slice(-maxTailLength) : logContent;
+          }
         }
       } catch (logReadError) {
         proxyLogTail = `<<Failed to read proxy log: ${
@@ -506,7 +512,7 @@ export class SessionManagerOperations extends SessionManagerData {
         syscall: (error as Record<string, unknown>)?.syscall,
         path: (error as Record<string, unknown>)?.path,
         toString: error?.toString ? error.toString() : 'No toString',
-        proxyLogPath: proxyLogTail ? proxyLogPath : undefined,
+        proxyLogPath,
         proxyLogTail
       };
 

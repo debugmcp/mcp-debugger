@@ -42,6 +42,7 @@ export interface ManagedSession extends DebugSessionInfo {
   // New state model fields
   sessionLifecycle: SessionLifecycleState;
   executionState?: ExecutionState;
+  logDir?: string;
 }
 
 /**
