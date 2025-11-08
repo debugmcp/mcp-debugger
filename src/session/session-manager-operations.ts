@@ -491,9 +491,10 @@ export class SessionManagerOperations extends SessionManagerData {
           const logExists = await this.fileSystem.pathExists(proxyLogPath);
           if (logExists) {
             const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
-            const maxTailLength = 4000;
-            proxyLogTail =
-              logContent.length > maxTailLength ? logContent.slice(-maxTailLength) : logContent;
+            const logLines = logContent.split(/\r?\n/);
+            const tailLineCount = 80;
+            const startIndex = Math.max(0, logLines.length - tailLineCount);
+            proxyLogTail = logLines.slice(startIndex).join('\n');
           }
         }
       } catch (logReadError) {

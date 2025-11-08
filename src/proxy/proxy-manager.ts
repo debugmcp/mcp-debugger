@@ -130,6 +130,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }>();
   private isInitialized = false;
   private isDryRun = false;
+  private dryRunCompleteReceived = false;
+  private dryRunCommandSnapshot?: string;
+  private dryRunScriptPath?: string;
   private adapterConfigured = false;
   private dapState: DAPSessionState | null = null;
   private stderrBuffer: string[] = [];
@@ -166,7 +169,19 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.sessionId = config.sessionId;
     this.isDryRun = config.dryRunSpawn === true;
+    this.dryRunCompleteReceived = false;
+    this.dryRunCommandSnapshot = undefined;
+    this.dryRunScriptPath = config.scriptPath;
     this.lastExitDetails = undefined;
+    if (config.adapterCommand?.command) {
+      const parts = [config.adapterCommand.command, ...(config.adapterCommand.args ?? [])]
+        .filter((part) => typeof part === 'string' && part.length > 0);
+      if (parts.length > 0) {
+        this.dryRunCommandSnapshot = parts.join(' ');
+      }
+    } else if (!this.dryRunCommandSnapshot && config.executablePath) {
+      this.dryRunCommandSnapshot = config.executablePath;
+    }
     
     // Initialize functional core state
     this.dapState = createInitialState(config.sessionId);
@@ -901,6 +916,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       case 'dry_run_complete':
         this.logger.info(`[ProxyManager] Dry run complete`);
+        this.dryRunCompleteReceived = true;
+        if (typeof message.command === 'string' && message.command.trim().length > 0) {
+          this.dryRunCommandSnapshot = message.command;
+        }
+        if (typeof message.script === 'string' && message.script.trim().length > 0) {
+          this.dryRunScriptPath = message.script;
+        }
         this.emit('dry-run-complete', message.command, message.script);
         break;
       
@@ -947,6 +969,18 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   private handleProxyExit(code: number | null, signal: string | null): void {
+    if (this.isDryRun && code === 0 && !this.dryRunCompleteReceived) {
+      const fallbackCommand = this.dryRunCommandSnapshot ?? '(command unavailable)';
+      const fallbackScript = this.dryRunScriptPath ?? '';
+      this.logger.warn(
+        `[ProxyManager] Dry run proxy exited without reporting completion; synthesizing dry-run-complete event.`
+      );
+      this.dryRunCompleteReceived = true;
+      this.dryRunCommandSnapshot = fallbackCommand;
+      this.dryRunScriptPath = fallbackScript;
+      this.emit('dry-run-complete', fallbackCommand, fallbackScript);
+    }
+
     // Clean up pending requests
     this.pendingDapRequests.forEach(pending => {
       pending.reject(new Error('Proxy exited'));
