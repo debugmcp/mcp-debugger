@@ -36,7 +36,11 @@ export default defineConfig({
         'Received', 
         'Test suite failed',
         'TypeError',
-        'ReferenceError'
+        'ReferenceError',
+        '[Discovery Test]',
+        '[Workflow Test]',
+        '[Test Server]',
+        '[env-utils]'
       ];
       if (importantPatterns.some(pattern => log.includes(pattern))) {
         return true;

@@ -45,6 +45,9 @@ async function startTestServer(): Promise<void> {
     } catch (e) { console.error(`Error deleting old log file: ${e}`); }
 
     ensurePythonOnPath(filteredEnv);
+    if (process.env.CI === 'true' && process.platform === 'win32') {
+      console.error('[Workflow Test] PATH after ensure:', filteredEnv.PATH || filteredEnv.Path || '<undefined>');
+    }
 
     const transport = new StdioClientTransport({
         command: 'node',
@@ -264,7 +267,9 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
       },
     });
     const parsedDryRunResult = parseToolResult(startDryRunRawResult);
-    
+    if (!parsedDryRunResult.success && process.env.CI === 'true') {
+      console.error('[Workflow Test] Dry run failure payload:', JSON.stringify(parsedDryRunResult, null, 2));
+    }
     console.log('[Test] Dry run start_debugging result:', JSON.stringify(parsedDryRunResult, null, 2));
     if (!parsedDryRunResult.success) {
       console.error('[Test] Dry run failed with error:', parsedDryRunResult.error);
