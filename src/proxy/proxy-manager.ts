@@ -67,6 +67,8 @@ export interface IProxyManager extends EventEmitter {
     event: K, 
     ...args: Parameters<ProxyManagerEvents[K]>
   ): boolean;
+  hasDryRunCompleted(): boolean;
+  getDryRunSnapshot(): { command?: string; script?: string } | undefined;
 }
 
 // Message types from proxy
@@ -1016,5 +1018,19 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.isInitialized = false;
     this.adapterConfigured = false;
     this.currentThreadId = null;
+  }
+
+  hasDryRunCompleted(): boolean {
+    return this.dryRunCompleteReceived;
+  }
+
+  getDryRunSnapshot(): { command?: string; script?: string } | undefined {
+    if (!this.dryRunCommandSnapshot && !this.dryRunScriptPath) {
+      return undefined;
+    }
+    return {
+      command: this.dryRunCommandSnapshot,
+      script: this.dryRunScriptPath
+    };
   }
 }

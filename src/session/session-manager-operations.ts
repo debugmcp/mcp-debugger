@@ -180,6 +180,13 @@ export class SessionManagerOperations extends SessionManagerData {
     session: ManagedSession,
     timeoutMs: number
   ): Promise<boolean> {
+    if (session.proxyManager?.hasDryRunCompleted?.()) {
+      this.logger.info(
+        `[SessionManager] Dry run already marked complete for session ${session.id} before wait`
+      );
+      return true;
+    }
+
     let handler: (() => void) | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
 
@@ -199,6 +206,13 @@ export class SessionManagerOperations extends SessionManagerData {
         }),
         new Promise<boolean>((resolve) => {
           timeoutId = setTimeout(() => {
+            if (session.proxyManager?.hasDryRunCompleted?.()) {
+              this.logger.info(
+                `[SessionManager] Dry run marked complete during timeout window for session ${session.id}`
+              );
+              resolve(true);
+              return;
+            }
             this.logger.warn(
               `[SessionManager] Dry run timeout after ${timeoutMs}ms for session ${session.id}`
             );
@@ -289,7 +303,12 @@ export class SessionManagerOperations extends SessionManagerData {
           console.error(`[CI Debug] Session state after proxy start: ${refreshedSession.state}`);
         }
         
-        if (refreshedSession.state === SessionState.STOPPED) {
+        const initialDryRunSnapshot = refreshedSession.proxyManager?.getDryRunSnapshot?.();
+        const dryRunAlreadyComplete =
+          refreshedSession.state === SessionState.STOPPED ||
+          refreshedSession.proxyManager?.hasDryRunCompleted?.() === true;
+
+        if (dryRunAlreadyComplete) {
           this.logger.info(
             `[SessionManager] Dry run already completed for session ${sessionId}`
           );
@@ -303,7 +322,12 @@ export class SessionManagerOperations extends SessionManagerData {
           return {
             success: true,
             state: SessionState.STOPPED,
-            data: { dryRun: true, message: 'Dry run spawn command logged by proxy.' },
+            data: {
+              dryRun: true,
+              message: 'Dry run spawn command logged by proxy.',
+              command: initialDryRunSnapshot?.command,
+              script: initialDryRunSnapshot?.script,
+            },
           };
         }
 
@@ -328,9 +352,17 @@ export class SessionManagerOperations extends SessionManagerData {
           console.error(`[CI Debug] waitForDryRunCompletion returned: ${dryRunCompleted}`);
         }
 
-        if (dryRunCompleted) {
+        const latestSessionState = this._getSessionById(sessionId);
+        const latestSnapshot =
+          latestSessionState.proxyManager?.getDryRunSnapshot?.() ?? initialDryRunSnapshot;
+        const effectiveDryRunComplete =
+          dryRunCompleted ||
+          latestSessionState.state === SessionState.STOPPED ||
+          latestSessionState.proxyManager?.hasDryRunCompleted?.() === true;
+
+        if (effectiveDryRunComplete) {
           this.logger.info(
-            `[SessionManager] Dry run completed for session ${sessionId}, final state: ${refreshedSession.state}`
+            `[SessionManager] Dry run completed for session ${sessionId}, final state: ${latestSessionState.state}`
           );
           
           // CI Debug: Success path
@@ -341,11 +373,16 @@ export class SessionManagerOperations extends SessionManagerData {
           return {
             success: true,
             state: SessionState.STOPPED,
-            data: { dryRun: true, message: 'Dry run spawn command logged by proxy.' },
+            data: {
+              dryRun: true,
+              message: 'Dry run spawn command logged by proxy.',
+              command: latestSnapshot?.command,
+              script: latestSnapshot?.script,
+            },
           };
         } else {
           // Timeout occurred
-          const finalSession = this._getSessionById(sessionId);
+          const finalSession = latestSessionState;
           this.logger.error(
             `[SessionManager] Dry run timeout for session ${sessionId}. ` +
               `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`

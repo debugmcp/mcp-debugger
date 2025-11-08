@@ -13,6 +13,9 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
   private _currentThreadId: number | null = null;
   private _config: ProxyConfig | null = null;
   private _dapRequestHandler: ((command: string, args?: any) => Promise<any>) | null = null;
+  private _dryRunCompleted = false;
+  private _dryRunCommand?: string;
+  private _dryRunScript?: string;
 
   // Track calls for testing
   public startCalls: ProxyConfig[] = [];
@@ -42,10 +45,16 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
 
     this._config = config;
     this._isRunning = true;
+    this._dryRunCompleted = false;
+    this._dryRunCommand = undefined;
+    this._dryRunScript = undefined;
 
     // Simulate initialization
     process.nextTick(() => {
       if (config.dryRunSpawn) {
+        this._dryRunCompleted = true;
+        this._dryRunCommand = 'python';
+        this._dryRunScript = config.scriptPath;
         this.emit('dry-run-complete', 'python', config.scriptPath);
       } else {
         this.emit('adapter-configured');
@@ -65,6 +74,9 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this._isRunning = false;
     this._currentThreadId = null;
     this._config = null;
+    this._dryRunCompleted = false;
+    this._dryRunCommand = undefined;
+    this._dryRunScript = undefined;
     
     process.nextTick(() => {
       this.emit('exit', 0, undefined);
@@ -184,6 +196,11 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     event: K,
     ...args: Parameters<ProxyManagerEvents[K]>
   ): void {
+    if (event === 'dry-run-complete') {
+      this._dryRunCompleted = true;
+      this._dryRunCommand = args[0] as string | undefined;
+      this._dryRunScript = args[1] as string | undefined;
+    }
     this.emit(event, ...args);
   }
 
@@ -202,6 +219,20 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this.emit('exit', code, signal);
   }
 
+  hasDryRunCompleted(): boolean {
+    return this._dryRunCompleted;
+  }
+
+  getDryRunSnapshot(): { command?: string; script?: string } | undefined {
+    if (!this._dryRunCompleted) {
+      return undefined;
+    }
+    return {
+      command: this._dryRunCommand,
+      script: this._dryRunScript
+    };
+  }
+
   reset(): void {
     this.startCalls = [];
     this.stopCalls = 0;
@@ -214,6 +245,9 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this._currentThreadId = null;
     this._config = null;
     this._dapRequestHandler = null;
+    this._dryRunCompleted = false;
+    this._dryRunCommand = undefined;
+    this._dryRunScript = undefined;
     this.removeAllListeners();
   }
 }
