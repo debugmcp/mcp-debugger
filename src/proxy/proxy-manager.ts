@@ -133,6 +133,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private adapterConfigured = false;
   private dapState: DAPSessionState | null = null;
   private stderrBuffer: string[] = [];
+  private lastExitDetails:
+    | {
+        code: number | null;
+        signal: string | null;
+        timestamp: number;
+        capturedStderr: string[];
+      }
+    | undefined;
   private readonly runtimeEnv: ProxyRuntimeEnvironment;
   
   // Track js-debug launch state for proper synchronization
@@ -158,6 +166,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.sessionId = config.sessionId;
     this.isDryRun = config.dryRunSpawn === true;
+    this.lastExitDetails = undefined;
     
     // Initialize functional core state
     this.dapState = createInitialState(config.sessionId);
@@ -562,11 +571,31 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       }
     }
 
-    throw new Error(`Failed to initialize proxy after ${maxRetries + 1} attempts. ${lastError ? `Last error: ${lastError.message}` : 'Init command not acknowledged'}`);
+    let detailMessage = `Failed to initialize proxy after ${maxRetries + 1} attempts. ${
+      lastError ? `Last error: ${lastError.message}` : 'Init command not acknowledged'
+    }`;
+
+    if (this.lastExitDetails) {
+      const { code, signal, capturedStderr } = this.lastExitDetails;
+      const stderrSnippet = capturedStderr.length
+        ? capturedStderr.slice(-10).join('\n')
+        : '<<no stderr captured>>';
+      detailMessage += ` Proxy exit details -> code=${code} signal=${signal} stderr:\n${stderrSnippet}`;
+    }
+
+    throw new Error(detailMessage);
   }
 
   private sendCommand(command: object): void {
     if (!this.proxyProcess || this.proxyProcess.killed) {
+      if (this.lastExitDetails) {
+        this.logger.error(
+          `[ProxyManager] Attempted to send command after proxy unavailable. Last exit -> code=${this.lastExitDetails.code} signal=${this.lastExitDetails.signal}`,
+          this.lastExitDetails.capturedStderr
+        );
+      } else {
+        this.logger.error('[ProxyManager] Attempted to send command but proxy process is not available (no exit details recorded).');
+      }
       throw new Error('Proxy process not available');
     }
 
@@ -659,6 +688,21 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Handle exit
     this.proxyProcess.on('exit', (code: number | null, signal: string | null) => {
       this.logger.info(`[ProxyManager] Proxy exited. Code: ${code}, Signal: ${signal}`);
+
+      this.lastExitDetails = {
+        code,
+        signal,
+        timestamp: Date.now(),
+        capturedStderr: [...this.stderrBuffer],
+      };
+
+      if (!this.isInitialized) {
+        this.logger.error(
+          `[ProxyManager] Proxy exited before initialization. code=${code} signal=${signal} stderrLines=${this.stderrBuffer.length}`,
+          this.stderrBuffer
+        );
+      }
+
       this.handleProxyExit(code, signal);
     });
 
