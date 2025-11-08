@@ -479,6 +479,23 @@ export class SessionManagerOperations extends SessionManagerData {
         },
       };
     } catch (error) {
+      // Attempt to capture proxy log tail for debugging initialization failures
+      let proxyLogTail: string | undefined;
+      const proxyLogPath = path.join(sessionLogDir, `proxy-${sessionId}.log`);
+      try {
+        const logExists = await this.fileSystem.pathExists(proxyLogPath);
+        if (logExists) {
+          const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
+          const maxTailLength = 4000;
+          proxyLogTail =
+            logContent.length > maxTailLength ? logContent.slice(-maxTailLength) : logContent;
+        }
+      } catch (logReadError) {
+        proxyLogTail = `<<Failed to read proxy log: ${
+          logReadError instanceof Error ? logReadError.message : String(logReadError)
+        }>>`;
+      }
+
       // Comprehensive error capture for debugging Windows CI issues
       const errorDetails: Record<string, unknown> = {
         type: error?.constructor?.name || 'Unknown',
@@ -488,7 +505,9 @@ export class SessionManagerOperations extends SessionManagerData {
         errno: (error as Record<string, unknown>)?.errno,
         syscall: (error as Record<string, unknown>)?.syscall,
         path: (error as Record<string, unknown>)?.path,
-        toString: error?.toString ? error.toString() : 'No toString'
+        toString: error?.toString ? error.toString() : 'No toString',
+        proxyLogPath: proxyLogTail ? proxyLogPath : undefined,
+        proxyLogTail
       };
 
       // Try to capture raw error object
