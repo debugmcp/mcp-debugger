@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { ensurePythonOnPath } from './env-utils.js';
 
 // DO NOT mock Python discovery - we want to test the real implementation
 // This test should fail on Windows if python3 is the Microsoft Store redirect
@@ -32,6 +33,9 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
     // Clear any Python-related environment variables to ensure we test discovery
     delete filteredEnv.PYTHON_PATH;
     delete filteredEnv.PYTHON_EXECUTABLE;
+
+    // On Windows CI the setup-python step can leave Python off PATH; ensure it's present.
+    ensurePythonOnPath(filteredEnv);
 
     const transport = new StdioClientTransport({
       command: 'node',

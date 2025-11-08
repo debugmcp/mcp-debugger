@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'; // Removed StdioClientTransportParameters
 import { ServerResult } from '@modelcontextprotocol/sdk/types.js'; 
+import { ensurePythonOnPath } from './env-utils.js';
 
 // --- SDK-based MCP Client for Testing ---
 // let serverProcess: ChildProcess | null = null; // SDK Transport will manage the process
@@ -42,6 +43,8 @@ async function startTestServer(): Promise<void> {
         fs.unlinkSync(logFilePath);
       }
     } catch (e) { console.error(`Error deleting old log file: ${e}`); }
+
+    ensurePythonOnPath(filteredEnv);
 
     const transport = new StdioClientTransport({
         command: 'node',
