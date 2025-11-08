@@ -18,6 +18,27 @@ function hasDebugpy(pythonExe: string): boolean {
   }
 }
 
+function installDebugpy(pythonExe: string): { installed: boolean; log: string } {
+  try {
+    const result = spawnSync(
+      pythonExe,
+      ['-m', 'pip', 'install', '--user', '--upgrade', 'debugpy'],
+      {
+        timeout: 120_000,
+        stdio: 'pipe',
+        windowsHide: true,
+      }
+    );
+    const log = (result.stdout?.toString() ?? '') + (result.stderr?.toString() ?? '');
+    return { installed: result.status === 0, log };
+  } catch (error) {
+    return {
+      installed: false,
+      log: `spawn error: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 /**
  * Ensure the spawned MCP server inherits a PATH that includes a valid Python installation
  * WITH debugpy installed. This guards against environments (notably Windows CI) where
@@ -97,13 +118,35 @@ export function ensurePythonOnPath(env: Record<string, string>): void {
   if (!selectedRoot && candidateRoots.length > 0) {
     console.warn('[env-utils] No Python with debugpy found. Diagnostics:');
     diagnostics.forEach(d => console.warn(`  ${d}`));
-    console.warn('[env-utils] Falling back to first Python found (tests may fail)');
-    
+    console.warn('[env-utils] Attempting to install debugpy for first available Python');
+
     for (const root of candidateRoots) {
       const pythonExe = path.join(root, 'python.exe');
-      if (fs.existsSync(pythonExe)) {
+      if (!fs.existsSync(pythonExe)) {
+        continue;
+      }
+
+      const installResult = installDebugpy(pythonExe);
+      if (!installResult.installed) {
+        diagnostics.push(`${root}: debugpy install failed -> ${installResult.log.trim()}`);
+        continue;
+      }
+
+      diagnostics.push(`${root}: debugpy installed via pip`);
+      if (hasDebugpy(pythonExe)) {
         selectedRoot = root;
         break;
+      }
+    }
+
+    if (!selectedRoot) {
+      console.warn('[env-utils] debugpy installation attempts failed. Falling back to first Python found (tests may fail)');
+      for (const root of candidateRoots) {
+        const pythonExe = path.join(root, 'python.exe');
+        if (fs.existsSync(pythonExe)) {
+          selectedRoot = root;
+          break;
+        }
       }
     }
   }
