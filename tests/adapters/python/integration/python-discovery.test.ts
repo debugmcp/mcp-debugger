@@ -37,7 +37,9 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
     // On Windows CI the setup-python step can leave Python off PATH; ensure it's present.
     ensurePythonOnPath(filteredEnv);
     if (process.env.CI === 'true' && process.platform === 'win32') {
-      console.error('[Discovery Test] PATH after ensure:', filteredEnv.PATH || filteredEnv.Path || '<undefined>');
+      process.stderr.write(
+        `[Discovery Test] PATH after ensure: ${filteredEnv.PATH || filteredEnv.Path || '<undefined>'}\n`
+      );
     }
 
     const transport = new StdioClientTransport({
@@ -113,7 +115,9 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
     );
 
     if (!startResult.success && process.env.CI === 'true') {
-      console.error('[Discovery Test] start_debugging failure payload:', JSON.stringify(startResult, null, 2));
+      process.stderr.write(
+        `[Discovery Test] start_debugging failure payload: ${JSON.stringify(startResult)}\n`
+      );
     }
 
     // This should succeed if Python discovery works correctly

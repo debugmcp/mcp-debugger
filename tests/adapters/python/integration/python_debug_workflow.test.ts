@@ -46,7 +46,9 @@ async function startTestServer(): Promise<void> {
 
     ensurePythonOnPath(filteredEnv);
     if (process.env.CI === 'true' && process.platform === 'win32') {
-      console.error('[Workflow Test] PATH after ensure:', filteredEnv.PATH || filteredEnv.Path || '<undefined>');
+      process.stderr.write(
+        `[Workflow Test] PATH after ensure: ${filteredEnv.PATH || filteredEnv.Path || '<undefined>'}\n`
+      );
     }
 
     const transport = new StdioClientTransport({
@@ -268,7 +270,9 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
     });
     const parsedDryRunResult = parseToolResult(startDryRunRawResult);
     if (!parsedDryRunResult.success && process.env.CI === 'true') {
-      console.error('[Workflow Test] Dry run failure payload:', JSON.stringify(parsedDryRunResult, null, 2));
+      process.stderr.write(
+        `[Workflow Test] Dry run failure payload: ${JSON.stringify(parsedDryRunResult)}\n`
+      );
     }
     console.log('[Test] Dry run start_debugging result:', JSON.stringify(parsedDryRunResult, null, 2));
     if (!parsedDryRunResult.success) {
