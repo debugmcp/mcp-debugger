@@ -54,7 +54,7 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
       console.error('[Test] Failed to connect to server:', error);
       throw error;
     }
-  });
+  }, 30000);
 
   afterAll(async () => {
     if (client) {

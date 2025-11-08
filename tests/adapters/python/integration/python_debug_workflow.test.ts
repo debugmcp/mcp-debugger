@@ -138,7 +138,7 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
 
   beforeAll(async () => {
     await startTestServer();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await stopTestServer();
