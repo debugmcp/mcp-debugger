@@ -552,37 +552,39 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        // Send init command
-        this.sendCommand(initCommand);
+      const timeoutMs = delays[Math.min(attempt, delays.length - 1)];
 
-        // Wait for init_received acknowledgment with proper cleanup
-        const timeoutMs = delays[Math.min(attempt, delays.length - 1)];
-        const received = await new Promise<boolean>((resolve) => {
+      try {
+        const received = await new Promise<boolean>((resolve, reject) => {
           let resolved = false;
 
-          const cleanup = (handler?: () => void, timer?: NodeJS.Timeout) => {
+          const handler = () => {
             if (resolved) return;
             resolved = true;
-            if (handler) {
-              this.removeListener('init-received', handler);
-            }
-            if (timer) {
-              clearTimeout(timer);
-            }
-          };
-
-          const handler = () => {
-            cleanup(handler, timer);
+            if (timer) clearTimeout(timer);
             resolve(true);
           };
 
+          const cleanup = () => {
+            this.removeListener('init-received', handler);
+            if (timer) clearTimeout(timer);
+          };
+
+          this.on('init-received', handler);
+
           const timer = setTimeout(() => {
-            cleanup(handler, timer);
+            if (resolved) return;
+            resolved = true;
+            this.removeListener('init-received', handler);
             resolve(false);
           }, timeoutMs);
 
-          this.on('init-received', handler);
+          try {
+            this.sendCommand(initCommand);
+          } catch (error) {
+            cleanup();
+            reject(error);
+          }
         });
 
         if (received) {
@@ -590,17 +592,19 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           return;
         }
 
-        // If not received, will retry
-        this.logger.warn(`[ProxyManager] Init not acknowledged, attempt ${attempt + 1}/${maxRetries + 1}`);
+        this.logger.warn(
+          `[ProxyManager] Init not acknowledged, attempt ${attempt + 1}/${maxRetries + 1}`
+        );
       } catch (error) {
         lastError = error as Error;
-        this.logger.warn(`[ProxyManager] Error sending init on attempt ${attempt + 1}: ${lastError.message}`);
+        this.logger.warn(
+          `[ProxyManager] Error sending init on attempt ${attempt + 1}: ${lastError.message}`
+        );
       }
 
-      // Wait before retry (except on last attempt)
       if (attempt < maxRetries) {
         const waitMs = delays[Math.min(attempt, delays.length - 1)];
-        await new Promise(resolve => setTimeout(resolve, waitMs));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
       }
     }
 
