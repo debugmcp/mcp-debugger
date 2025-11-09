@@ -556,19 +556,34 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // Send init command
         this.sendCommand(initCommand);
 
-        // Wait for init_received acknowledgment
-        const received = await Promise.race([
-          new Promise<boolean>((resolve) => {
-            const handler = () => {
+        // Wait for init_received acknowledgment with proper cleanup
+        const timeoutMs = delays[Math.min(attempt, delays.length - 1)];
+        const received = await new Promise<boolean>((resolve) => {
+          let resolved = false;
+
+          const cleanup = (handler?: () => void, timer?: NodeJS.Timeout) => {
+            if (resolved) return;
+            resolved = true;
+            if (handler) {
               this.removeListener('init-received', handler);
-              resolve(true);
-            };
-            this.on('init-received', handler);
-          }),
-          new Promise<boolean>((resolve) =>
-            setTimeout(() => resolve(false), delays[Math.min(attempt, delays.length - 1)])
-          )
-        ]);
+            }
+            if (timer) {
+              clearTimeout(timer);
+            }
+          };
+
+          const handler = () => {
+            cleanup(handler, timer);
+            resolve(true);
+          };
+
+          const timer = setTimeout(() => {
+            cleanup(handler, timer);
+            resolve(false);
+          }, timeoutMs);
+
+          this.on('init-received', handler);
+        });
 
         if (received) {
           this.logger.info(`[ProxyManager] Init command acknowledged on attempt ${attempt + 1}`);
@@ -584,7 +599,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       // Wait before retry (except on last attempt)
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, delays[Math.min(attempt, delays.length - 1)]));
+        const waitMs = delays[Math.min(attempt, delays.length - 1)];
+        await new Promise(resolve => setTimeout(resolve, waitMs));
       }
     }
 
