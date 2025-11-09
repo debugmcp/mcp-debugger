@@ -548,7 +548,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   private async sendInitWithRetry(initCommand: object): Promise<void> {
     const maxRetries = 5;
-    const delays = [100, 200, 400, 800, 1600]; // Exponential backoff
+    const delays = [500, 1000, 2000, 4000, 8000]; // More generous backoff for Windows CI
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
