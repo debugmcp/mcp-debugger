@@ -273,6 +273,7 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
       process.stderr.write(
         `[Workflow Test] Dry run failure payload: ${JSON.stringify(parsedDryRunResult)}\n`
       );
+      persistFailurePayload('python-debug-workflow-dry-run', parsedDryRunResult);
     }
     console.log('[Test] Dry run start_debugging result:', JSON.stringify(parsedDryRunResult, null, 2));
     if (!parsedDryRunResult.success) {
@@ -294,3 +295,14 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
     console.log(`[Test] Closed dry run session: ${dryRunSessionId}`);
   });
 }, 60000); // 60 seconds timeout for the entire suite
+function persistFailurePayload(testName: string, payload: unknown): void {
+  try {
+    const baseDir = path.resolve('logs/tests/adapters/failures');
+    fs.mkdirSync(baseDir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filePath = path.join(baseDir, `${testName}-${timestamp}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch (error) {
+    console.error(`[Workflow Test] Failed to persist failure payload: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}

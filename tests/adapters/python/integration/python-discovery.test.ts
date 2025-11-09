@@ -4,6 +4,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensurePythonOnPath } from './env-utils.js';
+import fs from 'fs';
 
 // DO NOT mock Python discovery - we want to test the real implementation
 // This test should fail on Windows if python3 is the Microsoft Store redirect
@@ -118,6 +119,7 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
       process.stderr.write(
         `[Discovery Test] start_debugging failure payload: ${JSON.stringify(startResult)}\n`
       );
+      persistFailurePayload('python-discovery', startResult);
     }
 
     // This should succeed if Python discovery works correctly
@@ -135,3 +137,15 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
   // where we can mock the environment. Integration tests run in environments where
   // Python is typically available, making it impractical to test this scenario here.
 });
+
+function persistFailurePayload(testName: string, payload: unknown): void {
+  try {
+    const baseDir = path.resolve('logs/tests/adapters/failures');
+    fs.mkdirSync(baseDir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filePath = path.join(baseDir, `${testName}-${timestamp}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch (error) {
+    console.error(`[Discovery Test] Failed to persist failure payload: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
