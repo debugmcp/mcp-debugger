@@ -245,6 +245,7 @@ export class DapProxyWorker {
 
   /**
    * Handle dry run mode
+   * Includes Windows IPC message flushing fixes
    */
   private handleDryRun(payload: ProxyInitPayload): void {
     // Get adapter spawn config from policy
@@ -266,10 +267,25 @@ export class DapProxyWorker {
     this.logger!.warn(`[Worker DRY_RUN] Would execute: ${fullCommand}`);
     this.logger!.warn(`[Worker DRY_RUN] Script to debug: ${payload.scriptPath}`);
     
-    this.sendStatus('dry_run_complete', { command: fullCommand, script: payload.scriptPath });
+    // Send dry run complete status
+    this.sendStatus('dry_run_complete', { 
+      command: fullCommand, 
+      script: payload.scriptPath 
+    });
     
-    this.state = ProxyState.TERMINATED;
-    this.logger!.info('[Worker DRY_RUN] Dry run complete. State set to TERMINATED.');
+    // For IPC, ensure the message is flushed before terminating
+    // Use setImmediate to allow the event loop to process the IPC send
+    // This is crucial on Windows where IPC messages can be lost if the process exits too quickly
+    setImmediate(() => {
+      this.state = ProxyState.TERMINATED;
+      this.logger!.info('[Worker DRY_RUN] Dry run complete. State set to TERMINATED after message flush.');
+
+      // Give a bit more time for IPC to flush on Windows
+      // Use the exit hook to allow tests to override this behavior
+      setTimeout(() => {
+        this.exitHook(0);
+      }, 100);
+    });
   }
 
   /**
@@ -443,32 +459,18 @@ export class DapProxyWorker {
   }
 
   /**
-   * Handle DAP command
+   * Handle DAP commands from the parent process
    */
-  async handleDapCommand(payload: DapCommandPayload): Promise<void> {
-    const stateLabel = this.state;
-    this.logger?.info(
-      `[Worker] handleDapCommand '${payload.dapCommand}' session=${payload.sessionId} state=${stateLabel} queueLength=${this.commandQueue.length}`
-    );
-
-    // If shutting down, fail fast
-    if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
-      this.sendDapResponse(payload.requestId, false, undefined, 'Proxy is shutting down');
-      return;
-    }
-
-    // Queue or fail-fast any DAP requests until the transport is connected
-    if (!this.dapClient || this.state !== ProxyState.CONNECTED) {
-      if (this.adapterPolicy.requiresCommandQueueing()) {
-        this.logger?.info(`[Worker] Queuing '${payload.dapCommand}' until DAP client connected (${this.adapterPolicy.name}).`);
+  private async handleDapCommand(payload: DapCommandPayload): Promise<void> {
+    // Check if we're connected
+    if (!this.dapClient) {
+      if (this.state === ProxyState.INITIALIZING) {
         this.preConnectQueue.push(payload);
-        this.logger?.info(
-          `[Worker] Pre-connect queue length=${this.preConnectQueue.length} (command='${payload.dapCommand}')`
-        );
-      } else {
-        this.logger?.info(`[Worker] Rejecting '${payload.dapCommand}' before connection: DAP client not connected`);
-        this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
+        this.logger?.info(`[Worker] Queued pre-connect DAP command: ${payload.dapCommand}`);
+        return;
       }
+      
+      this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
       return;
     }
 
