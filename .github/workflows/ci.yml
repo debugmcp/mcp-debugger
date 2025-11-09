@@ -57,6 +57,16 @@ jobs:
       env:
         CI: true
     
+    - name: Upload Windows test diagnostics
+      if: failure() && matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-test-diagnostics
+        path: |
+          tests/**/*.log
+          dist/**/*.log
+        if-no-files-found: warn
+    
     - name: Upload coverage reports
       uses: actions/upload-artifact@v4
       if: matrix.os == 'ubuntu-latest'
