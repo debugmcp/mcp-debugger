@@ -43,12 +43,13 @@ class WhichCommandFinder implements CommandFinder {
     }
 
     const isWindows = process.platform === 'win32';
+    const verboseDiscovery = process.env.DEBUG_PYTHON_DISCOVERY === 'true';
     try {
       // Fix for Windows: which library fails if PATH is undefined but Path exists
       // Windows env vars are case-insensitive, but Node.js treats them as case-sensitive
       if (isWindows) {
         // Diagnostic logging in CI to understand the issue
-        if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
+        if (verboseDiscovery) {
           const pathEntries = process.env.PATH?.split(';') || [];
           console.error(`[Python Discovery] Looking for command: ${cmd}`);
           console.error(`[Python Discovery] Environment:`, {
@@ -80,7 +81,7 @@ class WhichCommandFinder implements CommandFinder {
 
         if (!process.env.PATH && process.env.Path) {
           process.env.PATH = process.env.Path;
-          if (process.env.CI === 'true') {
+          if (verboseDiscovery) {
             console.error(`[Python Discovery] Copied Path to PATH`);
           }
         }
@@ -95,7 +96,7 @@ class WhichCommandFinder implements CommandFinder {
         return candidates.filter((candidate) => {
           const normalized = candidate.replace(/\//g, '\\').toLowerCase();
           const isShim = shimPattern.test(normalized);
-          if (isShim && (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY)) {
+          if (isShim && verboseDiscovery) {
             console.error(`[Python Discovery] Skipping Windows Store alias for ${cmd}: ${candidate}`);
           }
           return !isShim;
@@ -146,7 +147,7 @@ class WhichCommandFinder implements CommandFinder {
       }
       return resolved;
     } catch (error) {
-      if (process.env.CI === 'true' || process.env.DEBUG_PYTHON_DISCOVERY) {
+      if (verboseDiscovery) {
         const err = error as Error & {
           code?: string;
           errno?: number;
@@ -290,8 +291,10 @@ export async function findPythonExecutable(
 
   logger.debug?.(`[Python Detection] Starting discovery...`);
 
-  // Force visible logging in CI
-  if (process.env.CI === 'true' && isWindows) {
+  const verboseDiscovery = process.env.DEBUG_PYTHON_DISCOVERY === 'true';
+
+  // Optional verbose logging in CI (disabled unless explicitly requested)
+  if (verboseDiscovery && isWindows) {
     const pathEntries = process.env.PATH?.split(';') || [];
     const pythonPaths = pathEntries.filter(p => p.toLowerCase().includes('python'));
 
@@ -308,7 +311,6 @@ export async function findPythonExecutable(
       nodeVersion: process.version
     };
     console.log('[PYTHON_DISCOVERY_DEBUG]', JSON.stringify(debugInfo));
-    // Also log to error and use logger
     console.error('[PYTHON_DISCOVERY_DEBUG]', JSON.stringify(debugInfo));
     logger.error?.('[PYTHON_DISCOVERY_DEBUG] ' + JSON.stringify(debugInfo));
 
@@ -433,7 +435,7 @@ export async function findPythonExecutable(
   // No Python found at all
   const triedList = triedPaths.map(p => `  - ${p}`).join('\n');
 
-  // Log failure details in CI
+  // Log failure details (keep concise by default in CI)
   if (process.env.CI === 'true') {
     const failureInfo = {
       platform: process.platform,
@@ -442,8 +444,11 @@ export async function findPythonExecutable(
       PATH: process.env.PATH ? 'defined' : 'undefined',
       Path: process.env.Path ? 'defined' : 'undefined'
     };
-    console.log('[PYTHON_DISCOVERY_FAILED]', JSON.stringify(failureInfo, null, 2));
-    console.error('[PYTHON_DISCOVERY_FAILED]', JSON.stringify(failureInfo, null, 2));
+    logger.error?.('[PYTHON_DISCOVERY_FAILED]' + JSON.stringify(failureInfo));
+    if (verboseDiscovery) {
+      console.log('[PYTHON_DISCOVERY_FAILED]', JSON.stringify(failureInfo, null, 2));
+      console.error('[PYTHON_DISCOVERY_FAILED]', JSON.stringify(failureInfo, null, 2));
+    }
   }
 
   throw new Error(

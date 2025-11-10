@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -11,7 +12,8 @@ import {
   SessionNotFoundError,
   SessionTerminatedError,
   ProxyNotRunningError,
-  PythonNotFoundError
+  PythonNotFoundError,
+  DebugSessionCreationError
 } from '../../src/errors/debug-errors';
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
 
@@ -36,14 +38,18 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     mockProxyManager = {
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
-      sendDapRequest: vi.fn(),
+      sendDapRequest: vi.fn().mockResolvedValue({}),
       stop: vi.fn(),
       once: vi.fn(),
       off: vi.fn(),
       removeListener: vi.fn(),
       on: vi.fn(),
-      start: vi.fn()
+      start: vi.fn().mockResolvedValue(undefined)
     };
+    mockProxyManager.on.mockImplementation(() => mockProxyManager);
+    mockProxyManager.off.mockImplementation(() => mockProxyManager);
+    mockProxyManager.once.mockImplementation(() => mockProxyManager);
+    mockProxyManager.removeListener.mockImplementation(() => mockProxyManager);
 
     // Create mock session (aligned with new session model)
     mockSession = {
@@ -70,7 +76,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return session;
       }),
       update: vi.fn(),
-      updateState: vi.fn(),
+      updateState: vi.fn().mockImplementation((_sessionId: string, newState: SessionState) => {
+        mockSession.state = newState;
+      }),
       delete: vi.fn(),
       getAll: vi.fn().mockReturnValue([mockSession])
     };
@@ -136,6 +144,104 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       await expect(
         (operations as any).startProxyManager(mockSession, 'script.py')
       ).rejects.toBeInstanceOf(PythonNotFoundError);
+    });
+
+    it('throws when log directory cannot be verified after creation', async () => {
+      mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(false);
+
+      await expect(
+        (operations as any).startProxyManager(mockSession, 'script.py')
+      ).rejects.toThrow(/could not be created/);
+    });
+
+    it('wraps unresolved executable errors for non-python languages', async () => {
+      mockSession.language = 'javascript';
+      const adapterStub = {
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('node missing')),
+        buildAdapterCommand: vi.fn()
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      await expect(
+        (operations as any).startProxyManager(mockSession, 'app.js')
+      ).rejects.toBeInstanceOf(DebugSessionCreationError);
+    });
+
+    it('starts proxy manager with resolved configuration', async () => {
+      const originalCI = process.env.CI;
+      const originalGitHub = process.env.GITHUB_ACTIONS;
+      process.env.CI = 'true';
+      delete process.env.GITHUB_ACTIONS;
+
+      const proxyInstance: any = {
+        ...mockProxyManager,
+        start: vi.fn().mockResolvedValue(undefined),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn()
+      };
+      proxyInstance.on.mockReturnValue(proxyInstance);
+      proxyInstance.off.mockReturnValue(proxyInstance);
+      proxyInstance.once.mockReturnValue(proxyInstance);
+      proxyInstance.removeListener.mockReturnValue(proxyInstance);
+      mockDependencies.proxyManagerFactory.create.mockReturnValueOnce(proxyInstance);
+
+      const scriptArgs = ['--flag'];
+      const dapArgs = { stopOnEntry: true, justMyCode: true };
+      mockSession.breakpoints.set('bp-1', {
+        id: 'bp-1',
+        file: 'script.py',
+        line: 12,
+        condition: 'x > 0',
+        verified: false
+      });
+
+      try {
+        await (operations as any).startProxyManager(
+          mockSession,
+          'script.py',
+          scriptArgs,
+          dapArgs,
+          false
+        );
+      } finally {
+        if (originalCI === undefined) {
+          delete process.env.CI;
+        } else {
+          process.env.CI = originalCI;
+        }
+        if (originalGitHub === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGitHub;
+        }
+      }
+
+      expect(mockDependencies.fileSystem.ensureDir).toHaveBeenCalled();
+      expect(mockDependencies.networkManager.findFreePort).toHaveBeenCalled();
+      expect(mockDependencies.adapterRegistry.create).toHaveBeenCalledWith(
+        mockSession.language,
+        expect.objectContaining({
+          sessionId: mockSession.id,
+          scriptPath: 'script.py',
+          scriptArgs
+        })
+      );
+      expect(proxyInstance.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: mockSession.id,
+          dryRunSpawn: false,
+          scriptPath: 'script.py',
+          scriptArgs,
+          stopOnEntry: true
+        })
+      );
+      expect(mockSession.proxyManager).toBe(proxyInstance);
+      expect(mockSessionStore.update).toHaveBeenCalledWith(
+        mockSession.id,
+        expect.objectContaining({ logDir: expect.stringContaining(`run-`) })
+      );
     });
   });
 
@@ -203,6 +309,18 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.error).toContain('did not complete within 5s');
       
       vi.useRealTimers();
+    });
+
+    it('handles stepOut when internal execution rejects', async () => {
+      mockSession.state = SessionState.PAUSED;
+      const execSpy = vi.spyOn(operations as any, '_executeStepOperation').mockRejectedValue(new Error('internal failure'));
+
+      const result = await operations.stepOut('test-session');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('internal failure');
+      expect(mockSession.state).toBe(SessionState.ERROR);
+      execSpy.mockRestore();
     });
   });
 
@@ -483,25 +601,235 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
   });
 
+  describe('Evaluate Expression Success Scenarios', () => {
+    it('evaluates expression after resolving stack trace frame', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.isRunning.mockReturnValue(true);
+      mockProxyManager.getCurrentThreadId.mockReturnValue(5);
+
+      mockProxyManager.sendDapRequest.mockImplementation(
+        async (command: string, args: unknown) => {
+          if (command === 'stackTrace') {
+            return {
+              body: {
+                stackFrames: [{ id: 123 }],
+              },
+            };
+          }
+          if (command === 'evaluate') {
+            return {
+              body: {
+                result: '42',
+                type: 'int',
+                variablesReference: 0,
+                namedVariables: 1,
+                indexedVariables: 0,
+              },
+            };
+          }
+          return {};
+        }
+      );
+
+      const result = await operations.evaluateExpression('test-session', '6*7');
+
+      expect(result.success).toBe(true);
+      expect(result.result).toBe('42');
+      expect(result.type).toBe('int');
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'stackTrace',
+        expect.objectContaining({ threadId: 5 })
+      );
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'evaluate',
+        expect.objectContaining({ expression: '6*7', frameId: 123 })
+      );
+    });
+  });
+
   describe('Start Debugging Error Scenarios', () => {
+    it('should return timeout result when dry run never completes', async () => {
+      const originalCI = process.env.CI;
+      const originalGitHub = process.env.GITHUB_ACTIONS;
+      process.env.CI = 'true';
+      delete process.env.GITHUB_ACTIONS;
+
+      const dryRunProxy = {
+        ...mockProxyManager,
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        getDryRunSnapshot: vi.fn().mockReturnValue({ command: 'python -m debugpy', script: 'dry-run.py' })
+      };
+      mockSession.proxyManager = dryRunProxy;
+      mockSession.state = SessionState.INITIALIZING;
+
+      vi.spyOn(operations as any, 'startProxyManager').mockResolvedValue(undefined);
+      vi.spyOn(operations as any, 'waitForDryRunCompletion').mockResolvedValue(false);
+
+      let result;
+      try {
+        result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
+      } finally {
+        if (originalCI === undefined) {
+          delete process.env.CI;
+        } else {
+          process.env.CI = originalCI;
+        }
+        if (originalGitHub === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGitHub;
+        }
+      }
+
+      expect((operations as any).startProxyManager).toHaveBeenCalledTimes(1);
+      expect((operations as any).waitForDryRunCompletion).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'test-session' }),
+        expect.any(Number)
+      );
+      expect(result!.success).toBe(false);
+      expect(result!.error).toContain('Dry run timed out');
+    });
+
+    it('returns success immediately when dry run already completed', async () => {
+      const originalCI = process.env.CI;
+      const originalGitHub = process.env.GITHUB_ACTIONS;
+      process.env.CI = 'true';
+      delete process.env.GITHUB_ACTIONS;
+
+      const dryRunProxy = {
+        ...mockProxyManager,
+        hasDryRunCompleted: vi.fn().mockReturnValue(true),
+        getDryRunSnapshot: vi.fn().mockReturnValue({ command: 'python -m debugpy', script: 'dry-run.py' }),
+      };
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.STOPPED;
+      mockSessionStore.getOrThrow.mockReturnValue(mockSession);
+
+      const waitSpy = vi.spyOn(operations as any, 'waitForDryRunCompletion');
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = dryRunProxy as any;
+      });
+
+      let result;
+      try {
+        result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
+      } finally {
+        if (originalCI === undefined) {
+          delete process.env.CI;
+        } else {
+          process.env.CI = originalCI;
+        }
+        if (originalGitHub === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGitHub;
+        }
+      }
+
+      expect(result!.success).toBe(true);
+      expect(result!.state).toBe(SessionState.STOPPED);
+      expect(result!.data?.dryRun).toBe(true);
+      expect(dryRunProxy.getDryRunSnapshot).toHaveBeenCalled();
+      expect(waitSpy).not.toHaveBeenCalled();
+    });
+
     it('should handle startDebugging with proxy creation failure', async () => {
+      const originalCI = process.env.CI;
+      const originalGitHub = process.env.GITHUB_ACTIONS;
+      process.env.CI = 'true';
+      delete process.env.GITHUB_ACTIONS;
+
       mockDependencies.proxyManagerFactory.create.mockImplementation(() => {
         throw new Error('Port allocation failed');
       });
 
-      const result = await operations.startDebugging('test-session', 'test.py');
+      let result;
+      try {
+        result = await operations.startDebugging('test-session', 'test.py');
+      } finally {
+        if (originalCI === undefined) {
+          delete process.env.CI;
+        } else {
+          process.env.CI = originalCI;
+        }
+        if (originalGitHub === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGitHub;
+        }
+      }
       
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Port allocation failed');
+      expect(result!.success).toBe(false);
+      expect(result!.error).toContain('Port allocation failed');
     });
 
     it('should handle startDebugging with launch failure', async () => {
+      const originalCI = process.env.CI;
+      const originalGitHub = process.env.GITHUB_ACTIONS;
+      process.env.CI = 'true';
+      delete process.env.GITHUB_ACTIONS;
+
       mockProxyManager.start.mockRejectedValue(new Error('Failed to launch debuggee'));
 
-      const result = await operations.startDebugging('test-session', 'test.py');
+      let result;
+      try {
+        result = await operations.startDebugging('test-session', 'test.py');
+      } finally {
+        if (originalCI === undefined) {
+          delete process.env.CI;
+        } else {
+          process.env.CI = originalCI;
+        }
+        if (originalGitHub === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGitHub;
+        }
+      }
       
+      expect(result!.success).toBe(false);
+      expect(result!.error).toContain('Failed to launch debuggee');
+    });
+
+    it('captures proxy log tail when initialization throws', async () => {
+      mockSession.logDir = '/tmp/session-logs';
+      mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
+      mockDependencies.fileSystem.readFile.mockResolvedValueOnce('first line\nsecond line\nthird line');
+
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('Proxy failed to initialize'));
+
+      const result = await operations.startDebugging('test-session', 'test.py');
+
       expect(result.success).toBe(false);
-      expect(result.error).toContain('Failed to launch debuggee');
+      expect(result.error).toContain('Proxy failed to initialize');
+      expect(mockDependencies.fileSystem.pathExists).toHaveBeenCalledWith(
+        path.join('/tmp/session-logs', 'proxy-test-session.log')
+      );
+      expect(mockDependencies.fileSystem.readFile).toHaveBeenCalled();
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+      expect(mockSession.proxyManager).toBeUndefined();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Detailed error in startDebugging'),
+        expect.objectContaining({ proxyLogTail: expect.stringContaining('second line') })
+      );
+    });
+
+    it('records log read failure when tail cannot be captured', async () => {
+      mockSession.logDir = '/tmp/session-logs';
+      mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
+      mockDependencies.fileSystem.readFile.mockRejectedValueOnce(new Error('permission denied'));
+
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('Proxy start error'));
+
+      const result = await operations.startDebugging('test-session', 'test.py');
+
+      expect(result.success).toBe(false);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Detailed error in startDebugging'),
+        expect.objectContaining({
+          proxyLogTail: expect.stringContaining('Failed to read proxy log')
+        })
+      );
     });
 
     it('should handle startDebugging when already debugging', async () => {
@@ -522,6 +850,423 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       
       // Should close existing session and start new one
       expect((operations as any).closeSession).toHaveBeenCalledWith('test-session');
+    });
+  });
+
+  describe('Start Debugging Success Scenarios', () => {
+    it('completes handshake and waits for stop event', async () => {
+      const originalCI = process.env.CI;
+      const originalGitHub = process.env.GITHUB_ACTIONS;
+      process.env.CI = 'true';
+      delete process.env.GITHUB_ACTIONS;
+
+      const proxyStub: any = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        isRunning: vi.fn().mockReturnValue(true)
+      };
+      proxyStub.on.mockReturnValue(proxyStub);
+      proxyStub.off.mockReturnValue(proxyStub);
+      proxyStub.removeListener.mockReturnValue(proxyStub);
+      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
+        if (event === 'stopped') {
+          mockSession.state = SessionState.PAUSED;
+          handler();
+        }
+        return proxyStub;
+      });
+
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+      });
+
+      const policy = {
+        performHandshake: vi.fn().mockResolvedValue(undefined),
+        isSessionReady: vi.fn().mockImplementation(
+          (state: SessionState) => state === SessionState.PAUSED
+        ),
+      };
+      const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
+
+      let result: any;
+      try {
+        result = await operations.startDebugging('test-session', 'main.py', undefined, { stopOnEntry: true });
+      } finally {
+        startProxySpy.mockRestore();
+        selectPolicySpy.mockRestore();
+        if (originalCI === undefined) {
+          delete process.env.CI;
+        } else {
+          process.env.CI = originalCI;
+        }
+        if (originalGitHub === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGitHub;
+        }
+      }
+
+      expect(policy.performHandshake).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'test-session' })
+      );
+      expect(policy.isSessionReady).toHaveBeenCalled();
+      expect(result?.success).toBe(true);
+      expect(result?.state).toBe(SessionState.PAUSED);
+      expect(result?.data?.reason).toBe('entry');
+    });
+
+    it('handles dry run completion after waiting', async () => {
+      const originalCI = process.env.CI;
+      const originalGitHub = process.env.GITHUB_ACTIONS;
+      process.env.CI = 'true';
+      delete process.env.GITHUB_ACTIONS;
+
+      const dryRunProxy: any = {
+        getDryRunSnapshot: vi.fn().mockReturnValue({ command: 'python -m debugpy', script: 'wait.py' }),
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+      };
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.INITIALIZING;
+
+      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = dryRunProxy;
+      });
+      const waitSpy = vi.spyOn(operations as any, 'waitForDryRunCompletion').mockResolvedValue(true);
+
+      let result: any;
+      try {
+        result = await operations.startDebugging('test-session', 'wait.py', undefined, undefined, true);
+      } finally {
+        startProxySpy.mockRestore();
+        if (originalCI === undefined) {
+          delete process.env.CI;
+        } else {
+          process.env.CI = originalCI;
+        }
+        if (originalGitHub === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGitHub;
+        }
+      }
+
+      expect(waitSpy).toHaveBeenCalled();
+      waitSpy.mockRestore();
+      expect(result?.success).toBe(true);
+      expect(result?.data?.dryRun).toBe(true);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Dry run completed for session test-session')
+      );
+    });
+
+    it('skips readiness wait when policy reports session ready', async () => {
+      const proxyStub: any = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        isRunning: vi.fn().mockReturnValue(true)
+      };
+      proxyStub.once.mockReturnValue(proxyStub);
+      proxyStub.removeListener.mockReturnValue(proxyStub);
+
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.INITIALIZING;
+
+      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+        mockSession.state = SessionState.PAUSED;
+      });
+
+      const policy = {
+        performHandshake: vi.fn().mockResolvedValue(undefined),
+        isSessionReady: vi.fn().mockReturnValue(true),
+      };
+      const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
+
+      let result: any;
+      try {
+        result = await operations.startDebugging('test-session', 'main.py');
+      } finally {
+        startProxySpy.mockRestore();
+        selectPolicySpy.mockRestore();
+      }
+
+      expect(policy.performHandshake).toHaveBeenCalled();
+      expect(policy.isSessionReady).toHaveBeenCalled();
+      expect(proxyStub.once).not.toHaveBeenCalled();
+      expect(proxyStub.removeListener).not.toHaveBeenCalled();
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('skipping adapter readiness wait')
+      );
+      expect(result?.success).toBe(true);
+      expect(result?.state).toBe(SessionState.PAUSED);
+    });
+
+    it('logs warning when handshake throws but continues', async () => {
+      const proxyStub: any = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        isRunning: vi.fn().mockReturnValue(true)
+      };
+      proxyStub.once.mockReturnValue(proxyStub);
+      proxyStub.removeListener.mockReturnValue(proxyStub);
+
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.INITIALIZING;
+
+      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+        mockSession.state = SessionState.PAUSED;
+      });
+
+      const policy = {
+        performHandshake: vi.fn().mockRejectedValue(new Error('handshake failed')),
+        isSessionReady: vi.fn().mockReturnValue(true),
+      };
+      const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
+
+      try {
+        const result = await operations.startDebugging('test-session', 'handshake.py');
+        expect(result.success).toBe(true);
+      } finally {
+        startProxySpy.mockRestore();
+        selectPolicySpy.mockRestore();
+      }
+
+      expect(policy.performHandshake).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Language handshake returned with warning/error')
+      );
+    });
+
+    it('warns when adapter readiness wait times out', async () => {
+      vi.useFakeTimers();
+      const proxyStub: any = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        isRunning: vi.fn().mockReturnValue(true)
+      };
+      proxyStub.once.mockReturnValue(proxyStub);
+      proxyStub.removeListener.mockReturnValue(proxyStub);
+      proxyStub.on.mockReturnValue(proxyStub);
+      proxyStub.off.mockReturnValue(proxyStub);
+
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.INITIALIZING;
+
+      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+      });
+
+      const policy = {
+        performHandshake: vi.fn().mockResolvedValue(undefined),
+        isSessionReady: vi.fn().mockReturnValue(false),
+      };
+      const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
+
+      const startPromise = operations.startDebugging('test-session', 'timeout.py');
+      await vi.advanceTimersByTimeAsync(30000);
+      const result = await startPromise;
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Timed out waiting for debug adapter to be ready')
+      );
+      expect(result.success).toBe(true);
+
+      startProxySpy.mockRestore();
+      selectPolicySpy.mockRestore();
+      vi.useRealTimers();
+    });
+  });
+
+  describe('waitForDryRunCompletion behaviour', () => {
+    it('returns true immediately if already completed', async () => {
+      const proxyStub = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(true),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+      };
+      const session = { ...mockSession, proxyManager: proxyStub } as any;
+      const result = await (operations as any).waitForDryRunCompletion(session, 500);
+      expect(result).toBe(true);
+      expect(proxyStub.once).not.toHaveBeenCalled();
+    });
+
+    it('resolves true when dry-run-complete event fires', async () => {
+      let capturedHandler: (() => void) | undefined;
+      const proxyStub = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn((event: string, handler: () => void) => {
+          if (event === 'dry-run-complete') {
+            capturedHandler = handler;
+          }
+        }),
+        removeListener: vi.fn(),
+      };
+      const session = { ...mockSession, proxyManager: proxyStub } as any;
+
+      const waitPromise = (operations as any).waitForDryRunCompletion(session, 1000);
+      expect(capturedHandler).toBeDefined();
+      capturedHandler?.();
+      const result = await waitPromise;
+      expect(result).toBe(true);
+      expect(proxyStub.removeListener).toHaveBeenCalledWith('dry-run-complete', expect.any(Function));
+    });
+
+    it('resolves true when completion detected during timeout window', async () => {
+      vi.useFakeTimers();
+      let callCount = 0;
+      const proxyStub = {
+        hasDryRunCompleted: vi.fn().mockImplementation(() => {
+          callCount += 1;
+          return callCount > 1;
+        }),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+      };
+      const session = { ...mockSession, proxyManager: proxyStub } as any;
+
+      const waitPromise = (operations as any).waitForDryRunCompletion(session, 400);
+      await vi.advanceTimersByTimeAsync(400);
+      const result = await waitPromise;
+      expect(result).toBe(true);
+      expect(proxyStub.removeListener).toHaveBeenCalledWith('dry-run-complete', expect.any(Function));
+      vi.useRealTimers();
+    });
+
+    it('returns false when timeout elapses without completion', async () => {
+      vi.useFakeTimers();
+      const proxyStub = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+      };
+      const session = { ...mockSession, proxyManager: proxyStub } as any;
+
+      const waitPromise = (operations as any).waitForDryRunCompletion(session, 400);
+      await vi.advanceTimersByTimeAsync(400);
+      const result = await waitPromise;
+      expect(result).toBe(false);
+      vi.useRealTimers();
+    });
+  });
+
+  describe('_executeStepOperation behaviour', () => {
+    it('returns failure when proxy manager unavailable', async () => {
+      const session = { ...mockSession, proxyManager: undefined, state: SessionState.PAUSED } as any;
+
+      const result = await (operations as any)._executeStepOperation(session, session.id, {
+        command: 'next',
+        threadId: 1,
+        logTag: 'stepOver',
+        successMessage: 'Step completed.',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Proxy manager unavailable');
+    });
+
+    it('resolves success when stopped event fires', async () => {
+      const handlers: Record<string, Function> = {};
+      const proxyStub: any = {
+        on: vi.fn((event: string, handler: Function) => {
+          handlers[event] = handler;
+          return proxyStub;
+        }),
+        off: vi.fn(() => proxyStub),
+        sendDapRequest: vi.fn().mockResolvedValue(undefined),
+      };
+      const session = { ...mockSession, proxyManager: proxyStub, state: SessionState.PAUSED } as any;
+
+      const promise = (operations as any)._executeStepOperation(session, session.id, {
+        command: 'next',
+        threadId: 1,
+        logTag: 'stepOver',
+        successMessage: 'Step completed.',
+      });
+
+      expect(proxyStub.on).toHaveBeenCalledWith('stopped', expect.any(Function));
+      handlers['stopped']?.();
+
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(result.data?.message).toBe('Step completed.');
+      expect(proxyStub.off).toHaveBeenCalledWith('stopped', expect.any(Function));
+      expect(proxyStub.sendDapRequest).toHaveBeenCalledWith('next', { threadId: 1 });
+      expect(mockSessionStore.updateState).toHaveBeenCalledWith(session.id, SessionState.RUNNING);
+    });
+  });
+
+  describe('Operation Success Scenarios', () => {
+    it('continues execution and updates session state', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.isRunning.mockReturnValue(true);
+      mockProxyManager.getCurrentThreadId.mockReturnValue(7);
+      mockProxyManager.sendDapRequest.mockResolvedValue(undefined);
+
+      const result = await operations.continue('test-session');
+
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('continue', { threadId: 7 });
+      expect(mockSessionStore.updateState).toHaveBeenCalledWith('test-session', SessionState.RUNNING);
+      expect(result.success).toBe(true);
+      expect(mockSession.state).toBe(SessionState.RUNNING);
+    });
+  });
+
+  describe('waitForInitialBreakpointPause behaviour', () => {
+    it('returns false when no proxy manager present', async () => {
+      mockSession.proxyManager = undefined;
+      const result = await (operations as any).waitForInitialBreakpointPause('test-session', 200);
+      expect(result).toBe(false);
+    });
+
+    it('returns true immediately when session already paused', async () => {
+      mockSession.state = SessionState.PAUSED;
+      const result = await (operations as any).waitForInitialBreakpointPause('test-session', 200);
+      expect(result).toBe(true);
+    });
+
+    it('resolves true when stopped event fires before timeout', async () => {
+      let captured: (() => void) | undefined;
+      mockProxyManager.once.mockImplementation((event: string, handler: () => void) => {
+        if (event === 'stopped') {
+          captured = handler;
+        }
+        return mockProxyManager;
+      });
+      mockProxyManager.removeListener.mockReturnValue(mockProxyManager);
+
+      const waitPromise = (operations as any).waitForInitialBreakpointPause('test-session', 500);
+      expect(captured).toBeDefined();
+      captured?.();
+      const result = await waitPromise;
+      expect(result).toBe(true);
+    });
+
+    it('resolves false when timeout elapses without event', async () => {
+      vi.useFakeTimers();
+      mockProxyManager.once.mockImplementation(() => mockProxyManager);
+      mockProxyManager.removeListener.mockReturnValue(mockProxyManager);
+
+      const waitPromise = (operations as any).waitForInitialBreakpointPause('test-session', 300);
+      await vi.advanceTimersByTimeAsync(350);
+      const result = await waitPromise;
+      expect(result).toBe(false);
+      vi.useRealTimers();
     });
   });
 
