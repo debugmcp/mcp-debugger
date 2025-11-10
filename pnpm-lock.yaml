@@ -87,6 +87,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.1
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@22.18.6))
+      '@vitest/coverage-v8':
+        specifier: 3.2.4
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@22.18.6))
       '@vscode/debugadapter-testsupport':
         specifier: ^1.68.0
         version: 1.68.0
@@ -144,7 +147,7 @@ importers:
     dependencies:
       '@debugmcp/shared':
         specifier: 0.16.0
-        version: link:../shared
+        version: 0.16.0
       '@vscode/debugprotocol':
         specifier: ^1.68.0
         version: 1.68.0
@@ -178,7 +181,7 @@ importers:
     dependencies:
       '@debugmcp/shared':
         specifier: 0.16.0
-        version: link:../shared
+        version: 0.16.0
       '@vscode/debugprotocol':
         specifier: ^1.68.0
         version: 1.68.0
@@ -197,7 +200,7 @@ importers:
     dependencies:
       '@debugmcp/shared':
         specifier: 0.16.0
-        version: link:../shared
+        version: 0.16.0
       '@vscode/debugprotocol':
         specifier: ^1.68.0
         version: 1.68.0
@@ -342,6 +345,10 @@ packages:
 
   '@dabh/diagnostics@2.0.3':
     resolution: {integrity: sha512-hrlQOIi7hAfzsMqlGSFyVucrx38O+j6wiGOf//H2ecvIEqYN4ADBSS2iLMh5UFyDunCNniUIPk/q3riFv45xRA==}
+
+  '@debugmcp/shared@0.16.0':
+    resolution: {integrity: sha512-+qBRX5mlezeyodkyTkEvglWBJZa91n9NfPz1Q9HnRvyuU9nrNdTkfKsOXS838x98aWRiVl9HwDB1T8Qg+mNUFA==}
+    engines: {node: '>=16.0.0'}
 
   '@esbuild/aix-ppc64@0.25.10':
     resolution: {integrity: sha512-0NFWnA+7l41irNuaSVlLfgNT12caWJVLzp5eAVhZ0z1qpxbockccEt3s+149rE64VUI3Ml2zt8Nv5JVc4QXTsw==}
@@ -2626,6 +2633,10 @@ snapshots:
       colorspace: 1.1.4
       enabled: 2.0.0
       kuler: 2.0.0
+
+  '@debugmcp/shared@0.16.0':
+    dependencies:
+      '@vscode/debugprotocol': 1.68.0
 
   '@esbuild/aix-ppc64@0.25.10':
     optional: true
