@@ -1,118 +1,88 @@
 # mcp-debugger Roadmap
 
-This document outlines planned features and improvements for mcp-debugger.
+This document captures the forward-looking plan for the debugger and highlights the most recent milestones. It is meant to be a lightweight companion to the changelog.
 
-## 🚧 Unimplemented Features
+## 🎯 Active Feature Work
 
-Based on testing conducted on 2025-06-11, the following features are defined in the API but not yet implemented:
+Status snapshot as of **2025‑11‑09**:
 
-### High Priority
+### High priority
 
-#### 1. Expression Evaluation (`evaluate_expression`)
-- **Status**: Returns "Evaluate expression not yet implemented with proxy"
-- **Purpose**: Allow evaluation of arbitrary expressions in the current debugging context
-- **Use cases**:
-  - Inspect complex object properties
-  - Test conditions without modifying code
-  - Calculate values on the fly
+1. **Expression evaluation parity**
+   - ✅ Python sessions now support `evaluate_expression`
+   - ⏳ Expand result rendering (object previews, truncation) and surface better error feedback
 
-#### 2. Conditional Breakpoints
-- **Status**: Parameter exists but functionality not verified
-- **Purpose**: Set breakpoints that only trigger when conditions are met
-- **Use cases**:
-  - Debug loops with specific iterations
-  - Catch edge cases
-  - Reduce debugging noise
+2. **Conditional breakpoints polish**
+   - ✅ Server honours condition fields during dry runs
+   - ⏳ Improve verification feedback and bring feature to every adapter (JS, Python)
 
-### Medium Priority
+### Medium priority
 
-#### 3. Pause Execution (`pause_execution`)
-- **Status**: Returns "Pause execution not yet implemented with proxy"
-- **Purpose**: Pause a running program at any point
-- **Use cases**:
-  - Interrupt long-running processes
-  - Debug timing-sensitive code
-  - Handle unexpected behavior
+3. **Pause execution (`pause_execution`)**
+   - Current proxy still returns “not yet implemented”
+   - Design work in progress to integrate with proxy lifecycle hooks
 
-#### 4. Source Context (`get_source_context`)
-- **Status**: Returns "Get source context not yet fully implemented with proxy"
-- **Purpose**: Retrieve source code around a specific line
-- **Use cases**:
-  - Provide context without full file access
-  - Optimize large file handling
-  - Enable smart code navigation
+4. **Source context (`get_source_context`)**
+   - Returns limited context today; needs streaming + caching for large files
 
-### Low Priority
+### Lower priority
 
-#### 5. Remote Debugging
-- **Status**: Parameters exist (host, port) but not utilized
-- **Purpose**: Debug processes on remote machines
-- **Use cases**:
-  - Production debugging
-  - Containerized applications
-  - Distributed systems
+5. **Remote debugging**
+   - API surface exists (host/port) but not wired up
+   - Will follow once adapter transport abstraction is solidified
 
-## ✅ Recently Implemented
+## ✅ Recently Delivered
 
-These features are fully functional as of v0.9.0:
+- **v0.16.0** – First-class JavaScript adapter with TypeScript detection, js‑debug vendoring, and adapter policy orchestration
+- **v0.15.x** – Self-contained CLI bundle (npx-friendly), proxy diagnostics, Windows CI resiliency
+- Earlier releases – Core debugging primitives (session lifecycle, stepping, stack/variable inspection)
 
-- ✅ Basic debugging operations (create session, set breakpoints, start debugging)
-- ✅ Stepping operations (step over, step into, step out)
-- ✅ Variable inspection with proper scope handling
-- ✅ Stack trace navigation
-- ✅ Session management
+## 🔭 Upcoming Milestones
 
-## 🎯 Future Enhancements
+### Q4 2025
+- Ship GA-level expression evaluation (better previews, richer errors)
+- Tighten conditional breakpoint UX across adapters
+- Expose pause execution through the proxy API
 
-### Q1 2025
-- [ ] Complete expression evaluation support
-- [ ] Implement conditional breakpoints
-- [ ] Add pause execution capability
+### Q1 2026
+- Adapter-specific hinting for common runtime failures
+- Performance work for large variable payloads
+- Watch expressions prototype
 
-### Q2 2025
-- [ ] Multi-language support (JavaScript, TypeScript)
-- [ ] Enhanced error messages with suggestions
-- [ ] Performance optimizations for large variable sets
+### Q2 2026
+- Remote debugging (attach scenarios, container support)
+- Debug console commands routed through adapters
+- Publish adapter SDK / authoring guide
 
-### Q3 2025
-- [ ] Remote debugging support
-- [ ] Watch expressions
-- [ ] Debug console integration
-
-### Beyond 2025
-- [ ] Support for additional languages (Java, C++, Go)
-- [ ] Advanced breakpoint types (data breakpoints, function breakpoints)
-- [ ] Time-travel debugging capabilities
-- [ ] Integration with popular IDEs
+### Beyond 2026
+- Additional language adapters (Java, C++, Go)
+- Advanced breakpoint types (data / function)
+- Time-travel debugging exploration
+- IDE integrations (VS Code extension, JetBrains Gateway)
 
 ## 🤝 Contributing
 
-We welcome contributions! If you're interested in implementing any of these features:
+Want to help? Start by:
 
-1. Check the [GitHub Issues](https://github.com/debugmcp/mcp-debugger/issues) for existing discussions
-2. Open a new issue to discuss your implementation approach
-3. Follow the [Contributing Guidelines](./CONTRIBUTING.md)
+1. Browsing [GitHub Issues](https://github.com/debugmcp/mcp-debugger/issues) for tagged roadmap items
+2. Opening an issue to discuss your proposal
+3. Following the [Contributing Guidelines](./CONTRIBUTING.md)
 
-## 📊 Implementation Notes
+## 🧭 Implementation Notes
 
-### Known Limitations
+- **Breakpoint verification** still flips to `verified` only after the adapter confirms; UX improvements are planned.
+- **Session persistence**: intermittent Windows-specific terminations are largely resolved, but more telemetry will land after pause support.
+- **Path handling**: adapters now normalize workspace-relative paths, yet cross-filesystem debug sessions remain on the backlog.
 
-1. **Breakpoint Verification**: Breakpoints show `"verified": false` until debugging starts
-2. **Session Persistence**: Sessions may terminate unexpectedly during certain operations
-3. **Path Handling**: Uses absolute paths which may cause issues across different environments
+## 🗓 Version History (high level)
 
-### Technical Debt
-
-- Proxy architecture needs refactoring for pause/evaluate features
-- Better error handling for edge cases
-- Improved session lifecycle management
-
-## 📅 Version History
-
-- **v0.9.0** - Initial release with core debugging features
-- **v0.8.0** - Beta release with basic Python support
-- **v0.7.0** - Alpha release for testing
+- **v0.16.0** – JavaScript adapter, session policy orchestration, handshake instrumentation
+- **v0.15.0** – Bundled CLI distribution, Windows CI diagnostics, proxy log capture
+- **v0.9.0** – Initial GA with core Python debugging
+- **v0.8.0** – Beta release with foundational Python support
+- **v0.7.0** – Alpha release for internal testing
 
 ---
 
-*Last updated: 2025-06-11*
+*Last updated: 2025‑11‑09*
+
