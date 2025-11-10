@@ -177,10 +177,25 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
       name: 'step_over',
       arguments: { sessionId }
     });
-    
+
     const stepResponse = parseSdkToolResult(stepResult);
     expect(stepResponse.success).toBe(true);
     console.log('[JS Simple Smoke] ✓ Step executed');
+
+    // Verify location and context are provided
+    if (stepResponse.location) {
+      console.log('[JS Simple Smoke] Step result includes location:', stepResponse.location);
+      expect(stepResponse.location).toHaveProperty('file');
+      expect(stepResponse.location).toHaveProperty('line');
+      expect(typeof (stepResponse.location as any).line).toBe('number');
+    }
+
+    if (stepResponse.context) {
+      console.log('[JS Simple Smoke] Step result includes context');
+      expect(stepResponse.context).toHaveProperty('lineContent');
+      expect(stepResponse.context).toHaveProperty('surrounding');
+      expect(Array.isArray((stepResponse.context as any).surrounding)).toBe(true);
+    }
 
     // Wait for step to complete
     await new Promise(resolve => setTimeout(resolve, 1000));
