@@ -47,9 +47,29 @@ Adapter configuration (DAP adapter process)
 - `getAdapterModuleName(): string` — e.g., `'debugpy.adapter'`
 - `getAdapterInstallCommand(): string` — e.g., `'pip install debugpy'`
 
+Launch coordination (optional)
+- `createLaunchBarrier?(command: string, args?: unknown): AdapterLaunchBarrier | undefined`
+  - Allows an adapter to supply a coordination object when a particular DAP request (for example, `'launch'`) needs custom handling.
+  - When present, `ProxyManager` forwards proxy status messages, DAP events, and exit notifications to the barrier instead of hard-coding language logic.
+  - Typical use: js-debug’s launch flow resolves when a `stopped` event or `adapter_connected` status arrives; the adapter signals readiness via the barrier without forcing `ProxyManager` to know about JavaScript specifics.
+
 Debug configuration
 - `transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig`
 - `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
+ 
+### AdapterLaunchBarrier helper
+
+File: `packages/shared/src/interfaces/adapter-launch-barrier.ts`
+
+Adapters that implement `createLaunchBarrier` should return an object with the following responsibilities:
+- `awaitResponse: boolean` — If `false`, `ProxyManager` resolves the request once `waitUntilReady()` completes (useful for fire-and-forget launches).
+- `onRequestSent(requestId)` — Observe when the request leaves `ProxyManager`.
+- `onProxyStatus(status, message)` / `onDapEvent(event, body)` — Receive raw proxy messages to determine readiness.
+- `onProxyExit(code, signal)` — Fail fast if the proxy exits unexpectedly.
+- `waitUntilReady()` — Resolve when launch coordination is complete; reject to bubble an error.
+- `dispose()` — Clean up timers or listeners when the barrier is cleared.
+
+If `createLaunchBarrier` returns `undefined`, ProxyManager falls back to the default behavior (awaiting the DAP response).
 
 DAP protocol operations
 - `sendDapRequest<T extends DebugProtocol.Response>(command: string, args?: unknown): Promise<T>`
