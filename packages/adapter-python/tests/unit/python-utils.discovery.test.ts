@@ -50,6 +50,8 @@ describe('python-utils discovery behaviour', () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     spawnMock.mockReset();
+    delete process.env.pythonLocation;
+    delete process.env.PythonLocation;
   });
 
   afterEach(() => {

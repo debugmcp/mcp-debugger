@@ -143,7 +143,7 @@ importers:
   packages/adapter-javascript:
     dependencies:
       '@debugmcp/shared':
-        specifier: workspace:*
+        specifier: 0.16.0
         version: link:../shared
       '@vscode/debugprotocol':
         specifier: ^1.68.0
@@ -177,7 +177,7 @@ importers:
   packages/adapter-mock:
     dependencies:
       '@debugmcp/shared':
-        specifier: workspace:*
+        specifier: 0.16.0
         version: link:../shared
       '@vscode/debugprotocol':
         specifier: ^1.68.0
@@ -196,7 +196,7 @@ importers:
   packages/adapter-python:
     dependencies:
       '@debugmcp/shared':
-        specifier: workspace:*
+        specifier: 0.16.0
         version: link:../shared
       '@vscode/debugprotocol':
         specifier: ^1.68.0

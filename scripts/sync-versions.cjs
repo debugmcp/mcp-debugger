@@ -43,7 +43,7 @@ async function discoverWorkspacePackages() {
 
     for (const pattern of patterns) {
       // Convert workspace pattern to glob pattern
-      const globPattern = path.join(__dirname, '..', pattern, 'package.json');
+      const globPattern = path.join(__dirname, '..', pattern, 'package.json').replace(/\\/g, '/');
       const matches = await glob(globPattern);
 
       // Extract directory paths from matched package.json files
@@ -116,11 +116,25 @@ async function syncVersions() {
         if (pkg[depType]) {
           Object.keys(pkg[depType]).forEach(dep => {
             // Update version for any package that's part of our workspace
-            if (ourPackages.has(dep)) {
-              if (pkg[depType][dep] !== targetVersion) {
-                pkg[depType][dep] = targetVersion;
+            if (!ourPackages.has(dep)) {
+              return;
+            }
+
+            const currentSpec = pkg[depType][dep];
+
+            if (typeof currentSpec === 'string' && currentSpec.startsWith('workspace:')) {
+              // Normalise workspace protocol without forcing a publishable version
+              const normalized = currentSpec === 'workspace:*' ? currentSpec : 'workspace:*';
+              if (pkg[depType][dep] !== normalized) {
+                pkg[depType][dep] = normalized;
                 changed = true;
               }
+              return;
+            }
+
+            if (pkg[depType][dep] !== targetVersion) {
+              pkg[depType][dep] = targetVersion;
+              changed = true;
             }
           });
         }

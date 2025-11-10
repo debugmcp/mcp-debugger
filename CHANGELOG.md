@@ -7,34 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- **Build System**: Replaced esbuild with tsup for CLI bundling using `noExternal: [/./]` flag
-  - Resolves cross-package import issues in monorepo structure
-  - Creates fully self-contained bundles with all dependencies
-  - Enables reliable npx distribution without dependency installation
-- **Proxy Bundling**: Added separate proxy bundle (`proxy-bundle.cjs`) for DAP proxy process
-  - Proxy runs as separate child process with its own dependencies
-  - Simplified bootstrap logic - no environment variables required
-  - Automatic detection of bundled vs unbundled mode based on file presence
-- **JavaScript Adapter**: Updated paths to support both development and bundled distributions
+- _No changes yet._
 
-### Fixed
-- npx distribution failing due to missing cross-package imports
-- Proxy process failing in npx distribution due to missing dependencies (fs-extra, etc.)
-- JavaScript adapter not finding js-debug in bundled distribution
+## [0.16.0] - 2025-11-09
 
 ### Added
-- Comprehensive documentation for new bundling architecture in `docs/development/build-pipeline.md`
-- Bundle architecture section in `docs/architecture/system-overview.md`
-- `.gitignore` entries for mcp-debugger build artifacts (`proxy/`, `vendor/`)
+- **JavaScript adapter (Alpha)** – full debugging loop backed by bundled `js-debug`, TypeScript detector, and adapter policy orchestration
+- **Adapter documentation** – updated `docs/javascript/*` guides covering architecture, source maps, and usage
+- **Proxy session analytics** – dry-run/handshake instrumentation persisted in logs for CI triage
+
+### Changed
+- **Build system** – migrated CLI bundling from esbuild to tsup (`noExternal: [/./]`) for deterministic workspace packaging
+  - Produces self-contained `@debugmcp/mcp-debugger` bundles and trims install size
+  - Simplifies npx execution by embedding adapter assets
+- **Proxy bundling** – emitted dedicated `proxy-bundle.cjs` process with automatic runtime detection of bundled vs dev mode
+- **Adapter wiring** – session manager now loads adapters via registry/policies, enabling future language additions
+
+### Fixed
+- Resolved missing dependency errors when running via `npx` (fs-extra, etc.)
+- Ensured proxy bootstrap locates `js-debug` artifacts in bundled distributions
+- Hardened Windows dry-run handling to avoid silent exits
 
 ### Improved
-- **NPX Distribution**: Now fully self-contained with zero runtime dependencies
-  - CLI bundle (~3MB) includes all workspace packages
-  - Proxy bundle includes all proxy dependencies
-  - No `npm install` required for end users
-- **Build Performance**: Faster bundling with tsup compared to esbuild
-- **Deployment Simplicity**: Single command `npx @debugmcp/mcp-debugger stdio` just works
+- **npx distribution** – zero-runtime dependencies; CLI bundle (~3 MB) includes all workspace packages, proxy bundle ships with required modules
+- **Build performance** – faster incremental builds with tsup and shared cache
+- **Deployment simplicity** – single command `npx @debugmcp/mcp-debugger stdio` “just works”; Docker image consumes same artifact layout
+- **Documentation footprint** – refreshed build pipeline notes (`docs/development/build-pipeline.md`) and architecture overview
 
 ## [0.15.7] - 2025-09-27
 
