@@ -65,4 +65,22 @@ describe('JavascriptDebugAdapter runtime helpers', () => {
     expect(adapter.supportsFeature(DebugFeature.EVALUATE_FOR_HOVERS)).toBe(true);
     expect(adapter.supportsFeature(DebugFeature.DATA_BREAKPOINTS)).toBe(false);
   });
+
+  it('provides a launch barrier for js-debug launch coordination', async () => {
+    const adapter = new JavascriptDebugAdapter(createDependencies());
+    const barrier = adapter.createLaunchBarrier('launch');
+    expect(barrier).toBeDefined();
+    expect(barrier?.awaitResponse).toBe(false);
+    barrier?.onRequestSent('request-123');
+
+    const waiter = barrier?.waitUntilReady();
+    barrier?.onDapEvent('stopped', undefined);
+    await expect(waiter).resolves.toBeUndefined();
+    barrier?.dispose();
+  });
+
+  it('returns undefined launch barrier for non-launch commands', () => {
+    const adapter = new JavascriptDebugAdapter(createDependencies());
+    expect(adapter.createLaunchBarrier('threads')).toBeUndefined();
+  });
 });

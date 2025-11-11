@@ -77,6 +77,17 @@ Unit tests were updated to reflect the addition:
 - `DebugLanguage` should include `'javascript'`.
 - Server discovery tests validate that when `@debugmcp/adapter-javascript` is present, `installed: true` is reported for `javascript`.
 
+## Launch coordination via AdapterLaunchBarrier
+
+js-debug requires a short handoff period before clients can issue requests such as `threads` or `continue`. Previously this logic lived inside `ProxyManager`, which meant the core layer tracked a `jsDebugLaunchPending` flag, timers, and DAP event heuristics. The refactor introduces a shared hook so that the JavaScript adapter owns the behavior:
+
+- The adapter implements `createLaunchBarrier('launch')`, returning a `JsDebugLaunchBarrier` (`packages/adapter-javascript/src/utils/js-debug-launch-barrier.ts`).
+- `ProxyManager` delegates coordination to the barrier. It forwards proxy status updates, DAP events, and exit notifications without embedding language-specific branches.
+- The barrier resolves once js-debug emits a `stopped` event or the transport connection is confirmed (`adapter_connected` after a short delay); it rejects if the proxy exits prematurely.
+- Tests cover both sides: the adapter suite asserts the barrier’s behavior, and `tests/unit/proxy/proxy-manager-message-handling.test.ts` verifies that launch requests are treated as fire-and-forget when a barrier is returned.
+
+This approach keeps the core proxy orchestration language-agnostic while allowing adapters to implement bespoke synchronization when necessary.
+
 ## No auto-install (by design)
 
 Automatic installation of missing adapters is intentionally disabled by default to keep behavior explicit and reproducible. A future opt-in “install adapter” command (CLI/API) can:

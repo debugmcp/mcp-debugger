@@ -24,13 +24,15 @@ import {
   type GenericLaunchConfig,
   type LanguageSpecificLaunchConfig,
   type FeatureRequirement,
-  type AdapterCapabilities
+  type AdapterCapabilities,
+  type AdapterLaunchBarrier
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
 import { findNode } from './utils/executable-resolver.js';
 import { detectTsRunners as detectTsRunnersUtil, detectBinary } from './utils/typescript-detector.js';
 import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/config-transformer.js';
+import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
 
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
   // Cast string until DebugLanguage includes JAVASCRIPT
@@ -128,6 +130,13 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   getCurrentThreadId(): number | null {
     return this.currentThreadId;
+  }
+
+  createLaunchBarrier(command: string): AdapterLaunchBarrier | undefined {
+    if (command !== 'launch') {
+      return undefined;
+    }
+    return new JsDebugLaunchBarrier(this.dependencies.logger);
   }
 
   private transitionTo(next: AdapterState): void {

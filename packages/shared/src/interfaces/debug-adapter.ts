@@ -16,6 +16,7 @@
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { DebugLanguage } from '../models/index.js';
+import type { AdapterLaunchBarrier } from './adapter-launch-barrier.js';
 
 /**
  * Core debug adapter interface that all language adapters must implement
@@ -102,6 +103,12 @@ export interface IDebugAdapter extends EventEmitter {
    * @example 'pip install debugpy', 'npm install -g node-debug2'
    */
   getAdapterInstallCommand(): string;
+
+  /**
+   * Optionally provide a launch barrier that customizes how ProxyManager should
+   * coordinate a specific DAP request (e.g., fire-and-forget launches).
+   */
+  createLaunchBarrier?(command: string, args?: unknown): AdapterLaunchBarrier | undefined;
   
   // ===== Debug Configuration =====
   

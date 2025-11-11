@@ -22,7 +22,7 @@ import {
 } from '../dap-core/index.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
-import { IDebugAdapter } from '@debugmcp/shared';
+import { IDebugAdapter, AdapterLaunchBarrier } from '@debugmcp/shared';
 
 /**
  * Events emitted by ProxyManager
@@ -147,10 +147,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       }
     | undefined;
   private readonly runtimeEnv: ProxyRuntimeEnvironment;
-  
-  // Track js-debug launch state for proper synchronization
-  private jsDebugLaunchPending = false;
-  private jsDebugLaunchResolvers: Array<() => void> = [];
+  private activeLaunchBarrier: AdapterLaunchBarrier | null = null;
+  private activeLaunchBarrierRequestId: string | null = null;
   private proxyMessageCounter = 0;
 
   constructor(
@@ -349,67 +347,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     if (!this.proxyProcess || !this.isInitialized) {
       throw new Error('Proxy not initialized');
     }
-    
-    // For js-debug, implement proper synchronization for launch command
-    const isJsDebug =
-      !!this.adapter &&
-      typeof (this.adapter as IDebugAdapter).getAdapterModuleName === 'function' &&
-      (this.adapter as IDebugAdapter).getAdapterModuleName() === 'js-debug';
-    
-    if (isJsDebug && command === 'launch') {
-      const requestId = uuidv4();
-      const commandToSend = {
-        cmd: 'dap',
-        sessionId: this.sessionId,
-        requestId,
-        dapCommand: command,
-        dapArgs: args
-      };
-      
-      this.logger.info(`[ProxyManager] (js-debug) Sending launch command with proper synchronization: ${command}, requestId: ${requestId}`);
-      
-      // Mark that we're waiting for js-debug to be ready
-      this.jsDebugLaunchPending = true;
-      
-      try {
-        this.sendCommand(commandToSend);
-      } catch (error) {
-        this.jsDebugLaunchPending = false;
-        throw error;
-      }
-      
-      // Wait for either a stopped event (indicating ready) or a timeout
-      const LAUNCH_READY_TIMEOUT = 5000; // 5 seconds should be enough
-      
-      return new Promise<T>((resolve) => {
-        let resolved = false;
-        
-        const timeout = setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            this.jsDebugLaunchPending = false;
-            // Don't reject, just resolve with empty response
-            // The adapter might still be initializing
-            this.logger.warn(`[ProxyManager] js-debug launch timeout after ${LAUNCH_READY_TIMEOUT}ms, proceeding anyway`);
-            resolve({} as T);
-          }
-        }, LAUNCH_READY_TIMEOUT);
-        
-        // Store resolver to be called when we detect readiness
-        const resolveWhenReady = () => {
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            this.jsDebugLaunchPending = false;
-            this.logger.info(`[ProxyManager] js-debug launch confirmed ready`);
-            resolve({} as T);
-          }
-        };
-        
-        this.jsDebugLaunchResolvers.push(resolveWhenReady);
-      });
-    }
 
+    const barrier = this.adapter?.createLaunchBarrier?.(command, args);
     const requestId = uuidv4();
     const commandToSend = {
       cmd: 'dap',
@@ -419,7 +358,33 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       dapArgs: args
     };
 
+    if (barrier && !barrier.awaitResponse) {
+      this.logger.info(
+        `[ProxyManager] Sending DAP command with adapter barrier (fire-and-forget): ${command}, requestId: ${requestId}`
+      );
+      this.setActiveLaunchBarrier(barrier, requestId);
+      barrier.onRequestSent(requestId);
+
+      try {
+        this.sendCommand(commandToSend);
+      } catch (error) {
+        this.clearActiveLaunchBarrier(barrier);
+        throw error;
+      }
+
+      try {
+        await barrier.waitUntilReady();
+        return {} as T;
+      } finally {
+        this.clearActiveLaunchBarrier(barrier);
+      }
+    }
+
     this.logger.info(`[ProxyManager] Sending DAP command: ${command}, requestId: ${requestId}`);
+    if (barrier) {
+      this.setActiveLaunchBarrier(barrier, requestId);
+      barrier.onRequestSent(requestId);
+    }
 
     return new Promise<T>((resolve, reject) => {
       this.pendingDapRequests.set(requestId, {
@@ -442,6 +407,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.sendCommand(commandToSend);
       } catch (error) {
         this.pendingDapRequests.delete(requestId);
+        if (barrier) {
+          this.clearActiveLaunchBarrier(barrier);
+        }
         reject(error);
       }
 
@@ -449,6 +417,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       setTimeout(() => {
         if (this.pendingDapRequests.has(requestId)) {
           this.pendingDapRequests.delete(requestId);
+          if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
+            this.clearActiveLaunchBarrier();
+          }
           reject(new Error(ErrorMessages.dapRequestTimeout(command, 35)));
         }
       }, 35000);
@@ -861,6 +832,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.dapState = removePendingRequest(this.dapState, message.requestId);
     }
 
+    if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === message.requestId) {
+      this.clearActiveLaunchBarrier();
+    }
+
     if (message.success) {
       // If this was a 'threads' response, opportunistically capture a usable thread id
       try {
@@ -883,6 +858,11 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   private handleDapEvent(message: ProxyDapEventMessage): void {
+    this.activeLaunchBarrier?.onDapEvent(
+      message.event,
+      message.body as DebugProtocol.Event['body'] | undefined
+    );
+
     this.logger.info(`[ProxyManager] DAP event: ${message.event}`, message.body);
 
     switch (message.event) {
@@ -893,15 +873,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         if (typeof threadIdMaybe === 'number') {
           this.currentThreadId = threadIdMaybe;
         }
-        
-        // If js-debug launch is pending, resolve it now
-        if (this.jsDebugLaunchPending && this.jsDebugLaunchResolvers.length > 0) {
-          this.logger.info(`[ProxyManager] js-debug stopped event received, resolving pending launch`);
-          const resolvers = this.jsDebugLaunchResolvers;
-          this.jsDebugLaunchResolvers = [];
-          resolvers.forEach(resolve => resolve());
-        }
-        
         // Do not fabricate a threadId; emit undefined if adapter omitted it
         this.emit('stopped', threadIdMaybe as unknown as number, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
         break;
@@ -925,6 +896,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   private handleStatusMessage(message: ProxyStatusMessage): void {
+    this.activeLaunchBarrier?.onProxyStatus(message.status, message);
+
     switch (message.status) {
       case 'proxy_minimal_ran_ipc_test':
         this.logger.info(`[ProxyManager] IPC test message received`);
@@ -959,25 +932,11 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         break;
       
       case 'adapter_connected':
-        // JS adapter transport is up; allow client to proceed with DAP handshake.
-        this.logger.info(`[ProxyManager] Adapter transport connected (JS). Marking initialized to unblock client handshake.`);
+        // Adapter transport is up; allow client to proceed with DAP handshake.
+        this.logger.info(`[ProxyManager] Adapter transport connected. Marking initialized to unblock client handshake.`);
         if (!this.isInitialized) {
           this.isInitialized = true;
           this.emit('initialized');
-        }
-        
-        // If js-debug launch is pending and we haven't gotten a stopped event, 
-        // consider the adapter ready after connection
-        if (this.jsDebugLaunchPending && this.jsDebugLaunchResolvers.length > 0) {
-          // Give it a small delay to ensure adapter is fully ready
-          setTimeout(() => {
-            if (this.jsDebugLaunchPending && this.jsDebugLaunchResolvers.length > 0) {
-              this.logger.info(`[ProxyManager] js-debug adapter connected, resolving pending launch`);
-              const resolvers = this.jsDebugLaunchResolvers;
-              this.jsDebugLaunchResolvers = [];
-              resolvers.forEach(resolve => resolve());
-            }
-          }, 500);
         }
         break;
       
@@ -991,6 +950,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   private handleProxyExit(code: number | null, signal: string | null): void {
+    this.activeLaunchBarrier?.onProxyExit(code, signal);
+    this.clearActiveLaunchBarrier();
+
     if (this.isDryRun && code === 0 && !this.dryRunCompleteReceived) {
       const fallbackCommand = this.dryRunCommandSnapshot ?? '(command unavailable)';
       const fallbackScript = this.dryRunScriptPath ?? '';
@@ -1030,14 +992,37 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.dapState = clearPendingRequests(this.dapState);
     }
     
-    // Clear js-debug launch state
-    this.jsDebugLaunchPending = false;
-    this.jsDebugLaunchResolvers = [];
+    // Clear adapter-provided launch barriers
+    this.clearActiveLaunchBarrier();
     
     this.proxyProcess = null;
     this.isInitialized = false;
     this.adapterConfigured = false;
     this.currentThreadId = null;
+  }
+
+  private setActiveLaunchBarrier(barrier: AdapterLaunchBarrier, requestId: string): void {
+    if (this.activeLaunchBarrier && this.activeLaunchBarrier !== barrier) {
+      this.activeLaunchBarrier.dispose();
+    }
+    this.activeLaunchBarrier = barrier;
+    this.activeLaunchBarrierRequestId = requestId;
+  }
+
+  private clearActiveLaunchBarrier(barrier?: AdapterLaunchBarrier | null): void {
+    if (!this.activeLaunchBarrier) {
+      return;
+    }
+    if (barrier && this.activeLaunchBarrier !== barrier) {
+      return;
+    }
+    try {
+      this.activeLaunchBarrier.dispose();
+    } catch (error) {
+      this.logger.warn('[ProxyManager] Error disposing adapter launch barrier', error);
+    }
+    this.activeLaunchBarrier = null;
+    this.activeLaunchBarrierRequestId = null;
   }
 
   hasDryRunCompleted(): boolean {

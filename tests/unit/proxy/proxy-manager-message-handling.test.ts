@@ -7,6 +7,7 @@
  * SIMPLIFIED: Uses TestProxyManager to avoid complex async initialization
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { EventEmitter } from 'events';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { TestProxyManager } from '../test-utils/test-proxy-manager.js';
@@ -14,6 +15,7 @@ import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { DebugLanguage, type IDebugAdapter } from '@debugmcp/shared';
 import { createMockLogger, createMockFileSystem } from '../test-utils/mock-factories.js';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
+import { createInitialState } from '../../../src/dap-core/index.js';
 
 describe('ProxyManager Message Handling', () => {
   let proxyManager: TestProxyManager;
@@ -613,11 +615,23 @@ describe('ProxyManager Message Handling', () => {
       const logger = createMockLogger();
       const fileSystem = createMockFileSystem();
 
+      const barrier = {
+        awaitResponse: false,
+        onRequestSent: vi.fn(),
+        onProxyStatus: vi.fn(),
+        onDapEvent: vi.fn(),
+        onProxyExit: vi.fn(),
+        waitUntilReady: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn()
+      };
+      const createLaunchBarrier = vi.fn().mockReturnValue(barrier);
+
       const adapter = {
         language: DebugLanguage.JAVASCRIPT,
         validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
         resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
-        getAdapterModuleName: () => 'js-debug'
+        getAdapterModuleName: () => 'js-debug',
+        createLaunchBarrier
       } as unknown as IDebugAdapter;
 
       const proxyManager = new ProxyManager(
@@ -637,13 +651,179 @@ describe('ProxyManager Message Handling', () => {
 
       const response = await proxyManager.sendDapRequest('launch', { foo: 'bar' });
 
+      expect(createLaunchBarrier).toHaveBeenCalledWith('launch', { foo: 'bar' });
+      expect(barrier.onRequestSent).toHaveBeenCalled();
+      expect(barrier.waitUntilReady).toHaveBeenCalled();
       expect(sendCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           dapCommand: 'launch',
           sessionId: 'js-session'
         })
       );
+      expect(barrier.dispose).toHaveBeenCalled();
       expect(response).toEqual({});
+    });
+
+    it('clears adapter launch barrier when proxy exits early', async () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const barrier = {
+        awaitResponse: true,
+        onRequestSent: vi.fn(),
+        onProxyStatus: vi.fn(),
+        onDapEvent: vi.fn(),
+        onProxyExit: vi.fn(),
+        waitUntilReady: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn()
+      };
+
+      const adapter = {
+        language: DebugLanguage.JAVASCRIPT,
+        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
+        createLaunchBarrier: vi.fn().mockReturnValue(barrier)
+      } as unknown as IDebugAdapter;
+
+      const proxyManager = new ProxyManager(
+        adapter,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const sendCommand = vi.fn();
+      const fakeProcess = new EventEmitter() as unknown as IProxyProcess;
+      (fakeProcess as unknown as { sendCommand: (cmd: unknown) => void }).sendCommand = sendCommand;
+      (fakeProcess as unknown as { killed: boolean }).killed = false;
+      (fakeProcess as unknown as { kill: (_signal?: string) => void }).kill = vi.fn();
+
+      (proxyManager as unknown as { proxyProcess: unknown }).proxyProcess = fakeProcess;
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { sessionId: string }).sessionId = 'early-exit-session';
+      (proxyManager as unknown as { setupEventHandlers: () => void }).setupEventHandlers();
+
+      const requestPromise = proxyManager.sendDapRequest('launch', {});
+
+      expect(adapter.createLaunchBarrier).toHaveBeenCalledWith('launch', {});
+      expect(barrier.onRequestSent).toHaveBeenCalled();
+
+      fakeProcess.emit('exit', 1, 'SIGKILL');
+
+      await expect(requestPromise).rejects.toThrow(/Proxy exited/);
+      expect(barrier.onProxyExit).toHaveBeenCalledWith(1, 'SIGKILL');
+    expect(barrier.dispose).toHaveBeenCalled();
+  });
+
+    it('disposes adapter launch barrier after DAP response when awaiting reply', async () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const barrier = {
+        awaitResponse: true,
+        onRequestSent: vi.fn(),
+        onProxyStatus: vi.fn(),
+        onDapEvent: vi.fn(),
+        onProxyExit: vi.fn(),
+        waitUntilReady: vi.fn(),
+        dispose: vi.fn()
+      };
+
+      const adapter = {
+        language: DebugLanguage.JAVASCRIPT,
+        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
+        createLaunchBarrier: vi.fn().mockReturnValue(barrier)
+      } as unknown as IDebugAdapter;
+
+      const proxyManager = new ProxyManager(
+        adapter,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      (proxyManager as unknown as { proxyProcess: unknown }).proxyProcess = {
+        killed: false,
+        sendCommand: vi.fn((payload: any) => {
+          if (payload.cmd === 'dap') {
+            (proxyManager as unknown as { handleProxyMessage: (message: object) => void }).handleProxyMessage({
+              type: 'dapResponse',
+              sessionId: 'response-session',
+              requestId: payload.requestId,
+              success: true,
+              response: {
+                type: 'response',
+                seq: 3,
+                request_seq: 1,
+                command: payload.dapCommand,
+                success: true
+              }
+            });
+          }
+        })
+      };
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { sessionId: string }).sessionId = 'response-session';
+      (proxyManager as unknown as { dapState: ReturnType<typeof createInitialState> | null }).dapState =
+        createInitialState('response-session');
+
+      const response = await proxyManager.sendDapRequest('launch', {});
+
+      expect(response.command).toBe('launch');
+      expect(barrier.onRequestSent).toHaveBeenCalled();
+      expect(barrier.waitUntilReady).not.toHaveBeenCalled();
+      expect(barrier.dispose).toHaveBeenCalled();
+    });
+
+    it('disposes adapter launch barrier on request timeout', async () => {
+      vi.useFakeTimers();
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const barrier = {
+        awaitResponse: true,
+        onRequestSent: vi.fn(),
+        onProxyStatus: vi.fn(),
+        onDapEvent: vi.fn(),
+        onProxyExit: vi.fn(),
+        waitUntilReady: vi.fn(),
+        dispose: vi.fn()
+      };
+
+      const adapter = {
+        language: DebugLanguage.JAVASCRIPT,
+        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
+        createLaunchBarrier: vi.fn().mockReturnValue(barrier)
+      } as unknown as IDebugAdapter;
+
+      const proxyManager = new ProxyManager(
+        adapter,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      (proxyManager as unknown as { proxyProcess: unknown }).proxyProcess = {
+        killed: false,
+        sendCommand: vi.fn()
+      };
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { sessionId: string }).sessionId = 'timeout-session';
+      (proxyManager as unknown as { dapState: ReturnType<typeof createInitialState> | null }).dapState =
+        createInitialState('timeout-session');
+
+      const requestPromise = proxyManager.sendDapRequest('launch', {});
+
+      await vi.advanceTimersByTimeAsync(35000);
+
+      try {
+        await expect(requestPromise).rejects.toThrow(/Debug adapter did not respond to 'launch'/);
+        expect(barrier.dispose).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
