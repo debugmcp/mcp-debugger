@@ -25,9 +25,13 @@ COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/pack
 #    Copy all package sources to allow pnpm to resolve workspace:* links
 COPY packages ./packages
 
-# Remove any existing dist folders from packages to prevent stale tsbuildinfo files
-# from interfering with the build (these may have old path mappings)
-RUN find ./packages -type d -name 'dist' -exec rm -rf {} + 2>/dev/null || true
+# Remove any existing dist folders and tsbuildinfo artifacts from packages to prevent stale
+# build outputs (and their cached path maps) from polluting the Docker build.
+RUN set -eux; \
+    for pkg in ./packages/*; do \
+      [ -d "$pkg" ] || continue; \
+      rm -rf "$pkg/dist" "$pkg/tsconfig.tsbuildinfo"; \
+    done
 
 RUN pnpm --version && pnpm install --frozen-lockfile --ignore-scripts
 

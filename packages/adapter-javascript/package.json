@@ -29,7 +29,7 @@
     "build:adapter": "node ./scripts/build-js-debug.js"
   },
   "dependencies": {
-    "@debugmcp/shared": "0.16.0",
+    "@debugmcp/shared": "workspace:^0.16.0",
     "@vscode/debugprotocol": "^1.68.0"
   },
   "peerDependencies": {

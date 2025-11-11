@@ -69,6 +69,8 @@ dist
 !dist/proxy/proxy-bundle.cjs
 !dist/proxy/utils/
 !dist/proxy/utils/**
+packages/*/dist
+packages/*/tsconfig.tsbuildinfo
 build
 *.tsbuildinfo
 **/*.tsbuildinfo
