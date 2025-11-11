@@ -19,7 +19,7 @@
   },
   "scripts": {
     "prepare": "husky",
-    "prebuild": "rimraf dist",
+    "prebuild": "node scripts/clean-src-artifacts.cjs && rimraf dist",
     "build": "pnpm run build:packages && tsc -b -f . && pnpm run postbuild && pnpm run bundle",
     "build:shared": "pnpm --filter @debugmcp/shared build",
     "build:adapters": "pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build",
