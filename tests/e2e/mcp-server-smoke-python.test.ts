@@ -199,7 +199,22 @@ describe('MCP Server Python Debugging Smoke Test', () => {
     console.log('[Python Smoke Test] Testing step over...');
     const stepResult = await callToolSafely(mcpClient!, 'step_over', { sessionId });
     expect(stepResult.message).toBeDefined();
-    
+
+    // Verify location and context are provided
+    if (stepResult.location) {
+      console.log('[Python Smoke Test] Step result includes location:', stepResult.location);
+      expect(stepResult.location).toHaveProperty('file');
+      expect(stepResult.location).toHaveProperty('line');
+      expect(typeof (stepResult.location as any).line).toBe('number');
+    }
+
+    if (stepResult.context) {
+      console.log('[Python Smoke Test] Step result includes context');
+      expect(stepResult.context).toHaveProperty('lineContent');
+      expect(stepResult.context).toHaveProperty('surrounding');
+      expect(Array.isArray((stepResult.context as any).surrounding)).toBe(true);
+    }
+
     // Wait for step to complete
     await new Promise(resolve => setTimeout(resolve, 2000));
 

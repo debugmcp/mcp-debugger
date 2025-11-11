@@ -376,13 +376,13 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     });
 
     it('step operations resolve when session manager succeeds', async () => {
-      mockSessionManager.stepOver.mockResolvedValue({ success: true });
-      mockSessionManager.stepInto.mockResolvedValue({ success: true });
-      mockSessionManager.stepOut.mockResolvedValue({ success: true });
+      mockSessionManager.stepOver.mockResolvedValue({ success: true, state: 'paused' });
+      mockSessionManager.stepInto.mockResolvedValue({ success: true, state: 'paused' });
+      mockSessionManager.stepOut.mockResolvedValue({ success: true, state: 'paused' });
 
-      await expect(server.stepOver('test-session')).resolves.toBe(true);
-      await expect(server.stepInto('test-session')).resolves.toBe(true);
-      await expect(server.stepOut('test-session')).resolves.toBe(true);
+      await expect(server.stepOver('test-session')).resolves.toEqual({ success: true, state: 'paused' });
+      await expect(server.stepInto('test-session')).resolves.toEqual({ success: true, state: 'paused' });
+      await expect(server.stepOut('test-session')).resolves.toEqual({ success: true, state: 'paused' });
     });
 
     it('handleListDebugSessions maps active sessions', async () => {

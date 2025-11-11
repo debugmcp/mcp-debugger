@@ -853,16 +853,43 @@ export class SessionManagerOperations extends SessionManagerData {
         resolve(result);
       };
 
-      const success = (message: string) => {
+      const success = (message: string, location?: { file: string; line: number; column?: number }) => {
         this.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
+        const data: { message: string; location?: { file: string; line: number; column?: number } } = { message };
+        if (location) {
+          data.location = location;
+        }
         settle({
           success: true,
           state: session.state,
-          data: { message },
+          data,
         });
       };
 
-      const onStopped = () => success(options.successMessage);
+      const onStopped = async () => {
+        // Try to get current location from stack trace
+        let location: { file: string; line: number; column?: number } | undefined;
+        try {
+          // Wait a brief moment for state to settle after stopped event
+          await new Promise(resolve => setTimeout(resolve, 10));
+
+          const stackFrames = await this.getStackTrace(sessionId);
+          if (stackFrames && stackFrames.length > 0) {
+            const topFrame = stackFrames[0];
+            location = {
+              file: topFrame.file,
+              line: topFrame.line,
+              column: topFrame.column
+            };
+            this.logger.debug(`[SM ${options.logTag} ${sessionId}] Captured location: ${location.file}:${location.line}`);
+          }
+        } catch (error) {
+          // Log but don't fail the step operation if we can't get location
+          this.logger.debug(`[SM ${options.logTag} ${sessionId}] Could not capture location:`, error);
+        }
+        success(options.successMessage, location);
+      };
+
       const onTerminated = () => success(terminatedMessage);
       const onExited = () => success(exitedMessage);
       const onExit = () => success(exitedMessage);
