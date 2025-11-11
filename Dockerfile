@@ -24,6 +24,11 @@ COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/pack
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
 #    Copy all package sources to allow pnpm to resolve workspace:* links
 COPY packages ./packages
+
+# Remove any existing dist folders from packages to prevent stale tsbuildinfo files
+# from interfering with the build (these may have old path mappings)
+RUN find ./packages -type d -name 'dist' -exec rm -rf {} + 2>/dev/null || true
+
 RUN pnpm --version && pnpm install --frozen-lockfile --ignore-scripts
 
 # 3) Copy the rest of the sources and build configs
