@@ -113,6 +113,8 @@ describe('WhichCommandFinder integration', () => {
       process.env.Path = 'C:\\Windows\\System32;C:\\Python311';
       delete process.env.PATH;
       process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      delete process.env.pythonLocation;
+      delete process.env.PythonLocation;
 
       whichMock.mockResolvedValue(['C:\\Python311\\python.exe']);
       spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: '1.8.0' }));
@@ -130,6 +132,8 @@ describe('WhichCommandFinder integration', () => {
     it('filters Windows Store aliases', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      delete process.env.pythonLocation;
+      delete process.env.PythonLocation;
 
       // Mock which to return Windows Store alias first, then real Python
       whichMock.mockResolvedValueOnce([
@@ -347,6 +351,8 @@ describe('WhichCommandFinder integration', () => {
     it('skips invalid preferredPath and continues discovery', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      delete process.env.pythonLocation;
+      delete process.env.PythonLocation;
 
       const finder: CommandFinder = {
         find: vi.fn(async (cmd) => {
