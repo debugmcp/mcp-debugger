@@ -7,8 +7,8 @@
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@debugmcp/shared": ["../shared/src"],
-      "@debugmcp/shared/*": ["../shared/src/*"]
+      "@debugmcp/shared": ["../shared/dist"],
+      "@debugmcp/shared/*": ["../shared/dist/*"]
     },
     "declaration": true,
     "declarationMap": true,
