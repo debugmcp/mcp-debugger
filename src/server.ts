@@ -306,31 +306,31 @@ export class DebugMcpServer {
     return true;
   }
 
-  public async stepOver(sessionId: string): Promise<boolean> {
+  public async stepOver(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
     this.validateSession(sessionId);
     const result = await this.sessionManager.stepOver(sessionId);
     if (!result.success) {
       throw new Error(result.error || 'Failed to step over');
     }
-    return true;
+    return result;
   }
 
-  public async stepInto(sessionId: string): Promise<boolean> {
+  public async stepInto(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
     this.validateSession(sessionId);
     const result = await this.sessionManager.stepInto(sessionId);
     if (!result.success) {
       throw new Error(result.error || 'Failed to step into');
     }
-    return true;
+    return result;
   }
 
-  public async stepOut(sessionId: string): Promise<boolean> {
+  public async stepOut(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
     this.validateSession(sessionId);
     const result = await this.sessionManager.stepOut(sessionId);
     if (!result.success) {
       throw new Error(result.error || 'Failed to step out');
     }
-    return true;
+    return result;
   }
 
   constructor(options: DebugMcpServerOptions = {}) {
@@ -662,9 +662,9 @@ export class DebugMcpServer {
               if (!args.sessionId) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
               }
-              
+
               try {
-                let stepResult: boolean;
+                let stepResult: { success: boolean; state: string; error?: string; data?: unknown; };
                 if (toolName === 'step_over') {
                   stepResult = await this.stepOver(args.sessionId);
                 } else if (toolName === 'step_into') {
@@ -672,7 +672,47 @@ export class DebugMcpServer {
                 } else {
                   stepResult = await this.stepOut(args.sessionId);
                 }
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: stepResult, message: stepResult ? `Stepped ${toolName.replace('step_', '')}` : `Failed to ${toolName.replace('_', ' ')}` }) }] };
+
+                // Build response with location and line context if available
+                const stepType = toolName.replace('step_', '').replace('_', ' ');
+                const response: Record<string, unknown> = {
+                  success: stepResult.success,
+                  message: `Stepped ${stepType}`,
+                  state: stepResult.state
+                };
+
+                // Extract location from result data
+                const resultData = stepResult.data as { message?: string; location?: { file: string; line: number; column?: number } } | undefined;
+                const location = resultData?.location;
+
+                if (location) {
+                  response.location = location;
+
+                  // Try to get line context
+                  try {
+                    const lineContext = await this.lineReader.getLineContext(
+                      location.file,
+                      location.line,
+                      { contextLines: 2 }
+                    );
+
+                    if (lineContext) {
+                      response.context = {
+                        lineContent: lineContext.lineContent,
+                        surrounding: lineContext.surrounding
+                      };
+                    }
+                  } catch (contextError) {
+                    // Log but don't fail if we can't get context
+                    this.logger.debug('Could not get line context for step result', {
+                      file: location.file,
+                      line: location.line,
+                      error: contextError
+                    });
+                  }
+                }
+
+                result = { content: [{ type: 'text', text: JSON.stringify(response) }] };
               } catch (error) {
                 // Handle validation errors specifically
                 if (error instanceof SessionTerminatedError ||
