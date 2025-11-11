@@ -27,7 +27,7 @@
     "dev:js": "pnpm -w -F @debugmcp/adapter-javascript build && pnpm -w -F @debugmcp/adapter-javascript run build:adapter",
     "build:packages": "node scripts/build-packages.cjs",
     "build:packages:ci": "cross-env BUILD_SCRIPT=build:ci node scripts/build-packages.cjs",
-    "build:ci": "pnpm run build:packages:ci && tsc -b -f . && pnpm run postbuild",
+    "build:ci": "node scripts/clean-src-artifacts.cjs && rimraf dist && pnpm run build:packages:ci && tsc -b -f . && pnpm run postbuild",
     "build:servercore": "tsc -p tsconfig.json",
     "build:all": "pnpm -r build && pnpm run build",
     "build:clean": "pnpm run clean && pnpm run build",
