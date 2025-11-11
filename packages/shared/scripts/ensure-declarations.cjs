@@ -132,9 +132,16 @@ if (!fs.existsSync(indexDtsPath)) {
 const expectedFiles = [
   'index.d.ts',
   'factories/adapter-factory.d.ts',
+  'interfaces/adapter-launch-barrier.d.ts',
+  'interfaces/adapter-policy.d.ts',
+  'interfaces/adapter-policy-js.d.ts',
+  'interfaces/adapter-policy-mock.d.ts',
+  'interfaces/adapter-policy-python.d.ts',
+  'interfaces/dap-client-behavior.d.ts',
   'interfaces/debug-adapter.d.ts',
   'interfaces/adapter-registry.d.ts',
   'interfaces/external-dependencies.d.ts',
+  'interfaces/filesystem.d.ts',
   'interfaces/process-interfaces.d.ts',
   'models/index.d.ts'
 ];
