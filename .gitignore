@@ -151,6 +151,10 @@ tests/manual/
 /*_ANALYSIS.md
 /integration_test_*.log
 
+# ESLint reports (moved to docs/investigations)
+eslint-*.txt
+eslint-*.json
+
 # Vendored js-debug artifacts (generated during build; do not commit)
 packages/adapter-javascript/vendor/js-debug/
 packages/adapter-javascript/vendor/js-debug/**

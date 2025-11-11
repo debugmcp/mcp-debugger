@@ -16,7 +16,7 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.15.0: Dynamic adapter loading with monorepo packaging. Install adapters as optional dependencies. Start with Python and Mock; extend to any language.
+> 🆕 Version 0.16.0: JavaScript/Node.js debugging support (Alpha)! Full debugging capabilities with bundled js-debug, TypeScript support, and zero-runtime dependencies via improved npx distribution.
 
 > 🎬 **Demo Video**: See the debugger in action!
 > 
@@ -35,10 +35,12 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
-- 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger
+- 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger (Alpha)
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- � **STDIO and SSE transport modes** – Works with any MCP client
-- �📊 1019 tests passing – battle-tested end-to-end
+- 🔌 **STDIO and SSE transport modes** – Works with any MCP client
+- 📦 **Zero-runtime dependencies** – Self-contained bundles via tsup (~3 MB)
+- ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
+- 📊 **1019 tests passing** – battle-tested end-to-end
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
 - 🛡️ **Path validation** – Prevents crashes from non-existent files
@@ -371,10 +373,11 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.15.0 with dynamic adapter loading
+- ✅ **Production Ready**: v0.16.0 with JavaScript adapter (Alpha) and improved distribution
 - ✅ **1019 tests** passing end-to-end
 - ✅ **Clean architecture** with adapter pattern
-- 🚧 **Coming Soon**: Node.js, Go, and more language adapters
+- 🟨 **JavaScript/Node.js**: Alpha support with full debugging loop
+- 🚧 **Coming Soon**: Go, Ruby, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
 
 See [Roadmap.md](./Roadmap.md) for planned features.
