@@ -190,7 +190,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    * This includes the strict initialization sequence required by js-debug.
    */
   performHandshake: async (context) => {
-    const { proxyManager, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints } = context;
+    const { proxyManager, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints, launchConfig } = context;
     
     // Type assertion for proxyManager since we use 'unknown' in the interface
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -297,15 +297,32 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     }
 
     // 5) start debug target (attach if explicit attach+port; else launch using adapter policy)
-    const a = dapLaunchArgs || {};
-    const type = typeof a.type === 'string' ? a.type : 'pwa-node';
-    const req = typeof a.request === 'string' ? a.request : 'launch';
+    const a = (dapLaunchArgs || {}) as Record<string, unknown>;
+    const baseLaunchConfig: Record<string, unknown> = launchConfig ? { ...launchConfig } : {};
+    const baseRecord = baseLaunchConfig as Record<string, unknown>;
+
+    const getPortValue = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+    const type =
+      typeof baseLaunchConfig.type === 'string'
+        ? (baseLaunchConfig.type as string)
+        : typeof a.type === 'string'
+        ? (a.type as string)
+        : 'pwa-node';
+
+    const req =
+      typeof baseLaunchConfig.request === 'string'
+        ? (baseLaunchConfig.request as string)
+        : typeof a.request === 'string'
+        ? (a.request as string)
+        : 'launch';
+
     const attachPort =
-      typeof a?.attachSimplePort === 'number'
-        ? a.attachSimplePort
-        : typeof a?.port === 'number'
-        ? a.port
-        : undefined;
+      getPortValue(baseRecord.attachSimplePort) ??
+      getPortValue(baseRecord.port) ??
+      getPortValue(a.attachSimplePort) ??
+      getPortValue(a.port);
 
     if (req === 'attach' && typeof attachPort === 'number' && attachPort > 0) {
       // Explicit ATTACH flow (single parent session); avoid DI ambiguity
@@ -328,34 +345,87 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       try {
         // Dynamic import to avoid circular dependency issues
         const path = await import('path');
-        const cwd =
-          typeof a?.cwd === 'string' && a?.cwd
-            ? (a?.cwd as string)
-            : (scriptPath ? path.dirname(scriptPath) : process.cwd());
-        const launchArgs: Record<string, unknown> = {
-          type,
-          request: 'launch',
-          program: scriptPath,
-          cwd,
-          args: Array.isArray(scriptArgs) ? scriptArgs : [],
-          stopOnEntry: a?.stopOnEntry ?? false,
-          justMyCode: a?.justMyCode ?? true,
-          console: 'internalConsole',
-          outputCapture: 'std',
-          smartStep: true,
-          // Use process.execPath to ensure we use the same Node.js that's running this process
-          runtimeExecutable: process.execPath
-        };
-        // Pass through runtime overrides if provided (allow override of our default)
-        if (typeof a?.runtimeExecutable === 'string') {
-          launchArgs.runtimeExecutable = a.runtimeExecutable;
-        }
-        if (Array.isArray(a?.runtimeArgs)) {
-          launchArgs.runtimeArgs = a.runtimeArgs;
+        if (typeof baseLaunchConfig.program !== 'string' || !baseLaunchConfig.program.length) {
+          baseLaunchConfig.program = scriptPath;
         }
 
-        console.info(`[JsDebugAdapterPolicy] [JS] Sending 'launch' for program='${scriptPath}' cwd='${cwd}'`);
-        await pm.sendDapRequest('launch', launchArgs);
+        if (
+          (!Array.isArray(baseLaunchConfig.args) || baseLaunchConfig.args.length === 0) &&
+          Array.isArray(scriptArgs) &&
+          scriptArgs.length > 0
+        ) {
+          baseLaunchConfig.args = scriptArgs;
+        }
+
+        if (typeof baseLaunchConfig.cwd !== 'string' || !baseLaunchConfig.cwd.length) {
+          baseLaunchConfig.cwd = scriptPath ? path.dirname(scriptPath) : process.cwd();
+        }
+
+        if (typeof baseLaunchConfig.stopOnEntry !== 'boolean' && typeof a?.stopOnEntry === 'boolean') {
+          baseLaunchConfig.stopOnEntry = a.stopOnEntry;
+        }
+
+        if (typeof baseLaunchConfig.justMyCode !== 'boolean' && typeof a?.justMyCode === 'boolean') {
+          baseLaunchConfig.justMyCode = a.justMyCode;
+        }
+
+        if (typeof baseLaunchConfig.console !== 'string') {
+          baseLaunchConfig.console = 'internalConsole';
+        }
+
+        if (typeof baseLaunchConfig.outputCapture !== 'string') {
+          baseLaunchConfig.outputCapture = 'std';
+        }
+
+        if (typeof baseLaunchConfig.smartStep !== 'boolean') {
+          baseLaunchConfig.smartStep = true;
+        }
+
+        if (typeof baseLaunchConfig.pauseForSourceMap !== 'boolean') {
+          baseLaunchConfig.pauseForSourceMap = true;
+        }
+
+        if (typeof baseLaunchConfig.runtimeExecutable !== 'string') {
+          // Use process.execPath to ensure we use the same Node.js that's running this process
+          baseLaunchConfig.runtimeExecutable = process.execPath;
+        }
+
+        const finalLaunchArgs: Record<string, unknown> = {
+          ...baseLaunchConfig,
+          type,
+          request: req
+        };
+
+        if (typeof baseLaunchConfig.sourceMaps === 'boolean') {
+          finalLaunchArgs.sourceMaps = baseLaunchConfig.sourceMaps;
+        } else if (typeof a.sourceMaps === 'boolean') {
+          finalLaunchArgs.sourceMaps = a.sourceMaps;
+        }
+
+        const resolvedOutFiles =
+          Array.isArray(baseLaunchConfig.outFiles) && baseLaunchConfig.outFiles.length > 0
+            ? baseLaunchConfig.outFiles
+            : Array.isArray(a.outFiles) && a.outFiles.length > 0
+            ? a.outFiles
+            : undefined;
+        if (resolvedOutFiles) {
+          finalLaunchArgs.outFiles = resolvedOutFiles;
+        }
+
+        const resolvedSourcemapLocations =
+          Array.isArray((baseLaunchConfig as Record<string, unknown>).resolveSourceMapLocations)
+            ? (baseLaunchConfig as Record<string, unknown>).resolveSourceMapLocations
+            : Array.isArray((a as Record<string, unknown>).resolveSourceMapLocations)
+            ? (a as Record<string, unknown>).resolveSourceMapLocations
+            : undefined;
+        if (resolvedSourcemapLocations) {
+          finalLaunchArgs.resolveSourceMapLocations = resolvedSourcemapLocations;
+        }
+
+        console.info(
+          `[JsDebugAdapterPolicy] [JS] Sending 'launch' for program='${finalLaunchArgs.program}' cwd='${finalLaunchArgs.cwd}'`
+        );
+        await pm.sendDapRequest('launch', finalLaunchArgs);
       } catch (e) {
         console.warn(`[JsDebugAdapterPolicy] [JS] 'launch' failed: ${e instanceof Error ? e.message : String(e)}`);
       }

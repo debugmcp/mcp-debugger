@@ -15,7 +15,11 @@ import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
-import { AdapterConfig } from '@debugmcp/shared';
+import {
+  AdapterConfig,
+  type GenericLaunchConfig,
+  type LanguageSpecificLaunchConfig
+} from '@debugmcp/shared';
 import {
   SessionTerminatedError,
   ProxyNotRunningError,
@@ -48,7 +52,7 @@ export class SessionManagerOperations extends SessionManagerData {
     scriptArgs?: string[],
     dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
     dryRunSpawn?: boolean
-  ): Promise<void> {
+  ): Promise<LanguageSpecificLaunchConfig> {
     const sessionId = session.id;
     
     // Log entrance for Windows CI debugging
@@ -102,6 +106,21 @@ export class SessionManagerOperations extends SessionManagerData {
       ...(dapLaunchArgs || {}),
     };
 
+    const genericLaunchConfig: Record<string, unknown> = {
+      ...effectiveLaunchArgs,
+      program: scriptPath
+    };
+
+    if (Array.isArray(scriptArgs) && scriptArgs.length > 0) {
+      genericLaunchConfig.args = scriptArgs;
+    }
+
+    if (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0) {
+      genericLaunchConfig.cwd = path.dirname(scriptPath);
+    }
+
+    let transformedLaunchConfig: LanguageSpecificLaunchConfig | undefined;
+
     // Create the adapter for this language first
     const adapterConfig: AdapterConfig = {
       sessionId,
@@ -111,10 +130,21 @@ export class SessionManagerOperations extends SessionManagerData {
       logDir: sessionLogDir,
       scriptPath,
       scriptArgs,
-      launchConfig: effectiveLaunchArgs,
+      launchConfig: genericLaunchConfig as GenericLaunchConfig,
     };
 
     const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
+
+    try {
+      transformedLaunchConfig = adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
+    } catch (error) {
+      this.logger.warn(
+        `[SessionManager] transformLaunchConfig failed for ${session.language}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      transformedLaunchConfig = undefined;
+    }
 
     // Use the adapter to resolve the executable path
     let resolvedExecutablePath: string;
@@ -145,6 +175,43 @@ export class SessionManagerOperations extends SessionManagerData {
     // Build adapter command using the adapter
     const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
 
+    const launchConfigBase =
+      transformedLaunchConfig ?? (genericLaunchConfig as LanguageSpecificLaunchConfig);
+    const launchConfigData: LanguageSpecificLaunchConfig = { ...launchConfigBase };
+
+    const languageId = typeof session.language === 'string'
+      ? session.language.toLowerCase()
+      : String(session.language).toLowerCase();
+    const isJavascriptSession = languageId === 'javascript';
+    const stopOnEntryProvided = typeof dapLaunchArgs?.stopOnEntry === 'boolean';
+
+    if (isJavascriptSession && !stopOnEntryProvided) {
+      launchConfigData.stopOnEntry = false;
+      if (Array.isArray(launchConfigData.runtimeArgs)) {
+        launchConfigData.runtimeArgs = (launchConfigData.runtimeArgs as string[]).filter(
+          arg => !/^--inspect(?:-brk)?(?:=|$)/.test(arg)
+        );
+      }
+    }
+
+    this.logger.info(
+      `[SessionManager] Launch config stopOnEntry adjustments for ${sessionId}: base=${String(
+        launchConfigBase?.stopOnEntry
+      )}, final=${String(launchConfigData.stopOnEntry)}, userProvided=${String(
+        dapLaunchArgs?.stopOnEntry
+      )}`
+    );
+
+    const stopOnEntryFlag =
+      typeof launchConfigData?.stopOnEntry === 'boolean'
+        ? launchConfigData.stopOnEntry
+        : effectiveLaunchArgs.stopOnEntry;
+
+    const justMyCodeFlag =
+      typeof launchConfigData?.justMyCode === 'boolean'
+        ? launchConfigData.justMyCode
+        : effectiveLaunchArgs.justMyCode;
+
     // Create ProxyConfig
     const proxyConfig: ProxyConfig = {
       sessionId,
@@ -155,8 +222,8 @@ export class SessionManagerOperations extends SessionManagerData {
       logDir: sessionLogDir,
       scriptPath, // Path already resolved by server
       scriptArgs,
-      stopOnEntry: effectiveLaunchArgs.stopOnEntry,
-      justMyCode: effectiveLaunchArgs.justMyCode,
+      stopOnEntry: stopOnEntryFlag,
+      justMyCode: justMyCodeFlag,
       initialBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
       adapterCommand, // Pass the adapter command
@@ -171,6 +238,8 @@ export class SessionManagerOperations extends SessionManagerData {
 
     // Start the proxy
     await proxyManager.start(proxyConfig);
+
+    return launchConfigData;
   }
 
   /**
@@ -403,7 +472,7 @@ export class SessionManagerOperations extends SessionManagerData {
 
       // Normal (non-dry-run) flow
       // Start the proxy manager
-      await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
@@ -416,7 +485,8 @@ export class SessionManagerOperations extends SessionManagerData {
             dapLaunchArgs,
             scriptPath,
             scriptArgs,
-            breakpoints: session.breakpoints
+            breakpoints: session.breakpoints,
+            launchConfig: launchConfigData
           });
         } catch (handshakeErr) {
           this.logger.warn(

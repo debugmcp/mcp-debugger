@@ -16,6 +16,7 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 import type { SessionState } from '@debugmcp/shared';
+import type { LanguageSpecificLaunchConfig } from './debug-adapter.js';
 
 export type ChildSessionStrategy =
   | 'none'                     // No child session expected/created
@@ -189,6 +190,7 @@ export interface AdapterPolicy {
     scriptPath: string;
     scriptArgs?: string[];
     breakpoints: Map<string, unknown>;  // Will be Breakpoint in implementation
+    launchConfig?: LanguageSpecificLaunchConfig;
   }): Promise<void>;
 
   /**
