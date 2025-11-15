@@ -222,23 +222,46 @@ export class DapConnectionManager {
     scriptPath: string,
     scriptArgs: string[] = [],
     stopOnEntry: boolean = true,
-    justMyCode: boolean = true
+    justMyCode: boolean = true,
+    launchConfig?: Record<string, unknown>
   ): Promise<void> {
     // DIAGNOSTIC: Log the incoming scriptPath
     this.logger.info('[ConnectionManager] DIAGNOSTIC: Received scriptPath:', scriptPath);
     this.logger.info('[ConnectionManager] DIAGNOSTIC: scriptPath type:', typeof scriptPath);
     this.logger.info('[ConnectionManager] DIAGNOSTIC: scriptPath length:', scriptPath.length);
     
-    // Pass paths exactly as provided - no manipulation
-    const launchArgs = {
-      program: scriptPath,
-      stopOnEntry,
-      noDebug: false,
-      args: scriptArgs,
-      // Don't set cwd - let debugpy use its inherited working directory
-      console: "internalConsole",
-      justMyCode,
+    const baseLaunchArgs = launchConfig ? { ...launchConfig } : {};
+
+    const resolvedProgram =
+      typeof baseLaunchArgs.program === 'string' && baseLaunchArgs.program.length > 0
+        ? (baseLaunchArgs.program as string)
+        : scriptPath;
+
+    const resolvedArgs = Array.isArray(baseLaunchArgs.args)
+      ? (baseLaunchArgs.args as unknown[]).filter((arg): arg is string => typeof arg === 'string')
+      : scriptArgs;
+
+    const resolvedStopOnEntry =
+      typeof baseLaunchArgs.stopOnEntry === 'boolean' ? (baseLaunchArgs.stopOnEntry as boolean) : stopOnEntry;
+
+    const resolvedJustMyCode =
+      typeof baseLaunchArgs.justMyCode === 'boolean' ? (baseLaunchArgs.justMyCode as boolean) : justMyCode;
+
+    const launchArgs: Record<string, unknown> = {
+      ...baseLaunchArgs,
+      program: resolvedProgram,
+      args: resolvedArgs,
+      stopOnEntry: resolvedStopOnEntry,
+      justMyCode: resolvedJustMyCode,
     };
+
+    if (!('noDebug' in launchArgs)) {
+      launchArgs.noDebug = false;
+    }
+
+    if (!('console' in launchArgs)) {
+      launchArgs.console = 'internalConsole';
+    }
 
     // DIAGNOSTIC: Log the launch args object before sending
     this.logger.info('[ConnectionManager] DIAGNOSTIC: launchArgs object:', JSON.stringify(launchArgs, null, 2));

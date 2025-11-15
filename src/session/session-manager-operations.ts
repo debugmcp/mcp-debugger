@@ -8,7 +8,7 @@ import {
   SessionState, 
   SessionLifecycleState
 } from '@debugmcp/shared';
-import { ManagedSession } from './session-store.js';
+import { ManagedSession, ToolchainValidationState } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
@@ -51,7 +51,8 @@ export class SessionManagerOperations extends SessionManagerData {
     scriptPath: string,
     scriptArgs?: string[],
     dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
-    dryRunSpawn?: boolean
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>
   ): Promise<LanguageSpecificLaunchConfig> {
     const sessionId = session.id;
     
@@ -119,6 +120,10 @@ export class SessionManagerOperations extends SessionManagerData {
       genericLaunchConfig.cwd = path.dirname(scriptPath);
     }
 
+    if (adapterLaunchConfig && typeof adapterLaunchConfig === 'object') {
+      Object.assign(genericLaunchConfig, adapterLaunchConfig);
+    }
+
     let transformedLaunchConfig: LanguageSpecificLaunchConfig | undefined;
 
     // Create the adapter for this language first
@@ -136,7 +141,7 @@ export class SessionManagerOperations extends SessionManagerData {
     const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
 
     try {
-      transformedLaunchConfig = adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
+      transformedLaunchConfig = await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
     } catch (error) {
       this.logger.warn(
         `[SessionManager] transformLaunchConfig failed for ${session.language}: ${
@@ -144,6 +149,27 @@ export class SessionManagerOperations extends SessionManagerData {
         }`
       );
       transformedLaunchConfig = undefined;
+    }
+
+    const adapterWithToolchain = adapter as {
+      consumeLastToolchainValidation?: () => unknown;
+    };
+    const toolchainValidation =
+      typeof adapterWithToolchain.consumeLastToolchainValidation === 'function'
+      ? (adapterWithToolchain.consumeLastToolchainValidation() as ToolchainValidationState)
+      : undefined;
+
+    if (toolchainValidation) {
+      this.sessionStore.update(sessionId, { toolchainValidation });
+      if (!toolchainValidation.compatible && toolchainValidation.behavior !== 'continue') {
+        const toolchainError = new Error('MSVC_TOOLCHAIN_DETECTED') as Error & {
+          toolchainValidation?: ToolchainValidationState;
+        };
+        toolchainError.toolchainValidation = toolchainValidation;
+        throw toolchainError;
+      }
+    } else {
+      this.sessionStore.update(sessionId, { toolchainValidation: undefined });
     }
 
     // Use the adapter to resolve the executable path
@@ -213,6 +239,26 @@ export class SessionManagerOperations extends SessionManagerData {
         : effectiveLaunchArgs.justMyCode;
 
     // Create ProxyConfig
+    const programFromLaunchConfig =
+      typeof launchConfigData?.program === 'string' && launchConfigData.program.length > 0
+        ? launchConfigData.program
+        : scriptPath;
+
+    const argsFromLaunchConfig = Array.isArray(launchConfigData?.args)
+      ? (launchConfigData!.args as unknown[]).filter((arg): arg is string => typeof arg === 'string')
+      : Array.isArray(scriptArgs)
+        ? [...scriptArgs]
+        : [];
+
+    const normalizedScriptArgs = argsFromLaunchConfig.length > 0 ? argsFromLaunchConfig : undefined;
+
+    if (initialBreakpoints.length) {
+      this.logger.info(
+        `[SessionManager] Initial breakpoints for ${sessionId}:`,
+        initialBreakpoints.map(bp => ({ file: bp.file, line: bp.line }))
+      );
+    }
+
     const proxyConfig: ProxyConfig = {
       sessionId,
       language: session.language, // Add language from session
@@ -220,12 +266,13 @@ export class SessionManagerOperations extends SessionManagerData {
       adapterHost: '127.0.0.1',
       adapterPort,
       logDir: sessionLogDir,
-      scriptPath, // Path already resolved by server
-      scriptArgs,
+      scriptPath: programFromLaunchConfig,
+      scriptArgs: normalizedScriptArgs,
       stopOnEntry: stopOnEntryFlag,
       justMyCode: justMyCodeFlag,
       initialBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
+      launchConfig: launchConfigData,
       adapterCommand, // Pass the adapter command
     };
 
@@ -308,7 +355,8 @@ export class SessionManagerOperations extends SessionManagerData {
     scriptPath: string,
     scriptArgs?: string[],
     dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
-    dryRunSpawn?: boolean
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
     this.logger.info(
@@ -355,7 +403,7 @@ export class SessionManagerOperations extends SessionManagerData {
         }
         
         // Start the proxy manager
-        await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+        await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig);
         this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
         
         // CI Debug: After startProxyManager
@@ -472,7 +520,7 @@ export class SessionManagerOperations extends SessionManagerData {
 
       // Normal (non-dry-run) flow
       // Start the proxy manager
-      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig);
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
@@ -644,7 +692,20 @@ export class SessionManagerOperations extends SessionManagerData {
 
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      this._updateSessionState(session, SessionState.ERROR);
+      const toolchainValidation =
+        (error as { toolchainValidation?: ToolchainValidationState })?.toolchainValidation ??
+        session.toolchainValidation;
+      const incompatibleToolchain =
+        Boolean(toolchainValidation) && toolchainValidation?.compatible === false;
+
+      if (incompatibleToolchain) {
+        this._updateSessionState(session, SessionState.CREATED);
+        this.sessionStore.update(sessionId, {
+          sessionLifecycle: SessionLifecycleState.CREATED,
+        });
+      } else {
+        this._updateSessionState(session, SessionState.ERROR);
+      }
 
       if (session.proxyManager) {
         await session.proxyManager.stop();
@@ -659,6 +720,24 @@ export class SessionManagerOperations extends SessionManagerData {
         errorCode = (error as McpError).code as number | undefined;
       } else if (error instanceof Error) {
         errorType = error.constructor.name || 'Error';
+      }
+
+      if (incompatibleToolchain && toolchainValidation) {
+        const behavior = (toolchainValidation.behavior ?? 'warn').toLowerCase();
+        const canContinue = behavior !== 'error';
+        const updatedSession = this._getSessionById(sessionId);
+        return {
+          success: false,
+          error: 'MSVC_TOOLCHAIN_DETECTED',
+          state: updatedSession.state,
+          data: {
+            message: toolchainValidation.message ?? errorMessage,
+            toolchainValidation,
+          },
+          canContinue,
+          errorType,
+          errorCode,
+        };
       }
 
       return { success: false, error: errorMessage, state: session.state, errorType, errorCode };

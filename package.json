@@ -19,7 +19,13 @@
   },
   "scripts": {
     "prepare": "husky",
-    "prebuild": "node scripts/clean-src-artifacts.cjs && rimraf dist",
+    "postinstall": "pnpm run vendor:adapters",
+    "vendor": "pnpm run vendor:adapters",
+    "vendor:adapters": "pnpm run -r --if-present build:adapter",
+    "vendor:force": "pnpm run clean:vendor && pnpm run vendor:adapters",
+    "vendor:status": "node scripts/check-adapters.js",
+    "clean:vendor": "pnpm run -r --if-present clean:vendor",
+    "prebuild": "node scripts/clean-src-artifacts.cjs && rimraf dist && pnpm run vendor:adapters",
     "build": "pnpm run build:packages && tsc -b -f . && pnpm run postbuild && pnpm run bundle",
     "build:shared": "pnpm --filter @debugmcp/shared build",
     "build:adapters": "pnpm --filter @debugmcp/adapter-mock build && pnpm --filter @debugmcp/adapter-python build",
@@ -126,7 +132,6 @@
     "mcp-debugger": "./dist/index.js"
   },
   "dependencies": {
-    "@debugmcp/adapter-javascript": "workspace:*",
     "@debugmcp/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
@@ -146,7 +151,9 @@
   },
   "optionalDependencies": {
     "@debugmcp/adapter-mock": "workspace:*",
-    "@debugmcp/adapter-python": "workspace:*"
+    "@debugmcp/adapter-python": "workspace:*",
+    "@debugmcp/adapter-javascript": "workspace:*",
+    "@debugmcp/adapter-rust": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",

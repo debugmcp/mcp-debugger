@@ -22,6 +22,21 @@ export async function checkCargoInstallation(): Promise<boolean> {
 }
 
 /**
+ * Check if Rust is installed (via rustc)
+ */
+export async function checkRustInstallation(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const rustcProcess = spawn('rustc', ['--version'], {
+      stdio: 'ignore',
+      shell: true
+    });
+    
+    rustcProcess.on('error', () => resolve(false));
+    rustcProcess.on('exit', (code) => resolve(code === 0));
+  });
+}
+
+/**
  * Get Cargo version
  */
 export async function getCargoVersion(): Promise<string | null> {
@@ -150,4 +165,38 @@ export async function getRustBinaryPath(
   } catch {
     return null;
   }
+}
+
+/**
+ * Retrieve the host triple reported by rustc -Vv
+ */
+export async function getRustHostTriple(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const rustcProcess = spawn('rustc', ['-Vv'], {
+      shell: true
+    });
+
+    let output = '';
+
+    rustcProcess.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+
+    rustcProcess.on('error', () => resolve(null));
+    rustcProcess.on('exit', (code) => {
+      if (code === 0 && output) {
+        const hostLine = output
+          .split(/\r?\n/)
+          .find(line => line.toLowerCase().startsWith('host:'));
+        if (hostLine) {
+          const [, hostValue] = hostLine.split(':');
+          if (hostValue) {
+            resolve(hostValue.trim());
+            return;
+          }
+        }
+      }
+      resolve(null);
+    });
+  });
 }

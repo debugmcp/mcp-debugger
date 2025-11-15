@@ -12,6 +12,7 @@ const packages = [
   '@debugmcp/adapter-mock',
   '@debugmcp/adapter-python',
   '@debugmcp/adapter-javascript',
+  '@debugmcp/adapter-rust',
 ];
 
 for (const pkg of packages) {

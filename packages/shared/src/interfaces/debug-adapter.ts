@@ -114,8 +114,11 @@ export interface IDebugAdapter extends EventEmitter {
   
   /**
    * Transform generic launch config to language-specific format
+   * 
+   * @returns Promise resolving to language-specific launch configuration
+   * @since 2.1.0 - Made async to support build operations (e.g., Rust compilation)
    */
-  transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig;
+  transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>;
   
   /**
    * Get default launch configuration for this language

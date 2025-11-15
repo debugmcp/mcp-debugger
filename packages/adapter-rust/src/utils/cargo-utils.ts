@@ -221,3 +221,163 @@ async function getAllRustFiles(dir: string): Promise<string[]> {
   
   return files;
 }
+
+/**
+ * Run Cargo build with specified arguments
+ */
+export async function runCargoBuild(
+  projectPath: string,
+  args: string[]
+): Promise<{ success: boolean; output: string; binaryPath?: string }> {
+  return new Promise((resolve) => {
+    const buildProcess = spawn('cargo', args, {
+      cwd: projectPath,
+      shell: true
+    });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    buildProcess.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    buildProcess.stderr?.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    buildProcess.on('error', (error) => {
+      resolve({
+        success: false,
+        output: `Build failed: ${error.message}`
+      });
+    });
+    
+    buildProcess.on('exit', (code) => {
+      const fullOutput = output + errorOutput;
+      resolve({
+        success: code === 0,
+        output: fullOutput
+      });
+    });
+  });
+}
+
+/**
+ * Get the default binary name from Cargo.toml
+ */
+export async function getDefaultBinary(projectPath: string): Promise<string> {
+  const cargoProject = await resolveCargoProject(projectPath);
+  if (cargoProject) {
+    // Find the first binary target
+    const binTargets = cargoProject.targets.filter(t => t.kind.includes('bin'));
+    if (binTargets.length > 0) {
+      return binTargets[0].name;
+    }
+    // Fallback to package name
+    return cargoProject.name;
+  }
+  
+  // Last resort: look for main.rs
+  try {
+    const mainPath = path.join(projectPath, 'src', 'main.rs');
+    await fs.access(mainPath);
+    return path.basename(projectPath);
+  } catch {
+    return 'main';
+  }
+}
+
+/**
+ * Find the Cargo.toml file for a given Rust source file by walking up the directory tree
+ */
+export async function findCargoProjectRoot(filePath: string): Promise<string> {
+  let dir = path.dirname(path.resolve(filePath));
+  const root = path.parse(dir).root;
+  
+  while (dir !== root) {
+    const cargoToml = path.join(dir, 'Cargo.toml');
+    try {
+      await fs.access(cargoToml);
+      return dir;
+    } catch {
+      // Continue searching
+    }
+    const parentDir = path.dirname(dir);
+    if (parentDir === dir) {
+      break; // Reached the root
+    }
+    dir = parentDir;
+  }
+  
+  throw new Error(`No Cargo.toml found for ${filePath}`);
+}
+
+/**
+ * Build the Cargo project with progress reporting
+ */
+export async function buildCargoProject(
+  projectRoot: string,
+  logger?: { info?: (msg: string) => void; error?: (msg: string) => void },
+  buildMode: 'debug' | 'release' = 'debug'
+): Promise<{ success: boolean; binaryPath?: string; error?: string }> {
+  logger?.info?.(`[Rust Debugger] Building project at ${projectRoot}...`);
+  
+  const args = ['build'];
+  if (buildMode === 'release') {
+    args.push('--release');
+  }
+  
+  return new Promise((resolve) => {
+    const buildProcess = spawn('cargo', args, {
+      cwd: projectRoot,
+      shell: true
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    buildProcess.stdout?.on('data', (data) => {
+      const msg = data.toString();
+      stdout += msg;
+      // Show compilation progress
+      if (msg.includes('Compiling')) {
+        logger?.info?.(`[Rust Build] ${msg.trim()}`);
+      }
+    });
+    
+    buildProcess.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
+    buildProcess.on('error', (error) => {
+      const errorMsg = `Build process error: ${error.message}`;
+      logger?.error?.(`[Rust Debugger] ${errorMsg}`);
+      resolve({ success: false, error: errorMsg });
+    });
+    
+    buildProcess.on('exit', async (code) => {
+      if (code === 0) {
+        try {
+          const binaryName = await getDefaultBinary(projectRoot);
+          const binaryPath = path.join(
+            projectRoot,
+            'target',
+            buildMode,
+            process.platform === 'win32' ? `${binaryName}.exe` : binaryName
+          );
+          
+          logger?.info?.(`[Rust Debugger] Build successful: ${binaryPath}`);
+          resolve({ success: true, binaryPath });
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          logger?.error?.(`[Rust Debugger] Failed to determine binary path: ${errorMsg}`);
+          resolve({ success: false, error: errorMsg });
+        }
+      } else {
+        logger?.error?.(`[Rust Debugger] Build failed with code ${code}:\n${stderr}`);
+        resolve({ success: false, error: stderr || stdout });
+      }
+    });
+  });
+}

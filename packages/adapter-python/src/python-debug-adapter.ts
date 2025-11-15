@@ -332,7 +332,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   // ===== Debug Configuration =====
   
-  transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig {
+  async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
     const pythonConfig: PythonLaunchConfig = {
       ...config,
       type: 'python',

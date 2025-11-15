@@ -11,8 +11,17 @@ export interface SSEOptions {
   logFile?: string;
 }
 
+export interface CheckRustBinaryOptions {
+  json?: boolean;
+}
+
 export type StdioHandler = (options: StdioOptions, command?: Command) => Promise<void>;
 export type SSEHandler = (options: SSEOptions, command?: Command) => Promise<void>;
+export type CheckRustBinaryHandler = (
+  binaryPath: string,
+  options: CheckRustBinaryOptions,
+  command?: Command
+) => Promise<void>;
 
 export function createCLI(name: string, description: string, version: string): Command {
   const program = new Command();
@@ -49,5 +58,19 @@ export function setupSSECommand(program: Command, handler: SSEHandler): void {
       // Silencing also applies to SSE to protect transports used for JS debugging
       process.env.CONSOLE_OUTPUT_SILENCED = '1';
       await handler(options, command);
+    });
+}
+
+export function setupCheckRustBinaryCommand(
+  program: Command,
+  handler: CheckRustBinaryHandler
+): void {
+  program
+    .command('check-rust-binary')
+    .description('Analyze a Rust executable to determine debugger compatibility')
+    .argument('<binaryPath>', 'Path to the Rust executable to analyze')
+    .option('--json', 'Emit JSON output', false)
+    .action(async (binaryPath: string, options: CheckRustBinaryOptions, command: Command) => {
+      await handler(binaryPath, options, command);
     });
 }

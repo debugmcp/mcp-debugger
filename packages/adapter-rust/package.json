@@ -1,7 +1,7 @@
 {
   "name": "@debugmcp/adapter-rust",
   "version": "0.1.0",
-  "description": "Rust Debug Adapter implementation for MCP Debugger using CodeLLDB",
+  "description": "Rust debug adapter for MCP Debugger using CodeLLDB",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,44 +16,26 @@
     "vendor"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json",
     "build:adapter": "node scripts/vendor-codelldb.js",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "clean": "rimraf dist vendor/codelldb",
-    "prepare": "npm run build:adapter",
-    "typecheck": "tsc --noEmit"
+    "clean": "rimraf dist vendor",
+    "clean:vendor": "rimraf vendor",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
   },
   "dependencies": {
     "@debugmcp/shared": "workspace:*",
-    "@vscode/debugprotocol": "^1.65.0"
+    "@vscode/debugprotocol": "^1.65.0",
+    "execa": "^8.0.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.5",
-    "@vitest/ui": "^1.2.1",
+    "@types/node": "^20.11.0",
     "extract-zip": "^2.0.1",
-    "https-proxy-agent": "^7.0.2",
-    "node-fetch": "^3.3.2",
+    "node-fetch": "^2.7.0",
     "progress": "^2.0.3",
     "rimraf": "^5.0.5",
     "typescript": "^5.3.3",
-    "vitest": "^1.2.1"
-  },
-  "keywords": [
-    "debug",
-    "debugger",
-    "rust",
-    "codelldb",
-    "lldb",
-    "dap",
-    "mcp"
-  ],
-  "author": "MCP Debugger Contributors",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/debugmcp/mcp-debugger.git",
-    "directory": "packages/adapter-rust"
+    "vitest": "^1.2.0"
   },
   "engines": {
     "node": ">=18.0.0"

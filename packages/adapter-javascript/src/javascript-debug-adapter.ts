@@ -342,7 +342,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   // ===== Debug Configuration =====
 
-  transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig {
+  async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
     // Base fields and defaults - paths already resolved by server
     const user = (config || {}) as Record<string, unknown>;
     const u = user as Record<string, unknown>;

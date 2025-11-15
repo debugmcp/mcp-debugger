@@ -80,6 +80,7 @@ interface ToolArguments {
   args?: string[];
   dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>;
   dryRunSpawn?: boolean;
+  adapterLaunchConfig?: Record<string, unknown>;
   scope?: number;
   frameId?: number;
   expression?: string;
@@ -224,7 +225,8 @@ export class DebugMcpServer {
     scriptPath: string, 
     args?: string[], 
     dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>, 
-    dryRunSpawn?: boolean
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
     this.validateSession(sessionId);
     
@@ -243,7 +245,8 @@ export class DebugMcpServer {
       fileCheck.effectivePath, 
       args, 
       dapLaunchArgs, 
-      dryRunSpawn
+      dryRunSpawn,
+      adapterLaunchConfig
     );
     return result;
   }
@@ -445,7 +448,12 @@ export class DebugMcpServer {
                   },
                   additionalProperties: true
                 },
-                dryRunSpawn: { type: 'boolean' } 
+                dryRunSpawn: { type: 'boolean' },
+                adapterLaunchConfig: {
+                  type: 'object',
+                  description: 'Optional adapter-specific launch configuration overrides',
+                  additionalProperties: true
+                }
               }, 
               required: ['sessionId', 'scriptPath'] 
             } 
@@ -610,7 +618,21 @@ export class DebugMcpServer {
               }
               
               try {
-                const debugResult = await this.startDebugging(args.sessionId, args.scriptPath, args.args, args.dapLaunchArgs, args.dryRunSpawn);
+                if (args.adapterLaunchConfig !== undefined) {
+                  const cfg = args.adapterLaunchConfig;
+                  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
+                    throw new McpError(McpErrorCode.InvalidParams, 'adapterLaunchConfig must be an object when provided');
+                  }
+                }
+
+                const debugResult = await this.startDebugging(
+                  args.sessionId,
+                  args.scriptPath,
+                  args.args,
+                  args.dapLaunchArgs,
+                  args.dryRunSpawn,
+                  args.adapterLaunchConfig
+                );
                 const responsePayload: Record<string, unknown> = {
                   success: debugResult.success,
                   state: debugResult.state,

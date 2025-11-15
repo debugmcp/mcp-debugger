@@ -243,6 +243,90 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect.objectContaining({ logDir: expect.stringContaining(`run-`) })
       );
     });
+
+    it('captures MSVC toolchain validation and throws structured error', async () => {
+      mockSession.language = 'rust';
+      const validation = {
+        compatible: false,
+        behavior: 'warn',
+        toolchain: 'msvc',
+        message: 'MSVC binaries have limited support'
+      };
+
+      const adapterStub = {
+        transformLaunchConfig: vi.fn().mockResolvedValue({ program: 'debug.exe' }),
+        consumeLastToolchainValidation: vi.fn().mockReturnValue(validation),
+        resolveExecutablePath: vi.fn(),
+        buildAdapterCommand: vi.fn()
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      let capturedError: unknown;
+      try {
+        await (operations as any).startProxyManager(mockSession, 'debug.exe');
+      } catch (error) {
+        capturedError = error;
+      }
+
+      expect(adapterStub.consumeLastToolchainValidation).toHaveBeenCalled();
+      expect(capturedError).toBeInstanceOf(Error);
+      expect((capturedError as Error).message).toBe('MSVC_TOOLCHAIN_DETECTED');
+      expect((capturedError as { toolchainValidation?: unknown }).toolchainValidation).toBe(validation);
+      expect(mockSessionStore.update).toHaveBeenCalledWith(
+        mockSession.id,
+        expect.objectContaining({ toolchainValidation: validation })
+      );
+      expect(adapterStub.resolveExecutablePath).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startDebugging toolchain handling', () => {
+    it('returns structured response when MSVC toolchain is detected', async () => {
+      mockSession.proxyManager = undefined as any;
+      mockSession.language = 'rust';
+      const validation = {
+        compatible: false,
+        behavior: 'warn',
+        toolchain: 'msvc',
+        message: 'MSVC binaries provide limited debugger data'
+      };
+      mockSession.toolchainValidation = validation;
+
+      const startProxySpy = vi
+        .spyOn(operations as any, 'startProxyManager')
+        .mockImplementation(async () => {
+          const error = new Error('MSVC_TOOLCHAIN_DETECTED') as Error & {
+            toolchainValidation?: unknown;
+          };
+          error.toolchainValidation = validation;
+          throw error;
+        });
+
+      try {
+        const result = await operations.startDebugging('test-session', 'debug.exe');
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('MSVC_TOOLCHAIN_DETECTED');
+        expect(result.canContinue).toBe(true);
+        expect(result.data).toEqual(
+          expect.objectContaining({
+            toolchainValidation: validation,
+            message: validation.message
+          })
+        );
+
+        expect(mockSession.state).toBe(SessionState.CREATED);
+        const lastStateCall = mockSessionStore.updateState.mock.calls.at(-1);
+        expect(lastStateCall?.[0]).toBe(mockSession.id);
+        expect(lastStateCall?.[1]).toBe(SessionState.CREATED);
+        expect(mockSessionStore.update).toHaveBeenCalledWith(
+          mockSession.id,
+          expect.objectContaining({ sessionLifecycle: SessionLifecycleState.CREATED })
+        );
+      } finally {
+        startProxySpy.mockRestore();
+      }
+    });
   });
 
   describe('Operation Failures with Error Details', () => {

@@ -126,6 +126,11 @@ __pycache__/
 *$py.class
 .pytest_cache/
 
+# Rust build artifacts
+target/
+Cargo.lock
+**/*.rs.bk
+
 # Test results and analysis files
 test-results*.json
 test-output.txt

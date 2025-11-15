@@ -30,34 +30,32 @@ export async function resolveCodeLLDBExecutable(): Promise<string | null> {
   
   // Build path to vendored CodeLLDB
   const executableName = platform === 'win32' ? 'codelldb.exe' : 'codelldb';
-  const codelldbPath = path.resolve(
-    __dirname,
-    '..',
-    '..',
-    'vendor',
-    'codelldb',
-    platformDir,
-    'adapter',
-    executableName
-  );
+  const candidatePaths = [
+    path.resolve(__dirname, '..', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
+    path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
+    path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName)
+  ];
   
-  // Check if file exists
-  try {
-    await fs.access(codelldbPath, fs.constants.F_OK);
-    return codelldbPath;
-  } catch {
-    // Check environment variable as fallback
-    if (process.env.CODELLDB_PATH) {
-      try {
-        await fs.access(process.env.CODELLDB_PATH, fs.constants.F_OK);
-        return process.env.CODELLDB_PATH;
-      } catch {
-        // Fall through
-      }
+  for (const candidate of candidatePaths) {
+    try {
+      await fs.access(candidate, fs.constants.F_OK);
+      return candidate;
+    } catch {
+      // Try next candidate
     }
-    
-    return null;
   }
+  
+  // Check environment variable as fallback
+  if (process.env.CODELLDB_PATH) {
+    try {
+      await fs.access(process.env.CODELLDB_PATH, fs.constants.F_OK);
+      return process.env.CODELLDB_PATH;
+    } catch {
+      // Fall through
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -83,21 +81,21 @@ export async function getCodeLLDBVersion(): Promise<string | null> {
     platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
   }
   
-  const versionFile = path.resolve(
-    __dirname,
-    '..',
-    '..',
-    'vendor',
-    'codelldb',
-    platformDir,
-    'version.json'
-  );
+  const versionFileCandidates = [
+    path.resolve(__dirname, '..', 'vendor', 'codelldb', platformDir, 'version.json'),
+    path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'version.json'),
+    path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'version.json')
+  ];
   
-  try {
-    const versionData = await fs.readFile(versionFile, 'utf-8');
-    const parsed = JSON.parse(versionData);
-    return parsed.version || '1.11.0';
-  } catch {
-    return '1.11.0'; // Default version
+  for (const versionFile of versionFileCandidates) {
+    try {
+      const versionData = await fs.readFile(versionFile, 'utf-8');
+      const parsed = JSON.parse(versionData);
+      return parsed.version || '1.11.0';
+    } catch {
+      // Continue to next candidate
+    }
   }
+  
+  return '1.11.0'; // Default version fallback
 }

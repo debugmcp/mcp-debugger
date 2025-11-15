@@ -17,6 +17,7 @@ import {
   DefaultAdapterPolicy,
   PythonAdapterPolicy,
   JsDebugAdapterPolicy,
+  RustAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
@@ -32,6 +33,15 @@ export interface CreateSessionParams {
 
 import { IProxyManager } from '../proxy/proxy-manager.js';
 
+export interface ToolchainValidationState {
+  compatible: boolean;
+  toolchain: string;
+  message?: string;
+  suggestions?: string[];
+  behavior?: string;
+  binaryInfo?: Record<string, unknown>;
+}
+
 /**
  * Internal session representation with full details
  */
@@ -43,6 +53,7 @@ export interface ManagedSession extends DebugSessionInfo {
   sessionLifecycle: SessionLifecycleState;
   executionState?: ExecutionState;
   logDir?: string;
+  toolchainValidation?: ToolchainValidationState;
 }
 
 /**
@@ -61,6 +72,8 @@ export class SessionStore {
         return PythonAdapterPolicy;
       case DebugLanguage.JAVASCRIPT:
         return JsDebugAdapterPolicy;
+      case DebugLanguage.RUST:
+        return RustAdapterPolicy;
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
       default:

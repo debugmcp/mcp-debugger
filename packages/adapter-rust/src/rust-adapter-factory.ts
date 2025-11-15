@@ -8,7 +8,7 @@ import { IDebugAdapter } from '@debugmcp/shared';
 import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
 import { RustDebugAdapter } from './rust-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { checkCargoInstallation, getCargoVersion } from './utils/rust-utils.js';
+import { checkCargoInstallation, getCargoVersion, getRustHostTriple } from './utils/rust-utils.js';
 import { resolveCodeLLDBExecutable, getCodeLLDBVersion } from './utils/codelldb-resolver.js';
 
 /**
@@ -18,11 +18,8 @@ export class RustAdapterFactory implements IAdapterFactory {
   /**
    * Create a new Rust debug adapter instance
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   createAdapter(dependencies: AdapterDependencies): IDebugAdapter {
-    // Note: RustDebugAdapter will be updated to properly implement IDebugAdapter
-    // For now, we create it with a basic config
-    return new RustDebugAdapter({}) as unknown as IDebugAdapter;
+    return new RustDebugAdapter(dependencies);
   }
   
   /**
@@ -51,6 +48,7 @@ export class RustAdapterFactory implements IAdapterFactory {
     let codelldbPath: string | undefined;
     let codelldbVersion: string | undefined;
     let cargoVersion: string | undefined;
+    let hostTriple: string | undefined;
     
     // Check CodeLLDB
     const resolvedCodelldb = await resolveCodeLLDBExecutable();
@@ -69,6 +67,14 @@ export class RustAdapterFactory implements IAdapterFactory {
       cargoVersion = await getCargoVersion() || undefined;
     }
     
+    const rustHost = await getRustHostTriple();
+    if (rustHost) {
+      hostTriple = rustHost;
+      if (/-pc-windows-msvc/i.test(rustHost)) {
+        warnings.push('Rust MSVC toolchain detected. CodeLLDB works best with the GNU toolchain (x86_64-pc-windows-gnu) or DWARF debug info.');
+      }
+    }
+
     return {
       valid: errors.length === 0,
       errors,
@@ -77,6 +83,7 @@ export class RustAdapterFactory implements IAdapterFactory {
         codelldbPath,
         codelldbVersion,
         cargoVersion,
+        hostTriple,
         platform: process.platform,
         arch: process.arch,
         timestamp: new Date().toISOString()

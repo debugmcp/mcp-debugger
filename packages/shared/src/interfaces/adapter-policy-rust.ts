@@ -4,6 +4,7 @@
  * Encodes CodeLLDB specific behaviors and variable handling logic.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import * as path from 'path';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -101,33 +102,16 @@ export const RustAdapterPolicy: AdapterPolicy = {
   },
   
   resolveExecutablePath: (providedPath?: string) => {
-    // Rust-specific executable path resolution
-    // For Rust, we need to resolve the CodeLLDB adapter executable
     if (providedPath) {
       return providedPath;
     }
 
-    // Check environment variable for CodeLLDB path
-    if (process.env.CODELLDB_PATH) {
-      return process.env.CODELLDB_PATH;
+    if (process.env.CARGO_PATH) {
+      return process.env.CARGO_PATH;
     }
 
-    // Platform-specific default adapter path
-    // This will be resolved to the vendored CodeLLDB binary
-    const platform = process.platform;
-    const arch = process.arch;
-    
-    let platformDir = '';
-    if (platform === 'win32') {
-      platformDir = 'win32-x64';
-    } else if (platform === 'darwin') {
-      platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-    } else if (platform === 'linux') {
-      platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
-    }
-    
-    // Return path to vendored CodeLLDB
-    return `vendor/codelldb/${platformDir}/adapter/codelldb${platform === 'win32' ? '.exe' : ''}`;
+    // Defer to adapter for auto-detection (cargo / rustc)
+    return undefined;
   },
   
   getDebuggerConfiguration: () => {
@@ -319,8 +303,17 @@ export const RustAdapterPolicy: AdapterPolicy = {
       platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
     }
     
-    const codelldbPath = payload.executablePath || 
-      `vendor/codelldb/${platformDir}/adapter/codelldb${platform === 'win32' ? '.exe' : ''}`;
+    const codelldbPath = payload.executablePath ||
+      path.resolve(
+        process.cwd(),
+        'packages',
+        'adapter-rust',
+        'vendor',
+        'codelldb',
+        platformDir,
+        'adapter',
+        `codelldb${platform === 'win32' ? '.exe' : ''}`
+      );
     
     // CodeLLDB uses stdio for communication by default
     return {
