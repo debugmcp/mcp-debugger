@@ -24,7 +24,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CODELLDB_VERSION = process.env.CODELLDB_VERSION || '1.11.0';
+const CODELLDB_VERSION = process.env.CODELLDB_VERSION || '1.11.8';
 const VENDOR_DIR = path.resolve(__dirname, '..', 'vendor', 'codelldb');
 const FORCE_REBUILD = process.env.CODELLDB_FORCE_REBUILD === 'true';
 const IS_CI = process.env.CI === 'true';
@@ -191,26 +191,38 @@ async function extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName) {
     const targetAdapterDir = path.join(VENDOR_DIR, platformInfo.targetDir, 'adapter');
     const targetLldbDir = path.join(VENDOR_DIR, platformInfo.targetDir, 'lldb');
     
-    // Create target directories
+    // Recreate target directories to avoid stale files
+    await fs.rm(targetAdapterDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(targetLldbDir, { recursive: true, force: true }).catch(() => {});
     await fs.mkdir(targetAdapterDir, { recursive: true });
     await fs.mkdir(targetLldbDir, { recursive: true });
     
-    // Copy adapter binary
-    const sourceBinaryPath = path.join(tempExtractDir, platformInfo.binaryPath);
+    // Copy full adapter payload (binary + scripts + helper DLLs)
+    const sourceAdapterDir = path.join(tempExtractDir, 'extension', 'adapter');
+    log(`Copying adapter runtime (${sourceAdapterDir})...`);
+    await copyDirectory(sourceAdapterDir, targetAdapterDir);
+    
+    // Ensure the main executable remains executable on Unix targets
     const targetBinaryPath = path.join(targetAdapterDir, path.basename(platformInfo.binaryPath));
-    
-    log(`Copying adapter binary...`);
-    await fs.copyFile(sourceBinaryPath, targetBinaryPath);
-    
-    // Set executable permissions on Unix platforms
-    if (platform !== 'win32-x64') {
+    if (platform !== 'win32-x64' && await fileExists(targetBinaryPath)) {
       await fs.chmod(targetBinaryPath, 0o755);
     }
     
-    // Copy LLDB directory structure
+    // Copy LLDB directory structure (contains liblldb + embedded Python runtime)
     const sourceLldbDir = path.join(tempExtractDir, 'extension', 'lldb');
     log(`Copying LLDB libraries...`);
     await copyDirectory(sourceLldbDir, targetLldbDir);
+
+    // Copy additional resources needed by the adapter runtime (language helpers, etc.)
+    const extraDirs = ['lang_support'];
+    for (const dirName of extraDirs) {
+      const sourceExtraDir = path.join(tempExtractDir, 'extension', dirName);
+      if (await pathExists(sourceExtraDir)) {
+        const targetExtraDir = path.join(VENDOR_DIR, platformInfo.targetDir, dirName);
+        log(`Copying ${dirName}...`);
+        await copyDirectory(sourceExtraDir, targetExtraDir);
+      }
+    }
     
     // Create version manifest
     const versionFile = path.join(VENDOR_DIR, platformInfo.targetDir, 'version.json');
@@ -254,6 +266,24 @@ async function copyDirectory(src, dest) {
       const stats = await fs.stat(srcPath);
       await fs.chmod(destPath, stats.mode);
     }
+  }
+}
+
+async function pathExists(fsPath) {
+  try {
+    await fs.access(fsPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 

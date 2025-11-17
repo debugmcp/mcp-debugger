@@ -12,7 +12,9 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
+import * as fsSync from 'fs';
 import { fileURLToPath } from 'url';
+import * as os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,7 +39,12 @@ import {
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { resolveCodeLLDBExecutable } from './utils/codelldb-resolver.js';
-import { checkCargoInstallation, checkRustInstallation, getRustHostTriple } from './utils/rust-utils.js';
+import {
+  checkCargoInstallation,
+  checkRustInstallation,
+  getRustHostTriple,
+  findDlltoolExecutable,
+} from './utils/rust-utils.js';
 import { detectBinaryFormat, BinaryInfo } from './utils/binary-detector.js';
 
 export type MsvcBehavior = 'warn' | 'error' | 'continue';
@@ -97,6 +104,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   private lastToolchainValidation: ToolchainValidationResult | undefined;
   private readonly msvcBehavior: MsvcBehavior;
   private readonly autoSuggestGnu: boolean;
+  private dlltoolPath: string | undefined;
   
   // Caching
   private executablePathCache = new Map<string, ExecutablePathCacheEntry>();
@@ -213,6 +221,27 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
           code: 'RUST_MSVC_TOOLCHAIN',
           message: 'Detected Rust MSVC toolchain. For the best debugging experience with CodeLLDB, use the GNU toolchain (x86_64-pc-windows-gnu) or ensure DWARF debug info is available.'
         });
+      }
+
+      const gnuSignals = [
+        hostTriple,
+        process.env.CARGO_BUILD_TARGET,
+        process.env.RUSTFLAGS,
+        process.env.RUST_TARGET
+      ]
+        .filter(Boolean)
+        .join(' ');
+      if (process.platform === 'win32') {
+        const dlltoolPath = await findDlltoolExecutable();
+        if (dlltoolPath) {
+          this.dlltoolPath = dlltoolPath;
+        } else if (/-pc-windows-gnu/i.test(gnuSignals)) {
+          warnings.push({
+            code: 'DLLTOOL_NOT_FOUND',
+            message:
+              'dlltool.exe is required for Windows GNU builds but was not found. Install MinGW-w64/binutils (winget install mingw) or ensure rustup\'s stable-gnu toolchain is installed and its dlltool.exe is added to PATH.'
+          });
+        }
       }
       
       // Check Cargo installation
@@ -381,6 +410,14 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     return 'warn';
   }
 
+  private safeReadFile(filePath: string): string | null {
+    try {
+      return fsSync.readFileSync(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
   private resolveAutoSuggestGnu(): boolean {
     const rawValue =
       this.dependencies.environment?.get('RUST_AUTO_SUGGEST_GNU') ??
@@ -390,6 +427,97 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
     const normalized = rawValue.toLowerCase();
     return !(normalized === '0' || normalized === 'false' || normalized === 'no');
+  }
+
+  private configurePythonEnvironment(env: Record<string, string>, adapterPath: string): void {
+    try {
+      const adapterDir = path.dirname(adapterPath);
+      const vendorRoot = path.resolve(adapterDir, '..');
+      const lldbRoot = path.resolve(vendorRoot, 'lldb');
+      if (!existsSync(lldbRoot)) {
+        return;
+      }
+
+      const adapterScriptsDir = path.join(adapterDir, 'scripts');
+      const scrubbedVariables = ['PYTHONHOME', 'PYTHONPATH', 'CODELLDB_STARTUP'];
+      for (const variable of scrubbedVariables) {
+        if (Object.prototype.hasOwnProperty.call(env, variable)) {
+          delete env[variable as keyof typeof env];
+        }
+      }
+
+      const pathEntries = env.PATH
+        ? env.PATH.split(path.delimiter).filter(Boolean)
+        : [];
+      const prependEntries = [
+        path.join(lldbRoot, 'bin'),
+        path.join(lldbRoot, 'DLLs'),
+        path.join(adapterDir, 'DLLs'),
+        adapterDir,
+        adapterScriptsDir
+      ].filter((dir) => existsSync(dir));
+
+      for (const entry of prependEntries.reverse()) {
+        if (!pathEntries.includes(entry)) {
+          pathEntries.unshift(entry);
+        }
+      }
+
+      env.PATH = pathEntries.join(path.delimiter);
+
+      this.dependencies.logger?.info('[RustDebugAdapter] Configured embedded Python environment', {
+        scrubbedVariables,
+        addedPaths: prependEntries
+      });
+    } catch (error) {
+      this.dependencies.logger?.warn(
+        '[RustDebugAdapter] Failed to configure embedded Python for CodeLLDB',
+        error
+      );
+    }
+  }
+
+  private prepareCodelldbExecutablePath(originalPath: string | null): string | null {
+    if (!originalPath || process.platform !== 'win32' || !originalPath.includes(' ')) {
+      return originalPath;
+    }
+
+    try {
+      const platformDir = path.resolve(originalPath, '..', '..');
+      const sanitizedRoot = path.join(os.tmpdir(), 'debug-mcp-codelldb');
+      const sanitizedPlatformDir = path.join(sanitizedRoot, path.basename(platformDir));
+
+      const sourceVersionPath = path.join(platformDir, 'version.json');
+      const sanitizedVersionPath = path.join(sanitizedPlatformDir, 'version.json');
+      const sourceVersion = this.safeReadFile(sourceVersionPath);
+      const sanitizedVersion = this.safeReadFile(sanitizedVersionPath);
+
+      if (!sanitizedVersion || sanitizedVersion !== sourceVersion) {
+        fsSync.rmSync(sanitizedPlatformDir, { recursive: true, force: true });
+        fsSync.mkdirSync(path.dirname(sanitizedPlatformDir), { recursive: true });
+        fsSync.cpSync(platformDir, sanitizedPlatformDir, { recursive: true });
+      }
+
+      const sanitizedExecutable = path.join(
+        sanitizedPlatformDir,
+        path.relative(platformDir, originalPath)
+      );
+
+      if (existsSync(sanitizedExecutable)) {
+        this.dependencies.logger?.info('[RustDebugAdapter] Using sanitized CodeLLDB path', {
+          sanitizedExecutable,
+          originalPath
+        });
+        return sanitizedExecutable;
+      }
+    } catch (error) {
+      this.dependencies.logger?.warn(
+        '[RustDebugAdapter] Failed to prepare sanitized CodeLLDB path',
+        error
+      );
+    }
+
+    return originalPath;
   }
 
   private buildMsvcWarningMessage(binaryPath: string): string {
@@ -495,14 +623,16 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     // Resolve CodeLLDB executable synchronously (already validated in initialize)
-    const codelldbPath = this.resolveCodeLLDBExecutableSync();
+    const resolvedPath = this.resolveCodeLLDBExecutableSync();
     
-    if (!codelldbPath) {
+    if (!resolvedPath) {
       throw new AdapterError(
         'CodeLLDB executable not found. Run: npm run build:adapter',
         AdapterErrorCode.ENVIRONMENT_INVALID
       );
     }
+
+    const codelldbPath = this.prepareCodelldbExecutablePath(resolvedPath) ?? resolvedPath;
     
     // Validate port - proxy infrastructure requires valid TCP port
     if (!config.adapterPort || config.adapterPort === 0) {
@@ -515,6 +645,15 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     // Build CodeLLDB command for TCP mode
     // CodeLLDB uses --port argument for TCP mode
     const args = ['--port', String(config.adapterPort)];
+
+    // Point codelldb at the vendored liblldb so it can locate its Python runtime.
+    const libExt = process.platform === 'darwin' ? '.dylib' : process.platform === 'win32' ? '.dll' : '.so';
+    const liblldbPath = path.resolve(path.dirname(codelldbPath), '..', 'lldb', 'bin', `liblldb${libExt}`);
+    if (existsSync(liblldbPath)) {
+      args.push('--liblldb', liblldbPath);
+    } else {
+      this.dependencies.logger?.warn(`[RustDebugAdapter] liblldb not found at ${liblldbPath}. Python visualizers may not work.`);
+    }
     
     // Prepare environment
     const env: Record<string, string> = { ...process.env as Record<string, string> };
@@ -522,7 +661,21 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     // Windows: Enable native PDB reader for MSVC-compiled Rust
     if (process.platform === 'win32') {
       env.LLDB_USE_NATIVE_PDB_READER = '1';
+      if (this.dlltoolPath && !env.DLLTOOL) {
+        env.DLLTOOL = this.dlltoolPath;
+        const dllDir = path.dirname(this.dlltoolPath);
+        if (existsSync(dllDir)) {
+          const pathEntries = env.PATH
+            ? env.PATH.split(path.delimiter).filter(Boolean)
+            : [];
+          if (!pathEntries.includes(dllDir)) {
+            env.PATH = [dllDir, ...pathEntries].join(path.delimiter);
+          }
+        }
+      }
     }
+
+    this.configurePythonEnvironment(env, codelldbPath);
     
     // Ensure RUST_BACKTRACE is enabled for better error messages
     if (!env.RUST_BACKTRACE) {
