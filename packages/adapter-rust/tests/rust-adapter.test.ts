@@ -170,7 +170,7 @@ describe('RustDebugAdapter', () => {
   });
   
   describe('transformLaunchConfig', () => {
-    it('should transform config with explicit program path', () => {
+    it('should transform config with explicit program path', async () => {
       const config = {
         program: './target/debug/myapp',
         args: ['--verbose'],
@@ -179,7 +179,7 @@ describe('RustDebugAdapter', () => {
         stopOnEntry: true
       };
       
-      const transformed = adapter.transformLaunchConfig(config);
+      const transformed = await adapter.transformLaunchConfig(config);
       
       expect(transformed.type).toBe('lldb');
       expect(transformed.request).toBe('launch');
@@ -190,7 +190,7 @@ describe('RustDebugAdapter', () => {
       expect(transformed.sourceLanguages).toEqual(['rust']);
     });
     
-    it('should handle Cargo configuration', () => {
+    it('should handle Cargo configuration', async () => {
       const config = {
         cargo: {
           bin: 'my_binary',
@@ -200,7 +200,7 @@ describe('RustDebugAdapter', () => {
         cwd: '/project'
       };
       
-      const transformed = adapter.transformLaunchConfig(config);
+      const transformed = await adapter.transformLaunchConfig(config);
       
       expect(transformed.program).toContain(path.join('target', 'release', 'my_binary'));
       if (process.platform === 'win32') {
@@ -211,12 +211,12 @@ describe('RustDebugAdapter', () => {
       expect(transformedWithFields.sourceLanguages).toEqual(['rust']);
     });
     
-    it('should throw error if no program specified', () => {
+    it('should throw error if no program specified', async () => {
       const config = {
         args: ['--verbose']
       };
       
-      expect(() => adapter.transformLaunchConfig(config)).toThrow('No program specified');
+      await expect(adapter.transformLaunchConfig(config)).rejects.toThrow('No program specified');
     });
   });
   

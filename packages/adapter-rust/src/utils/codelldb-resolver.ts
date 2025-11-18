@@ -31,7 +31,11 @@ export async function resolveCodeLLDBExecutable(): Promise<string | null> {
   // Build path to vendored CodeLLDB
   const executableName = platform === 'win32' ? 'codelldb.exe' : 'codelldb';
   const candidatePaths = [
+    // Package root (production install)
+    path.resolve(__dirname, '..', '..', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
+    // Backward compatibility for older builds that expected vendor under dist/
     path.resolve(__dirname, '..', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
+    // Monorepo source tree fallbacks
     path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
     path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName)
   ];
@@ -82,6 +86,7 @@ export async function getCodeLLDBVersion(): Promise<string | null> {
   }
   
   const versionFileCandidates = [
+    path.resolve(__dirname, '..', '..', 'vendor', 'codelldb', platformDir, 'version.json'),
     path.resolve(__dirname, '..', 'vendor', 'codelldb', platformDir, 'version.json'),
     path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'version.json'),
     path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'version.json')

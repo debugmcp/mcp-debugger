@@ -252,7 +252,16 @@ export class SessionManagerCore {
         sessionName: session.name,
         timestamp: Date.now()
       });
-      
+
+      // Guard against stale continued events arriving after a breakpoint stop.
+      // If the session is already paused, keep it paused so inspections still work.
+      if (session.state === SessionState.PAUSED) {
+        this.logger.debug(
+          `[SessionManager] Ignoring continued event for session ${sessionId} because state is already PAUSED`
+        );
+        return;
+      }
+
       this._updateSessionState(session, SessionState.RUNNING);
     };
     proxyManager.on('continued', handleContinued);

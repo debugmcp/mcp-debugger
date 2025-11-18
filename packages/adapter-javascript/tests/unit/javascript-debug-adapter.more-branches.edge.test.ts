@@ -60,9 +60,9 @@ describe('JavascriptDebugAdapter additional branch coverage', () => {
     expect(adapter.isConnected()).toBe(false);
   });
 
-  it('transformLaunchConfig: respects user env.NODE_ENV and merges process.env', () => {
+  it('transformLaunchConfig: respects user env.NODE_ENV and merges process.env', async () => {
     const adapter = new JavascriptDebugAdapter(depsWithLogger);
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program: '/proj/app.js',
       env: { NODE_ENV: 'production', CUSTOM_X: '1' }
     } as any);

@@ -90,6 +90,9 @@ importers:
       '@vscode/debugadapter-testsupport':
         specifier: ^1.68.0
         version: 1.68.0
+      baseline-browser-mapping:
+        specifier: ^2.8.29
+        version: 2.8.29
       c8:
         specifier: ^10.1.3
         version: 10.1.3
@@ -1238,8 +1241,8 @@ packages:
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
-  baseline-browser-mapping@2.8.6:
-    resolution: {integrity: sha512-wrH5NNqren/QMtKUEEJf7z86YjfqW/2uw3IL3/xpqZUC95SSVIFXYQeeGjL6FT/X68IROu6RMehZQS5foy2BXw==}
+  baseline-browser-mapping@2.8.29:
+    resolution: {integrity: sha512-sXdt2elaVnhpDNRDz+1BDx1JQoJRuNk7oVlAlbGiFkLikHCAQiccexF/9e91zVi6RCgqspl04aP+6Cnl9zRLrA==}
     hasBin: true
 
   body-parser@2.2.0:
@@ -3766,7 +3769,7 @@ snapshots:
 
   balanced-match@1.0.2: {}
 
-  baseline-browser-mapping@2.8.6: {}
+  baseline-browser-mapping@2.8.29: {}
 
   body-parser@2.2.0:
     dependencies:
@@ -3797,7 +3800,7 @@ snapshots:
 
   browserslist@4.26.2:
     dependencies:
-      baseline-browser-mapping: 2.8.6
+      baseline-browser-mapping: 2.8.29
       caniuse-lite: 1.0.30001743
       electron-to-chromium: 1.5.223
       node-releases: 2.0.21

@@ -12,12 +12,140 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import fs from 'fs/promises';
 import { appendFile, mkdir, writeFile } from 'fs/promises';
+import { createHash } from 'crypto';
 
 const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../../..');
+const PACK_LOCK_PATH = path.join(ROOT, 'packages', 'mcp-debugger', '.pack-lock');
+const PACK_LOCK_STALE_MS = 5 * 60 * 1000;
+const PACKAGE_DIR = path.join(ROOT, 'packages', 'mcp-debugger');
+const PACKAGE_DIST_DIR = path.join(PACKAGE_DIR, 'dist');
+const PACK_CACHE_DIR = path.join(PACKAGE_DIR, 'package-cache');
+const PACKAGE_JSON_PATH = path.join(PACKAGE_DIR, 'package.json');
+const PACKAGE_BACKUP_PATH = path.join(PACKAGE_DIR, 'package.json.backup');
+const ROOT_DIST_DIR = path.join(ROOT, 'dist');
+const ROOT_BUNDLE_ENTRY = path.join(ROOT_DIST_DIR, 'bundle.cjs');
+const PACKAGE_DIST_ENTRY = path.join(PACKAGE_DIST_DIR, 'cli.mjs');
+
+async function acquirePackLock(): Promise<void> {
+  while (true) {
+    try {
+      const handle = await fs.open(PACK_LOCK_PATH, 'wx');
+      await handle.writeFile(JSON.stringify({ pid: process.pid, timestamp: Date.now() }));
+      await handle.close();
+      return;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== 'EEXIST') {
+        throw error;
+      }
+
+      try {
+        const stats = await fs.stat(PACK_LOCK_PATH);
+        if (Date.now() - stats.mtimeMs > PACK_LOCK_STALE_MS) {
+          console.log('[NPX Test] Pack lock looks stale. Removing it...');
+          await fs.unlink(PACK_LOCK_PATH);
+          continue;
+        }
+      } catch (statError) {
+        const statErr = statError as NodeJS.ErrnoException;
+        if (statErr.code !== 'ENOENT') {
+          throw statError;
+        }
+      }
+
+      console.log('[NPX Test] Waiting for existing pack operation to finish...');
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+}
+
+async function releasePackLock(): Promise<void> {
+  try {
+    await fs.unlink(PACK_LOCK_PATH);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== 'ENOENT') {
+      console.warn('[NPX Test] Failed to release pack lock:', err);
+    }
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureWorkspaceBuilt(): Promise<void> {
+  const needsRootBuild = !(await pathExists(ROOT_BUNDLE_ENTRY));
+  const needsPackageBuild = !(await pathExists(PACKAGE_DIST_ENTRY));
+
+  if (needsRootBuild) {
+    console.log('[NPX Test] Root dist missing, running "pnpm build"...');
+    await execAsync('pnpm build', { cwd: ROOT });
+  }
+
+  if (needsPackageBuild) {
+    console.log('[NPX Test] mcp-debugger dist missing, rebuilding package...');
+    await execAsync('pnpm --filter @debugmcp/mcp-debugger build', { cwd: ROOT });
+  }
+}
+
+async function ensurePackageBackupRestored(): Promise<void> {
+  if (await pathExists(PACKAGE_BACKUP_PATH)) {
+    console.log('[NPX Test] Detected leftover package.json.backup, restoring before continuing...');
+    await execAsync('node scripts/prepare-pack.js restore', { cwd: ROOT });
+  }
+}
+
+async function hashDirectoryContents(
+  dir: string,
+  hash: ReturnType<typeof createHash>,
+  relativeTo: string
+): Promise<void> {
+  if (!(await pathExists(dir))) {
+    return;
+  }
+
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    const relativePath = path.relative(relativeTo, entryPath).replace(/\\/g, '/');
+    hash.update(relativePath);
+
+    if (entry.isDirectory()) {
+      await hashDirectoryContents(entryPath, hash, relativeTo);
+    } else if (entry.isFile()) {
+      const contents = await fs.readFile(entryPath);
+      hash.update(contents);
+    }
+  }
+}
+
+async function computePackFingerprint(): Promise<string> {
+  const hash = createHash('sha256');
+  hash.update(await fs.readFile(PACKAGE_JSON_PATH));
+  await hashDirectoryContents(PACKAGE_DIST_DIR, hash, PACKAGE_DIR);
+  return hash.digest('hex');
+}
+
+async function ensurePackCacheDir(): Promise<void> {
+  await fs.mkdir(PACK_CACHE_DIR, { recursive: true });
+}
+
+async function getCachedTarballPath(fingerprint: string): Promise<string | null> {
+  const candidate = path.join(PACK_CACHE_DIR, `${fingerprint}.tgz`);
+  return (await pathExists(candidate)) ? candidate : null;
+}
 
 export interface NpxTestConfig {
   packagePath?: string;
@@ -30,45 +158,57 @@ export interface NpxTestConfig {
  */
 export async function buildAndPackNpmPackage(): Promise<string> {
   console.log('[NPX Test] Building project...');
-  
-  try {
-    // Build the entire project
-    await execAsync('pnpm build', { cwd: ROOT });
-    console.log('[NPX Test] Build completed');
-    
-    // Build the mcp-debugger package specifically (creates bundles)
-    console.log('[NPX Test] Building mcp-debugger package bundles...');
-    await execAsync('pnpm --filter @debugmcp/mcp-debugger build', { cwd: ROOT });
-    console.log('[NPX Test] MCP debugger bundles created');
-    
-    // Prepare package.json (resolve workspace deps)
-    await execAsync('node scripts/prepare-pack.js prepare', { cwd: ROOT });
 
-    // Pack the mcp-debugger package
-    const packageDir = path.join(ROOT, 'packages', 'mcp-debugger');
-    console.log('[NPX Test] Creating npm package...');
-    
-    const { stdout } = await execAsync('npm pack', { cwd: packageDir });
-    
-    // Extract tarball filename from output
+  await acquirePackLock();
+  console.log('[NPX Test] Acquired NPX packaging lock.');
+
+  let ranPrepare = false;
+  try {
+    await ensurePackageBackupRestored();
+    await ensureWorkspaceBuilt();
+    await ensurePackCacheDir();
+
+    const fingerprint = await computePackFingerprint();
+    const cachedTarball = await getCachedTarballPath(fingerprint);
+    if (cachedTarball) {
+      console.log(`[NPX Test] Using cached npm package at ${cachedTarball}`);
+      return cachedTarball;
+    }
+
+    console.log('[NPX Test] Cache miss; creating npm package tarball...');
+    await execAsync('node scripts/prepare-pack.js prepare', { cwd: ROOT });
+    ranPrepare = true;
+
+    const { stdout } = await execAsync('npm pack --pack-destination package-cache', {
+      cwd: PACKAGE_DIR
+    });
     const tarballName = stdout.trim().split('\n').pop();
     if (!tarballName) {
-      throw new Error('Failed to get tarball name from npm pack output');
+      throw new Error('Failed to determine npm pack output filename');
     }
-    
-    const tarballPath = path.join(packageDir, tarballName);
-    console.log(`[NPX Test] Package created: ${tarballPath}`);
-    
-    return tarballPath;
+
+    const tempTarballPath = path.join(PACKAGE_DIR, 'package-cache', tarballName);
+    const finalTarballPath = path.join(PACK_CACHE_DIR, `${fingerprint}.tgz`);
+    if (await pathExists(finalTarballPath)) {
+      await fs.unlink(finalTarballPath);
+    }
+    await fs.rename(tempTarballPath, finalTarballPath);
+    console.log(`[NPX Test] Package created: ${finalTarballPath}`);
+
+    return finalTarballPath;
   } catch (error) {
     console.error('[NPX Test] Build/pack failed:', error);
     throw error;
   } finally {
-    try {
-      await execAsync('node scripts/prepare-pack.js restore', { cwd: ROOT });
-    } catch (restoreError) {
-      console.warn('[NPX Test] Warning restoring package.json:', restoreError);
+    if (ranPrepare) {
+      try {
+        await execAsync('node scripts/prepare-pack.js restore', { cwd: ROOT });
+      } catch (restoreError) {
+        console.warn('[NPX Test] Warning restoring package.json:', restoreError);
+      }
     }
+
+    await releasePackLock();
   }
 }
 

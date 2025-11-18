@@ -100,8 +100,8 @@ describe('SessionManager - Multi-Session Management', () => {
     await sessionManager.continue(session1.id);
     mockProxyManager1.simulateEvent('continued');
     
-    // Session 1 should be running, session 2 should still be paused
-    expect(sessionManager.getSession(session1.id)?.state).toBe(SessionState.RUNNING);
+    // Session 1 should remain paused until a subsequent stop event arrives; session 2 stays paused.
+    expect(sessionManager.getSession(session1.id)?.state).toBe(SessionState.PAUSED);
     expect(sessionManager.getSession(session2.id)?.state).toBe(SessionState.PAUSED);
   });
 

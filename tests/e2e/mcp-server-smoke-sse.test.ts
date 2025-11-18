@@ -5,7 +5,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
-import { spawn, ChildProcess } from 'child_process';
+import { existsSync } from 'fs';
+import { spawn, ChildProcess, exec as execCallback } from 'child_process';
+import { promisify } from 'util';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
@@ -13,12 +15,14 @@ import {
   waitForPort
 } from './smoke-test-utils.js';
 
+const execAsync = promisify(execCallback);
 const TEST_TIMEOUT = 30000; // 30 seconds for all operations
 
 let mcpSdkClient: Client | null = null;
 let sseServerProcess: ChildProcess | null = null;
 let serverPort: number | null = null;
 const projectRoot = process.cwd();
+let distReady = false;
 
 describe('MCP Server E2E SSE Smoke Test', () => {
   // Ensure server is killed even if test fails
@@ -79,6 +83,22 @@ describe('MCP Server E2E SSE Smoke Test', () => {
     serverPort = null;
   });
 
+  async function ensureDistBuild(): Promise<void> {
+    if (distReady) {
+      return;
+    }
+
+    const distEntry = path.join(projectRoot, 'dist', 'index.js');
+    if (existsSync(distEntry)) {
+      distReady = true;
+      return;
+    }
+
+    console.log('[SSE Smoke Test] dist build missing; running "pnpm build" before launching SSE server...');
+    await execAsync('pnpm build', { cwd: projectRoot });
+    distReady = true;
+  }
+
   /**
    * Find an available port by trying to bind to it
    */
@@ -126,6 +146,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
    */
   async function startSSEServer(options: { cwd?: string, env?: NodeJS.ProcessEnv } = {}, maxRetries: number = 3): Promise<number> {
     let lastError: Error | null = null;
+    await ensureDistBuild();
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {

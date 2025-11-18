@@ -338,7 +338,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       type: 'python',
       request: 'launch',
       name: 'Python: Current File',
-      console: 'integratedTerminal',
+      console: 'internalConsole',
       redirectOutput: true,
       showReturnValue: true,
       justMyCode: config.justMyCode ?? true,

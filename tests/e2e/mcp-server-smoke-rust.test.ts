@@ -8,119 +8,14 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { spawn } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
-import { findDlltoolExecutable } from '../../packages/adapter-rust/src/utils/rust-utils.js';
+import { prepareRustExample } from './rust-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../..');
-const WINDOWS_GNU_TARGET = 'x86_64-pc-windows-gnu';
-type ExampleName = 'hello_world' | 'async_example';
-
-interface ExamplePaths {
-  sourcePath: string;
-  binaryPath: string;
-}
-
-const preparedExamples = new Map<ExampleName, ExamplePaths>();
-
-async function prepareExample(exampleName: ExampleName): Promise<ExamplePaths> {
-  if (preparedExamples.has(exampleName)) {
-    return preparedExamples.get(exampleName)!;
-  }
-
-  const exampleRoot = path.resolve(ROOT, 'examples', 'rust', exampleName);
-  const sourcePath = path.join(exampleRoot, 'src', 'main.rs');
-  if (!existsSync(sourcePath)) {
-    throw new Error(`Source file missing for ${exampleName}: ${sourcePath}`);
-  }
-
-  await buildExampleBinary(exampleRoot);
-  const binaryPath = resolveBinaryPath(exampleRoot, exampleName);
-  if (!existsSync(binaryPath)) {
-    throw new Error(`Compiled binary missing for ${exampleName}: ${binaryPath}`);
-  }
-
-  const result = { sourcePath, binaryPath };
-  preparedExamples.set(exampleName, result);
-  return result;
-}
-
-async function buildExampleBinary(exampleRoot: string): Promise<void> {
-  if (process.platform === 'win32') {
-    const dlltoolPath = await findDlltoolExecutable();
-    if (!dlltoolPath) {
-      throw new Error(
-        'dlltool.exe is required for GNU toolchain builds on Windows. Install MinGW-w64/binutils or ensure rustup stable-gnu is installed and add dlltool.exe to PATH.'
-      );
-    }
-    const dllDir = path.dirname(dlltoolPath);
-    const env = {
-      ...process.env,
-      PATH: `${dllDir}${path.delimiter}${process.env.PATH ?? ''}`,
-      DLLTOOL: dlltoolPath
-    };
-    try {
-      await runCargoCommand(
-        ['+stable-gnu', 'build', '--target', WINDOWS_GNU_TARGET],
-        exampleRoot,
-        env
-      );
-      return;
-    } catch (error) {
-      console.warn('[Rust Smoke Test] GNU target build failed, falling back to MSVC build:', error);
-    }
-  }
-
-  const fallbackArgs =
-    process.platform === 'win32'
-      ? ['+stable-msvc', 'build', '--target', 'x86_64-pc-windows-msvc']
-      : ['build'];
-  await runCargoCommand(fallbackArgs, exampleRoot, { ...process.env });
-}
-
-function resolveBinaryPath(exampleRoot: string, binaryName: string): string {
-  const extension = process.platform === 'win32' ? '.exe' : '';
-  if (process.platform === 'win32') {
-    const gnuPath = path.join(
-      exampleRoot,
-      'target',
-      WINDOWS_GNU_TARGET,
-      'debug',
-      `${binaryName}${extension}`
-    );
-    if (existsSync(gnuPath)) {
-      return gnuPath;
-    }
-  }
-  return path.join(exampleRoot, 'target', 'debug', `${binaryName}${extension}`);
-}
-
-function runCargoCommand(
-  args: string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const buildProcess = spawn('cargo', args, {
-      cwd,
-      env,
-      stdio: 'inherit'
-    });
-    buildProcess.on('error', reject);
-    buildProcess.on('exit', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`cargo build failed with exit code ${code}`));
-      }
-    });
-  });
-}
-
 describe('MCP Server Rust Debugging Smoke Test', () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
@@ -172,7 +67,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
     'starts Rust debug session end-to-end without proxy exit',
     async () => {
       const { sourcePath: helloSourcePath, binaryPath: helloBinaryPath } =
-        await prepareExample('hello_world');
+        await prepareRustExample('hello_world');
       expect(existsSync(helloSourcePath)).toBe(true);
       expect(existsSync(helloBinaryPath)).toBe(true);
 
@@ -302,7 +197,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
     'steps through async await and inspects locals',
     async () => {
       const { sourcePath: asyncSourcePath, binaryPath: asyncBinaryPath } =
-        await prepareExample('async_example');
+        await prepareRustExample('async_example');
       expect(existsSync(asyncSourcePath)).toBe(true);
       expect(existsSync(asyncBinaryPath)).toBe(true);
 

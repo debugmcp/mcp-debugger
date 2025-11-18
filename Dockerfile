@@ -19,11 +19,15 @@ COPY packages/shared/package.json ./packages/shared/package.json
 COPY packages/adapter-mock/package.json ./packages/adapter-mock/package.json
 COPY packages/adapter-python/package.json ./packages/adapter-python/package.json
 COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/package.json
+COPY packages/adapter-rust/package.json ./packages/adapter-rust/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
 #    Copy all package sources to allow pnpm to resolve workspace:* links
 COPY packages ./packages
+
+# Ensure the linux CodeLLDB payload (vendored locally) is available before the build.
+RUN test -f ./packages/adapter-rust/vendor/codelldb/linux-x64/version.json || (echo "Missing packages/adapter-rust/vendor/codelldb/linux-x64 assets. Run \"pnpm --filter @debugmcp/adapter-rust run build:adapter\" locally before building Docker images." && exit 1)
 
 # Remove any existing dist folders and tsbuildinfo artifacts from packages to prevent stale
 # build outputs (and their cached path maps) from polluting the Docker build.
@@ -41,12 +45,13 @@ COPY packages/shared/tsconfig*.json ./packages/shared/
 COPY packages/adapter-mock/tsconfig*.json ./packages/adapter-mock/
 COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
 COPY packages/adapter-javascript/tsconfig*.json ./packages/adapter-javascript/
+COPY packages/adapter-rust/tsconfig*.json ./packages/adapter-rust/
 
 COPY src ./src
 COPY scripts ./scripts/
 
 # 4) Build workspace packages and main project (root build runs build:packages); then bundle
-RUN pnpm run build --silent
+RUN CODELLDB_VENDOR_LOCAL_ONLY=true CODELLDB_VENDOR_ALL=false CODELLDB_PLATFORMS=linux-x64 pnpm run build --silent
 RUN node scripts/bundle.js
 
 # Optional: quick diagnostics for bundle
@@ -64,6 +69,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     mkdir -p /app/node_modules/@debugmcp/adapter-mock && \
     mkdir -p /app/node_modules/@debugmcp/adapter-python && \
     mkdir -p /app/node_modules/@debugmcp/adapter-javascript && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-rust && \
     cp -r /app/packages/shared/dist /app/node_modules/@debugmcp/shared/ && \
     cp /app/packages/shared/package.json /app/node_modules/@debugmcp/shared/ && \
     cp -r /app/packages/adapter-mock/dist /app/node_modules/@debugmcp/adapter-mock/ && \
@@ -72,7 +78,10 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/ && \
     cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
-    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/
+    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/ && \
+    cp -r /app/packages/adapter-rust/dist /app/node_modules/@debugmcp/adapter-rust/ && \
+    cp -r /app/packages/adapter-rust/vendor /app/node_modules/@debugmcp/adapter-rust/ && \
+    cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/
 
 # Stage 2: Create minimal runtime image
 # Use Debian-slim for glibc compatibility with js-debug binary
@@ -97,9 +106,15 @@ RUN apt-get update && \
     tini && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
+    curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable && \
+    ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc && \
+    ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && \
+    ln -sf /root/.cargo/bin/rustup /usr/local/bin/rustup && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     pip3 install --no-cache-dir "debugpy>=1.8.14"
+
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Copy ONLY the bundled server and proxy files (everything else is bundled)
 COPY --from=builder /app/dist/bundle.cjs /app/dist/bundle.cjs

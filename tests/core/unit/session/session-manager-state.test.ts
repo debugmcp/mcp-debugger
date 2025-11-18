@@ -52,7 +52,7 @@ describe('SessionManager - State Machine Integrity', () => {
     dependencies.mockProxyManager.simulateStopped(1, 'entry');
     await sessionManager.continue(session.id);
     dependencies.mockProxyManager.simulateEvent('continued');
-    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.RUNNING);
+    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
     
     // RUNNING → STOPPED
     await sessionManager.closeSession(session.id);
@@ -94,9 +94,9 @@ describe('SessionManager - State Machine Integrity', () => {
     await sessionManager.startDebugging(session.id, 'test.py');
     await vi.runAllTimersAsync();
     
-    // Simulate error during RUNNING state
+    // Simulate continued event; state should remain paused until the next explicit transition
     dependencies.mockProxyManager.simulateEvent('continued');
-    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.RUNNING);
+    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
     
     dependencies.mockProxyManager.simulateError(new Error('Runtime error'));
     

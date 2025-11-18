@@ -294,7 +294,7 @@ describe('AdapterLoader', () => {
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
-      expect(adapters).toHaveLength(3);
+      expect(adapters).toHaveLength(4);
 
       const pythonAdapter = adapters.find(a => a.name === 'python');
       expect(pythonAdapter).toEqual({
@@ -317,6 +317,14 @@ describe('AdapterLoader', () => {
         name: 'javascript',
         packageName: '@debugmcp/adapter-javascript',
         description: 'JavaScript/TypeScript debugger using js-debug',
+        installed: false
+      });
+
+      const rustAdapter = adapters.find(a => a.name === 'rust');
+      expect(rustAdapter).toEqual({
+        name: 'rust',
+        packageName: '@debugmcp/adapter-rust',
+        description: 'Rust debugger using CodeLLDB',
         installed: false
       });
     });

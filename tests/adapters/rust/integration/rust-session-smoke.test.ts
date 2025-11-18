@@ -90,7 +90,11 @@ describe('Rust adapter - session smoke (integration)', () => {
 
     expect(path.isAbsolute(command.command)).toBe(true);
     expect(existsSync(command.command)).toBe(true);
-    expect(command.args).toEqual(['--port', String(adapterPort)]);
+    expect(command.args?.[0]).toBe('--port');
+    expect(command.args?.[1]).toBe(String(adapterPort));
+    if (command.args && command.args.length > 2) {
+      expect(command.args.slice(2)).toContain('--liblldb');
+    }
     expect(command.env?.RUST_BACKTRACE).toBe('1');
     if (process.platform === 'win32') {
       expect(command.env?.LLDB_USE_NATIVE_PDB_READER).toBe('1');

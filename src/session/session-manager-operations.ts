@@ -1109,10 +1109,17 @@ export class SessionManagerOperations extends SessionManagerData {
         `[SessionManager continue] Sending DAP 'continue' for session ${sessionId}, threadId ${threadId}.`
       );
       await session.proxyManager.sendDapRequest('continue', { threadId });
-      this._updateSessionState(session, SessionState.RUNNING);
-      this.logger.info(
-        `[SessionManager continue] DAP 'continue' sent, session ${sessionId} state updated to RUNNING.`
-      );
+
+      if (session.state === SessionState.PAUSED || session.state === SessionState.STOPPED) {
+        this.logger.debug(
+          `[SessionManager continue] DAP 'continue' completed but session ${sessionId} is already ${session.state}; skipping RUNNING update.`
+        );
+      } else {
+        this._updateSessionState(session, SessionState.RUNNING);
+        this.logger.info(
+          `[SessionManager continue] DAP 'continue' sent, session ${sessionId} state updated to RUNNING.`
+        );
+      }
       return { success: true, state: session.state };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

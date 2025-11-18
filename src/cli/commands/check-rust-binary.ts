@@ -1,6 +1,28 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import { detectBinaryFormat, type BinaryInfo } from '@debugmcp/adapter-rust';
+import type { BinaryInfo } from '@debugmcp/adapter-rust';
+
+type DetectBinaryFormatFn = (exePath: string) => Promise<BinaryInfo>;
+let detectBinaryFormatFn: DetectBinaryFormatFn | null = null;
+
+async function ensureDetectBinaryFormat(): Promise<DetectBinaryFormatFn> {
+  if (detectBinaryFormatFn) {
+    return detectBinaryFormatFn;
+  }
+
+  try {
+    const mod = await import('@debugmcp/adapter-rust');
+    detectBinaryFormatFn = mod.detectBinaryFormat;
+  } catch (error) {
+    const message =
+      (error instanceof Error && error.message) || 'Failed to load @debugmcp/adapter-rust';
+    throw new Error(
+      `${message}. Ensure the Rust adapter is built (pnpm --filter @debugmcp/adapter-rust run build) before using check-rust-binary.`
+    );
+  }
+
+  return detectBinaryFormatFn;
+}
 
 export interface CheckRustBinaryOptions {
   json?: boolean;
@@ -86,6 +108,7 @@ export async function handleCheckRustBinaryCommand(
     throw error;
   }
 
+  const detectBinaryFormat = await ensureDetectBinaryFormat();
   const info = await detectBinaryFormat(resolvedPath);
 
   if (options.json) {

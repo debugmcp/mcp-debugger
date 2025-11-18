@@ -26,6 +26,8 @@ The Rust adapter bundles the CodeLLDB binaries into `packages/adapter-rust/vendo
 - `pnpm --filter @debugmcp/adapter-rust run build:adapter`
 - `node packages/adapter-rust/scripts/vendor-codelldb.js`
 
+> **New default:** the vendoring script now downloads **all supported platforms** (win32-x64, linux-{x86_64,arm64}, darwin-{x64,arm64}) so Docker builds can reuse the same artifacts. Set `CODELLDB_VENDOR_ALL=false` if you only want the host platform.
+
 ### Manual control
 
 ```bash
@@ -41,6 +43,8 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 - `CODELLDB_VERSION`: override the release tag (defaults to `1.11.0`)
 - `CODELLDB_FORCE_REBUILD=true`: ignore cached binaries and re-download
 - `CODELLDB_PLATFORMS=win32-x64,linux-x64`: vendor specific platforms
+- `CODELLDB_VENDOR_ALL=false`: opt out of the "vendor every platform" default and fall back to host-only downloads
+- `CODELLDB_VENDOR_LOCAL_ONLY=true`: disable network downloads entirely and fail if the requested platform isn't already vendored (used by Docker builds that copy pre-fetched artifacts)
 - `CODELLDB_KEEP_TEMP=true`: retain the downloaded VSIX and extracted temp folders for inspection
 - `SKIP_ADAPTER_VENDOR=true`: opt out entirely (used by CI jobs that pre-bake artifacts)
 
@@ -140,6 +144,30 @@ For a Cargo project with arguments:
   }
 }
 ```
+
+### 5. Understand What the Rust Example Helper Does
+
+Our test suite uses `tests/e2e/rust-example-utils.ts` to make sure every rust smoke test compiles and reuses binaries deterministically. The helper does three things you can mirror in your own workflows:
+
+1. **Build with the GNU toolchain when available.** On Windows it looks up `dlltool.exe` (via `@debugmcp/adapter-rust`’s `findDlltoolExecutable`) and runs `cargo +stable-gnu build --target x86_64-pc-windows-gnu`. If that fails it falls back to the platform’s default triple (MSVC on Windows, glibc or musl elsewhere). You can follow the same pattern manually:
+   ```powershell
+   # GNU-preferred build on Windows
+   rustup target add x86_64-pc-windows-gnu
+   cargo +stable-gnu build --target x86_64-pc-windows-gnu
+   ```
+   ```bash
+   # Non-Windows hosts usually only need the default debug build
+   cargo build
+   ```
+2. **Resolve the correct binary path for `start_debugging`.** Breakpoints should always reference the `.rs` source file (absolute paths avoid MCP resolution issues), but `start_debugging.scriptPath` must point to the compiled artifact:
+   - Windows GNU: `examples/rust/<name>/target/x86_64-pc-windows-gnu/debug/<name>.exe`
+   - Windows MSVC fallback: `examples/rust/<name>/target/debug/<name>.exe`
+   - Unix-like hosts: `examples/rust/<name>/target/debug/<name>`
+
+   Tokio/async builds use exactly the same rule—the helper’s `prepareRustExample('async_example')` just compiles a different crate and returns `{ sourcePath, binaryPath }` so the smoke tests can reuse those paths.
+3. **Cache builds between tests.** Once an example has been compiled, the helper stores both paths in-memory so the rest of the suite can run without triggering another `cargo build`. For local work you can emulate this with Cargo’s default incremental builds: as long as you relaunch the same `target/<triple>/debug/<binary>` the MCP `start_debugging` call does not care when the binary was produced.
+
+> **Tip:** Users can reuse the same helper logic by importing `prepareRustExample` inside custom E2E scripts, or by replicating its approach in their own build tooling. The important detail is that breakpoints reference source (`src/main.rs`) while `start_debugging.scriptPath` references the compiled executable. This is true for synchronous and async (Tokio) binaries alike.
 
 ## Cargo Integration
 

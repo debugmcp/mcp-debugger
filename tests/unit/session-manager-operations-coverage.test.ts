@@ -1296,7 +1296,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
   });
 
   describe('Operation Success Scenarios', () => {
-    it('continues execution and updates session state', async () => {
+    it('continues execution without forcing session into RUNNING state immediately', async () => {
       mockSession.state = SessionState.PAUSED;
       mockProxyManager.isRunning.mockReturnValue(true);
       mockProxyManager.getCurrentThreadId.mockReturnValue(7);
@@ -1305,9 +1305,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const result = await operations.continue('test-session');
 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('continue', { threadId: 7 });
-      expect(mockSessionStore.updateState).toHaveBeenCalledWith('test-session', SessionState.RUNNING);
       expect(result.success).toBe(true);
-      expect(mockSession.state).toBe(SessionState.RUNNING);
+      expect(mockSessionStore.updateState).not.toHaveBeenCalledWith('test-session', SessionState.RUNNING);
+      expect(mockSession.state).toBe(SessionState.PAUSED);
     });
   });
 

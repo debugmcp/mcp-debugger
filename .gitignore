@@ -130,6 +130,9 @@ __pycache__/
 target/
 Cargo.lock
 **/*.rs.bk
+examples/.cargo/
+examples/rust/**/.cargo/
+examples/rust/**/.debug-mcp-linux-build
 
 # Test results and analysis files
 test-results*.json
@@ -168,3 +171,6 @@ packages/adapter-javascript/vendor/js-debug/**
 packages/mcp-debugger/proxy/
 packages/mcp-debugger/vendor/
 packages/mcp-debugger/package/
+packages/mcp-debugger/.pack-lock
+packages/mcp-debugger/package.json.backup
+packages/mcp-debugger/package-cache/

@@ -503,7 +503,8 @@ describe('DapProxyWorker', () => {
         payload.scriptPath,
         payload.scriptArgs,
         payload.stopOnEntry,
-        payload.justMyCode
+        payload.justMyCode,
+        payload.launchConfig
       );
       const statusCall = mockMessageSender.send.mock.calls.find(
         ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
