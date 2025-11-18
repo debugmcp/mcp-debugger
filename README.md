@@ -40,6 +40,18 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger (Alpha)
 - 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Alpha)
 > WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
+
+### Windows Rust Setup Script
+
+If you're on Windows and want the quickest path to a working GNU toolchain + dlltool configuration, run:
+
+```powershell
+pwsh scripts/setup/windows-rust-debug.ps1
+```
+
+The script installs the `stable-gnu` toolchain (via rustup), exposes `dlltool.exe` from rustup's self-contained directory, builds the bundled Rust examples, and (optionally) runs the Rust smoke tests. Add `-UpdateUserPath` if you want the dlltool path persisted to your user PATH/DLLTOOL variables.
+
+The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (via winget + pacman) so `cargo +stable-gnu` has a fully functional `dlltool/ld/as` stack. If MSYS2 is already installed, it simply reuses it; otherwise it guides you through installing it (or warns so you can install manually).
 - 🧪 **Mock adapter for testing** – Test without external dependencies
 - 🔌 **STDIO and SSE transport modes** – Works with any MCP client
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via tsup (~3 MB)

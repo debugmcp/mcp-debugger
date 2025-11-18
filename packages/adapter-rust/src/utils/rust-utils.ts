@@ -5,6 +5,8 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import os from 'os';
+import which from 'which';
 
 /**
  * Check if Cargo is installed and available
@@ -199,4 +201,74 @@ export async function getRustHostTriple(): Promise<string | null> {
       resolve(null);
     });
   });
+}
+
+/**
+ * Attempt to locate dlltool.exe in PATH, DLLTOOL env override, or rustup toolchains.
+ */
+export async function findDlltoolExecutable(): Promise<string | null> {
+  const explicit = process.env.DLLTOOL;
+  if (explicit) {
+    try {
+      await fs.access(explicit, fs.constants.F_OK);
+      return explicit;
+    } catch {
+      // fall through
+    }
+  }
+
+  try {
+    const resolved = await which('dlltool');
+    if (resolved) {
+      return resolved;
+    }
+  } catch {
+    // not on PATH
+  }
+
+  if (process.platform === 'win32') {
+    const rustupHome =
+      process.env.RUSTUP_HOME || path.join(os.homedir(), '.rustup');
+    const toolchainsDir = path.join(rustupHome, 'toolchains');
+    try {
+      const toolchains = await fs.readdir(toolchainsDir);
+      for (const entry of toolchains) {
+        if (!/-pc-windows-gnu/i.test(entry)) {
+          continue;
+        }
+        const possibleDirs = [
+          path.join(
+            toolchainsDir,
+            entry,
+            'lib',
+            'rustlib',
+            'x86_64-pc-windows-gnu',
+            'bin'
+          ),
+          path.join(
+            toolchainsDir,
+            entry,
+            'lib',
+            'rustlib',
+            'x86_64-pc-windows-gnu',
+            'bin',
+            'self-contained'
+          )
+        ];
+        for (const dir of possibleDirs) {
+          const candidate = path.join(dir, 'dlltool.exe');
+          try {
+            await fs.access(candidate, fs.constants.F_OK);
+            return candidate;
+          } catch {
+            // try next candidate
+          }
+        }
+      }
+    } catch {
+      // rustup home missing
+    }
+  }
+
+  return null;
 }
