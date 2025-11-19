@@ -13,22 +13,26 @@ The project uses a **monorepo architecture** with dynamic adapter loading, allow
 ```
 mcp-debugger/
 ├── packages/
-│   ├── shared/          # Shared interfaces, types, and utilities
-│   ├── adapter-python/  # Python debug adapter using debugpy
-│   └── adapter-mock/    # Mock adapter for testing
+│   ├── shared/             # Shared interfaces, types, and utilities
+│   ├── adapter-python/     # Python debug adapter using debugpy
+│   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug (v0.16.0+)
+│   ├── adapter-mock/       # Mock adapter for testing
+│   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
-│   ├── adapters/       # Adapter loading and registry system
-│   ├── container/      # Dependency injection container
-│   ├── proxy/          # DAP proxy system
-│   └── session/        # Session management
-└── tests/              # Comprehensive test suite
+│   ├── adapters/          # Adapter loading and registry system
+│   ├── container/         # Dependency injection container
+│   ├── proxy/             # DAP proxy system
+│   └── session/           # Session management
+└── tests/                 # Comprehensive test suite
 ```
 
 ### Package Details
 
 - **@debugmcp/shared**: Core interfaces and types used across all packages
 - **@debugmcp/adapter-python**: Python debugging support via debugpy
+- **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug (Alpha in v0.16.0)
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
+- **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
 ## Key Commands
 
@@ -43,8 +47,9 @@ npm run build
 
 # Build specific packages
 npm run build:shared
-npm run build:adapters
-npm run build:packages  # Build all packages via TypeScript project references
+npm run build:adapters       # Build mock + python adapters
+npm run build:adapters:all   # Build all adapters including JavaScript
+npm run build:packages       # Build all packages in correct order via build-packages.cjs
 
 # Clean build
 npm run build:clean
@@ -223,7 +228,11 @@ Sessions progress through states: IDLE → INITIALIZING → READY → RUNNING �
 - `src/adapters/adapter-loader.ts` - Dynamic adapter loading
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter
+- `packages/adapter-javascript/` - JavaScript/Node.js debug adapter
 - `packages/adapter-mock/` - Mock adapter for testing
+
+### Distribution
+- `packages/mcp-debugger/` - Self-contained CLI bundle for npm/npx distribution
 
 ### Supporting Infrastructure
 - `src/container/dependencies.ts` - Dependency injection container
@@ -235,13 +244,14 @@ Sessions progress through states: IDLE → INITIALIZING → READY → RUNNING �
 ## Development Guidelines
 
 1. **TypeScript Strict Mode**: All code must pass TypeScript strict mode checks
-2. **Monorepo Management**: Use npm workspaces for package management
-3. **Test Coverage**: Maintain >90% test coverage
-4. **Error Handling**: Use centralized error messages from `error-messages.ts`
-5. **Logging**: Use Winston logger with appropriate log levels
-6. **Async Operations**: All DAP operations are async with timeouts
-7. **Process Cleanup**: Always ensure proper cleanup of spawned processes
-8. **Adapter Development**: New language adapters should implement `IAdapterFactory` from `@debugmcp/shared`
+2. **Monorepo Management**: Use npm workspaces (pnpm preferred) for package management
+3. **Build Order**: Packages must build in order: shared → adapters → main server. This is managed by `scripts/build-packages.cjs`
+4. **Test Coverage**: Maintain >90% test coverage
+5. **Error Handling**: Use centralized error messages from `error-messages.ts`
+6. **Logging**: Use Winston logger with appropriate log levels
+7. **Async Operations**: All DAP operations are async with timeouts
+8. **Process Cleanup**: Always ensure proper cleanup of spawned processes
+9. **Adapter Development**: New language adapters should implement `IAdapterFactory` from `@debugmcp/shared`
 
 ## Testing Approach
 
@@ -286,6 +296,12 @@ packages/adapter-nodejs/
 - Python 3.7+ must be installed
 - debugpy must be installed: `pip install debugpy`
 - The system will auto-detect Python path or use `PYTHON_PATH` env var
+
+### JavaScript/Node.js (Alpha)
+- Node.js 18+ must be installed
+- Uses bundled js-debug adapter (VSCode's debugger)
+- Supports JavaScript and TypeScript debugging
+- Auto-detects TypeScript configuration
 
 ### Mock (Testing)
 - No external requirements
