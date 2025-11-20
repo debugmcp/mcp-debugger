@@ -77,7 +77,7 @@ Comprehensive testing of all four MCP debugger deployment variants (local stdio,
 
 **Verdict:** Fully functional. Path translation works correctly.
 
-**Note:** Requires relative paths from workspace root (e.g., `examples/python/simple_test.py` not `c:/Users/.../simple_test.py`)
+**Note:** Requires relative paths from workspace root (e.g., `examples/python/simple_test.py` not absolute paths like `C:/path/to/simple_test.py`)
 
 #### 2.2 JavaScript - ✅ SUCCESS
 - **Session Creation:** ✅ Success
