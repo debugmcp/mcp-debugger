@@ -1,5 +1,9 @@
 # Stage 1: Build and bundle the TypeScript application
+ARG DISABLE_LANGUAGES=rust
+
 FROM node:20-slim AS builder
+ARG DISABLE_LANGUAGES
+ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
 # Install pnpm (using version 10 to match local development)
 RUN npm install -g pnpm@10
@@ -25,9 +29,6 @@ COPY packages/adapter-rust/package.json ./packages/adapter-rust/package.json
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
 #    Copy all package sources to allow pnpm to resolve workspace:* links
 COPY packages ./packages
-
-# Ensure the linux CodeLLDB payload (vendored locally) is available before the build.
-RUN test -f ./packages/adapter-rust/vendor/codelldb/linux-x64/version.json || (echo "Missing packages/adapter-rust/vendor/codelldb/linux-x64 assets. Run \"pnpm --filter @debugmcp/adapter-rust run build:adapter\" locally before building Docker images." && exit 1)
 
 # Remove any existing dist folders and tsbuildinfo artifacts from packages to prevent stale
 # build outputs (and their cached path maps) from polluting the Docker build.
@@ -69,7 +70,6 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     mkdir -p /app/node_modules/@debugmcp/adapter-mock && \
     mkdir -p /app/node_modules/@debugmcp/adapter-python && \
     mkdir -p /app/node_modules/@debugmcp/adapter-javascript && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-rust && \
     cp -r /app/packages/shared/dist /app/node_modules/@debugmcp/shared/ && \
     cp /app/packages/shared/package.json /app/node_modules/@debugmcp/shared/ && \
     cp -r /app/packages/adapter-mock/dist /app/node_modules/@debugmcp/adapter-mock/ && \
@@ -78,14 +78,12 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/ && \
     cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
-    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/ && \
-    cp -r /app/packages/adapter-rust/dist /app/node_modules/@debugmcp/adapter-rust/ && \
-    cp -r /app/packages/adapter-rust/vendor /app/node_modules/@debugmcp/adapter-rust/ && \
-    cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/
+    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/
 
-# Stage 2: Create minimal runtime image
-# Use Debian-slim for glibc compatibility with js-debug binary
-FROM python:3.11-slim
+# Stage 2: Create runtime image with full LLDB dependencies
+FROM ubuntu:24.04
+ARG DISABLE_LANGUAGES
+ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
 # Set application directory
 WORKDIR /app
@@ -95,26 +93,29 @@ ENV MCP_CONTAINER=true
 # Set default workspace mount location (can be overridden at runtime)
 ENV MCP_WORKSPACE_ROOT=/workspace
 
-# Install Node.js runtime, Python debugging support, tini for signal handling, and debugging tools
+# Install Python, LLDB, and supporting tools (Node copied from builder)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    strace \
-    procps \
-    lsof \
-    tini && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable && \
-    ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc && \
-    ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && \
-    ln -sf /root/.cargo/bin/rustup /usr/local/bin/rustup && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      curl \
+      ca-certificates \
+      strace \
+      procps \
+      lsof \
+      tini \
+      python3 \
+      python3-pip \
+      python3-venv \
+      libstdc++6 \
+      lldb \
+      python3-lldb && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    pip3 install --no-cache-dir "debugpy>=1.8.14"
+    pip3 install --break-system-packages --no-cache-dir "debugpy>=1.8.14"
 
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Copy Node runtime from builder to avoid installing system-wide Node.js
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/bin/node /usr/bin/node
 
 # Copy ONLY the bundled server and proxy files (everything else is bundled)
 COPY --from=builder /app/dist/bundle.cjs /app/dist/bundle.cjs

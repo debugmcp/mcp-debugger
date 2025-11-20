@@ -105,6 +105,8 @@ cd mcp-debugger
 docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
+> ⚠️ The Docker image intentionally ships only the Python and JavaScript adapters. Rust debugging requires the local, SSE, or packed deployments where the adapter runs next to your toolchain.
+
 ### Using npm
 
 ```bash

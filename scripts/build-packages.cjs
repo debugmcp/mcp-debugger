@@ -7,12 +7,18 @@
 const { spawnSync } = require('node:child_process');
 
 const buildScript = process.env.BUILD_SCRIPT || 'build';
+const disabledLanguages = new Set(
+  (process.env.DEBUG_MCP_DISABLE_LANGUAGES || '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean),
+);
 const packages = [
   '@debugmcp/shared',
   '@debugmcp/adapter-mock',
   '@debugmcp/adapter-python',
   '@debugmcp/adapter-javascript',
-  '@debugmcp/adapter-rust',
+  ...(!disabledLanguages.has('rust') ? ['@debugmcp/adapter-rust'] : []),
 ];
 
 for (const pkg of packages) {

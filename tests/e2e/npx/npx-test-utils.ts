@@ -159,20 +159,27 @@ export interface NpxTestConfig {
 export async function buildAndPackNpmPackage(): Promise<string> {
   console.log('[NPX Test] Building project...');
 
+  await ensurePackageBackupRestored();
+  await ensureWorkspaceBuilt();
+  await ensurePackCacheDir();
+
+  const fingerprint = await computePackFingerprint();
+  const cachedBeforeLock = await getCachedTarballPath(fingerprint);
+  if (cachedBeforeLock) {
+    console.log(`[NPX Test] Using cached npm package at ${cachedBeforeLock}`);
+    return cachedBeforeLock;
+  }
+
   await acquirePackLock();
   console.log('[NPX Test] Acquired NPX packaging lock.');
 
   let ranPrepare = false;
   try {
     await ensurePackageBackupRestored();
-    await ensureWorkspaceBuilt();
-    await ensurePackCacheDir();
-
-    const fingerprint = await computePackFingerprint();
-    const cachedTarball = await getCachedTarballPath(fingerprint);
-    if (cachedTarball) {
-      console.log(`[NPX Test] Using cached npm package at ${cachedTarball}`);
-      return cachedTarball;
+    const cachedAfterLock = await getCachedTarballPath(fingerprint);
+    if (cachedAfterLock) {
+      console.log(`[NPX Test] Cache filled while waiting for lock; using ${cachedAfterLock}`);
+      return cachedAfterLock;
     }
 
     console.log('[NPX Test] Cache miss; creating npm package tarball...');

@@ -317,6 +317,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     
     // Find Cargo executable
     let execPath: string;
+    const relaxedMode = this.getRelaxedToolchainMode();
     
     if (preferredPath) {
       // Validate user-provided path
@@ -339,6 +340,11 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
         const rustInstalled = await checkRustInstallation();
         if (rustInstalled) {
           execPath = 'rustc';
+        } else if (relaxedMode.enabled) {
+          execPath = relaxedMode.placeholder;
+          this.dependencies.logger?.warn(
+            `[RustDebugAdapter] cargo/rustc not found but ${relaxedMode.reason} active; assuming host-provided binaries`
+          );
         } else {
           throw new AdapterError(
             'Neither cargo nor rustc found in PATH',
@@ -355,6 +361,32 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     });
     
     return execPath;
+  }
+  
+  private getRelaxedToolchainMode(): { enabled: boolean; reason: string; placeholder: string } {
+    const placeholder = process.env.MCP_RUST_EXECUTABLE_PLACEHOLDER || 'rust-prebuilt-binary';
+    
+    if (process.env.MCP_RUST_ALLOW_PREBUILT === 'true') {
+      return {
+        enabled: true,
+        reason: 'MCP_RUST_ALLOW_PREBUILT',
+        placeholder
+      };
+    }
+    
+    if (process.env.MCP_CONTAINER === 'true') {
+      return {
+        enabled: true,
+        reason: 'MCP_CONTAINER',
+        placeholder
+      };
+    }
+    
+    return {
+      enabled: false,
+      reason: 'auto-detect',
+      placeholder
+    };
   }
   
   getDefaultExecutableName(): string {

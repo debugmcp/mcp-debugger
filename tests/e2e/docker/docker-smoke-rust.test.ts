@@ -20,6 +20,13 @@ import { prepareRustExample } from '../rust-example-utils.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../../..');
+const DOCKER_RUST_ENABLED = process.env.DOCKER_ENABLE_RUST === 'true';
+
+if (!DOCKER_RUST_ENABLED) {
+  console.warn(
+    '[Docker Rust Tests] Skipping docker rust smoke tests (set DOCKER_ENABLE_RUST=true to re-enable).',
+  );
+}
 
 function ensureSuccess(response: any, label: string) {
   if (!response?.success) {
@@ -35,7 +42,9 @@ function toContainerAbsolute(containerPath: string): string {
   return `/workspace/${containerPath.replace(/^\/*/, '')}`;
 }
 
-describe.sequential('Docker: Rust Debugging Smoke Tests', () => {
+const describeDockerRust = DOCKER_RUST_ENABLED ? describe : describe.skip;
+
+describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;

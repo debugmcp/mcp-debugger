@@ -91,6 +91,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(env.NODE_ENV).toBe('development');
     // Ensure process.env not mutated
     expect(process.env.NODE_ENV).toBe(envBefore.NODE_ENV);
+    expect(norm(cfg.runtimeExecutable as string)).toBe(norm(process.execPath));
   });
 
   it('JS with sourceMaps true applies default outFiles when not provided', async () => {
@@ -125,8 +126,8 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
 
     expect(cfg.sourceMaps).toBe(true);
     expect((cfg.outFiles as string[])).toContain('**/*.js');
-    // runtimeExecutable default to 'node' when ts-node is present (hooks added)
-    expect(typeof cfg.runtimeExecutable).toBe('string');
+    // runtimeExecutable defaults to host Node.js when ts-node is present (hooks added)
+    expect(norm(cfg.runtimeExecutable as string)).toBe(norm(process.execPath));
     // runtimeArgs should include ts-node hooks
     const ra = (cfg.runtimeArgs || []) as string[];
     const hasRegister = ra.includes('-r') && ra.includes('ts-node/register');

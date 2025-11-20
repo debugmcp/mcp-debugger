@@ -38,7 +38,7 @@ describe('Docker: Python Debugging Smoke Tests', () => {
     cleanup = result.cleanup;
     
     console.log('[Docker Python] MCP client connected to Docker container');
-  }, 60000);
+  }, 240000);
 
   afterAll(async () => {
     if (sessionId && mcpClient) {

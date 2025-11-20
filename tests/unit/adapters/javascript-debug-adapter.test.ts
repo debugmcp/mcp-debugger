@@ -44,7 +44,7 @@ describe('JavascriptDebugAdapter runtime helpers', () => {
       program: '/workspace/app.ts',
       cwd: '/workspace',
       runtimeArgs: ['-r', 'ts-node/register'],
-      runtimeExecutable: 'node'
+      runtimeExecutable: process.execPath
     });
 
     const tsNodeRegisterCount = args.filter((entry: string) => entry === 'ts-node/register').length;
