@@ -15,6 +15,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createWriteStream, createReadStream } from 'fs';
 import fetch from 'node-fetch';
@@ -320,6 +321,7 @@ async function downloadFile(url, destPath, maxRetries = 3) {
       
       // Only show progress bar if not in CI
       let progressBar = null;
+      let progressTap = null;
       if (!IS_CI && totalSize) {
         progressBar = new ProgressBar('  downloading [:bar] :percent :etas', {
           complete: '=',
@@ -327,17 +329,22 @@ async function downloadFile(url, destPath, maxRetries = 3) {
           width: 20,
           total: totalSize
         });
-        
-        // Update progress bar on data received
-        response.body.on('data', (chunk) => {
-          progressBar.tick(chunk.length);
+        progressTap = new Transform({
+          transform(chunk, _encoding, callback) {
+            progressBar.tick(chunk.length);
+            callback(null, chunk);
+          }
         });
       } else if (IS_CI && totalSize) {
         log(`Downloading (${Math.round(totalSize / 1024 / 1024)}MB)...`);
       }
-      
+
       await fs.mkdir(path.dirname(destPath), { recursive: true });
-      await pipeline(response.body, createWriteStream(destPath));
+      if (progressTap) {
+        await pipeline(response.body, progressTap, createWriteStream(destPath));
+      } else {
+        await pipeline(response.body, createWriteStream(destPath));
+      }
 
       // Validate downloaded file size when Content-Length is provided
       if (totalSize && Number.isFinite(totalSize)) {
