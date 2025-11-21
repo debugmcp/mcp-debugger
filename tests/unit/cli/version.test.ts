@@ -71,4 +71,16 @@ describe('Version Utility', () => {
 
     expect(version).toBe('0.0.0');
   });
+
+  it('suppresses error logging when console output is silenced', () => {
+    process.env.CONSOLE_OUTPUT_SILENCED = '1';
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('boom');
+    });
+
+    getVersion();
+
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    delete process.env.CONSOLE_OUTPUT_SILENCED;
+  });
 });

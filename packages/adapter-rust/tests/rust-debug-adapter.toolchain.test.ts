@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { RustDebugAdapter } from '../src/rust-debug-adapter.js';
-import { AdapterError } from '@debugmcp/shared';
-import type { AdapterConfig } from '@debugmcp/shared';
-import type { AdapterDependencies } from '@debugmcp/shared';
+import { AdapterError, DebugFeature, AdapterState } from '@debugmcp/shared';
+import type { AdapterConfig, AdapterDependencies } from '@debugmcp/shared';
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -335,6 +335,223 @@ describe('RustDebugAdapter toolchain logic', () => {
       await expect(
         adapter.transformLaunchConfig({ program: '/tmp/my-program' })
       ).rejects.toThrow(AdapterError);
+    });
+  });
+
+  describe('DAP operations and connectivity', () => {
+    it('warns about invalid exception filters on DAP requests', async () => {
+      const warnSpy = dependencies.logger?.warn as Mock;
+      const result = await adapter.sendDapRequest('setExceptionBreakpoints', {
+        filters: ['unknown']
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Unknown exception filters')
+      );
+    });
+
+    it('handles DAP events and responses with state transitions', async () => {
+      await adapter.connect('127.0.0.1', 4000);
+      const stoppedSpy = vi.fn();
+      const terminatedSpy = vi.fn();
+      adapter.on('stopped', stoppedSpy);
+      adapter.on('terminated', terminatedSpy);
+
+      adapter.handleDapEvent({
+        type: 'event',
+        event: 'stopped',
+        body: { threadId: 21 }
+      });
+
+      expect(adapter.getState()).toBe(AdapterState.DEBUGGING);
+      expect(adapter.getCurrentThreadId()).toBe(21);
+      expect(stoppedSpy).toHaveBeenCalledWith({ threadId: 21 });
+
+      adapter.handleDapEvent({ type: 'event', event: 'terminated', body: {} });
+      expect(adapter.getState()).toBe(AdapterState.CONNECTED);
+      expect(adapter.getCurrentThreadId()).toBeNull();
+      expect(terminatedSpy).toHaveBeenCalled();
+    });
+
+    it('logs DAP errors', () => {
+      const errorSpy = dependencies.logger?.error as Mock;
+      adapter.handleDapResponse({
+        type: 'response',
+        command: 'launch',
+        success: false,
+        message: 'boom',
+        request_seq: 1,
+        seq: 2
+      });
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('DAP error')
+      );
+    });
+
+    it('manages connection lifecycle', async () => {
+      const connectedSpy = vi.fn();
+      const disconnectedSpy = vi.fn();
+      adapter.on('connected', connectedSpy);
+      adapter.on('disconnected', disconnectedSpy);
+
+      await adapter.connect('localhost', 9000);
+      expect(connectedSpy).toHaveBeenCalled();
+      expect(adapter.isConnected()).toBe(true);
+      expect(adapter.getState()).toBe(AdapterState.CONNECTED);
+
+      await adapter.disconnect();
+      expect(disconnectedSpy).toHaveBeenCalled();
+      expect(adapter.isConnected()).toBe(false);
+      expect(adapter.getState()).toBe(AdapterState.DISCONNECTED);
+    });
+  });
+
+  describe('dependency and path utilities', () => {
+    it('lists required dependencies with install commands', () => {
+      const deps = adapter.getRequiredDependencies();
+      expect(deps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'CodeLLDB', installCommand: 'npm run build:adapter' }),
+          expect.objectContaining({ name: 'Rust' }),
+          expect.objectContaining({ name: 'Cargo' })
+        ])
+      );
+    });
+
+    it('derives executable search paths per platform', () => {
+      const restoreLinux = setPlatform('linux');
+      const originalHome = process.env.HOME;
+      const originalPath = process.env.PATH;
+      process.env.HOME = '/tmp/tester';
+      process.env.PATH = '/usr/bin:/usr/local/bin';
+      expect(adapter.getExecutableSearchPaths()).toEqual(
+        expect.arrayContaining(['/usr/bin', '/usr/local/bin', '/tmp/tester/.cargo/bin'])
+      );
+      process.env.HOME = originalHome;
+      process.env.PATH = originalPath;
+      restoreLinux();
+
+      const restoreWindows = setPlatform('win32');
+      const originalRustup = process.env.RUSTUP_HOME;
+      const originalCargo = process.env.CARGO_HOME;
+      const originalHomeWin = process.env.HOME;
+      process.env.HOME = 'C:\\Users\\tester';
+      process.env.RUSTUP_HOME = 'C:\\Rustup';
+      process.env.CARGO_HOME = 'C:\\Cargo';
+      const windowsPaths = adapter.getExecutableSearchPaths();
+      expect(windowsPaths.some((entry) => entry.includes('Cargo'))).toBe(true);
+      expect(windowsPaths.some((entry) => entry.includes('Program Files'))).toBe(true);
+      process.env.HOME = originalHomeWin;
+      process.env.RUSTUP_HOME = originalRustup;
+      process.env.CARGO_HOME = originalCargo;
+      restoreWindows();
+    });
+
+    it('scrubs python variables when configuring embedded environment', async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'rust-python-'));
+      const adapterDir = path.join(root, 'adapter');
+      const adapterScripts = path.join(adapterDir, 'scripts');
+      const adapterDLLs = path.join(adapterDir, 'DLLs');
+      const lldbDir = path.join(root, 'lldb');
+      const lldbBin = path.join(lldbDir, 'bin');
+      const lldbDLLs = path.join(lldbDir, 'DLLs');
+
+      await fs.mkdir(adapterScripts, { recursive: true });
+      await fs.mkdir(adapterDLLs, { recursive: true });
+      await fs.mkdir(lldbBin, { recursive: true });
+      await fs.mkdir(lldbDLLs, { recursive: true });
+
+      const env: Record<string, string> = {
+        PATH: '',
+        PYTHONHOME: 'remove',
+        PYTHONPATH: 'remove',
+        CODELLDB_STARTUP: 'remove'
+      };
+
+      (adapter as unknown as {
+        configurePythonEnvironment: (env: Record<string, string>, adapterPath: string) => void;
+      }).configurePythonEnvironment(env, path.join(adapterDir, 'codelldb.exe'));
+
+      const pathEntries = env.PATH.split(path.delimiter);
+      expect(pathEntries).toEqual(expect.arrayContaining([adapterDir, adapterScripts, lldbBin]));
+      expect(env.PYTHONHOME).toBeUndefined();
+
+      await fs.rm(root, { recursive: true, force: true });
+    });
+
+    it('sanitizes CodeLLDB paths containing spaces on Windows', async () => {
+      const restorePlatform = setPlatform('win32');
+      const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codelldb-src-'));
+      const platformDir = path.join(baseDir, 'platform dir');
+      const adapterDir = path.join(platformDir, 'adapter');
+      await fs.mkdir(adapterDir, { recursive: true });
+      const exePath = path.join(adapterDir, 'codelldb.exe');
+      await fs.writeFile(exePath, 'binary');
+      await fs.writeFile(path.join(platformDir, 'version.json'), '"1.0"');
+
+      const sanitized = (adapter as unknown as {
+        prepareCodelldbExecutablePath: (path: string) => string | null;
+      }).prepareCodelldbExecutablePath(exePath);
+
+      expect(sanitized).toContain('debug-mcp-codelldb');
+      expect(fsSync.existsSync(sanitized as string)).toBe(true);
+
+      await fs.rm(path.join(os.tmpdir(), 'debug-mcp-codelldb'), { recursive: true, force: true });
+      await fs.rm(baseDir, { recursive: true, force: true });
+      restorePlatform();
+    });
+
+    it('exposes adapter metadata helpers', () => {
+      expect(adapter.getAdapterModuleName()).toBe('codelldb');
+      expect(adapter.getAdapterInstallCommand()).toBe('npm run build:adapter');
+    });
+  });
+
+  describe('adapter messaging and capabilities', () => {
+    it('provides installation guidance and missing executable error', () => {
+      expect(adapter.getInstallationInstructions()).toContain('Install Rust toolchain');
+      expect(adapter.getMissingExecutableError()).toContain('Rust toolchain not found');
+    });
+
+    it('translates common error messages', () => {
+      const cases: Array<[string, string]> = [
+        ['CodeLLDB not found', 'CodeLLDB is not installed'],
+        ['cargo command not found', 'Rust toolchain not found'],
+        ['Permission denied while executing', 'Permission denied'],
+        ['target debug build missing', 'Debug binary not found'],
+        ['LLDB failed to start', 'LLDB failed to start'],
+        ['unexpected failure', 'unexpected failure']
+      ];
+
+      for (const [message, expected] of cases) {
+        const translated = adapter.translateErrorMessage(new Error(message));
+        expect(translated).toContain(expected.split(' ')[0]);
+      }
+    });
+
+    it('reports supported features and requirements', () => {
+      expect(adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)).toBe(true);
+      expect(adapter.supportsFeature(DebugFeature.REVERSE_DEBUGGING)).toBe(false);
+
+      const dataReqs = adapter.getFeatureRequirements(DebugFeature.DATA_BREAKPOINTS);
+      expect(dataReqs[0]?.type).toBe('version');
+
+      const disassembleReqs = adapter.getFeatureRequirements(DebugFeature.DISASSEMBLE_REQUEST);
+      expect(disassembleReqs[0]?.type).toBe('configuration');
+
+      const logPointReqs = adapter.getFeatureRequirements(DebugFeature.LOG_POINTS);
+      expect(logPointReqs[0]?.description).toContain('CodeLLDB');
+    });
+
+    it('returns default launch configuration and capabilities', () => {
+      const defaults = adapter.getDefaultLaunchConfig();
+      expect(defaults.cwd).toBe(process.cwd());
+      expect(defaults.stopOnEntry).toBe(false);
+
+      const capabilities = adapter.getCapabilities();
+      expect(capabilities.supportsConditionalBreakpoints).toBe(true);
+      expect(capabilities.supportsDisassembleRequest).toBe(true);
+      expect(capabilities.supportsSetExpression).toBe(false);
     });
   });
 });
