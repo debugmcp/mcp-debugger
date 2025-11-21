@@ -5,7 +5,7 @@
 
 import { ChildProcess, SpawnOptions } from 'child_process';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from '@debugmcp/shared';
+import type { AdapterPolicy, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
 // ===== Core Message Types =====
 
@@ -22,6 +22,7 @@ export interface ProxyInitPayload {
   justMyCode?: boolean;
   initialBreakpoints?: { file: string; line: number; condition?: string }[];
   dryRunSpawn?: boolean;
+  launchConfig?: LanguageSpecificLaunchConfig;
   // Adapter command info for language-agnostic adapter spawning
   adapterCommand?: {
     command: string;

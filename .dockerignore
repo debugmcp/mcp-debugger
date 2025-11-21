@@ -71,6 +71,15 @@ dist
 !dist/proxy/utils/**
 packages/*/dist
 packages/*/tsconfig.tsbuildinfo
+packages/mcp-debugger/package
+packages/mcp-debugger/package/**
+packages/adapter-rust/vendor/codelldb/*
+!packages/adapter-rust/vendor
+!packages/adapter-rust/vendor/codelldb
+!packages/adapter-rust/vendor/codelldb/linux-x64
+!packages/adapter-rust/vendor/codelldb/linux-x64/**
+!packages/adapter-rust/vendor/codelldb/linux-arm64
+!packages/adapter-rust/vendor/codelldb/linux-arm64/**
 build
 *.tsbuildinfo
 **/*.tsbuildinfo

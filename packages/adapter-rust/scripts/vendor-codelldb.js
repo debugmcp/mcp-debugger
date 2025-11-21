@@ -1,0 +1,772 @@
+#!/usr/bin/env node
+
+/**
+ * Downloads and extracts CodeLLDB binaries for platforms
+ * Based on research: official VSIX structure from vadimcn.vscode-lldb
+ * 
+ * Environment variables:
+ *   - CODELLDB_VERSION: Version to download (default: '1.11.0')
+ *   - CI: Set to 'true' in CI environments
+ *   - SKIP_ADAPTER_VENDOR: Set to 'true' to skip vendoring
+ *   - CODELLDB_PLATFORMS: Comma-separated list of platforms (default: current platform or all in CI)
+ *   - CODELLDB_FORCE_REBUILD: Set to 'true' to force re-vendor
+ *   - CODELLDB_VENDOR_LOCAL_ONLY: Set to 'true' to forbid downloads (use existing artifacts only)
+ */
+
+import fs from 'fs/promises';
+import path from 'path';
+import { Transform } from 'stream';
+import { pipeline } from 'stream/promises';
+import { createWriteStream, createReadStream } from 'fs';
+import fetch from 'node-fetch';
+import extractZip from 'extract-zip';
+import ProgressBar from 'progress';
+import { fileURLToPath } from 'url';
+import os from 'os';
+import { createHash } from 'crypto';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const CODELLDB_VERSION = process.env.CODELLDB_VERSION || '1.11.8';
+const VENDOR_DIR = path.resolve(__dirname, '..', 'vendor', 'codelldb');
+const FORCE_REBUILD = process.env.CODELLDB_FORCE_REBUILD === 'true';
+const IS_CI = process.env.CI === 'true';
+const SKIP_VENDOR = process.env.SKIP_ADAPTER_VENDOR === 'true';
+const KEEP_TEMP = process.env.CODELLDB_KEEP_TEMP === 'true';
+const VENDOR_ALL =
+  process.env.CODELLDB_VENDOR_ALL !== undefined
+    ? process.env.CODELLDB_VENDOR_ALL.toLowerCase() !== 'false'
+    : true;
+const LOCAL_ONLY = process.env.CODELLDB_VENDOR_LOCAL_ONLY === 'true';
+const RELEASE_BASE_URLS = [
+  process.env.CODELLDB_RELEASE_BASE?.replace(/\/$/, '') ||
+    'https://github.com/vadimcn/vscode-lldb/releases/download',
+  'https://github.com/vadimcn/codelldb/releases/download'
+];
+
+let cacheWritable = true;
+const CACHE_DIR = determineCacheDir();
+
+const PLATFORMS = {
+  'win32-x64': {
+    vsixNames: ['codelldb-win32-x64.vsix', 'codelldb-x86_64-windows.vsix'],
+    binaryPath: 'extension/adapter/codelldb.exe',
+    libPath: 'extension/lldb/bin/liblldb.dll',
+    targetDir: 'win32-x64'
+  },
+  'darwin-x64': {
+    vsixNames: ['codelldb-darwin-x64.vsix', 'codelldb-x86_64-darwin.vsix'],
+    binaryPath: 'extension/adapter/codelldb',
+    libPath: 'extension/lldb/lib/liblldb.dylib',
+    targetDir: 'darwin-x64'
+  },
+  'darwin-arm64': {
+    vsixNames: ['codelldb-darwin-arm64.vsix', 'codelldb-aarch64-darwin.vsix'],
+    binaryPath: 'extension/adapter/codelldb',
+    libPath: 'extension/lldb/lib/liblldb.dylib',
+    targetDir: 'darwin-arm64'
+  },
+  'linux-x64': {
+    vsixNames: ['codelldb-linux-x64.vsix', 'codelldb-x86_64-linux.vsix'],
+    binaryPath: 'extension/adapter/codelldb',
+    libPath: 'extension/lldb/lib/liblldb.so',
+    targetDir: 'linux-x64'
+  },
+  'linux-arm64': {
+    vsixNames: ['codelldb-linux-arm64.vsix', 'codelldb-aarch64-linux.vsix'],
+    binaryPath: 'extension/adapter/codelldb',
+    libPath: 'extension/lldb/lib/liblldb.so',
+    targetDir: 'linux-arm64'
+  }
+};
+
+/**
+ * Get current platform identifier
+ */
+function getCurrentPlatform() {
+  const platform = process.platform;
+  const arch = process.arch;
+  
+  if (platform === 'win32' && arch === 'x64') return 'win32-x64';
+  if (platform === 'darwin' && arch === 'x64') return 'darwin-x64';
+  if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
+  if (platform === 'linux' && arch === 'x64') return 'linux-x64';
+  if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
+  
+  return null;
+}
+
+/**
+ * Log with prefix
+ */
+function log(msg) {
+  console.log(`[CodeLLDB vendor] ${msg}`);
+}
+
+function logWarn(msg) {
+  console.warn(`[CodeLLDB vendor][warn] ${msg}`);
+}
+
+function logError(msg) {
+  console.error(`[CodeLLDB vendor][error] ${msg}`);
+}
+
+function getHomeDirectory() {
+  try {
+    return typeof os.homedir === 'function' ? os.homedir() : null;
+  } catch {
+    return null;
+  }
+}
+
+function determineCacheDir() {
+  if (process.env.CODELLDB_CACHE_DIR) {
+    return path.resolve(process.env.CODELLDB_CACHE_DIR);
+  }
+
+  const parts = ['debug-mcp', 'codelldb', CODELLDB_VERSION];
+  const home = getHomeDirectory();
+
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : null);
+    if (base) {
+      return path.join(base, ...parts);
+    }
+  }
+
+  if (process.env.XDG_CACHE_HOME) {
+    return path.join(process.env.XDG_CACHE_HOME, ...parts);
+  }
+
+  if (process.platform === 'darwin' && home) {
+    return path.join(home, 'Library', 'Caches', ...parts);
+  }
+
+  if (home) {
+    return path.join(home, '.cache', ...parts);
+  }
+
+  const tmpDir = typeof os.tmpdir === 'function' ? os.tmpdir() : null;
+  return tmpDir ? path.join(tmpDir, ...parts) : null;
+}
+
+function sanitizeCacheFileName(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function getCacheEntryPaths(vsixName) {
+  if (!CACHE_DIR || !cacheWritable) {
+    return null;
+  }
+  const safeName = sanitizeCacheFileName(vsixName);
+  const filePath = path.join(CACHE_DIR, safeName);
+  const metaPath = `${filePath}.json`;
+  return { filePath, metaPath };
+}
+
+async function loadCacheEntry(vsixName) {
+  const paths = getCacheEntryPaths(vsixName);
+  if (!paths) {
+    return null;
+  }
+  try {
+    const [metaRaw, stats] = await Promise.all([
+      fs.readFile(paths.metaPath, 'utf-8'),
+      fs.stat(paths.filePath)
+    ]);
+    const meta = JSON.parse(metaRaw);
+    if (meta.version !== CODELLDB_VERSION) {
+      return null;
+    }
+    if (!meta.sha256) {
+      logWarn(`Cached ${vsixName} missing SHA256 metadata; invalidating.`);
+      await invalidateCacheEntry(vsixName);
+      return null;
+    }
+    try {
+      const currentSha = await computeSha256(paths.filePath);
+      if (currentSha !== meta.sha256) {
+        logWarn(
+          `Cached ${vsixName} failed SHA256 validation (expected ${meta.sha256}, got ${currentSha}). Invalidating cache entry.`
+        );
+        await invalidateCacheEntry(vsixName);
+        return null;
+      }
+    } catch (error) {
+      logWarn(
+        `Unable to validate cached ${vsixName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      await invalidateCacheEntry(vsixName);
+      return null;
+    }
+    return { ...paths, meta, stats };
+  } catch {
+    return null;
+  }
+}
+
+async function invalidateCacheEntry(vsixName) {
+  const paths = getCacheEntryPaths(vsixName);
+  if (!paths) {
+    return;
+  }
+  await fs.rm(paths.filePath, { force: true }).catch(() => {});
+  await fs.rm(paths.metaPath, { force: true }).catch(() => {});
+}
+
+async function tryUseCachedArtifact(platform, platformInfo, vsixName) {
+  const cacheEntry = await loadCacheEntry(vsixName);
+  if (!cacheEntry) {
+    return false;
+  }
+  log(`Using cached ${vsixName} for ${platform} (${formatBytes(cacheEntry.stats.size)})`);
+  try {
+    await extractAndCopyFiles(cacheEntry.filePath, platform, platformInfo, vsixName);
+    return true;
+  } catch (error) {
+    logWarn(`Cached artifact ${vsixName} failed validation: ${error.message}. Removing cache entry.`);
+    await invalidateCacheEntry(vsixName);
+    return false;
+  }
+}
+
+async function saveArtifactToCache(vsixName, sourcePath) {
+  const paths = getCacheEntryPaths(vsixName);
+  if (!paths) {
+    return;
+  }
+  try {
+    await fs.mkdir(path.dirname(paths.filePath), { recursive: true });
+    const tempPath = `${paths.filePath}.tmp-${process.pid}-${Date.now()}`;
+    await fs.copyFile(sourcePath, tempPath);
+    const sha256 = await computeSha256(tempPath);
+    const stats = await fs.stat(tempPath);
+    try {
+      await fs.rename(tempPath, paths.filePath);
+    } catch (error) {
+      if (error.code === 'EXDEV') {
+        await fs.copyFile(tempPath, paths.filePath);
+        await fs.rm(tempPath, { force: true }).catch(() => {});
+      } else {
+        await fs.rm(tempPath, { force: true }).catch(() => {});
+        throw error;
+      }
+    }
+    const meta = {
+      version: CODELLDB_VERSION,
+      size: stats.size,
+      sha256,
+      cachedAt: new Date().toISOString()
+    };
+    await fs.writeFile(paths.metaPath, JSON.stringify(meta, null, 2));
+    log(`Cached ${vsixName} (${formatBytes(stats.size)}) at ${paths.filePath}`);
+  } catch (error) {
+    logWarn(`Failed to cache ${vsixName}: ${error.message}`);
+  }
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) {
+    return `${bytes} bytes`;
+  }
+  const units = ['bytes', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function computeSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(filePath);
+    stream.on('error', reject);
+    hash.on('error', reject);
+    hash.on('finish', () => {
+      try {
+        resolve(hash.digest('hex'));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    stream.pipe(hash);
+  });
+}
+
+/**
+ * Download a file with progress indicator and retries
+ */
+async function downloadFile(url, destPath, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        timeout: 30000, // 30 second timeout
+        headers: {
+          'User-Agent': 'debugmcp/adapter-rust'
+        }
+      });
+      log(`HTTP response: ${response.status} ${response.statusText}, content-type=${response.headers.get('content-type')}, content-length=${response.headers.get('content-length')}, encoding=${response.headers.get('content-encoding') ?? '<none>'}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const totalSize = parseInt(response.headers.get('content-length'), 10);
+      
+      // Only show progress bar if not in CI
+      let progressBar = null;
+      let progressTap = null;
+      if (!IS_CI && totalSize) {
+        progressBar = new ProgressBar('  downloading [:bar] :percent :etas', {
+          complete: '=',
+          incomplete: ' ',
+          width: 20,
+          total: totalSize
+        });
+        progressTap = new Transform({
+          transform(chunk, _encoding, callback) {
+            progressBar.tick(chunk.length);
+            callback(null, chunk);
+          }
+        });
+      } else if (IS_CI && totalSize) {
+        log(`Downloading (${Math.round(totalSize / 1024 / 1024)}MB)...`);
+      }
+
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+      if (progressTap) {
+        await pipeline(response.body, progressTap, createWriteStream(destPath));
+      } else {
+        await pipeline(response.body, createWriteStream(destPath));
+      }
+
+      // Validate downloaded file size when Content-Length is provided
+      if (totalSize && Number.isFinite(totalSize)) {
+        const { size: actualSize } = await fs.stat(destPath);
+        if (actualSize !== totalSize) {
+          logWarn(
+            `Downloaded size mismatch: expected ${totalSize} bytes, got ${actualSize} bytes. Will verify during extraction.`
+          );
+        }
+      }
+      
+      return; // Success
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      
+      const backoff = Math.floor(500 * Math.pow(2, attempt - 1));
+      logWarn(`Download failed (attempt ${attempt}/${maxRetries}): ${error.message}. Retrying in ${backoff}ms...`);
+      await new Promise(resolve => setTimeout(resolve, backoff));
+    }
+  }
+}
+
+/**
+ * Extract VSIX and copy required files
+ */
+async function extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName) {
+  const tempExtractDir = path.join(path.dirname(vsixPath), `temp-${platform}`);
+  
+  try {
+    const stats = await fs.stat(vsixPath);
+    log(`Artifact size: ${stats.size} bytes`);
+    let magic = '';
+    try {
+      const fileHandle = await fs.open(vsixPath, 'r');
+      const buffer = Buffer.alloc(4);
+      await fileHandle.read(buffer, 0, 4, 0);
+      await fileHandle.close();
+      magic = `${buffer.toString('hex')} (${buffer.toString('ascii')})`;
+    } catch (magicError) {
+      logWarn(`Unable to inspect VSIX header: ${magicError.message}`);
+    }
+    log(`Artifact magic header: ${magic || 'unknown'}`);
+
+    const expectedMagic = '504b0304';
+    if (magic && !magic.startsWith(expectedMagic)) {
+      throw new Error(`Unexpected VSIX header: expected ${expectedMagic}, got ${magic}`);
+    }
+
+    // Extract VSIX (which is a zip file)
+    log(`Extracting ${vsixName}...`);
+    await extractZip(vsixPath, { dir: tempExtractDir });
+    
+    // Target directories for adapter and lldb
+    const targetAdapterDir = path.join(VENDOR_DIR, platformInfo.targetDir, 'adapter');
+    const targetLldbDir = path.join(VENDOR_DIR, platformInfo.targetDir, 'lldb');
+    
+    // Recreate target directories to avoid stale files
+    await fs.rm(targetAdapterDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(targetLldbDir, { recursive: true, force: true }).catch(() => {});
+    await fs.mkdir(targetAdapterDir, { recursive: true });
+    await fs.mkdir(targetLldbDir, { recursive: true });
+    
+    // Copy full adapter payload (binary + scripts + helper DLLs)
+    const sourceAdapterDir = path.join(tempExtractDir, 'extension', 'adapter');
+    log(`Copying adapter runtime (${sourceAdapterDir})...`);
+    await copyDirectory(sourceAdapterDir, targetAdapterDir);
+    
+    // Ensure the main executable remains executable on Unix targets
+    const targetBinaryPath = path.join(targetAdapterDir, path.basename(platformInfo.binaryPath));
+    if (platform !== 'win32-x64' && await fileExists(targetBinaryPath)) {
+      await fs.chmod(targetBinaryPath, 0o755);
+    }
+    
+    // Copy LLDB directory structure (contains liblldb + embedded Python runtime)
+    const sourceLldbDir = path.join(tempExtractDir, 'extension', 'lldb');
+    log(`Copying LLDB libraries...`);
+    await copyDirectory(sourceLldbDir, targetLldbDir);
+
+    // Copy additional resources needed by the adapter runtime (language helpers, etc.)
+    const extraDirs = ['lang_support'];
+    for (const dirName of extraDirs) {
+      const sourceExtraDir = path.join(tempExtractDir, 'extension', dirName);
+      if (await pathExists(sourceExtraDir)) {
+        const targetExtraDir = path.join(VENDOR_DIR, platformInfo.targetDir, dirName);
+        log(`Copying ${dirName}...`);
+        await copyDirectory(sourceExtraDir, targetExtraDir);
+      }
+    }
+    
+    // Create version manifest
+    const versionFile = path.join(VENDOR_DIR, platformInfo.targetDir, 'version.json');
+    await fs.writeFile(versionFile, JSON.stringify({
+      version: CODELLDB_VERSION,
+      platform: platform,
+      downloadedAt: new Date().toISOString()
+    }, null, 2));
+    
+    log(`Success: ${platform} vendored successfully`);
+  } finally {
+    // Clean up temp directory
+    if (KEEP_TEMP) {
+      log(`Keeping temp extraction directory at ${tempExtractDir}`);
+    } else {
+      try {
+        await fs.rm(tempExtractDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        logWarn(`Unable to remove temp directory ${tempExtractDir}: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`);
+      }
+    }
+  }
+}
+
+/**
+ * Recursively copy directory
+ */
+async function copyDirectory(src, dest) {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    
+    if (entry.isDirectory()) {
+      await copyDirectory(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+      // Preserve executable permissions
+      const stats = await fs.stat(srcPath);
+      await fs.chmod(destPath, stats.mode);
+    }
+  }
+}
+
+async function pathExists(fsPath) {
+  try {
+    await fs.access(fsPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if platform is already vendored with correct version
+ */
+async function isAlreadyVendored(platform, platformInfo) {
+  if (FORCE_REBUILD) {
+    return false;
+  }
+  
+  const versionFile = path.join(VENDOR_DIR, platformInfo.targetDir, 'version.json');
+  
+  try {
+    const versionData = JSON.parse(await fs.readFile(versionFile, 'utf-8'));
+    return versionData.version === CODELLDB_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Download and extract CodeLLDB for a specific platform
+ */
+async function downloadAndExtract(platform) {
+  const platformInfo = PLATFORMS[platform];
+  
+  if (!platformInfo) {
+    logWarn(`Unsupported platform: ${platform}`);
+    return false;
+  }
+  
+  // Check if already vendored
+  if (await isAlreadyVendored(platform, platformInfo)) {
+    log(`Up-to-date: ${platform} already vendored (v${CODELLDB_VERSION})`);
+    return true;
+  }
+
+  if (LOCAL_ONLY) {
+    logError(
+      `CODELLDB_VENDOR_LOCAL_ONLY is enabled but ${platform} artifacts were not found under ${path.join(
+        VENDOR_DIR,
+        platformInfo.targetDir
+      )}`
+    );
+    logWarn('Run "pnpm --filter @debugmcp/adapter-rust run build:adapter" locally to download them before building Docker images.');
+    return false;
+  }
+  
+  const vsixCandidates = Array.isArray(platformInfo.vsixNames)
+    ? platformInfo.vsixNames
+    : [platformInfo.vsixName].filter(Boolean);
+  
+  if (vsixCandidates.length === 0) {
+    logWarn(`No VSIX candidates configured for ${platform}`);
+    return false;
+  }
+  
+  const tempDir = path.join(VENDOR_DIR, 'temp');
+  await fs.mkdir(tempDir, { recursive: true });
+  
+  let lastError = null;
+  const maxAttempts = Number(process.env.CODELLDB_DOWNLOAD_RETRIES ?? '3');
+  const baseUrls = Array.from(
+    new Set(RELEASE_BASE_URLS.filter(Boolean).map(url => url.replace(/\/$/, '')))
+  );
+
+  for (const vsixName of vsixCandidates) {
+    if (await tryUseCachedArtifact(platform, platformInfo, vsixName)) {
+      return true;
+    }
+
+    let successForArtifact = false;
+    for (let attempt = 1; attempt <= maxAttempts && !successForArtifact; attempt++) {
+      for (const baseUrl of baseUrls) {
+        const downloadUrl = `${baseUrl}/v${CODELLDB_VERSION}/${vsixName}`;
+        const vsixPath = path.join(tempDir, vsixName);
+        
+        log(`Vendoring CodeLLDB for ${platform} (artifact: ${vsixName}):`);
+        log(`Downloading from ${downloadUrl}`);
+        
+        try {
+          await downloadFile(downloadUrl, vsixPath);
+          await extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName);
+          await saveArtifactToCache(vsixName, vsixPath);
+          successForArtifact = true;
+          break;
+        } catch (error) {
+          lastError = error;
+          logWarn(`Attempt with ${vsixName} via ${baseUrl} failed: ${error.message}`);
+          await invalidateCacheEntry(vsixName).catch(() => {});
+        } finally {
+          if (KEEP_TEMP) {
+            log(`Keeping downloaded artifact at ${vsixPath} for inspection.`);
+          } else {
+            await fs.rm(vsixPath, { force: true }).catch(() => {});
+          }
+        }
+      }
+
+      if (!successForArtifact && attempt < maxAttempts) {
+        logWarn(
+          `Retrying ${vsixName} (attempt ${attempt + 1}/${maxAttempts}) after previous failures.`
+        );
+      }
+    }
+
+    if (successForArtifact) {
+      return true;
+    }
+  }
+
+  if (lastError) {
+    logWarn(`Failed to vendor ${platform} after trying ${vsixCandidates.join(', ')}. Last error: ${lastError.message}`);
+  }
+  return false;
+}
+
+/**
+ * Determine platforms to vendor based on environment
+ */
+function determinePlatforms() {
+  // Check if platforms are explicitly specified
+  if (process.env.CODELLDB_PLATFORMS) {
+    const fromEnv = process.env.CODELLDB_PLATFORMS.split(',').map(p => p.trim());
+    log(`Using platforms from CODELLDB_PLATFORMS: ${fromEnv.join(', ')}`);
+    return fromEnv;
+  }
+  
+  // Command line arguments take precedence
+  const cliPlatforms = process.argv.slice(2);
+  if (cliPlatforms.length > 0) {
+    log(`Using platforms from CLI args: ${cliPlatforms.join(', ')}`);
+    return cliPlatforms;
+  }
+
+  const vendorAll = VENDOR_ALL || IS_CI;
+  if (vendorAll) {
+    if (process.env.CODELLDB_VENDOR_ALL?.toLowerCase() === 'false') {
+      log('CODELLDB_VENDOR_ALL=false - vendoring current platform only');
+    } else if (IS_CI && !VENDOR_ALL) {
+      log('CI environment detected - vendoring all platforms');
+    } else {
+      log('Vendoring all supported platforms (CODELLDB_VENDOR_ALL not set to false)');
+    }
+    return Object.keys(PLATFORMS);
+  }
+  
+  // Otherwise, only vendor current platform
+  const currentPlatform = getCurrentPlatform();
+  if (!currentPlatform) {
+    logWarn(`Unknown platform: ${process.platform}-${process.arch}`);
+    logWarn('Vendoring all platforms as fallback');
+    return Object.keys(PLATFORMS);
+  }
+  
+  log(`Using detected platform: ${currentPlatform}`);
+  return [currentPlatform];
+}
+
+/**
+ * Main function to vendor CodeLLDB for selected platforms
+ */
+async function main() {
+  // Check if vendoring should be skipped
+  if (SKIP_VENDOR) {
+    log('Skipping vendoring (SKIP_ADAPTER_VENDOR=true)');
+    process.exit(0);
+  }
+  
+  log('Script starting...');
+  log(`Working directory: ${process.cwd()}`);
+  log(`Vendor directory: ${VENDOR_DIR}`);
+  log(`Environment: CI=${process.env.CI ?? '<unset>'}, SKIP_ADAPTER_VENDOR=${process.env.SKIP_ADAPTER_VENDOR ?? '<unset>'}`);
+  log(`Force rebuild: ${FORCE_REBUILD}`);
+  log(`Requested platforms (env): ${process.env.CODELLDB_PLATFORMS ?? '<none>'}`);
+  log(`Keep temp artifacts: ${KEEP_TEMP}`);
+  log(`CLI arguments: ${process.argv.slice(2).join(', ') || '<none>'}`);
+  if (LOCAL_ONLY) {
+    log('Local-only mode enabled: downloads will be skipped; existing artifacts must be present.');
+  }
+
+  log(`CodeLLDB Vendoring Script v${CODELLDB_VERSION}`);
+  log('='.repeat(50));
+
+  if (CACHE_DIR) {
+    try {
+      await fs.mkdir(CACHE_DIR, { recursive: true });
+      log(`Artifact cache directory: ${CACHE_DIR}`);
+    } catch (error) {
+      cacheWritable = false;
+      logWarn(`Artifact cache disabled - unable to create ${CACHE_DIR}: ${error.message}`);
+    }
+  } else {
+    log('Artifact cache disabled (no suitable directory detected)');
+  }
+  
+  // Create vendor directory
+  await fs.mkdir(VENDOR_DIR, { recursive: true });
+  
+  // Create .gitkeep file
+  const vendorRootGitkeep = path.resolve(__dirname, '..', 'vendor', '.gitkeep');
+  await fs.writeFile(vendorRootGitkeep, '', { flag: 'a' });
+  const gitkeepPath = path.join(VENDOR_DIR, '.gitkeep');
+  await fs.writeFile(gitkeepPath, '', { flag: 'a' }); // Create if not exists
+  
+  // Determine which platforms to vendor
+  const selectedPlatforms = determinePlatforms();
+  
+  log(`Platforms to vendor: ${selectedPlatforms.join(', ')}\n`);
+  
+  const results = [];
+  for (const platform of selectedPlatforms) {
+    const success = await downloadAndExtract(platform);
+    results.push({ platform, success });
+  }
+  
+  // Clean up temp directory
+  if (!KEEP_TEMP) {
+    try {
+      await fs.rm(path.join(VENDOR_DIR, 'temp'), { recursive: true, force: true });
+    } catch {
+      // Ignore if doesn't exist
+    }
+  } else {
+    log('Retaining temp workspace per CODELLDB_KEEP_TEMP=true');
+  }
+  
+  // Summary
+  console.log('\n' + '='.repeat(50));
+  log('Summary:');
+  const successful = results.filter(r => r.success);
+  const failed = results.filter(r => !r.success);
+  
+  if (successful.length > 0) {
+    log(`Successfully vendored: ${successful.map(r => r.platform).join(', ')}`);
+  }
+  
+  if (failed.length > 0) {
+    logError(`Failed to vendor: ${failed.map(r => r.platform).join(', ')}`);
+    logWarn('Rust debugging will not be available for the failed platforms.');
+    logWarn('You can try again with: pnpm vendor:force');
+    if (IS_CI) {
+      logWarn('CI environment detected - exiting with failure to surface the issue.');
+      process.exit(1);
+    } else {
+      process.exitCode = 1;
+    }
+    return;
+  }
+  
+  if (successful.length > 0) {
+    log('Vendoring complete!');
+    log(`\nNote: The vendored binaries maintain the required directory structure:`);
+    log(`  adapter/codelldb[.exe]`);
+    log(`  lldb/lib/liblldb.[dll|dylib|so]`);
+  }
+}
+
+const invokedDirectly = Boolean(process.argv[1] && path.resolve(process.argv[1]) === __filename);
+
+// Run if called directly
+if (invokedDirectly) {
+  main().catch(error => {
+    logError(`Fatal error: ${error.message}`);
+    if (error?.stack) {
+      logError(error.stack);
+    }
+    logWarn('Rust debugging will not be available');
+    process.exitCode = 1;
+  });
+}
+
+export { downloadAndExtract, PLATFORMS, CODELLDB_VERSION };

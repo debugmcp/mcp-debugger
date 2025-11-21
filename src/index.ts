@@ -41,9 +41,15 @@ process.argv = process.argv.map(arg =>
 import { createLogger } from './utils/logger.js';
 import { DebugMcpServer } from './server.js';
 import { setupErrorHandlers } from './cli/error-handlers.js';
-import { createCLI, setupStdioCommand, setupSSECommand } from './cli/setup.js';
+import {
+  createCLI,
+  setupStdioCommand,
+  setupSSECommand,
+  setupCheckRustBinaryCommand,
+} from './cli/setup.js';
 import { handleStdioCommand } from './cli/stdio-command.js';
 import { handleSSECommand } from './cli/sse-command.js';
+import { handleCheckRustBinaryCommand } from './cli/commands/check-rust-binary.js';
 import { getVersion } from './cli/version.js';
 import fs from 'fs';
 import path from 'path';
@@ -97,6 +103,10 @@ export async function main(): Promise<void> {
   setupSSECommand(program, (options) =>
     handleSSECommand(options, { logger, serverFactory: createDebugMcpServer })
   );
+
+  setupCheckRustBinaryCommand(program, (binaryPath, options) =>
+    handleCheckRustBinaryCommand(binaryPath, options)
+  );
   
   // Parse command line arguments
   program.parse();
@@ -141,6 +151,8 @@ export {
   createCLI, 
   setupStdioCommand, 
   setupSSECommand,
+  setupCheckRustBinaryCommand,
   handleStdioCommand,
-  handleSSECommand
+  handleSSECommand,
+  handleCheckRustBinaryCommand
 };

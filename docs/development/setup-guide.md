@@ -208,7 +208,7 @@ Create `.vscode/launch.json`:
       "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
       "args": ["run", "${file}"],
       "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal"
+      "console": "internalConsole"
     }
   ]
 }

@@ -176,6 +176,8 @@ export type {
 export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
+export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
+export type { RustAdapterPolicyInterface } from './interfaces/adapter-policy-rust.js';
 export { MockAdapterPolicy } from './interfaces/adapter-policy-mock.js';
 
 // DAP Client Behavior interfaces for adapter policies

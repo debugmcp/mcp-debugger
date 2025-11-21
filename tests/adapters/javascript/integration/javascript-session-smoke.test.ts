@@ -53,7 +53,7 @@ describe('JavaScript adapter - session smoke (integration)', () => {
     const adapter = await registry.create('javascript', adapterConfig);
 
     // Smoke: transformLaunchConfig for a TS program; prefer tsx via explicit override
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program: dummyScriptTs,
       // Ensure deterministic result without module mocking
       runtimeExecutable: 'tsx',

@@ -227,6 +227,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       justMyCode: config.justMyCode,
       initialBreakpoints: config.initialBreakpoints,
       dryRunSpawn: config.dryRunSpawn,
+      launchConfig: config.launchConfig,
       // Pass adapter command info for language-agnostic adapter spawning
       adapterCommand: config.adapterCommand
     };

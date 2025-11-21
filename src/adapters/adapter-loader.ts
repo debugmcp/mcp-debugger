@@ -139,6 +139,7 @@ export class AdapterLoader {
       { name: 'mock', packageName: '@debugmcp/adapter-mock', description: 'Mock adapter for testing' },
       { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy' },
       { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug' },
+      { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB' },
     ];
 
     const results: AdapterMetadata[] = [];

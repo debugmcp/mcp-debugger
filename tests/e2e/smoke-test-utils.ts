@@ -72,9 +72,19 @@ export async function callToolSafely(
  */
 export async function executeDebugSequence(
   mcpSdkClient: Client,
-  fibonacciPath: string,
-  sessionName: string
+  scriptPath: string,
+  sessionName: string,
+  options?: {
+    language?: string;
+    breakpointLine?: number;
+    breakpointFile?: string;
+    dapLaunchArgs?: Record<string, unknown>;
+  }
 ): Promise<{ sessionId: string; success: boolean }> {
+  const language = options?.language ?? 'python';
+  const breakpointLine = options?.breakpointLine ?? 32;
+  const breakpointFile = options?.breakpointFile ?? scriptPath;
+  const dapLaunchArgs = options?.dapLaunchArgs ?? { stopOnEntry: true };
   let debugSessionId: string | undefined;
   
   try {
@@ -82,7 +92,7 @@ export async function executeDebugSequence(
     console.log(`[Smoke Test] Creating debug session: ${sessionName}...`);
     const createCall = await mcpSdkClient.callTool({
       name: 'create_debug_session',
-      arguments: { language: 'python', name: sessionName }
+      arguments: { language, name: sessionName }
     });
     const createToolResponse = parseSdkToolResult(createCall);
     if (!createToolResponse.sessionId) {
@@ -95,7 +105,7 @@ export async function executeDebugSequence(
     console.log('[Smoke Test] Setting breakpoint...');
     const breakpointCall = await mcpSdkClient.callTool({
       name: 'set_breakpoint',
-      arguments: { sessionId: debugSessionId, file: fibonacciPath, line: 32 }
+      arguments: { sessionId: debugSessionId, file: breakpointFile, line: breakpointLine }
     });
     const breakpointResponse = parseSdkToolResult(breakpointCall);
     if (!breakpointResponse.success) {
@@ -109,8 +119,8 @@ export async function executeDebugSequence(
       name: 'start_debugging',
       arguments: {
         sessionId: debugSessionId,
-        scriptPath: fibonacciPath,
-        dapLaunchArgs: { stopOnEntry: true }
+        scriptPath,
+        dapLaunchArgs
       }
     });
     const debugResponse = parseSdkToolResult(debugCall);

@@ -186,6 +186,7 @@ describe('Server Control Tools Tests', () => {
         expect.stringContaining('test.py'),
         ['--debug'],
         { stopOnEntry: true, justMyCode: false },
+        undefined,
         undefined
       );
       
@@ -223,7 +224,8 @@ describe('Server Control Tools Tests', () => {
         expect.stringContaining('test.py'),
         undefined,
         undefined,
-        true
+        true,
+        undefined
       );
       
       const content = JSON.parse(result.content[0].text);

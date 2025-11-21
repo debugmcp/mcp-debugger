@@ -16,32 +16,60 @@ const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../../..');
+const DEFAULT_IMAGE = process.env.DOCKER_IMAGE_NAME || 'mcp-debugger:local';
+let dockerBuildPromise: Promise<void> | null = null;
 
 export interface DockerTestConfig {
   imageName?: string;
   containerName?: string;
   workspaceMount?: string;
   logLevel?: string;
+  forceRebuild?: boolean;
 }
 
 /**
- * Build the Docker image if needed
+ * Build the Docker image if needed.
+ * Uses the same logic as scripts/docker-build-if-needed.js so we only rebuild once per test run.
  */
 export async function buildDockerImage(config: DockerTestConfig = {}): Promise<void> {
-  const imageName = config.imageName || 'mcp-debugger:test';
-  console.log(`[Docker Test] Building image ${imageName}...`);
-  
+  const imageName = config.imageName || DEFAULT_IMAGE;
+  const forceRebuild = config.forceRebuild === true || process.env.DOCKER_FORCE_REBUILD === 'true';
+
+  // Force rebuild bypasses the shared cache and always runs docker build
+  if (forceRebuild) {
+    console.log(`[Docker Test] Forcing Docker rebuild for ${imageName}...`);
+    await runDockerBuild(imageName);
+    return;
+  }
+
+  if (!dockerBuildPromise) {
+    dockerBuildPromise = (async () => {
+      console.log(`[Docker Test] Ensuring Docker image ${imageName} is up to date...`);
+      const scriptPath = path.join(ROOT, 'scripts', 'docker-build-if-needed.js');
+      try {
+        await execAsync(`node "${scriptPath}"`, {
+          cwd: ROOT,
+          env: {
+            ...process.env,
+            DOCKER_IMAGE_NAME: imageName
+          }
+        });
+      } catch (error) {
+        dockerBuildPromise = null;
+        throw error;
+      }
+    })();
+  }
+
+  await dockerBuildPromise;
+}
+
+async function runDockerBuild(imageName: string): Promise<void> {
   try {
-    const { stdout, stderr } = await execAsync(
-      `docker build -t ${imageName} .`,
-      { cwd: ROOT }
-    );
-    
-    if (stderr && !stderr.includes('Successfully built')) {
+    const { stderr } = await execAsync(`docker build -t ${imageName} .`, { cwd: ROOT });
+    if (stderr && stderr.trim().length > 0) {
       console.warn('[Docker Test] Build warnings:', stderr);
     }
-    
-    console.log('[Docker Test] Image built successfully');
   } catch (error) {
     console.error('[Docker Test] Failed to build image:', error);
     throw error;

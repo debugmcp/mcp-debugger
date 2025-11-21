@@ -32,6 +32,7 @@ import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,
+  RustAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 
@@ -104,6 +105,8 @@ export class DapProxyWorker {
       return JsDebugAdapterPolicy;
     } else if (PythonAdapterPolicy.matchesAdapter(adapterCommand)) {
       return PythonAdapterPolicy;
+    } else if (RustAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return RustAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
       return MockAdapterPolicy;
     }
@@ -355,7 +358,8 @@ export class DapProxyWorker {
           payload.scriptPath,
           payload.scriptArgs,
           payload.stopOnEntry,
-          payload.justMyCode
+          payload.justMyCode,
+          payload.launchConfig
         );
       }
 
@@ -437,11 +441,27 @@ export class DapProxyWorker {
     try {
       // Set initial breakpoints if provided
       if (this.currentInitPayload.initialBreakpoints?.length) {
-        await this.connectionManager.setBreakpoints(
-          this.dapClient,
-          this.currentInitPayload.scriptPath,
-          this.currentInitPayload.initialBreakpoints
-        );
+        this.logger!.info('[Worker] Initial breakpoints payload:', this.currentInitPayload.initialBreakpoints);
+        const groupedBreakpoints = new Map<string, { line: number; condition?: string }[]>();
+
+        for (const breakpoint of this.currentInitPayload.initialBreakpoints) {
+          const filePath = path.resolve(breakpoint.file);
+          if (!groupedBreakpoints.has(filePath)) {
+            groupedBreakpoints.set(filePath, []);
+          }
+          groupedBreakpoints.get(filePath)!.push({
+            line: breakpoint.line,
+            condition: breakpoint.condition
+          });
+        }
+
+        for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
+          await this.connectionManager.setBreakpoints(
+            this.dapClient,
+            filePath,
+            breakpoints
+          );
+        }
       }
 
       // Send configuration done

@@ -342,7 +342,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   // ===== Debug Configuration =====
 
-  transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig {
+  async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
     // Base fields and defaults - paths already resolved by server
     const user = (config || {}) as Record<string, unknown>;
     const u = user as Record<string, unknown>;
@@ -434,6 +434,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // Runtime selection and args with overrides and idempotency
     const runtimeExecutableOverride = typeof u.runtimeExecutable === 'string' ? (u.runtimeExecutable as string) : undefined;
     const userRuntimeArgs = Array.isArray(u.runtimeArgs) ? (u.runtimeArgs as string[]) : [];
+    const runtimeExecutableWasOverridden = typeof runtimeExecutableOverride === 'string' && runtimeExecutableOverride.length > 0;
 
 
     // Note: transformLaunchConfig is not async in the interface; however our internal
@@ -454,25 +455,32 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     if (typeof runtimeExecutableOverride === 'string' && runtimeExecutableOverride.length > 0) {
       runtimeExecutableSync = runtimeExecutableOverride;
+    } else if (isTS && tsxSync) {
+      runtimeExecutableSync = tsxSync;
     } else {
-      // Auto-detect for TS: tsx > node
-      if (isTS && tsxSync) {
-        runtimeExecutableSync = tsxSync;
-      } else {
-        runtimeExecutableSync = 'node';
-      }
+      runtimeExecutableSync = process.execPath || 'node';
     }
 
     // Compute runtimeArgs synchronously with idempotency and user overrides
     const computedArgs: string[] = [];
-    if (isTS) {
+    const normalizedRuntime = this.normalizeBinary(runtimeExecutableSync);
+    const normalizedTsx = this.normalizeBinary(tsxSync);
+    const normalizedTsNode = this.normalizeBinary(tsNodeSync);
+    const isTsNodeExecutable =
+      normalizedRuntime === 'ts-node' ||
+      (!!normalizedTsNode && normalizedRuntime.length > 0 && normalizedRuntime === normalizedTsNode);
+    const isUsingTsx =
+      normalizedRuntime === 'tsx' ||
+      (!!normalizedTsx && normalizedRuntime.length > 0 && normalizedRuntime === normalizedTsx);
+    const isNodeRuntime = this.isNodeRuntime(runtimeExecutableSync);
+
+    if (isTS && !runtimeExecutableWasOverridden) {
       // If using tsx (override or detected), do not add ts-node hooks
-      const isUsingTsx = runtimeExecutableSync === 'tsx' || (!!tsxSync && runtimeExecutableSync === tsxSync);
       if (!isUsingTsx) {
         // If user explicitly selected ts-node executable, don't add hooks (CLI handles it)
-        if (runtimeExecutableSync !== 'ts-node') {
+        if (!isTsNodeExecutable) {
           // If ts-node is available and we're running under node, add require hooks
-          if (tsNodeSync && runtimeExecutableSync === 'node') {
+          if (tsNodeSync && isNodeRuntime) {
             // Add -r ts-node/register (idempotent with user args)
             if (!this.hasPairArgs(userRuntimeArgs, '-r', 'ts-node/register')) {
               computedArgs.push('-r', 'ts-node/register');
@@ -511,7 +519,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // If an --inspect/--inspect-brk flag is present, ensure it's explicit with a port
     // and set attachSimplePort so js-debug adopts the target in this same DAP session
     // (avoiding a reverse 'startDebugging' request).
-    if (runtimeExecutableSync === 'node') {
+    if (isNodeRuntime) {
       const findInspectIndex = () =>
         finalArgs.findIndex(
           (a) =>
@@ -544,6 +552,23 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     }
 
     return result as LanguageSpecificLaunchConfig;
+  }
+
+  private normalizeBinary(value?: string): string {
+    if (!value) {
+      return '';
+    }
+    try {
+      return path.normalize(value).replace(/\\/g, '/').toLowerCase();
+    } catch {
+      return value.toLowerCase();
+    }
+  }
+
+  private isNodeRuntime(executable?: string): boolean {
+    if (!executable) return false;
+    const base = path.basename(executable).toLowerCase();
+    return base === 'node' || base === 'node.exe' || base === 'node.cmd';
   }
 
   getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {

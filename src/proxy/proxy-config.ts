@@ -1,7 +1,7 @@
 /**
  * Configuration for starting a proxy - language agnostic version
  */
-import { DebugLanguage } from '@debugmcp/shared';
+import { DebugLanguage, type LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
 /**
  * Configuration for starting a proxy
@@ -19,6 +19,7 @@ export interface ProxyConfig {
   justMyCode?: boolean;
   initialBreakpoints?: Array<{ file: string; line: number; condition?: string }>;
   dryRunSpawn?: boolean;
+  launchConfig?: LanguageSpecificLaunchConfig;
   
   // Adapter spawn command info - needed for proxy to spawn the correct adapter
   adapterCommand?: {

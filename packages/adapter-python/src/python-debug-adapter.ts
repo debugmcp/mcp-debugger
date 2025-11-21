@@ -332,13 +332,13 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   // ===== Debug Configuration =====
   
-  transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig {
+  async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
     const pythonConfig: PythonLaunchConfig = {
       ...config,
       type: 'python',
       request: 'launch',
       name: 'Python: Current File',
-      console: 'integratedTerminal',
+      console: 'internalConsole',
       redirectOutput: true,
       showReturnValue: true,
       justMyCode: config.justMyCode ?? true,

@@ -1,5 +1,9 @@
 # Known Issues
 
+## Rust debugging inside Docker is disabled
+
+The `mcp-debugger-docker` image now ships only the Python and JavaScript adapters. CodeLLDB had chronic DWARF/symbol issues with binaries compiled outside the container, so the image is built with `DEBUG_MCP_DISABLE_LANGUAGES=rust` and the server refuses to create Rust sessions in that environment. Use the local stdio, SSE, or packed deployments for Rust debugging where the adapter runs on the same host as the toolchain.
+
 ## Test Failures in Act Environment
 
 As of July 2025, there are 3 tests that fail when running with Act (local GitHub Actions simulator) but may pass in the actual GitHub Actions CI environment. These tests have been temporarily skipped with `.skip` to allow the project to be pushed to GitHub for further investigation.

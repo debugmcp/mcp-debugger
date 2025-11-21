@@ -38,7 +38,7 @@ describe('Docker: JavaScript Debugging Smoke Tests', () => {
     cleanup = result.cleanup;
     
     console.log('[Docker JS] MCP client connected to Docker container');
-  }, 60000);
+  }, 240000);
 
   afterAll(async () => {
     if (sessionId && mcpClient) {

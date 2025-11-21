@@ -32,10 +32,10 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
     vi.restoreAllMocks();
   });
 
-  it('runtimeExecutable override: custom absolute path -> skip auto-detection and only include user runtimeArgs', () => {
+  it('runtimeExecutable override: custom absolute path -> skip auto-detection and only include user runtimeArgs', async () => {
     const program = path.resolve('/proj/app.ts');
     const customExec = path.resolve('/custom/node');
-    const cfgOut = adapter.transformLaunchConfig({
+    const cfgOut = await adapter.transformLaunchConfig({
       program,
       runtimeExecutable: customExec,
       runtimeArgs: ['--custom']
@@ -45,14 +45,14 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
     expect(cfgOut.runtimeArgs).toEqual(['--custom']);
   });
 
-  it('override "tsx" while user added ts-node hooks -> preserve user args, do not auto-add more (dedup applied)', () => {
+  it('override "tsx" while user added ts-node hooks -> preserve user args, do not auto-add more (dedup applied)', async () => {
     const program = path.resolve('/proj/app.ts');
     const userArgs = [
       '-r', 'ts-node/register',
       '-r', 'ts-node/register/transpile-only',
       '--loader', 'ts-node/esm'
     ];
-    const cfgOut = adapter.transformLaunchConfig({
+    const cfgOut = await adapter.transformLaunchConfig({
       program,
       runtimeExecutable: 'tsx',
       runtimeArgs: userArgs.slice()
@@ -75,7 +75,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
     expect(countPair('--loader', 'ts-node/esm')).toBe(1);
   });
 
-  it('deduplication: when user provides duplicate hooks and adapter would add them, ensure no duplicates present', () => {
+  it('deduplication: when user provides duplicate hooks and adapter would add them, ensure no duplicates present', async () => {
     const program = path.resolve('/proj/app.ts');
 
     // Make ts-node available synchronously for transformLaunchConfig
@@ -97,7 +97,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
       '-r', 'tsconfig-paths/register' // duplicate
     ];
 
-    const out = adapter.transformLaunchConfig({
+    const out = await adapter.transformLaunchConfig({
       program,
       runtimeArgs: userArgs
     } as any);
@@ -121,7 +121,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
     spy.mockRestore();
   });
 
-  it('TS detection for .cts: when ts-node present and ESM project, include --loader ts-node/esm', () => {
+  it('TS detection for .cts: when ts-node present and ESM project, include --loader ts-node/esm', async () => {
     const program = path.resolve('/proj/app.cts');
 
     vi.spyOn(tsdet, 'detectBinary').mockImplementation((name: 'tsx' | 'ts-node') => {
@@ -130,17 +130,17 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
     });
     vi.spyOn(cfg, 'isESMProject').mockReturnValue(true);
 
-    const out = adapter.transformLaunchConfig({ program } as any);
+    const out = await adapter.transformLaunchConfig({ program } as any);
     const ra = (out.runtimeArgs || []) as string[];
     const idx = ra.findIndex(x => x === '--loader');
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(ra[idx + 1]).toBe('ts-node/esm');
   });
 
-  it('JS sourceMaps false without outFiles -> outFiles omitted', () => {
+  it('JS sourceMaps false without outFiles -> outFiles omitted', async () => {
     const program = path.resolve('/proj/app.js');
 
-    const out = adapter.transformLaunchConfig({
+    const out = await adapter.transformLaunchConfig({
       program,
       sourceMaps: false
     } as any);
@@ -149,9 +149,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
     expect((out as any).outFiles).toBeUndefined();
   });
 
-  it('skipFiles merge/dedupe with defaults', () => {
+  it('skipFiles merge/dedupe with defaults', async () => {
     const program = path.resolve('/proj/app.js');
-    const out = adapter.transformLaunchConfig({
+    const out = await adapter.transformLaunchConfig({
       program,
       skipFiles: ['**/*.spec.js', '**/node_modules/**'] // includes a default to test dedupe
     } as any);

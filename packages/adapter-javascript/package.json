@@ -22,11 +22,12 @@
     "build": "tsc -b",
     "postbuild": "node ./scripts/build-js-debug.js",
     "build:ci": "tsc -b -f",
-    "clean": "tsc -b --clean",
+    "build:adapter": "node ./scripts/build-js-debug.js",
+    "clean": "tsc -b --clean && rimraf vendor",
+    "clean:vendor": "rimraf vendor",
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
-    "lint": "eslint .",
-    "build:adapter": "node ./scripts/build-js-debug.js"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@debugmcp/shared": "workspace:^0.16.0",

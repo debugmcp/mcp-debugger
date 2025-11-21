@@ -34,6 +34,7 @@ export interface DebugResult {
   state: SessionState;
   error?: string;
   data?: unknown;
+  canContinue?: boolean;
   // Machine-readable error identity for tests and callers (avoid string assertions)
   errorType?: string; // e.g., 'PythonNotFoundError'
   errorCode?: number; // e.g., -32602 (MCP InvalidParams)
@@ -251,7 +252,16 @@ export class SessionManagerCore {
         sessionName: session.name,
         timestamp: Date.now()
       });
-      
+
+      // Guard against stale continued events arriving after a breakpoint stop.
+      // If the session is already paused, keep it paused so inspections still work.
+      if (session.state === SessionState.PAUSED) {
+        this.logger.debug(
+          `[SessionManager] Ignoring continued event for session ${sessionId} because state is already PAUSED`
+        );
+        return;
+      }
+
       this._updateSessionState(session, SessionState.RUNNING);
     };
     proxyManager.on('continued', handleContinued);

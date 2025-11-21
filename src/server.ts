@@ -32,6 +32,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
+import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
 
 const DEFAULT_LANGUAGES = Object.freeze(['python', 'mock'] as const);
 
@@ -80,6 +81,7 @@ interface ToolArguments {
   args?: string[];
   dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>;
   dryRunSpawn?: boolean;
+  adapterLaunchConfig?: Record<string, unknown>;
   scope?: number;
   frameId?: number;
   expression?: string;
@@ -101,10 +103,12 @@ export class DebugMcpServer {
 
   // Get supported languages from adapter registry
   private async getSupportedLanguagesAsync(): Promise<string[]> {
+    const disabled = getDisabledLanguages();
+    const filter = (langs: readonly string[]) => this.filterDisabledLanguages(langs, disabled);
     const adapterRegistry = this.getAdapterRegistry();
     // Guard against undefined registry in certain test environments
     if (!adapterRegistry) {
-      return getDefaultLanguages();
+      return filter(getDefaultLanguages());
     }
     // Prefer dynamic discovery if available on the concrete registry
     const dynRegistry = adapterRegistry as unknown as { listLanguages?: () => Promise<string[]> };
@@ -113,7 +117,9 @@ export class DebugMcpServer {
       try {
         const langs = await maybeList.call(adapterRegistry);
         if (Array.isArray(langs) && langs.length > 0) {
-          return process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, 'python') : langs;
+          const normalized =
+            process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, 'python') : langs;
+          return filter(normalized);
         }
       } catch (e) {
         this.logger.warn('Dynamic adapter language discovery failed, falling back to registered languages', { error: (e as Error)?.message });
@@ -124,15 +130,15 @@ export class DebugMcpServer {
     if (langs.length > 0) {
       // In container runtime, ensure python is advertised even if not yet registered (preload may be async)
       if (process.env.MCP_CONTAINER === 'true') {
-        return ensureLanguage(langs, 'python');
+        return filter(ensureLanguage(langs, 'python'));
       }
-      return langs;
+      return filter(langs);
     }
     // Final fallback to known defaults for UX (ensure python listed in container)
     if (process.env.MCP_CONTAINER === 'true') {
-      return ensureLanguage(getDefaultLanguages(), 'python');
+      return filter(ensureLanguage(getDefaultLanguages(), 'python'));
     }
-    return getDefaultLanguages();
+    return filter(getDefaultLanguages());
   }
 
   // Get language metadata for all supported languages
@@ -197,6 +203,12 @@ export class DebugMcpServer {
     const requested = params.language as unknown as string;
     const isContainer = process.env.MCP_CONTAINER === 'true';
     const allowInContainer = isContainer && requested === 'python'; // ensure python allowed in container
+    if (isLanguageDisabled(requested)) {
+      throw new McpError(
+        McpErrorCode.InvalidParams,
+        `Language '${params.language}' is disabled in this runtime. Available languages: ${supported.join(', ')}`,
+      );
+    }
     if (!allowInContainer && !supported.includes(requested)) {
       throw new McpError(
         McpErrorCode.InvalidParams, 
@@ -224,7 +236,8 @@ export class DebugMcpServer {
     scriptPath: string, 
     args?: string[], 
     dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>, 
-    dryRunSpawn?: boolean
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
     this.validateSession(sessionId);
     
@@ -243,7 +256,8 @@ export class DebugMcpServer {
       fileCheck.effectivePath, 
       args, 
       dapLaunchArgs, 
-      dryRunSpawn
+      dryRunSpawn,
+      adapterLaunchConfig
     );
     return result;
   }
@@ -445,7 +459,12 @@ export class DebugMcpServer {
                   },
                   additionalProperties: true
                 },
-                dryRunSpawn: { type: 'boolean' } 
+                dryRunSpawn: { type: 'boolean' },
+                adapterLaunchConfig: {
+                  type: 'object',
+                  description: 'Optional adapter-specific launch configuration overrides',
+                  additionalProperties: true
+                }
               }, 
               required: ['sessionId', 'scriptPath'] 
             } 
@@ -610,7 +629,21 @@ export class DebugMcpServer {
               }
               
               try {
-                const debugResult = await this.startDebugging(args.sessionId, args.scriptPath, args.args, args.dapLaunchArgs, args.dryRunSpawn);
+                if (args.adapterLaunchConfig !== undefined) {
+                  const cfg = args.adapterLaunchConfig;
+                  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
+                    throw new McpError(McpErrorCode.InvalidParams, 'adapterLaunchConfig must be an object when provided');
+                  }
+                }
+
+                const debugResult = await this.startDebugging(
+                  args.sessionId,
+                  args.scriptPath,
+                  args.args,
+                  args.dapLaunchArgs,
+                  args.dryRunSpawn,
+                  args.adapterLaunchConfig
+                );
                 const responsePayload: Record<string, unknown> = {
                   success: debugResult.success,
                   state: debugResult.state,
@@ -1201,5 +1234,16 @@ export class DebugMcpServer {
    */
   public getAdapterRegistry() {
     return this.sessionManager.adapterRegistry;
+  }
+
+  private filterDisabledLanguages(
+    languages: readonly string[],
+    disabled?: Set<string>,
+  ): string[] {
+    const disabledSet = disabled ?? getDisabledLanguages();
+    if (!disabledSet.size) {
+      return [...languages];
+    }
+    return languages.filter((lang) => !disabledSet.has(lang));
   }
 }

@@ -16,7 +16,9 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.16.0: JavaScript/Node.js debugging support (Alpha)! Full debugging capabilities with bundled js-debug, TypeScript support, and zero-runtime dependencies via improved npx distribution.
+> 🆕 Version 0.17.0: Rust debugging support (Alpha)! Debug Rust programs with CodeLLDB, including Cargo projects, async code, and full variable inspection.
+
+> 🔥 Version 0.16.0: JavaScript/Node.js debugging support (Alpha)! Full debugging capabilities with bundled js-debug, TypeScript support, and zero-runtime dependencies via improved npx distribution.
 
 > 🎬 **Demo Video**: See the debugger in action!
 > 
@@ -36,6 +38,20 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
 - 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger (Alpha)
+- 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Alpha)
+> WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
+
+### Windows Rust Setup Script
+
+If you're on Windows and want the quickest path to a working GNU toolchain + dlltool configuration, run:
+
+```powershell
+pwsh scripts/setup/windows-rust-debug.ps1
+```
+
+The script installs the `stable-gnu` toolchain (via rustup), exposes `dlltool.exe` from rustup's self-contained directory, builds the bundled Rust examples, and (optionally) runs the Rust smoke tests. Add `-UpdateUserPath` if you want the dlltool path persisted to your user PATH/DLLTOOL variables.
+
+The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (via winget + pacman) so `cargo +stable-gnu` has a fully functional `dlltool/ld/as` stack. If MSYS2 is already installed, it simply reuses it; otherwise it guides you through installing it (or warns so you can install manually).
 - 🧪 **Mock adapter for testing** – Test without external dependencies
 - 🔌 **STDIO and SSE transport modes** – Works with any MCP client
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via tsup (~3 MB)
@@ -89,6 +105,8 @@ cd mcp-debugger
 docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
+> ⚠️ The Docker image intentionally ships only the Python and JavaScript adapters. Rust debugging requires the local, SSE, or packed deployments where the adapter runs next to your toolchain.
+
 ### Using npm
 
 ```bash
@@ -119,7 +137,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",  // or "javascript" or "mock" for testing
+  "language": "python",  // or "javascript", "rust", or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -341,6 +359,7 @@ Then get the local variables:
 - 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading to v0.15.0 (dynamic loading)
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
 - 🟨 [JavaScript Debugging Guide](./docs/javascript/README.md) – JavaScript/TypeScript features
+- [Rust Debugging on Windows](docs/rust-debugging-windows.md) - Toolchain requirements and troubleshooting
 - 🤖 [AI Integration Guide](./docs/ai-integration.md) – Leverage AI-friendly features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
@@ -352,9 +371,44 @@ We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guideline
 # Development setup
 git clone https://github.com/debugmcp/mcp-debugger.git
 cd mcp-debugger
-npm install
-npm run build
-npm test
+
+# Install dependencies and vendor debug adapters
+pnpm install
+# All debug adapters (JavaScript js-debug, Rust CodeLLDB) are automatically downloaded
+
+# Build the project
+pnpm build
+
+# Run tests
+pnpm test
+
+# Check adapter vendoring status
+pnpm vendor:status
+
+# Force re-vendor all adapters (if needed)
+pnpm vendor:force
+```
+
+### Debug Adapter Vendoring
+
+The project automatically vendors debug adapters during `pnpm install`:
+- **JavaScript**: Downloads Microsoft's js-debug from GitHub releases
+- **Rust**: Downloads CodeLLDB binaries for the current platform
+- **CI Environment**: Set `SKIP_ADAPTER_VENDOR=true` to skip vendoring
+
+To manually manage adapters:
+```bash
+# Check current vendoring status
+pnpm vendor:status
+
+# Re-vendor all adapters
+pnpm vendor
+
+# Clean and re-vendor (force)
+pnpm vendor:force
+
+# Clean vendor directories only
+pnpm clean:vendor
 ```
 
 ### Running Container Tests Locally

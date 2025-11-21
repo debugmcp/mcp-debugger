@@ -15,13 +15,21 @@ const PACKAGE_DIR = path.resolve(__dirname, '../packages/mcp-debugger');
 const PACKAGE_JSON = path.join(PACKAGE_DIR, 'package.json');
 const BACKUP_JSON = path.join(PACKAGE_DIR, 'package.json.backup');
 
+function log(message) {
+  console.log(`[prepare-pack] ${message}`);
+}
+
+function warn(message) {
+  console.warn(`[prepare-pack] ${message}`);
+}
+
 // Read workspace package versions
 function getWorkspaceVersions() {
   const versions = {};
   const packagesDir = path.resolve(__dirname, '../packages');
   
   // Read each workspace package
-  const workspaces = ['shared', 'adapter-javascript', 'adapter-python', 'adapter-mock'];
+  const workspaces = ['shared', 'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-rust'];
   
   for (const ws of workspaces) {
     const pkgPath = path.join(packagesDir, ws, 'package.json');
@@ -59,7 +67,7 @@ function resolveWorkspaceDeps(pkg, versions) {
     return result;
   };
   
-  console.log('Resolving workspace dependencies:');
+  log('Resolving workspace dependencies:');
   
   if (resolved.dependencies) {
     resolved.dependencies = resolveDeps(resolved.dependencies);
@@ -80,39 +88,45 @@ async function main() {
   const command = process.argv[2];
   
   if (command === 'prepare') {
-    console.log('Preparing package.json for packing...\n');
+    log('Preparing package.json for packing...');
+
+    if (fs.existsSync(BACKUP_JSON)) {
+      warn('Found existing package.json.backup. Restoring original file before continuing.');
+      fs.copyFileSync(BACKUP_JSON, PACKAGE_JSON);
+      fs.unlinkSync(BACKUP_JSON);
+      log('Restored original package.json.');
+    }
     
     // Read original package.json
     const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON, 'utf8'));
     
     // Backup original
     fs.writeFileSync(BACKUP_JSON, JSON.stringify(pkg, null, 2));
-    console.log('✓ Backed up original package.json\n');
+    log('Backed up original package.json.');
     
     // Get workspace versions
     const versions = getWorkspaceVersions();
-    console.log('Found workspace versions:');
+    log('Found workspace versions:');
     for (const [name, version] of Object.entries(versions)) {
       console.log(`  ${name}@${version}`);
     }
-    console.log();
     
     // Resolve workspace dependencies
     const resolved = resolveWorkspaceDeps(pkg, versions);
     
     // Write resolved package.json
     fs.writeFileSync(PACKAGE_JSON, JSON.stringify(resolved, null, 2) + '\n');
-    console.log('\n✓ Updated package.json with resolved versions');
+    log('Updated package.json with resolved versions.');
     
   } else if (command === 'restore') {
-    console.log('Restoring original package.json...');
+    log('Restoring original package.json...');
     
     if (fs.existsSync(BACKUP_JSON)) {
       fs.copyFileSync(BACKUP_JSON, PACKAGE_JSON);
       fs.unlinkSync(BACKUP_JSON);
-      console.log('✓ Restored original package.json');
+      log('Restored original package.json.');
     } else {
-      console.log('⚠ No backup found');
+      warn('No backup found.');
     }
     
   } else {

@@ -97,6 +97,14 @@ Here's the recommended configuration for your MCP settings file:
 - The temp directory mount is optional but useful for log files
 - When using the debugger, provide paths relative to the project root (e.g., `examples/test.py` not `/workspace/examples/test.py`)
 
+## Rust support in Docker
+
+> ⚠️ **Rust debugging is not supported inside the Docker image.** The container now builds with `DEBUG_MCP_DISABLE_LANGUAGES=rust`, so the Rust adapter is omitted entirely and the MCP tools will not advertise `rust` as an available language.
+
+Why? CodeLLDB inside the container could not reliably interpret DWARF data for binaries compiled on the host (Windows/WSL/macOS). Rather than forcing every user to rebuild their projects with a matching Linux toolchain, we recommend running Rust sessions via the local/stdio, SSE, or packed deployments—where the debugger runs next to the toolchain that produced the binary. The Docker variant remains the best choice for Python and JavaScript debugging and now ships a slimmer image (no CodeLLDB payload).
+
+If you need Rust debugging from a container, keep the host-based deployments and mount your compiled Linux binary directly; the Docker image intentionally refuses to start Rust sessions to avoid inconsistent experiences.
+
 ## Using Both Debug MCP Server and GitHub MCP Server with Docker
 
 To use both servers together, configure them in your MCP settings:

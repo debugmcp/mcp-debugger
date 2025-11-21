@@ -68,9 +68,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     vi.restoreAllMocks();
   });
 
-  it('should transform JS config with defaults', () => {
+  it('should transform JS config with defaults', async () => {
     const program = path.resolve('/proj/app.js');
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program,
       stopOnEntry: true
     } as any);
@@ -91,16 +91,17 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(env.NODE_ENV).toBe('development');
     // Ensure process.env not mutated
     expect(process.env.NODE_ENV).toBe(envBefore.NODE_ENV);
+    expect(norm(cfg.runtimeExecutable as string)).toBe(norm(process.execPath));
   });
 
-  it('JS with sourceMaps true applies default outFiles when not provided', () => {
+  it('JS with sourceMaps true applies default outFiles when not provided', async () => {
     const program = path.resolve('/proj/app.js');
     (determineOutFiles as any).mockImplementation((_p: string, user?: string[]) => {
       if (user && user.length > 0) return user;
       return ['**/*.js', '!**/node_modules/**'];
     });
 
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program,
       sourceMaps: true
     } as any);
@@ -110,7 +111,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(cfg.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
   });
 
-  it('should set TS defaults and outFiles with ts-node present', () => {
+  it('should set TS defaults and outFiles with ts-node present', async () => {
     const program = path.resolve('/proj/app.ts');
 
     // Synchronous detectBinary used by transformLaunchConfig
@@ -119,14 +120,14 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       return undefined;
     });
 
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program
     } as any);
 
     expect(cfg.sourceMaps).toBe(true);
     expect((cfg.outFiles as string[])).toContain('**/*.js');
-    // runtimeExecutable default to 'node' when ts-node is present (hooks added)
-    expect(typeof cfg.runtimeExecutable).toBe('string');
+    // runtimeExecutable defaults to host Node.js when ts-node is present (hooks added)
+    expect(norm(cfg.runtimeExecutable as string)).toBe(norm(process.execPath));
     // runtimeArgs should include ts-node hooks
     const ra = (cfg.runtimeArgs || []) as string[];
     const hasRegister = ra.includes('-r') && ra.includes('ts-node/register');
@@ -134,7 +135,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(hasRegister || hasTranspile).toBe(true);
   });
 
-  it('should use tsx when available (priority over ts-node)', () => {
+  it('should use tsx when available (priority over ts-node)', async () => {
     const program = path.resolve('/proj/app.ts');
 
     (detectBinary as any).mockImplementation((name: string) => {
@@ -142,7 +143,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       return undefined;
     });
 
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program
     } as any);
 
@@ -150,7 +151,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(cfg.runtimeArgs).toBeUndefined(); // no hooks added when using tsx (aside from user-provided)
   });
 
-  it('should add ts-node ESM loader for ESM project (.mts) when ts-node present', () => {
+  it('should add ts-node ESM loader for ESM project (.mts) when ts-node present', async () => {
     const program = path.resolve('/proj/app.mts');
 
     (detectBinary as any).mockImplementation((name: string) => {
@@ -160,7 +161,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
 
     (isESMProject as any).mockReturnValue(true);
 
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program
     } as any);
 
@@ -170,7 +171,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(ra[idx + 1]).toBe('ts-node/esm');
   });
 
-  it('should add tsconfig-paths/register when tsconfig has paths', () => {
+  it('should add tsconfig-paths/register when tsconfig has paths', async () => {
     const program = path.resolve('/proj/app.ts');
 
     (detectBinary as any).mockImplementation((name: string) => {
@@ -179,7 +180,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     });
     (hasTsConfigPaths as any).mockReturnValue(true);
 
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program
     } as any);
 
@@ -189,14 +190,14 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(values).toContain('tsconfig-paths/register');
   });
 
-  it('should preserve user-provided runtimeArgs and append last', () => {
+  it('should preserve user-provided runtimeArgs and append last', async () => {
     const program = path.resolve('/proj/app.ts');
     (detectBinary as any).mockImplementation((name: string) => {
       if (name === 'ts-node') return '/bin/ts-node';
       return undefined;
     });
 
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program,
       runtimeArgs: ['--my-flag']
     } as any);
@@ -205,9 +206,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(ra[ra.length - 1]).toBe('--my-flag');
   });
 
-  it('runtimeExecutable override: "tsx" results in empty hooks', () => {
+  it('runtimeExecutable override: "tsx" results in empty hooks', async () => {
     const program = path.resolve('/proj/app.ts');
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program,
       runtimeExecutable: 'tsx',
       runtimeArgs: ['--custom']
@@ -217,9 +218,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(cfg.runtimeArgs).toEqual(['--custom']); // only user-provided
   });
 
-  it('runtimeExecutable override: "ts-node" results in no duplicate hooks', () => {
+  it('runtimeExecutable override: "ts-node" results in no duplicate hooks', async () => {
     const program = path.resolve('/proj/app.ts');
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program,
       runtimeExecutable: 'ts-node',
       runtimeArgs: ['-r', 'ts-node/register', '-r', 'ts-node/register/transpile-only']
@@ -233,9 +234,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(countTranspile).toBe(1);
   });
 
-  it('JS passes through user-provided outFiles', () => {
+  it('JS passes through user-provided outFiles', async () => {
     const program = path.resolve('/proj/app.js');
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program,
       sourceMaps: true,
       outFiles: ['dist/**/*.js']
@@ -243,10 +244,10 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(cfg.outFiles).toEqual(['dist/**/*.js']);
   });
 
-  it('env merge should not mutate process.env', () => {
+  it('env merge should not mutate process.env', async () => {
     const program = path.resolve('/proj/app.js');
     const before = { ...process.env };
-    const cfg = adapter.transformLaunchConfig({
+    const cfg = await adapter.transformLaunchConfig({
       program,
       env: { CUSTOM_ENV: '1' }
     } as any);

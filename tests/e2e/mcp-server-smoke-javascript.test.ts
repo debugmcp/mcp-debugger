@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult } from './smoke-test-utils.js';
@@ -25,9 +26,16 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
   beforeAll(async () => {
     console.log('[JS Simple Smoke] Starting MCP server...');
     
+    const cliEntry = path.join(ROOT, 'packages', 'mcp-debugger', 'dist', 'cli.mjs');
+    if (!existsSync(cliEntry)) {
+      throw new Error(
+        `mcp-debugger CLI bundle missing at ${cliEntry}. Run "pnpm --filter @debugmcp/mcp-debugger build" before executing this test.`
+      );
+    }
+
     transport = new StdioClientTransport({
       command: 'node',
-      args: [path.join(ROOT, 'dist', 'index.js'), '--log-level', 'info'],
+      args: [cliEntry, 'stdio', '--log-level', 'info'],
       env: {
         ...process.env,
         NODE_ENV: 'test'
@@ -81,9 +89,10 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     }
   });
 
+  const JS_SCRIPT_PATH = path.join(ROOT, 'examples', 'javascript', 'simple_test.js');
+
   it('should complete full JavaScript debugging cycle', async () => {
-    const scriptPath = path.join(ROOT, 'examples', 'javascript', 'mcp_target.js');
-    
+    const scriptPath = JS_SCRIPT_PATH;
     // Step 1: Create session - just verify we get a session ID
     console.log('[JS Simple Smoke] Creating session...');
     const createResult = await mcpClient!.callTool({
@@ -107,7 +116,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
       arguments: {
         sessionId,
         file: scriptPath,
-        line: 44
+        line: 14
       }
     });
     
@@ -247,7 +256,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
   }, 60000);
 
   it('should handle multiple breakpoints', async () => {
-    const scriptPath = path.join(ROOT, 'examples', 'javascript', 'mcp_target.js');
+    const scriptPath = JS_SCRIPT_PATH;
     
     // Create session
     const createResult = await mcpClient!.callTool({
@@ -263,12 +272,12 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     // Set multiple breakpoints
     const bp1 = await mcpClient!.callTool({
       name: 'set_breakpoint',
-      arguments: { sessionId, file: scriptPath, line: 44 }
+      arguments: { sessionId, file: scriptPath, line: 11 }
     });
     
     const bp2 = await mcpClient!.callTool({
       name: 'set_breakpoint',
-      arguments: { sessionId, file: scriptPath, line: 53 }
+      arguments: { sessionId, file: scriptPath, line: 14 }
     });
     
     // Both should succeed
@@ -286,7 +295,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
   });
 
   it('should retrieve source context', async () => {
-    const scriptPath = path.join(ROOT, 'examples', 'javascript', 'mcp_target.js');
+    const scriptPath = JS_SCRIPT_PATH;
     
     // Create session
     const createResult = await mcpClient!.callTool({
@@ -305,7 +314,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
       arguments: {
         sessionId,
         file: scriptPath,
-        line: 44,
+        line: 14,
         linesContext: 3
       }
     });

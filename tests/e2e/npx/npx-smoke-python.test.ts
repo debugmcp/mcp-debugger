@@ -41,7 +41,7 @@ describe.sequential('NPX: Python Debugging Smoke Tests', () => {
     cleanup = result.cleanup;
     
     console.log('[NPX Python] MCP client connected');
-  }, 120000);
+  }, 240000);
 
   afterAll(async () => {
     if (sessionId && mcpClient) {

@@ -1,0 +1,274 @@
+/**
+ * Rust debugging utilities
+ */
+
+import { spawn } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import os from 'os';
+import which from 'which';
+
+/**
+ * Check if Cargo is installed and available
+ */
+export async function checkCargoInstallation(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const cargoProcess = spawn('cargo', ['--version'], {
+      stdio: 'ignore',
+      shell: true
+    });
+    
+    cargoProcess.on('error', () => resolve(false));
+    cargoProcess.on('exit', (code) => resolve(code === 0));
+  });
+}
+
+/**
+ * Check if Rust is installed (via rustc)
+ */
+export async function checkRustInstallation(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const rustcProcess = spawn('rustc', ['--version'], {
+      stdio: 'ignore',
+      shell: true
+    });
+    
+    rustcProcess.on('error', () => resolve(false));
+    rustcProcess.on('exit', (code) => resolve(code === 0));
+  });
+}
+
+/**
+ * Get Cargo version
+ */
+export async function getCargoVersion(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const cargoProcess = spawn('cargo', ['--version'], {
+      shell: true
+    });
+    
+    let output = '';
+    cargoProcess.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    cargoProcess.on('error', () => resolve(null));
+    cargoProcess.on('exit', (code) => {
+      if (code === 0 && output) {
+        // Parse version from "cargo 1.73.0 (9c4383fb5 2023-08-26)"
+        const match = output.match(/cargo (\d+\.\d+\.\d+)/);
+        resolve(match ? match[1] : null);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
+ * Resolve the path to the CodeLLDB executable
+ * This is re-exported from codelldb-resolver for backward compatibility
+ */
+export { resolveCodeLLDBExecutable as resolveCodeLLDBPath } from './codelldb-resolver.js';
+
+/**
+ * Find Rust project root (containing Cargo.toml)
+ */
+export async function findCargoProjectRoot(startPath: string): Promise<string | null> {
+  let currentPath = path.resolve(startPath);
+  const root = path.parse(currentPath).root;
+  
+  while (currentPath !== root) {
+    try {
+      const cargoTomlPath = path.join(currentPath, 'Cargo.toml');
+      await fs.access(cargoTomlPath, fs.constants.F_OK);
+      return currentPath;
+    } catch {
+      // Not found, move up
+      currentPath = path.dirname(currentPath);
+    }
+  }
+  
+  // Check root as well
+  try {
+    const cargoTomlPath = path.join(root, 'Cargo.toml');
+    await fs.access(cargoTomlPath, fs.constants.F_OK);
+    return root;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a Rust project using Cargo
+ */
+export async function buildRustProject(
+  projectPath: string,
+  release: boolean = false
+): Promise<{ success: boolean; output: string }> {
+  return new Promise((resolve) => {
+    const args = ['build'];
+    if (release) {
+      args.push('--release');
+    }
+    
+    const buildProcess = spawn('cargo', args, {
+      cwd: projectPath,
+      shell: true
+    });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    buildProcess.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    buildProcess.stderr?.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    buildProcess.on('error', (error) => {
+      resolve({
+        success: false,
+        output: `Build failed: ${error.message}`
+      });
+    });
+    
+    buildProcess.on('exit', (code) => {
+      resolve({
+        success: code === 0,
+        output: output + errorOutput
+      });
+    });
+  });
+}
+
+/**
+ * Get the path to the compiled binary
+ */
+export async function getRustBinaryPath(
+  projectPath: string,
+  binaryName: string,
+  release: boolean = false
+): Promise<string | null> {
+  const targetDir = path.join(
+    projectPath,
+    'target',
+    release ? 'release' : 'debug'
+  );
+  
+  const extension = process.platform === 'win32' ? '.exe' : '';
+  const binaryPath = path.join(targetDir, `${binaryName}${extension}`);
+  
+  try {
+    await fs.access(binaryPath, fs.constants.F_OK);
+    return binaryPath;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Retrieve the host triple reported by rustc -Vv
+ */
+export async function getRustHostTriple(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const rustcProcess = spawn('rustc', ['-Vv'], {
+      shell: true
+    });
+
+    let output = '';
+
+    rustcProcess.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+
+    rustcProcess.on('error', () => resolve(null));
+    rustcProcess.on('exit', (code) => {
+      if (code === 0 && output) {
+        const hostLine = output
+          .split(/\r?\n/)
+          .find(line => line.toLowerCase().startsWith('host:'));
+        if (hostLine) {
+          const [, hostValue] = hostLine.split(':');
+          if (hostValue) {
+            resolve(hostValue.trim());
+            return;
+          }
+        }
+      }
+      resolve(null);
+    });
+  });
+}
+
+/**
+ * Attempt to locate dlltool.exe in PATH, DLLTOOL env override, or rustup toolchains.
+ */
+export async function findDlltoolExecutable(): Promise<string | null> {
+  const explicit = process.env.DLLTOOL;
+  if (explicit) {
+    try {
+      await fs.access(explicit, fs.constants.F_OK);
+      return explicit;
+    } catch {
+      // fall through
+    }
+  }
+
+  try {
+    const resolved = await which('dlltool');
+    if (resolved) {
+      return resolved;
+    }
+  } catch {
+    // not on PATH
+  }
+
+  if (process.platform === 'win32') {
+    const rustupHome =
+      process.env.RUSTUP_HOME || path.join(os.homedir(), '.rustup');
+    const toolchainsDir = path.join(rustupHome, 'toolchains');
+    try {
+      const toolchains = await fs.readdir(toolchainsDir);
+      for (const entry of toolchains) {
+        if (!/-pc-windows-gnu/i.test(entry)) {
+          continue;
+        }
+        const possibleDirs = [
+          path.join(
+            toolchainsDir,
+            entry,
+            'lib',
+            'rustlib',
+            'x86_64-pc-windows-gnu',
+            'bin'
+          ),
+          path.join(
+            toolchainsDir,
+            entry,
+            'lib',
+            'rustlib',
+            'x86_64-pc-windows-gnu',
+            'bin',
+            'self-contained'
+          )
+        ];
+        for (const dir of possibleDirs) {
+          const candidate = path.join(dir, 'dlltool.exe');
+          try {
+            await fs.access(candidate, fs.constants.F_OK);
+            return candidate;
+          } catch {
+            // try next candidate
+          }
+        }
+      }
+    } catch {
+      // rustup home missing
+    }
+  }
+
+  return null;
+}

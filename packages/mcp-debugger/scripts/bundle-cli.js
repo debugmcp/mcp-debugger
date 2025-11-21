@@ -130,6 +130,16 @@ async function bundleCLI() {
     console.warn('Run: pnpm -w -F @debugmcp/adapter-javascript run build:adapter');
   }
 
+  const rustVendorSrc = path.join(repoRoot, 'packages/adapter-rust/vendor/codelldb');
+  if (fs.existsSync(rustVendorSrc)) {
+    const rustVendorDest = path.join(distDir, 'vendor/codelldb');
+    fs.cpSync(rustVendorSrc, rustVendorDest, { recursive: true });
+    console.log('Copied CodeLLDB adapter payload.');
+  } else {
+    console.warn('Warning: CodeLLDB vendor directory not found; Rust debugging may fail.');
+    console.warn('Run: pnpm -w -F @debugmcp/adapter-rust run build:adapter');
+  }
+
   // Mirror dist into the package/ directory used by npm pack artifacts.
   const packageDir = path.join(packageRoot, 'package');
   const packageDistDir = path.join(packageDir, 'dist');

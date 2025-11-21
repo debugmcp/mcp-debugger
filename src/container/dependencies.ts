@@ -31,6 +31,7 @@ import { SessionStoreFactory } from '../factories/session-store-factory.js';
 import { ProxyManagerFactory, IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import { IAdapterRegistry, AdapterRegistryConfig } from '@debugmcp/shared';
 import { AdapterRegistry } from '../adapters/adapter-registry.js';
+import { isLanguageDisabled } from '../utils/language-config.js';
 
 type BundledAdapterEntry = {
   language: string;
@@ -124,7 +125,11 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   // Adapters are loaded dynamically on-demand by the AdapterRegistry via AdapterLoader.
   // In container runtime, pre-register known adapters using dynamic import (fire-and-forget)
   if (process.env.MCP_CONTAINER === 'true') {
-    const tryRegister = (lang: 'mock' | 'python' | 'javascript', factoryName: string) => {
+    const tryRegister = (lang: 'mock' | 'python' | 'javascript' | 'rust', factoryName: string) => {
+      if (isLanguageDisabled(lang)) {
+        logger.info?.(`[AdapterRegistry] Skipping bundled adapter '${lang}' (disabled via env).`);
+        return;
+      }
       const url = new URL(`../node_modules/@debugmcp/adapter-${lang}/dist/index.js`, import.meta.url).href;
       // Fire-and-forget; do not block dependency creation
       import(
@@ -145,6 +150,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
     tryRegister('mock', 'MockAdapterFactory');
     tryRegister('python', 'PythonAdapterFactory');
     tryRegister('javascript', 'JavascriptAdapterFactory');
+    tryRegister('rust', 'RustAdapterFactory');
   }
   
   return {

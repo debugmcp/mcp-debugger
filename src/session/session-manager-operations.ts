@@ -8,14 +8,18 @@ import {
   SessionState, 
   SessionLifecycleState
 } from '@debugmcp/shared';
-import { ManagedSession } from './session-store.js';
+import { ManagedSession, ToolchainValidationState } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
-import { AdapterConfig } from '@debugmcp/shared';
+import {
+  AdapterConfig,
+  type GenericLaunchConfig,
+  type LanguageSpecificLaunchConfig
+} from '@debugmcp/shared';
 import {
   SessionTerminatedError,
   ProxyNotRunningError,
@@ -47,8 +51,9 @@ export class SessionManagerOperations extends SessionManagerData {
     scriptPath: string,
     scriptArgs?: string[],
     dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
-    dryRunSpawn?: boolean
-  ): Promise<void> {
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>
+  ): Promise<LanguageSpecificLaunchConfig> {
     const sessionId = session.id;
     
     // Log entrance for Windows CI debugging
@@ -102,6 +107,25 @@ export class SessionManagerOperations extends SessionManagerData {
       ...(dapLaunchArgs || {}),
     };
 
+    const genericLaunchConfig: Record<string, unknown> = {
+      ...effectiveLaunchArgs,
+      program: scriptPath
+    };
+
+    if (Array.isArray(scriptArgs) && scriptArgs.length > 0) {
+      genericLaunchConfig.args = scriptArgs;
+    }
+
+    if (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0) {
+      genericLaunchConfig.cwd = path.dirname(scriptPath);
+    }
+
+    if (adapterLaunchConfig && typeof adapterLaunchConfig === 'object') {
+      Object.assign(genericLaunchConfig, adapterLaunchConfig);
+    }
+
+    let transformedLaunchConfig: LanguageSpecificLaunchConfig | undefined;
+
     // Create the adapter for this language first
     const adapterConfig: AdapterConfig = {
       sessionId,
@@ -111,10 +135,42 @@ export class SessionManagerOperations extends SessionManagerData {
       logDir: sessionLogDir,
       scriptPath,
       scriptArgs,
-      launchConfig: effectiveLaunchArgs,
+      launchConfig: genericLaunchConfig as GenericLaunchConfig,
     };
 
     const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
+
+    try {
+      transformedLaunchConfig = await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
+    } catch (error) {
+      this.logger.warn(
+        `[SessionManager] transformLaunchConfig failed for ${session.language}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      transformedLaunchConfig = undefined;
+    }
+
+    const adapterWithToolchain = adapter as {
+      consumeLastToolchainValidation?: () => unknown;
+    };
+    const toolchainValidation =
+      typeof adapterWithToolchain.consumeLastToolchainValidation === 'function'
+      ? (adapterWithToolchain.consumeLastToolchainValidation() as ToolchainValidationState)
+      : undefined;
+
+    if (toolchainValidation) {
+      this.sessionStore.update(sessionId, { toolchainValidation });
+      if (!toolchainValidation.compatible && toolchainValidation.behavior !== 'continue') {
+        const toolchainError = new Error('MSVC_TOOLCHAIN_DETECTED') as Error & {
+          toolchainValidation?: ToolchainValidationState;
+        };
+        toolchainError.toolchainValidation = toolchainValidation;
+        throw toolchainError;
+      }
+    } else {
+      this.sessionStore.update(sessionId, { toolchainValidation: undefined });
+    }
 
     // Use the adapter to resolve the executable path
     let resolvedExecutablePath: string;
@@ -145,7 +201,64 @@ export class SessionManagerOperations extends SessionManagerData {
     // Build adapter command using the adapter
     const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
 
+    const launchConfigBase =
+      transformedLaunchConfig ?? (genericLaunchConfig as LanguageSpecificLaunchConfig);
+    const launchConfigData: LanguageSpecificLaunchConfig = { ...launchConfigBase };
+
+    const languageId = typeof session.language === 'string'
+      ? session.language.toLowerCase()
+      : String(session.language).toLowerCase();
+    const isJavascriptSession = languageId === 'javascript';
+    const stopOnEntryProvided = typeof dapLaunchArgs?.stopOnEntry === 'boolean';
+
+    if (isJavascriptSession && !stopOnEntryProvided) {
+      launchConfigData.stopOnEntry = false;
+      if (Array.isArray(launchConfigData.runtimeArgs)) {
+        launchConfigData.runtimeArgs = (launchConfigData.runtimeArgs as string[]).filter(
+          arg => !/^--inspect(?:-brk)?(?:=|$)/.test(arg)
+        );
+      }
+    }
+
+    this.logger.info(
+      `[SessionManager] Launch config stopOnEntry adjustments for ${sessionId}: base=${String(
+        launchConfigBase?.stopOnEntry
+      )}, final=${String(launchConfigData.stopOnEntry)}, userProvided=${String(
+        dapLaunchArgs?.stopOnEntry
+      )}`
+    );
+
+    const stopOnEntryFlag =
+      typeof launchConfigData?.stopOnEntry === 'boolean'
+        ? launchConfigData.stopOnEntry
+        : effectiveLaunchArgs.stopOnEntry;
+
+    const justMyCodeFlag =
+      typeof launchConfigData?.justMyCode === 'boolean'
+        ? launchConfigData.justMyCode
+        : effectiveLaunchArgs.justMyCode;
+
     // Create ProxyConfig
+    const programFromLaunchConfig =
+      typeof launchConfigData?.program === 'string' && launchConfigData.program.length > 0
+        ? launchConfigData.program
+        : scriptPath;
+
+    const argsFromLaunchConfig = Array.isArray(launchConfigData?.args)
+      ? (launchConfigData!.args as unknown[]).filter((arg): arg is string => typeof arg === 'string')
+      : Array.isArray(scriptArgs)
+        ? [...scriptArgs]
+        : [];
+
+    const normalizedScriptArgs = argsFromLaunchConfig.length > 0 ? argsFromLaunchConfig : undefined;
+
+    if (initialBreakpoints.length) {
+      this.logger.info(
+        `[SessionManager] Initial breakpoints for ${sessionId}:`,
+        initialBreakpoints.map(bp => ({ file: bp.file, line: bp.line }))
+      );
+    }
+
     const proxyConfig: ProxyConfig = {
       sessionId,
       language: session.language, // Add language from session
@@ -153,12 +266,13 @@ export class SessionManagerOperations extends SessionManagerData {
       adapterHost: '127.0.0.1',
       adapterPort,
       logDir: sessionLogDir,
-      scriptPath, // Path already resolved by server
-      scriptArgs,
-      stopOnEntry: effectiveLaunchArgs.stopOnEntry,
-      justMyCode: effectiveLaunchArgs.justMyCode,
+      scriptPath: programFromLaunchConfig,
+      scriptArgs: normalizedScriptArgs,
+      stopOnEntry: stopOnEntryFlag,
+      justMyCode: justMyCodeFlag,
       initialBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
+      launchConfig: launchConfigData,
       adapterCommand, // Pass the adapter command
     };
 
@@ -171,6 +285,8 @@ export class SessionManagerOperations extends SessionManagerData {
 
     // Start the proxy
     await proxyManager.start(proxyConfig);
+
+    return launchConfigData;
   }
 
   /**
@@ -239,7 +355,8 @@ export class SessionManagerOperations extends SessionManagerData {
     scriptPath: string,
     scriptArgs?: string[],
     dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
-    dryRunSpawn?: boolean
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
     this.logger.info(
@@ -286,7 +403,7 @@ export class SessionManagerOperations extends SessionManagerData {
         }
         
         // Start the proxy manager
-        await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+        await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig);
         this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
         
         // CI Debug: After startProxyManager
@@ -403,7 +520,7 @@ export class SessionManagerOperations extends SessionManagerData {
 
       // Normal (non-dry-run) flow
       // Start the proxy manager
-      await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig);
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
@@ -416,7 +533,8 @@ export class SessionManagerOperations extends SessionManagerData {
             dapLaunchArgs,
             scriptPath,
             scriptArgs,
-            breakpoints: session.breakpoints
+            breakpoints: session.breakpoints,
+            launchConfig: launchConfigData
           });
         } catch (handshakeErr) {
           this.logger.warn(
@@ -574,7 +692,20 @@ export class SessionManagerOperations extends SessionManagerData {
 
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      this._updateSessionState(session, SessionState.ERROR);
+      const toolchainValidation =
+        (error as { toolchainValidation?: ToolchainValidationState })?.toolchainValidation ??
+        session.toolchainValidation;
+      const incompatibleToolchain =
+        Boolean(toolchainValidation) && toolchainValidation?.compatible === false;
+
+      if (incompatibleToolchain) {
+        this._updateSessionState(session, SessionState.CREATED);
+        this.sessionStore.update(sessionId, {
+          sessionLifecycle: SessionLifecycleState.CREATED,
+        });
+      } else {
+        this._updateSessionState(session, SessionState.ERROR);
+      }
 
       if (session.proxyManager) {
         await session.proxyManager.stop();
@@ -589,6 +720,24 @@ export class SessionManagerOperations extends SessionManagerData {
         errorCode = (error as McpError).code as number | undefined;
       } else if (error instanceof Error) {
         errorType = error.constructor.name || 'Error';
+      }
+
+      if (incompatibleToolchain && toolchainValidation) {
+        const behavior = (toolchainValidation.behavior ?? 'warn').toLowerCase();
+        const canContinue = behavior !== 'error';
+        const updatedSession = this._getSessionById(sessionId);
+        return {
+          success: false,
+          error: 'MSVC_TOOLCHAIN_DETECTED',
+          state: updatedSession.state,
+          data: {
+            message: toolchainValidation.message ?? errorMessage,
+            toolchainValidation,
+          },
+          canContinue,
+          errorType,
+          errorCode,
+        };
       }
 
       return { success: false, error: errorMessage, state: session.state, errorType, errorCode };
@@ -960,10 +1109,17 @@ export class SessionManagerOperations extends SessionManagerData {
         `[SessionManager continue] Sending DAP 'continue' for session ${sessionId}, threadId ${threadId}.`
       );
       await session.proxyManager.sendDapRequest('continue', { threadId });
-      this._updateSessionState(session, SessionState.RUNNING);
-      this.logger.info(
-        `[SessionManager continue] DAP 'continue' sent, session ${sessionId} state updated to RUNNING.`
-      );
+
+      if (session.state === SessionState.PAUSED || session.state === SessionState.STOPPED) {
+        this.logger.debug(
+          `[SessionManager continue] DAP 'continue' completed but session ${sessionId} is already ${session.state}; skipping RUNNING update.`
+        );
+      } else {
+        this._updateSessionState(session, SessionState.RUNNING);
+        this.logger.info(
+          `[SessionManager continue] DAP 'continue' sent, session ${sessionId} state updated to RUNNING.`
+        );
+      }
       return { success: true, state: session.state };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

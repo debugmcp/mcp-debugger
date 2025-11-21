@@ -114,6 +114,10 @@ export function validateProxyInitPayload(payload: unknown): ProxyInitPayload {
     console.error('[VALIDATION ERROR]', error.message);
     throw error;
   }
+
+  if (p.launchConfig && typeof p.launchConfig !== 'object') {
+    throw new Error('Invalid ProxyInitPayload: launchConfig must be an object when provided');
+  }
   
   return payload as ProxyInitPayload;
 }

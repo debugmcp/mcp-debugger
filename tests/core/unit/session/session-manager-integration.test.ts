@@ -46,7 +46,8 @@ describe('SessionManager - Integration Tests', () => {
       expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
       
       dependencies.mockProxyManager.simulateEvent('continued');
-      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.RUNNING);
+      // Continued events emitted while the session is already paused should not flip the state back to running.
+      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
       
       dependencies.mockProxyManager.simulateEvent('terminated');
       expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);

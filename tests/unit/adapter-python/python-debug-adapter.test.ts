@@ -259,9 +259,9 @@ describe('PythonDebugAdapter', () => {
     expect(await checkPromise).toBe(false);
   });
 
-  it('transforms launch configuration with python defaults', () => {
+  it('transforms launch configuration with python defaults', async () => {
     const adapter = new PythonDebugAdapter(createDependencies());
-    const config = adapter.transformLaunchConfig({
+    const config = await adapter.transformLaunchConfig({
       type: 'python',
       request: 'launch',
       name: 'Test',
@@ -270,7 +270,7 @@ describe('PythonDebugAdapter', () => {
     });
 
     expect(config.name).toBe('Python: Current File');
-    expect(config.console).toBe('integratedTerminal');
+    expect(config.console).toBe('internalConsole');
     expect(config.redirectOutput).toBe(true);
     expect(config.showReturnValue).toBe(true);
     expect(config.stopOnEntry).toBe(true);

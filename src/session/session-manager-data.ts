@@ -10,6 +10,7 @@ import {
   DefaultAdapterPolicy,
   PythonAdapterPolicy,
   JsDebugAdapterPolicy,
+  RustAdapterPolicy,
   MockAdapterPolicy,
   DebugLanguage
 } from '@debugmcp/shared';
@@ -31,6 +32,9 @@ export class SessionManagerData extends SessionManagerCore {
       case 'javascript':
       case DebugLanguage.JAVASCRIPT:
         return JsDebugAdapterPolicy;
+      case 'rust':
+      case DebugLanguage.RUST:
+        return RustAdapterPolicy;
       case 'mock':
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
