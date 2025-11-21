@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getDisabledLanguages, isLanguageDisabled } from '../../../src/utils/language-config.js';
 
 const originalEnv = { ...process.env };
 
 describe('language configuration helpers', () => {
   beforeEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
     process.env = { ...originalEnv };
   });
 
