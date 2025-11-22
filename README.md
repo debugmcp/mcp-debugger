@@ -40,6 +40,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger (Alpha)
 - 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Alpha)
 > WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
+> NOTE: The published npm bundle ships the Linux x64 CodeLLDB runtime to stay under registry size limits. On macOS or Windows, point the `CODELLDB_PATH` environment variable at an existing CodeLLDB installation (for example from the VSCode extension) or clone the repo and run `pnpm --filter @debugmcp/adapter-rust run build:adapter` to vendor your platform binaries locally.
 
 ### Windows Rust Setup Script
 

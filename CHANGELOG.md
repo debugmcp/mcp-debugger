@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Improved
 - **Stepping UX** – every `step_*` response now embeds current source context so agents see the active file/line instead of generic “success” acknowledgements
 
+### Packaging
+- **CodeLLDB footprint** – CLI bundle ships the Linux x64 CodeLLDB runtime by default (other platforms can point `CODELLDB_PATH` to an installed binary or re-run the vendor script) to stay within npm size limits
+
 ## [0.16.0] - 2025-11-09
 
 ### Added

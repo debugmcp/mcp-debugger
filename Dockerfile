@@ -52,7 +52,8 @@ COPY src ./src
 COPY scripts ./scripts/
 
 # 4) Build workspace packages and main project (root build runs build:packages); then bundle
-RUN CODELLDB_VENDOR_LOCAL_ONLY=true CODELLDB_VENDOR_ALL=false CODELLDB_PLATFORMS=linux-x64 pnpm run build --silent
+# Download Linux CodeLLDB artifacts during the container build if they are not already vendored.
+RUN CODELLDB_VENDOR_ALL=false CODELLDB_PLATFORMS=linux-x64 pnpm run build --silent
 RUN node scripts/bundle.js
 
 # Optional: quick diagnostics for bundle

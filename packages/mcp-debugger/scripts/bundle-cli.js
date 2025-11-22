@@ -132,9 +132,35 @@ async function bundleCLI() {
 
   const rustVendorSrc = path.join(repoRoot, 'packages/adapter-rust/vendor/codelldb');
   if (fs.existsSync(rustVendorSrc)) {
-    const rustVendorDest = path.join(distDir, 'vendor/codelldb');
-    fs.cpSync(rustVendorSrc, rustVendorDest, { recursive: true });
-    console.log('Copied CodeLLDB adapter payload.');
+    const rawPlatforms = process.env.CODELLDB_PACKAGE_PLATFORMS ?? 'linux-x64';
+    const requestedPlatforms = rawPlatforms
+      .split(',')
+      .map((platform) => platform.trim())
+      .filter(Boolean);
+
+    if (requestedPlatforms.length === 0) {
+      console.log('Skipping CodeLLDB inclusion (CODELLDB_PACKAGE_PLATFORMS empty).');
+    } else {
+      const rustVendorDest = path.join(distDir, 'vendor/codelldb');
+      fs.mkdirSync(rustVendorDest, { recursive: true });
+
+      for (const platform of requestedPlatforms) {
+        if (platform.toLowerCase() === 'none') {
+          continue;
+        }
+
+        const srcDir = path.join(rustVendorSrc, platform);
+        if (!fs.existsSync(srcDir)) {
+          console.warn(`[CodeLLDB bundler] Requested platform "${platform}" not found in vendor directory.`);
+          console.warn('Run: pnpm -w -F @debugmcp/adapter-rust run build:adapter');
+          continue;
+        }
+
+        const destDir = path.join(rustVendorDest, platform);
+        fs.cpSync(srcDir, destDir, { recursive: true });
+        console.log(`Copied CodeLLDB payload for ${platform}.`);
+      }
+    }
   } else {
     console.warn('Warning: CodeLLDB vendor directory not found; Rust debugging may fail.');
     console.warn('Run: pnpm -w -F @debugmcp/adapter-rust run build:adapter');
