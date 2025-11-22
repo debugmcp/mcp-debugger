@@ -48,6 +48,16 @@ class WhichCommandFinder implements CommandFinder {
       // Fix for Windows: which library fails if PATH is undefined but Path exists
       // Windows env vars are case-insensitive, but Node.js treats them as case-sensitive
       if (isWindows) {
+        if (!process.env.ComSpec && !process.env.COMSPEC) {
+          const systemRoot =
+            process.env.SystemRoot ||
+            process.env.windir ||
+            'C:\\Windows';
+          const fallbackCmd = path.join(systemRoot, 'System32', 'cmd.exe');
+          process.env.ComSpec = fallbackCmd;
+          process.env.COMSPEC = fallbackCmd;
+        }
+
         // Diagnostic logging in CI to understand the issue
         if (verboseDiscovery) {
           const pathEntries = process.env.PATH?.split(';') || [];

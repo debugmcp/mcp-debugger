@@ -187,7 +187,8 @@ describe('RustAdapterPolicy', () => {
         logDir: '/tmp/logs'
       });
 
-      expect(config.command).toMatch(/vendor\/codelldb\/win32-x64\/adapter\/codelldb\.exe$/);
+      const normalizedCommand = config.command.replace(/\\/g, '/');
+      expect(normalizedCommand).toMatch(/vendor\/codelldb\/win32-x64\/adapter\/codelldb\.exe$/);
       expect(config.args).toEqual(['--port', '9000']);
       expect(config.env?.LLDB_USE_NATIVE_PDB_READER).toBe('1');
       restore();

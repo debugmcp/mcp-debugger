@@ -56,6 +56,9 @@ const createTempProject = async (name = 'crate'): Promise<string> => {
   return base;
 };
 
+const withBinaryExtension = (name: string): string =>
+  process.platform === 'win32' ? `${name}.exe` : name;
+
 beforeEach(() => {
   spawnMock.mockReset();
 });
@@ -230,7 +233,7 @@ describe('needsRebuild', () => {
     const project = await createTempProject('needs-rebuild');
     const targetDir = path.join(project, 'target', 'debug');
     await fs.mkdir(targetDir, { recursive: true });
-    const binaryPath = path.join(targetDir, 'needs-rebuild');
+    const binaryPath = path.join(targetDir, withBinaryExtension('needs-rebuild'));
     await fs.writeFile(binaryPath, '');
     await new Promise((resolve) => setTimeout(resolve, 10));
     await fs.writeFile(path.join(project, 'src', 'main.rs'), '// updated');
@@ -243,7 +246,7 @@ describe('needsRebuild', () => {
     const project = await createTempProject('fresh');
     const targetDir = path.join(project, 'target', 'debug');
     await fs.mkdir(targetDir, { recursive: true });
-    const binaryPath = path.join(targetDir, 'fresh');
+    const binaryPath = path.join(targetDir, withBinaryExtension('fresh'));
     await fs.writeFile(path.join(project, 'src', 'main.rs'), '// stable');
     await fs.writeFile(path.join(project, 'Cargo.toml'), 'name = "fresh"\nversion = "0.1.0"\n');
     await new Promise((resolve) => setTimeout(resolve, 10));

@@ -250,7 +250,13 @@ describe('RustDebugAdapter toolchain logic', () => {
         program: '/workspace/project/src/main.rs'
       });
 
-      expect(result.program).toBe(path.join('/workspace/project', 'target', 'debug', 'project-bin'));
+      const expectedBinaryPath = path.join(
+        '/workspace/project',
+        'target',
+        'debug',
+        process.platform === 'win32' ? 'project-bin.exe' : 'project-bin'
+      );
+      expect(result.program).toBe(expectedBinaryPath);
       expect(buildCargoProject).not.toHaveBeenCalled();
     });
 
@@ -258,9 +264,13 @@ describe('RustDebugAdapter toolchain logic', () => {
       vi.mocked(findCargoProjectRoot).mockResolvedValueOnce('/workspace/project');
       vi.mocked(getDefaultBinary).mockResolvedValueOnce('project-bin');
       vi.mocked(needsRebuild).mockResolvedValueOnce(true);
+      const builtBinaryPath =
+        process.platform === 'win32'
+          ? '/workspace/project/target/release/project-bin.exe'
+          : '/workspace/project/target/release/project-bin';
       vi.mocked(buildCargoProject).mockResolvedValueOnce({
         success: true,
-        binaryPath: '/workspace/project/target/release/project-bin'
+        binaryPath: builtBinaryPath
       });
       detectBinaryFormat.mockResolvedValueOnce(mockBinaryInfo);
 
@@ -274,7 +284,7 @@ describe('RustDebugAdapter toolchain logic', () => {
         dependencies.logger,
         'release'
       );
-      expect(result.program).toBe('/workspace/project/target/release/project-bin');
+      expect(result.program).toBe(builtBinaryPath);
     });
 
     it('throws when Cargo build fails', async () => {
@@ -424,9 +434,17 @@ describe('RustDebugAdapter toolchain logic', () => {
       const originalPath = process.env.PATH;
       process.env.HOME = '/tmp/tester';
       process.env.PATH = '/usr/bin:/usr/local/bin';
-      expect(adapter.getExecutableSearchPaths()).toEqual(
-        expect.arrayContaining(['/usr/bin', '/usr/local/bin', '/tmp/tester/.cargo/bin'])
+      const searchPaths = adapter
+        .getExecutableSearchPaths()
+        .map((entry) => entry.replace(/\\/g, '/'));
+      expect(searchPaths).toEqual(
+        expect.arrayContaining([
+          '/tmp/tester/.cargo/bin',
+          '/tmp/tester/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin'
+        ])
       );
+      expect(searchPaths.some((entry) => entry.includes('/usr/bin'))).toBe(true);
+      expect(searchPaths.some((entry) => entry.includes('/usr/local/bin'))).toBe(true);
       process.env.HOME = originalHome;
       process.env.PATH = originalPath;
       restoreLinux();
