@@ -36,7 +36,7 @@ const extensions = [
 ];
 
 // Directories to exclude
-const excludeDirs = ['node_modules', 'dist', 'coverage', '.git', 'build', '.husky', 'logs', 'sessions'];
+const excludeDirs = ['node_modules', 'dist', 'coverage', '.git', 'build', '.husky', 'logs', 'sessions', 'vendor'];
 
 // Binary file extensions to skip
 const binaryExtensions = [
