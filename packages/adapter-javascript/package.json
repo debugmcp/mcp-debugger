@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-javascript",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "JavaScript/TypeScript debug adapter skeleton for MCP debugger (Task 1 scaffolding)",
   "type": "module",
   "main": "dist/index.js",
@@ -30,11 +30,11 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@debugmcp/shared": "workspace:^0.16.0",
+    "@debugmcp/shared": "workspace:^0.17.0",
     "@vscode/debugprotocol": "^1.68.0"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.16.0"
+    "@debugmcp/shared": "0.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",

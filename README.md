@@ -16,7 +16,7 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.17.0: Rust debugging support (Alpha)! Debug Rust programs with CodeLLDB, including Cargo projects, async code, and full variable inspection.
+> 🆕 Version 0.17.0: Rust debugging support (Alpha)! Debug Rust programs with CodeLLDB, including Cargo projects, async code, and full variable inspection—plus step commands now return the active source context so agents keep their place automatically.
 
 > 🔥 Version 0.16.0: JavaScript/Node.js debugging support (Alpha)! Full debugging capabilities with bundled js-debug, TypeScript support, and zero-runtime dependencies via improved npx distribution.
 
@@ -427,7 +427,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.16.0 with JavaScript adapter (Alpha) and improved distribution
+- ✅ **Production Ready**: v0.17.0 with Rust adapter (Alpha), richer stepping responses, and polished JavaScript distribution
 - ✅ **1019 tests** passing end-to-end
 - ✅ **Clean architecture** with adapter pattern
 - 🟨 **JavaScript/Node.js**: Alpha support with full debugging loop

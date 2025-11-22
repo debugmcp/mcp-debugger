@@ -1,6 +1,6 @@
 [project]
 name = "debug-mcp-server-launcher"
-version = "0.16.0"
+version = "0.17.0"
 description = "Launcher for debug-mcp-server. This package ensures debugpy is installed and provides instructions to run the main server (Node.js or Docker)."
 readme = "README.md"
 requires-python = ">=3.8"

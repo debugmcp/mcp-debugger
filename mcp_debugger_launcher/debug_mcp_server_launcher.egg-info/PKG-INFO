@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: debug-mcp-server-launcher
-Version: 0.16.0
+Version: 0.17.0
 Summary: Launcher for debug-mcp-server. This package ensures debugpy is installed and provides instructions to run the main server (Node.js or Docker).
 Author-email: debugmcp <debug@sycamore.llc>
 License-Expression: MIT

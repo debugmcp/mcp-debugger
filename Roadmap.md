@@ -4,7 +4,7 @@ This document captures the forward-looking plan for the debugger and highlights 
 
 ## 🎯 Active Feature Work
 
-Status snapshot as of **2025‑11‑09**:
+Status snapshot as of **2025‑11‑22**:
 
 ### High priority
 
@@ -33,6 +33,7 @@ Status snapshot as of **2025‑11‑09**:
 
 ## ✅ Recently Delivered
 
+- **v0.17.0** – Rust adapter backed by CodeLLDB plus richer stepping responses with inline source context
 - **v0.16.0** – First-class JavaScript adapter with TypeScript detection, js‑debug vendoring, and adapter policy orchestration
 - **v0.15.x** – Self-contained CLI bundle (npx-friendly), proxy diagnostics, Windows CI resiliency
 - Earlier releases – Core debugging primitives (session lifecycle, stepping, stack/variable inspection)
@@ -76,6 +77,7 @@ Want to help? Start by:
 
 ## 🗓 Version History (high level)
 
+- **v0.17.0** – Rust adapter (Alpha), inline source context in stepping tools
 - **v0.16.0** – JavaScript adapter, session policy orchestration, handshake instrumentation
 - **v0.15.0** – Bundled CLI distribution, Windows CI diagnostics, proxy log capture
 - **v0.9.0** – Initial GA with core Python debugging
@@ -84,5 +86,4 @@ Want to help? Start by:
 
 ---
 
-*Last updated: 2025‑11‑09*
-
+*Last updated: 2025‑11‑22*

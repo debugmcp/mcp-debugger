@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - _No changes yet._
 
+## [0.17.0] - 2025-11-22
+
+### Added
+- **Rust adapter (Alpha)** – integrates CodeLLDB to support Cargo projects, async runtimes, and cross-platform execution with smart rebuild detection
+
+### Improved
+- **Stepping UX** – every `step_*` response now embeds current source context so agents see the active file/line instead of generic “success” acknowledgements
+
 ## [0.16.0] - 2025-11-09
 
 ### Added
