@@ -149,6 +149,37 @@ importers:
         specifier: workspace:*
         version: link:packages/adapter-rust
 
+  packages/adapter-java:
+    dependencies:
+      '@debugmcp/shared':
+        specifier: workspace:^0.16.0
+        version: link:../shared
+      '@vscode/debugprotocol':
+        specifier: ^1.68.0
+        version: 1.68.0
+      which:
+        specifier: ^5.0.0
+        version: 5.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.29
+        version: 22.18.6
+      '@types/which':
+        specifier: ^3.0.4
+        version: 3.0.4
+      '@vitest/coverage-v8':
+        specifier: 3.2.4
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@22.18.6))
+      eslint:
+        specifier: ^9.27.0
+        version: 9.36.0
+      typescript:
+        specifier: ^5.2.2
+        version: 5.9.2
+      vitest:
+        specifier: ^3.2.1
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@22.18.6)
+
   packages/adapter-javascript:
     dependencies:
       '@debugmcp/shared':

@@ -1,0 +1,48 @@
+{
+  "name": "@debugmcp/adapter-java",
+  "version": "0.16.0",
+  "description": "Java debug adapter for MCP debugger using jdb",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "build:ci": "tsc -b -f",
+    "clean": "rimraf dist && rimraf tsconfig.tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:cov": "vitest run --coverage",
+    "lint": "eslint src tests"
+  },
+  "dependencies": {
+    "@debugmcp/shared": "workspace:^0.16.0",
+    "@vscode/debugprotocol": "^1.68.0",
+    "which": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@debugmcp/shared": "0.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@types/which": "^3.0.4",
+    "@vitest/coverage-v8": "3.2.4",
+    "eslint": "^9.27.0",
+    "typescript": "^5.2.2",
+    "vitest": "^3.2.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

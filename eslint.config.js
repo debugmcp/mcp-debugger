@@ -32,6 +32,21 @@ export default [
   // TypeScript flat recommended config (scoped by typescript-eslint to TS files)
   ...tseslint.configs.recommended,
 
+  // Configure no-unused-vars to ignore variables starting with underscore
+  {
+    files: ["**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_",
+          "caughtErrorsIgnorePattern": "^_"
+        }
+      ]
+    }
+  },
+
   // JavaScript rules (only JS files)
   {
     files: ["**/*.{js,mjs,cjs}"],

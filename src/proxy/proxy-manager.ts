@@ -57,7 +57,8 @@ export interface IProxyManager extends EventEmitter {
   ): Promise<T>;
   isRunning(): boolean;
   getCurrentThreadId(): number | null;
-  
+  setCurrentThreadId(threadId: number): void;
+
   // Typed event emitter methods
   on<K extends keyof ProxyManagerEvents>(
     event: K, 
@@ -433,6 +434,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   getCurrentThreadId(): number | null {
     return this.currentThreadId;
+  }
+
+  setCurrentThreadId(threadId: number): void {
+    this.currentThreadId = threadId;
   }
 
   private async prepareSpawnContext(config: ProxyConfig): Promise<{

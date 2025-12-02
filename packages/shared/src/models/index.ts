@@ -13,11 +13,73 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
 }
 
 /**
+ * Process identifier type for attach operations
+ */
+export enum ProcessIdentifierType {
+  /** Attach to process by ID (PID) */
+  PID = 'pid',
+  /** Attach to process by name */
+  NAME = 'name',
+  /** Attach to remote debugger by host:port */
+  REMOTE = 'remote'
+}
+
+/**
+ * Generic attach configuration (common across languages)
+ */
+export interface GenericAttachConfig {
+  /** Request type */
+  request: 'attach';
+
+  /** Process identifier type */
+  identifierType?: ProcessIdentifierType;
+
+  /** Process ID (for PID-based attach) */
+  processId?: number | string;
+
+  /** Process name (for name-based attach) */
+  processName?: string;
+
+  /** Remote host (for remote debugging) */
+  host?: string;
+
+  /** Remote port (for remote debugging) */
+  port?: number;
+
+  /** Connection timeout in milliseconds */
+  timeout?: number;
+
+  /** Source paths for mapping (optional) */
+  sourcePaths?: string[];
+
+  /** Stop on entry after attaching */
+  stopOnEntry?: boolean;
+
+  /** Just my code (exclude library code) */
+  justMyCode?: boolean;
+
+  /** Environment variables */
+  env?: Record<string, string>;
+
+  /** Working directory */
+  cwd?: string;
+
+  /** Additional language-specific options */
+  [key: string]: unknown;
+}
+
+/**
+ * Language-specific attach configuration (resolved by adapter)
+ */
+export type LanguageSpecificAttachConfig = Record<string, unknown>;
+
+/**
  * Supported debugger languages
  */
 export enum DebugLanguage {
   PYTHON = 'python',
   JAVASCRIPT = 'javascript',
+  JAVA = 'java',
   RUST = 'rust',
   MOCK = 'mock',  // Mock adapter for testing
 }

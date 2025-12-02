@@ -273,6 +273,18 @@ export class DapConnectionManager {
   }
 
   /**
+   * Send an attach request to connect to a running process
+   */
+  async sendAttachRequest(
+    client: IDapClient,
+    attachConfig: Record<string, unknown>
+  ): Promise<void> {
+    this.logger.info('[ConnectionManager] Sending "attach" request to adapter with config:', attachConfig);
+    await client.sendRequest('attach', attachConfig);
+    this.logger.info('[ConnectionManager] DAP "attach" request sent.');
+  }
+
+  /**
    * Set breakpoints for a file
    */
   async setBreakpoints(

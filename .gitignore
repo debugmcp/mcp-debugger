@@ -134,6 +134,9 @@ examples/.cargo/
 examples/rust/**/.cargo/
 examples/rust/**/.debug-mcp-linux-build
 
+# Java build artifacts
+examples/java/*.class
+
 # Test results and analysis files
 test-results*.json
 test-output.txt

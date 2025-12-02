@@ -29,7 +29,7 @@ export type {
   // Launch configurations
   GenericLaunchConfig,
   LanguageSpecificLaunchConfig,
-  
+
   // Features
   FeatureRequirement,
   ExceptionBreakpointFilter,
@@ -136,13 +136,17 @@ export type {
 export type {
   // Launch arguments
   CustomLaunchRequestArguments,
-  
+
+  // Attach configurations
+  GenericAttachConfig,
+  LanguageSpecificAttachConfig,
+
   // Session types
   SessionConfig,
   Breakpoint,
   DebugSession,
   DebugSessionInfo,
-  
+
   // Debug info types
   Variable,
   StackFrame,
@@ -156,7 +160,8 @@ export {
   SessionLifecycleState,
   ExecutionState,
   SessionState,
-  
+  ProcessIdentifierType,
+
   // State mapping functions
   mapLegacyState,
   mapToLegacyState
@@ -176,6 +181,7 @@ export type {
 export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
+export { JavaAdapterPolicy } from './interfaces/adapter-policy-java.js';
 export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
 export type { RustAdapterPolicyInterface } from './interfaces/adapter-policy-rust.js';
 export { MockAdapterPolicy } from './interfaces/adapter-policy-mock.js';

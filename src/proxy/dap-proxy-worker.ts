@@ -28,10 +28,11 @@ import {
 import { SilentDapCommandPayload } from './dap-extensions.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
-import { 
+import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,
+  JavaAdapterPolicy,
   RustAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
@@ -57,6 +58,10 @@ export class DapProxyWorker {
   private currentSessionId: string | null = null;
   private currentInitPayload: ProxyInitPayload | null = null;
   private state: ProxyState = ProxyState.UNINITIALIZED;
+  private initializedEventPending: boolean = false;
+  private deferInitializedHandling: boolean = false;
+  private initializedEventPromise: Promise<void> | null = null;
+  private initializedEventResolver: (() => void) | null = null;
   private requestTracker: CallbackRequestTracker;
   private processManager: GenericAdapterManager | null = null;
   private connectionManager: DapConnectionManager | null = null;
@@ -105,12 +110,14 @@ export class DapProxyWorker {
       return JsDebugAdapterPolicy;
     } else if (PythonAdapterPolicy.matchesAdapter(adapterCommand)) {
       return PythonAdapterPolicy;
+    } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return JavaAdapterPolicy;
     } else if (RustAdapterPolicy.matchesAdapter(adapterCommand)) {
       return RustAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
       return MockAdapterPolicy;
     }
-    
+
     // Fallback to default
     return DefaultAdapterPolicy;
   }
@@ -343,24 +350,63 @@ export class DapProxyWorker {
         this.sendStatus('adapter_connected');
         await this.drainPreConnectQueue();
       } else {
+        // Defer handling of "initialized" event until after we send launch/attach
+        // This ensures the correct DAP sequence: initialize → launch/attach → configurationDone
+        this.deferInitializedHandling = true;
+
+        // Create promise to wait for "initialized" event
+        this.initializedEventPromise = new Promise<void>((resolve) => {
+          this.initializedEventResolver = resolve;
+        });
+
         // Initialize DAP session with correct adapterId
         await this.connectionManager!.initializeSession(
           this.dapClient,
           payload.sessionId,
           this.adapterPolicy.getDapAdapterConfiguration().type
         );
-        
-        // Send automatic launch request for non-queueing adapters
-        this.logger!.info('[Worker] Sending launch request with scriptPath:', payload.scriptPath);
-        
-        await this.connectionManager!.sendLaunchRequest(
-          this.dapClient,
-          payload.scriptPath,
-          payload.scriptArgs,
-          payload.stopOnEntry,
-          payload.justMyCode,
-          payload.launchConfig
-        );
+
+        // Wait for "initialized" event with timeout
+        this.logger!.info('[Worker] Waiting for "initialized" event before sending launch/attach');
+        await Promise.race([
+          this.initializedEventPromise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout waiting for initialized event')), 5000)
+          )
+        ]);
+
+        this.logger!.info('[Worker] "initialized" event received, proceeding with launch/attach');
+
+        // Detect attach mode from launchConfig
+        const isAttachMode = payload.launchConfig?.request === 'attach' ||
+                             payload.launchConfig?.__attachMode === true;
+
+        if (isAttachMode) {
+          // Send attach request for attach mode
+          this.logger!.info('[Worker] Sending attach request with config:', payload.launchConfig);
+
+          await this.connectionManager!.sendAttachRequest(
+            this.dapClient,
+            payload.launchConfig || {}
+          );
+        } else {
+          // Send launch request for normal debugging
+          this.logger!.info('[Worker] Sending launch request with scriptPath:', payload.scriptPath);
+
+          await this.connectionManager!.sendLaunchRequest(
+            this.dapClient,
+            payload.scriptPath,
+            payload.scriptArgs,
+            payload.stopOnEntry,
+            payload.justMyCode,
+            payload.launchConfig
+          );
+        }
+
+        // Now that launch/attach has been sent, process the initialized event
+        this.deferInitializedHandling = false;
+        this.logger!.info('[Worker] Processing deferred initialized event');
+        await this.handleInitializedEvent();
       }
 
       this.logger!.info('[Worker] Waiting for "initialized" event from adapter.');
@@ -382,13 +428,23 @@ export class DapProxyWorker {
         if (this.adapterPolicy.updateStateOnEvent) {
           this.adapterPolicy.updateStateOnEvent('initialized', {}, this.adapterState);
         }
-        
+
         if (this.adapterPolicy.requiresCommandQueueing()) {
           this.logger!.info(`[Worker] DAP "initialized" (${this.adapterPolicy.name}) received; forwarding event and draining queue.`);
           this.sendDapEvent('initialized', {});
           await this.drainCommandQueue();
         } else {
-          await this.handleInitializedEvent();
+          // If we're deferring initialized handling (e.g., to send launch/attach first),
+          // mark the event as pending and resolve the promise to signal it arrived
+          if (this.deferInitializedHandling) {
+            this.logger!.info('[Worker] DAP "initialized" event received but deferred until after launch/attach');
+            this.initializedEventPending = true;
+            if (this.initializedEventResolver) {
+              this.initializedEventResolver();
+            }
+          } else {
+            await this.handleInitializedEvent();
+          }
         }
       },
       onOutput: (body) => {

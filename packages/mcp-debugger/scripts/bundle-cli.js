@@ -123,8 +123,23 @@ async function bundleCLI() {
   const jsDebugSrc = path.join(repoRoot, 'packages/adapter-javascript/vendor/js-debug');
   if (fs.existsSync(jsDebugSrc)) {
     const jsDebugDest = path.join(distDir, 'vendor/js-debug');
-    fs.cpSync(jsDebugSrc, jsDebugDest, { recursive: true });
-    console.log('Copied js-debug adapter payload.');
+    // Remove destination if it exists to avoid permission issues
+    if (fs.existsSync(jsDebugDest)) {
+      try {
+        execSync(`rm -rf "${jsDebugDest}"`, { stdio: 'pipe' });
+      } catch (err) {
+        console.warn('Failed to remove existing vendor directory:', err.message);
+      }
+    }
+    // Use shell cp command which handles permission issues better than fs.cpSync
+    try {
+      fs.mkdirSync(path.join(distDir, 'vendor'), { recursive: true });
+      execSync(`cp -r "${jsDebugSrc}" "${jsDebugDest}"`, { stdio: 'pipe' });
+      console.log('Copied js-debug adapter payload.');
+    } catch (err) {
+      console.warn('Warning: Failed to copy js-debug vendor directory:', err.message);
+      console.warn('JavaScript debugging may be impacted.');
+    }
   } else {
     console.warn('Warning: js-debug adapter vendor directory not found; JavaScript debugging may fail.');
     console.warn('Run: pnpm -w -F @debugmcp/adapter-javascript run build:adapter');
@@ -157,8 +172,16 @@ async function bundleCLI() {
         }
 
         const destDir = path.join(rustVendorDest, platform);
-        fs.cpSync(srcDir, destDir, { recursive: true });
-        console.log(`Copied CodeLLDB payload for ${platform}.`);
+        // Use shell cp command to avoid permission issues
+        try {
+          if (fs.existsSync(destDir)) {
+            execSync(`rm -rf "${destDir}"`, { stdio: 'pipe' });
+          }
+          execSync(`cp -r "${srcDir}" "${destDir}"`, { stdio: 'pipe' });
+          console.log(`Copied CodeLLDB payload for ${platform}.`);
+        } catch (err) {
+          console.warn(`Warning: Failed to copy CodeLLDB for ${platform}:`, err.message);
+        }
       }
     }
   } else {
@@ -170,8 +193,13 @@ async function bundleCLI() {
   const packageDir = path.join(packageRoot, 'package');
   const packageDistDir = path.join(packageDir, 'dist');
   fs.mkdirSync(packageDir, { recursive: true });
-  fs.rmSync(packageDistDir, { recursive: true, force: true });
-  fs.cpSync(distDir, packageDistDir, { recursive: true });
+  // Use shell commands to avoid permission issues
+  try {
+    execSync(`rm -rf "${packageDistDir}"`, { stdio: 'pipe' });
+  } catch (err) {
+    // Ignore error if directory doesn't exist
+  }
+  execSync(`cp -r "${distDir}" "${packageDistDir}"`, { stdio: 'pipe' });
   console.log('Copied bundle into packages/mcp-debugger/package/dist/.');
 
   console.log('\nGenerating npm pack tarball...');

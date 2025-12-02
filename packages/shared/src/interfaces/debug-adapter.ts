@@ -15,7 +15,7 @@
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { DebugLanguage } from '../models/index.js';
+import { DebugLanguage, GenericAttachConfig, LanguageSpecificAttachConfig } from '../models/index.js';
 import type { AdapterLaunchBarrier } from './adapter-launch-barrier.js';
 
 /**
@@ -114,17 +114,44 @@ export interface IDebugAdapter extends EventEmitter {
   
   /**
    * Transform generic launch config to language-specific format
-   * 
+   *
    * @returns Promise resolving to language-specific launch configuration
    * @since 2.1.0 - Made async to support build operations (e.g., Rust compilation)
    */
   transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>;
-  
+
   /**
    * Get default launch configuration for this language
    */
   getDefaultLaunchConfig(): Partial<GenericLaunchConfig>;
-  
+
+  /**
+   * Check if this adapter supports attaching to running processes
+   * @returns true if attach is supported, false otherwise
+   */
+  supportsAttach?(): boolean;
+
+  /**
+   * Check if this adapter supports detaching without terminating the debuggee
+   * @returns true if detach is supported, false otherwise
+   */
+  supportsDetach?(): boolean;
+
+  /**
+   * Transform generic attach config to language-specific format
+   * Only called if supportsAttach() returns true
+   * @param config Generic attach configuration
+   * @returns Language-specific attach configuration
+   */
+  transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig;
+
+  /**
+   * Get default attach configuration for this language
+   * Only called if supportsAttach() returns true
+   * @returns Default attach configuration with language-specific defaults
+   */
+  getDefaultAttachConfig?(): Partial<GenericAttachConfig>;
+
   // ===== DAP Protocol Operations =====
   
   /**

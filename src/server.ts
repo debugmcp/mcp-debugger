@@ -87,6 +87,15 @@ interface ToolArguments {
   expression?: string;
   linesContext?: number;
   includeInternals?: boolean;
+  // Attach-related parameters
+  port?: number;
+  host?: string;
+  processId?: number | string;
+  timeout?: number;
+  sourcePaths?: string[];
+  stopOnEntry?: boolean;
+  justMyCode?: boolean;
+  terminateProcess?: boolean;
 }
 
 /**
@@ -170,6 +179,14 @@ export class DebugMcpServer {
             version: '1.0.0',
             requiresExecutable: true,
             defaultExecutable: 'node'
+          };
+        case 'java':
+          return {
+            id: 'java',
+            displayName: 'Java',
+            version: '1.0.0',
+            requiresExecutable: true,
+            defaultExecutable: 'java'
           };
         default:
           return {
@@ -441,7 +458,7 @@ export class DebugMcpServer {
       
       return {
         tools: [
-          { name: 'create_debug_session', description: 'Create a new debugging session', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'} }, required: ['language'] } },
+          { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' } }, required: ['sessionId', 'file', 'line'] } },
@@ -468,6 +485,30 @@ export class DebugMcpServer {
               }, 
               required: ['sessionId', 'scriptPath'] 
             } 
+          },
+          { name: 'attach_to_process', description: 'Attach to a running process for debugging', inputSchema: {
+              type: 'object',
+              properties: {
+                sessionId: { type: 'string', description: 'Debug session ID' },
+                port: { type: 'number', description: 'Debug port to attach to' },
+                host: { type: 'string', description: 'Host to attach to (default: localhost)' },
+                processId: { type: ['number', 'string'], description: 'Process ID (for local attach, language-specific)' },
+                timeout: { type: 'number', description: 'Connection timeout in milliseconds (default: 30000)' },
+                sourcePaths: { type: 'array', items: { type: 'string' }, description: 'Source paths for code mapping' },
+                stopOnEntry: { type: 'boolean', description: 'Stop on entry after attaching' },
+                justMyCode: { type: 'boolean', description: 'Only debug user code (skip library code)' }
+              },
+              required: ['sessionId']
+            }
+          },
+          { name: 'detach_from_process', description: 'Detach from the debugged process without terminating it', inputSchema: {
+              type: 'object',
+              properties: {
+                sessionId: { type: 'string', description: 'Debug session ID' },
+                terminateProcess: { type: 'boolean', description: 'Whether to terminate the process on detach (default: false)' }
+              },
+              required: ['sessionId']
+            }
           },
           { name: 'close_debug_session', description: 'Close a debugging session', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'step_over', description: 'Step over', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
@@ -520,7 +561,7 @@ export class DebugMcpServer {
                 name: args.name,
                 executablePath: args.executablePath
               });
-              
+
               // Log session creation
               this.logger.info('session:created', {
                 sessionId: sessionInfo.id,
@@ -529,8 +570,57 @@ export class DebugMcpServer {
                 executablePath: args.executablePath,
                 timestamp: Date.now()
               });
-              
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: true, sessionId: sessionInfo.id, message: `Created ${sessionInfo.language} debug session: ${sessionInfo.name}` }) }] };
+
+              // Check if attach mode is requested (host/port provided)
+              const isAttachMode = args.port !== undefined;
+
+              if (isAttachMode) {
+                // Attach mode: immediately attach to the running process
+                this.logger.info('session:attach-mode', {
+                  sessionId: sessionInfo.id,
+                  host: args.host || 'localhost',
+                  port: args.port,
+                  timestamp: Date.now()
+                });
+
+                try {
+                  const attachResult = await this.sessionManager.attachToProcess(sessionInfo.id, {
+                    port: args.port as number,
+                    host: (args.host as string) || 'localhost',
+                    timeout: (args.timeout as number) || 30000
+                  });
+
+                  result = { content: [{ type: 'text', text: JSON.stringify({
+                    success: attachResult.success,
+                    sessionId: sessionInfo.id,
+                    state: attachResult.state,
+                    message: attachResult.success
+                      ? `Created and attached ${sessionInfo.language} debug session: ${sessionInfo.name}`
+                      : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`
+                  }) }] };
+                } catch (error) {
+                  this.logger.error('session:attach-failed', {
+                    sessionId: sessionInfo.id,
+                    error: error instanceof Error ? error.message : String(error),
+                    timestamp: Date.now()
+                  });
+
+                  result = { content: [{ type: 'text', text: JSON.stringify({
+                    success: false,
+                    sessionId: sessionInfo.id,
+                    state: 'error',
+                    message: `Created session but failed to attach: ${error instanceof Error ? error.message : String(error)}`
+                  }) }] };
+                }
+              } else {
+                // Launch mode: just create the session
+                result = { content: [{ type: 'text', text: JSON.stringify({
+                  success: true,
+                  sessionId: sessionInfo.id,
+                  message: `Created ${sessionInfo.language} debug session: ${sessionInfo.name}`
+                }) }] };
+              }
+
               break;
             }
             case 'list_debug_sessions': {
@@ -662,6 +752,105 @@ export class DebugMcpServer {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message, state: 'stopped' }) }] };
                 } else {
                   // Re-throw all other errors (including file validation errors)
+                  throw error;
+                }
+              }
+              break;
+            }
+            case 'attach_to_process': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
+              }
+
+              try {
+                this.logger.info('Attach to process requested', {
+                  sessionId: args.sessionId,
+                  port: args.port,
+                  host: args.host,
+                  processId: args.processId
+                });
+
+                const attachResult = await this.sessionManager.attachToProcess(args.sessionId, {
+                  port: args.port,
+                  host: args.host,
+                  processId: args.processId,
+                  timeout: args.timeout,
+                  sourcePaths: args.sourcePaths,
+                  stopOnEntry: args.stopOnEntry,
+                  justMyCode: args.justMyCode
+                });
+
+                const responsePayload: Record<string, unknown> = {
+                  success: attachResult.success,
+                  state: attachResult.state,
+                  message: attachResult.error ||
+                    (attachResult.data as Record<string, unknown>)?.message ||
+                    'Attach operation completed'
+                };
+
+                if (attachResult.data) {
+                  responsePayload.data = attachResult.data;
+                }
+
+                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+              } catch (error) {
+                // Handle session state errors specifically
+                if (error instanceof McpError &&
+                    (error.message.includes('terminated') ||
+                     error.message.includes('closed') ||
+                     (error.message.includes('not found') && error.message.includes('Session')))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({
+                    success: false,
+                    error: error.message,
+                    state: 'stopped'
+                  }) }] };
+                } else {
+                  throw error;
+                }
+              }
+              break;
+            }
+            case 'detach_from_process': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
+              }
+
+              try {
+                this.logger.info('Detach from process requested', {
+                  sessionId: args.sessionId,
+                  terminateProcess: args.terminateProcess
+                });
+
+                const detachResult = await this.sessionManager.detachFromProcess(
+                  args.sessionId,
+                  args.terminateProcess ?? false
+                );
+
+                const responsePayload: Record<string, unknown> = {
+                  success: detachResult.success,
+                  state: detachResult.state,
+                  message: detachResult.error ||
+                    (detachResult.data as Record<string, unknown>)?.message ||
+                    'Detach operation completed'
+                };
+
+                if (detachResult.data) {
+                  responsePayload.data = detachResult.data;
+                }
+
+                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+              } catch (error) {
+                // Handle session state errors specifically
+                if (error instanceof McpError &&
+                    (error.message.includes('terminated') ||
+                     error.message.includes('closed') ||
+                     (error.message.includes('not found') && error.message.includes('Session')))) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({
+                    success: false,
+                    error: error.message,
+                    state: 'stopped'
+                  }) }] };
+                } else {
                   throw error;
                 }
               }

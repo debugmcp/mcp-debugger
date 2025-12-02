@@ -18,6 +18,7 @@ const packages = [
   '@debugmcp/adapter-mock',
   '@debugmcp/adapter-python',
   '@debugmcp/adapter-javascript',
+  '@debugmcp/adapter-java',
   ...(!disabledLanguages.has('rust') ? ['@debugmcp/adapter-rust'] : []),
 ];
 

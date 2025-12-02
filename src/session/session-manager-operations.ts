@@ -18,6 +18,7 @@ import { CustomLaunchRequestArguments, DebugResult } from './session-manager-cor
 import {
   AdapterConfig,
   type GenericLaunchConfig,
+  type GenericAttachConfig,
   type LanguageSpecificLaunchConfig
 } from '@debugmcp/shared';
 import {
@@ -107,17 +108,26 @@ export class SessionManagerOperations extends SessionManagerData {
       ...(dapLaunchArgs || {}),
     };
 
+    // Detect attach mode early to avoid setting launch-specific fields
+    const launchArgs = effectiveLaunchArgs as Record<string, unknown>;
+    const isAttachMode = launchArgs.request === 'attach' ||
+                         launchArgs.__attachMode === true;
+
     const genericLaunchConfig: Record<string, unknown> = {
-      ...effectiveLaunchArgs,
-      program: scriptPath
+      ...effectiveLaunchArgs
     };
 
-    if (Array.isArray(scriptArgs) && scriptArgs.length > 0) {
-      genericLaunchConfig.args = scriptArgs;
-    }
+    // Only set program/cwd/args for launch mode
+    if (!isAttachMode) {
+      genericLaunchConfig.program = scriptPath;
 
-    if (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0) {
-      genericLaunchConfig.cwd = path.dirname(scriptPath);
+      if (Array.isArray(scriptArgs) && scriptArgs.length > 0) {
+        genericLaunchConfig.args = scriptArgs;
+      }
+
+      if (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0) {
+        genericLaunchConfig.cwd = path.dirname(scriptPath);
+      }
     }
 
     if (adapterLaunchConfig && typeof adapterLaunchConfig === 'object') {
@@ -140,11 +150,20 @@ export class SessionManagerOperations extends SessionManagerData {
 
     const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
 
+    // isAttachMode already detected above
+
     try {
-      transformedLaunchConfig = await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
+      if (isAttachMode && adapter.supportsAttach && adapter.supportsAttach() && adapter.transformAttachConfig) {
+        // Call transformAttachConfig for attach operations
+        transformedLaunchConfig = adapter.transformAttachConfig(genericLaunchConfig as GenericAttachConfig);
+        this.logger.info(`[SessionManager] Using attach config for ${session.language}`);
+      } else {
+        // Call transformLaunchConfig for launch operations
+        transformedLaunchConfig = await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
+      }
     } catch (error) {
       this.logger.warn(
-        `[SessionManager] transformLaunchConfig failed for ${session.language}: ${
+        `[SessionManager] transform${isAttachMode ? 'Attach' : 'Launch'}Config failed for ${session.language}: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
@@ -1328,6 +1347,185 @@ export class SessionManagerOperations extends SessionManagerData {
       return { success: false, error: userError };
   }
 }
+
+  /**
+   * Attach to a running process for debugging
+   */
+  async attachToProcess(
+    sessionId: string,
+    attachConfig: {
+      port?: number;
+      host?: string;
+      processId?: number | string;
+      timeout?: number;
+      sourcePaths?: string[];
+      stopOnEntry?: boolean;
+      justMyCode?: boolean;
+    }
+  ): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+    this.logger.info(
+      `[SessionManager] Attempting to attach to process for session ${sessionId}`,
+      attachConfig
+    );
+
+    if (session.proxyManager) {
+      this.logger.warn(
+        `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`
+      );
+      await this.closeSession(sessionId);
+    }
+
+    // Update to INITIALIZING state and set lifecycle to ACTIVE
+    this._updateSessionState(session, SessionState.INITIALIZING);
+    this.sessionStore.update(sessionId, {
+      sessionLifecycle: SessionLifecycleState.ACTIVE,
+    });
+
+    try {
+      // For attach mode, we use a placeholder scriptPath
+      // The actual attach logic will be handled by the adapter via dapLaunchArgs
+      const placeholderPath = 'attach://remote';
+
+      // Pass attach config through dapLaunchArgs with special request type
+      const attachLaunchArgs = {
+        ...attachConfig,
+        request: 'attach',
+        __attachMode: true  // Internal flag to signal attach mode
+      };
+
+      await this.startProxyManager(
+        session,
+        placeholderPath,
+        undefined,
+        attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
+        false
+      );
+
+      // Auto-detect stopOnEntry from process if not explicitly provided (Java with JDWP)
+      if (attachConfig.stopOnEntry === undefined && attachConfig.port) {
+        try {
+          const { detectSuspendByPort } = await import('../utils/jdwp-detector.js');
+          const detected = detectSuspendByPort(attachConfig.port);
+          if (detected !== null) {
+            attachConfig.stopOnEntry = detected;
+            this.logger.info(`[SessionManager] Auto-detected stopOnEntry=${detected} from process on port ${attachConfig.port}`);
+          } else {
+            attachConfig.stopOnEntry = true; // Default to true (safe for suspend=y)
+            this.logger.info(`[SessionManager] Could not auto-detect suspend mode, defaulting to stopOnEntry=true`);
+          }
+        } catch (error) {
+          this.logger.warn(`[SessionManager] Auto-detect failed:`, error);
+          attachConfig.stopOnEntry = true; // Default to true
+        }
+      }
+
+      // Set session state based on stopOnEntry
+      // For attach mode: suspend=y (stopOnEntry=true) → PAUSED, suspend=n (stopOnEntry=false) → RUNNING
+      let finalState = session.state;
+
+      if (attachConfig.stopOnEntry !== false) {
+        // JVM is suspended (suspend=y), set to PAUSED
+        this._updateSessionState(session, SessionState.PAUSED);
+        finalState = SessionState.PAUSED;
+
+        // Set a default thread ID so continue command works
+        // Thread ID 1 is typically the main thread in Java
+        if (session.proxyManager) {
+          session.proxyManager.setCurrentThreadId(1);
+          this.logger.info(`[SessionManager] Set default threadId=1 for attach mode`);
+        }
+
+        this.logger.info(`[SessionManager] Set session ${sessionId} to PAUSED after attach (stopOnEntry=${attachConfig.stopOnEntry})`);
+      } else {
+        // JVM is already running (suspend=n), keep RUNNING state
+        this.logger.info(`[SessionManager] Keeping session ${sessionId} as RUNNING (stopOnEntry=false, process started with suspend=n)`);
+      }
+
+      return {
+        success: true,
+        state: finalState,
+        data: {
+          message: `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
+          attachConfig
+        }
+      };
+    } catch (error) {
+      this.logger.error(`[SessionManager] Failed to attach to process for session ${sessionId}:`, error);
+      this._updateSessionState(session, SessionState.ERROR);
+
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        state: SessionState.ERROR,
+        error: `Failed to attach: ${message}`
+      };
+    }
+  }
+
+  /**
+   * Detach from the debugged process without terminating it
+   */
+  async detachFromProcess(
+    sessionId: string,
+    terminateProcess: boolean = false
+  ): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+    this.logger.info(
+      `[SessionManager] Detaching from process for session ${sessionId}, terminateProcess: ${terminateProcess}`
+    );
+
+    if (!session.proxyManager) {
+      return {
+        success: false,
+        state: session.state,
+        error: 'No active debug session to detach from'
+      };
+    }
+
+    try {
+      if (terminateProcess) {
+        // Terminate the process
+        await this.closeSession(sessionId);
+      } else {
+        // Disconnect without terminating - send DAP disconnect request
+        try {
+          await session.proxyManager.sendDapRequest('disconnect', {
+            terminateDebuggee: false
+          });
+        } catch (disconnectError) {
+          this.logger.warn(`[SessionManager] Disconnect request failed, continuing with cleanup:`, disconnectError);
+        }
+
+        // Stop the proxy manager
+        await session.proxyManager.stop();
+
+        this._updateSessionState(session, SessionState.STOPPED);
+        this.sessionStore.update(sessionId, {
+          sessionLifecycle: SessionLifecycleState.TERMINATED
+        });
+      }
+
+      return {
+        success: true,
+        state: SessionState.STOPPED,
+        data: {
+          message: terminateProcess
+            ? 'Detached and terminated process'
+            : 'Detached from process (process still running)'
+        }
+      };
+    } catch (error) {
+      this.logger.error(`[SessionManager] Failed to detach from process for session ${sessionId}:`, error);
+
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        state: session.state,
+        error: `Failed to detach: ${message}`
+      };
+    }
+  }
 
   /**
    * Wait for a session to emit a stopped event after launch to honour the first breakpoint.
