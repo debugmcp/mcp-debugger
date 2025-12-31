@@ -294,7 +294,7 @@ describe('AdapterLoader', () => {
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
-      expect(adapters).toHaveLength(4);
+      expect(adapters).toHaveLength(5);
 
       const pythonAdapter = adapters.find(a => a.name === 'python');
       expect(pythonAdapter).toEqual({
@@ -326,6 +326,14 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-rust',
         description: 'Rust debugger using CodeLLDB',
         installed: false
+      });
+
+      const goAdapter = adapters.find(a => a.name === 'go');
+      expect(goAdapter).toEqual({
+        name: 'go',
+        packageName: '@debugmcp/adapter-go',
+        description: 'Go debugger using Delve',
+        installed: true
       });
     });
 
