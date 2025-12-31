@@ -333,7 +333,7 @@ describe('AdapterLoader', () => {
         name: 'go',
         packageName: '@debugmcp/adapter-go',
         description: 'Go debugger using Delve',
-        installed: true
+        installed: false
       });
     });
 
