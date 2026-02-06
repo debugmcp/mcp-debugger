@@ -266,12 +266,20 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Debug Configuration =====
 
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<JavaLaunchConfig> {
+    // Extract main class name from program path (e.g., /path/to/TestJavaDebug.java -> TestJavaDebug)
+    const program: string = typeof (config as Record<string, unknown>)?.program === 'string'
+      ? (config as Record<string, unknown>).program as string
+      : '';
+    const mainClass = program
+      ? path.basename(program, '.java')
+      : 'Main';
+
     const javaConfig: JavaLaunchConfig = {
       ...config,
       type: 'java',
       request: 'launch',
       name: 'Java Debug',
-      mainClass: 'Main', // Will be set from scriptPath in buildAdapterCommand
+      mainClass,
       classpath: config.cwd || '.',
       sourcePaths: config.cwd ? [config.cwd] : [],
       vmArgs: []
