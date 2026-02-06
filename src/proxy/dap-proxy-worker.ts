@@ -350,14 +350,9 @@ export class DapProxyWorker {
         this.sendStatus('adapter_connected');
         await this.drainPreConnectQueue();
       } else {
-        // Defer handling of "initialized" event until after we send launch/attach
-        // This ensures the correct DAP sequence: initialize → launch/attach → configurationDone
-        this.deferInitializedHandling = true;
-
-        // Create promise to wait for "initialized" event
-        this.initializedEventPromise = new Promise<void>((resolve) => {
-          this.initializedEventResolver = resolve;
-        });
+        // Detect attach mode from launchConfig - needed to determine DAP sequence
+        const isAttachMode = payload.launchConfig?.request === 'attach' ||
+                             payload.launchConfig?.__attachMode === true;
 
         // Initialize DAP session with correct adapterId
         await this.connectionManager!.initializeSession(
@@ -366,31 +361,33 @@ export class DapProxyWorker {
           this.adapterPolicy.getDapAdapterConfiguration().type
         );
 
-        // Wait for "initialized" event with timeout
-        this.logger!.info('[Worker] Waiting for "initialized" event before sending launch/attach');
-        await Promise.race([
-          this.initializedEventPromise,
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout waiting for initialized event')), 5000)
-          )
-        ]);
-
-        this.logger!.info('[Worker] "initialized" event received, proceeding with launch/attach');
-
-        // Detect attach mode from launchConfig
-        const isAttachMode = payload.launchConfig?.request === 'attach' ||
-                             payload.launchConfig?.__attachMode === true;
-
         if (isAttachMode) {
-          // Send attach request for attach mode
-          this.logger!.info('[Worker] Sending attach request with config:', payload.launchConfig);
+          // ATTACH MODE: Wait for "initialized" event BEFORE sending attach
+          // Java/jdb sends "initialized" after initialize response, before attach
+          this.deferInitializedHandling = true;
+          this.initializedEventPromise = new Promise<void>((resolve) => {
+            this.initializedEventResolver = resolve;
+          });
 
+          this.logger!.info('[Worker] Waiting for "initialized" event before sending attach');
+          await Promise.race([
+            this.initializedEventPromise,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout waiting for initialized event')), 5000)
+            )
+          ]);
+
+          this.logger!.info('[Worker] "initialized" event received, sending attach request');
           await this.connectionManager!.sendAttachRequest(
             this.dapClient,
             payload.launchConfig || {}
           );
+
+          this.deferInitializedHandling = false;
+          await this.handleInitializedEvent();
         } else {
-          // Send launch request for normal debugging
+          // LAUNCH MODE: Send launch request FIRST, then wait for "initialized"
+          // Python/debugpy sends "initialized" AFTER receiving the launch request
           this.logger!.info('[Worker] Sending launch request with scriptPath:', payload.scriptPath);
 
           await this.connectionManager!.sendLaunchRequest(
@@ -402,11 +399,6 @@ export class DapProxyWorker {
             payload.launchConfig
           );
         }
-
-        // Now that launch/attach has been sent, process the initialized event
-        this.deferInitializedHandling = false;
-        this.logger!.info('[Worker] Processing deferred initialized event');
-        await this.handleInitializedEvent();
       }
 
       this.logger!.info('[Worker] Waiting for "initialized" event from adapter.');

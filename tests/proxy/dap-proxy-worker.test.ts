@@ -53,16 +53,37 @@ const createMockProcessSpawner = (): IProcessSpawner => ({
   })
 });
 
-const createMockDapClient = (): IDapClient => ({
-  sendRequest: vi.fn().mockResolvedValue({ body: {} }),
-  connect: vi.fn().mockResolvedValue(undefined),
-  disconnect: vi.fn().mockResolvedValue(undefined),
-  on: vi.fn(),
-  off: vi.fn(),
-  once: vi.fn(),
-  removeAllListeners: vi.fn(),
-  shutdown: vi.fn()
-});
+const createMockDapClient = (): IDapClient & EventEmitter => {
+  const emitter = new EventEmitter();
+  // Store original methods before wrapping
+  const originalOn = emitter.on.bind(emitter);
+  const originalOff = emitter.off.bind(emitter);
+  const originalOnce = emitter.once.bind(emitter);
+  const originalRemoveAllListeners = emitter.removeAllListeners.bind(emitter);
+
+  return Object.assign(emitter, {
+    sendRequest: vi.fn().mockResolvedValue({ body: {} }),
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      originalOn(event, handler);
+      return emitter;
+    }),
+    off: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      originalOff(event, handler);
+      return emitter;
+    }),
+    once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      originalOnce(event, handler);
+      return emitter;
+    }),
+    removeAllListeners: vi.fn((event?: string) => {
+      originalRemoveAllListeners(event);
+      return emitter;
+    }),
+    shutdown: vi.fn()
+  }) as IDapClient & EventEmitter;
+};
 
 const createMockMessageSender = () => ({
   send: vi.fn()
@@ -473,8 +494,17 @@ describe('DapProxyWorker', () => {
       const connectionStub = {
         connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
         setAdapterPolicy: vi.fn(),
-        setupEventHandlers: vi.fn(),
-        initializeSession: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          // Wire up event handlers like the real connection manager does
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onOutput) client.on('output', handlers.onOutput);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+          if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          // Emit 'initialized' event after initializeSession, simulating real DAP adapter behavior
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
         sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
@@ -604,10 +634,18 @@ describe('DapProxyWorker', () => {
       const connectionStub = {
         connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
         setAdapterPolicy: vi.fn(),
-        setupEventHandlers: vi.fn((_client, handlers) => {
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          // Store handlers for test inspection and wire them up
           Object.assign(connectionHandlers, handlers);
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onOutput) client.on('output', handlers.onOutput);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+          if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
         }),
-        initializeSession: vi.fn().mockResolvedValue(undefined),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          // Emit 'initialized' event after initializeSession, simulating real DAP adapter behavior
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
         sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
