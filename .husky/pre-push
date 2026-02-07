@@ -1,6 +1,21 @@
+# Prevent SIGPIPE from killing the hook when output buffer fills
+trap '' PIPE
+
 echo "🧪 Running tests before push to ensure code quality..."
 echo "💡 This prevents broken code from being pushed to GitHub."
 echo ""
+
+# Source cargo environment if available (for Rust tests)
+if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+fi
+
+# Auto-detect Docker availability and skip Docker tests if not fully functional
+if ! docker buildx version >/dev/null 2>&1; then
+    export SKIP_DOCKER_TESTS=true
+    echo "Docker buildx not available - Docker tests will be skipped."
+    echo ""
+fi
 
 # Detect if this push contains only tags (read refs from stdin)
 TMP_REFS=$(mktemp 2>/dev/null || echo ./.prepush_tmp)

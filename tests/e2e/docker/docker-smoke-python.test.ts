@@ -16,7 +16,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../../..');
 
-describe('Docker: Python Debugging Smoke Tests', () => {
+const SKIP_DOCKER = process.env.SKIP_DOCKER_TESTS === 'true';
+
+describe.skipIf(SKIP_DOCKER)('Docker: Python Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;
