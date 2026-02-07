@@ -1,6 +1,3 @@
-# Prevent SIGPIPE from killing the hook when output buffer fills
-trap '' PIPE
-
 echo "🧪 Running tests before push to ensure code quality..."
 echo "💡 This prevents broken code from being pushed to GitHub."
 echo ""
@@ -34,14 +31,21 @@ else
 fi
 rm -f "$TMP_REFS" 2>/dev/null || true
 
+# Log file for verbose output (keeps hook stdout small to avoid SIGPIPE)
+PRE_PUSH_LOG=$(mktemp 2>/dev/null || echo ./.pre-push-log)
+cleanup_log() { rm -f "$PRE_PUSH_LOG" 2>/dev/null || true; }
+trap cleanup_log EXIT
+
 # Run linting first to catch syntax and style issues
 echo "🔎 Running ESLint to catch linting issues..."
-pnpm run lint
+pnpm run lint > "$PRE_PUSH_LOG" 2>&1
 
 if [ $? -ne 0 ]; then
     echo ""
     echo "❌ Lint failed! Push blocked to prevent broken code on GitHub."
     echo "💡 Run 'pnpm run lint' to see all errors, or 'pnpm run lint:fix' for auto-fixes."
+    echo ""
+    tail -20 "$PRE_PUSH_LOG"
     exit 1
 fi
 
@@ -50,13 +54,15 @@ echo ""
 
 # Clean build to ensure no stale artifacts
 echo "🔨 Running clean build to ensure fresh compilation..."
-npm run clean
-npm run build
+npm run clean > "$PRE_PUSH_LOG" 2>&1
+npm run build >> "$PRE_PUSH_LOG" 2>&1
 
 if [ $? -ne 0 ]; then
     echo ""
     echo "❌ Build failed! Push blocked to prevent broken code on GitHub."
     echo "💡 Fix build errors before pushing."
+    echo ""
+    tail -20 "$PRE_PUSH_LOG"
     exit 1
 fi
 
@@ -64,16 +70,20 @@ echo "✅ Build successful!"
 echo ""
 
 # Run tests (reduced suite for tag-only pushes to match release CI)
+echo "🧪 Running tests (this may take a few minutes)..."
 if [ "$TAGS_ONLY" = true ]; then
-    echo ""
-    echo "🔖 Tag-only push detected. Running reduced CI tests (no e2e, no python) to match release workflow..."
-    npm run test:ci-no-python
+    echo "🔖 Tag-only push detected. Running reduced CI tests..."
+    npm run test:ci-no-python > "$PRE_PUSH_LOG" 2>&1
 else
-    # Run the full test suite
-    npm test
+    npm test > "$PRE_PUSH_LOG" 2>&1
 fi
 
-if [ $? -eq 0 ]; then
+TEST_EXIT=$?
+
+# Show the test summary (last few lines contain pass/fail counts)
+grep -E "Test Files|Tests |Duration" "$PRE_PUSH_LOG" || true
+
+if [ $TEST_EXIT -eq 0 ]; then
     echo ""
     echo "✅ All tests passed! Push will proceed."
     echo "🚀 Code quality maintained for GitHub repository."
@@ -82,5 +92,12 @@ else
     echo "❌ Tests failed! Push blocked to prevent broken code on GitHub."
     echo "💡 Fix failing tests or use 'git push --no-verify' for emergency pushes."
     echo "🔧 You can still make local commits for WIP - tests only run on push."
+    echo ""
+    echo "Failed test details:"
+    grep -E "FAIL|Error|AssertionError" "$PRE_PUSH_LOG" | head -20 || true
+    echo ""
+    echo "Full log: $PRE_PUSH_LOG"
+    # Keep log on failure so user can inspect
+    trap - EXIT
     exit 1
 fi
