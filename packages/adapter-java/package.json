@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-java",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Java debug adapter for MCP debugger using jdb",
   "type": "module",
   "main": "dist/index.js",
@@ -27,12 +27,12 @@
     "lint": "eslint src tests"
   },
   "dependencies": {
-    "@debugmcp/shared": "workspace:^0.16.0",
+    "@debugmcp/shared": "workspace:^0.17.0",
     "@vscode/debugprotocol": "^1.68.0",
     "which": "^5.0.0"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.16.0"
+    "@debugmcp/shared": "0.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",

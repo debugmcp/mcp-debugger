@@ -24,6 +24,8 @@ import {
   DebugFeature,
   FeatureRequirement,
   AdapterCapabilities,
+  AdapterError,
+  AdapterErrorCode,
   AdapterDependencies,
   DebugLanguage
 } from '@debugmcp/shared';
@@ -104,7 +106,10 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     const validation = await this.validateEnvironment();
     if (!validation.valid) {
       this.transitionTo(AdapterState.ERROR);
-      throw new Error(`Environment validation failed: ${validation.errors[0]?.message}`);
+      throw new AdapterError(
+        validation.errors[0]?.message || 'Java environment validation failed',
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
     }
 
     this.transitionTo(AdapterState.READY);
@@ -137,7 +142,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   private transitionTo(newState: AdapterState): void {
     const oldState = this.state;
     this.state = newState;
-    this.emit('stateChanged', { from: oldState, to: newState });
+    this.emit('stateChanged', oldState, newState);
   }
 
   // ===== Environment Validation =====
@@ -312,7 +317,10 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     const port = config.port;
 
     if (!port) {
-      throw new Error('Port is required for Java attach');
+      throw new AdapterError(
+        'Port is required for Java attach',
+        AdapterErrorCode.INVALID_RESPONSE
+      );
     }
 
     const javaConfig: JavaAttachConfig = {
@@ -363,7 +371,10 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   ): Promise<T> {
     // This will be delegated to ProxyManager
     // For now, throw an error
-    throw new Error('sendDapRequest must be called through ProxyManager');
+    throw new AdapterError(
+      'sendDapRequest must be called through ProxyManager',
+      AdapterErrorCode.UNSUPPORTED_OPERATION
+    );
   }
 
   handleDapEvent(event: DebugProtocol.Event): void {

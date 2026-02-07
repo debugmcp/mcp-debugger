@@ -27,10 +27,16 @@ export class CommandNotFoundError extends Error {
   }
 }
 
+/**
+ * Interface for resolving executable commands to their full paths
+ */
 export interface CommandFinder {
   find(cmd: string): Promise<string>;
 }
 
+/**
+ * CommandFinder implementation using the 'which' library for PATH-based lookup
+ */
 class WhichCommandFinder implements CommandFinder {
   private cache = new Map<string, string>();
   constructor(private useCache = true) {}

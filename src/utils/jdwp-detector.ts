@@ -5,6 +5,9 @@
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 
+/**
+ * Parsed JDWP agent configuration from a Java process
+ */
 export interface JdwpConfig {
   suspend: boolean;
   port?: number;
