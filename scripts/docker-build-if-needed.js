@@ -68,8 +68,10 @@ async function main() {
 
   try {
     execSync('docker --version', { stdio: 'ignore' });
+    // Also verify that Docker can actually build (e.g., buildx is available)
+    execSync('docker buildx version', { stdio: 'ignore' });
   } catch {
-    console.log('[Docker Build] Docker not available - skipping build');
+    console.log('[Docker Build] Docker not available or not fully functional - skipping build');
     return;
   }
 
