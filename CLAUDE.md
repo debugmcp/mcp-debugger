@@ -15,7 +15,10 @@ mcp-debugger/
 ├── packages/
 │   ├── shared/             # Shared interfaces, types, and utilities
 │   ├── adapter-python/     # Python debug adapter using debugpy
-│   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug (v0.16.0+)
+│   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug
+│   ├── adapter-rust/       # Rust debug adapter using CodeLLDB
+│   ├── adapter-go/         # Go debug adapter using Delve
+│   ├── adapter-java/       # Java debug adapter using jdb
 │   ├── adapter-mock/       # Mock adapter for testing
 │   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
@@ -30,7 +33,10 @@ mcp-debugger/
 
 - **@debugmcp/shared**: Core interfaces and types used across all packages
 - **@debugmcp/adapter-python**: Python debugging support via debugpy
-- **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug (Alpha in v0.16.0)
+- **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug
+- **@debugmcp/adapter-rust**: Rust debugging support via CodeLLDB
+- **@debugmcp/adapter-go**: Go debugging support via Delve
+- **@debugmcp/adapter-java**: Java debugging support via jdb
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
 - **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
@@ -38,9 +44,11 @@ mcp-debugger/
 
 ### Building and Development
 
+**IMPORTANT: This project uses pnpm, not npm.** The `workspace:*` protocol in dependencies requires pnpm. Run scripts via `npm run <script>` (which delegates to pnpm) or use pnpm directly.
+
 ```bash
 # Install dependencies (including workspace packages)
-npm install
+pnpm install
 
 # Build all packages and main project
 npm run build
@@ -225,10 +233,13 @@ Sessions progress through states: IDLE → INITIALIZING → READY → RUNNING �
 
 ### Adapter System
 - `src/adapters/adapter-registry.ts` - Adapter lifecycle management
-- `src/adapters/adapter-loader.ts` - Dynamic adapter loading
+- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (6 known adapters)
 - `packages/shared/` - Shared interfaces and types
-- `packages/adapter-python/` - Python debug adapter
-- `packages/adapter-javascript/` - JavaScript/Node.js debug adapter
+- `packages/adapter-python/` - Python debug adapter (debugpy)
+- `packages/adapter-javascript/` - JavaScript/Node.js debug adapter (js-debug)
+- `packages/adapter-rust/` - Rust debug adapter (CodeLLDB)
+- `packages/adapter-go/` - Go debug adapter (Delve)
+- `packages/adapter-java/` - Java debug adapter (jdb)
 - `packages/adapter-mock/` - Mock adapter for testing
 
 ### Distribution
@@ -244,7 +255,7 @@ Sessions progress through states: IDLE → INITIALIZING → READY → RUNNING �
 ## Development Guidelines
 
 1. **TypeScript Strict Mode**: All code must pass TypeScript strict mode checks
-2. **Monorepo Management**: Use npm workspaces (pnpm preferred) for package management
+2. **Monorepo Management**: Use pnpm workspaces for package management (`pnpm install`, not `npm install`)
 3. **Build Order**: Packages must build in order: shared → adapters → main server. This is managed by `scripts/build-packages.cjs`
 4. **Test Coverage**: Maintain >90% test coverage
 5. **Error Handling**: Use centralized error messages from `error-messages.ts`
@@ -275,19 +286,23 @@ To add support for a new language:
 1. **Create Package**: Add new package under `packages/adapter-{language}/`
 2. **Implement Interfaces**: Implement `IAdapterFactory` and `IDebugAdapter` from `@debugmcp/shared`
 3. **Export Factory**: Export a factory class named `{Language}AdapterFactory`
-4. **Update Registry**: The adapter will be dynamically loaded when requested
-5. **Add Tests**: Include unit and integration tests in the package
+4. **Register in root `package.json`**: Add `"@debugmcp/adapter-{language}": "workspace:*"` to `optionalDependencies`
+5. **Add Vitest alias**: Add `{ find: '@debugmcp/adapter-{language}', replacement: path.resolve(__dirname, './packages/adapter-{language}/src/index.ts') }` to `resolve.alias` in `vitest.config.ts`
+6. **Update adapter count**: Update hardcoded adapter counts in tests (`adapter-loader.test.ts`, `models.test.ts`)
+7. **Add Tests**: Include unit and integration tests in the package
+8. **Run `pnpm install`**: To link the new workspace package
 
 Example structure:
 ```
-packages/adapter-nodejs/
+packages/adapter-{language}/
 ├── src/
-│   ├── index.ts         # Export NodejsAdapterFactory
-│   ├── adapter.ts       # Implement IDebugAdapter
-│   └── factory.ts       # Implement IAdapterFactory
+│   ├── index.ts         # Export {Language}AdapterFactory
+│   ├── {language}-debug-adapter.ts  # Implement IDebugAdapter
+│   └── {language}-adapter-factory.ts  # Implement IAdapterFactory
 ├── tests/
-├── package.json
-└── tsconfig.json
+├── package.json         # Must include "type": "module" and workspace:* dep on @debugmcp/shared
+├── tsconfig.json
+└── vitest.config.ts     # Optional if tests run from root
 ```
 
 ## Language-Specific Requirements
@@ -297,11 +312,26 @@ packages/adapter-nodejs/
 - debugpy must be installed: `pip install debugpy`
 - The system will auto-detect Python path or use `PYTHON_PATH` env var
 
-### JavaScript/Node.js (Alpha)
+### JavaScript/Node.js
 - Node.js 18+ must be installed
 - Uses bundled js-debug adapter (VSCode's debugger)
 - Supports JavaScript and TypeScript debugging
 - Auto-detects TypeScript configuration
+
+### Rust
+- Rust toolchain must be installed (rustc, cargo)
+- Uses vendored CodeLLDB debug adapter (auto-downloaded during `pnpm install`)
+- Supports both MSVC and GNU toolchains on Windows
+
+### Go
+- Go 1.18+ must be installed
+- Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`
+- Uses Delve's native DAP protocol support
+
+### Java
+- JDK 11+ must be installed (javac, java, jdb)
+- Uses jdb (Java Debugger) with a DAP protocol bridge
+- Supports both launch and attach modes
 
 ### Mock (Testing)
 - No external requirements
@@ -338,7 +368,7 @@ npm install -g @debugmcp/mcp-debugger
 #### Option 4: Build from Source (Current Setup)
 ```bash
 # Best for: Development of mcp-debugger itself
-npm install && npm run build
+pnpm install && npm run build
 /home/ubuntu/.claude/local/claude mcp add-json mcp-debugger \
   '{"type":"stdio","command":"node","args":["/home/ubuntu/mcp-debugger/dist/index.js","stdio"]}'
 ```

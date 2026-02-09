@@ -150,6 +150,7 @@
     "zod": "^3.22.4"
   },
   "optionalDependencies": {
+    "@debugmcp/adapter-go": "workspace:*",
     "@debugmcp/adapter-java": "workspace:*",
     "@debugmcp/adapter-javascript": "workspace:*",
     "@debugmcp/adapter-mock": "workspace:*",
