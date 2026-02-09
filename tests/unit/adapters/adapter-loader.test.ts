@@ -327,6 +327,14 @@ describe('AdapterLoader', () => {
         description: 'Rust debugger using CodeLLDB',
         installed: false
       });
+
+      const goAdapter = adapters.find(a => a.name === 'go');
+      expect(goAdapter).toEqual({
+        name: 'go',
+        packageName: '@debugmcp/adapter-go',
+        description: 'Go debugger using Delve',
+        installed: false
+      });
     });
 
     it('should include javascript with installed true when available', async () => {

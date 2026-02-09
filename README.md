@@ -360,6 +360,7 @@ Then get the local variables:
 - 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading to v0.15.0 (dynamic loading)
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
 - 🟨 [JavaScript Debugging Guide](./docs/javascript/README.md) – JavaScript/TypeScript features
+- 🐹 [Go Debugging Guide](./docs/go/README.md) – Go debugging with Delve
 - [Rust Debugging on Windows](docs/rust-debugging-windows.md) - Toolchain requirements and troubleshooting
 - 🤖 [AI Integration Guide](./docs/ai-integration.md) – Leverage AI-friendly features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
@@ -432,7 +433,8 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 - ✅ **1019 tests** passing end-to-end
 - ✅ **Clean architecture** with adapter pattern
 - 🟨 **JavaScript/Node.js**: Alpha support with full debugging loop
-- 🚧 **Coming Soon**: Go, Ruby, and more language adapters
+- ✅ **Go**: Full debugging support via Delve DAP
+- 🚧 **Coming Soon**: Ruby, C/C++, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
 
 See [Roadmap.md](./Roadmap.md) for planned features.

@@ -1,0 +1,49 @@
+{
+  "name": "@debugmcp/adapter-go",
+  "version": "0.17.0",
+  "description": "Go debugging adapter for mcp-debugger using Delve",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "lint": "eslint src/**/*.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@debugmcp/shared": "workspace:*",
+    "@vscode/debugprotocol": "^1.65.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/which": "^3.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "debugger",
+    "go",
+    "golang",
+    "delve",
+    "dap"
+  ],
+  "author": "mcp-debugger team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/debugmcp/mcp-debugger.git",
+    "directory": "packages/adapter-go"
+  }
+}

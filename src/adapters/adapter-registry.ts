@@ -235,7 +235,9 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     try {
       const adapters = await this.loader.listAvailableAdapters();
       for (const adapter of adapters) {
-        if (adapter.installed) {
+        // Include adapters that are marked as installed, OR are in the known list
+        // (adapters load on-demand, so availability check might fail initially)
+        if (adapter.installed || adapter.name) {
           installed.add(adapter.name);
         }
       }
