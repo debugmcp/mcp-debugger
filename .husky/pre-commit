@@ -1,5 +1,5 @@
 # Run existing personal info check
-node scripts/check-personal-paths.cjs
+node "$(dirname -- "$0")/../scripts/check-personal-paths.cjs"
 
 # Check for build artifacts in src directories
 echo "🔍 Checking for build artifacts in source directories..."
@@ -41,3 +41,13 @@ if git diff --cached --name-only | grep -E '\.tgz$'; then
 fi
 
 echo "✅ No build artifacts found in staged files"
+
+# Docstar shadow documentation (optional — runs only if docstar is installed)
+if command -v docstar &> /dev/null; then
+  echo "Docstar: Updating shadow documentation..."
+  docstar shadow . 2>/dev/null || true
+  # Stage any updated shadow docs
+  if [ -d ".docstar/shadow" ]; then
+    git add .docstar/shadow 2>/dev/null || true
+  fi
+fi

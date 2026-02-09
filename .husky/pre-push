@@ -101,3 +101,9 @@ else
     trap - EXIT
     exit 1
 fi
+
+# Docstar shadow documentation check (optional — runs only if docstar is installed)
+if command -v docstar &> /dev/null; then
+  echo "🔍 Docstar: Checking shadow documentation..."
+  docstar check || true
+fi
