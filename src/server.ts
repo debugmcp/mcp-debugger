@@ -3,7 +3,6 @@
  * Debug MCP Server - Main Server Implementation
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-// StdioServerTransport is used in index.ts, not here
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,

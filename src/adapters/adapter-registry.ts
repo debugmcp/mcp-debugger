@@ -199,7 +199,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       language,
       available: true,
       activeInstances: activeSet?.size || 0,
-      registeredAt: new Date(), // In a real implementation, track this
+      registeredAt: new Date(),
     };
   }
 

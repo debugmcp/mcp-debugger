@@ -1,13 +1,10 @@
 /**
  * Orphan exit decision helper.
- * NOTE: This intentionally mirrors the current buggy behavior in proxy-bootstrap
- * so that the unit test will FAIL and catch the regression when running `pnpm test`.
- * We will fix this implementation after confirming the failing test.
  */
 
 /**
  * Decide if the proxy should exit as "orphaned".
- * Current buggy behavior: exit when PPID is 1 regardless of container environment.
+ * In containers (PID namespaces), PPID=1 is expected and does not indicate orphaning.
  */
 export function shouldExitAsOrphan(ppid: number, inContainer: boolean): boolean {
   // Fixed behavior: in containers (PID namespaces), PPID=1 is expected; do not exit

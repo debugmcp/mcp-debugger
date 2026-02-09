@@ -1,2 +1,0 @@
-﻿  backup/uncommitted-work-20250726
-  feature/javascript-adapter
