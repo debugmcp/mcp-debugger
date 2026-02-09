@@ -1,8 +1,5 @@
 /**
- * JavaScript/TypeScript Debug Adapter (skeleton)
- *
- * NOTE: This is a minimal, non-functional stub for Task 1 scaffolding.
- * TODO: Add DebugLanguage.JAVASCRIPT to @debugmcp/shared enum in a later task.
+ * JavaScript/TypeScript Debug Adapter
  *
  * @since 0.1.0
  */
@@ -35,7 +32,6 @@ import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/confi
 import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
 
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
-  // Cast string until DebugLanguage includes JAVASCRIPT
   readonly language = 'javascript' as unknown as DebugLanguage;
   readonly name = 'JavaScript/TypeScript Debug Adapter';
 
@@ -541,13 +537,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
           finalArgs[idx] = `--inspect-brk=${port}`;
           result.runtimeArgs = finalArgs;
         }
-        // REMOVED: attachSimplePort to trigger multi-session mode
       } else if (stopOnEntry === true) {
         // Ensure a deterministic single-session stop on entry when requested
         const port = 9229;
         finalArgs = [...finalArgs, `--inspect-brk=${port}`];
         result.runtimeArgs = finalArgs;
-        // REMOVED: attachSimplePort to trigger multi-session mode
       }
     }
 

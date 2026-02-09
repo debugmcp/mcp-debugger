@@ -1,6 +1,5 @@
 /**
- * Debug operations for session management including starting, stepping,
- * continuing, and breakpoint management.
+ * Session lifecycle operations: launch/attach, stepping, continue, and breakpoint management.
  */
 import { v4 as uuidv4 } from 'uuid';
 import { 

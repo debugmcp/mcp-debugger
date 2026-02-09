@@ -229,7 +229,6 @@ export class SessionManagerCore {
       // Handle auto-continue for stopOnEntry=false
       if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
         this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false)`);
-        // Import the continue method from operations when needed
         this.handleAutoContinue().catch(err => {
           this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
         });
@@ -386,9 +385,7 @@ export class SessionManagerCore {
     this.sessionEventHandlers.delete(session);
   }
 
-  /**
-   * @internal - This is for testing only, do not use in production
-   */
+  /** Exposed for testing. Delegates to cleanupProxyEventHandlers. */
   public _testOnly_cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
     return this.cleanupProxyEventHandlers(session, proxyManager);
   }

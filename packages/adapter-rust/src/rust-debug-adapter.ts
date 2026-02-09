@@ -903,9 +903,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       launchConfig.cargo = rustConfig.cargo;
     }
     
-    // Handle preLaunchTask for building
     if (rustConfig.preLaunchTask === 'cargo build' || rustConfig.cargo?.build) {
-      // Note: Actual building would be handled by the session manager or a pre-launch task
       this.dependencies.logger?.info('[RustDebugAdapter] Cargo build requested before debugging');
     }
 

@@ -155,7 +155,7 @@ export class SessionManagerData extends SessionManagerCore {
         this.logger.info(`[SM getScopes ${sessionId}] Parsed scopes:`, response.body.scopes.map(s => ({name: s.name, ref: s.variablesReference, expensive: s.expensive })));
         return response.body.scopes;
       }
-      this.logger.warn(`[GetScopes] No scopes in response body for session ${sessionId}, frameId ${frameId}. Response:`, response);
+      this.logger.warn(`[SM getScopes ${sessionId}] No scopes in response body for frameId ${frameId}. Response:`, response);
       return [];
     } catch (error) {
       this.logger.error(`[SM getScopes ${sessionId}] Error getting scopes:`, error);
