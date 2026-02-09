@@ -19,6 +19,7 @@ export enum DebugLanguage {
   PYTHON = 'python',
   JAVASCRIPT = 'javascript',
   RUST = 'rust',
+  GO = 'go',
   MOCK = 'mock',  // Mock adapter for testing
 }
 

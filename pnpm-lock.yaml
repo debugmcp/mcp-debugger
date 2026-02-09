@@ -149,6 +149,31 @@ importers:
         specifier: workspace:*
         version: link:packages/adapter-rust
 
+  packages/adapter-go:
+    dependencies:
+      '@debugmcp/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@vscode/debugprotocol':
+        specifier: ^1.65.0
+        version: 1.68.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.25
+      '@types/which':
+        specifier: ^3.0.0
+        version: 3.0.4
+      rimraf:
+        specifier: ^5.0.0
+        version: 5.0.10
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.2
+      vitest:
+        specifier: ^1.0.0
+        version: 1.6.1(@types/node@20.19.25)
+
   packages/adapter-javascript:
     dependencies:
       '@debugmcp/shared':
@@ -3239,7 +3264,7 @@ snapshots:
 
   '@jest/pattern@30.0.1':
     dependencies:
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
       jest-regex-util: 30.0.1
 
   '@jest/schemas@29.6.3':
@@ -3256,7 +3281,7 @@ snapshots:
       '@jest/schemas': 30.0.5
       '@types/istanbul-lib-coverage': 2.0.6
       '@types/istanbul-reports': 3.0.4
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
       '@types/yargs': 17.0.33
       chalk: 4.1.2
 
@@ -3399,7 +3424,7 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
 
   '@types/chai@5.2.2':
     dependencies:
@@ -3407,7 +3432,7 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
 
   '@types/debug@4.1.12':
     dependencies:
@@ -3419,7 +3444,7 @@ snapshots:
 
   '@types/express-serve-static-core@5.0.7':
     dependencies:
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 0.17.5
@@ -3458,7 +3483,7 @@ snapshots:
 
   '@types/jsonfile@6.1.4':
     dependencies:
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
 
   '@types/mime@1.3.5': {}
 
@@ -3479,12 +3504,12 @@ snapshots:
   '@types/send@0.17.5':
     dependencies:
       '@types/mime': 1.3.5
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
 
   '@types/serve-static@1.15.8':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
       '@types/send': 0.17.5
 
   '@types/stack-utils@2.0.3': {}
@@ -3503,7 +3528,7 @@ snapshots:
 
   '@types/yauzl@2.10.3':
     dependencies:
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
     optional: true
 
   '@typescript-eslint/eslint-plugin@8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.36.0)(typescript@5.9.2))(eslint@9.36.0)(typescript@5.9.2)':
@@ -4526,7 +4551,7 @@ snapshots:
   jest-mock@30.0.5:
     dependencies:
       '@jest/types': 30.0.5
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
       jest-util: 30.0.5
 
   jest-regex-util@30.0.1: {}
@@ -4534,7 +4559,7 @@ snapshots:
   jest-util@30.0.5:
     dependencies:
       '@jest/types': 30.0.5
-      '@types/node': 22.18.6
+      '@types/node': 20.19.25
       chalk: 4.1.2
       ci-info: 4.3.0
       graceful-fs: 4.2.11

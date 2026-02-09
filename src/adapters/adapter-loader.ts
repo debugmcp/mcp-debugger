@@ -140,11 +140,21 @@ export class AdapterLoader {
       { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy' },
       { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug' },
       { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB' },
+      { name: 'go', packageName: '@debugmcp/adapter-go', description: 'Go debugger using Delve' },
     ];
 
     const results: AdapterMetadata[] = [];
     for (const a of known) {
-      const installed = await this.isAdapterAvailable(a.name);
+      // Try to check availability, but don't fail if adapter can't be loaded immediately
+      // Adapters are loaded on-demand, so we mark as available if it's in the known list
+      let installed = false;
+      try {
+        installed = await this.isAdapterAvailable(a.name);
+      } catch {
+        // If availability check fails, still include in list since adapters load on-demand
+        // The actual load will happen when createAdapter is called
+        installed = false;
+      }
       results.push({ ...a, installed });
     }
     return results;
