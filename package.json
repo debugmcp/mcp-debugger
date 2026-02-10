@@ -105,7 +105,8 @@
     "act:debug": "scripts\\act-runner.cmd -j build-and-test --verbose",
     "validate": "node scripts/validate-push.js",
     "validate:quick": "node scripts/validate-push.js --no-tests",
-    "validate:smoke": "node scripts/validate-push.js --smoke"
+    "validate:smoke": "node scripts/validate-push.js --smoke",
+    "dev:proxy": "node tools/dev-proxy/dev-proxy.mjs"
   },
   "keywords": [
     "mcp",

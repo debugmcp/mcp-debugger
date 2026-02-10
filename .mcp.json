@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mcp-debugger": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "tools/dev-proxy/dev-proxy.mjs"
+      ],
+      "env": {
+        "JAVA_HOME": "C:\\Users\\johnf\\tools\\jdk-21.0.10+7"
+      }
+    }
+  }
+}

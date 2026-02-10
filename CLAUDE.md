@@ -365,15 +365,34 @@ npm install -g @debugmcp/mcp-debugger
   '{"type":"stdio","command":"docker","args":["run","-i","--rm","-v","${PWD}:/workspace","debugmcp/mcp-debugger:latest","stdio"]}'
 ```
 
-#### Option 4: Build from Source (Current Setup)
+#### Option 4: Build from Source
 ```bash
-# Best for: Development of mcp-debugger itself
+# Best for: One-off use from a local clone
 pnpm install && npm run build
 /home/ubuntu/.claude/local/claude mcp add-json mcp-debugger \
   '{"type":"stdio","command":"node","args":["/home/ubuntu/mcp-debugger/dist/index.js","stdio"]}'
 ```
 
 **Note**: The `stdio` argument is critical - it tells the server to suppress all console output which would otherwise corrupt the JSON-RPC protocol communication.
+
+#### Option 5: Dev Proxy (Current Setup — Recommended for Development)
+```bash
+# Best for: Active development of mcp-debugger itself
+pnpm install && npm run build
+claude mcp add-json mcp-debugger \
+  '{"type":"stdio","command":"node","args":["tools/dev-proxy/dev-proxy.mjs"]}'
+```
+
+The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that sits between Claude Code and mcp-debugger. It maintains a stable stdio connection to Claude Code while managing the backend as a restartable SSE child process. This means you can rebuild and restart mcp-debugger **without restarting Claude Code** (which would lose conversation context).
+
+**When to use**: Whenever you are actively developing mcp-debugger — making code changes, adding adapters, or installing new toolchains (Go, Java, etc.) that need to be picked up by the running server.
+
+**How it works**: After code changes, call the `dev_rebuild_and_restart` tool. The proxy kills the backend, runs `npm run build`, spawns a fresh process, and reconnects — all transparently. If the backend crashes, dev tools remain available to bring it back.
+
+**Configuration** (env vars, all optional):
+- `DEV_PROXY_PORT` — Backend SSE port (default: 3001)
+- `DEV_PROXY_BUILD_CMD` — Build command (default: `npm run build`)
+- `DEV_PROXY_ROOT` — Project root (default: auto-detected)
 
 #### Verify Installation
 
@@ -403,6 +422,11 @@ Once connected, the following MCP tools become available:
 - `get_variables`, `get_stack_trace` - Inspect program state
 - `evaluate_expression` - Evaluate expressions in debug context
 - `close_debug_session` - Clean up sessions
+
+**Dev proxy only** (available when using Option 5):
+- `dev_restart_debugger` - Restart the backend (pass `rebuild: true` to build first)
+- `dev_rebuild_and_restart` - Run `npm run build` then restart the backend
+- `dev_server_status` - Check backend state, PID, uptime, tool count
 
 ### Troubleshooting MCP Connection
 - **If server shows "Failed to connect"**:
