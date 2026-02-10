@@ -1,39 +1,32 @@
 # examples/visualizer/convert_to_gif.py
 @source-hash: da9cf0919ec35bef
-@generated: 2026-02-09T18:14:58Z
+@generated: 2026-02-10T00:41:40Z
 
-## Purpose
-Utility script that converts asciinema recording files (.cast) to optimized GIF animations for documentation/demo purposes. Part of a visualizer toolchain in an examples directory.
+**Purpose**: Utility script for converting asciinema terminal recordings (.cast files) to optimized GIF animations using the `agg` tool.
 
-## Key Components
+**Core Functions**:
+- `check_tool(tool_name, install_hint)` (L9-16): Validates external tool availability using `which` command, provides installation guidance on failure
+- `convert_to_gif(cast_file)` (L18-57): Main conversion pipeline that processes asciinema recordings to GIF format
 
-### Functions
-- **check_tool()** (L9-16): Validates external tool availability using `which` command, prints installation instructions on failure
-- **convert_to_gif()** (L18-57): Main conversion function that orchestrates the cast-to-GIF pipeline with configurable input file
-
-### Conversion Pipeline (L18-57)
-1. **Dependency Check** (L22-23): Ensures `agg` tool (asciinema-to-gif converter) is installed
-2. **Path Resolution** (L25-29): Calculates project root (3 levels up) and creates output path at `assets/demo.gif`
-3. **Conversion Execution** (L34-42): Invokes `agg` with optimized parameters:
-   - Monokai theme for visual consistency
-   - 14pt font size for readability
+**Conversion Pipeline** (L18-57):
+1. **Dependency validation**: Ensures `agg` tool is installed via cargo
+2. **Path resolution**: Constructs output path as `project_root/assets/demo.gif` (L25-26)
+3. **Directory setup**: Creates assets directory if missing (L29)
+4. **Conversion execution**: Calls `agg` with optimized parameters:
+   - Monokai theme for visual appeal
+   - 14px font size for readability  
    - 1.2x playback speed for efficiency
-   - 1.4 line height for spacing
-4. **Size Validation** (L44-52): Warns if output exceeds 10MB GitHub limit, suggests optimization
-5. **Cleanup Option** (L54-57): Interactive prompt to remove source cast file
+   - 1.4 line height for clarity
+5. **Size validation**: Warns if output exceeds 10MB GitHub limit (L50-52)
+6. **Cleanup option**: Interactive prompt to remove source .cast file (L55-57)
 
-## Dependencies
-- **External Tools**: `agg` (asciinema GIF generator) via cargo install
-- **Python Modules**: subprocess, pathlib for system interaction and file management
-- **File Structure**: Assumes 3-level directory nesting from project root
+**Key Dependencies**:
+- External: `agg` (asciinema-to-gif converter via cargo)
+- Internal: `subprocess`, `pathlib.Path` for file operations
+- Default input: `"mcp-debugger-demo-swap-bug.cast"`
 
-## Architecture Notes
-- **Path Convention**: Hard-coded project structure assumption (parent.parent.parent)
-- **Default Input**: "mcp-debugger-demo-swap-bug.cast" suggests MCP (Model Context Protocol) debugging workflow
-- **Output Location**: Standardized assets directory for demo materials
-- **Interactive UX**: Includes progress feedback and user prompts for workflow control
-
-## Configuration
-- Theme: Monokai (dark theme optimized for code visibility)
-- Performance: 1.2x speed, 14pt font for balance of readability and file size
-- Size threshold: 10MB warning aligned with typical platform limits
+**Architecture Notes**:
+- Script assumes three-level directory structure (`examples/visualizer/` → project root)
+- Hard-coded output location (`assets/demo.gif`) suggests standardized project layout
+- Interactive cleanup workflow requires user input, not suitable for automated pipelines
+- No error handling for subprocess failures during conversion

@@ -1,52 +1,38 @@
 # tests/core/unit/adapters/debug-adapter-interface.test.ts
 @source-hash: 2b0fb6075a0819cf
-@generated: 2026-02-09T18:14:19Z
+@generated: 2026-02-10T00:41:24Z
 
-## Primary Purpose
-Unit test suite for debug adapter interface types from `@debugmcp/shared`. Validates enums, error classes, and TypeScript interfaces used in debug adapter protocol implementation.
+**Purpose**: Comprehensive unit test suite for the debug-adapter-interface module, validating enums, error classes, and type interfaces from the @debugmcp/shared package.
 
-## Test Structure
-- **AdapterState enum tests (L26-41)**: Validates 7 adapter lifecycle states (uninitialized → ready → debugging → error)
-- **AdapterErrorCode enum tests (L43-76)**: Validates 13 categorized error codes (environment, connection, protocol, runtime)
-- **DebugFeature enum tests (L78-106)**: Validates 20 debug protocol features (breakpoints, variable inspection, etc.)
-- **AdapterError class tests (L108-141)**: Tests custom error class with code, message, and recoverable flag
-- **Type interface tests (L143-485)**: Comprehensive validation of TypeScript interfaces
+**Key Test Suites**:
 
-## Key Test Categories
+- **AdapterState enum validation (L26-41)**: Tests the 7 adapter lifecycle states (uninitialized → ready → debugging → error)
+- **AdapterErrorCode enum validation (L43-76)**: Validates 13 error codes across categories:
+  - Environment errors: EXECUTABLE_NOT_FOUND, ADAPTER_NOT_INSTALLED (L44-49)  
+  - Connection errors: CONNECTION_FAILED, CONNECTION_TIMEOUT (L51-55)
+  - Protocol errors: INVALID_RESPONSE, UNSUPPORTED_OPERATION (L57-60)
+  - Runtime errors: DEBUGGER_ERROR, SCRIPT_NOT_FOUND (L62-66)
+- **DebugFeature enum validation (L78-106)**: Tests 20 debug protocol features like conditional breakpoints, variable inspection, step debugging
+- **AdapterError class testing (L108-141)**: Validates custom error class with code categorization and recovery flags
 
-### Core Error Handling (L108-141, L487-514)
-- `AdapterError` class extends native Error with `code` and `recoverable` properties
-- Tests error instantiation, inheritance, stack traces, and recovery patterns
-- Validates proper error categorization for different failure scenarios
+**Type Interface Testing (L143-485)**:
+- **ValidationResult (L144-191)**: Tests validation state with errors/warnings collections
+- **DependencyInfo (L193-217)**: Tests dependency metadata with version requirements
+- **AdapterCommand (L219-245)**: Tests command execution configuration with environment variables
+- **AdapterConfig (L247-286)**: Tests complete adapter configuration including session, paths, and launch settings
+- **GenericLaunchConfig (L288-314)**: Tests base launch configuration options
+- **LanguageSpecificLaunchConfig (L316-330)**: Tests extension of generic config with language-specific options
+- **FeatureRequirement (L333-367)**: Tests requirement categorization (dependency/version/configuration)
+- **AdapterCapabilities (L369-456)**: Tests extensive capability flags for debug protocol features
+- **ExceptionBreakpointFilter (L458-484)**: Tests exception filtering configuration
 
-### Validation Types (L144-191)
-- `ValidationResult` interface with errors/warnings arrays
-- `ValidationError` and `ValidationWarning` structures with codes and messages
-- Tests both successful and failed validation scenarios
+**Error Handling Patterns (L487-514)**: Tests error categorization and recovery strategies with different error types and recovery flags.
 
-### Configuration Types (L193-330)
-- `DependencyInfo` (L193-217): Package dependencies with version requirements
-- `AdapterCommand` (L219-245): Command execution with args and environment
-- `AdapterConfig` (L247-286): Complete adapter configuration including session, paths, ports
-- `GenericLaunchConfig` & `LanguageSpecificLaunchConfig` (L288-330): Debug launch parameters
+**Type Safety Validation (L516-531)**: Ensures enum values are properly constrained and type-safe.
 
-### Feature Requirements (L333-367)
-- `FeatureRequirement` interface supporting dependency/version/configuration requirement types
-- Tests requirement validation for debug adapter capabilities
+**Dependencies**: 
+- vitest testing framework
+- @debugmcp/shared package providing all tested types and enums
+- Validates 40+ interface properties and enum values
 
-### Adapter Capabilities (L369-456)
-- `AdapterCapabilities` interface with 30+ boolean capability flags
-- `ExceptionBreakpointFilter` for exception handling configuration
-- Extensive testing of DAP (Debug Adapter Protocol) feature support
-
-## Dependencies
-- **vitest**: Test framework (describe, it, expect, beforeEach)
-- **@debugmcp/shared**: Core types being tested (all imported types L6-23)
-- **DebugLanguage**: Additional enum import (L23)
-
-## Test Patterns
-- Enum value validation with string literal checking
-- Interface instantiation and property validation  
-- Type safety enforcement through TypeScript compilation
-- Error class behavior validation including inheritance chains
-- Comprehensive coverage of optional vs required fields
+**Testing Architecture**: Uses describe/it structure for organized validation of enums, classes, and complex type interfaces with both positive and negative test cases.

@@ -261,6 +261,16 @@ export async function cleanupGlobalInstall(): Promise<void> {
 }
 
 /**
+ * Resolve the CLI entry point of the globally-installed @debugmcp/mcp-debugger package.
+ * Uses `npm root -g` to find the global node_modules directory, then resolves the CLI entry.
+ */
+async function resolveGlobalCliEntry(): Promise<string> {
+  const { stdout } = await execAsync('npm root -g');
+  const globalRoot = stdout.trim();
+  return path.join(globalRoot, '@debugmcp', 'mcp-debugger', 'dist', 'cli.mjs');
+}
+
+/**
  * Create an MCP client connected via npx
  */
 export async function createNpxMcpClient(config: NpxTestConfig = {}): Promise<{
@@ -269,14 +279,16 @@ export async function createNpxMcpClient(config: NpxTestConfig = {}): Promise<{
   cleanup: () => Promise<void>;
 }> {
   const logLevel = config.logLevel || 'info';
-  
+
   console.log('[NPX Test] Starting MCP server via npx...');
-  
-  // Use npx to run the globally installed package
+
+  // Resolve the globally-installed CLI entry and run it directly via process.execPath.
+  // This bypasses npx.cmd → cmd.exe resolution which fails on Windows with ENOENT.
+  const cliEntry = await resolveGlobalCliEntry();
   const transport = new StdioClientTransport({
-    command: 'npx',
+    command: process.execPath,
     args: [
-      '@debugmcp/mcp-debugger',
+      cliEntry,
       'stdio',
       '--log-level', logLevel,
       '--log-file', path.join(ROOT, 'logs', 'npx-test.log')

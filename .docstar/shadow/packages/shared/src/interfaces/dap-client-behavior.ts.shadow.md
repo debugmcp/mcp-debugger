@@ -1,44 +1,35 @@
 # packages/shared/src/interfaces/dap-client-behavior.ts
 @source-hash: a571e684752f8a27
-@generated: 2026-02-09T18:14:10Z
+@generated: 2026-02-10T00:41:08Z
 
-This TypeScript interface file defines the behavior configuration system for Debug Adapter Protocol (DAP) clients, enabling customization of debug session management and adapter-specific behaviors.
+**Primary Purpose**: Interface definitions for DAP (Debug Adapter Protocol) client behavior configuration system. This file defines the contract for customizing how debug adapters handle reverse requests, child session management, and various debugging behaviors.
 
-## Core Purpose
-Provides a clean separation of DAP client-specific behaviors from main interfaces, allowing adapters to customize debug session handling, child session management, and protocol routing behaviors.
+**Core Interfaces:**
 
-## Key Interfaces
+- **ReverseRequestResult (L11-15)**: Return type for reverse request handlers, indicating whether the request was handled and optionally specifying child session creation with configuration.
 
-### ReverseRequestResult (L11-15)
-Return type for reverse request handlers, controlling whether requests were handled and if child sessions should be created. Contains optional child session configuration.
+- **ChildSessionConfig (L20-25)**: Configuration object for spawning child debug sessions, containing host/port networking details, pending session ID, and parent configuration passthrough.
 
-### ChildSessionConfig (L20-25)
-Configuration structure for spawning child debug sessions, specifying connection details (host/port), session identifiers (pendingId), and parent configuration inheritance.
+- **DapClientContext (L30-35)**: Execution context provided to reverse request handlers, offering response utilities, child session creation capability, and tracking collections for active children and adopted targets.
 
-### DapClientContext (L30-35)
-Context object passed to behavior handlers, providing access to protocol communication (`sendResponse`), child session management (`createChildSession`), and session state tracking (`activeChildren`, `adoptedTargets`).
+- **DapClientBehavior (L40-91)**: Main configuration interface defining customizable behaviors per debug adapter type, including:
+  - Reverse request handling (L45-48)
+  - Command routing to child sessions (L53)
+  - Breakpoint mirroring (L58)
+  - Session lifecycle coordination (L63, L68, L83)
+  - Adapter ID normalization (L73)
+  - Timing configuration (L78)
+  - Stack trace child dependency handling (L90)
 
-### DapClientBehavior (L40-91)
-Main behavior configuration interface with optional customization points:
-- `handleReverseRequest` (L45-48): Custom handler for reverse requests from debug adapters
-- `childRoutedCommands` (L53): Commands that bypass parent and route directly to child sessions
-- Breakpoint management: `mirrorBreakpointsToChild` (L58)
-- Session lifecycle: `deferParentConfigDone` (L63), `pauseAfterChildAttach` (L68), `suppressPostAttachConfigDone` (L83)
-- Adapter normalization: `normalizeAdapterId` (L73) for mapping adapter IDs
-- Timing controls: `childInitTimeout` (L78)
-- Stack trace handling: `stackTraceRequiresChild` (L90) for child-dependent operations
+**Key Dependencies:**
+- `@vscode/debugprotocol` for standard DAP types and interfaces
 
-## Dependencies
-- `@vscode/debugprotocol`: Provides core DAP types and protocol definitions
+**Architectural Patterns:**
+- Strategy pattern: DapClientBehavior allows different adapters to implement custom handling
+- Context object pattern: DapClientContext provides necessary utilities and state to handlers
+- Configuration object pattern: Interfaces use optional properties for flexible customization
 
-## Architecture Patterns
-- Interface segregation: Separates client behaviors from core protocol handling
-- Strategy pattern: Allows per-adapter behavior customization through optional methods
-- Context passing: Provides rich context objects for behavior implementations
-- Optional configuration: All behavior methods are optional, enabling incremental customization
-
-## Key Design Decisions
-- All behavior methods are optional, providing sensible defaults
-- Child session management is first-class with dedicated configuration and lifecycle hooks
-- Reverse request handling is abstracted to support adapter-specific protocols
-- Command routing can be customized to support multi-session debugging scenarios
+**Notable Design Decisions:**
+- All behavior methods are optional, allowing minimal configuration overrides
+- Child session management is abstracted through configuration objects rather than direct API calls
+- Reverse request handling returns structured result rather than boolean, enabling complex workflows

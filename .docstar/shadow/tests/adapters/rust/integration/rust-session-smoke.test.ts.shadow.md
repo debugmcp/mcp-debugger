@@ -1,59 +1,44 @@
 # tests/adapters/rust/integration/rust-session-smoke.test.ts
 @source-hash: 68665fc60213f9f4
-@generated: 2026-02-09T18:14:15Z
+@generated: 2026-02-10T00:41:10Z
 
-## Primary Purpose
-Integration test file for the Rust adapter's session management functionality. Tests command building and launch configuration transformation without actual process execution.
+## Purpose
+Integration test file for the Rust adapter that performs smoke testing of session functionality. Tests adapter command building and launch configuration transformation without actually launching processes.
 
-## Key Components
+## Key Functions and Structure
 
-### Dependencies & Setup (L1-7)
-- Uses Vitest testing framework
-- Imports RustAdapterFactory from adapter-rust package
-- Imports AdapterDependencies type for dependency injection
+**createDependencies() (L8-42)**: Factory function that creates mock AdapterDependencies with stubbed implementations. Key mocks include:
+- FileSystem operations all return empty/false values
+- Logger methods are no-ops  
+- Environment delegates to real process.env
+- ProcessLauncher throws error to prevent actual process launches
 
-### Mock Dependencies Factory (L8-42)
-`createDependencies()` - Creates mock AdapterDependencies object with:
-- Stubbed file system operations (all return empty/false values)
-- No-op logger methods
-- Real environment access via process.env
-- Process launcher that throws error to prevent actual process spawning (L38-40)
+**Test Suite Setup (L44-74)**: 
+- Defines test constants: port 48765, session ID, host 127.0.0.1
+- Sets up fake paths for CodeLLDB executable and sample Rust script
+- beforeEach/afterEach hooks manage CODELLDB_PATH and RUST_BACKTRACE environment variables
 
-### Test Suite Configuration (L44-74)
-Constants for test environment:
-- `adapterPort: 48765` - TCP port for adapter communication
-- `sessionId: 'session-rust-smoke'` - Test session identifier  
-- `sampleScriptPath` - Points to examples/rust/src/main.rs
-- `fakeCodelldbPath` - Uses process.execPath as mock CodeLLDB path
+## Test Cases
 
-Environment variable management:
-- `beforeEach()` (L55-60) - Sets CODELLDB_PATH, clears RUST_BACKTRACE
-- `afterEach()` (L62-74) - Restores original environment variables
+**Command Building Test (L76-104)**: 
+- Verifies RustAdapterFactory creates adapter that builds proper CodeLLDB commands
+- Validates command structure: executable path, --port argument, optional --liblldb flag
+- Checks environment variables: RUST_BACKTRACE=1, platform-specific LLDB_USE_NATIVE_PDB_READER on Windows
 
-### Test Cases
+**Launch Config Transformation Test (L106-125)**:
+- Tests adapter's ability to normalize binary launch configurations
+- Transforms relative program path to absolute path
+- Validates output format: type='lldb', sourceLanguages=['rust'], console='internalConsole'
+- Uses platform-specific binary names (hello.exe on Windows, hello elsewhere)
 
-#### Command Building Test (L76-104)
-Tests `adapter.buildAdapterCommand()` with mock parameters:
-- Verifies command path is absolute and exists
-- Checks TCP port arguments (--port flag)
-- Validates --liblldb argument presence
-- Confirms RUST_BACKTRACE=1 environment variable
-- Platform-specific LLDB_USE_NATIVE_PDB_READER validation (Windows only)
+## Dependencies
+- Vitest testing framework
+- RustAdapterFactory from adapter-rust package
+- AdapterDependencies type from shared package
+- Node.js fs and path modules
 
-#### Launch Configuration Test (L106-125)  
-Tests `adapter.transformLaunchConfig()` for Rust binary debugging:
-- Uses examples/rust-hello project with platform-specific binary name
-- Validates transformation to LLDB launch configuration
-- Confirms absolute path resolution for program executable
-- Verifies sourceLanguages=['rust'] and console='internalConsole' settings
-
-## Architectural Patterns
-- Dependency injection pattern with mock implementations
-- Environment variable isolation for test reliability  
-- Platform-specific handling for Windows vs Unix systems
-- Integration testing without external process dependencies
-
-## Critical Constraints
-- Process launcher must throw error to prevent actual process execution
-- Tests depend on existence of example Rust projects in workspace
-- CodeLLDB path validation requires executable file existence
+## Architectural Notes
+- Uses dependency injection pattern with mock dependencies to isolate adapter logic
+- Environment variable manipulation ensures clean test isolation
+- Platform-aware testing for Windows vs Unix differences
+- Integration-level testing without external process dependencies

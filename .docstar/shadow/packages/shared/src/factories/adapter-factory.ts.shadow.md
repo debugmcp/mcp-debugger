@@ -1,39 +1,41 @@
 # packages/shared/src/factories/adapter-factory.ts
 @source-hash: a47e35af38792bbe
-@generated: 2026-02-09T18:14:05Z
+@generated: 2026-02-10T00:41:07Z
 
 ## Purpose
-Abstract base class for creating debug adapter factories in a TypeScript debugging framework. Provides standardized infrastructure for language-specific adapter factory implementations while ensuring version compatibility and validation.
+Abstract factory base class for creating debug adapters across different languages, providing standardized interface and compatibility validation.
 
-## Key Components
+## Core Components
 
 ### AdapterFactory Class (L25-95)
-Abstract base class implementing `IAdapterFactory` interface. Serves as template for concrete adapter factory implementations.
+- **Abstract base class** implementing `IAdapterFactory` interface
+- **Constructor** (L30): Takes `AdapterMetadata` parameter, stored as protected readonly
+- **Key responsibility**: Enforce consistent adapter creation patterns across language implementations
 
-**Constructor (L30)**: Takes `AdapterMetadata` parameter, stored as protected readonly field for factory configuration.
+### Public Methods
+- **getMetadata()** (L36-38): Returns defensive copy of adapter metadata
+- **validate()** (L45-51): Async validation with default "always valid" implementation
+- **isCompatibleWithCore()** (L58-65): Version compatibility checking with fallback to "always compatible"
+- **createAdapter()** (L94): Abstract method - must be implemented by concrete factories
 
-**getMetadata() (L36-38)**: Returns shallow copy of factory metadata to prevent external mutation.
-
-**validate() (L45-51)**: Async validation method with default implementation returning valid state. Designed to be overridden for environment-specific validation checks.
-
-**isCompatibleWithCore() (L58-65)**: Version compatibility checker comparing core version against `metadata.minimumDebuggerVersion`. Falls back to always-compatible if no minimum version specified.
-
-**compareVersions() (L73-86)**: Protected semantic version comparison utility using numeric part-by-part comparison with zero-padding for missing parts.
-
-**createAdapter() (L94)**: Abstract method requiring implementation by concrete factories. Takes `AdapterDependencies` and returns `IDebugAdapter` instance.
+### Version Management
+- **compareVersions()** (L73-86): Semantic version comparison utility
+  - Handles variable-length version strings
+  - Returns standard comparison result (-1, 0, 1)
+  - Uses integer parsing with zero-padding for missing parts
 
 ## Dependencies
-- `IDebugAdapter` from debug-adapter interface
-- `AdapterDependencies`, `IAdapterFactory`, `AdapterMetadata`, `FactoryValidationResult` from adapter-registry interface
+- **Interfaces**: `IDebugAdapter`, `IAdapterFactory`, `AdapterMetadata`, `AdapterDependencies`, `FactoryValidationResult`
+- **Module pattern**: ES6 imports from relative interface files
 
-## Architecture Patterns
-- **Template Method**: Base class provides common functionality while requiring specific implementation of `createAdapter()`
-- **Factory Pattern**: Encapsulates adapter creation logic
-- **Metadata-driven**: Uses `AdapterMetadata` to configure factory behavior
-- **Version Management**: Built-in semantic version compatibility checking
+## Architectural Patterns
+- **Template Method**: Concrete validation and compatibility overrides expected
+- **Factory Pattern**: Abstract `createAdapter` forces implementation
+- **Defensive Programming**: Metadata copying, version fallbacks
+- **Extensibility**: Protected methods and validation hooks for subclassing
 
-## Key Invariants
-- Metadata is immutable after construction (readonly protection)
-- Version comparison handles missing version parts as zero
-- Default validation always passes unless overridden
-- Compatibility defaults to true when no minimum version specified
+## Key Design Decisions
+- Default implementations favor permissive behavior (always valid, always compatible)
+- Metadata immutability through defensive copying
+- Version checking only if `minimumDebuggerVersion` specified
+- Clean separation between factory logic and adapter creation

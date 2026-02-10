@@ -1,47 +1,57 @@
 # packages/adapter-java/tests/unit/java-adapter-factory.test.ts
 @source-hash: cecd2cf133a5e9f3
-@generated: 2026-02-09T18:13:54Z
+@generated: 2026-02-10T00:41:10Z
 
-## Purpose
-Unit test suite for JavaAdapterFactory class, testing adapter creation, metadata retrieval, and Java environment validation using Vitest framework.
+## Test Suite for JavaAdapterFactory
 
-## Key Test Structure
+Unit tests for the `JavaAdapterFactory` class, verifying adapter creation, metadata retrieval, and environment validation capabilities.
 
-**Main Test Suite** (L50-178): `JavaAdapterFactory` test suite with comprehensive validation testing
+### Core Purpose
+Comprehensive test coverage for the Java debug adapter factory, ensuring proper instantiation, metadata accuracy, and robust environment validation with various Java installation scenarios.
 
-**Mock Setup** (L13-31): 
-- Mocks java-utils functions: `findJavaExecutable`, `getJavaVersion`, `findJdb`, `validateJdb`
-- Includes inline mock implementation of `parseJavaMajorVersion` for version parsing logic
-- Creates typed mock references for test manipulation
+### Key Test Structure
 
-**Test Helpers** (L33-48):
-- `createDependencies()`: Factory function creating mock `AdapterDependencies` with stub implementations
-- Returns object with mocked `fileSystem`, `processLauncher`, `environment`, and `logger`
+**Mock Setup (L13-31)**
+- Mocks all Java utility functions from `java-utils.js`
+- Provides simplified `parseJavaMajorVersion` implementation for testing
+- Creates typed mock references for test assertions
 
-## Test Categories
+**Dependencies Helper (L33-48)**
+- `createDependencies()`: Factory function creating mock `AdapterDependencies`
+- Returns minimal implementation with stubbed fileSystem, processLauncher, environment, and logger
+- Environment mock returns current working directory and empty configuration
 
-**Adapter Creation** (L59-66): Validates factory creates JavaDebugAdapter instances with correct properties
+**Test Reset (L51-57)**
+- `beforeEach`: Clears all mocks and resets specific utility function mocks
+- Ensures test isolation between runs
 
-**Metadata Testing** (L68-80): Verifies factory returns correct metadata including:
-- Language type (JAVA)
-- Display name, version, description 
-- Supported file extensions (.java, .class)
+### Test Categories
 
-**Validation Testing** (L82-177): Comprehensive environment validation scenarios:
-- **Success cases** (L83-110): Java 17 and Java 8 compatibility
-- **Version failures** (L112-124): Java 7 rejection (minimum Java 8 required)
-- **Missing dependencies** (L126-148): Java executable and jdb tool not found
-- **Tool validation** (L150-162): jdb tool validation failure
-- **Warning cases** (L164-176): Undetermined Java version handling
+**Adapter Creation Tests (L59-66)**
+- Verifies `JavaAdapterFactory.createAdapter()` returns `JavaDebugAdapter` instance
+- Validates adapter has correct language (`DebugLanguage.JAVA`) and name properties
 
-## Dependencies
-- Vitest testing framework with mocking capabilities
-- `@debugmcp/shared` types: `AdapterDependencies`, `DebugLanguage` 
-- Target classes: `JavaAdapterFactory`, `JavaDebugAdapter`
-- Java utility functions from `../../src/utils/java-utils.js`
+**Metadata Tests (L68-80)**
+- Tests `getMetadata()` method returns correct adapter information
+- Verifies language, display name, version, description, and file extensions (`.java`, `.class`)
 
-## Testing Patterns
-- Uses beforeEach hook (L51-57) for comprehensive mock cleanup
-- Employs mock rejection/resolution patterns for async validation testing
-- Tests both positive and negative validation paths with detailed error checking
-- Validates metadata consistency and adapter instantiation
+**Validation Tests (L82-177)**
+Extensive testing of environment validation with various scenarios:
+
+- **Success Cases (L83-110)**: Java 17 and Java 8 compatibility validation
+- **Version Failures (L112-124)**: Rejection of Java 7 (below minimum requirement)
+- **Missing Dependencies (L126-148)**: Java executable not found, jdb not found
+- **Tool Validation (L150-162)**: jdb executable fails internal validation
+- **Edge Cases (L164-176)**: Handles undetermined Java version with warnings
+
+### Dependencies
+- **External**: `@debugmcp/shared` types and enums, Vitest testing framework
+- **Internal**: `JavaAdapterFactory`, `JavaDebugAdapter`, Java utility functions
+- **Mocking**: Comprehensive mocking of Java environment detection utilities
+
+### Test Patterns
+- Uses factory pattern for dependency injection
+- Employs comprehensive mocking strategy for external dependencies
+- Follows arrange-act-assert pattern with clear separation
+- Tests both positive and negative validation scenarios
+- Validates error messages and warning conditions

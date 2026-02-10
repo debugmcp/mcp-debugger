@@ -1,75 +1,65 @@
 # tests/implementations/test/
-@generated: 2026-02-09T18:16:08Z
+@generated: 2026-02-10T01:19:36Z
 
-## Purpose
-Test implementations module providing comprehensive fake/mock versions of process-related interfaces for unit testing. Enables deterministic, controllable testing of process spawning, debug target launching, and proxy process management without spawning real system processes or external dependencies.
+## Overall Purpose and Responsibility
 
-## Key Components and Architecture
+This test implementation module provides a comprehensive suite of fake/mock implementations for all process-related interfaces in the system. It enables deterministic unit testing of process management code without spawning real processes, offering controllable simulation of process lifecycles, debugging scenarios, and proxy communications.
 
-### Core Process Simulation
-- **FakeProcess**: Base fake process implementation extending EventEmitter to simulate real process behavior with controllable PID, streams (stdin/stdout/stderr), IPC messaging, and lifecycle events
-- **Process Control**: Provides methods to simulate process output, errors, exit conditions, and kill signals with proper event emission timing
+## Key Components and Relationships
 
-### Launcher Implementations
-- **FakeProcessLauncher**: Mock implementation of IProcessLauncher for basic process spawning with launch tracking and pre-configuration capabilities
-- **FakeDebugTargetLauncher**: Specialized launcher for Python debug targets with auto-incrementing port management and debug session tracking
-- **FakeProxyProcessLauncher**: Advanced launcher for proxy processes with automatic command response handling and session management
+The module follows a layered architecture mirroring the production process interfaces:
 
-### Specialized Process Types
-- **FakeProxyProcess**: Extended fake process implementing IProxyProcess interface with command tracking, JSON message handling, and initialization simulation
-- **Session Management**: Built-in support for session-based operations and command/response patterns
+**Core Process Layer**
+- `FakeProcess` - Base process mock implementing `IProcess` with controllable lifecycle events
+- `FakeProcessLauncher` - Creates and tracks FakeProcess instances
 
-### Factory Pattern
-- **FakeProcessLauncherFactory**: Centralized factory providing singleton instances of all fake launchers with unified reset capabilities
+**Debug Target Layer** 
+- `FakeDebugTargetLauncher` - Specialized launcher for Python debugging scenarios with auto-incrementing debug ports
+
+**Proxy Process Layer**
+- `FakeProxyProcess` - Extended process mock with command tracking and initialization simulation
+- `FakeProxyProcessLauncher` - Launches proxy processes with automatic 'init' command responses
+
+**Factory Layer**
+- `FakeProcessLauncherFactory` - Centralized factory providing singleton access to all fake launchers
 
 ## Public API Surface
 
-### Main Entry Points
-- `FakeProcessLauncherFactory`: Primary entry point providing access to all launcher implementations
-- Factory methods: `createProcessLauncher()`, `createDebugTargetLauncher()`, `createProxyProcessLauncher()`
-- Unified reset: `reset()` method clears state across all components
+**Primary Entry Points:**
+- `FakeProcessLauncherFactory` - Main factory for obtaining all launcher instances
+- Individual launcher classes can be instantiated directly for isolated testing
 
-### Test Control Interface
-- **Pre-configuration**: `prepare*()` methods allow setting up specific behavior before launch operations
-- **State inspection**: `launched*` arrays and `getLast*()` methods enable test assertions
-- **Simulation helpers**: Methods to trigger specific process events, outputs, and state changes
+**Key Methods:**
+- `launch()` / `launchPythonDebugTarget()` / `launchProxy()` - Process creation methods
+- `simulate*()` methods on FakeProcess - Control process behavior (output, errors, exit, etc.)
+- `prepare*()` methods - Pre-configure next process/target behavior
+- `reset()` methods - Clean state for test isolation
 
 ## Internal Organization and Data Flow
 
-### State Tracking
-- All launchers maintain arrays of launched processes/targets/proxies for test verification
-- Comprehensive logging of commands, arguments, options, and session details
-- Singleton pattern ensures state persistence across test operations
+**State Management:**
+- Each fake maintains internal arrays tracking launched processes/targets
+- Process state managed through private fields (`_killed`, `_exitCode`, `_signalCode`)
+- Automatic ID generation (process IDs, debug ports) for realistic simulation
 
-### Event Simulation
-- Uses `process.nextTick()` to maintain proper event loop semantics
-- Automatic emission of 'exit' and 'close' events for realistic process lifecycle simulation
-- Built-in IPC message handling with proper async timing
+**Event Flow:**
+- EventEmitter-based async simulation using `process.nextTick()` for realistic timing
+- Automatic response interception in proxy launchers for 'init' commands
+- Stream-based I/O simulation using PassThrough streams
 
-### Auto-response Logic
-- Proxy processes automatically respond to 'init' commands unless pre-configured
-- Port auto-increment for debug targets to avoid conflicts
-- Default successful initialization behavior with override capabilities
+**Test Orchestration:**
+- Centralized reset capability across all fakes via factory
+- Launch history tracking for test verification
+- Pre-configuration support for deterministic test scenarios
 
 ## Important Patterns and Conventions
 
-### Test Double Pattern
-- All implementations are true fakes (not stubs or mocks) providing working behavior
-- Maintain interface compatibility with production implementations
-- Enable both positive and negative test scenarios
+**Test Double Pattern:** All implementations are controllable fakes rather than stubs, providing rich simulation capabilities while maintaining deterministic behavior.
 
-### Builder Pattern
-- `prepare*()` methods allow configuring specific instances before they're launched
-- Chainable configuration for complex test scenarios
-- Clear separation between preparation and execution phases
+**Factory Pattern:** Centralized access to all fakes with singleton management for consistent test state.
 
-### Event-Driven Architecture
-- Proper EventEmitter inheritance with realistic timing
-- Consistent event emission patterns matching real process behavior
-- Support for both synchronous state queries and asynchronous event handling
+**Event Simulation:** Realistic async behavior through EventEmitter patterns matching Node.js process APIs.
 
-## Critical Design Decisions
-- Singleton factory instances enable cross-test state inspection and coordination
-- PassThrough streams provide realistic I/O behavior without external dependencies
-- Auto-increment patterns (ports, PIDs) prevent test interference
-- Comprehensive reset capabilities ensure test isolation when needed
+**Command Interception:** Automatic response generation for common initialization patterns, reducing test setup complexity.
+
+**Deterministic Defaults:** Fixed process IDs (12345) and predictable port allocation for consistent test execution.

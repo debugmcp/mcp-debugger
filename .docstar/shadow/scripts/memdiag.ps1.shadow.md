@@ -1,69 +1,65 @@
 # scripts/memdiag.ps1
 @source-hash: defc069a7d6b9f32
-@generated: 2026-02-09T18:15:19Z
+@generated: 2026-02-10T00:42:03Z
 
-## Primary Purpose
-Windows memory diagnostic PowerShell script that provides comprehensive memory usage analysis through multiple perspectives - system-level metrics, performance counters, and per-process breakdowns. Designed for troubleshooting memory issues and capacity planning.
+## Windows Memory Diagnostic Script
 
-## Key Components
+**Primary Purpose**: Comprehensive Windows memory usage analysis tool that provides system-level and process-level memory insights through multiple data sources.
 
-### Parameters & Configuration (L1-5)
-- `$TopN` parameter (L2): Controls number of top processes displayed (default: 25)
-- Error suppression enabled (L5) for graceful handling of permission/counter failures
+**Core Architecture**: PowerShell script that combines WMI queries, performance counters, and process objects to create a detailed memory diagnostic snapshot.
 
-### Core Functions
-- `GB()` function (L7): Utility for converting bytes to GB with 2 decimal precision
+### Key Components
 
-### System Memory Analysis (L11-37)
-Gathers comprehensive system-level memory metrics:
-- Physical memory totals via Win32_OperatingSystem (L12-14)
-- Performance counters for commit, pools, cache, standby memory (L16-26)
-- Memory compression and pagefile usage (L24-26)
-- Process memory aggregation (L28-29)
+**Parameters & Configuration (L1-5)**:
+- `$TopN` parameter controls number of processes shown in rankings (default: 25)
+- `$ErrorActionPreference = 'SilentlyContinue'` suppresses non-critical errors
 
-### Commit Memory Breakdown (L39-54)
-Attempts to attribute committed memory by analyzing:
-- Page table bytes, system code, drivers, cache (L41-46)
-- Kernel commit approximation and delta calculation (L46-47)
-- Identifies unattributed committed memory (L53)
+**Utility Functions**:
+- `GB()` helper function (L7) converts bytes to gigabytes with 2 decimal precision
 
-### Performance Counter Process Analysis (L56-145)
-Three separate attempts to analyze per-process memory via performance counters:
+### Data Collection Strategies
 
-1. **Private Bytes Analysis (L58-78)**
-   - Maps process instances to PIDs (L61-62)
-   - Sorts by private memory usage (L64-70)
-   - Graceful degradation on permission failures (L75-77)
+**System Memory Overview (L11-37)**:
+- Uses `Win32_OperatingSystem` CIM instance for total/free physical memory
+- Queries 10+ performance counters for detailed memory metrics:
+  - Committed bytes vs commit limit
+  - Kernel pools (paged/nonpaged) 
+  - File cache and standby cache tiers
+  - Memory compression statistics
+  - Pagefile utilization
+- Aggregates process private bytes and working set totals
 
-2. **Committed Bytes Analysis (L81-102)**
-   - Alternative commit size measurement (L83-94)
-   - Similar structure with error handling (L99-101)
+**Commit Attribution Analysis (L39-54)**:
+- Attempts to break down committed memory by component
+- Calculates approximate kernel commit from pools, page tables, system code
+- Reports "delta" representing unattributed committed memory
 
-3. **Commit Size Analysis with Fallback (L105-145)**
-   - Primary: Uses "Commit Size" counter (closest to Task Manager) (L107-122)
-   - Fallback: Virtual Bytes when Commit Size unavailable (L126-143)
-   - Nested try-catch for graceful degradation (L125-144)
+**Process Memory Analysis (Multiple Approaches)**:
+1. **Private Bytes via Perf Counters (L56-78)**: Most accurate process memory attribution
+2. **Committed Bytes via Perf Counters (L80-102)**: Alternative commit measurement
+3. **Commit Size via Perf Counters (L104-145)**: Task Manager equivalent, with Virtual Bytes fallback
+4. **Get-Process Analysis (L147-162)**: Native PowerShell object approach for Private/Working Set
 
-### Process Rankings (L147-179)
-Multiple process views for different analysis needs:
-- Top by Private Bytes (L148-153)
-- Top by Working Set (L156-162)
-- Special processes (Docker, WSL, MemoryCompression) (L166-171)
-- Handle count analysis for leak detection (L174-179)
+**Specialized Reporting**:
+- Special process monitoring (L165-171): MemoryCompression, WSL, Docker processes
+- Handle count analysis (L174-179): Leak detection indicator
 
-## Dependencies
-- Windows Performance Counters (requires appropriate permissions)
-- Win32_OperatingSystem CIM class
-- Get-Process cmdlet
+### Error Handling Patterns
 
-## Architecture Patterns
-- **Graceful Degradation**: Multiple fallback mechanisms for counter access failures
-- **Multi-perspective Analysis**: Same data viewed through different lenses (system vs process)
-- **Error Isolation**: Try-catch blocks prevent single counter failure from breaking entire analysis
-- **Consistent Formatting**: Standardized MB/GB conversion and table output
+- Graceful degradation with try-catch blocks around performance counter queries
+- Fallback mechanisms when newer counters unavailable (Commit Size → Virtual Bytes)
+- Process ID mapping with null checks for missing instances
 
-## Critical Constraints
-- Requires Windows environment with performance counter access
-- Some counters require elevated permissions
-- Counter availability varies by Windows version (Commit Size counter)
-- Memory calculations are approximations due to kernel memory attribution complexity
+### Key Dependencies
+
+- Windows Performance Counters subsystem
+- CIM/WMI access for system information  
+- Administrative privileges recommended for complete counter access
+
+### Output Structure
+
+Produces structured console output with:
+- System memory summary with percentages
+- Tabular process rankings by various metrics
+- Memory composition breakdown
+- Special process monitoring results

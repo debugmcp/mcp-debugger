@@ -96,30 +96,8 @@ export class DapConnectionManager {
     };
 
     this.logger.info('[ConnectionManager] Sending DAP "initialize" request');
-    const initResponse = await client.sendRequest('initialize', initializeArgs);
+    await client.sendRequest('initialize', initializeArgs);
     this.logger.info('[ConnectionManager] DAP "initialize" request sent and response received.');
-    
-    // TEMPORARY DEBUG: Log capabilities to check for breakpointLocations support
-    console.error('[DEBUG-DAP] Initialize response capabilities:', JSON.stringify(initResponse, null, 2));
-    if (initResponse && typeof initResponse === 'object' && 'body' in initResponse) {
-      const typedResponse = initResponse as DebugProtocol.InitializeResponse;
-      const capabilities = typedResponse.body;
-      if (capabilities) {
-        console.error('[DEBUG-DAP] Breakpoint-related capabilities:', {
-          supportsBreakpointLocationsRequest: capabilities.supportsBreakpointLocationsRequest,
-          supportsConditionalBreakpoints: capabilities.supportsConditionalBreakpoints,
-          supportsHitConditionalBreakpoints: capabilities.supportsHitConditionalBreakpoints,
-          supportsLogPoints: capabilities.supportsLogPoints,
-          supportsDataBreakpoints: capabilities.supportsDataBreakpoints,
-          supportsFunctionBreakpoints: capabilities.supportsFunctionBreakpoints,
-          supportsInstructionBreakpoints: capabilities.supportsInstructionBreakpoints,
-          supportsExceptionInfoRequest: capabilities.supportsExceptionInfoRequest,
-          supportsExceptionOptions: capabilities.supportsExceptionOptions,
-          supportsExceptionConditions: (capabilities as unknown as Record<string, unknown>).supportsExceptionConditions,
-          supportsExceptionFilterOptions: capabilities.supportsExceptionFilterOptions
-        });
-      }
-    }
   }
 
   /**
@@ -225,10 +203,7 @@ export class DapConnectionManager {
     justMyCode: boolean = true,
     launchConfig?: Record<string, unknown>
   ): Promise<void> {
-    // DIAGNOSTIC: Log the incoming scriptPath
-    this.logger.info('[ConnectionManager] DIAGNOSTIC: Received scriptPath:', scriptPath);
-    this.logger.info('[ConnectionManager] DIAGNOSTIC: scriptPath type:', typeof scriptPath);
-    this.logger.info('[ConnectionManager] DIAGNOSTIC: scriptPath length:', scriptPath.length);
+    this.logger.info('[ConnectionManager] Received scriptPath:', scriptPath);
     
     const baseLaunchArgs = launchConfig ? { ...launchConfig } : {};
 
@@ -263,10 +238,6 @@ export class DapConnectionManager {
       launchArgs.console = 'internalConsole';
     }
 
-    // DIAGNOSTIC: Log the launch args object before sending
-    this.logger.info('[ConnectionManager] DIAGNOSTIC: launchArgs object:', JSON.stringify(launchArgs, null, 2));
-    this.logger.info('[ConnectionManager] DIAGNOSTIC: launchArgs.program value:', launchArgs.program);
-    
     this.logger.info('[ConnectionManager] Sending "launch" request to adapter with args:', launchArgs);
     await client.sendRequest('launch', launchArgs);
     this.logger.info('[ConnectionManager] DAP "launch" request sent.');

@@ -1,30 +1,24 @@
 # tests/fixtures/javascript-e2e/app.ts
 @source-hash: 1cd6846134d9b5e0
-@generated: 2026-02-09T18:14:30Z
+@generated: 2026-02-10T00:41:22Z
 
-## Primary Purpose
-TypeScript test fixture designed for end-to-end debugging scenarios, specifically testing TypeScript compilation with source map generation and debugger integration.
+## Purpose
+E2E testing fixture for debugging TypeScript applications with source maps. Provides a minimal TypeScript program with a designated breakpoint location for testing debugging capabilities.
 
-## Key Components
-- **greeting variable (L2)**: String literal constant 'hello world' with explicit TypeScript typing
-- **shout variable (L3)**: Transformed uppercase version of greeting with debugging breakpoint marker
-- **Console output (L4)**: Simple logging statement for verification
+## Key Elements
+- **greeting variable** (L2): String literal constant `'hello world'` with explicit type annotation
+- **shout variable** (L3): Derived uppercase transformation with `// BREAK_HERE` comment indicating designated breakpoint location
+- **Console output** (L4): Simple logging of the transformed string
 
 ## Dependencies
-- TypeScript compiler (implicit - requires compilation to JavaScript)
-- Source map support for debugging
-- Console API for output
+- TypeScript compiler (implicit via .ts extension)
+- Source map support (implied by E2E debugging context)
 
-## Architectural Decisions
-- Uses explicit TypeScript typing (`string`) for demonstration purposes
-- Includes `BREAK_HERE` comment as debugging marker for E2E test automation
-- Minimal implementation focuses on basic TypeScript features (type annotations, method calls)
+## Architecture Notes
+- Minimal program structure optimized for debugging scenarios
+- Type annotations demonstrate TypeScript features for testing
+- Strategic breakpoint placement for E2E test automation
+- No external dependencies or complex logic - focuses on debugging workflow verification
 
-## Purpose in Test Suite
-This fixture serves as a controlled environment for testing:
-- TypeScript-to-JavaScript compilation
-- Source map accuracy during debugging
-- Breakpoint placement and variable inspection
-- E2E debugging workflow validation
-
-The simplicity is intentional - provides predictable behavior for automated testing scenarios.
+## Testing Context
+The `// BREAK_HERE` comment (L3) serves as a marker for automated debugging tests to verify breakpoint functionality in TypeScript environments with source map support.

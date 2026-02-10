@@ -1,33 +1,44 @@
 # tests/core/unit/utils/session-migration.test.ts
-@source-hash: aae494d446eae0c5
-@generated: 2026-02-09T18:14:25Z
+@source-hash: b3bdc2d9b406fd90
+@generated: 2026-02-10T01:18:59Z
 
 ## Purpose
-Unit tests for verifying migration from deprecated `pythonPath` parameter to new `executablePath` parameter in session creation. Validates TypeScript type safety and ensures all debug session interfaces use the new parameter consistently across the DebugMCP system.
+Unit test suite verifying the migration from `pythonPath` to `executablePath` parameter in session management. Ensures the old API has been fully replaced and validates the new parameter works across all supported debug languages.
 
 ## Test Structure
-Test suite organized into 6 verification scenarios within main describe block (L8-132):
+- **Main describe block (L8-131)**: "Session Migration Verification" - comprehensive migration validation
+- **Test imports (L4-6)**: Uses vitest framework, imports SessionStore and CreateSessionParams from session module, DebugLanguage enum from shared package
 
-### Key Test Functions
-- **pythonPath rejection test (L9-25)**: Verifies TypeScript prevents using deprecated `pythonPath`, ensures only `executablePath` exists on session objects
-- **Multi-language support test (L27-47)**: Tests `executablePath` works with Python and Mock languages, validates session creation and retrieval
-- **Default executable path test (L49-70)**: Tests platform-specific defaults when `executablePath` not provided (python3 on Unix, python on Windows)
-- **API migration completeness test (L72-108)**: Documents all migrated interfaces (CreateSessionParams, ProxyConfig, ProxyInitPayload) use `executablePath`
-- **Multi-executable demonstration (L110-131)**: Shows flexible executable path support across different Python installations and platforms
+## Key Test Cases
+
+### Migration Verification Tests
+- **pythonPath rejection test (L9-24)**: Verifies TypeScript prevents using old `pythonPath` parameter, confirms only `executablePath` exists on created sessions
+- **Multi-language support test (L26-46)**: Tests both Python and Mock languages work with `executablePath`, validates language-specific behavior
+
+### Default Handling Tests  
+- **Platform defaults test (L48-69)**: Tests executable path defaults when not provided, handles environment variable cleanup, validates platform-specific defaults (python vs python3)
+
+### API Migration Validation
+- **Complete migration test (L71-107)**: Documents that all interfaces use `executablePath`:
+  - CreateSessionParams (L76-79)
+  - ProxyConfig (L82-90) 
+  - ProxyInitPayload (L93-101)
+
+### Flexibility Demonstration
+- **Multi-executable test (L109-130)**: Demonstrates various executable paths work across languages, tests edge cases like Mock language with executable
 
 ## Dependencies
-- `SessionStore` and `CreateSessionParams` from `../../../../src/session/session-store.js` (L5)
-- `DebugLanguage` enum from `@debugmcp/shared` (L6)
-- Vitest testing framework (L4)
+- **SessionStore**: Core session management class from `src/session/session-store.js`
+- **DebugLanguage**: Enum defining supported debug languages (PYTHON, MOCK)
+- **CreateSessionParams**: Type interface for session creation parameters
 
 ## Key Patterns
-- Environment variable manipulation with cleanup pattern (L53-69)
-- Type assertion casting with `as CreateSessionParams` for migration verification (L17)
-- Parameterized testing with test case arrays (L114-120)
-- Session lifecycle testing (create → retrieve → verify)
+- Environment variable isolation using try/finally blocks (L52-68)
+- Platform-specific executable defaults (win32 vs unix)
+- Type safety validation through TypeScript compilation
+- Comprehensive API interface validation through inline examples
 
-## Critical Constraints
-- All debug session creation must use `executablePath` instead of deprecated `pythonPath`
-- Platform-specific executable defaults required for Python sessions
-- TypeScript compiler should prevent usage of old parameter names
-- Session store must maintain backward compatibility while enforcing new interface
+## Test Data Patterns
+- Uses realistic executable paths for different platforms
+- Tests both required and optional parameter scenarios
+- Validates both positive cases (works) and negative cases (old API rejected)

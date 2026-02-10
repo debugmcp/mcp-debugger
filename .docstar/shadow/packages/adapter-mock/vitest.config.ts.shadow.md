@@ -1,31 +1,26 @@
 # packages/adapter-mock/vitest.config.ts
 @source-hash: fe397d6a657d0a8a
-@generated: 2026-02-09T18:14:56Z
+@generated: 2026-02-10T00:41:42Z
 
-## Purpose
-Vitest test configuration file for the `adapter-mock` package, setting up the testing environment with TypeScript support and workspace dependencies.
+**Primary Purpose**: Vitest configuration for the adapter-mock package, defining test environment settings, file inclusion patterns, and module resolution aliases.
 
-## Configuration Structure
+**Key Configuration Sections**:
+- **Test Configuration (L5-16)**: Sets up Node.js testing environment with global test functions enabled
+- **File Patterns (L8-9)**: Includes test files from `tests/**/*.{test,spec}.ts` and `src/**/*.{test,spec}.ts`, excludes `node_modules` and `dist`
+- **Test Aliases (L10-15)**: 
+  - JS extension stripping regex (L12): `^(\\.{1,2}/.+)\\.js$` → `$1` for handling .js imports in TypeScript
+  - Workspace alias (L14): `@debugmcp/shared` → `../shared/src/index.ts`
+- **Resolve Configuration (L17-22)**: Module resolution with TypeScript-first extension priority and duplicate workspace alias
 
-### Test Configuration (L5-16)
-- **globals**: Enables global test functions (L6)
-- **environment**: Node.js runtime environment for tests (L7)
-- **include**: Test file patterns covering `tests/` and `src/` directories (L8)
-- **exclude**: Standard exclusions for dependencies and build output (L9)
+**Dependencies**: 
+- `vitest/config` for configuration utilities
+- `path` for cross-platform path resolution
 
-### Alias Configuration (L10-15, L19-21)
-- **JS extension handling**: Regex alias to strip `.js` extensions from imports (L12)
-- **Workspace dependency**: Maps `@debugmcp/shared` to local TypeScript source file in sibling package (L14, L20)
+**Architecture Notes**:
+- Monorepo setup evidenced by workspace alias to `../shared` package
+- TypeScript-centric with JS extension handling for compatibility
+- Standard Node.js test environment suitable for adapter testing
 
-### Resolve Configuration (L17-22)
-- **File extensions**: TypeScript-first resolution order with fallbacks (L18)
-- **Duplicate alias**: Redundant workspace alias definition for module resolution (L20)
-
-## Dependencies
-- `vitest/config`: Test framework configuration utility (L1)
-- `path`: Node.js path manipulation for workspace resolution (L2)
-
-## Architecture Notes
-- Workspace-aware configuration enabling local development with shared packages
-- TypeScript-first setup with JavaScript import compatibility
-- Dual alias definitions suggest potential for consolidation
+**Key Patterns**:
+- Duplicate alias definitions (test.alias and resolve.alias) ensure consistency across test and build contexts
+- Extension stripping regex accommodates TypeScript compilation artifacts

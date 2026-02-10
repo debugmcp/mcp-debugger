@@ -1,85 +1,101 @@
 # packages/adapter-java/src/utils/
-@generated: 2026-02-09T18:16:16Z
+@generated: 2026-02-10T01:19:41Z
 
-## Purpose
-Java debugging utilities module providing comprehensive Java runtime discovery, debugger management, and output parsing for the Java adapter package. This module bridges the gap between the Debug Adapter Protocol (DAP) and the Java Debugger (jdb) command-line tool, enabling structured debugging workflows.
+## Purpose and Responsibility
 
-## Key Components and Relationships
+The `utils` directory provides the core Java debugging infrastructure for the Java Debug Adapter. It abstracts the complexity of discovering, launching, and communicating with the Java Debugger (jdb) command-line tool, transforming raw JDB interactions into structured debugging capabilities compatible with the Debug Adapter Protocol (DAP).
 
-### Java Environment Detection (`java-utils.ts`)
-Core infrastructure for discovering and validating Java tools across platforms:
-- **Java Runtime Discovery**: Multi-tier fallback strategy (user preference → JAVA_HOME → PATH) for finding Java executables
-- **Version Management**: Extracts and parses Java version information from both legacy (1.8.x) and modern (9+) formats
-- **Debugger Tool Location**: Parallel discovery system for Java Debugger (jdb) executable
-- **Cross-platform Support**: Windows .exe handling and consistent PATH resolution
+## Key Components and Integration
 
-### JDB Output Parsing (`jdb-parser.ts`)
-Static parsing utilities that convert unstructured jdb text output into structured data:
-- **Event Detection**: Parses debugger events (breakpoints, steps, termination) from text streams
-- **Stack Trace Parsing**: Extracts structured stack frames with method and location information  
-- **Variable Inspection**: Converts local variable dumps into typed variable representations
-- **Thread Management**: Parses thread listings and maps names to consistent numeric IDs
+### Three-Layer Architecture
 
-### JDB Process Wrapper (`jdb-wrapper.ts`)
-High-level orchestration layer managing the jdb process lifecycle and command execution:
-- **Process Management**: Handles jdb spawning in both launch and attach modes
-- **Command Queue**: Serializes jdb commands to handle single-threaded CLI nature
-- **Event Bridge**: Converts parsed jdb output into EventEmitter events for DAP consumption
-- **State Tracking**: Maintains debugger state (breakpoints, threads, execution status)
+1. **Discovery Layer (`java-utils.ts`)**
+   - Cross-platform Java/JDB executable discovery and validation
+   - Supports multiple resolution strategies (JAVA_HOME, PATH, user-specified)
+   - Provides version detection and executable validation with timeout protection
 
-## Data Flow Architecture
+2. **Communication Layer (`jdb-wrapper.ts`)**
+   - High-level JDB process management and command orchestration
+   - Event-driven architecture extending EventEmitter for async debugging
+   - Queued command execution system with timeout handling
+   - Supports both launch mode (start new JVM) and attach mode (connect to running JVM)
 
-1. **Initialization**: `java-utils.ts` discovers Java/jdb executables using environment detection
-2. **Process Launch**: `jdb-wrapper.ts` spawns jdb process with discovered executables and user configuration
-3. **Command Execution**: Wrapper queues and executes jdb commands, collecting text responses
-4. **Output Processing**: `jdb-parser.ts` converts text responses into structured TypeScript objects
-5. **Event Emission**: Wrapper emits structured events consumed by the broader Java adapter
+3. **Translation Layer (`jdb-parser.ts`)**
+   - Converts unstructured JDB text output into structured TypeScript interfaces
+   - Regex-based parsing of debugging events, stack traces, variables, and thread information
+   - Maps Java types and values to DAP-compatible representations
+
+### Component Interaction Flow
+
+```
+Java Discovery → JDB Process Launch/Attach → Command Execution → Output Parsing → DAP Events
+```
+
+- `java-utils` locates and validates Java/JDB executables
+- `jdb-wrapper` spawns the JDB process using discovered executables
+- `jdb-wrapper` sends debugging commands and receives raw output
+- `jdb-parser` transforms raw output into structured debugging data
+- `jdb-wrapper` emits standardized debugging events for consumption by the adapter
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **`findJavaExecutable(preferredPath?)`**: Main Java discovery function with fallback strategies
-- **`findJdb(preferredPath?)`**: Java Debugger discovery with same fallback pattern
-- **`getJavaVersion(javaPath)`**: Version extraction from Java executable
-- **`JdbWrapper.spawn(config)`**: Launch mode debugger initialization
-- **`JdbWrapper.attach(config)`**: Attach mode debugger initialization
 
-### Configuration Interfaces
-- **`JdbConfig`**: Comprehensive configuration for both launch/attach debugging modes
-- **`JdbBreakpoint`**: Breakpoint representation with verification tracking
-- **`JdbStoppedEvent`**: Structured debugger stop event information
+**JdbWrapper Class:**
+- `spawn(config)` / `attach(config)`: Initialize debugging session
+- `setBreakpoint()` / `clearBreakpoint()`: Breakpoint management
+- `continue()`, `stepOver()`, `stepIn()`, `stepOut()`: Execution control
+- `getStackTrace()`, `getLocals()`, `getThreads()`: State inspection
+- Event emissions: 'stopped', 'continued', 'terminated', 'error'
 
-### Debugging Operations
-- **Command Execution**: `executeCommand()` for synchronous operations, `sendCommandDirect()` for execution control
-- **Breakpoint Management**: `setBreakpoint()`, `clearBreakpoint()` with class resolution
-- **State Inspection**: `getStackTrace()`, `getLocals()`, `getThreads()` for runtime introspection
-- **Execution Control**: `continue()`, `stepOver()`, `stepIn()`, `stepOut()` for program flow
+**Java Discovery Functions:**
+- `findJavaExecutable(preferredPath?)`: Multi-strategy Java discovery
+- `findJdb(javaPath?)`: JDB executable resolution
+- `getJavaVersion()`, `parseJavaMajorVersion()`: Version management
 
-## Internal Organization
+**JDB Parser (Static Methods):**
+- `parseStoppedEvent()`: Breakpoint/step event parsing
+- `parseStackTrace()`, `parseLocals()`, `parseThreads()`: State parsing
+- `isPrompt()`, `isVMStarted()`, `isTerminated()`: State detection
 
-### Command Queue Pattern
-The wrapper serializes all jdb interactions through a command queue, handling the single-threaded nature of the jdb CLI while providing promise-based async APIs to consumers.
+## Internal Organization and Data Flow
 
-### Event-Driven Communication
-Uses EventEmitter pattern to decouple jdb output processing from consumer logic, emitting events like 'stopped', 'continued', 'output', 'terminated', and 'error'.
+### Command Processing Pipeline
+1. Commands queued in `jdb-wrapper` with timeout handling
+2. Direct process communication via stdin/stdout pipes
+3. Output buffering and event detection in real-time
+4. Parsed events trigger appropriate DAP-compatible emissions
 
-### Caching and State Management
-- **Executable Discovery**: WhichCommandFinder caches resolved paths to avoid repeated filesystem operations
-- **Thread Information**: Cached thread data reduces redundant jdb queries
-- **Breakpoint Tracking**: Maintains verification status and unique identification across debugging sessions
+### Configuration Management
+- **JdbConfig**: Unified configuration supporting both launch and attach modes
+- **Cross-platform handling**: Automatic Windows .exe extension resolution
+- **Environment integration**: JAVA_HOME and PATH-based discovery
 
-## Critical Design Patterns
+### State Management
+- Breakpoint tracking with verification status
+- Thread information caching
+- Process lifecycle management with cleanup
 
-### Multi-tier Fallback Strategy
-Consistent across Java and jdb discovery - user preference, environment variables, then PATH resolution with comprehensive error reporting including "tried paths" for debugging.
+## Important Patterns and Conventions
 
-### Cross-platform Compatibility
-Windows-specific handling throughout, including .exe extension variants and proper path resolution.
+### Error Handling Strategy
+- Custom error types (CommandNotFoundError) with detailed context
+- Timeout protection on all subprocess operations (5-second default)
+- Comprehensive error detection across multiple JDB output patterns
 
-### Timeout Management
-Consistent 5-second timeouts for process operations with graceful degradation and proper cleanup to prevent hanging operations.
+### Cross-Platform Compatibility
+- Windows .exe extension handling throughout discovery
+- Platform-specific command resolution via 'which' library
+- Path separator and executable extension abstraction
 
-### Type Inference and Parsing
-Robust regex-based parsing with fallback patterns handles jdb's varied output formats, including type inference for Java primitives and objects.
+### Performance Optimizations
+- Command finder caching to avoid repeated PATH lookups
+- Direct command sending for non-blocking execution control
+- Buffer management for real-time output processing
 
-This module serves as the foundational layer enabling Java debugging capabilities, abstracting away platform differences and jdb's text-based interface to provide a clean, structured API for the broader Java adapter system.
+### Testing Support
+- Dependency injection via `setDefaultCommandFinder()`
+- Configurable command resolution for test environments
+- Comprehensive validation with detailed error reporting
+
+This utility module serves as the foundation for Java debugging capabilities, providing reliable process management, robust executable discovery, and accurate parsing of JDB output into structured debugging data suitable for IDE integration.

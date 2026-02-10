@@ -1,27 +1,37 @@
 # packages/adapter-javascript/scripts/lib/vendor-strategy.js
 @source-hash: d90cc98474b10b06
-@generated: 2026-02-09T18:13:52Z
+@generated: 2026-02-10T00:41:05Z
 
-**Primary Purpose**: Environment-based vendoring strategy determination for JavaScript adapter build system. Provides pure functions to parse environment variables and determine how dependencies should be sourced (local development, build-from-source, or prebuilt artifacts).
+## Primary Purpose
+Utility module for determining vendoring strategies based on environment variables. Provides side-effect-free ESM functions to parse boolean environment values and determine how dependencies should be vendored (local development, build from source, or use prebuilt artifacts).
 
-**Key Functions**:
-- `parseEnvBool(v)` (L18-20): Utility function that coerces any value to boolean, only returning true for case-insensitive string "true"
-- `determineVendoringPlan(env)` (L34-43): Core strategy function that returns vendoring mode objects based on environment variable precedence
+## Key Functions
 
-**Vendoring Strategy Logic** (L34-43):
-1. **Local mode**: Returns `{ mode: 'local', localPath: string }` when `JS_DEBUG_LOCAL_PATH` is non-empty
-2. **Prebuilt-then-source mode**: Returns `{ mode: 'prebuilt-then-source' }` when `JS_DEBUG_BUILD_FROM_SOURCE=true`  
-3. **Prebuilt-only mode**: Returns `{ mode: 'prebuilt-only' }` as default fallback
+### `parseEnvBool(v)` (L18-20)
+- **Purpose**: Converts environment variable-like values to boolean
+- **Logic**: Only returns `true` for case-insensitive string "true", all other values return `false`
+- **Input**: `unknown` type (designed for env var flexibility)
+- **Usage**: Helper for parsing boolean environment flags
 
-**Environment Variables**:
-- `JS_DEBUG_LOCAL_PATH`: Highest priority - enables local development mode with specified path
-- `JS_DEBUG_BUILD_FROM_SOURCE`: Secondary priority - enables source building when "true"
-- `JS_DEBUG_FORCE_REBUILD`: Referenced in comments but handled by calling scripts (L28-29)
+### `determineVendoringPlan(env)` (L34-43)
+- **Purpose**: Central strategy selector that returns vendoring plan based on environment variables
+- **Parameters**: `env` object (defaults to `process.env` with safe fallback for non-Node environments)
+- **Return Types**:
+  - `{ mode: 'local', localPath: string }` - when `JS_DEBUG_LOCAL_PATH` is set (L36-38)
+  - `{ mode: 'prebuilt-then-source' }` - when `JS_DEBUG_BUILD_FROM_SOURCE=true` (L39-41) 
+  - `{ mode: 'prebuilt-only' }` - default fallback (L42)
 
-**Architecture Notes**:
-- ESM module with side-effect free exports
-- Safe process.env access with fallback for non-Node environments (L34)
-- Deterministic behavior with explicit precedence ordering
-- Type annotations support both NodeJS.ProcessEnv and generic Record types (L31-32)
+## Environment Variables
+- **`JS_DEBUG_LOCAL_PATH`**: Triggers local development mode with specified path
+- **`JS_DEBUG_BUILD_FROM_SOURCE`**: When "true", enables source building fallback
+- **`JS_DEBUG_FORCE_REBUILD`**: Referenced in comments but handled by calling scripts
 
-**Dependencies**: None - pure utility functions with defensive coding for environment access.
+## Architectural Decisions
+- **Side-effect free**: Pure functions with no global state modifications
+- **Environment-agnostic**: Safe fallback for non-Node environments (L34)
+- **Deterministic**: External concerns (force rebuild, artifact existence) delegated to callers
+- **Type-safe returns**: Union types clearly differentiate vendoring modes
+
+## Dependencies
+- No external dependencies
+- Uses built-in `String()` and string methods only

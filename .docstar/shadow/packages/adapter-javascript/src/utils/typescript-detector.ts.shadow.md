@@ -1,45 +1,42 @@
 # packages/adapter-javascript/src/utils/typescript-detector.ts
 @source-hash: 43947ff9c9de7311
-@generated: 2026-02-09T18:13:57Z
+@generated: 2026-02-10T00:41:06Z
 
-## TypeScript Runtime Detection Utility
+## Primary Purpose
+Detects TypeScript runtime executables (tsx and ts-node) with local-first resolution strategy, caching results for performance.
 
-**Primary Purpose:** Detects and locates TypeScript runtime executables (`tsx` and `ts-node`) with local node_modules prioritization and PATH fallback, using module-level caching for performance.
+## Key Components
 
-### Key Components
+**TsRunnerDetection Type (L14)**: Result interface with optional tsx and ts-node executable paths
 
-**Core Types:**
-- `TsRunnerDetection` (L14): Object type containing optional paths to tsx and tsNode executables
+**Cache Management**:
+- `cached` variable (L16): Module-wide cache for detection results
+- `clearCache()` (L29-31): Resets cache for testing
+- `defaultFileSystem` (L19): Configurable filesystem abstraction
 
-**State Management:**
-- `cached` (L16): Module-level cache storing detection results
-- `defaultFileSystem` (L19): Configurable filesystem abstraction defaulting to NodeFileSystem
+**Core Detection Functions**:
+- `detectBinary()` (L43-70): Detects single TypeScript runner with platform-aware binary resolution
+- `detectTsRunners()` (L76-89): Main async function that detects both tsx and ts-node with caching
 
-**Primary Functions:**
-- `detectBinary()` (L43-70): Single binary detection with Windows suffix handling (.cmd/.exe/bare)
-- `detectTsRunners()` (L76-89): Main async API detecting both tsx and ts-node with caching
-- `clearCache()` (L29-31): Cache invalidation utility for testing
-- `setDefaultFileSystem()` (L25-27): Dependency injection for filesystem abstraction
+**Utility Functions**:
+- `setDefaultFileSystem()` (L25-27): Dependency injection for filesystem testing
+- `toAbs()` (L33-35): Converts paths to absolute form
 
-**Helper Functions:**
-- `toAbs()` (L33-35): Path normalization to absolute paths
+## Detection Strategy
 
-### Detection Algorithm
+**Local-First Resolution (L50-61)**: Checks `<cwd>/node_modules/.bin/` first for project-local installations
 
-1. **Local Priority:** Searches `<cwd>/node_modules/.bin/` first
-2. **PATH Fallback:** Uses `whichInPath` utility for system-wide detection  
-3. **Windows Support:** Tries `.cmd`, `.exe`, then bare executable names
-4. **Caching:** Results cached at module level until `clearCache()` called
+**Platform-Aware Binary Names (L48)**: Windows supports `.cmd`, `.exe`, and bare executable names; Unix uses bare names only
 
-### Dependencies
+**PATH Fallback (L63-67)**: Uses `whichInPath` utility when local binaries not found
 
+## Dependencies
 - `path`: Node.js path manipulation
-- `@debugmcp/shared`: FileSystem abstraction (NodeFileSystem)
-- `./executable-resolver.js`: whichInPath utility and isWindows detection
+- `@debugmcp/shared`: FileSystem abstraction layer
+- `./executable-resolver.js`: Cross-platform executable resolution utilities
 
-### Architecture Patterns
-
-- **Strategy Pattern:** Pluggable filesystem via dependency injection
-- **Caching Strategy:** Module-level memoization with explicit cache control
-- **Error Handling:** Graceful degradation - returns undefined rather than throwing
-- **Platform Abstraction:** Windows-specific executable suffix handling
+## Architectural Patterns
+- **Dependency Injection**: FileSystem parameter allows testing with mock implementations
+- **Process-Level Caching**: Results cached module-wide to avoid repeated filesystem operations
+- **Fail-Safe Design**: Returns undefined rather than throwing on detection failures
+- **Platform Abstraction**: Handles Windows vs Unix executable naming conventions

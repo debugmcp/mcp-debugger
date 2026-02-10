@@ -25,7 +25,6 @@ import { IAdapterRegistry } from '@debugmcp/shared';
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
   stopOnEntry?: boolean;
   justMyCode?: boolean;
-  // Add other common custom arguments here if needed, e.g., console, cwd, env
 }
 
 // Define DebugResult interface (previously imported from provider.js)
@@ -66,7 +65,7 @@ export interface SessionManagerConfig {
 /**
  * Core session management functionality
  */
-export class SessionManagerCore {
+export abstract class SessionManagerCore {
   protected sessionStore: SessionStore;
   protected logDirBase: string;
   protected logger: ILogger;
@@ -393,9 +392,9 @@ export class SessionManagerCore {
     return this.cleanupProxyEventHandlers(session, proxyManager);
   }
 
-  // This method will be overridden in the main SessionManager class
-  protected async handleAutoContinue(): Promise<void> {
-    // Will be implemented in the main class that has access to continue method
-    throw new Error('handleAutoContinue must be implemented by SessionManager');
-  }
+  /**
+   * Handle auto-continue when stopOnEntry is false.
+   * Must be overridden in subclasses that have access to the continue method.
+   */
+  protected abstract handleAutoContinue(): Promise<void>;
 }

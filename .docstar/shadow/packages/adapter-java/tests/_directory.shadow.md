@@ -1,76 +1,81 @@
 # packages/adapter-java/tests/
-@generated: 2026-02-09T18:16:36Z
+@generated: 2026-02-10T01:19:57Z
 
-## Overall Purpose and Responsibility
+## Java Debug Adapter Test Suite
 
-This directory contains the complete test suite for the Java debug adapter's core functionality within the MCP debugging framework. It provides comprehensive validation of the adapter's ability to detect Java environments, manage debugging sessions, and parse Java Debugger (jdb) output into structured debugging protocol data. The tests ensure reliable Java application debugging across different Java versions and system configurations.
+This directory contains the comprehensive test suite for the Java debug adapter, providing complete validation coverage for the adapter's core functionality from environment detection through active debugging session management.
 
-## Key Components and Integration
+### Overall Purpose and Responsibility
 
-The test directory is organized into a three-layer architecture that mirrors the adapter's internal structure:
+The test suite serves as the quality assurance layer for the Java debug adapter implementation, ensuring reliable debugging capabilities across diverse Java environments. It validates the entire debugging pipeline:
+- Java environment detection and compatibility verification
+- Debug adapter factory operations and configuration
+- Real-time JDB (Java Debugger) output parsing and interpretation
+- End-to-end debugging workflow functionality
 
-### Factory Layer (`java-adapter-factory.test.ts`)
-- **Role**: Tests the primary entry point for Java debug adapter creation and orchestration
-- **Integration**: Validates coordination between environment detection, metadata generation, and adapter instantiation
-- **Dependencies**: Relies on mocked java-utils functions to isolate factory-specific logic
+### Key Components and Integration
 
-### Utility Layer (`java-utils.test.ts`)
-- **Role**: Tests foundational Java environment detection and management capabilities
-- **Core Functions**: Java version parsing, executable path resolution, JAVA_HOME detection, and command finding
-- **Process Simulation**: Uses complex EventEmitter mocking to simulate realistic child process behavior for Java version detection
+The test suite is organized into three complementary testing layers that mirror the adapter's architectural components:
 
-### Parser Layer (`jdb-parser.test.ts`)
-- **Role**: Tests transformation of raw Java Debugger output into structured debugging protocol data
-- **Data Processing**: Validates parsing of debugging events, stack traces, variables, threads, and breakpoints
-- **Error Resilience**: Ensures graceful handling of malformed or unexpected debugger output
+**Environment Validation Layer (`java-utils.test.ts`)**
+- Tests Java installation detection and version parsing
+- Validates JAVA_HOME configuration and command discovery
+- Ensures compatibility enforcement (Java 8+ requirement)
+- Provides foundation for all higher-level adapter operations
 
-## Public API Surface
+**Adapter Factory Layer (`java-adapter-factory.test.ts`)**
+- Tests adapter instantiation and metadata retrieval
+- Validates environment dependency integration
+- Ensures proper configuration and initialization workflows
+- Serves as the primary entry point validation for adapter creation
 
-### Primary Entry Points
-- **Adapter Creation**: `JavaAdapterFactory.createAdapter()` - Main adapter instantiation
-- **Environment Validation**: `JavaAdapterFactory.isEnvironmentSupported()` - Comprehensive Java environment checking
-- **Metadata Access**: `JavaAdapterFactory.getMetadata()` - Adapter capabilities and supported file types
+**Runtime Parser Layer (`jdb-parser.test.ts`)**
+- Tests active debugging session output interpretation
+- Validates extraction of breakpoints, steps, variables, and stack traces
+- Ensures proper VM state detection and lifecycle management
+- Provides the core debugging functionality validation
 
-### Utility Interface
-- **Environment Detection**: Version parsing, executable finding, JAVA_HOME resolution
-- **Command Management**: Configurable command finder system with validation
-- **Version Compatibility**: Support for both legacy (1.x) and modern (9+) Java version formats
+### Public Testing Interface
 
-### Parser Interface
-- **Event Processing**: Debugging events, errors, and session state changes
-- **State Inspection**: Stack traces, local variables, thread information
-- **Session Management**: VM lifecycle and prompt detection
+The test suite validates the adapter's primary API surface:
 
-## Internal Organization and Data Flow
+**Factory Operations**
+- `JavaAdapterFactory.createAdapter()` - Complete adapter instance creation
+- `JavaAdapterFactory.getMetadata()` - Adapter capability and version information
+- `validateEnvironment()` - Java installation compatibility checking
 
-### Testing Architecture
-The test suite follows a hierarchical structure where:
-1. **Factory tests** validate high-level orchestration and depend on mocked utility functions
-2. **Utility tests** verify low-level Java environment interaction with isolated process simulation
-3. **Parser tests** ensure accurate data transformation from jdb output to debugging protocol structures
+**Runtime Operations**
+- `JdbParser` methods - Complete suite of debugging output interpretation
+- Environment utilities - Java detection and configuration validation
 
-### Mock Strategy
-- **Comprehensive Isolation**: Each layer uses extensive mocking to test units in isolation
-- **Realistic Simulation**: Process mocking includes actual Java command output formats
-- **State Management**: Consistent beforeEach/afterEach cleanup ensures test independence
-- **Environment Control**: Careful preservation and restoration of system environment variables
+### Internal Test Organization and Data Flow
 
-## Important Patterns and Conventions
+**Layered Testing Architecture**
+The tests follow the adapter's natural data flow:
+1. Environment detection and validation → 2. Factory-based adapter creation → 3. Runtime debugging operations
 
-### Error Handling
-- **Graceful Degradation**: All components return sensible defaults for invalid input
-- **Detailed Reporting**: Environment validation provides specific failure reasons
-- **Consistent Signaling**: Error conditions communicated through return values rather than exceptions
+**Comprehensive Mock Strategy**
+- Complete isolation through mocking of file system, process execution, and environment
+- Dependency injection pattern enables controlled testing of all external interactions
+- Realistic simulation of Java environments and JDB debugging scenarios
 
-### Testing Standards
-- **Comprehensive Coverage**: Both positive and negative test paths for all functionality
-- **Type Safety**: Extensive TypeScript assertions and typed mock objects
-- **Realistic Data**: Test fixtures use actual Java debugger output formats
-- **Layered Dependencies**: Factory tests build upon utility test foundations
+**Mock Utilities Framework**
+- `simulateSpawn` - Async process simulation for subprocess testing
+- `createDependencies` - Factory for consistent mock adapter dependencies  
+- `MockCommandFinder` - Pluggable command discovery for testing flexibility
 
-### Integration Points
-- **Shared Types**: Utilizes `@debugmcp/shared` for common debugging protocol interfaces
-- **Cross-Layer Validation**: Tests ensure proper data flow from environment detection through debugging protocol output
-- **Version Compatibility**: Validates adapter functionality across Java 8+ versions and different system configurations
+### Testing Patterns and Conventions
 
-This test directory ensures the Java adapter can reliably establish debugging sessions and provide accurate debugging information across diverse Java environments and use cases.
+**Multi-Scenario Coverage**
+- Success paths: Valid Java installations, proper JDB responses, complete debugging workflows
+- Failure modes: Missing dependencies, version incompatibility, malformed debug output
+- Edge cases: Timeout scenarios, null handling, VM state transitions
+
+**Quality Assurance Standards**
+- AAA Pattern (Arrange-Act-Assert) structure ensures clear test organization
+- Comprehensive null safety validation for all parser operations
+- Type safety verification and object expansion testing
+- State management validation for debugging session lifecycles
+- Error propagation and message validation throughout all components
+
+The test suite ensures the Java debug adapter can reliably operate across various Java versions and debugging scenarios, providing confidence in the adapter's ability to deliver consistent debugging experiences.

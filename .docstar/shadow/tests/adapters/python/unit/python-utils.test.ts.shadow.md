@@ -1,57 +1,65 @@
 # tests/adapters/python/unit/python-utils.test.ts
-@source-hash: 816ad069d3703e9a
-@generated: 2026-02-09T18:14:25Z
+@source-hash: 05c71052cdd484a7
+@generated: 2026-02-10T01:19:05Z
 
 ## Purpose
-Comprehensive unit test suite for Python utility functions in the debugmcp adapter-python package. Tests Python executable discovery, version detection, and command finding across different platforms (Windows, Linux, macOS).
+Comprehensive unit test suite for Python utility functions in the debugmcp adapter, specifically testing Python executable discovery, version detection, and command finding functionality across different platforms.
 
-## Key Test Suites
+## Test Structure
+- **Main test suite**: `python-utils` (L24-427) covering all core functionality
+- **Cross-platform testing**: Tests run on win32, linux, and darwin platforms (L59-214)
+- **Windows-specific tests**: Special handling for Store aliases and py launcher (L216-319)
 
-### findPythonExecutable Tests (L58-326)
-- **Cross-platform testing** (L59): Tests behavior on win32, linux, darwin platforms using `describe.each`
-- **Priority resolution** (L68-93): Tests precedence order - user-specified path → PYTHON_PATH → PYTHON_EXECUTABLE env vars
-- **GitHub Actions support** (L95-110): Windows-specific test for `pythonLocation` environment variable handling
-- **Auto-detection logic** (L112-161): Platform-specific command search order:
-  - Windows: `py` → `python` → `python3` 
-  - Unix: `python3` → `python`
-- **Fallback mechanisms** (L163-184): Tests graceful degradation through command list
-- **Error handling** (L192-219): Tests behavior when no Python found or spawn errors occur
-- **Windows Store alias detection** (L222-325): Specialized tests for Windows Store Python alias handling and validation
+## Key Test Functions
 
-### getPythonVersion Tests (L328-414)
-- **Version parsing** (L329-347): Extracts version from `python --version` stdout
-- **stderr handling** (L349-367): Some Python versions output to stderr
-- **Error scenarios** (L369-393): Spawn failures and non-zero exit codes return null
-- **Fallback output** (L395-413): Returns raw output when version pattern not matched
+### findPythonExecutable Tests (L58-320)
+Tests Python executable discovery with multiple fallback strategies:
+- User-specified pythonPath validation (L68-75)
+- Environment variable precedence: PYTHON_PATH, PYTHON_EXECUTABLE (L77-93)
+- Windows pythonLocation support for GitHub Actions (L96-110)
+- Platform-specific command order and debugpy preference (L112-161)
+- Fallback chain testing (L163-184)
+- Error handling for missing Python (L186-198, L200-213)
 
-### setDefaultCommandFinder Tests (L416-432)
-- **Global configuration** (L417-431): Tests setting and restoring default command finder
+### getPythonVersion Tests (L322-408)
+Tests version string extraction from Python executable:
+- Standard stdout version output parsing (L323-341)
+- stderr version output handling (L343-361)
+- Error conditions: spawn errors (L363-374), non-zero exit codes (L376-387)
+- Fallback to raw output when version pattern not found (L389-407)
+
+### setDefaultCommandFinder Tests (L410-426)
+Tests global command finder configuration for dependency injection.
 
 ## Mock Infrastructure
 
-### Child Process Mocking (L14-22)
-- **Partial mock strategy**: Preserves other APIs like `exec` to avoid breaking cleanup code
-- **EventEmitter-based**: Mock processes emit events to simulate real spawn behavior
+### Mocking Strategy
+- **child_process mock**: Partial mock preserving other APIs like exec (L14-20)
+- **MockCommandFinder**: Custom mock for command discovery testing (L25, L36)
+- **spawn mock**: EventEmitter-based process simulation (L39-48, L22)
 
-### Test Setup/Teardown (L27-56)
-- **Environment cleanup** (L29-33): Clears Python-related environment variables
-- **Mock reset** (L36-48): Fresh MockCommandFinder and default spawn behavior per test
-- **Consistent state** (L51-56): Ensures no cross-test pollution
+### Mock Patterns
+- **Platform stubbing**: Uses vi.stubGlobal for cross-platform testing (L61)
+- **Environment cleanup**: Resets Python-related env vars in beforeEach/afterEach (L29-34, L51-56)
+- **Process simulation**: Mocks child processes with EventEmitter pattern for async testing
 
-## Key Dependencies
-- **@debugmcp/adapter-python**: Main module under test (L5,7)
-- **MockCommandFinder**: Test utility for simulating command resolution (L6)
-- **vitest**: Test framework with mocking capabilities (L1)
-- **child_process**: Mocked for spawn simulation (L2)
+## Test Environment Management
+- **beforeEach setup**: Clears mocks, resets env vars, creates fresh MockCommandFinder (L27-49)
+- **afterEach cleanup**: Clears mocks, resets command finder, removes env vars (L51-56)
+- **Global stubbing**: Platform-specific test isolation with proper cleanup (L64-66)
 
-## Architectural Patterns
-- **Platform-specific testing**: Uses `describe.each` for cross-platform validation
-- **Mock strategy**: Partial mocks preserve system functionality while isolating test subjects
-- **Event-driven simulation**: Mock processes use EventEmitter to simulate async spawn behavior
-- **Error propagation testing**: Validates both wrapped and unwrapped error scenarios
+## Platform-Specific Logic
+- **Windows**: Tests py launcher priority, Store alias detection, where.exe usage
+- **Unix-like**: Tests python3 → python fallback order
+- **Cross-platform**: Environment variable handling, error conditions
 
-## Critical Test Constraints
-- **Platform isolation**: Each test platform is stubbed globally to ensure consistent behavior
-- **Environment variable hygiene**: Tests clean up Python-related env vars to prevent interference
-- **Mock lifecycle management**: Proper setup/teardown prevents state leakage between tests
-- **Async process simulation**: Mock spawn processes emit events on next tick to simulate real timing
+## Dependencies
+- **Core modules**: vitest testing framework, node fs/path, child_process
+- **Target code**: @debugmcp/adapter-python utilities and errors
+- **Test utilities**: MockCommandFinder from test-utils
+
+## Key Patterns
+- **Parameterized testing**: describe.each for platform variants
+- **Process mocking**: EventEmitter-based child process simulation
+- **Error simulation**: CommandNotFoundError and spawn error testing
+- **Async testing**: Promise-based test patterns with proper await handling

@@ -1,88 +1,73 @@
 # packages/adapter-java/src/utils/jdb-wrapper.ts
-@source-hash: d38f43f42646edad
-@generated: 2026-02-09T18:14:07Z
+@source-hash: 98ffcd0dc9cb4cde
+@generated: 2026-02-10T01:19:05Z
 
-## Purpose
-High-level wrapper around the Java Debugger (jdb) process, providing asynchronous command execution, event parsing, and debugger state management for the Java adapter.
+## JdbWrapper - Java Debugger Process Manager
 
-## Core Classes and Interfaces
+**Primary Purpose:** High-level wrapper for the Java Debugger (jdb) command-line tool, managing the debugging process, command execution, and event handling for Java applications.
 
-### JdbConfig (L24-46)
-Configuration interface supporting both launch and attach modes:
-- Launch mode: requires `mainClass`, optional `classpath`, `vmArgs`, `programArgs`
-- Attach mode: requires `attach.host` and `attach.port`
-- Common: `jdbPath` and `sourcePath` required
+### Core Architecture
 
-### JdbBreakpoint (L51-56)
-Represents debugger breakpoints with verification status and unique identification.
+**JdbWrapper Class (L78-620)** extends EventEmitter to provide async debugging interface:
+- **Process Management:** Spawns/attaches to jdb process with stdio pipes (L79, L120-123)
+- **Command Queue System:** Serializes jdb commands through queue mechanism (L81-82, L344-361)
+- **Event-Driven Design:** Emits debugging events (stopped, continued, terminated, error)
 
-### JdbWrapper (L78-618)
-Main wrapper class extending EventEmitter with comprehensive debugging capabilities:
+### Key Configuration & Interfaces
 
-**Key Properties:**
-- `process` (L79): Child process handle for jdb
-- `commandQueue` (L81): Queue for serialized command execution
-- `breakpoints` (L84): Map of active breakpoints by ID
-- `threads` (L85): Cache of thread information
-- `ready` (L86): Process initialization state
+**JdbConfig Interface (L24-46):** Comprehensive configuration supporting both launch and attach modes
+- Launch mode: `mainClass`, `classpath`, `vmArgs`, `programArgs`
+- Attach mode: `attach.host`, `attach.port`, `attach.timeout`
 
-## Key Methods
+**JdbBreakpoint Interface (L51-56):** Represents debugger breakpoints with verification status
 
-### Process Management
-- `spawn()` (L95-100): Launch mode initialization with mainClass validation
-- `attach()` (L105-111): Attach mode initialization with timeout handling
-- `startJdbProcess()` (L116-179): Common process spawning logic with event setup
-- `kill()` (L544-557): Graceful process termination with SIGTERM/SIGKILL fallback
+**QueuedCommand Interface (L61-66):** Internal command queuing with timeout handling
 
-### Command Execution
-- `executeCommand()` (L317-339): Queued command execution with timeout handling
-- `sendCommandDirect()` (L367-379): Direct command sending for non-blocking operations (continue, step commands)
-- `processNextCommand()` (L344-361): Queue processing with error handling
+### Core Operations
 
-### Debugging Operations
-- `setBreakpoint()`/`clearBreakpoint()` (L384-434): Breakpoint management with class name resolution
-- `continue()`, `stepOver()`, `stepIn()`, `stepOut()` (L485-514): Execution control using direct commands
-- `getStackTrace()`, `getLocals()`, `getThreads()` (L439-466): State inspection via JdbParser
-- `evaluate()` (L519-524): Expression evaluation with result extraction
+**Process Initialization:**
+- `spawn()` (L95-100): Launch mode with main class execution
+- `attach()` (L105-111): Attach to running JVM with debug agent
+- `startJdbProcess()` (L116-179): Common initialization logic with timeout handling
 
-### Event Handling
-- `onStdout()`/`onStderr()` (L223-258): Output processing and event detection
-- `detectEvents()` (L263-289): Parses jdb output for stopped, started, terminated, and error events
-- Emits: 'stopped', 'continued', 'output', 'terminated', 'error', 'vmStarted'
+**Command Execution:**
+- `executeCommand()` (L317-339): Queued command execution with timeout
+- `sendCommandDirect()` (L367-379): Direct command sending for non-blocking operations
+- `processNextCommand()` (L344-361): Command queue processor
 
-## Architecture Patterns
+**Debugging Operations:**
+- `setBreakpoint()`/`clearBreakpoint()` (L384-434): Breakpoint management
+- `continue()`, `stepOver()`, `stepIn()`, `stepOut()` (L485-514): Execution control
+- `getStackTrace()`, `getLocals()`, `getThreads()` (L439-466): State inspection
 
-### Command Queue Pattern
-Serializes jdb commands to handle single-threaded nature of jdb CLI, with timeout management and promise-based responses.
+### Event Processing & Output Handling
 
-### Event-Driven Architecture
-Uses EventEmitter to decouple jdb output parsing from consumer logic, enabling reactive debugging workflows.
+**Output Processing:**
+- `onStdout()`/`onStderr()` (L223-258): Buffer management and event detection
+- `detectEvents()` (L263-289): Parses jdb output for debugging events using JdbParser
+- `handleCommandComplete()` (L294-312): Command completion detection via prompt
 
-### Mode Differentiation
-- Launch mode (L188-215): Builds arguments with sourcepath/classpath
-- Attach mode (L188-194): Uses -attach flag, excludes launch-specific arguments
+**State Management:**
+- Breakpoints map (L84): Tracks active breakpoints by ID
+- Threads map (L85): Caches thread information
+- Ready flag (L86): Process initialization state
 
-## Key Dependencies
-- `JdbParser`: Handles all jdb output parsing and command result extraction
-- `child_process.spawn`: Process management
-- `events.EventEmitter`: Event emission pattern
+### Utility Functions
 
-## Critical Implementation Details
+**Class Name Resolution (L577-605):** 
+- Reads Java source files to extract package declarations
+- Constructs fully qualified class names for jdb commands
+- Provides diagnostic output for debugging
 
-### File-to-Class Resolution (L575-603)
-Attempts package declaration parsing from source files, falls back to basename. Includes debug output emission.
+### Dependencies
 
-### Timeout Handling
-- Process initialization: configurable timeout (10s launch, 30s attach)
-- Command execution: 5s default timeout per command
-- Process termination: 2s graceful shutdown before force kill
+- **JdbParser (L13-17):** Parsing utilities for jdb output formats
+- **Node.js child_process:** Process spawning and management
+- **EventEmitter:** Event-driven architecture foundation
 
-### Direct vs Queued Commands
-- Queued: Commands expecting prompt response (breakpoints, inspection)
-- Direct: Execution control commands that don't return immediate prompt (continue, step)
+### Critical Behavior Notes
 
-## State Management
-- `ready` flag prevents command execution before jdb initialization
-- Thread cache updated on `getThreads()` calls
-- Breakpoint map maintains verification status
-- Output buffer accumulates partial responses for event detection
+- **Attach vs Launch Mode:** Different argument handling (L188-218) - attach mode cannot use sourcepath/classpath
+- **Command Timing:** Uses direct sending for execution commands (resume, step) that don't return prompts immediately
+- **Process Lifecycle:** Automatic cleanup on process exit with timeout-based forced termination
+- **Error Handling:** Comprehensive timeout and error propagation throughout command execution

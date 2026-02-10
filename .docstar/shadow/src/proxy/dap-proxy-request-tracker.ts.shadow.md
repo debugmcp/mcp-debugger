@@ -1,47 +1,54 @@
 # src/proxy/dap-proxy-request-tracker.ts
-@source-hash: 5e3d7b06eaa4c047
-@generated: 2026-02-09T18:15:03Z
+@source-hash: 2142dfc2592fe7db
+@generated: 2026-02-10T01:19:00Z
 
-## Purpose
-Request tracking utility for managing DAP (Debug Adapter Protocol) request timeouts in a proxy architecture. Provides timeout management for pending requests with automatic cleanup.
+## Request tracking utility for managing DAP request timeouts
 
-## Core Classes
+This module provides two classes for managing Debug Adapter Protocol (DAP) request timeouts:
 
-### RequestTracker (L7-91)
-Base implementation of `IRequestTracker` interface for managing request timeouts.
+### Core Architecture
 
-**Key Properties:**
-- `pendingRequests` (L8): Map storing active tracked requests by ID
-- `defaultTimeoutMs` (L9): Default timeout duration (30 seconds)
+- **RequestTracker (L7-91)**: Base implementation that tracks pending requests with automatic timeout cleanup
+- **CallbackRequestTracker (L96-129)**: Enhanced version that executes callbacks on timeout
 
-**Key Methods:**
-- `track(requestId, command, timeoutMs?)` (L18-37): Registers new request with timeout timer, auto-clears existing requests with same ID
-- `complete(requestId)` (L42-48): Marks request complete and cleans up timeout timer
-- `clear()` (L53-58): Clears all pending requests and their timers
+### Key Dependencies
+
+- `IRequestTracker` and `TrackedRequest` interfaces from `./dap-proxy-interfaces.js` (L5)
+
+### RequestTracker Class (L7-91)
+
+**Primary responsibility**: Track DAP requests with timeout management, ensuring requests don't hang indefinitely.
+
+**Core state**:
+- `pendingRequests`: Map storing active requests by ID (L8)
+- `defaultTimeoutMs`: Default timeout value (30 seconds) (L9, L11)
+
+**Key methods**:
+- `track(requestId, command, timeoutMs)` (L18-37): Registers new request with timeout timer, auto-clears duplicates
+- `complete(requestId)` (L42-48): Removes request and clears its timeout
+- `clear()` (L53-58): Bulk cleanup of all pending requests
 - `getPending()` (L63-65): Returns copy of pending requests map
-- `getPendingCount()` (L70-72): Returns count of pending requests
-- `isPending(requestId)` (L77-79): Checks if specific request is tracked
-- `getElapsedTime(requestId)` (L84-90): Returns elapsed time since request started
+- `getPendingCount()` (L70-72): Returns count of active requests
+- `isPending(requestId)` (L77-79): Checks if specific request exists
+- `getElapsedTime(requestId)` (L84-90): Calculates request age in milliseconds
 
-### CallbackRequestTracker (L96-129)
-Enhanced version extending `RequestTracker` with timeout callback functionality.
+**Timeout behavior**: When timeout triggers, request is silently removed from tracking (L23-29). Base class has no timeout callback mechanism.
 
-**Key Properties:**
-- `onTimeout` (L97): Callback function invoked when requests timeout
+### CallbackRequestTracker Class (L96-129)
 
-**Key Methods:**
-- `track()` (L107-127): Overrides parent to execute callback on timeout instead of silent cleanup
+**Purpose**: Extends RequestTracker to execute custom timeout handlers.
 
-## Dependencies
-- Imports `IRequestTracker` and `TrackedRequest` interfaces from `./dap-proxy-interfaces.js` (L5)
+**Key differences**:
+- Constructor requires `onTimeout` callback (L99-105)
+- Overridden `track()` method calls `onTimeout(requestId, command)` when timeout occurs (L107-127)
+- Same timeout cleanup behavior but with notification capability
 
-## Architecture Patterns
-- Template method pattern: Base class provides structure, derived class customizes timeout behavior
-- Map-based tracking with timer cleanup for memory management
-- Defensive programming: Always clears existing requests before tracking new ones with same ID
+### Usage Patterns
 
-## Key Behaviors
-- Default 30-second timeout for all requests
-- Automatic cleanup prevents memory leaks from abandoned requests
-- Thread-safe request replacement (clears before adding)
-- Timeout handling differs between classes: base class silently removes, callback version executes handler
+Both classes implement automatic request deduplication - tracking a request with existing ID clears the previous one first (L20, L109). This prevents timeout leak scenarios.
+
+The `TrackedRequest` structure includes: requestId, command, timer handle, and timestamp for elapsed time calculations.
+
+### Architectural Decision
+
+Two-tier design allows for flexible timeout handling - base class for simple timeout cleanup, extended class for notification-based timeout handling (useful for error reporting, retry logic, etc.).

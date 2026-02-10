@@ -1,42 +1,45 @@
 # packages/mcp-debugger/scripts/
-@generated: 2026-02-09T18:16:03Z
+@generated: 2026-02-10T01:19:33Z
 
-## Purpose & Responsibility
+## Overview
 
-The `packages/mcp-debugger/scripts` directory contains the complete build automation system for the MCP debugger CLI distribution. This module orchestrates the transformation of the development codebase into production-ready, distributable bundles with all necessary runtime assets and vendor dependencies.
+This directory contains build automation scripts for packaging and distributing the MCP debugger CLI tool. It orchestrates the complete build pipeline from TypeScript source to distributable npm packages with embedded runtime dependencies.
 
-## Core Components
+## Key Components
 
-**bundle-cli.js**: The primary build orchestrator that executes a comprehensive bundling pipeline, handling both JavaScript compilation and asset management. This script serves as the single entry point for creating distribution-ready packages.
+### bundle-cli.js
+The primary build orchestrator that handles the complete packaging workflow:
 
-## Build Pipeline Architecture
+- **Proxy Bundling**: Creates CommonJS bundles for DAP (Debug Adapter Protocol) proxy components
+- **CLI Bundling**: Compiles TypeScript CLI to ESM format with Node 18 compatibility
+- **Asset Management**: Copies selective runtime dependencies from repo-level builds
+- **Vendor Integration**: Handles platform-specific debug adapter payloads (JavaScript via js-debug, Rust via CodeLLDB)
+- **Distribution Packaging**: Creates npm-ready packages with tarballs for distribution
 
-The directory implements a sophisticated multi-stage build process:
+## Public API Surface
 
-1. **Component Bundling**: Creates optimized bundles for both CLI (ESM format) and DAP proxy (CommonJS) components using tsup
-2. **Runtime Assembly**: Generates executable wrapper scripts with proper shebangs and copies essential runtime assets
-3. **Vendor Integration**: Conditionally includes platform-specific debugger binaries (js-debug, CodeLLDB) based on availability and platform targeting
-4. **Package Creation**: Produces both mirrored package structure and npm tarball for distribution
+### Main Entry Points
+- **`bundleProxy()`**: Builds proxy transport bundles for SSE/stdio communication
+- **`bundleCLI()`**: Primary orchestration function managing the complete build pipeline
 
-## Key Entry Points
+### Build Outputs
+- `packages/mcp-debugger/dist/`: Runtime bundle for local execution
+- `packages/mcp-debugger/package/dist/`: Mirrored artifacts for npm packaging
+- `packages/mcp-debugger/package/debugmcp-*.tgz`: Distribution-ready npm tarball
 
-- **Main Build Command**: `bundle-cli.js` serves as the primary entry point for the entire build process
-- **bundleProxy()**: Specialized function for DAP proxy component bundling
-- **bundleCLI()**: Comprehensive CLI bundling orchestrator handling all distribution artifacts
+## Internal Organization & Data Flow
 
-## Internal Organization
-
-The build system follows a layered approach:
-- **Source Processing**: TypeScript compilation via tsup with environment-specific configurations
-- **Asset Management**: Systematic copying of runtime directories (proxy, errors, adapters, session, utils)
-- **Vendor Handling**: Platform-aware inclusion of debugging tool binaries with graceful fallback
-- **Distribution Packaging**: Dual-output system creating both development mirrors and npm-ready tarballs
+1. **Bundling Phase**: TypeScript compilation using tsup with aggressive dependency inlining
+2. **Asset Collection**: Selective copying of runtime components (proxy, errors, adapters, session, utils)
+3. **Vendor Integration**: Platform-aware inclusion of debug adapter binaries with environment-based filtering
+4. **Distribution Preparation**: File mirroring and npm pack generation for publishing
 
 ## Important Patterns
 
-- **Graceful Degradation**: Missing vendor components generate warnings but don't break the build
-- **Platform Awareness**: Environment variables control platform-specific binary inclusion
-- **Execution Safety**: Wrapper scripts ensure proper CLI execution with shebang handling
-- **Path Resolution**: Dynamic calculation of repository structure enables flexible deployment
+- **Platform Awareness**: Uses CODELLDB_PACKAGE_PLATFORMS environment variable for cross-platform builds
+- **Defensive File Operations**: Employs shell commands over Node.js fs APIs for better permission handling
+- **Graceful Degradation**: Warns about missing vendor directories rather than failing builds
+- **Executable Generation**: Creates proper shebang wrappers for cross-platform CLI execution
+- **Error Handling**: Process-level error management with appropriate exit codes
 
-This build system enables the MCP debugger to be distributed as a self-contained package with all necessary runtime dependencies and debugger tools included.
+The scripts directory serves as the build system foundation, transforming development artifacts into production-ready distribution packages with all necessary runtime dependencies embedded.

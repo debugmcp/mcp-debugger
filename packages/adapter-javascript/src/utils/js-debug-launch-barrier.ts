@@ -66,8 +66,7 @@ export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
     }, ADAPTER_CONNECTED_DELAY_MS);
   }
 
-  onDapEvent(event: string, body: DebugProtocol.Event['body'] | undefined): void {
-    void body;
+  onDapEvent(event: string, _body: DebugProtocol.Event['body'] | undefined): void {
     if (this.settled || event !== 'stopped') {
       return;
     }

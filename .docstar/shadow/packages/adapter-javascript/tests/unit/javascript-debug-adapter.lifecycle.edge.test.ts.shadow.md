@@ -1,42 +1,41 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.lifecycle.edge.test.ts
 @source-hash: abc1a5259b664feb
-@generated: 2026-02-09T18:14:02Z
+@generated: 2026-02-10T00:41:08Z
 
-## Edge Case Test Suite for JavascriptDebugAdapter Lifecycle
+**Test Suite: JavascriptDebugAdapter Edge Case Lifecycle Tests**
 
-**Primary Purpose:** Tests edge cases and specific behaviors in JavascriptDebugAdapter lifecycle operations, focusing on warning handling during initialization and cache clearing during disposal.
+This test file validates edge case behaviors in the JavascriptDebugAdapter lifecycle, specifically initialization warning handling and dispose cache clearing functionality.
 
-### Key Test Structure
-- **Test Suite** (L17): `JavascriptDebugAdapter.lifecycle (edge)` - focuses on edge scenarios
-- **Mock Dependencies** (L7-15): Minimal AdapterDependencies stub with mocked logger functions
-- **Setup** (L18-21): beforeEach hook that restores and clears all mocks
+## Dependencies & Setup
+- **Test Framework**: Vitest with mock capabilities (L1)
+- **Core Subject**: JavascriptDebugAdapter from adapter package (L3)
+- **Mock Dependencies**: Stubbed AdapterDependencies with logger (L8-15)
+- **External Mock**: executable-resolver.findNode function (L5)
 
-### Critical Test Cases
+## Test Structure
+**Mock Setup** (L18-21): Restores and clears all mocks before each test to ensure isolation.
 
-#### 1. Warning Logging Test (L23-44)
-- **Purpose**: Validates that initialization logs each warning exactly once and transitions to READY state
-- **Key Behaviors**:
-  - Mocks `validateEnvironment` to return warnings with codes 'W1' and 'W2' (L28-32)
-  - Verifies logger.warn called exactly twice with correct messages (L37-39)
-  - Confirms state transition to `AdapterState.READY` (L42)
-  - Validates 'initialized' event emission (L43)
+**Test Case 1: Warning Logging During Initialization** (L23-44)
+- Validates that initialization warnings are logged exactly once each
+- Mocks validateEnvironment to return specific warnings (L28-32)
+- Verifies state transition to READY and 'initialized' event emission
+- Asserts precise call counts and message ordering for logger.warn
 
-#### 2. Cache Clearing Test (L46-71)
-- **Purpose**: Ensures `dispose()` properly clears per-instance caches
-- **Key Behaviors**:
-  - Mocks `exec.findNode` to return platform-specific node path (L49-51)
-  - Tests caching behavior: first call hits `findNode`, second call uses cache (L54-61)
-  - Verifies `dispose()` clears caches and resets state to UNINITIALIZED (L64-65)
-  - Confirms subsequent calls after disposal re-invoke underlying `findNode` (L67-70)
+**Test Case 2: Cache Clearing on Dispose** (L46-71)
+- Tests that dispose() properly clears internal caches
+- Uses resolveExecutablePath() as cache validation mechanism
+- Mocks findNode to track call frequency vs caching behavior
+- Validates cache hit (no additional findNode call), dispose reset, and cache miss pattern
+- Cross-platform path handling for Windows vs Unix systems (L50)
 
-### Dependencies
-- **JavascriptDebugAdapter** (L3): Main class under test from `../../src/index.js`
-- **AdapterState** (L4): State enum from `@debugmcp/shared`
-- **exec module** (L5): Executable resolver utilities for mocking `findNode`
-- **Vitest**: Testing framework with mocking capabilities
+## Key Behavioral Validations
+- **Initialization**: Warning deduplication and proper event/state handling
+- **Caching**: Per-instance cache lifecycle tied to dispose operations
+- **State Management**: Transitions between UNINITIALIZED and READY states
+- **Event Emission**: 'initialized' event fired exactly once per successful initialization
 
-### Architectural Insights
-- Tests validate proper cache lifecycle management in adapter instances
-- Ensures warning aggregation and logging works correctly during initialization
-- Validates event-driven architecture with 'initialized' event emission
-- Cross-platform path handling for executable resolution testing
+## Architecture Insights
+- Uses event-driven architecture with state management
+- Implements caching layer for executable resolution
+- Clear separation between validation warnings and errors
+- Mock-friendly design enabling precise behavioral testing

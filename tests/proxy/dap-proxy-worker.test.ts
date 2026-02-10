@@ -356,6 +356,8 @@ describe('DapProxyWorker', () => {
     });
 
     it('invokes custom exit hook when initialization fails critically', async () => {
+      vi.useFakeTimers();
+
       const exitSpy = vi.fn();
       const traceSpy = vi.fn().mockReturnValue('/logs/custom-trace.ndjson');
       dependencies.fileSystem.ensureDir = vi.fn().mockRejectedValue(new Error('cannot ensure dir'));
@@ -369,9 +371,14 @@ describe('DapProxyWorker', () => {
 
       await worker.handleCommand(basePayload);
 
+      // Advance past the setImmediate + setTimeout(100ms) IPC flush pattern
+      await vi.advanceTimersByTimeAsync(200);
+
       expect(exitSpy).toHaveBeenCalledWith(1);
       expect(shutdownSpy).toHaveBeenCalled();
       expect(worker.getState()).toBe(ProxyState.UNINITIALIZED);
+
+      vi.useRealTimers();
     });
 
     it('does not trigger exit hook during successful dry run', async () => {
@@ -416,7 +423,7 @@ describe('DapProxyWorker', () => {
       }
     });
     
-    it('startDebugpyAdapterAndConnect should emit adapter_connected for queueing policy', async () => {
+    it('startAdapterAndConnect should emit adapter_connected for queueing policy', async () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'js-session',
@@ -458,7 +465,7 @@ describe('DapProxyWorker', () => {
       (worker as any).currentInitPayload = payload;
       (worker as any).state = ProxyState.INITIALIZING;
 
-      await (worker as any).startDebugpyAdapterAndConnect(payload);
+      await (worker as any).startAdapterAndConnect(payload);
 
       expect(processStub.spawn).toHaveBeenCalledTimes(1);
       expect(connectionStub.connectWithRetry).toHaveBeenCalledWith(payload.adapterHost, payload.adapterPort);
@@ -469,7 +476,7 @@ describe('DapProxyWorker', () => {
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
     });
 
-    it('startDebugpyAdapterAndConnect should initialize session for non-queue policy', async () => {
+    it('startAdapterAndConnect should initialize session for non-queue policy', async () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'py-session',
@@ -519,7 +526,7 @@ describe('DapProxyWorker', () => {
       (worker as any).currentInitPayload = payload;
       (worker as any).state = ProxyState.INITIALIZING;
 
-      await (worker as any).startDebugpyAdapterAndConnect(payload);
+      await (worker as any).startAdapterAndConnect(payload);
       await (worker as any).handleInitializedEvent();
 
       expect(processStub.spawn).toHaveBeenCalledTimes(1);
@@ -665,7 +672,7 @@ describe('DapProxyWorker', () => {
         .spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown')
         .mockResolvedValue(undefined);
 
-      await (worker as any).startDebugpyAdapterAndConnect(payload);
+      await (worker as any).startAdapterAndConnect(payload);
 
       expect(processStub.spawn).toHaveBeenCalledTimes(1);
       expect(connectionStub.setupEventHandlers).toHaveBeenCalled();
@@ -1034,6 +1041,8 @@ describe('DapProxyWorker', () => {
 
   describe('Error Handling', () => {
     it('should handle initialization errors gracefully', async () => {
+      vi.useFakeTimers();
+
       // Make file system fail
       vi.mocked(dependencies.fileSystem.ensureDir).mockRejectedValue(
         new Error('Permission denied')
@@ -1054,16 +1063,22 @@ describe('DapProxyWorker', () => {
 
       await worker.handleCommand(payload);
 
+      // Advance past the setImmediate + setTimeout(100ms) IPC flush pattern
+      await vi.advanceTimersByTimeAsync(200);
+
       // Verify that process.exit was called with error code
       // This is the key behavior - critical errors during init cause process exit
       expect(exitSpy).toHaveBeenCalledWith(1);
-      
+
       // Note: Logger won't be called since it's created AFTER ensureDir, which is what's failing
 
       exitSpy.mockRestore();
+      vi.useRealTimers();
     });
 
     it('invokes exit hook when adapter spawn fails', async () => {
+      vi.useFakeTimers();
+
       const exitSpy = vi.fn();
       worker = new DapProxyWorker(dependencies, { exit: exitSpy });
       const spawnError = new Error('spawn failed');
@@ -1093,6 +1108,9 @@ describe('DapProxyWorker', () => {
       try {
         await worker.handleCommand(payload);
 
+        // Advance past the setImmediate + setTimeout(100ms) IPC flush pattern
+        await vi.advanceTimersByTimeAsync(200);
+
         expect(exitSpy).toHaveBeenCalledWith(1);
         expect(mockLogger.error).toHaveBeenCalledWith(
           expect.stringContaining('Critical initialization error'),
@@ -1101,10 +1119,13 @@ describe('DapProxyWorker', () => {
       } finally {
         spawnSpy.mockRestore();
         shutdownSpy.mockRestore();
+        vi.useRealTimers();
       }
     });
 
     it('invokes exit hook when DAP connection fails', async () => {
+      vi.useFakeTimers();
+
       const exitSpy = vi.fn();
       worker = new DapProxyWorker(dependencies, { exit: exitSpy });
       const connectError = new Error('connect failed');
@@ -1134,6 +1155,9 @@ describe('DapProxyWorker', () => {
       try {
         await worker.handleCommand(payload);
 
+        // Advance past the setImmediate + setTimeout(100ms) IPC flush pattern
+        await vi.advanceTimersByTimeAsync(200);
+
         expect(exitSpy).toHaveBeenCalledWith(1);
         expect(mockLogger.error).toHaveBeenCalledWith(
           expect.stringContaining('Critical initialization error'),
@@ -1142,6 +1166,7 @@ describe('DapProxyWorker', () => {
       } finally {
         connectSpy.mockRestore();
         shutdownSpy.mockRestore();
+        vi.useRealTimers();
       }
     });
 

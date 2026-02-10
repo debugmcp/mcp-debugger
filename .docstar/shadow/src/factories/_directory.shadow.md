@@ -1,58 +1,55 @@
 # src/factories/
-@generated: 2026-02-09T18:16:06Z
+@generated: 2026-02-10T01:19:34Z
 
-## Factories Module
+## Factory Module for Debug MCP System
 
-**Overall Purpose**: This module implements the Factory Pattern for creating core system components, providing a clean abstraction layer that enables dependency injection, test isolation, and polymorphic object creation. It serves as the primary instantiation point for ProxyManager and SessionStore components.
+This directory implements factory pattern abstractions for creating core service instances within a debug Model Context Protocol (MCP) system. The module provides dependency injection capabilities and comprehensive testing support through mock implementations.
 
-**Key Components**:
+## Purpose & Responsibility
 
-- **ProxyManagerFactory** (`proxy-manager-factory.ts`): Creates ProxyManager instances with dependency injection support
-- **SessionStoreFactory** (`session-store-factory.ts`): Creates SessionStore instances following the same factory pattern
-- **Mock Factories**: Test doubles with tracking capabilities and customizable behavior for comprehensive testing support
+The factories module serves as the creation layer for key system components, abstracting object instantiation and enabling dependency injection for both production and testing scenarios. It ensures loose coupling between component creation and usage while providing test doubles for verification.
 
-**Public API Surface**:
+## Key Components
 
-```typescript
-// Factory Interfaces (main entry points)
-interface IProxyManagerFactory {
-  create(adapter?: IDebugAdapter): IProxyManager;
-}
+### Factory Interfaces
+- `IProxyManagerFactory` - Contract for creating ProxyManager instances with optional debug adapters
+- `ISessionStoreFactory` - Contract for creating SessionStore instances
 
-interface ISessionStoreFactory {
-  create(): SessionStore;
-}
+### Production Factories
+- `ProxyManagerFactory` - Creates ProxyManager instances with injected dependencies (process launcher, file system, logger)
+- `SessionStoreFactory` - Creates standard SessionStore instances for session management
 
-// Production Implementations
-class ProxyManagerFactory implements IProxyManagerFactory
-class SessionStoreFactory implements ISessionStoreFactory
+### Testing Infrastructure
+- `MockProxyManagerFactory` - Test factory with call tracking and configurable creation behavior
+- `MockSessionStoreFactory` - Test factory that creates mock session stores with verification capabilities
+- `MockSessionStore` - Test double extending SessionStore with method call tracking
 
-// Test Implementations  
-class MockProxyManagerFactory implements IProxyManagerFactory
-class MockSessionStoreFactory implements ISessionStoreFactory
-```
+## Public API Surface
 
-**Internal Organization**:
+**Main Entry Points:**
+- Factory interfaces for polymorphic usage in dependency injection
+- Production factories for standard application flow
+- Mock factories for test configuration and verification
 
-The module follows a consistent architectural pattern across all factories:
+**Key Methods:**
+- `create()` methods across all factories for instance creation
+- Tracking arrays and properties in mock implementations for test assertions
 
-1. **Interface Definition**: Each factory exposes a creation contract through an interface
-2. **Production Implementation**: Concrete factory that creates real instances with proper dependency injection
-3. **Mock Implementation**: Test factory with call tracking and behavioral customization
-4. **Test Doubles**: Where applicable (SessionStore), mock objects that extend real components for behavioral compatibility
+## Internal Organization & Data Flow
 
-**Data Flow**:
+1. **Abstraction Layer**: Interfaces define creation contracts
+2. **Production Path**: Concrete factories create instances with real dependencies
+3. **Testing Path**: Mock factories create test doubles with verification capabilities
+4. **Dependency Flow**: Production factories inject required services (launchers, file systems, loggers)
 
-1. Client code depends on factory interfaces (`IProxyManagerFactory`, `ISessionStoreFactory`)
-2. Production code injects concrete factory implementations
-3. Test code substitutes mock factories to control and observe creation behavior
-4. Factories handle dependency injection, passing required services to created instances
+## Architectural Patterns
 
-**Important Patterns**:
+- **Abstract Factory**: Interface-based factory contracts
+- **Dependency Injection**: Constructor-based dependency provision
+- **Test Double**: Mock objects extending real implementations
+- **Call Tracking**: Spy pattern for test verification
+- **Factory Method**: Standardized `create()` method across implementations
 
-- **Dependency Injection**: Production factories receive dependencies via constructor injection and pass them to created instances
-- **Interface Segregation**: Each factory has a focused creation responsibility
-- **Test Instrumentation**: Mock factories provide tracking arrays (`createdManagers`, `createdStores`) and parameter capture (`lastAdapter`, `createSessionCalls`)
-- **Explicit Configuration**: Mock factories require explicit setup (`createFn` for ProxyManager) to prevent silent test failures
+## Integration Context
 
-**Role in Larger System**: This module serves as the composition root for major system components, enabling clean architecture principles by decoupling object creation from business logic and providing comprehensive testing capabilities through mock implementations.
+This module enables the debug MCP system to create proxy managers and session stores with different configurations and dependency sets, while providing comprehensive testing infrastructure for verifying component interactions and behaviors.

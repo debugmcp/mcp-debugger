@@ -1,36 +1,36 @@
 # tests/test-utils/session-id-generator.ts
 @source-hash: 08c0b8adea108bbd
-@generated: 2026-02-09T18:15:08Z
+@generated: 2026-02-10T00:41:55Z
 
-## Primary Purpose
-Test utility module for generating unique session identifiers that help track resource leaks and identify problematic tests during test execution.
+## Purpose
+Test utility module for generating unique session IDs that help track test execution and identify resource/promise leaks in test environments.
 
 ## Key Functions
 
-### getTestSessionId (L11-30)
-Generates unique session IDs with test name integration and collision prevention.
+### `getTestSessionId(testName?: string)` (L11-30)
+- **Purpose**: Generates unique session IDs for test identification
 - **Input**: Optional test name string
 - **Output**: Formatted session ID string
-- **Format**: `session-{cleanName}-{timestamp}-{random}` or `session-unknown-{timestamp}-{random}`
-- **Name sanitization**: Removes special characters, collapses multiple dashes, trims leading/trailing dashes, limits to 30 chars (L19-23)
-- **Uniqueness**: Combines millisecond timestamp with 3-character base36 random suffix (L26-27)
+- **Logic**:
+  - Fallback mode (L12-15): Returns `session-unknown-{timestamp}-{random}` when no test name provided
+  - Name cleaning (L19-23): Sanitizes test name by removing special chars, collapsing dashes, trimming, and limiting to 30 chars
+  - ID composition (L26-29): Combines `session-{cleanName}-{timestamp}-{random}` format
+- **Uniqueness**: Uses `Date.now()` timestamp + 3-char random base36 suffix
 
-### getTestNameFromSessionId (L37-43)
-Reverse parser to extract test names from session IDs for debugging purposes.
-- **Input**: Session ID string
+### `getTestNameFromSessionId(sessionId: string)` (L37-43)
+- **Purpose**: Reverse-parses session IDs to extract original test names for debugging
+- **Input**: Session ID string to parse
 - **Output**: Test name string or null if invalid format
-- **Pattern matching**: Uses regex to validate session ID format and extract name portion (L38)
-- **Name restoration**: Converts dashes back to spaces for readability (L40)
+- **Logic**: Uses regex `/^session-([^-]+(?:-[^-]+)*)-\d+-[a-z0-9]+$/` to match expected format and converts dashes back to spaces
 
 ## Architecture Patterns
-- **Bidirectional transformation**: Name → session ID → name roundtrip capability
-- **Defensive fallback**: Handles missing test names gracefully with "unknown" prefix
-- **Collision resistance**: Multi-layer uniqueness (timestamp + random + test context)
+- **Bidirectional encoding**: Clean encoding with reversible parsing
+- **Defensive design**: Graceful fallback for missing test names
+- **Collision avoidance**: Multi-factor uniqueness (timestamp + randomness)
 
 ## Dependencies
-- No external dependencies, uses only built-in JavaScript APIs (Date, Math, String methods)
+- Standard JavaScript Date and Math APIs only
+- No external dependencies
 
-## Critical Constraints
-- Session ID format must match regex pattern `^session-([^-]+(?:-[^-]+)*)-\d+-[a-z0-9]+$` for proper parsing
-- Test name length restricted to 30 characters after sanitization
-- Random suffix limited to 3 characters for brevity while maintaining reasonable collision resistance
+## Use Case
+Primarily for test debugging and resource leak detection by providing traceable identifiers that can be correlated back to specific test cases.

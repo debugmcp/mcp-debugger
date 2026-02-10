@@ -1,88 +1,71 @@
 # packages/adapter-javascript/src/utils/
-@generated: 2026-02-09T18:16:15Z
+@generated: 2026-02-10T01:19:38Z
 
-## Overall Purpose & Responsibility
+## Overall Purpose
+The `utils` directory provides core infrastructure utilities for the JavaScript debug adapter, focusing on environment detection, configuration analysis, and runtime coordination. These utilities enable the adapter to intelligently configure debugging sessions based on project characteristics and system capabilities.
 
-The `utils` directory provides essential utilities for the JavaScript/TypeScript debugging adapter, focusing on environment detection, executable resolution, and project configuration analysis. These utilities enable the adapter to intelligently configure debugging sessions by detecting project characteristics, locating runtime executables, and coordinating launch sequences without external process spawning.
+## Key Components and Relationships
 
-## Key Components & Relationships
+### Configuration Analysis (`config-transformer.ts`)
+- **Purpose**: Analyzes project structure to determine ESM/CommonJS module type, TypeScript paths configuration, and output file patterns
+- **Key API**: `transformConfig()`, `isESMProject()`, `hasTsConfigPaths()`, `determineOutFiles()`
+- **Pattern**: Heuristic-based detection using multiple fallback strategies (file extensions → package.json → tsconfig.json)
 
-### Configuration & Project Analysis
-- **`config-transformer.ts`**: Core configuration detection and transformation utilities
-  - Detects ESM vs CommonJS projects through multiple heuristics
-  - Analyzes TypeScript configuration for paths and module settings
-  - Provides safe output file pattern determination
-  - Uses defensive programming with no-throw guarantees
+### Executable Resolution (`executable-resolver.ts` & `typescript-detector.ts`)
+- **Node.js Resolution**: `findNode()` provides deterministic Node.js executable discovery across platforms
+- **TypeScript Runtime Detection**: `detectTsRunners()` locates tsx/ts-node with local-first strategy
+- **Pattern**: Platform-aware resolution with PATH search and graceful fallbacks
 
-### Executable Resolution
-- **`executable-resolver.ts`**: Cross-platform Node.js executable discovery
-  - Implements 4-tier precedence for Node.js path resolution
-  - Provides PATH search utilities respecting directory ordering
-  - Returns deterministic results without subprocess spawning
-- **`typescript-detector.ts`**: TypeScript runtime detection (tsx, ts-node)
-  - Prioritizes local node_modules installations over global PATH
-  - Implements module-level caching for performance
-  - Handles Windows executable suffix variations
-
-### Launch Coordination
-- **`js-debug-launch-barrier.ts`**: Launch readiness coordination
-  - Implements barrier pattern for js-debug adapter startup
-  - Coordinates through DAP events or adapter connection signals
-  - Provides timeout protection and resource cleanup
+### Launch Coordination (`js-debug-launch-barrier.ts`)
+- **Purpose**: Synchronizes debugger launch readiness using barrier pattern
+- **Integration**: Waits for DAP 'stopped' events or adapter connection status
+- **Pattern**: Promise-based coordination with timeout fallback and proper cleanup
 
 ## Public API Surface
 
 ### Main Entry Points
-- **`findNode(preferredPath?, fileSystem?)`**: Primary Node.js executable resolution
-- **`detectTsRunners()`**: Async TypeScript runtime detection with caching
-- **`isESMProject(program?, cwd?)`**: ESM project detection heuristics  
-- **`hasTsConfigPaths(program?, cwd?)`**: TypeScript path mapping detection
-- **`determineOutFiles(outFiles?)`**: Output file pattern determination
-- **`JsDebugLaunchBarrier`**: Launch coordination class for js-debug adapter
+- `transformConfig(config)` - Primary configuration transformation
+- `findNode(preferredPath?, fileSystem?)` - Cross-platform Node.js resolution  
+- `detectTsRunners(cwd, fileSystem?)` - TypeScript runtime detection with caching
+- `JsDebugLaunchBarrier` class - Launch synchronization barrier
 
-### Configuration APIs
-- **`setDefaultFileSystem(fs)`**: Dependency injection across all modules
-- **`clearCache()`**: Cache invalidation for TypeScript detection
-- **`transformConfig(config)`**: Back-compatibility placeholder
+### Testing Support
+- `setDefaultFileSystem(fileSystem)` - Available in all modules for test dependency injection
+- `clearCache()` - Cache reset for typescript-detector testing
 
-## Internal Organization & Data Flow
+## Internal Organization and Data Flow
 
-### Filesystem Abstraction Layer
-All utilities use injectable `FileSystem` interface with `NodeFileSystem` default, enabling:
-- Hermetic testing without real filesystem access
-- Consistent error handling across modules
-- Platform-agnostic file operations
+### Dependency Flow
+```
+config-transformer → project analysis → debugging configuration
+executable-resolver → platform detection → runtime path resolution
+typescript-detector → local-first search → cached executable paths
+js-debug-launch-barrier → event coordination → launch synchronization
+```
 
-### Detection Pipeline
-1. **Project Analysis**: `config-transformer` analyzes project structure and configuration files
-2. **Executable Resolution**: `executable-resolver` and `typescript-detector` locate required runtimes
-3. **Launch Coordination**: `js-debug-launch-barrier` manages startup sequencing
+### Shared Patterns
+- **No-throw Design**: All functions use safe fallbacks rather than throwing exceptions
+- **Dependency Injection**: FileSystem abstraction enables testing across all modules
+- **Platform Abstraction**: Windows vs Unix handling built into resolution logic
+- **Caching Strategy**: Module-level caching for expensive filesystem operations
 
-### Caching Strategy
-- **TypeScript Detection**: Module-level caching with explicit invalidation
-- **Configuration Analysis**: Per-call analysis with filesystem dependency injection
-- **Executable Resolution**: No caching, deterministic resolution per call
+## Important Conventions
 
-## Important Patterns & Conventions
+### Error Handling
+- Filesystem operations wrapped in try-catch blocks
+- Graceful degradation with sensible defaults
+- No process spawning for deterministic cross-platform behavior
 
-### Error Resilience
-- **No-throw Design**: All functions catch and handle filesystem errors gracefully
-- **Defensive Programming**: Default values and fallback strategies throughout
-- **Silent Failure Mode**: Returns undefined/defaults rather than propagating errors
+### Path Resolution
+- Always return absolute paths via `path.resolve()`
+- Respect PATH environment variable ordering
+- Local node_modules/.bin precedence over global PATH
 
-### Platform Adaptation
-- **Windows Support**: Handles executable suffixes (.cmd, .exe) in detection
-- **PATH Precedence**: Respects directory ordering in PATH searches
-- **Cross-platform Paths**: Consistent absolute path resolution
+### Configuration Detection Precedence
+1. User-provided explicit configuration
+2. File extension analysis (.mjs, .mts)
+3. package.json "type" field
+4. tsconfig.json module settings
+5. Safe defaults as final fallback
 
-### Testability
-- **Dependency Injection**: FileSystem abstraction enables isolated testing
-- **Cache Control**: Explicit cache management for test reproducibility
-- **Deterministic Behavior**: Consistent results across different environments
-
-### Performance Considerations
-- **No Process Spawning**: All detection through filesystem operations only
-- **Lazy Evaluation**: TypeScript detection only runs when explicitly called
-- **Efficient Caching**: Module-level memoization reduces repeated filesystem access
-
-This utility collection forms the foundation for intelligent JavaScript/TypeScript debugging configuration, providing the adapter with comprehensive environment awareness while maintaining reliability and testability.
+This utility suite provides the foundational detection and coordination capabilities that enable the JavaScript debug adapter to intelligently adapt to diverse project configurations and runtime environments.

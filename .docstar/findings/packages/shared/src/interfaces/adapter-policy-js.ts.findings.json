@@ -1,0 +1,31 @@
+{
+  "source": "packages/shared/src/interfaces/adapter-policy-js.ts",
+  "source_hash": "919cdc5f0dd8d595",
+  "generated": "2026-02-10T00:41:31Z",
+  "findings": [
+    {
+      "category": "commented_out_code",
+      "line_start": 195,
+      "line_end": 197,
+      "severity": "warning",
+      "description": "ESLint disable comment with type assertion workaround - indicates potential architectural issue",
+      "suggestion": "Consider refactoring to use proper typing instead of 'any' type assertion"
+    },
+    {
+      "category": "commented_out_code",
+      "line_start": 235,
+      "line_end": 235,
+      "severity": "warning",
+      "description": "ESLint disable comment for 'any' type usage in event handler",
+      "suggestion": "Define proper event type instead of using 'any'"
+    },
+    {
+      "category": "commented_out_code",
+      "line_start": 629,
+      "line_end": 629,
+      "severity": "warning",
+      "description": "ESLint disable comment for 'any' type in request arguments",
+      "suggestion": "Define proper type for startDebugging request arguments"
+    }
+  ]
+}

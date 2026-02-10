@@ -1,49 +1,49 @@
 # src/cli/setup.ts
 @source-hash: 816cd37b9915b5f3
-@generated: 2026-02-09T18:15:02Z
+@generated: 2026-02-10T00:41:46Z
 
-## CLI Command Setup Framework
+## Purpose
+CLI command setup and configuration module for a multi-transport server system, providing standardized command line interfaces for stdio, SSE (Server-Sent Events), and Rust binary analysis operations.
 
-This file provides a comprehensive framework for setting up CLI commands using the Commander.js library. It defines interfaces and factory functions for creating consistent command-line interfaces across different transport modes.
+## Key Types and Interfaces
+- **StdioOptions** (L3-6): Configuration for stdio transport with optional logging controls
+- **SSEOptions** (L8-12): Configuration for SSE transport including required port and optional logging
+- **CheckRustBinaryOptions** (L14-16): Options for Rust binary analysis with optional JSON output
+- **Handler Types** (L18-24): Type aliases for async command handlers that accept options and optional Command objects
 
-### Core Purpose
-- Establishes standardized CLI command patterns for server applications
-- Provides type-safe interfaces for command options and handlers
-- Handles common logging and transport configuration concerns
+## Core Functions
 
-### Key Interfaces
+### createCLI (L26-35)
+Factory function that creates a new Commander.js program instance with basic metadata (name, description, version).
 
-**StdioOptions (L3-6)**: Configuration for stdio transport mode, supporting optional log level and file output.
+### setupStdioCommand (L37-48)
+Configures the default 'stdio' command with:
+- Log level option (default: 'info')
+- Optional log file output
+- Sets `CONSOLE_OUTPUT_SILENCED` environment variable to prevent console pollution in stdio transport
 
-**SSEOptions (L8-12)**: Configuration for Server-Sent Events transport, requiring port specification plus optional logging config.
+### setupSSECommand (L50-62)
+Configures the 'sse' command with:
+- Port option (default: '3001')
+- Log level and file options matching stdio
+- Also sets console silencing for transport protection
 
-**CheckRustBinaryOptions (L14-16)**: Simple configuration for Rust binary analysis with JSON output toggle.
+### setupCheckRustBinaryCommand (L64-76)
+Configures 'check-rust-binary' command for analyzing Rust executables:
+- Requires binary path as argument
+- Optional JSON output format
+- No console silencing (analysis output expected)
 
-### Handler Types
+## Architecture Patterns
+- **Handler Injection**: Commands accept handler functions, enabling dependency injection and testability
+- **Consistent Option Patterns**: Logging options (`-l/--log-level`, `--log-file`) standardized across transport commands
+- **Environment-based Control**: Uses `CONSOLE_OUTPUT_SILENCED` to coordinate logging behavior across the application
+- **Transport Isolation**: Different commands for different communication protocols (stdio vs SSE)
 
-**StdioHandler (L18)**: Async function signature for stdio command execution.
+## Dependencies
+- **commander**: CLI framework for argument parsing and command structure
 
-**SSEHandler (L19)**: Async function signature for SSE command execution.
-
-**CheckRustBinaryHandler (L20-24)**: Async function signature for Rust binary analysis, accepting binary path as first argument.
-
-### Core Functions
-
-**createCLI (L26-35)**: Factory function that creates and configures a base Commander program with name, description, and version.
-
-**setupStdioCommand (L37-48)**: Configures the default stdio command with logging options. Sets `CONSOLE_OUTPUT_SILENCED=1` environment variable to prevent console pollution during stdio transport.
-
-**setupSSECommand (L50-62)**: Configures SSE transport command with port and logging options. Also silences console output for transport protection.
-
-**setupCheckRustBinaryCommand (L64-76)**: Configures Rust binary analysis command with required binary path argument and optional JSON output.
-
-### Architecture Patterns
-- Uses dependency injection pattern with handler functions passed to setup functions
-- Consistent option naming across commands (-l/--log-level, --log-file)
-- Environment variable manipulation for transport-specific behavior
-- Type-safe command configuration with TypeScript interfaces
-
-### Critical Behavior
-- Both stdio and SSE commands automatically set `CONSOLE_OUTPUT_SILENCED=1` to prevent interference with transport protocols
-- Stdio command is marked as default (isDefault: true)
-- All handlers are async and receive the parsed options plus optional Command reference
+## Critical Behaviors
+- Console output is explicitly silenced for stdio/SSE commands to prevent interference with transport protocols
+- Default command is stdio, making it the primary interface
+- All handlers are async and receive both parsed options and the Commander command object for extended functionality

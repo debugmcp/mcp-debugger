@@ -22,11 +22,10 @@ from examples.visualizer.log_watcher import LogWatcher
 def create_test_event(message_type: str, **kwargs) -> dict:
     """Create a test event with proper structure."""
     event = {
-        "timestamp": datetime.now().isoformat() + "Z",
+        "timestamp": int(time.time() * 1000),
         "level": "info",
         "namespace": "debug-mcp:test",
         "message": message_type,
-        "timestamp": int(time.time() * 1000)
     }
     event.update(kwargs)
     return event

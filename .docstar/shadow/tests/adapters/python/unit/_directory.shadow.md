@@ -1,52 +1,67 @@
 # tests/adapters/python/unit/
-@generated: 2026-02-09T18:16:05Z
+@generated: 2026-02-10T01:19:41Z
 
 ## Purpose
-This directory contains comprehensive unit tests for the Python adapter utilities in the debugmcp ecosystem. It validates cross-platform Python executable discovery, version detection, and command resolution functionality that enables the adapter to reliably locate and interact with Python installations across different operating systems.
+Unit test directory for the Python adapter's core utility functions, providing comprehensive test coverage for Python executable discovery, version detection, and cross-platform compatibility in the debugmcp system.
 
-## Key Components and Organization
+## Key Components
+This directory contains focused unit tests for the `@debugmcp/adapter-python` utility layer:
 
-### Core Test Coverage
-- **Python Executable Discovery**: Tests the complex logic for finding Python installations across Windows, Linux, and macOS platforms
-- **Version Detection**: Validates parsing of Python version information from various output formats and edge cases  
-- **Command Resolution**: Tests the configurable command finding infrastructure that underlies Python executable discovery
-- **Cross-Platform Compatibility**: Ensures consistent behavior across different operating systems and Python installation patterns
+- **python-utils.test.ts**: Complete test suite for Python environment detection and executable management
+- **Cross-platform testing infrastructure**: Ensures adapter works consistently across Windows, Linux, and macOS
+- **Mock framework**: Sophisticated mocking system for child processes, file system, and command discovery
 
-### Test Infrastructure Architecture
-The test suite employs sophisticated mocking strategies to simulate real-world scenarios:
+## Test Coverage Areas
 
-- **Partial Child Process Mocking**: Mocks `spawn` while preserving other child_process APIs to avoid breaking cleanup operations
-- **Event-Driven Simulation**: Uses EventEmitter patterns to simulate asynchronous process spawning and completion
-- **Platform Abstraction**: Leverages `describe.each` for systematic cross-platform testing without code duplication
-- **Environment Isolation**: Comprehensive cleanup of Python-related environment variables prevents test interference
+### Python Executable Discovery
+Tests the core `findPythonExecutable` functionality that powers Python environment detection:
+- User-specified path validation and prioritization  
+- Environment variable precedence (PYTHON_PATH, PYTHON_EXECUTABLE)
+- Platform-specific executable search patterns and fallback chains
+- Windows-specific features (py launcher, Store aliases, GitHub Actions support)
+- Error handling for missing or invalid Python installations
 
-### Platform-Specific Logic Testing
-Tests validate the adapter's ability to handle:
-- **Windows Store Python aliases** and their validation mechanisms
-- **GitHub Actions environment** variables like `pythonLocation`
-- **Platform-specific command precedence** (e.g., `py` on Windows, `python3` on Unix)
-- **Environment variable hierarchies** (user paths, PYTHON_PATH, PYTHON_EXECUTABLE)
+### Version Detection
+Tests `getPythonVersion` utility for Python version extraction:
+- Version string parsing from stdout/stderr outputs
+- Error handling for spawn failures and non-zero exit codes
+- Fallback strategies when version patterns aren't found
 
-## Public API Surface
-The tests validate the following key entry points from the adapter-python package:
+### Command Finding Infrastructure
+Tests the configurable command discovery system through `setDefaultCommandFinder`:
+- Dependency injection patterns for testability
+- Platform-specific command location strategies
 
-- `findPythonExecutable()`: Core function for locating Python installations with fallback logic
-- `getPythonVersion()`: Utility for extracting version information from Python executables
-- `setDefaultCommandFinder()`: Configuration interface for customizing command resolution behavior
+## Testing Infrastructure
 
-## Data Flow and Integration Patterns
-The test suite validates a layered approach to Python discovery:
+### Mock Strategy
+- **Process mocking**: EventEmitter-based child process simulation for realistic async testing
+- **Platform isolation**: Global stubbing system for cross-platform test execution
+- **Command finder mocking**: MockCommandFinder for controlled executable discovery testing
+- **Environment management**: Clean slate setup/teardown for Python-related environment variables
 
-1. **User Override Layer**: Tests explicit Python path specifications
-2. **Environment Variable Layer**: Validates PYTHON_PATH and PYTHON_EXECUTABLE resolution
-3. **Auto-Detection Layer**: Tests platform-specific command search patterns
-4. **Fallback Layer**: Ensures graceful degradation when preferred options fail
-5. **Error Handling Layer**: Validates appropriate responses to missing executables or spawn failures
+### Test Organization
+- **Platform-driven testing**: Parameterized tests across win32, linux, darwin platforms
+- **Error scenario coverage**: Comprehensive testing of failure modes and edge cases
+- **Integration patterns**: Tests cover the full flow from high-level API calls to low-level system interactions
 
-## Critical Testing Patterns
-- **Mock Lifecycle Management**: Proper setup/teardown prevents state pollution between tests
-- **Async Process Simulation**: Event-based mocks simulate real spawn timing and error conditions
-- **Platform Stubbing**: Global platform detection overrides ensure consistent test execution
-- **Error Propagation Validation**: Tests both wrapped exceptions and null return scenarios
+## Internal Organization
+The test suite follows a layered approach:
+1. **Environment setup/teardown**: Ensures clean test isolation
+2. **Platform-specific scenarios**: Tests platform-dependent behaviors 
+3. **Error condition simulation**: Validates robust error handling
+4. **Integration verification**: Confirms end-to-end functionality
 
-This test directory serves as the quality gate ensuring the Python adapter can reliably bootstrap Python environments across diverse deployment scenarios, from developer workstations to CI/CD pipelines and production containers.
+## Key Patterns
+- **Cross-platform compatibility testing**: Ensures consistent behavior across operating systems
+- **Mock-driven testing**: Comprehensive mocking of system dependencies for reliable, fast tests
+- **Error simulation**: Systematic testing of failure scenarios and recovery mechanisms
+- **Async process handling**: Proper testing of child process lifecycle and event handling
+
+## API Surface Tested
+The tests validate the public API of the Python adapter utilities:
+- `findPythonExecutable(options?)`: Primary entry point for Python discovery
+- `getPythonVersion(pythonPath)`: Version detection utility
+- `setDefaultCommandFinder(finder)`: Configuration interface for dependency injection
+
+This test directory ensures the Python adapter can reliably discover and interact with Python environments across different platforms and configurations, forming the foundation for debugmcp's Python debugging capabilities.

@@ -1,73 +1,108 @@
 # packages/adapter-java/
-@generated: 2026-02-09T18:17:05Z
+@generated: 2026-02-10T01:20:31Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/adapter-java` module implements a complete Java debugging adapter for the MCP (Model Context Protocol) debugger system. It serves as a bridge between Debug Adapter Protocol (DAP) compatible editors and Java applications, translating high-level debugging requests into Java Debugger (jdb) commands and converting text-based jdb output back into structured DAP responses. This enables seamless Java debugging integration within the broader MCP debugging ecosystem.
+The `packages/adapter-java` directory implements a complete Java Debug Adapter for the MCP Debugger ecosystem. This module provides Debug Adapter Protocol (DAP) compliant Java debugging capabilities by bridging modern IDE debugging interfaces with Java's command-line `jdb` (Java Debugger) tool. It enables professional-grade debugging experiences for Java applications through breakpoints, step execution, variable inspection, and exception handling.
 
-## Architecture and Component Integration
+## Key Components and Integration
 
-The module follows a layered architecture with clear separation of concerns:
+### Four-Tier Architecture
 
-### Core Adapter Layer (`src/`)
-- **JavaAdapterFactory**: Primary factory providing environment validation and adapter instantiation
-- **JavaDebugAdapter**: Main adapter implementing IDebugAdapter interface for DAP session management
-- **JdbDapServer**: Standalone Node.js server implementing actual DAP protocol over TCP connections
+**1. Public API Layer (`src/index.ts`)**
+- Single entry point using barrel export pattern for clean external integration
+- Consolidates all public interfaces for adapter registry consumption
+- Enables dependency injection and factory-based adapter instantiation
 
-### Process Integration Layer (`src/utils/`)
-- **JdbWrapper**: High-level async process manager abstracting jdb's synchronous CLI
-- **JdbParser**: Static parsing utilities converting jdb text output to TypeScript objects
-- **java-utils**: Cross-platform Java environment discovery with multi-tier fallback strategies
+**2. Adapter Factory and Core (`src/java-adapter-factory.ts`, `src/java-debug-adapter.ts`)**
+- Factory pattern for adapter creation with comprehensive environment validation
+- Main adapter implementation bridging DAP protocol with JDB via proxy architecture
+- Handles configuration transformation between launch/attach modes and JDB commands
 
-### Supporting Infrastructure
-- **examples/**: Controlled Java test programs (HelloWorld.java) for adapter validation
-- **tests/**: Comprehensive test suite covering all layers with realistic mocking
-- **vitest.config.ts**: Test framework configuration for Node.js environment testing
+**3. Protocol Bridge Server (`src/jdb-dap-server.ts`)**
+- Standalone Node.js TCP server implementing full DAP specification
+- Manages client connections, message framing, and real-time debugging orchestration
+- Translates between structured DAP requests and text-based JDB interactions
 
-## Data Flow and Communication Pattern
+**4. Java Integration Layer (`src/utils/`)**
+- Cross-platform Java/JDB executable discovery and validation
+- Process management via `JdbWrapper` for controlled command execution
+- Output parsing via `JdbParser` for structured data extraction from JDB text responses
 
-1. **Environment Discovery**: Factory validates Java/jdb availability using multi-tier fallback strategy
-2. **Session Initialization**: Adapter spawns JdbDapServer process with TCP DAP connection
-3. **Command Processing**: DAP requests → JdbDapServer → JdbWrapper → jdb CLI → JdbParser → structured responses
-4. **Event Pipeline**: Bidirectional flow through EventEmitter-based architecture for debugging events
+### Component Data Flow
+
+```
+External System → JavaAdapterFactory → JavaDebugAdapter → JDB-DAP Server → JdbWrapper → JDB Process
+                                                                    ↓
+DAP Client ←→ TCP Server ←→ Command Queue ←→ JdbParser ←→ Raw JDB Output
+```
+
+### Testing and Validation Infrastructure (`tests/`)
+- **Environment Layer**: Java installation detection and compatibility validation
+- **Factory Layer**: Adapter instantiation and configuration testing  
+- **Runtime Layer**: Real-time JDB output parsing and debugging workflow validation
+- **Example Programs** (`examples/`): Simple Java test applications for integration testing
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **`JavaAdapterFactory.createAdapter()`**: Main adapter instantiation with dependency injection support
-- **`JavaAdapterFactory.isEnvironmentSupported()`**: Comprehensive Java environment validation
-- **`JavaAdapterFactory.getMetadata()`**: Adapter capabilities and supported file types
 
-### Debug Session Management
-- **Launch/Attach Modes**: Support for both launching new Java processes and attaching to existing ones
-- **Configuration Interfaces**: `JavaLaunchConfig` and `JavaAttachConfig` for session setup
-- **Breakpoint Management**: Function and exception breakpoints (conditional breakpoints limited by jdb)
-- **Runtime Inspection**: Stack traces, variable inspection, thread management, execution control
+**Factory Interface:**
+- `JavaAdapterFactory.createAdapter()`: Main adapter instantiation with environment validation
+- `JavaAdapterFactory.validate()`: Pre-flight checks for Java/JDB availability
+- `JavaAdapterFactory.getMetadata()`: Adapter capabilities and version information
 
-### Environment Integration
-- **Java Version Support**: JDK 8+ compatibility with both legacy (1.x) and modern (9+) version formats
-- **Cross-Platform Support**: Windows/Unix compatibility with platform-specific executable discovery
-- **Command Discovery**: Configurable executable finding with PATH resolution and validation
+**Core Debugging Services:**
+- Breakpoint management (line, function, exception breakpoints)
+- Execution control (continue, step-over, step-into, step-out)
+- State introspection (threads, stack traces, variable inspection)
+- Process lifecycle (launch applications, attach to running processes, terminate)
 
-## Internal Organization Patterns
+**Configuration Support:**
+- **Launch Mode**: Main class execution with classpath and JVM argument management
+- **Attach Mode**: Remote debugging via host:port or local PID attachment
+- Automatic source path discovery and main class extraction
 
-### Proxy Architecture
-The adapter uses a proxy pattern where `JavaDebugAdapter` delegates DAP communication to the external `JdbDapServer` process, enabling protocol isolation and specialized handling.
+### Development and Testing Tools
 
-### Command Queue Management
-JDB's single-threaded nature is managed through promise-based async APIs in `JdbWrapper`, serializing access while providing modern async interfaces.
+**Vitest Configuration**: Node.js test environment with TypeScript support and comprehensive coverage reporting
+**Example Programs**: Minimal Java applications designed for debugging scenario validation
+**Mock Infrastructure**: Complete isolation framework for testing without external Java dependencies
 
-### Multi-Tier Fallback Strategy
-Consistent pattern throughout for executable discovery: user configuration → environment variables → PATH resolution, with detailed error reporting.
+## Internal Organization and Data Flow
 
-### Event-Driven Design
-Extensive EventEmitter usage decouples components, enabling clean separation between jdb process management, output parsing, and DAP protocol handling.
+### State Management Architecture
+- Strict state machine transitions ensuring reliable debugging session lifecycle
+- Thread-aware debugging with active context tracking
+- Event-driven architecture with real-time status reporting
 
-## Critical Dependencies and Constraints
+### Cross-Platform Java Integration
+- Multi-strategy executable discovery (JAVA_HOME, PATH, explicit configuration)
+- Platform-specific command resolution with Windows compatibility
+- Version compatibility enforcement (Java 8+ requirement)
 
-- **Runtime Requirements**: JDK 8+ with Java Debugger (jdb) availability
-- **Protocol Compliance**: Full Debug Adapter Protocol implementation through TCP-based server architecture  
-- **State Management**: Careful state transitions (UNINITIALIZED → READY → CONNECTED → DEBUGGING)
-- **Process Orchestration**: Complex child process management for both Java applications and jdb debugging sessions
+### Protocol Translation Layer
+- Complete DAP specification implementation hiding JDB complexity
+- Asynchronous command queuing with timeout protection
+- Real-time event translation from text output to structured DAP events
 
-The module provides a production-ready Java debugging solution that abstracts jdb's text-based interface complexity while maintaining full DAP ecosystem compatibility, enabling seamless Java debugging within MCP-compatible development environments.
+## Important Patterns and Conventions
+
+### Factory and Dependency Injection
+- Clean separation between instantiation/validation (factory) and operation (adapter)
+- Environment validation occurs before adapter creation to ensure reliable operation
+- Supports dynamic loading by adapter registry systems
+
+### Error Handling and Resilience
+- Multi-stage validation from environment detection through runtime operation
+- Detailed error context with actionable troubleshooting information
+- Graceful degradation and cleanup on failure conditions
+
+### Performance Optimization
+- Executable discovery caching to minimize filesystem operations
+- Non-blocking command execution for responsive debugging experience
+- Efficient output parsing with buffered event detection
+
+## Role in Larger System
+
+This module serves as the Java language implementation within the MCP Debugger's multi-language adapter ecosystem. It transforms the text-based, command-line JDB interface into a standardized, IDE-compatible debugging experience while maintaining cross-platform compatibility and production-level reliability. The adapter integrates seamlessly with modern development environments through its DAP compliance and factory-based instantiation pattern.

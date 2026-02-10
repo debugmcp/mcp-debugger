@@ -1,51 +1,47 @@
 # packages/adapter-javascript/tests/unit/executable-resolver.edge.test.ts
 @source-hash: d19f6bf1a864d226
-@generated: 2026-02-09T18:14:01Z
+@generated: 2026-02-10T00:41:08Z
 
-## Purpose and Responsibility
-
-Unit test file for `executable-resolver.js` utilities, focusing on edge cases for executable path resolution across Windows and POSIX systems. Tests the behavior of `whichInPath` and `findNode` functions under various PATH configurations and file system states.
+## Purpose
+Edge case test suite for executable resolution utilities, specifically testing cross-platform behavior of Node.js executable discovery with mocked file systems.
 
 ## Key Components
 
-### MockFileSystem Class (L9-22)
-- Test double implementing `FileSystem` interface
-- `setExistsMock(mock)` (L12-14): Configures custom file existence behavior
-- `existsSync(path)` (L16-21): Returns mock existence results or false by default
+### MockFileSystem (L9-22)
+Test double implementing `FileSystem` interface with configurable existence checks via `setExistsMock()`. Returns false by default when no mock is set.
 
 ### Test Utilities
-- `withPath(paths)` (L26-32): Temporarily modifies `process.env.PATH` and returns cleanup function
-- `WIN` constant (L24): Cached result of `isWindows()` for platform-specific test logic
+- `withPath()` (L26-32): Temporarily modifies `process.env.PATH` and returns cleanup function
+- `WIN` constant (L24): Platform detection flag using `isWindows()`
 
-### Test Setup (L38-51)
-- `beforeEach`: Initializes fresh `MockFileSystem` and sets as default
-- `afterEach`: Restores original PATH, resets mocks, restores `NodeFileSystem`
+### Test Suite Structure (L34-123)
+Setup/teardown (L38-51): Configures mock file system and restores environment state between tests.
 
 ## Test Cases
 
-### Platform-Specific Executable Preference (L53-72)
-Tests that `whichInPath` correctly prioritizes:
-- Windows: `node.exe` over `node` when both exist in same directory
-- POSIX: Only searches for `node`
+### Platform-specific Executable Preference (L53-72)
+Tests `whichInPath()` behavior when multiple Node executables exist:
+- Windows: prefers `node.exe` over `node` in same directory
+- POSIX: uses `node` only
+- Validates absolute path resolution
 
-### PATH Directory Precedence (L74-93)
-Verifies that directories earlier in PATH take precedence over later directories, even when later directories contain preferred executable names.
+### PATH Directory Precedence (L74-93) 
+Verifies `whichInPath()` prioritizes directories in PATH order over executable name preferences. Tests scenario where earlier PATH directory contains less-preferred executable name.
 
 ### Relative Path Resolution (L95-102)
-Tests `findNode` with relative `preferredPath` - ensures absolute path resolution when file exists.
+Tests `findNode()` with relative preferred path, ensuring proper absolute path resolution when file exists.
 
 ### Fallback Behavior (L104-122)
-Tests `findNode` fallback logic:
+Complex test of `findNode()` fallback logic:
 1. When `process.execPath` doesn't exist but PATH candidate does → returns PATH candidate
-2. When neither exists → returns resolved `process.execPath` as deterministic fallback
+2. When neither exists → falls back to resolved `process.execPath`
 
 ## Dependencies
-- **vitest**: Test framework and mocking utilities
-- **@debugmcp/shared**: `FileSystem` and `NodeFileSystem` interfaces
-- **../../src/utils/executable-resolver.js**: Functions under test (`whichInPath`, `findNode`, `isWindows`, `setDefaultFileSystem`)
+- `@debugmcp/shared`: FileSystem interface
+- `executable-resolver.js`: Core utilities under test (`whichInPath`, `findNode`, `isWindows`, `setDefaultFileSystem`)
 
-## Architectural Patterns
-- Dependency injection pattern: Uses `setDefaultFileSystem` to inject mock during tests
-- Environment isolation: Careful PATH manipulation with cleanup
-- Platform-agnostic testing: Uses `isWindows()` to adapt test expectations
-- Mock-based testing: FileSystem abstraction enables deterministic file existence simulation
+## Test Patterns
+- Environment isolation with cleanup
+- Cross-platform executable naming conventions
+- Mock-driven file system behavior
+- Deterministic fallback testing

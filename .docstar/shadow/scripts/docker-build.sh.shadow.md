@@ -1,23 +1,24 @@
 # scripts/docker-build.sh
 @source-hash: 0984064fe31719d3
-@generated: 2026-02-09T18:15:09Z
+@generated: 2026-02-10T00:41:55Z
 
 ## Purpose
-Docker build automation script for the Debug MCP Server. Provides a streamlined way to build the Docker image with consistent naming and includes usage instructions for developers.
+Shell script for building a Docker image for the Debug MCP Server. Provides a simple wrapper around `docker build` with user-friendly output and usage instructions.
 
-## Key Operations
-- **Docker Image Build (L5)**: Executes `docker build` command to create image tagged as `debug-mcp-server` from current directory context
-- **User Guidance (L9-10)**: Provides runtime command example using interactive mode with automatic cleanup (`-i --rm` flags)
+## Key Components
+- **Docker Build Command (L5)**: Executes `docker build -t debug-mcp-server .` to create the image with tag "debug-mcp-server" from the current directory's Dockerfile
+- **User Feedback (L4, L8-10)**: Provides status messages and usage instructions for running the built container
 
-## Script Flow
-1. **Build Notification (L4)**: Announces build process start
-2. **Image Creation (L5)**: Builds Docker image using current directory as build context
-3. **Success Feedback (L8-11)**: Confirms successful build and displays usage instructions
+## Behavior
+1. Displays build start message
+2. Builds Docker image using current directory as build context
+3. Tags the resulting image as "debug-mcp-server"
+4. Provides success confirmation and run instructions
 
 ## Dependencies
-- Docker daemon must be available and running
-- Dockerfile must exist in current directory (implied by build context `.`)
-- Current working directory should be project root
+- Requires Docker to be installed and accessible
+- Expects a Dockerfile in the current directory (implied by `.` context)
+- Assumes script is run from the project root directory
 
 ## Usage Pattern
-Simple wrapper script that standardizes the Docker build process and eliminates need to remember image tag naming conventions. Designed for developer convenience with clear feedback and next-step guidance.
+Typical development workflow script - meant to be executed from command line to rebuild the Docker image during development cycles. The provided run command uses `-i --rm` flags for interactive mode with automatic cleanup.

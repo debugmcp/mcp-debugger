@@ -1,8 +1,6 @@
 /**
  * JavaScript/TypeScript Debug Adapter (skeleton)
  *
- * NOTE: This is a minimal, non-functional stub for Task 1 scaffolding.
- * TODO: Add DebugLanguage.JAVASCRIPT to @debugmcp/shared enum in a later task.
  *
  * @since 0.1.0
  */
@@ -762,36 +760,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     };
   }
 
-  // ===== Runtime selection helpers =====
-
-  private async determineRuntimeExecutable(isTypeScript: boolean): Promise<string> {
-    if (!isTypeScript) {
-      return 'node';
-    }
-    const runners = await this.detectTypeScriptRunners();
-    if (runners.tsx) {
-      return runners.tsx;
-    }
-    if (runners.tsNode) {
-      // Use node with ts-node require hooks
-      return 'node';
-    }
-    // Warn when no TS runner found
-    try {
-      // Prefer dependency logger if present
-      const logger = this.dependencies.logger;
-      if (logger && typeof logger.warn === 'function') {
-        logger.warn('TypeScript file detected but no TS runner found. Install tsx or ts-node for best experience.');
-      } else {
-        // Fallback to console
-        console.warn('TypeScript file detected but no TS runner found. Install tsx or ts-node for best experience.');
-      }
-    } catch {
-      // ignore logging errors
-    }
-    return 'node';
-  }
-
   private normalizeAndDedupeArgs(args: string[]): string[] {
     const out: string[] = [];
     const seenPairs = new Set<string>();
@@ -827,93 +795,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       if (args[i] === flag && args[i + 1] === value) return true;
     }
     return false;
-  }
-
-  private computeRuntimeArgsSync(
-    isTypeScript: boolean,
-    opts: { program: string; cwd: string; runtimeExecutable: string; userRuntimeArgs: string[] }
-  ): string[] {
-    const userArgs = Array.isArray(opts.userRuntimeArgs) ? opts.userRuntimeArgs.slice() : [];
-    const base: string[] = [];
-
-    if (!isTypeScript) {
-      return this.normalizeAndDedupeArgs([...base, ...userArgs]);
-    }
-
-    // If runtimeExecutable is 'tsx', do not add ts-node hooks
-    if (opts.runtimeExecutable === 'tsx') {
-      return this.normalizeAndDedupeArgs([...base, ...userArgs]);
-    }
-
-    // If runtimeExecutable is 'ts-node', assume CLI handles transpilation; avoid adding hooks
-    if (opts.runtimeExecutable === 'ts-node') {
-      return this.normalizeAndDedupeArgs([...base, ...userArgs]);
-    }
-
-    // Heuristic-only synchronous add for ts-node hooks is skipped (we don't know availability);
-    // rely on async version for precise behavior. Still, consider user args idempotency only.
-    return this.normalizeAndDedupeArgs([...base, ...userArgs]);
-  }
-
-  private async determineRuntimeArgs(isTypeScript: boolean, config: Record<string, unknown>): Promise<string[]> {
-    const userArgs: string[] = Array.isArray(config?.runtimeArgs) ? config.runtimeArgs.slice() : [];
-    const args: string[] = [];
-
-    if (!isTypeScript) {
-      return this.normalizeAndDedupeArgs([...args, ...userArgs]);
-    }
-
-    const program: string = typeof config?.program === 'string' ? config.program : '';
-    const cwd: string = typeof config?.cwd === 'string' ? config.cwd : (program ? path.dirname(program) : process.cwd());
-    const overrideExec: string | undefined = typeof config?.runtimeExecutable === 'string' ? config.runtimeExecutable : undefined;
-
-    // Respect runtimeExecutable overrides
-    if (overrideExec === 'tsx') {
-      // tsx executable handles TS, no hooks
-      return this.normalizeAndDedupeArgs([...args, ...userArgs]);
-    }
-    if (overrideExec === 'ts-node') {
-      // ts-node CLI handles transpilation; avoid adding hooks; still dedupe any user-provided hooks
-      return this.normalizeAndDedupeArgs([...args, ...userArgs]);
-    }
-
-    const runners = await this.detectTypeScriptRunners();
-
-    // If no override, prefer tsx -> no hooks
-    if (!overrideExec && runners.tsx) {
-      return this.normalizeAndDedupeArgs([...args, ...userArgs]);
-    }
-
-    // If ts-node present, add require hooks for node
-    if (runners.tsNode) {
-      // Only add if user hasn't already provided the same hooks
-      if (!this.hasPairArgs(userArgs, '-r', 'ts-node/register')) {
-        args.push('-r', 'ts-node/register');
-      }
-      if (!this.hasPairArgs(userArgs, '-r', 'ts-node/register/transpile-only')) {
-        args.push('-r', 'ts-node/register/transpile-only');
-      }
-
-      // ESM loader if project is ESM
-      if (isESMProject(program, cwd)) {
-        if (!this.hasPairArgs(userArgs, '--loader', 'ts-node/esm')) {
-          args.push('--loader', 'ts-node/esm');
-        }
-      }
-
-      // tsconfig-paths/register if paths present
-      const dirForTsconfig = cwd || (program ? path.dirname(program) : process.cwd());
-      if (hasTsConfigPaths(dirForTsconfig)) {
-        if (!this.hasPairArgs(userArgs, '-r', 'tsconfig-paths/register')) {
-          args.push('-r', 'tsconfig-paths/register');
-        }
-      }
-    } else {
-      // No TS runner found; keep args empty (warn in executable selection)
-    }
-
-    // Append user args last and dedupe known pairs/loader
-    return this.normalizeAndDedupeArgs([...args, ...userArgs]);
   }
 
   // ===== Internal discovery helpers =====

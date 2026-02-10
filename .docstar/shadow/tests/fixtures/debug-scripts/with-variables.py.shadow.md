@@ -1,33 +1,32 @@
 # tests/fixtures/debug-scripts/with-variables.py
 @source-hash: 8540bb65e9505c2f
-@generated: 2026-02-09T18:14:32Z
+@generated: 2026-02-10T00:41:23Z
 
-**Purpose**: Test fixture script for debugger variable inspection functionality. Demonstrates various Python data types and scoping scenarios for testing debugging tools.
+## Purpose
+Test fixture script for debugging variable inspection functionality across different data types and scopes.
 
-**Key Functions**:
-- `test_variables()` (L4-17): Main test function that creates variables of different types (int, string, list, dict) and calls a nested function to test scope handling
-- `inner()` (L12-14): Nested function that creates a local variable to test debugger scope inspection
+## Key Functions
+- `test_variables()` (L4-17): Main test function demonstrating variable inspection scenarios
+  - Creates variables of different types (int, str, list, dict) for testing debugger variable display
+  - Contains nested function to test scope-based variable inspection
+  - Returns result from inner function call
+- `inner()` (L12-14): Nested function for testing local scope variable inspection
+  - Creates `local_var` with string value for scope testing
+  - Returns local variable value
 
-**Variable Types Tested**:
-- `number` (L6): Integer literal (42)
-- `text` (L7): String literal 
-- `items` (L8): List with integers [1,2,3,4,5]
-- `data` (L9): Dictionary with mixed types
-- `local_var` (L13): String in nested scope
-- `result` (L16): Return value from nested function
+## Variables & Test Data
+- `number = 42` (L6): Integer variable for numeric type testing
+- `text = "Hello, debugger!"` (L7): String variable for text type testing  
+- `items = [1, 2, 3, 4, 5]` (L8): List variable for collection type testing
+- `data = {"name": "test", "value": 100}` (L9): Dictionary variable for mapping type testing
+- `local_var = "inner scope"` (L13): Local variable in nested function scope
 
-**Execution Flow**:
-- Script entry point at L19-20 calls `test_variables()`
-- Function creates variables of different types (L6-9)
-- Calls nested `inner()` function (L16) - marked as breakpoint location in comment
-- Returns result from nested function (L17)
+## Debug Points
+- L16 (`result = inner()`): Marked as breakpoint location in comments for testing debugger functionality
+- Function demonstrates multiple variable scopes (global function scope vs nested function scope)
 
-**Testing Context**: 
-- Comments indicate specific line numbers for breakpoint placement (L16)
-- Designed to test debugger's ability to inspect variables across different scopes
-- No external dependencies - pure Python standard types only
+## Execution Flow
+Script executes `test_variables()` when run directly via `if __name__ == "__main__"` guard (L19-20).
 
-**Architecture Notes**:
-- Simple linear execution flow
-- Single level of function nesting to test scope boundaries
-- Self-contained test data with no external state
+## Architecture Notes
+Simple linear test script designed specifically for debugger variable inspection testing. No external dependencies. Demonstrates common Python data types and nested scope scenarios that debuggers need to handle.

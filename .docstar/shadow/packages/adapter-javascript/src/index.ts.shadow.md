@@ -1,28 +1,33 @@
 # packages/adapter-javascript/src/index.ts
 @source-hash: 758b5f8b713a0532
-@generated: 2026-02-09T18:14:27Z
+@generated: 2026-02-10T00:41:18Z
 
-## Primary Purpose
-Package entry point for `@debugmcp/adapter-javascript` that provides JavaScript/TypeScript debugging capabilities through MCP (Model Context Protocol). Serves as the main public API surface by re-exporting all essential components.
+## Purpose and Responsibility
+Entry point module for the `@debugmcp/adapter-javascript` package that provides debugging capabilities for JavaScript/TypeScript applications. Serves as the public API surface by re-exporting core components, utilities, and types.
 
 ## Key Exports
 
-### Factory
-- `JavascriptAdapterFactory` (L6) - Primary factory for creating JavaScript debug adapter instances
-
-### Adapter
-- `JavascriptDebugAdapter` (L9) - Core debug adapter implementation handling JavaScript/TypeScript debugging sessions
+### Core Components
+- **JavascriptAdapterFactory** (L6): Factory class for creating JavaScript debug adapter instances
+- **JavascriptDebugAdapter** (L9): Main debug adapter implementation for JavaScript/TypeScript debugging sessions
 
 ### Utilities
-- `resolveNodeExecutable` (L12) - Locates and resolves Node.js executable paths for debugging
-- `detectTsRunners` (L13) - Identifies available TypeScript runtime environments (ts-node, tsx, etc.)
-- `transformConfig` (L14) - Transforms debug configuration objects for runtime compatibility
+- **resolveNodeExecutable** (L12): Utility function for locating and resolving Node.js executable paths
+- **detectTsRunners** (L13): Function to detect available TypeScript runtime environments (ts-node, tsx, etc.)
+- **transformConfig** (L14): Configuration transformation utility for adapting debug configurations
 
 ### Types
-- `JsDebugConfig` (L17) - TypeScript interface defining JavaScript debugging configuration structure
+- **JsDebugConfig** (L17): TypeScript type definition for JavaScript debug configuration objects
 
-## Architecture
-Classic barrel export pattern providing clean public API. Uses ES module syntax with explicit `.js` extensions for Node.js compatibility. Separates concerns into factory, adapter, utilities, and types.
+## Architecture Notes
+- Pure re-export module following barrel pattern for clean public API
+- Clear separation between factory, adapter implementation, utilities, and types
+- Comment on L11 indicates utilities section is designed for extensibility with future debugging tasks
+- All imports use explicit `.js` extensions for ES module compatibility
 
 ## Dependencies
-Internal modules only - no external dependencies in this entry point. All imports use relative paths with explicit file extensions.
+Depends on four internal modules within the package:
+- `./javascript-adapter-factory.js`
+- `./javascript-debug-adapter.js` 
+- `./utils/` directory modules
+- `./types/js-debug-config.js`

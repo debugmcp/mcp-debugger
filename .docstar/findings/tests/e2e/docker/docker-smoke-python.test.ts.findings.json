@@ -1,0 +1,6 @@
+{
+  "source": "tests/e2e/docker/docker-smoke-python.test.ts",
+  "source_hash": "a331b1ed67bb6636",
+  "generated": "2026-02-10T00:41:33Z",
+  "findings": []
+}

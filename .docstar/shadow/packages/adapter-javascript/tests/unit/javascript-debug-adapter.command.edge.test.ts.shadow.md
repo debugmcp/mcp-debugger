@@ -1,32 +1,44 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.command.edge.test.ts
 @source-hash: ccfc0a560f315720
-@generated: 2026-02-09T18:14:01Z
+@generated: 2026-02-10T00:41:07Z
 
-## Purpose
-Unit test file for JavascriptDebugAdapter's `buildAdapterCommand` method, specifically testing edge cases and environment stability to ensure consistent behavior across repeated calls with different NODE_OPTIONS configurations.
+## Unit Test for JavascriptDebugAdapter Command Building Edge Cases
 
-## Key Test Components
+**Primary Purpose**: Tests the stability and correctness of `JavascriptDebugAdapter.buildAdapterCommand()` method under various NODE_OPTIONS environment variable scenarios, ensuring consistent behavior across repeated calls without side effects.
 
-### Test Setup (L1-46)
-- **Dependencies**: Vitest testing framework with minimal AdapterDependencies stub (L4-12)
-- **Utility Function**: `isVendorPath()` (L14-16) validates that adapter path ends with expected vendor debug server path
-- **Platform-Aware Config**: `baseConfig` (L22-30) with Windows/Unix conditional paths using `process.platform` detection (L19-20)
-- **Environment Management**: beforeEach/afterEach hooks (L34-46) preserve and restore NODE_OPTIONS environment variable
+### Key Test Components
 
-### Core Test Suite (L48-94)
-Tests three critical stability scenarios for `buildAdapterCommand()`:
+**Test Setup** (L4-31):
+- `deps` (L5-12): Minimal mock of `AdapterDependencies` with no-op logger methods
+- `isVendorPath()` (L14-16): Helper function to validate adapter executable path points to vendor debug server
+- `baseConfig` (L22-30): Standard adapter configuration with platform-specific paths for Node.js executable, log directory, and script path
 
-1. **Existing Memory Flag Test** (L48-66): Verifies that when NODE_OPTIONS already contains max-old-space-size, repeated calls normalize whitespace without duplication and preserve original process.env
-2. **Missing Memory Flag Test** (L68-82): Ensures memory flag is appended exactly once when missing, with consistent whitespace normalization across calls  
-3. **Empty NODE_OPTIONS Test** (L84-94): Confirms stable behavior when NODE_OPTIONS is undefined, adding only the required memory flag
+**Environment Management** (L32-46):
+- Preserves and restores original `NODE_OPTIONS` environment variable
+- Uses Vitest lifecycle hooks for clean test isolation
+- Restores all mocks after each test
 
-## Testing Patterns
-- **Stability Focus**: Each test calls `buildAdapterCommand()` multiple times to verify idempotent behavior
-- **Environment Isolation**: Tests manipulate NODE_OPTIONS but verify original process.env remains unchanged
-- **Cross-Platform**: Uses conditional paths for Windows vs Unix systems
-- **Assertion Strategy**: Validates both adapter path correctness and NODE_OPTIONS normalization
+### Test Scenarios
 
-## Dependencies
-- `@debugmcp/shared` types for AdapterConfig and AdapterDependencies
-- JavascriptDebugAdapter from main package source (L2)
-- Vitest testing utilities for mocking and environment management
+**Existing Memory Flag Test** (L48-66):
+- Tests behavior when `NODE_OPTIONS` already contains `--MAX-OLD-SPACE-SIZE=2048`
+- Verifies whitespace normalization occurs only once without duplication
+- Ensures original process environment remains unchanged
+- Validates adapter path points to correct vendor location
+
+**Missing Memory Flag Test** (L68-82):
+- Tests automatic addition of `--max-old-space-size=4096` when memory flag absent
+- Verifies preservation of existing flags while adding default memory setting
+- Confirms whitespace normalization and stability across multiple calls
+
+**Empty Environment Test** (L84-94):
+- Tests default behavior when `NODE_OPTIONS` is undefined
+- Verifies only memory flag is added with default 4096MB limit
+- Confirms no side effects on process environment
+
+### Critical Test Patterns
+
+- **Idempotency**: All tests verify repeated calls produce identical results
+- **Environment Isolation**: Process environment modifications don't persist between tests
+- **Cross-platform Compatibility**: Uses platform detection for Windows vs Unix paths
+- **Whitespace Handling**: Tests proper normalization of environment variable formatting

@@ -1,46 +1,48 @@
 # mcp_debugger_launcher/mcp_debugger_launcher/detectors.py
 @source-hash: f7b31d12c3a49508
-@generated: 2026-02-09T18:15:02Z
+@generated: 2026-02-10T00:41:52Z
 
-## Purpose
-Runtime detection utilities for the debug-mcp-server launcher, providing comprehensive environment analysis for Node.js/npm and Docker execution paths.
+## Primary Purpose
+Provides runtime detection capabilities for the debug-mcp-server launcher, identifying and validating available execution environments (Node.js/npx and Docker) with detailed status reporting.
 
-## Core Architecture
-Single static class `RuntimeDetector` (L8-165) implementing detection pattern with separate methods for each runtime component, unified by aggregation functions.
+## Key Components
 
-## Key Classes & Methods
+### RuntimeDetector Class (L8-165)
+Static utility class containing all detection methods. No instance state - purely functional approach.
 
-### RuntimeDetector (L8-165)
-Static utility class providing runtime environment detection capabilities:
+#### Core Detection Methods
+- `check_nodejs()` (L12-31): Validates Node.js installation using `shutil.which()` and `subprocess.run()` with version retrieval. Returns tuple of (availability, version_string).
+- `check_npx()` (L34-36): Simple binary check for npx availability via PATH lookup.
+- `check_npm_package()` (L39-51): Tests npm package accessibility using `npx --no-install {package} --version` with 10s timeout.
+- `check_docker()` (L54-95): Comprehensive Docker validation including installation check, version retrieval, and daemon status via both `docker ping` and `docker ps` fallback.
+- `check_docker_image()` (L98-109): Verifies local Docker image existence using `docker images -q`.
 
-- `check_nodejs()` (L11-31): Detects Node.js installation via `shutil.which()` and version extraction through subprocess execution. Returns tuple of (availability, version_string). Includes 5-second timeout protection.
-
-- `check_npx()` (L33-36): Simple binary check for npx availability using `shutil.which()`.
-
-- `check_npm_package(package_name)` (L38-51): Validates npm package accessibility via `npx --no-install` with `--version` flag. Uses 10-second timeout and prevents automatic installation.
-
-- `check_docker()` (L53-95): Comprehensive Docker detection including installation check, version extraction, and daemon status verification. Implements fallback strategy: attempts `docker ping` first, then `docker ps` if ping fails. Returns tuple with daemon status in version string.
-
-- `check_docker_image(image_name)` (L97-109): Local Docker image existence check using `docker images -q` command with output evaluation.
-
-- `detect_available_runtimes()` (L111-150): Orchestrates all detection methods into structured dictionary. Hardcodes specific package name `@debugmcp/mcp-debugger` and image `debugmcp/mcp-debugger:latest`. Implements conditional checking (only checks npx packages if Node.js available, only checks Docker images if daemon running).
-
-- `get_recommended_runtime(runtimes)` (L152-165): Runtime selection logic prioritizing npx over Docker based on availability matrix.
+#### Orchestration Methods
+- `detect_available_runtimes()` (L112-150): Main detection orchestrator that builds comprehensive runtime status dictionary. Checks Node.js ecosystem first, then Docker, with conditional package/image checks.
+- `get_recommended_runtime()` (L153-165): Decision engine that prioritizes npx over Docker based on availability criteria.
 
 ## Dependencies
-- `subprocess`: Process execution for version checks and availability testing
-- `shutil`: Cross-platform executable detection via `which()`
+- `subprocess`: All external command execution with timeout protection
+- `shutil`: PATH-based executable discovery via `which()`
 - `os`: Standard library import (unused in current implementation)
-- `typing`: Type hints for Tuple and Optional
+- `typing`: Type hints for return signatures
 
-## Key Patterns
-- **Defensive Programming**: All subprocess calls wrapped in try/except with timeout protection
-- **Fallback Strategy**: Docker daemon detection uses multiple verification approaches
-- **Binary Detection**: Consistent pattern of executable path checking followed by functional validation
-- **Structured Output**: Standardized dictionary format for runtime information aggregation
+## Architecture Patterns
+- **Static Methods Only**: No instance state, pure utility class design
+- **Defensive Programming**: Extensive try/except blocks with timeout handling for all subprocess calls
+- **Structured Returns**: Consistent tuple returns for availability checks, detailed dict for comprehensive status
+- **Fallback Logic**: Docker daemon detection uses ping->ps fallback strategy
+- **Conditional Checks**: Package/image validation only performed when base runtimes are available
 
-## Critical Constraints
-- Hardcoded timeouts: 5s for version checks, 10s for npm package validation
-- Hardcoded package/image names embedded in detection logic
-- Docker daemon status detection assumes specific command behaviors
-- No caching of detection results across multiple calls
+## Critical Invariants
+- All subprocess calls use `capture_output=True, text=True` for consistent handling
+- Timeout values: 5s for basic checks, 10s for npm package verification
+- Docker daemon status distinguished from installation status via version string analysis
+- Package detection uses `--no-install` flag to avoid unwanted installations
+
+## Data Flow
+RuntimeDetector orchestrates a two-phase detection:
+1. Base runtime availability (Node.js/Docker installation + basic functionality)
+2. Ecosystem readiness (npx packages, Docker images) - only if base runtimes are functional
+
+The recommendation engine implements a preference hierarchy: npx (if Node.js + npx available) > Docker (if daemon running) > None.

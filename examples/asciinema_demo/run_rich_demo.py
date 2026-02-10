@@ -93,13 +93,6 @@ def update_code_pane():
 
         display_lines.append(text_line)
     
-    # Using Syntax for proper highlighting, but it's a single block
-    # For per-line styling (breakpoints, current line), manual Text objects are easier
-    # For a real app, a more sophisticated approach would be needed.
-    # For this demo, we'll use manually styled Text objects.
-    # syntax = Syntax(SCRIPT_CODE, "python", theme="monokai", line_numbers=True)
-    # layout["right_pane"].update(Panel(syntax, title=f"{SCRIPT_TO_DEBUG_RELPATH.name}"))
-    
     layout["right_pane"].update(Panel(Text("\n").join(display_lines), title=f"{SCRIPT_TO_DEBUG_RELPATH.name}"))
 
 
@@ -138,12 +131,9 @@ def start_mcp_server():
         if mcp_server_process.poll() is None:
             add_log_message("MCP Debugger server started.", "green")
         else:
-            add_log_message(f"MCP Debugger server failed to start. Return code: {mcp_server_process.poll()}", "bold red")
+            returncode = mcp_server_process.poll()
+            add_log_message(f"MCP Debugger server failed to start. Return code: {returncode}", "bold red")
             mcp_server_process = None
-            # Print all stderr
-            if mcp_server_process and mcp_server_process.stderr:
-                for line in mcp_server_process.stderr.readlines():
-                    add_log_message(f"MCP Server STDERR: {line.strip()}", "dim red")
 
 
     except Exception as e:

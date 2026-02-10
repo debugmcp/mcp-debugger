@@ -1,50 +1,43 @@
 # examples/javascript/mcp_target.js
 @source-hash: 20db91ba517632f7
-@generated: 2026-02-09T18:14:55Z
+@generated: 2026-02-10T00:41:37Z
 
 ## Purpose
-A JavaScript test script designed to validate debugging capabilities in development environments. Provides structured test scenarios for breakpoints, stack traces, variable inspection, and expression evaluation.
+JavaScript debugging test script designed to exercise various debugging features including breakpoints, stack traces, variable inspection, and expression evaluation. Serves as a comprehensive target for testing JavaScript debugging tools.
 
-## Key Components
+## Key Functions
 
-### Test Data (L13-17)
-- `testData`: Static configuration object containing script metadata and feature list
-- Used as baseline data for debugging tests
+**deepFunction(level)** (L20-27)
+- Recursive function for testing stack trace depth
+- Decrements level until reaching 0, then returns a local variable
+- Creates nested call stack for debugging stack frame inspection
 
-### Functions
+**testVariables()** (L30-39)
+- Demonstrates variable inspection capabilities
+- Creates diverse variable types: number, string, array, nested object
+- Performs simple expression evaluation (multiplication)
+- Returns computed result for testing
 
-#### `deepFunction(level)` (L20-27)
-- Recursive function for testing call stack depth and tracing
-- Creates controlled stack frames by recursively calling itself until `level` reaches 0
-- Returns a local variable from the deepest stack frame
-- Useful for testing debugger stack navigation and variable scope inspection
+**main()** (L42-57)
+- Async entry point orchestrating test execution
+- Runs two test scenarios with console output separation
+- Calls deepFunction(3) to test 4-level stack depth
+- Calls testVariables() to test variable inspection
 
-#### `testVariables()` (L30-39)
-- Demonstrates various JavaScript data types for variable inspection testing
-- Creates local variables of different types: number, string, array, object with nested properties
-- Performs simple computation (`result = number * 2`) for expression evaluation testing
-- Returns computed result
+## Data Structures
 
-#### `main()` (L42-57)
-- Async entry point orchestrating all test scenarios
-- Executes tests in sequence with console logging for visual feedback
-- **Test 1 (L47-49)**: Stack trace testing via `deepFunction(3)`
-- **Test 2 (L52-54)**: Variable inspection testing via `testVariables()`
-- Provides clear test boundaries with formatted console output
+**testData** (L13-17)
+- Global constant object with metadata about the debugging test
+- Contains name, version, and features array for inspection
 
-### Execution Entry Point (L60-63)
-- Invokes `main()` with error handling
-- Exits process with code 1 on any unhandled errors
-- Uses `.catch()` for promise error handling
+## Execution Flow
+1. Script starts by calling main() (L60-63)
+2. Error handling with process.exit(1) on failure
+3. Sequential execution of stack trace and variable inspection tests
+4. Console logging throughout for test progress tracking
 
-## Architecture Patterns
-- Separation of concerns: distinct functions for different debugging aspects
-- Async/await pattern for main execution flow
-- Structured test organization with clear logging boundaries
-- Error handling with graceful process termination
-
-## Key Testing Scenarios
-- **Stack Depth**: 4-level deep recursion for stack frame inspection
-- **Data Types**: Primitive and complex types for variable examination
-- **Scope Testing**: Local variables at different function levels
-- **Expression Evaluation**: Simple arithmetic operations for debugger testing
+## Debugging Test Points
+- Line 48: Deep recursion call for stack testing
+- Line 53: Variable-rich function call for inspection testing
+- Multiple breakpoint opportunities at function entry/exit points
+- Diverse variable types for expression evaluation testing

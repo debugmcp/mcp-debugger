@@ -1,46 +1,41 @@
 # src/interfaces/external-dependencies.ts
 @source-hash: e904edcd18ba7261
-@generated: 2026-02-09T18:15:05Z
+@generated: 2026-02-10T00:41:51Z
 
 ## Purpose
-Defines TypeScript interfaces for external dependencies to enable dependency injection and testing isolation. This abstraction layer allows mocking of system dependencies (filesystem, processes, network) without changing implementation code.
+Defines external dependency interfaces for dependency injection and testing. Enables easy mocking and testing without changing implementation by abstracting Node.js built-in modules and third-party dependencies.
 
-## Core Interfaces
+## Key Interfaces
 
-**IFileSystem (L17-36)**: Comprehensive filesystem abstraction combining Node.js `fs` and `fs-extra` operations. Includes basic operations (`readFile`, `writeFile`, `exists`, `mkdir`) and enhanced utilities (`ensureDir`, `pathExists`, `remove`, `copy`). All operations are Promise-based except sync variants (`ensureDirSync`, `existsSync`).
+### Core System Abstractions
+- **IFileSystem (L17-36)**: Mirrors fs-extra functionality with async file operations, directory management, and path utilities. Combines standard fs methods with fs-extra extensions.
+- **IChildProcess (L42-50)**: Extends EventEmitter to mirror Node.js ChildProcess with process control, IPC, and stream access.
+- **IProcessManager (L56-59)**: High-level process spawning interface providing spawn() and exec() methods.
+- **INetworkManager (L65-68)**: Network utilities for server creation and port discovery.
+- **IServer (L74-79)**: Mirrors Node.js net.Server with listen/close lifecycle and address management.
 
-**IChildProcess (L42-50)**: Process handle interface extending EventEmitter with lifecycle management (`kill`, `send`) and stream access (`stdin`, `stdout`, `stderr`). Mirrors Node.js ChildProcess API.
+### Application Services
+- **ILogger (L85-90)**: Standard logging interface with info/error/debug/warn methods supporting optional metadata.
+- **IProxyManagerFactory (L95-97)**: Factory for creating IProxyManager instances with optional debug adapter.
+- **IEnvironment (L103-107)**: Environment variable access and working directory abstraction.
 
-**IProcessManager (L56-59)**: Process spawning and execution interface. Provides `spawn()` for long-running processes and `exec()` for command execution with output capture.
+### Dependency Injection Support
+- **IDependencies (L112-118)**: Complete dependency container aggregating all core interfaces.
+- **PartialDependencies (L124)**: Type alias for gradual migration allowing optional dependencies.
+- **Factory Interfaces (L129-135)**: ILoggerFactory and IChildProcessFactory for creating specific instances.
 
-**INetworkManager (L65-68)**: Network operations abstraction for server creation and port discovery. Critical for dynamic port allocation in testing environments.
-
-**IServer (L74-79)**: Network server interface mirroring Node.js `net.Server` with lifecycle methods (`listen`, `close`) and introspection (`address`).
-
-**ILogger (L85-90)**: Standard logging interface with four levels (info, error, debug, warn) and optional metadata support.
-
-## Dependency Injection Architecture
-
-**IDependencies (L112-118)**: Main dependency container aggregating all core dependencies. Used by components requiring full system access.
-
-**PartialDependencies (L124)**: Flexible type allowing components to specify subset of dependencies for gradual migration and focused testing.
-
-## Factory Interfaces
-
-**IProxyManagerFactory (L95-97)**: Creates proxy managers with optional debug adapter integration.
-
-**ILoggerFactory (L129-131)**: Creates named loggers with configuration options.
-
-**IChildProcessFactory (L133-135)**: Creates child process instances for testing scenarios.
-
-**IEnvironment (L103-107)**: Environment variable and working directory abstraction with getter methods and full environment access.
-
-## Key Dependencies
-- Node.js built-ins: `events.EventEmitter`, `child_process.SpawnOptions`, `fs.Stats`
-- Internal types: `IProxyManager`, `IDebugAdapter`
+## Dependencies
+- **Internal**: IProxyManager from proxy-manager, IDebugAdapter from @debugmcp/shared
+- **Node.js Built-ins**: EventEmitter, SpawnOptions, fs.Stats
 
 ## Architectural Patterns
-- Interface segregation: Each interface focuses on single responsibility
-- Factory pattern: Separate creation interfaces for complex objects
-- Gradual migration support: Partial dependencies enable incremental adoption
-- Testing-first design: All interfaces designed for easy mocking
+- **Dependency Injection**: Interfaces designed for constructor injection and testing
+- **Factory Pattern**: Separate factory interfaces for complex object creation
+- **Gradual Migration**: PartialDependencies type supports incremental adoption
+- **Interface Segregation**: Fine-grained interfaces matching specific Node.js modules
+
+## Design Constraints
+- All async operations return Promises
+- Maintains compatibility with Node.js built-in APIs
+- Supports both sync and async variants where Node.js provides both
+- EventEmitter extension pattern for stateful objects

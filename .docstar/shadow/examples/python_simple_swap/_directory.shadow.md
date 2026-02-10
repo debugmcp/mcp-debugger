@@ -1,69 +1,80 @@
 # examples/python_simple_swap/
-@generated: 2026-02-09T18:16:07Z
+@generated: 2026-02-10T01:19:39Z
 
 ## Overall Purpose and Responsibility
-This directory provides a complete end-to-end demonstration of Python debugging through the MCP (Model Context Protocol) debug server. It showcases how to programmatically debug Python code by orchestrating a full debugging workflow including breakpoint management, step-by-step execution, and variable inspection.
+
+This directory provides a complete **debugging workflow demonstration** using the Model Context Protocol (MCP). It showcases how to use a debug MCP server to programmatically debug Python code by implementing a realistic debugging scenario with an intentionally buggy target script.
 
 ## Key Components and Relationships
 
-### Target Script (`swap_vars.py`)
-- **Role**: Educational debugging target containing an intentional variable swap bug
-- **Purpose**: Provides a simple, predictable test case for debugging demonstrations
-- **Bug Pattern**: Sequential assignment without temporary variable (`a = b; b = a`) resulting in both variables having the same value
-- **Expected Behavior**: Always fails to swap correctly, making it ideal for debugging practice
+The module consists of two complementary Python files that work together to demonstrate MCP debugging capabilities:
 
-### Debug Orchestrator (`debug_swap_demo.py`)
-- **Role**: MCP client that demonstrates complete debugging workflow automation
-- **Integration**: Targets `swap_vars.py` specifically, setting breakpoints and inspecting the buggy swap logic
-- **Protocol**: Communicates with MCP debug server via HTTP JSON-RPC 2.0 requests
-- **Workflow**: Creates session → sets breakpoints → starts debugging → inspects state → steps through code → verifies changes
+- **`debug_swap_demo.py`** - The primary demonstration script that acts as a debug client
+- **`swap_vars.py`** - Target script containing an intentional bug for debugging practice
 
-## Public API and Entry Points
+### Component Interaction Flow
+1. `debug_swap_demo.py` launches and connects to an MCP debug server
+2. It loads `swap_vars.py` as the target for debugging  
+3. Sets breakpoints and steps through the buggy swap function
+4. Inspects variable states before and after the problematic code execution
+5. Validates that the debugging workflow correctly identifies the variable swap failure
 
-### Primary Entry Point
-- **`debug_swap_demo.py`** (command-line execution): Runs complete debugging demonstration
-- **Environment**: Expects MCP debug server running at `MCP_SERVER_URL`
+## Public API Surface
 
-### Core Functions
-- **`call_mcp_tool()`**: Generic MCP server communication handler
-- **`run_debug_session()`**: Complete debugging workflow orchestrator
-- **`swap_variables()`**: Buggy target function for debugging practice
+### Main Entry Point
+- **`run_debug_session()`** - Complete debugging workflow orchestration
+- **`call_mcp_tool()`** - Generic MCP server communication utility
+
+### Debug Workflow Operations
+- Session management (create/close debug sessions)
+- Breakpoint management (set breakpoints at specific lines)  
+- Execution control (start, step, continue)
+- State inspection (stack frames, variable scopes, variable values)
 
 ## Internal Organization and Data Flow
 
-### Communication Flow
-1. **HTTP Client** (`debug_swap_demo.py`) → **MCP Debug Server** (external)
-2. **Debug Server** manages **Python Interpreter** running `swap_vars.py`
-3. **Session Management**: Maintains both HTTP session and debug session contexts
-4. **State Synchronization**: Captures and compares variable states before/after operations
+### Architecture Pattern
+The module implements a **synchronous debugging client** using JSON-RPC 2.0 protocol:
 
-### Debugging Workflow
 ```
-Session Creation → Breakpoint Setup → Script Launch → 
-State Inspection → Step Execution → State Verification → Cleanup
+Debug Client → MCP Server → Python Debugger → Target Script
+     ↑                                              ↓
+     ←── Debug Events & State Information ←────────
 ```
 
-### Critical Integration Points
-- **Line 9 Breakpoint**: Set at the first buggy assignment (`a = b`) in `swap_variables()`
-- **Variable Tracking**: Monitors `a` and `b` values through the "Locals" scope
-- **Stack Frame Analysis**: Inspects execution context at breakpoint
+### Data Flow Sequence
+1. **Session Establishment**: Creates debug session with server
+2. **Breakpoint Configuration**: Sets breakpoint at critical line (L9 in swap function)
+3. **Execution Launch**: Starts target script until breakpoint hit
+4. **State Capture**: Retrieves stack frames and variable scopes
+5. **Pre-execution Inspection**: Captures initial variable values (a=10, b=20)
+6. **Step Execution**: Steps over the buggy assignment line
+7. **Post-execution Validation**: Verifies the bug manifestation (both vars = 20)
+8. **Cleanup**: Properly closes debug session
 
 ## Important Patterns and Conventions
 
-### Error Handling
-- Robust JSON response parsing with fallback mechanisms
-- Comprehensive validation of MCP API responses
-- Try-finally patterns for guaranteed session cleanup
-- Detailed error messages with debugging context
+### MCP Communication Pattern
+- **JSON-RPC 2.0 Protocol**: Standardized request/response structure
+- **Session State Management**: Tracks both HTTP and debug session IDs
+- **Error Handling**: Comprehensive validation of server responses
+- **Resource Management**: Ensures proper cleanup via finally blocks
 
-### Educational Design
-- **Intentional Bug**: `swap_vars.py` demonstrates classic programming mistake
-- **Predictable Behavior**: Always produces same incorrect result for consistent testing
-- **Clear Output**: Debug prints and validation messages for learning
+### Debugging Workflow Pattern
+- **Defensive Programming**: Validates each debug operation before proceeding  
+- **State Verification**: Asserts expected conditions at each step
+- **Educational Design**: Clear demonstration of common debugging operations
 
-### Protocol Compliance
-- **JSON-RPC 2.0**: Standard request/response format
-- **MCP Headers**: Session ID management via `mcp-session-id`
-- **1-based Line Numbers**: Follows debugging convention for breakpoint specification
+### Configuration Requirements
+- MCP debug server running on `localhost:3000/mcp`
+- Target script must exist in same directory
+- Server must support standard debug operations (breakpoints, stepping, inspection)
 
-This module serves as both a functional debugging demonstration and a template for building MCP-based debugging tools, showcasing proper session management, error handling, and debugging workflow automation.
+## Key Educational Value
+This example serves as a **comprehensive reference implementation** for:
+- MCP debug server integration
+- Programmatic debugging workflows
+- Common debugging operations (breakpoints, stepping, variable inspection)
+- Error identification in educational contexts
+
+The intentional bug in `swap_vars.py` provides a realistic debugging scenario where the expected behavior fails, demonstrating how MCP debugging tools can identify and analyze runtime issues.

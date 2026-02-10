@@ -1,44 +1,43 @@
 # tests/unit/utils/container-path-utils.spec.ts
 @source-hash: fa5b82e665d0eb94
-@generated: 2026-02-09T18:14:43Z
+@generated: 2026-02-10T00:41:34Z
 
-**Test File for Container Path Utilities**
+**Purpose:** Test suite for container path utilities, providing comprehensive coverage for path resolution functionality in both container and non-container environments.
 
-Comprehensive unit tests for container path resolution utilities using vitest framework. Tests the behavior of path manipulation functions in both container and non-container execution modes.
+**Key Components:**
 
-## Key Components
+- **MockEnvironment (L9-29):** Test double implementing `IEnvironment` interface with configurable environment variables and current working directory. Supports setting arbitrary env vars via constructor and provides standard environment interface methods.
 
-**MockEnvironment class (L9-29):** Test double implementing IEnvironment interface
-- Constructor accepts custom environment variables and working directory (L13-16)  
-- Provides `get()`, `getAll()`, and `getCurrentWorkingDirectory()` methods (L18-28)
-- Defaults to `/app` working directory for consistent testing
+- **isContainerMode tests (L32-42):** Validates container mode detection based on `MCP_CONTAINER` environment variable, testing both true and false scenarios.
 
-**Test Suites:**
+- **getWorkspaceRoot tests (L44-62):** Tests workspace root resolution with error conditions:
+  - Throws when not in container mode (L45-48)
+  - Throws when `MCP_WORKSPACE_ROOT` missing (L50-53)  
+  - Normalizes paths by removing trailing slashes (L55-61)
 
-**isContainerMode tests (L32-42):** Validates container mode detection
-- Tests MCP_CONTAINER environment variable parsing
-- Covers both true and false cases
+- **resolvePathForRuntime tests (L64-81):** Validates path resolution behavior:
+  - Returns original path in non-container mode (L65-70)
+  - Prefixes workspace root in container mode (L72-80)
 
-**getWorkspaceRoot tests (L44-62):** Validates workspace root resolution
-- Tests error conditions: non-container mode (L45-48), missing MCP_WORKSPACE_ROOT (L50-53)
-- Verifies trailing slash normalization (L55-61)
+- **getPathDescription tests (L83-100):** Tests path description generation:
+  - Returns original path in non-container mode (L84-87)
+  - Returns original when resolved equals original (L89-92)
+  - Returns descriptive format when paths differ (L94-99)
 
-**resolvePathForRuntime tests (L64-81):** Tests path resolution logic
-- Non-container mode: returns original path unchanged (L65-70)
-- Container mode: prefixes workspace root to relative paths (L72-80)
+**Testing Patterns:**
+- Uses Vitest framework with describe/it structure
+- Employs mock environment for isolated testing
+- Tests both positive and negative scenarios
+- Validates error conditions with appropriate error messages
+- Tests edge cases like trailing slash normalization
 
-**getPathDescription tests (L83-100):** Tests user-friendly path descriptions
-- Non-container mode: returns original path (L84-87)
-- Container mode with identical paths: returns original (L89-92)  
-- Container mode with different paths: returns descriptive format (L94-99)
+**Dependencies:** 
+- Vitest testing framework (L1)
+- Container path utilities under test (L2-7)
+- Assumes `IEnvironment` interface exists (referenced but not imported)
 
-## Dependencies
-- vitest testing framework
-- container-path-utils module functions
-- IEnvironment interface (imported implicitly)
-
-## Test Patterns
-- Uses dependency injection via MockEnvironment for clean isolation
-- Tests both positive and negative cases for each function
-- Validates error messages for exceptional conditions
-- Focuses on container vs non-container mode behavioral differences
+**Critical Test Coverage:**
+- Container mode detection logic
+- Workspace root validation and normalization  
+- Path resolution with workspace prefixing
+- Descriptive path formatting for user feedback

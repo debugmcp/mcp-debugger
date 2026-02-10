@@ -1,57 +1,44 @@
 # src/dap-core/types.ts
 @source-hash: 5a4591c3cd7ab33d
-@generated: 2026-02-09T18:15:04Z
+@generated: 2026-02-10T00:41:50Z
 
-## Primary Purpose
+## Core Types for Functional DAP Handling
 
-Core type definitions for a functional Debug Adapter Protocol (DAP) handling system. This file establishes the data structures and message types for stateless DAP session management, command emission, and proxy communication.
+This file defines the foundational TypeScript interfaces and types for a Debug Adapter Protocol (DAP) implementation using a functional programming approach. It serves as the contract layer between the core functional logic and the external DAP ecosystem.
 
-## Key Types and Interfaces
+### Key Type Definitions
 
-### Core Data Structures
+**PendingRequest (L9-14)**: Pure data interface representing a pending DAP request without timeout logic. Contains essential tracking fields: requestId, command, seq number, and timestamp.
 
-- **PendingRequest (L9-14)**: Immutable data structure tracking pending DAP requests with requestId, command, sequence number, and timestamp. Pure data with no timeout logic.
+**DAPSessionState (L19-26)**: Immutable state container for a DAP debugging session. Tracks initialization status, adapter configuration, current thread ID, and pending requests via ReadonlyMap. Designed for functional state management patterns.
 
-- **DAPSessionState (L18-26)**: Immutable state representation for a DAP session containing sessionId, initialization flags (initialized, adapterConfigured), optional currentThreadId, and a readonly map of pending requests. Designed for functional state management.
+**DAPCommand (L31-36)**: Discriminated union representing commands that the functional core emits but doesn't execute directly. Includes:
+- `sendToClient`: For DAP responses/events to client
+- `sendToProxy`: For commands to proxy layer  
+- `log`: For structured logging with levels
+- `emitEvent`: For custom event emission
+- `killProcess`: For process termination
 
-### Command System
-
-- **DAPCommand (L31-36)**: Discriminated union defining commands the functional core can emit but not execute:
-  - `sendToClient`: Send DAP Response/Event to debug client
-  - `sendToProxy`: Send command to proxy process
-  - `log`: Emit log message with level and data
-  - `emitEvent`: Emit event with arguments
-  - `killProcess`: Terminate process command
-
-- **DAPProcessingResult (L41-44)**: Result of DAP message processing containing array of commands to execute and optional new state.
+**DAPProcessingResult (L41-44)**: Return type for DAP message processing functions. Contains array of commands to execute and optional new state, enabling pure functional message handling.
 
 ### Proxy Communication Types
 
-- **ProxyStatusMessage (L49-55)**: Status updates from proxy including lifecycle events like `proxy_minimal_ran_ipc_test`, `init_received`, `dry_run_complete`, `adapter_connected`, `adapter_configured_and_launched`, and termination statuses.
+**ProxyStatusMessage (L49-55)**: Comprehensive union type covering all proxy lifecycle states including initialization, dry runs, adapter connection/configuration, and termination scenarios with exit codes and signals.
 
-- **ProxyDapEventMessage (L57-63)**: DAP events forwarded from proxy with sessionId, event name, and optional body/data.
+**ProxyDapEventMessage (L57-63)**: Wraps DAP events from proxy with session context and optional metadata.
 
-- **ProxyDapResponseMessage (L65-74)**: DAP responses from proxy including success flag, optional response object, error message, and additional data.
+**ProxyDapResponseMessage (L65-74)**: Handles DAP response messages with success/failure states, response bodies, and error information.
 
-- **ProxyErrorMessage (L76-81)**: Error messages from proxy with sessionId and error details.
+**ProxyErrorMessage (L76-81)**: Simple error message wrapper with session context.
 
-- **ProxyMessage (L83)**: Union type encompassing all proxy message types.
+**ProxyMessage (L83)**: Top-level union of all proxy message types for type-safe message handling.
 
-## Dependencies
+### Architecture Pattern
 
-- `@vscode/debugprotocol`: Standard DAP protocol types for Response and Event objects
-- Node.js types: Uses `NodeJS.Signals` for process signal handling
+The types follow a functional architecture where:
+- State is immutable (readonly properties, ReadonlyMap)
+- Side effects are represented as data (DAPCommand)
+- Message processing returns both effects and new state
+- Clear separation between core logic and I/O operations
 
-## Architectural Patterns
-
-- **Immutability**: All interfaces use `readonly` modifiers to enforce functional programming patterns
-- **Discriminated Unions**: Extensive use of type-safe discriminated unions for message handling
-- **Command Pattern**: Commands are data structures that describe actions without executing them
-- **Functional State Management**: State updates return new state objects rather than mutating existing ones
-
-## Key Design Decisions
-
-- Separation of command description from execution (functional core emits, external system executes)
-- Immutable state management for predictable debugging and testing
-- Comprehensive proxy message typing to match existing ProxyManager implementation
-- Pure data structures without embedded behavior or timeout logic
+This design enables testable, predictable DAP session management with explicit effect handling.

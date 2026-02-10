@@ -1,41 +1,37 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.connection.test.ts
 @source-hash: ec04b64efbba3119
-@generated: 2026-02-09T18:13:58Z
+@generated: 2026-02-10T00:41:03Z
 
 ## Purpose
-Unit test suite for JavascriptDebugAdapter connection lifecycle functionality using Vitest framework.
+Test file for JavascriptDebugAdapter connection functionality, validating connection state management and event emission.
 
 ## Test Structure
-- **Test Suite**: `JavascriptDebugAdapter.connection` (L15)
-- **Setup**: Creates fresh adapter instance with mocked dependencies in `beforeEach` (L18-22)
-- **Dependencies**: Minimal stub with mocked logger methods (L6-13)
+- **Test Suite**: `JavascriptDebugAdapter.connection` (L15-47)
+- **Dependencies**: Mocked AdapterDependencies with logger stub (L6-13)
+- **Setup**: Fresh adapter instance per test with cleared mocks (L18-22)
 
 ## Key Test Cases
 
 ### Connection Test (L24-33)
-- **Purpose**: Validates successful connection establishment
-- **Actions**: Calls `adapter.connect('127.0.0.1', 12345)`
-- **Assertions**: 
-  - `isConnected()` returns true
-  - State transitions to `AdapterState.CONNECTED`
-  - `connected` event is emitted
+- Validates `connect()` method behavior
+- Asserts state transition to `CONNECTED`
+- Verifies `isConnected()` returns true
+- Confirms 'connected' event emission
 
 ### Disconnection Test (L35-46)
-- **Purpose**: Validates proper disconnection and cleanup
-- **Actions**: Establishes connection then calls `adapter.disconnect()`
-- **Assertions**:
-  - `isConnected()` returns false
-  - Current thread ID is cleared (null)
-  - State transitions to `AdapterState.DISCONNECTED`
-  - `disconnected` event is emitted
+- Tests `disconnect()` method after establishing connection
+- Validates state transition to `DISCONNECTED`
+- Verifies `isConnected()` returns false
+- Confirms thread clearing (`getCurrentThreadId()` returns null)
+- Validates 'disconnected' event emission
 
 ## Dependencies
-- **External**: `@debugmcp/shared` for AdapterState enum and AdapterDependencies type
-- **Internal**: JavascriptDebugAdapter from main module
-- **Testing**: Vitest framework with mocking capabilities
+- **JavascriptDebugAdapter** from `../../src/index.js` (L2)
+- **AdapterState** enum from `@debugmcp/shared` (L3)
+- **Vitest** testing framework with mocking utilities (L1)
 
-## Patterns
-- Event-driven testing using adapter event emitters
-- State machine validation through AdapterState transitions
-- Mock dependency injection for isolated unit testing
-- Fresh adapter instance per test to prevent state leakage
+## Test Patterns
+- Event-driven testing using event listeners and arrays
+- Mock dependency injection with typed casting
+- State assertion testing covering connection lifecycle
+- Mock cleanup in beforeEach hooks

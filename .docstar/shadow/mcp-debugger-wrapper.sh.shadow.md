@@ -1,30 +1,30 @@
 # mcp-debugger-wrapper.sh
 @source-hash: 65455119cf7b045d
-@generated: 2026-02-09T18:15:15Z
+@generated: 2026-02-10T00:42:00Z
 
-**Purpose**: Bash wrapper script that intelligently routes MCP debugger execution to ensure proper stdio mode handling for Claude Code integration.
+## Primary Purpose
+Bash wrapper script for the mcp-debugger Node.js application that automatically handles transport mode detection and ensures proper stdio configuration for Claude Code integration.
 
-**Core Logic**:
-- **Transport Detection (L7)**: Conditionally checks if script is invoked without arguments or without explicit `--transport` parameter
-- **Stdio Mode Routing (L9)**: When no transport specified, executes Node.js with forced `stdio` argument to suppress console output for Claude Code compatibility
-- **Passthrough Mode (L12)**: For explicit transport specifications, passes all arguments unchanged to the underlying Node.js application
+## Core Functionality
+The script intelligently routes execution based on command-line arguments:
+- **Transport Detection Logic (L7)**: Checks if arguments are empty or lack `--transport` flag
+- **Stdio Mode Execution (L9)**: Automatically injects `stdio` argument when running without explicit transport
+- **Passthrough Mode (L12)**: Preserves original arguments for explicit transport specifications
 
-**Key Components**:
-- **Script Path Resolution (L9, L12)**: Uses `$(dirname "$0")/dist/index.js` to locate the main Node.js entry point relative to wrapper location
-- **Argument Handling (L9, L12)**: Preserves original arguments with `"$@"` while conditionally prepending `stdio`
-- **Process Replacement (L9, L12)**: Uses `exec` to replace shell process with Node.js, ensuring clean process hierarchy
+## Key Components
+- **Argument Analysis (L7)**: Uses bash parameter expansion and pattern matching to detect transport mode
+- **Execution Delegation (L9, L12)**: Both branches use `exec` to replace shell process with Node.js runtime
+- **Path Resolution (L9, L12)**: Dynamically resolves script directory using `$(dirname "$0")` for portable execution
 
-**Dependencies**:
-- Requires Node.js runtime in PATH
-- Expects compiled JavaScript at `dist/index.js` relative to script location
-- Designed for MCP (Model Context Protocol) SDK integration patterns
+## Architectural Decisions
+- **Default Stdio Assumption**: Assumes Claude Code integration requires stdio mode when no transport specified
+- **Process Replacement**: Uses `exec` instead of subprocess calls to maintain PID and signal handling
+- **Argument Preservation**: Maintains original argument order with `"$@"` expansion
 
-**Architectural Decisions**:
-- **Default Stdio Assumption**: Aligns with MCP SDK convention of defaulting to stdio transport when unspecified
-- **Claude Code Compatibility**: Specifically addresses console output suppression needs for IDE integration
-- **Transparent Wrapping**: Maintains full argument compatibility while adding intelligent defaults
+## Dependencies
+- Node.js runtime (assumed available in PATH)
+- Compiled JavaScript distribution at `./dist/index.js` relative to wrapper location
+- MCP SDK stdio transport functionality
 
-**Critical Constraints**:
-- Transport detection relies on string pattern matching for `--transport` parameter
-- Assumes `dist/index.js` exists and is executable via Node.js
-- Process replacement semantics require proper exit code propagation through `exec`
+## Integration Context
+Designed specifically for Claude Code IDE integration where the MCP debugger needs to suppress console output and communicate via stdio transport protocol.

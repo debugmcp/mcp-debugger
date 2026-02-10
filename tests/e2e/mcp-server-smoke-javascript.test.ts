@@ -34,7 +34,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     }
 
     transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [cliEntry, 'stdio', '--log-level', 'info'],
       env: {
         ...process.env,

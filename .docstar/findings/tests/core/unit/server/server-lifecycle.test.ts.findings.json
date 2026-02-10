@@ -1,0 +1,15 @@
+{
+  "source": "tests/core/unit/server/server-lifecycle.test.ts",
+  "source_hash": "8b6269ea912ad720",
+  "generated": "2026-02-10T01:18:54Z",
+  "findings": [
+    {
+      "category": "misleading_docstring",
+      "line_start": 56,
+      "line_end": 62,
+      "severity": "warning",
+      "description": "Test description 'should handle server start errors' suggests error handling testing, but the implementation only tests successful start scenario - identical to the previous test",
+      "suggestion": "Either implement actual error handling test logic or rename the test to reflect what it actually tests"
+    }
+  ]
+}

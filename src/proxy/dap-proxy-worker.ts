@@ -1,5 +1,5 @@
 /**
- * Core worker class for DAP Proxy functionality - REFACTORED VERSION
+ * Core worker class for DAP Proxy functionality.
  * Uses the Adapter Policy pattern to eliminate language-specific hardcoding
  */
 
@@ -34,6 +34,7 @@ import {
   PythonAdapterPolicy,
   JavaAdapterPolicy,
   RustAdapterPolicy,
+  GoAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 
@@ -114,6 +115,8 @@ export class DapProxyWorker {
       return JavaAdapterPolicy;
     } else if (RustAdapterPolicy.matchesAdapter(adapterCommand)) {
       return RustAdapterPolicy;
+    } else if (GoAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return GoAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
       return MockAdapterPolicy;
     }
@@ -243,13 +246,19 @@ export class DapProxyWorker {
       }
 
       // Start adapter and connect
-      await this.startDebugpyAdapterAndConnect(payload);
+      await this.startAdapterAndConnect(payload);
     } catch (error) {
       this.state = ProxyState.UNINITIALIZED;
       const message = error instanceof Error ? error.message : String(error);
       this.logger?.error(`[Worker] Critical initialization error: ${message}`, error);
+      this.sendError(`Critical initialization error: ${message}`);
       await this.shutdown();
-      this.exitHook(1);
+      // Use setImmediate/setTimeout to allow IPC message to flush before exit
+      setImmediate(() => {
+        setTimeout(() => {
+          this.exitHook(1);
+        }, 100);
+      });
     }
   }
 
@@ -301,7 +310,7 @@ export class DapProxyWorker {
   /**
    * Start adapter and establish connection
    */
-  private async startDebugpyAdapterAndConnect(payload: ProxyInitPayload): Promise<void> {
+  private async startAdapterAndConnect(payload: ProxyInitPayload): Promise<void> {
     // Get adapter spawn config from policy
     const spawnConfig = this.adapterPolicy.getAdapterSpawnConfig?.({
       executablePath: payload.executablePath,

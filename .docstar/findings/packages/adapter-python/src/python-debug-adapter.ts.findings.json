@@ -1,0 +1,31 @@
+{
+  "source": "packages/adapter-python/src/python-debug-adapter.ts",
+  "source_hash": "f5bb3929b92b788a",
+  "generated": "2026-02-10T01:19:09Z",
+  "findings": [
+    {
+      "category": "stale_comment",
+      "line_start": 88,
+      "line_end": 101,
+      "severity": "warning",
+      "description": "CI-specific console.error debug statements appear to be temporary debugging code that may no longer be needed in production",
+      "suggestion": "Remove CI-specific debug logging or replace with proper logger usage"
+    },
+    {
+      "category": "stale_comment",
+      "line_start": 156,
+      "line_end": 162,
+      "severity": "warning",
+      "description": "More CI-specific console.error debug statements that appear to be temporary debugging code",
+      "suggestion": "Remove CI-specific debug logging or replace with proper logger usage"
+    },
+    {
+      "category": "stale_comment",
+      "line_start": 199,
+      "line_end": 201,
+      "severity": "warning",
+      "description": "Additional CI-specific console.error debug statement that appears to be temporary debugging code",
+      "suggestion": "Remove CI-specific debug logging or replace with proper logger usage"
+    }
+  ]
+}

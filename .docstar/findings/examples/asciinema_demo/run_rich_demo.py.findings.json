@@ -1,0 +1,31 @@
+{
+  "source": "examples/asciinema_demo/run_rich_demo.py",
+  "source_hash": "743361c72faeca34",
+  "generated": "2026-02-10T01:19:13Z",
+  "findings": [
+    {
+      "category": "commented_out_code",
+      "line_start": 124,
+      "line_end": 125,
+      "severity": "warning",
+      "description": "Commented-out code for stderr reading that could mislead AI agents about intended functionality",
+      "suggestion": "Remove commented code and replace with clear comment explaining why stderr reading was omitted"
+    },
+    {
+      "category": "expired_todo",
+      "line_start": 116,
+      "line_end": 116,
+      "severity": "warning",
+      "description": "TODO comment about setting up stderr monitoring thread appears outdated given current simplified implementation",
+      "suggestion": "Update or remove TODO as the current implementation intentionally skips stderr monitoring for demo purposes"
+    },
+    {
+      "category": "commented_out_code",
+      "line_start": 330,
+      "line_end": 332,
+      "severity": "warning",
+      "description": "Commented-out code with type: ignore hints at complex non-blocking I/O logic that was abandoned",
+      "suggestion": "Remove commented setblocking calls and clarify the current event processing approach"
+    }
+  ]
+}

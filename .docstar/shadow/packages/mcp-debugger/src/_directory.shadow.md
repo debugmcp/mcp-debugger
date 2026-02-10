@@ -1,63 +1,60 @@
 # packages/mcp-debugger/src/
-@generated: 2026-02-09T18:16:05Z
+@generated: 2026-02-10T01:19:36Z
 
 ## Overall Purpose
-The `packages/mcp-debugger/src` directory contains the CLI entry point and adapter bootstrap system for the MCP debugger. It provides a batteries-included distribution that bundles all supported language adapters and creates a standalone CLI tool compatible with MCP transport protocols.
 
-## Key Components & Relationships
+The `packages/mcp-debugger/src` directory serves as the CLI distribution layer for the MCP debugger system, providing bundled adapter registration and protocol-compliant entry point management. This module bridges the gap between the core debugger implementation and external CLI usage, ensuring proper adapter availability and MCP protocol compliance.
 
-### CLI Entry System
-- **cli-entry.ts**: Primary CLI entry point that handles MCP protocol compatibility through intelligent console output management
-- **batteries-included.ts**: Adapter registration bootstrap that ensures all language adapters are bundled and available
+## Key Components and Architecture
 
-### Component Interaction Flow
-1. **CLI Invocation**: `cli-entry.ts` executes first, detecting transport mode and silencing console output if needed for MCP protocol compatibility
-2. **Adapter Bootstrap**: Imports `batteries-included.ts` to register all supported language adapters (JavaScript, Python, Mock) in global registry
-3. **Core Execution**: Dynamically imports and delegates to the main debugger implementation with proper environment setup
+### Adapter Bundle Management (`batteries-included.ts`)
+- **Static Adapter Registry**: Pre-bundles JavaScript, Python, and Mock adapters using global namespace pattern
+- **Global Registration System**: Uses `__DEBUG_MCP_BUNDLED_ADAPTERS__` key for cross-module adapter discovery
+- **Side-Effect Based Loading**: Executes adapter registration on import to ensure availability without explicit dependency injection
+- **Deduplication Logic**: Prevents duplicate adapter registrations through Set-based language key tracking
 
-### Global Registry Architecture
-- **Singleton Pattern**: Uses `globalThis.__DEBUG_MCP_BUNDLED_ADAPTERS__` for centralized adapter storage
-- **Factory Pattern**: All adapters implement `IAdapterFactory` interface for consistent instantiation
-- **Duplicate Prevention**: Set-based deduplication prevents multiple registrations of same adapter type
+### CLI Entry Point (`cli-entry.ts`)
+- **Protocol Compliance Layer**: Critical console silencing to prevent stdout pollution in MCP transport modes
+- **Bootstrap Coordination**: Manages initialization order and flag coordination with main implementation
+- **Transport Detection**: Intelligent detection of stdio/SSE transport modes from arguments and environment
+- **Error Handling**: Conditional logging that respects console silencing state
+
+## Data Flow and Integration
+
+1. **CLI Invocation**: `cli-entry.ts` serves as the primary entry point for npx usage
+2. **Console Management**: Immediate console silencing before any imports to maintain protocol compliance
+3. **Adapter Loading**: Dynamic import of `batteries-included.js` ensures all adapters are bundled
+4. **Main Delegation**: Bootstrap process imports and delegates to root implementation with proper flag coordination
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **CLI Tool**: `cli-entry.ts` serves as the main executable entry point for npx usage
-- **Adapter Registry**: Global adapter registry accessible via `globalThis.__DEBUG_MCP_BUNDLED_ADAPTERS__`
+- **CLI Entry**: `cli-entry.ts` - Main entry point for CLI usage
+- **Adapter Registry**: Global `__DEBUG_MCP_BUNDLED_ADAPTERS__` - Discoverable adapter collection
 
-### Supported Language Adapters
-- JavaScript/Node.js debugging via `JavascriptAdapterFactory`
-- Python debugging via `PythonAdapterFactory`  
-- Mock/testing via `MockAdapterFactory`
+### Key Interfaces
+- **BundledAdapterEntry**: Type definition for adapter registry entries
+- **Environment Flags**: `CONSOLE_OUTPUT_SILENCED`, `DEBUG_MCP_SKIP_AUTO_START` for cross-module coordination
 
-## Internal Organization & Data Flow
+## Important Patterns and Conventions
 
-### Bootstrap Sequence
-1. Console output silencing detection and activation (transport-aware)
-2. Quote normalization for CLI arguments
-3. Static adapter import and global registry initialization
-4. Environment variable coordination (`DEBUG_MCP_SKIP_AUTO_START=1`)
-5. Dynamic core module loading and execution
+### Global Registry Pattern
+Uses global object storage for adapter discovery, enabling loose coupling between adapter implementations and the main debugger system.
 
-### MCP Protocol Compatibility
-- Automatic detection of `stdio` and `sse` transport modes
-- Console silencing to prevent stdout pollution during MCP communication
-- Environment variable coordination between CLI shim and core implementation
+### Protocol-First Design
+Prioritizes MCP protocol compliance over developer convenience, with mandatory console silencing for transport modes.
 
-## Important Patterns & Conventions
+### Initialization Coordination
+Employs environment flags and careful import ordering to prevent initialization races and duplicate processes.
 
-### Early Initialization Pattern
-- IIFE execution before imports to ensure console silencing takes effect
-- Static imports force esbuild bundling rather than dynamic loading
-- Global registry setup happens at module load time
+### Bundle Integration
+Leverages esbuild static analysis through explicit imports to ensure adapter availability in distributed CLI builds.
 
-### Error Handling Strategy
-- Dual-level error handling that respects console silencing state
-- Fail-fast approach with appropriate exit codes
-- MCP protocol preservation takes precedence over error visibility
+## Critical Dependencies
 
-### Environment Coordination
-- Uses environment variables to coordinate behavior between CLI shim and core module
-- Detects piped stdin to determine default console silencing behavior
-- Maintains compatibility across different execution contexts (direct vs npx vs MCP server)
+- **Core Adapters**: JavaScript, Python, and Mock adapter packages
+- **Shared Interfaces**: `@debugmcp/shared` for common types
+- **Root Implementation**: Main debugger logic via dynamic import
+- **Build System**: esbuild for static bundling and tree-shaking
+
+This module ensures that the MCP debugger can be distributed as a standalone CLI tool while maintaining protocol compliance and adapter ecosystem integration.

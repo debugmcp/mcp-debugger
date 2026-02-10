@@ -1,49 +1,50 @@
 # tests/test-utils/mocks/mock-proxy-manager.ts
 @source-hash: 791970fddf17cc15
-@generated: 2026-02-09T18:14:41Z
+@generated: 2026-02-10T00:41:32Z
 
-**Purpose**: Mock implementation of ProxyManager for testing VSCode debug adapter functionality. Provides a fully controllable proxy that simulates real ProxyManager behavior without external dependencies.
+## Purpose
+Mock implementation of ProxyManager for comprehensive unit testing of debug adapter proxy functionality. Provides controllable simulation of debug adapter protocol operations, event emission, and error conditions.
 
-**Architecture**: Extends EventEmitter and implements IProxyManager interface. Maintains internal state to track running status, thread IDs, configuration, and dry-run status while providing extensive testing controls.
+## Architecture
+**MockProxyManager (L11)** extends EventEmitter and implements IProxyManager interface. Uses private state tracking and public test controls to simulate real proxy behavior while enabling deterministic testing scenarios.
 
-## Core Components
-
-**MockProxyManager (L11-252)**: Main mock class with complete ProxyManager interface implementation
-- Private state tracking: `_isRunning`, `_currentThreadId`, `_config`, `_dapRequestHandler` (L12-18)
-- Public call tracking arrays for verification: `startCalls`, `stopCalls`, `dapRequestCalls` (L21-23)
-- Behavioral control flags: `shouldFailStart`, `startDelay`, `shouldFailDapRequests`, `dapRequestDelay` (L26-29)
+## Core State Management
+- **Private state (L12-18)**: Tracks running status, thread ID, config, DAP handler, and dry-run completion
+- **Call tracking (L21-23)**: Records all method invocations for test verification
+- **Behavior controls (L25-29)**: Flags to simulate failures and delays for error testing
 
 ## Key Methods
 
-**start(config) (L35-70)**: Simulates proxy startup with configurable delays and failures
-- Records all start calls for test verification
-- Emits appropriate initialization events based on config (dry-run vs normal mode)
-- Handles `stopOnEntry` configuration with thread simulation
+### Lifecycle Management
+- **start() (L35-70)**: Simulates proxy startup with configurable delays/failures. Emits initialization events based on config (dry-run vs normal mode)
+- **stop() (L72-84)**: Resets state and emits exit event asynchronously
+- **reset() (L236-252)**: Complete state reset for test isolation
 
-**stop() (L72-84)**: Cleanly shuts down proxy, resets state, emits exit event
+### Debug Protocol Simulation
+- **sendDapRequest() (L86-180)**: Core DAP command simulation with:
+  - Call tracking and validation (L90-94)
+  - Configurable failure modes (L96-98)  
+  - Custom handler support (L104-108)
+  - Default mock responses for common commands (L110-179)
 
-**sendDapRequest<T>(command, args) (L86-180)**: Core DAP protocol handler with extensive mock responses
-- Built-in responses for common commands: `setBreakpoints`, `stackTrace`, `scopes`, `variables`, `next`, `stepIn`, `stepOut`, `continue`
-- Custom handler support via `_dapRequestHandler`
-- Simulates stepping events and continuation behavior
+### Test Utilities
+- **setDapRequestHandler() (L191-193)**: Allows custom DAP response logic
+- **simulateEvent() (L195-205)**: Manual event emission for testing edge cases
+- **simulateStopped/Error/Exit() (L207-220)**: Specific event simulation methods
+- **hasDryRunCompleted/getDryRunSnapshot() (L222-234)**: Dry-run state inspection
 
-## Test Utilities
+## Event Simulation Patterns
+Uses `process.nextTick()` for asynchronous event emission (L53, L81, L166, L172) to simulate real-world timing while remaining deterministic for tests.
 
-**Event Simulation (L195-220)**:
-- `simulateEvent()`: Generic event emission with state updates
-- `simulateStopped()`, `simulateError()`, `simulateExit()`: Specific scenario helpers
-
-**Dry-Run Support (L222-234)**:
-- `hasDryRunCompleted()`: Status check
-- `getDryRunSnapshot()`: Retrieve dry-run execution details
-
-**State Management**:
-- `reset() (L236-252)`: Complete state reset for test isolation
-- `setDapRequestHandler() (L191-193)`: Custom DAP response injection
+## Default DAP Responses
+Provides realistic mock responses for:
+- **setBreakpoints**: Returns verified breakpoints (L112-121)
+- **stackTrace**: Single frame mock stack (L123-135)
+- **scopes/variables**: Basic variable inspection (L137-160)
+- **Step commands**: Automatic stopped event emission (L162-169)
+- **continue**: Continued event emission (L171-175)
 
 ## Dependencies
-- `EventEmitter` from Node.js events
-- `DebugProtocol` from @vscode/debugprotocol for type safety
-- Interface imports from `../../src/proxy/proxy-manager.js`
-
-**Usage Pattern**: Instantiate mock, configure behavioral flags, call methods, verify tracked calls and emitted events. Supports both synchronous verification and asynchronous event-driven testing scenarios.
+- EventEmitter for event-driven architecture
+- @vscode/debugprotocol for DAP type definitions
+- Local proxy-manager interface for contract compliance

@@ -1,46 +1,41 @@
 # tests/unit/dap-core/state.test.ts
 @source-hash: c03365d27c5feeb5
-@generated: 2026-02-09T18:14:42Z
+@generated: 2026-02-10T00:41:31Z
 
-## DAP Core State Management Test Suite
+## Purpose
+Comprehensive unit test suite for DAP (Debug Adapter Protocol) core state management functions using Vitest. Tests immutable state operations including initialization, flag updates, thread management, and pending request tracking.
 
-**Purpose**: Comprehensive unit tests for the Debug Adapter Protocol (DAP) core state management system, focusing on immutable state operations and pending request tracking.
+## Test Structure
 
-### Test Structure
+### Initial State Testing (L19-29)
+- **createInitialState**: Validates state object creation with session ID, default boolean flags (initialized, adapterConfigured), undefined thread ID, and empty pending requests Map
 
-**Main Test Suites (L18-164)**:
-- `createInitialState` (L19-29): Validates initial state creation with correct defaults
-- `setInitialized` (L31-40): Tests initialization flag updates with immutability
-- `setAdapterConfigured` (L42-50): Tests adapter configuration flag updates
-- `setCurrentThreadId` (L52-67): Tests thread ID management including clearing
-- `pending requests` (L69-118): Comprehensive testing of request queue management
-- `updateState` (L120-136): Tests batch state updates
-- `immutability` (L138-163): Dedicated immutability validation tests
+### State Flag Operations (L31-67)
+- **setInitialized (L31-40)**: Tests initialization flag updates with immutability verification
+- **setAdapterConfigured (L42-50)**: Tests adapter configuration flag updates
+- **setCurrentThreadId (L52-67)**: Tests thread ID assignment and clearing (undefined values)
 
-### Key Test Patterns
+### Pending Request Management (L69-118)
+- Uses mock `PendingRequest` object with requestId, command, seq, and timestamp fields (L70-75)
+- **addPendingRequest (L77-85)**: Tests adding requests to state Map with immutability
+- **getPendingRequest (L87-92)**: Tests request retrieval by ID, including non-existent cases
+- **removePendingRequest (L94-106)**: Tests selective request removal while preserving others
+- **clearPendingRequests (L108-117)**: Tests complete request Map clearing
 
-**Immutability Verification**: Every state mutation test includes explicit checks that original state objects remain unchanged (L38, L48, L58, L84, L105, L116, L134)
+### Bulk State Updates (L120-136)
+- **updateState**: Tests atomic updates of multiple state properties simultaneously
 
-**Pending Request Management (L70-118)**:
-- Uses sample `PendingRequest` object (L70-75) with DAP-specific structure
-- Tests CRUD operations: add, get, remove, clear
-- Validates Map-based storage with proper sizing and key existence checks
+### Immutability Verification (L138-163)
+- Tests all operations against frozen state objects to ensure no mutations (L139-148)
+- Validates new Map instance creation for pending requests (L150-162)
 
-**Frozen State Testing (L139-148)**: Uses `Object.freeze()` to ensure state functions don't attempt mutation, validating true functional programming approach
+## Key Dependencies
+- **Vitest**: Testing framework (describe, it, expect)
+- **DAP Core State Module**: All state management functions from `../../../src/dap-core/state.js`
+- **DAP Core Types**: PendingRequest type definition
 
-### Dependencies
-
-**Testing Framework**: Vitest with standard assertions (`describe`, `it`, `expect`) (L4)
-**State Module**: Imports 8 state management functions from `../../../src/dap-core/state.js` (L5-15)
-**Types**: Imports `PendingRequest` type from DAP core types (L16)
-
-### Architecture Insights
-
-**State Design**: Tests reveal immutable state pattern with:
-- Session-based state initialization
-- Boolean flags for initialization and adapter configuration
-- Optional thread ID tracking
-- Map-based pending request storage
-- Batch update capability
-
-**Quality Assurance**: Strong emphasis on immutability testing suggests the state system is designed for functional programming patterns typical in DAP implementations where state changes must be predictable and traceable.
+## Test Patterns
+- Consistent immutability validation across all state operations
+- Mock data construction for complex objects (PendingRequest)
+- State chaining for multi-step operations
+- Frozen object testing to guarantee immutability

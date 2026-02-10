@@ -1,47 +1,57 @@
 # src/proxy/proxy-bootstrap.js
 @source-hash: fb950fbbc5b243bb
-@generated: 2026-02-09T18:15:06Z
+@generated: 2026-02-10T00:41:52Z
 
-## Purpose
-Bootstrap script for DAP (Debug Adapter Protocol) proxy process initialization. Runs before TypeScript types are available, handles process lifecycle, orphan detection, and dynamically loads the appropriate proxy implementation.
+## Primary Purpose
+
+Bootstrap script for proxy processes that initializes process lifecycle management and dynamically loads the appropriate proxy implementation. Runs before TypeScript types are available and sets up robust orphan detection, signal handling, and heartbeat monitoring.
 
 ## Key Functions
 
-**logBootstrapActivity (L16-18)**: Logs bootstrap activities to stderr with timestamped prefix for debugging proxy startup.
+- `logBootstrapActivity(message)` (L16-18): Simple logging utility that outputs to stderr with timestamp prefix for debugging proxy startup
+- Anonymous async IIFE (L68-115): Main bootstrap logic that determines and loads proxy implementation
 
-**Signal Handlers (L21-35)**: 
-- SIGTERM/SIGINT handlers (L21-29) for graceful shutdown
-- disconnect handler (L32-35) for parent process death detection
+## Process Lifecycle Management
 
-**Orphan Detection Loop (L42-59)**: 10-second interval checking for orphaned processes using container-aware detection and heartbeat timeout (30s). Sends heartbeat pings to parent and terminates if communication fails.
+**Signal Handlers** (L21-35):
+- SIGTERM/SIGINT handlers for graceful shutdown
+- `disconnect` event handler for parent process death detection
 
-**Message Handler (L62-64)**: Updates lastHeartbeat timestamp on any parent IPC message.
+**Orphan Detection** (L37-59):
+- Uses `shouldExitAsOrphanFromEnv()` utility for container-safe orphan detection
+- Heartbeat mechanism with 30-second timeout to detect communication loss
+- 10-second interval check for orphaned state
+- Attempts parent ping via IPC before terminating
 
-## Core Bootstrap Logic (L68-115)
+**Heartbeat Management** (L62-64):
+- Updates `lastHeartbeat` timestamp on any parent message
+- Enables detection of stale parent processes
 
-**Environment Setup (L71-72)**: Sets `DAP_PROXY_WORKER=true` to signal proxy mode.
+## Proxy Loading Strategy
 
-**Proxy Selection (L75-91)**: 
+**Path Resolution** (L75-82):
 - Prefers bundled version (`proxy-bundle.cjs`) over unbundled (`dap-proxy-entry.js`)
-- Validates file existence and exits on failure
+- Uses simple file existence check to determine which version to load
 
-**Dynamic Import (L93-109)**:
-- Converts file paths to proper file:// URLs for cross-platform ESM compatibility
-- Windows paths get three slashes (`file:///C:/...`), Unix paths get two (`file://...`)
-- Handles import errors with detailed logging
+**Dynamic Import** (L93-109):
+- Converts file paths to proper file URLs for ESM import compatibility
+- Handles Windows/Unix path normalization differences
+- Comprehensive error handling with stack traces
 
 ## Dependencies
-- `fs`, `path`, `url` (Node.js built-ins)
-- `./utils/orphan-check.js` for container-safe orphan detection
 
-## Key Variables
-- `HEARTBEAT_TIMEOUT`: 30-second communication timeout (L39)
-- `lastHeartbeat`: Tracks parent communication (L38)
-- `bootstrapLogPrefix`: Timestamped log prefix (L13)
+- `fs`, `path`: Standard Node.js modules for file operations
+- `url.fileURLToPath`: ES module path conversion
+- `./utils/orphan-check.js`: Container-aware orphan detection utility
 
-## Architectural Notes
-- Uses stderr for all logging (intentional for debugging)
-- ESLint disabled for console usage (L1)
-- Robust process lifecycle management with multiple termination triggers
-- Container-aware orphan detection to handle Docker/container environments
-- Cross-platform file URL handling for dynamic imports
+## Environment Setup
+
+- Sets `DAP_PROXY_WORKER=true` environment variable (L71) to signal proxy mode
+- Maintains current working directory context
+
+## Critical Constraints
+
+- Must run before TypeScript compilation
+- Requires either `proxy-bundle.cjs` or `dap-proxy-entry.js` to exist
+- Depends on IPC communication with parent process
+- Uses stderr exclusively for logging (stdout reserved for proxy communication)

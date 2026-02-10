@@ -2,7 +2,7 @@
  * Unit tests for type guards and validation utilities
  * Tests runtime type safety at critical boundaries (IPC, serialization, etc.)
  */
-import { describe, it, expect, beforeEach, vi, MockInstance } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, MockInstance } from 'vitest';
 import {
   isValidAdapterCommand,
   validateAdapterCommand,

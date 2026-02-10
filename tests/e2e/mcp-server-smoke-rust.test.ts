@@ -28,7 +28,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
     }
 
     transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [distEntry, '--log-level', 'info'],
       env: {
         ...process.env,

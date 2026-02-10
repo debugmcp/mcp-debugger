@@ -1,36 +1,41 @@
 # packages/adapter-javascript/tests/unit/config-transformer.throw.edge.test.ts
 @source-hash: 234e52677657f740
-@generated: 2026-02-09T18:14:00Z
+@generated: 2026-02-10T00:41:08Z
 
 ## Purpose
-Edge case testing for `config-transformer` utility functions, specifically testing error resilience when filesystem operations throw exceptions. Validates that `isESMProject` and `hasTsConfigPaths` gracefully handle filesystem errors without propagating exceptions.
+Edge case test suite for config-transformer utility functions, specifically testing error handling and fault tolerance when file system operations throw exceptions.
 
-## Key Test Structure
-- **Test Suite** (L20): `utils/config-transformer.throw.edge` - focused on exception handling scenarios
-- **Setup/Teardown** (L24-31): Configures mock behaviors and restores mocks after each test
-- **Mock Variables** (L7-8): `existsSyncMock` and `readFileSyncMock` - delegatable mock functions for fs operations
+## Key Components
 
-## Mock Implementation Pattern
-- **fs Module Mock** (L9-16): ESM-safe mocking strategy using `vi.importActual` and delegation pattern
-- **Delegate Functions** (L11-14): Conditional execution - uses mocks when available, falls back to actual fs operations
-- **Mock Reset** (L25-26): Ensures clean state with default non-throwing behaviors
+### Mock Setup (L7-16)
+- `existsSyncMock` and `readFileSyncMock` variables for controlling fs behavior
+- ESM-safe fs module mock using vitest's `vi.mock()` with delegate pattern
+- Preserves actual fs implementation while allowing selective override of `existsSync` and `readFileSync`
 
-## Test Cases
+### Test Configuration (L21-31)
+- `projDir` and `programDir` path constants for test scenarios
+- `beforeEach` (L24-27): Resets mocks to safe defaults (return false/empty string)
+- `afterEach` (L29-31): Restores all mocks to clean state
 
-### isESMProject Error Handling
-- **existsSync Throws Test** (L33-50): Verifies function returns `false` when `existsSync` throws for package.json and tsconfig.json files
-- **readFileSync Throws Test** (L52-65): Ensures function remains safe when file reading operations fail
+### Test Cases
 
-### hasTsConfigPaths Error Handling  
-- **existsSync Throws Test** (L67-76): Confirms function returns `false` when tsconfig.json existence check throws
-- **readFileSync Throws Test** (L78-85): Validates graceful handling of JSON parsing failures due to read errors
+#### `isESMProject` Error Handling (L33-65)
+- **Test 1 (L33-50)**: Validates function handles `existsSync` throws for package.json and tsconfig.json files gracefully, returns `false` instead of propagating errors
+- **Test 2 (L52-65)**: Tests `readFileSync` throw scenarios, ensuring function remains fault-tolerant
+
+#### `hasTsConfigPaths` Error Handling (L67-85)
+- **Test 3 (L67-76)**: Verifies function handles `existsSync` throws for tsconfig.json, returns `false`
+- **Test 4 (L78-85)**: Tests `readFileSync` throw scenarios for tsconfig.json parsing
+
+## Architecture Patterns
+- **Fault tolerance testing**: All tests verify functions return sensible defaults (`false`) rather than throwing
+- **Selective mocking**: Uses path-based conditional logic to throw errors only for specific files
+- **ESM compatibility**: Mock implementation preserves actual fs module while enabling test control
 
 ## Dependencies
-- **Testing Framework**: Vitest (describe, it, expect, beforeEach, afterEach, vi)
-- **Node.js Modules**: path, fs (PathLike type)
-- **Target Functions**: `isESMProject`, `hasTsConfigPaths` from `config-transformer.js`
+- `vitest` for testing framework and mocking
+- `path` for file path manipulation
+- Imports `isESMProject` and `hasTsConfigPaths` from config-transformer utils
 
-## Test Data Pattern
-- **Project Structure**: Uses `proj-throw-edge` as test project directory with `src` subdirectory
-- **File Paths**: Constructs specific paths for package.json and tsconfig.json at different directory levels
-- **Error Messages**: Consistent error message patterns for different failure scenarios
+## Critical Behavior
+Functions under test must be exception-safe and return meaningful defaults when file system operations fail, preventing crashes in production environments with file permission issues or missing files.

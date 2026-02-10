@@ -1,67 +1,66 @@
 # src/cli/commands/
-@generated: 2026-02-09T18:16:07Z
+@generated: 2026-02-10T01:19:35Z
 
 ## Purpose
+This directory contains CLI command handlers for the debugging MCP adapter system. It provides command-line interfaces for analyzing and debugging various binary formats and development artifacts.
 
-The `src/cli/commands` directory contains CLI command handlers that provide debugging tools and utilities for analyzing executable binaries. This module serves as the command-line interface layer, translating user commands into actionable analysis operations and presenting results in user-friendly formats.
+## Core Architecture
 
-## Key Components
+### Command Pattern Implementation
+The directory implements a modular command pattern where each file represents a distinct CLI command handler. Commands are designed to be:
+- Self-contained with their own option interfaces
+- Lazily loaded for performance optimization
+- Consistent in output formatting (JSON vs human-readable)
 
-### Binary Analysis Commands
-- **check-rust-binary**: Comprehensive Rust binary analyzer that determines toolchain compatibility, debug information availability, and debugging setup requirements
+### Key Components
 
-### Command Architecture Pattern
-All commands follow a consistent pattern:
-- Main handler function as primary entry point
-- Input validation and path resolution
-- Adapter integration for specialized analysis
-- Dual output formatting (JSON and human-readable)
-- Error handling with actionable guidance
+#### Binary Analysis Commands
+- **check-rust-binary.ts**: Analyzes Rust executables for debugging compatibility, extracting toolchain information, debug formats, and runtime dependencies
+
+### Common Patterns
+
+#### Lazy Module Loading
+Commands implement lazy loading of heavyweight analysis modules to improve CLI startup performance. Error handling includes helpful build instructions when dependencies are missing.
+
+#### Output Formatting
+Standardized dual-format output system:
+- Human-readable format with detailed summaries and recommendations
+- JSON format for programmatic consumption
+- Consistent error handling and messaging
+
+#### File System Integration
+Commands validate input files for existence and accessibility before processing, with clear error messages for common failure scenarios.
 
 ## Public API Surface
 
-### Entry Points
-- `handleCheckRustBinaryCommand(options)`: Analyzes Rust executables for debugging compatibility
+### Main Entry Points
+- `handleCheckRustBinaryCommand(binaryPath: string, options?: CheckRustBinaryOptions)`: Analyzes Rust binaries for debugging information
 
-### Configuration Interfaces
-- `CheckRustBinaryOptions`: Standard command options supporting JSON output mode
+### Option Interfaces
+- Command-specific option types (e.g., `CheckRustBinaryOptions`) with consistent patterns for output formatting preferences
 
 ## Internal Organization
 
-### Lazy Loading Architecture
-Commands use dynamic imports to handle optional dependencies gracefully, allowing the CLI to function even when specialized adapters are not installed.
+### Module Dependencies
+Commands depend on specialized adapter modules (e.g., `@debugmcp/adapter-rust`) for core analysis functionality, while maintaining CLI-specific concerns like formatting and user interaction.
 
-### Adapter Integration Layer
-Commands interface with domain-specific adapters (e.g., `@debugmcp/adapter-rust`) to perform deep binary analysis while maintaining separation of concerns.
+### Data Flow
+1. Input validation and file system checks
+2. Lazy loading of analysis modules
+3. Binary/artifact analysis
+4. Output formatting based on user preferences
+5. Results output to stdout/stderr
 
-### Output Formatting System
-Dual-mode output system provides:
-- **JSON mode**: Machine-readable structured data for programmatic consumption
-- **Human-readable mode**: Formatted reports with actionable recommendations and color-coded status information
+## Important Conventions
 
-## Data Flow
+### Error Handling
+- User-friendly error messages with actionable guidance
+- Graceful degradation when optional information is unavailable
+- Clear distinction between system errors and analysis limitations
 
-1. **Command Parsing**: CLI framework routes commands to appropriate handlers
-2. **Input Validation**: File path validation and accessibility checks
-3. **Adapter Invocation**: Specialized analysis through domain adapters
-4. **Result Processing**: Raw analysis data transformed into user-friendly insights
-5. **Output Generation**: Formatted results delivered via console output utilities
+### Output Standards
+- Consistent JSON schema for programmatic usage
+- Human-readable output with structured sections
+- Toolchain-specific recommendations and compatibility guidance
 
-## Important Patterns
-
-### Error Context Enhancement
-Commands wrap technical errors with user-actionable guidance, particularly for missing dependencies and setup requirements.
-
-### Toolchain-Specific Intelligence
-Analysis results include platform and toolchain-specific recommendations, helping users understand debugging limitations and required setup steps.
-
-### Dependency Filtering
-Runtime dependency analysis filters for relevant system libraries, focusing user attention on critical compatibility factors.
-
-## Module Conventions
-
-- Consistent error handling with contextual guidance
-- Lazy loading for optional dependencies
-- Standardized output formatting utilities
-- File system operations using async/await patterns
-- Configuration through typed option interfaces
+This directory serves as the command-line interface layer for the debugging MCP system, abstracting complex analysis operations into user-friendly CLI commands with consistent behavior and output formatting.

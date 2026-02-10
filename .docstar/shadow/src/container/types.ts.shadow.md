@@ -1,27 +1,27 @@
 # src/container/types.ts
 @source-hash: 9126dc0f4cda0eaf
-@generated: 2026-02-09T18:14:58Z
+@generated: 2026-02-10T00:41:43Z
 
-## Purpose
-TypeScript type definitions file for dependency injection container configuration. Provides strongly-typed interfaces for configuring logging and session management components within the DI container.
+**Primary Purpose**: Defines TypeScript interfaces for dependency injection container configuration in a debugging/session management system.
 
-## Key Interfaces
+**Key Interfaces**:
 
-### ContainerConfig (L8-30)
-Primary configuration interface for the dependency injection container, focused on logging configuration:
-- `logLevel` (L12): Optional string for log level control ('debug', 'info', 'warn', 'error')
-- `logFile` (L17): Optional path for persistent log file output
-- `sessionLogDirBase` (L22): Optional base directory for session-specific logs
-- `loggerOptions` (L27-29): Flexible key-value object for additional logger configuration
+- **ContainerConfig (L8-30)**: Main container configuration interface defining logging setup
+  - `logLevel` (L12): Optional string for log verbosity control
+  - `logFile` (L17): Optional path for persistent log file output
+  - `sessionLogDirBase` (L22): Optional base directory for session-specific logs
+  - `loggerOptions` (L27-29): Flexible key-value store for additional logger configuration
 
-### SessionManagerConfig (L35-51)
-Configuration interface specifically for SessionManager component:
-- `sessionStore` (L39-42): Optional nested config for session storage with `maxSessions` and `sessionTimeout` parameters
-- `defaultDapLaunchArgs` (L47-50): Optional DAP (Debug Adapter Protocol) launch configuration with `stopOnEntry` and `justMyCode` boolean flags
+- **SessionManagerConfig (L35-50)**: Specialized configuration for session management component
+  - `sessionStore` (L39-42): Optional configuration for session storage with capacity and timeout controls
+  - `defaultDapLaunchArgs` (L47-50)**: DAP (Debug Adapter Protocol) launch parameters including entry point and code scope settings
 
-## Architecture Notes
-- Pure type definition file with no runtime code
-- Follows optional property pattern (all fields are optional with `?`)
-- Uses generic object typing (`{[key: string]: unknown}`) for extensible logger options
-- Separates concerns between general container config and session-specific config
-- DAP integration suggests this is part of a debugging/development tool ecosystem
+**Architectural Patterns**:
+- Uses optional properties throughout for flexible configuration
+- Separates container-level concerns (logging) from domain-specific concerns (session management)
+- Employs nested object structures for logical grouping of related settings
+- Generic `unknown` type for extensible logger options provides type safety while allowing customization
+
+**Dependencies**: Pure TypeScript interfaces with no external dependencies - designed for compile-time type checking and IDE support.
+
+**Usage Context**: These types serve as contracts for dependency injection container initialization, particularly in debugging/development tool scenarios involving DAP integration.

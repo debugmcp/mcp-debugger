@@ -1,47 +1,45 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.transform.edge.test.ts
 @source-hash: dbd2f9ddb47d5c78
-@generated: 2026-02-09T18:14:05Z
+@generated: 2026-02-10T00:41:09Z
 
 ## Purpose
-Unit test file for edge cases in JavascriptDebugAdapter's `transformLaunchConfig` method, focusing on runtime executable overrides, argument deduplication, TypeScript detection, and configuration merging behaviors.
 
-## Key Test Structure
-- **Test setup** (L25-33): Creates fresh JavascriptDebugAdapter instance with minimal dependencies stub before each test
-- **Dependencies stub** (L9-16): Minimal logger implementation for adapter initialization
-- **Helper function `norm`** (L18-20): Normalizes file paths by replacing backslashes with forward slashes for cross-platform compatibility
+Unit test file covering edge cases for `JavascriptDebugAdapter.transformLaunchConfig` method. Tests specific scenarios around runtime executable overrides, TypeScript hook deduplication, and configuration merging behaviors.
 
-## Core Test Scenarios
+## Key Components
 
-### Runtime Executable Override (L35-46)
-Tests that custom absolute `runtimeExecutable` paths bypass auto-detection and preserve only user-provided `runtimeArgs`.
+### Test Infrastructure (L8-33)
+- **deps stub (L9-16)**: Minimal `AdapterDependencies` mock with logger interface
+- **norm helper (L18-20)**: Normalizes file paths by converting backslashes to forward slashes
+- **beforeEach/afterEach (L25-33)**: Creates fresh adapter instance and manages Vitest mocks
 
-### TypeScript Runtime Args Preservation (L48-76)
-Validates that when user provides existing ts-node hooks with 'tsx' executable, the adapter preserves user args without duplication. Includes `countPair` helper (L66-72) to verify hook argument uniqueness.
+### Test Cases
 
-### Argument Deduplication (L78-122)
-Complex test ensuring duplicate TypeScript hooks are deduplicated when:
-- User provides duplicate args AND adapter would add the same args
-- Mocks `tsdet.detectBinary`, `cfg.isESMProject`, and `cfg.hasTsConfigPaths` to force adapter additions
-- Uses same `countPair` pattern (L108-114) to verify final uniqueness
+#### Runtime Executable Override (L35-46)
+Tests that custom `runtimeExecutable` paths bypass auto-detection and preserve only user-specified `runtimeArgs`.
 
-### TypeScript .cts File Handling (L124-138)
-Tests that `.cts` files in ESM projects get `--loader ts-node/esm` when ts-node is available.
+#### TypeScript Hook Preservation (L48-76)
+Verifies that when using 'tsx' with existing ts-node hooks, user arguments are preserved without duplication. Uses `countPair` helper (L66-72) to verify single occurrences of flag-value pairs.
 
-### Source Maps Configuration (L140-150)
-Verifies that `sourceMaps: false` without `outFiles` results in omitted `outFiles` property.
+#### Deduplication Logic (L78-122)
+Complex test mocking `tsdet.detectBinary`, `cfg.isESMProject`, and `cfg.hasTsConfigPaths` to verify that duplicate runtime arguments are properly deduplicated while maintaining necessary hooks for ESM + tsconfig-paths scenarios.
 
-### Skip Files Merging (L152-162)
-Tests merging and deduplication of `skipFiles` arrays with adapter defaults, ensuring no duplicate entries.
+#### CTS File Handling (L124-138)
+Tests `.cts` file extension with ESM project configuration, ensuring `--loader ts-node/esm` is included when ts-node is available.
+
+#### SourceMap Configuration (L140-150)
+Verifies that `sourceMaps: false` without `outFiles` results in undefined `outFiles` property.
+
+#### SkipFiles Merging (L152-162)
+Tests merging and deduplication of `skipFiles` arrays with default values like `<node_internals>/**` and `**/node_modules/**`.
 
 ## Dependencies
-- **vitest**: Test framework and mocking utilities
-- **JavascriptDebugAdapter**: Main class under test from `../../src/index.js`
-- **cfg module**: Configuration utilities for ESM/tsconfig detection
-- **tsdet module**: TypeScript binary detection utilities
-- **@debugmcp/shared**: AdapterDependencies type definition
+
+- **JavascriptDebugAdapter (L4)**: Main class under test from `../../src/index.js`
+- **cfg module (L5)**: Config transformer utilities (`isESMProject`, `hasTsConfigPaths`)
+- **tsdet module (L6)**: TypeScript detection utilities (`detectBinary`)
+- **Vitest (L2)**: Testing framework with mocking capabilities
 
 ## Testing Patterns
-- Extensive use of vi.spyOn() for mocking external dependencies
-- Path normalization with `norm()` for cross-platform assertions
-- Custom `countPair` helper for verifying argument deduplication
-- Mock restoration in beforeEach/afterEach hooks
+
+Uses comprehensive mocking strategy to isolate transformLaunchConfig behavior. Heavy use of `vi.spyOn` for controlling external dependencies and `mockImplementation` for deterministic binary detection results. All tests follow arrange-act-assert pattern with detailed assertions on runtime configuration properties.

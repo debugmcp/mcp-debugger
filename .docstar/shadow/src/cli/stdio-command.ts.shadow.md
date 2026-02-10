@@ -1,40 +1,56 @@
 # src/cli/stdio-command.ts
 @source-hash: ca130161515b64ec
-@generated: 2026-02-09T18:15:01Z
+@generated: 2026-02-10T00:41:52Z
 
-## Purpose
-CLI command handler for starting a Debug MCP Server in stdio mode, managing the connection between the server and stdin/stdout transport with robust lifecycle management.
+## Primary Purpose
+Command handler for stdio mode operation of a Debug MCP (Model Context Protocol) Server. Establishes stdio transport, manages server lifecycle, and handles graceful shutdown with robust signal handling for containerized environments.
 
-## Key Interfaces & Types
-- `ServerFactoryOptions` (L6-9): Configuration for server factory with optional logLevel and logFile
-- `StdioCommandDependencies` (L11-15): Dependency injection interface containing logger, serverFactory function, and optional exitProcess override
+## Key Interfaces & Functions
 
-## Core Function
-- `handleStdioCommand` (L17-102): Main async handler that orchestrates the stdio server startup process
+### `ServerFactoryOptions` (L6-9)
+Configuration interface for server creation:
+- `logLevel`: Optional logging verbosity control
+- `logFile`: Optional log output destination
 
-## Key Dependencies
-- `StdioServerTransport` from MCP SDK: Handles stdin/stdout communication protocol
-- `DebugMcpServer`: The actual MCP server instance being managed
-- `WinstonLoggerType`: Logging interface
+### `StdioCommandDependencies` (L11-15) 
+Dependency injection interface enabling testability:
+- `logger`: Winston logger instance for diagnostics
+- `serverFactory`: Factory function creating DebugMcpServer instances
+- `exitProcess`: Optional process exit handler (defaults to `process.exit`)
 
-## Architecture & Flow
-1. **Initialization** (L21-27): Sets up logger level and logs startup message
-2. **Server Creation** (L31-34): Uses injected factory to create DebugMcpServer instance
-3. **Transport Setup** (L37-46): Creates StdioServerTransport and connects server to it
-4. **Lifecycle Management** (L41-96):
-   - Keep-alive interval (L41) prevents premature exit in detached containers
-   - Transport close handler (L49-54) ensures clean shutdown
-   - Stdin management (L66-76) with policy to ignore stdin end in containerized environments
-   - Signal handlers (L79-88) for SIGTERM/SIGINT with cleanup
-   - Exit diagnostics (L89-96) for debugging
+### `handleStdioCommand()` (L17-102)
+Main async command handler orchestrating stdio mode server startup:
+- **Input validation & setup** (L21-27): Configures logger level from options
+- **Server creation** (L31-34): Uses factory pattern to instantiate DebugMcpServer
+- **Transport setup** (L37-46): Creates StdioServerTransport and establishes MCP connection
+- **Keep-alive mechanism** (L41): 60-second interval prevents premature container shutdown
+- **Shutdown handlers** (L49-54, L79-88): Manages transport close and signal-based termination
+- **Error handling** (L61-63, L97-101): Transport errors and startup failures
+
+## Architecture & Dependencies
+- **MCP SDK**: Uses `@modelcontextprotocol/sdk/server/stdio.js` for protocol transport
+- **Internal server**: Depends on `../server.js` DebugMcpServer implementation
+- **CLI integration**: Consumes `StdioOptions` from `./setup.js`
+- **Logging**: Winston-based structured logging throughout
 
 ## Critical Patterns
-- **Dependency Injection**: Uses injected dependencies for testability (logger, serverFactory, exitProcess)
-- **Robust Error Handling**: Try-catch wrapper with appropriate exit codes
-- **Container-Aware Design**: Handles detached container scenarios where stdin may close unexpectedly
-- **Protocol Safety**: Careful handling of console output to avoid corrupting MCP transport
 
-## Important Constraints
-- Console output must be avoided when `CONSOLE_OUTPUT_SILENCED` to prevent transport corruption
-- Keep-alive mechanism is essential for containerized deployments
-- Transport close is the authoritative shutdown trigger, not stdin end
+### Containerized Environment Handling
+- Keep-alive interval (L41) prevents Node.js exit in detached containers
+- Stdin end handling (L74-76) ignores unexpected stdin closure in containers
+- Transport-based lifecycle management over stdin-based termination
+
+### Graceful Shutdown Strategy
+- Multiple exit paths: transport close (L50-54), SIGTERM/SIGINT (L79-88)
+- Consistent cleanup: `clearInterval(keepAlive)` + `exitProcess(0)`
+- Process exit diagnostics (L89-96) with environment context
+
+### Protocol Safety
+- Console output silencing awareness (L99) to prevent transport corruption
+- Structured error logging instead of console output
+- Transport error isolation (L61-63)
+
+## Key Constraints
+- Must not corrupt stdio transport with console output
+- Requires deterministic shutdown for container orchestration
+- Transport lifecycle controls server lifetime, not process signals alone

@@ -1,54 +1,46 @@
 # scripts/bundle.js
 @source-hash: e446cc34cebb3883
-@generated: 2026-02-09T18:15:15Z
+@generated: 2026-02-10T00:41:59Z
 
 ## Purpose
-Node.js script that bundles the MCP debugger server using esbuild, creating two production bundles: a main server bundle and a debug adapter proxy bundle. Critical feature: injects console silencing code to prevent stdout pollution in MCP transport modes.
+Node.js build script that bundles the MCP (Model Context Protocol) debugger server and its proxy component into standalone executable files using esbuild.
 
 ## Key Functions
 
-### `bundle()` (L10-173)
-Main bundling function that orchestrates the entire process:
-- Creates main server bundle from `dist/index.js` → `dist/bundle.cjs` (L15-34)
-- Injects console silencing header to prevent MCP protocol corruption (L40-102)
-- Creates proxy bundle from `dist/proxy/dap-proxy-entry.js` → `dist/proxy/proxy-bundle.cjs` (L131-150)
-- Performs bundle analysis and size reporting (L118-127, L152-167)
+**bundle() (L10-173)**: Main bundling orchestrator that:
+- Creates main application bundle from `dist/index.js` to `dist/bundle.cjs`
+- Injects critical console silencing code to prevent MCP protocol corruption
+- Creates secondary proxy bundle from `dist/proxy/dap-proxy-entry.js`
+- Performs file operations and bundle analysis
 
-## Bundle Configurations
+## Critical Architecture Patterns
 
-### Main Bundle (L15-34)
-- **Entry**: `dist/index.js`
-- **Output**: `dist/bundle.cjs` (CommonJS, Node 18+, minified)
-- **External**: `fsevents` (native module)
-- **Defines**: Hardcoded paths for `import.meta.url` and `__dirname`
+**Console Silencing Injection (L39-102)**: 
+- Prepends runtime code that detects stdio/SSE transport modes via CLI arguments
+- Disables all console output methods to prevent stdout pollution that breaks MCP protocol
+- Uses sophisticated argument parsing with quote stripping and keyword matching
+- Applied conditionally based on `--transport=stdio/sse` flags or `CONSOLE_OUTPUT_SILENCED` env var
 
-### Proxy Bundle (L131-150) 
-- **Entry**: `dist/proxy/dap-proxy-entry.js`
-- **Output**: `dist/proxy/proxy-bundle.cjs` (CommonJS, Node 20+, unminified)
-- **External**: None (bundles all dependencies)
-- **Features**: Inline sourcemaps, name preservation for debugging
-
-## Critical Implementation Details
-
-### Console Silencing (L39-99)
-Injects sophisticated argument parsing logic to detect MCP transport modes:
-- **Transport Detection**: Matches `stdio`, `sse` keywords in various formats (L52-67)
-- **Silencing**: Overrides all console methods with no-ops when transport detected (L73-91)
-- **Argv Cleaning**: Strips quotes from command line arguments (L94-97)
-
-### Post-Processing (L40-44, L101-102)
-- Removes embedded shebang lines from bundle content
-- Prepends custom shebang + console silencer to final bundle
+**Dual Bundle Strategy**:
+- Main bundle (L15-34): Minified, CJS format, targets Node 18, keeps `fsevents` external
+- Proxy bundle (L131-150): Unminified for debugging, includes all dependencies, targets Node 20, inline sourcemaps
 
 ## Dependencies
-- **esbuild**: Primary bundling engine
-- **fs**: File operations (reading, writing, copying)
-- **path**: Path manipulation for proxy bootstrap copying
+- `esbuild`: Primary bundling engine
+- `fs`: File system operations for bundle modification and copying
+- `path`: Path manipulation for proxy file handling
 
-## File Operations
-- Writes metafile for bundle analysis: `dist/bundle-meta.json` (L37)
-- Conditionally copies `src/proxy/proxy-bootstrap.js` → `dist/proxy/proxy-bootstrap.js` (L104-115)
-- Creates proxy directory structure as needed (L109-112)
+## Bundle Configuration Details
+- Main bundle uses hardcoded paths (`/app/dist`) for container deployment
+- Metafile generation enabled for both bundles for analysis
+- Shebang line handling with regex replacement (L43)
+- Proxy bootstrap file copying from `src/proxy/` to `dist/proxy/` (L104-115)
+
+## Output Artifacts
+- `dist/bundle.cjs`: Main executable bundle with console silencing
+- `dist/bundle-meta.json`: Build analysis metadata
+- `dist/proxy/proxy-bundle.cjs`: Proxy component bundle
+- `dist/proxy/proxy-bootstrap.js`: Copied proxy bootstrap file
 
 ## Error Handling
-Process exits with code 1 on bundling failures (L166, L171) or missing proxy bundle (L165-167).
+Comprehensive try-catch with process.exit(1) on failures, bundle size reporting, and detailed esbuild analysis output for both main and proxy bundles.

@@ -1,80 +1,67 @@
 # packages/adapter-python/src/utils/python-utils.ts
 @source-hash: 9de9510a811b02a6
-@generated: 2026-02-09T18:14:13Z
+@generated: 2026-02-10T00:41:18Z
 
 ## Purpose
+Python executable detection utilities for the adapter-python package. Provides cross-platform Python discovery with Windows Store alias filtering, debugpy detection, and command-line tool resolution using the `which` library.
 
-Python executable discovery utility for Node.js applications, specifically designed for cross-platform Python detection with Windows compatibility focus. Handles Windows Store alias filtering, debugpy detection, and provides robust command finding with extensive diagnostics.
+## Key Components
 
-## Key Architecture
+### Error Classes
+- `CommandNotFoundError` (L23-30): Custom error for when commands cannot be found, extends Error with command property
 
-### Command Finding Interface (L32-34)
-- `CommandFinder` interface abstracts executable discovery
-- Enables dependency injection for testing
-- `WhichCommandFinder` (L36-217) is the primary implementation using the 'which' library
+### Interfaces & Types
+- `Logger` (L10-13): Simple logging interface with error/debug methods, used throughout for diagnostic output
+- `CommandFinder` (L32-34): Abstraction for command resolution with async find method
+- `noopLogger` (L16-19): Default no-op logger implementation
 
-### Error Handling (L23-30)
-- `CommandNotFoundError` extends Error with command context
-- Custom error type for cleaner error handling in calling code
+### Core Classes
+- `WhichCommandFinder` (L36-217): Main command finder implementation using `which` library
+  - Caches results by default (L37-38)
+  - Handles Windows PATH/Path case sensitivity issues (L50-98)
+  - Filters Windows Store Python aliases using regex pattern (L100-114)
+  - Extensive Windows-specific debugging and fallback logic (L45-216)
+  - Attempts direct spawn testing when `which` fails (L175-212)
 
-### Core Discovery Logic (L293-468)
-`findPythonExecutable()` implements multi-stage Python discovery:
-1. User-specified preferred path (L335-350)
-2. Environment variables: PYTHON_PATH, PYTHON_EXECUTABLE (L353-369)
-3. GitHub Actions pythonLocation support (L372-400)
-4. Auto-detection via common commands (L407-424)
-5. debugpy availability check (L428-436)
-6. Fallback to first valid Python (L439-443)
+### Primary Functions
+- `findPythonExecutable()` (L293-468): Main entry point for Python discovery
+  - Priority order: preferred path → env vars → pythonLocation → auto-detect
+  - Validates executables on Windows to avoid Store aliases (L339, L358, L395, L412)
+  - Prefers Python installations with debugpy installed (L427-436)
+  - Falls back to first valid Python if no debugpy found (L439-443)
+  - Comprehensive error reporting with CI-specific logging (L449-462)
 
-### Windows-Specific Features
+- `isValidPythonExecutable()` (L235-262): Validates Python executable by running import test
+  - Detects Windows Store aliases by exit code 9009 and stderr patterns (L249-254)
 
-#### Store Alias Filtering (L100-114)
-- Detects and filters Windows Store Python aliases via regex pattern
-- Prevents selection of non-functional Microsoft Store shortcuts
-- Pattern: `/\\microsoft\\windowsapps\\(python(\d+)?|py)\.exe$/`
+- `hasDebugpy()` (L267-285): Checks if Python installation has debugpy package
 
-#### Path Environment Fixes (L48-98)
-- Handles Windows case-sensitive PATH vs Path environment variable issues
-- Sets ComSpec fallbacks for cmd.exe discovery
-- Extensive diagnostics when DEBUG_PYTHON_DISCOVERY=true
+- `getPythonVersion()` (L473-491): Extracts Python version string from --version output
 
-### Validation Functions
-
-#### `isValidPythonExecutable()` (L235-262)
-- Spawns Python with test command to verify functionality
-- Detects Windows Store aliases by exit code 9009 and stderr patterns
-- Returns boolean validity status
-
-#### `hasDebugpy()` (L267-285)
-- Tests for debugpy module availability via import test
-- Used to prioritize Python installations with debugging support
-
-#### `getPythonVersion()` (L473-491)
-- Extracts version string from `python --version`
-- Handles both stdout and stderr output
-- Returns semantic version or null
+### Utilities
+- `setDefaultCommandFinder()` (L226-230): Dependency injection for testing
+- `defaultCommandFinder` (L220): Global instance used by findPythonExecutable
 
 ## Dependencies
-- `which`: Primary executable discovery mechanism
-- `child_process.spawn`: Python validation and version detection
+- `child_process.spawn`: Process execution for validation and version checks
+- `which`: Cross-platform command resolution
 - `node:fs`, `node:path`: File system operations
 
-## Configuration
-- Environment variables: PYTHON_PATH, PYTHON_EXECUTABLE, pythonLocation
-- Debug mode: DEBUG_PYTHON_DISCOVERY=true enables verbose logging
-- Platform detection: process.platform === 'win32'
+## Architecture Patterns
+- **Strategy Pattern**: CommandFinder interface allows pluggable command resolution
+- **Caching**: WhichCommandFinder caches resolved paths for performance
+- **Graceful Degradation**: Multiple fallback strategies for Python discovery
+- **Platform Abstraction**: Extensive Windows-specific handling while maintaining cross-platform compatibility
 
-## Caching
-- `WhichCommandFinder` includes LRU-style Map cache (L37)
-- Cache can be disabled via constructor parameter
-- `setDefaultCommandFinder()` (L226-230) allows test overrides
+## Critical Behaviors
+- Windows Store Python aliases are actively filtered out (shimPattern L100)
+- Environment variables PATH/Path are normalized on Windows (L92-97)
+- ComSpec/COMSPEC fallback prevents which library failures on Windows (L51-59)
+- debugpy presence influences Python selection priority but isn't required
+- Verbose discovery mode via DEBUG_PYTHON_DISCOVERY environment variable
 
-## Error Recovery
-- Multi-candidate resolution with Set deduplication (L135-149)
-- Graceful degradation when debugpy not available
-- Comprehensive error messages with tried paths listing (L464-467)
-
-## Logging
-- Local Logger interface (L10-13) for decoupled logging
-- Extensive CI diagnostics when in verbose mode
-- JSON structured logging for automated analysis
+## Error Handling
+- CommandNotFoundError for missing commands
+- Graceful fallbacks through multiple discovery strategies
+- Comprehensive error reporting in CI environments
+- Direct spawn testing when which library fails

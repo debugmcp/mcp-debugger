@@ -1,29 +1,31 @@
 # src/implementations/environment-impl.ts
 @source-hash: d509c4dea5c4799a
-@generated: 2026-02-09T18:14:58Z
+@generated: 2026-02-10T00:41:45Z
 
-## Primary Purpose
-Production implementation of the IEnvironment interface that provides safe access to Node.js process environment variables and working directory. Creates immutable snapshots to prevent mid-execution environment changes.
+## Purpose
+Production implementation of the environment abstraction layer that provides controlled access to Node.js process environment variables and file system context.
 
 ## Key Components
 
 ### ProcessEnvironment Class (L11-41)
-- **Purpose**: Concrete implementation of IEnvironment interface for production use
-- **Key Feature**: Creates immutable snapshot of `process.env` at construction time (L17) to ensure consistent behavior
-- **Dependencies**: Imports `IEnvironment` from `@debugmcp/shared` (L5)
+- **Core Role**: Concrete implementation of `IEnvironment` interface for production use
+- **Pattern**: Snapshot pattern - captures environment state at construction time for consistency
+- **Constructor (L14-18)**: Creates immutable snapshot of `process.env` to prevent mid-execution changes from affecting behavior
 
-### Core Methods
-- **constructor() (L14-18)**: Captures environment variables snapshot using spread operator for immutability
-- **get(key: string) (L23-25)**: Retrieves specific environment variable from snapshot, not live process.env
-- **getAll() (L30-33)**: Returns defensive copy of all environment variables to prevent external modification
-- **getCurrentWorkingDirectory() (L38-40)**: Direct wrapper around `process.cwd()` - intentionally not cached
+### Key Methods
+- **get() (L23-25)**: Retrieves specific environment variable from internal snapshot
+- **getAll() (L30-33)**: Returns defensive copy of all environment variables to prevent external mutation
+- **getCurrentWorkingDirectory() (L38-40)**: Direct wrapper around `process.cwd()` for real-time working directory
+
+## Dependencies
+- `IEnvironment` from `@debugmcp/shared` - interface contract this class fulfills
 
 ## Architectural Decisions
-- **Snapshot Pattern**: Environment variables are captured once at instantiation, preventing runtime inconsistencies
-- **Defensive Copying**: Both constructor and getAll() use spread operator to prevent external mutations
-- **Live Working Directory**: CWD is accessed directly from process rather than cached, allowing for legitimate directory changes
+1. **Immutable Snapshot Strategy**: Environment variables are captured once at construction rather than live-read, ensuring consistent behavior throughout object lifetime
+2. **Defensive Copying**: All returned data structures are copies to prevent external modification of internal state
+3. **Mixed Consistency Model**: Environment variables are snapshotted (consistent), but working directory is live (current)
 
 ## Critical Invariants
-- Environment variables remain constant throughout object lifecycle
-- External code cannot modify the internal environment state
-- Working directory reflects current process state at call time
+- Environment variable access is always consistent with construction-time state
+- Internal snapshot remains immutable after construction
+- All external data access is through defensive copies

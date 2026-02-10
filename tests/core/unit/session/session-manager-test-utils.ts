@@ -17,8 +17,8 @@ import { createMockFileSystem, createMockLogger } from '../../../test-utils/help
 import { IAdapterRegistry } from '@debugmcp/shared';
 import { createMockAdapterRegistry as createCentralizedMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
-// Mock for the deprecated constructor path in SessionManager
-vi.mock('./dist/implementations/index.js', () => ({ 
+// Mock modules that SessionManager may import transitively during tests
+vi.mock('./dist/implementations/index.js', () => ({
   FileSystemImpl: vi.fn(),
   ProcessManagerImpl: vi.fn(),
   NetworkManagerImpl: vi.fn(),

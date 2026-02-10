@@ -1,35 +1,32 @@
 # examples/go/fibonacci.go
 @source-hash: 7f809679531cb9f3
-@generated: 2026-02-09T18:14:50Z
+@generated: 2026-02-10T00:41:35Z
 
 ## Purpose
-Simple Go command-line program demonstrating recursive Fibonacci number calculation with formatted output.
+Simple Go example program demonstrating recursive Fibonacci sequence calculation with console output.
 
 ## Key Components
 
-**fibonacci function (L8-13)**
-- Recursive implementation of Fibonacci sequence calculation
-- Takes integer `n` as input, returns nth Fibonacci number
-- Base case: returns `n` for `n <= 1` (handles 0 and 1)
-- Recursive case: `fibonacci(n-1) + fibonacci(n-2)`
-- **Performance Note**: Exponential time complexity O(2^n) due to redundant calculations
+### Functions
+- **fibonacci(n int) int (L8-13)**: Core recursive function calculating nth Fibonacci number using classic base cases (n≤1 returns n) and recursive relation F(n) = F(n-1) + F(n-2)
+- **main() (L15-29)**: Entry point that demonstrates fibonacci function by printing sequence for numbers 0-10 and calculating F(15)
 
-**main function (L15-29)**
-- Entry point that demonstrates Fibonacci calculation
-- Prints formatted header and sequence table
-- Loop (L20-23): calculates and displays Fibonacci numbers 0-10
-- Single calculation (L26-28): demonstrates specific value calculation for n=15
+### Dependencies
+- **fmt package (L4)**: Used for console output formatting via Println and Printf
 
-## Dependencies
-- `fmt` package for console output formatting
+## Implementation Details
 
-## Architectural Patterns
-- Pure functional approach for Fibonacci calculation
-- Straightforward recursive algorithm without memoization
-- Console application with formatted tabular output
+### Algorithm Characteristics
+- Uses naive recursive approach with exponential time complexity O(2^n)
+- No memoization or optimization - suitable for educational purposes only
+- Base cases handle n=0 (returns 0) and n=1 (returns 1) correctly
 
-## Critical Considerations
-- Algorithm has exponential time complexity - inefficient for large values
-- No input validation or error handling
-- Hardcoded demonstration values (0-10, then 15)
-- Stack overflow risk for very large input values due to deep recursion
+### Output Pattern
+- Prints formatted header and sequence table for F(0) through F(10)
+- Demonstrates specific calculation for F(15) = 610
+- Uses consistent formatting with Printf for numbered results
+
+### Performance Notes
+- Inefficient for large n values due to repeated subproblem calculation
+- Suitable for small demonstrations (n≤20 reasonable on modern hardware)
+- No error handling for negative inputs

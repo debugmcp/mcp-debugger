@@ -1,89 +1,75 @@
 # tests/unit/proxy/proxy-manager-message-handling.test.ts
-@source-hash: d6e936a3823dbbf7
-@generated: 2026-02-09T18:15:03Z
+@source-hash: f20991d7dc282288
+@generated: 2026-02-10T01:19:07Z
 
-## Unit Test Suite for ProxyManager Message Handling and Cleanup
+**Primary Purpose**: Comprehensive unit test suite for ProxyManager message handling, event propagation, cleanup scenarios, and edge cases in debug adapter communication.
 
-Comprehensive test suite for `ProxyManager` message handling capabilities, event propagation, cleanup scenarios, and edge case resilience. Uses `TestProxyManager` for simplified async initialization testing.
+**Test Framework**: Uses Vitest with TestProxyManager utility class to simplify async initialization and avoid complex proxy process management.
 
-### Test Structure (L20-56)
-- **Setup**: Creates mock logger, proxy config, and TestProxyManager instance
-- **Teardown**: Ensures clean proxy shutdown and mock cleanup
-- **Config**: Standard Python debug session configuration with breakpoints and dry-run options
+**Main Test Classes/Utilities**:
+- `TestProxyManager` (L13): Simplified proxy manager for testing that avoids real process spawning
+- `ProxyConfig` (L14): Configuration object for proxy sessions
+- Mock factories for logger and filesystem (L16)
 
-### Core Message Handling Tests (L58-267)
-Tests various message types and their event propagation:
+**Test Structure**:
 
-- **Status Messages (L59-75)**: Validates `adapter_configured_and_launched` status triggers `adapter-configured` event
-- **Dry-Run Messages (L77-101)**: Tests `dry_run_complete` status with command and script extraction
-- **DAP Events (L103-170)**: 
-  - Stopped events with thread ID capture (L103-116)
-  - Continued events (L118-128) 
-  - Terminated events (L130-145)
-  - Exited events with exit code handling (L147-170)
-- **DAP Responses (L172-197)**: Mock response handling for requests like `setBreakpoints`
-- **Error Handling (L199-218)**: Error message propagation to error events
-- **Malformed Messages (L220-266)**: Graceful handling of invalid JSON, empty messages, wrong session IDs
+**Setup & Teardown (L25-56)**:
+- `beforeEach`: Creates mock logger, config, and TestProxyManager instance, starts proxy
+- `afterEach`: Stops proxy if running and clears mocks
+- Uses session ID 'test-session' and Python debug language as defaults
 
-### Process Exit Handling (L269-328)
-Tests proxy process lifecycle management:
-- Clean exit scenarios with event emission
-- Exit codes and signal handling 
-- Error event propagation during proxy failures
+**Core Test Suites**:
 
-### Cleanup Scenarios (L330-381)
-Validates resource cleanup and concurrent request handling:
-- Pending request cleanup on proxy exit
-- Multiple concurrent DAP requests
-- Timeout handling during cleanup
-- Double-stop protection
+1. **Message Handling (L58-264)**:
+   - Status messages: adapter configured (L59-75), dry-run complete (L77-101)
+   - DAP events: stopped (L103-116), continued (L118-128), terminated (L130-145), exited (L147-169)
+   - DAP responses: setBreakpoints success (L171-196)
+   - Error handling: error messages (L198-217), invalid formats (L219-239), wrong session ID (L247-263)
 
-### DAP Request Edge Cases (L383-436)
-Tests request handling in failure scenarios:
-- Requests when proxy not running
-- Concurrent identical requests
-- Failed DAP responses with error messages
-- Request timeout behavior
+2. **Proxy Process Exit Handling (L266-325)**:
+   - Clean exit (L267-277), exit with error code (L279-292), exit with signal (L294-307)
+   - Error event propagation (L309-324)
 
-### State Management (L438-466)
-Tests internal state tracking:
-- Current thread ID updates from stopped/continued events
-- Dry-run mode state transitions
+3. **Cleanup Scenarios (L327-378)**:
+   - Pending request cleanup on exit (L328-339)
+   - Multiple concurrent requests (L341-356)
+   - Timeout clearing during cleanup (L363-368)
+   - Stop after already exited (L370-377)
 
-### Resilience and Error Recovery (L468-828)
-Extensive testing of failure scenarios using real `ProxyManager`:
+4. **DAP Request Edge Cases (L380-433)**:
+   - Requests when proxy not running (L381-389)
+   - Concurrent requests with same command (L391-406)
+   - Failed DAP responses (L415-432)
 
-- **Invalid Message Handling (L473-484)**: Logs and ignores unknown message types
-- **Request Timeouts (L486-513)**: 30s timeout with pending request cleanup
-- **Bootstrap Validation (L515-546)**: Missing bootstrap script error handling
-- **Transport Errors (L548-577)**: Command send failures with proper cleanup
-- **Adapter Validation (L579-612)**: Environment validation failures
-- **Launch Barriers (L614-827)**: 
-  - Fire-and-forget launch for js-debug adapters
-  - Barrier cleanup on proxy exit
-  - Response handling with barrier disposal
-  - Timeout scenarios with barrier cleanup
+5. **State Management (L435-463)**:
+   - Thread ID tracking from stopped/continued events (L436-449)
+   - Dry-run mode state changes (L451-462)
 
-### Status and Lifecycle Management (L830-989)
-Tests status transitions and event emission:
-- `adapter_connected` → `initialized` event
-- `adapter_exited` → `exit` event with code/signal
-- Pending request rejection on proxy exit
-- Duplicate test coverage for status transitions (L912-989)
+6. **Resilience Scenarios (L465-825)**:
+   - Invalid message logging (L470-481)
+   - Request timeouts using real ProxyManager with fake timers (L483-510)
+   - Missing bootstrap script error (L512-543)
+   - Transport errors during command sending (L545-574)
+   - Adapter validation failures (L576-609)
+   - JavaScript adapter launch barrier handling (L611-824)
 
-### IPC Smoke Test (L991-1014)
-Tests minimal proxy IPC validation with process termination on `proxy_minimal_ran_ipc_test` status.
+7. **Status & Lifecycle (L827-907)**:
+   - Initialized event on adapter connection (L828-851)
+   - Exit event on adapter termination (L853-878)
+   - Pending request rejection on proxy exit (L880-906)
 
-### Key Dependencies
-- `TestProxyManager`: Simplified proxy manager for testing
-- `ProxyConfig`: Debug session configuration
-- `DebugLanguage`: Language-specific debug adapter selection
-- Mock factories for logger and filesystem operations
-- Vitest framework with fake timers for timeout testing
+8. **IPC Smoke Test (L910-933)**:
+   - Process termination on minimal proxy test status (L911-932)
 
-### Test Patterns
-- Event-driven testing with listener setup/verification
-- Mock response injection for DAP request testing  
-- Process lifecycle simulation
-- Concurrent request validation
-- Error boundary testing with type assertions
+**Key Testing Patterns**:
+- Uses `simulateMessage()` and `simulateStoppedEvent()` methods for event injection
+- Validates event emission with boolean flags and captured parameters
+- Tests both successful and error scenarios
+- Covers concurrent operations and cleanup edge cases
+- Uses fake timers for timeout testing in resilience scenarios
+
+**Mock Strategy**: 
+- TestProxyManager for simplified proxy operations
+- Real ProxyManager for complex resilience testing
+- Fake timers for timeout simulation
+- Mock process objects for event testing

@@ -1,42 +1,34 @@
 # packages/shared/src/interfaces/filesystem.ts
 @source-hash: ad700ed7abc5419c
-@generated: 2026-02-09T18:14:10Z
+@generated: 2026-02-10T00:41:08Z
 
-## Purpose and Responsibility
+**Purpose**: Provides filesystem abstraction interface for dependency injection, enabling filesystem operations to be mocked in tests while maintaining a production implementation using Node.js fs module.
 
-This file provides a filesystem abstraction layer designed for dependency injection, enabling filesystem operations to be mocked during testing. It follows a similar pattern to CommandFinder for the Python adapter, providing a clean interface for file system interactions.
+**Key Components**:
 
-## Key Interfaces and Classes
+- `FileSystem` interface (L23-38): Defines contract for basic filesystem operations
+  - `existsSync(path: string): boolean` (L29): Synchronous path existence check
+  - `readFileSync(path: string, encoding: string): string` (L37): Synchronous file reading with text encoding
 
-**FileSystem Interface (L23-38)**: Core abstraction defining two essential filesystem operations:
-- `existsSync(path: string): boolean` - Synchronous path existence checking
-- `readFileSync(path: string, encoding: string): string` - Synchronous file reading with encoding support
+- `NodeFileSystem` class (L43-68): Production implementation of FileSystem interface
+  - Constructor (L46-48): Initializes with Node.js fs module via require
+  - `existsSync()` (L50-57): Wraps fs.existsSync with error handling, returns false on any error
+  - `readFileSync()` (L59-67): Wraps fs.readFileSync with BufferEncoding cast and error handling, returns empty string on failure
 
-**NodeFileSystem Class (L43-68)**: Production implementation of FileSystem interface
-- Uses dynamic `require('fs')` through constructor injection (L46-48)
-- Implements defensive programming with try-catch blocks that return safe defaults (false for existence checks, empty string for read failures)
-- Handles TypeScript BufferEncoding casting requirement (L62)
+**Global State Management**:
+- `defaultFileSystem` variable (L73): Module-level singleton holding current FileSystem instance
+- `setDefaultFileSystem()` (L79-81): Setter for dependency injection, primarily for testing
+- `getDefaultFileSystem()` (L87-89): Getter for current default implementation
 
-## Key Functions
+**Dependencies**:
+- Node.js `module` and `url` modules for ES module compatibility (L9-10)
+- Dynamic require setup (L14-18) with fallback for environments lacking import.meta.url
+- Node.js `fs` module loaded dynamically in NodeFileSystem constructor
 
-**setDefaultFileSystem(fileSystem: FileSystem) (L79-81)**: Dependency injection setter for testing scenarios
-**getDefaultFileSystem(): FileSystem (L87-89)**: Getter for current filesystem implementation
+**Architectural Patterns**:
+- Dependency injection pattern enabling test mocking
+- Error-safe operations with graceful fallbacks (false/empty string)
+- ES module compatibility layer for CommonJS interop
+- Singleton pattern for default filesystem instance
 
-## Important Dependencies
-
-- `createRequire` from Node.js 'module' for ES module compatibility (L9, L14-18)
-- `pathToFileURL` from Node.js 'url' as fallback mechanism (L10, L17)
-- Dynamic `require('fs')` loaded at runtime rather than static import (L47)
-
-## Notable Architectural Decisions
-
-1. **ES Module Compatibility**: Uses `createRequire` with robust fallback handling when `import.meta.url` is unavailable (L14-18)
-2. **Error Resilience**: All filesystem operations use try-catch with sensible defaults rather than throwing errors
-3. **Singleton Pattern**: Maintains a default instance (L73) with getter/setter for dependency injection
-4. **Late Binding**: Filesystem module loaded in constructor rather than at module level, enabling better testability
-
-## Critical Invariants
-
-- `readFileSync` always returns a string (empty on error, never throws)
-- `existsSync` always returns a boolean (false on error, never throws) 
-- Default filesystem instance is always available and non-null
+**Error Handling Strategy**: All filesystem operations catch exceptions and return safe default values rather than propagating errors, prioritizing robustness over error reporting.

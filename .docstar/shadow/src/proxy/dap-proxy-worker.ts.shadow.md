@@ -1,99 +1,83 @@
 # src/proxy/dap-proxy-worker.ts
-@source-hash: dfe66a3859588d01
-@generated: 2026-02-09T18:15:16Z
+@source-hash: c35edafb986069fb
+@generated: 2026-02-10T01:19:16Z
 
-## DapProxyWorker Core Implementation
+## Primary Purpose and Responsibility
 
-This file implements the main worker class for a Debug Adapter Protocol (DAP) proxy system that routes debugging commands between parent processes and debug adapters using the Adapter Policy pattern to eliminate language-specific hardcoding.
+Core worker class that orchestrates Debug Adapter Protocol (DAP) debugging sessions. Acts as a proxy between parent processes and language-specific debug adapters, implementing the Adapter Policy pattern to eliminate hardcoded language-specific logic. Manages the full debugging lifecycle including adapter spawning, DAP connection establishment, command routing, and session cleanup.
 
-### Key Classes and Functions
+## Key Classes and Functions
 
-**DapProxyWorker (L54-852)** - Main worker class that manages the entire debugging session lifecycle:
-- Handles initialization, DAP command forwarding, and termination
-- Uses adapter policies to determine language-specific behavior
-- Manages command queuing for adapters that require sequential processing
-- Maintains state through ProxyState enum transitions
+**DapProxyWorker (L55-861)** - Main orchestrator class
+- `constructor(dependencies, hooks)` (L79-98) - Initializes with dependency injection and configurable hooks
+- `handleCommand(command)` (L138-174) - Main command dispatcher for init/dap/terminate commands
+- `handleInitCommand(payload)` (L179-263) - Processes initialization with adapter policy selection and spawning
+- `selectAdapterPolicy(adapterCommand)` (L103-126) - Chooses appropriate adapter policy based on command matching
+- `startAdapterAndConnect(payload)` (L313-418) - Spawns adapter process and establishes DAP connection
+- `handleDapCommand(payload)` (L541-649) - Routes DAP commands with policy-based queueing decisions
+- `shutdown()` (L784-815) - Clean teardown of all resources
 
-**DapProxyWorkerHooks (L40-52)** - Configuration interface providing:
-- Custom exit handler for fatal errors (L45)
-- Trace file factory for DAP frame logging (L51)
+**DapProxyWorkerHooks (L41-53)** - Configuration interface for testing/customization
+- `exit` - Custom exit handler (defaults to process.exit)
+- `createTraceFile` - DAP frame tracing configuration factory
 
-### Core Dependencies and Architecture
+## Important Dependencies and Relationships
 
 **External Dependencies:**
-- Uses `@vscode/debugprotocol` for DAP types (L8)
-- Imports adapter policies from `@debugmcp/shared` package (L30-38)
-- Leverages several internal managers for specialized concerns (L22-24)
+- `@debugmcp/shared` - Provides adapter policies (DefaultAdapterPolicy, JsDebugAdapterPolicy, etc.) (L30-39)
+- `@vscode/debugprotocol` - DAP protocol definitions (L8)
+- Child process management and DAP client interfaces (L9-21)
 
-**Key Managers:**
-- `CallbackRequestTracker` (L65) - Tracks DAP request timeouts
-- `GenericAdapterManager` (L66) - Handles adapter process lifecycle
-- `DapConnectionManager` (L67) - Manages DAP client connections
+**Internal Dependencies:**
+- `CallbackRequestTracker` (L22) - Tracks DAP request timeouts
+- `GenericAdapterManager` (L23) - Handles adapter process lifecycle  
+- `DapConnectionManager` (L24) - Manages DAP socket connections
+- `validateProxyInitPayload` (L26) - Input validation utilities
 
-### State Management and Policy Pattern
+**State Management:**
+- `ProxyState` enum tracking: UNINITIALIZED → INITIALIZING → CONNECTED → SHUTTING_DOWN → TERMINATED
+- Policy-specific adapter state via `AdapterSpecificState` (L72)
 
-**Adapter Policy System (L70-71, L102-123):**
-- `selectAdapterPolicy()` (L102) chooses appropriate policy based on adapter command
-- Supports JS Debug, Python, Java, Rust, and Mock adapters
-- Falls back to DefaultAdapterPolicy for unknown adapters
+## Notable Patterns and Architectural Decisions
 
-**State Tracking:**
-- `ProxyState` enum controls worker lifecycle (L60)
-- `adapterState` (L71) stores adapter-specific state managed by policies
-- Command queues for pre-connection (L73) and policy-based queuing (L72)
+**Adapter Policy Pattern** - Language-specific behavior encapsulated in policy objects:
+- Policy selection based on adapter command matching (L103-126)
+- Policies control command queueing, initialization sequences, and state updates
+- Supports JS/Node, Python, Java, Rust, Go, and Mock adapters
 
-### Critical Command Handling
+**Command Queueing Strategy** - Two-tier queuing system:
+- Pre-connect queue for commands received during initialization (L74, L545-548)
+- Policy-driven command queue for adapters requiring specific ordering (L73, L556-588)
+- Silent command injection for deferred configuration (L570-580)
 
-**Initialization Flow (L176-254):**
-- Validates payload structure and selects adapter policy
-- Creates logger, process manager, and connection manager
-- Handles dry-run mode with Windows IPC flushing (L260-299)
-- Spawns adapter process and establishes DAP connection
+**Event-Driven Architecture** - Asynchronous event handling:
+- DAP event forwarding with policy state updates (L423-486)
+- Deferred "initialized" event handling for attach mode (L376-396)
+- Request timeout tracking with cleanup (L759-763)
 
-**DAP Command Processing (L532-640):**
-- Implements policy-based command queuing decisions (L547)
-- Handles pre-connection command queueing
-- Tracks requests for timeout handling
-- Updates adapter state based on commands and responses
+**Error Recovery** - Graceful degradation and cleanup:
+- Idempotent command handling for retries (L180-185)
+- Windows IPC message flushing for dry runs (L296-307)
+- Resource cleanup on shutdown with proper ordering (L784-815)
 
-**Event Handling (L414-476):**
-- Sets up comprehensive DAP event forwarding
-- Special handling for "initialized" event with deferred processing
-- Manages adapter-specific initialization sequences
+## Critical Invariants and Constraints
 
-### Queue Management and Flow Control
+**State Transitions** - Strict state machine enforcement:
+- Init only allowed from UNINITIALIZED state (L188-190)
+- Commands queued if received before DAP connection ready
+- Shutdown prevents further state transitions (L770, L785-787)
 
-**Command Queue Draining (L645-700):**
-- Processes queued commands in policy-determined order
-- Supports silent commands that don't send responses
-- Handles errors gracefully with proper cleanup
+**DAP Protocol Compliance** - Sequence requirements vary by adapter:
+- Launch mode: launch request → wait for "initialized" → configuration
+- Attach mode: wait for "initialized" → attach request → configuration  
+- Command queueing policies ensure proper DAP message ordering
 
-**Pre-Connect Queue (L738-746):**
-- Buffers commands received during initialization
-- Drains after connection establishment
+**Resource Management** - Proper lifecycle handling:
+- Adapter processes must be spawned before DAP connection
+- DAP client shutdown clears pending requests and timers
+- Process termination follows DAP disconnect for clean teardown
 
-### Notable Patterns and Constraints
-
-**Windows IPC Handling (L287-298):**
-- Uses `setImmediate` and `setTimeout` for proper message flushing
-- Critical for preventing message loss on process exit
-
-**Initialization Sequencing:**
-- Supports both launch and attach modes with different event timing
-- Handles adapter-specific "initialized" event timing requirements
-- Manages breakpoint setting during initialization
-
-**Error Handling and Cleanup:**
-- Comprehensive shutdown sequence (L775-806) with proper resource cleanup
-- Request timeout handling with automatic response generation
-- Graceful handling of adapter process exits
-
-### Message Protocol
-
-The worker communicates via structured messages:
-- **StatusMessage** - Worker state updates
-- **DapResponseMessage** - DAP command responses  
-- **DapEventMessage** - DAP event forwarding
-- **ErrorMessage** - Error notifications
-
-All messages include session identification for multi-session support.
+**Policy Contracts** - Adapter policies must provide:
+- `matchesAdapter()` for command-based selection
+- `getAdapterSpawnConfig()` for process creation
+- Optional queueing and state management hooks

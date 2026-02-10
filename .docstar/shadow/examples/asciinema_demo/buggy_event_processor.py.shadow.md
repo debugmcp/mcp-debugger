@@ -1,54 +1,67 @@
 # examples/asciinema_demo/buggy_event_processor.py
-@source-hash: 660c85e3de032b5d
-@generated: 2026-02-09T18:14:58Z
+@source-hash: 8cbb4415058e9028
+@generated: 2026-02-10T01:19:03Z
 
-## Primary Purpose
-Event processing system that demonstrates copy vs. reference handling bugs. Processes a list of events, applies transformations based on thresholds and special revert logic, while highlighting potential data mutation issues.
+## Purpose
+Event processing system demonstrating common copy/reference bugs in data transformation pipelines. Contains intentionally buggy logic for debugging demos.
 
-## Key Functions
+## Core Functions
 
-**`process_events(events, important_threshold=5)` (L1-52)**
-- Main processing function that transforms event dictionaries
-- Creates shallow copies of input events to avoid mutation (L8)
-- Applies priority logic: events > threshold get "PRIORITY" status and value bonuses (L15-22)
-- Handles special "special_revert" events that reference original values from other events (L32-46)
-- Returns tuple of (processed_events, high_priority_events)
+**process_events(events, important_threshold=5)** (L1-51)
+- Primary event processing pipeline with shallow copy protection
+- Creates shallow copies of input events to prevent mutation (L8)
+- Processes events sequentially, applying transformations and classifications
+- Returns tuple: (processed_events, high_priority_events)
 
-**`find_original_from_list(source_events_list, event_id_to_find)` (L54-58)**
-- Utility function to locate events by ID from a source list
-- Used by special_revert logic to find original event values
-- Returns matching event dict or None
+**find_original_from_list(source_events_list, event_id_to_find)** (L53-57)
+- Helper function to locate events by ID in a list
+- Linear search implementation returning first match or None
 
-## Key Data Structures
+## Key Processing Logic
 
-**`initial_events_data` (L60-65)**
-- Demo dataset with 4 events (A, B, C, D)
-- Event C has `type: "special_revert"` that targets event B
-- Event B has value=10, triggering priority processing
+**Event Enrichment** (L11-13)
+- Auto-generates IDs (`event_{i}`) for events missing ID field
+- Defaults missing values to 0
 
-## Processing Logic Flow
+**Priority Classification** (L15-22)
+- Events with value > threshold become high priority
+- High priority events get "PRIORITY" status and value boost (+10 even, +5 odd)
+- High priority events are copied separately to avoid reference issues
 
-1. **Copy Creation (L8)**: Shallow copy each event dict to prevent original mutation
-2. **Default Assignment (L11-13)**: Set missing "id" and "value" fields
-3. **Priority Processing (L15-22)**: High-value events get status="PRIORITY" and value bonuses
-4. **Special Revert Handling (L32-46)**: Events with type="special_revert" use original values from referenced events
-5. **Value Doubling (L24)**: All events get processed_value = value * 2
+**Special Revert Logic** (L32-46)
+- Events with `type: "special_revert"` trigger special handling
+- Uses `find_original_from_list` to locate original event state
+- Overwrites `processed_value` with original value * 2
+- Adds `reverted_to_original_value` field
 
-## Critical Bug Demonstration
+## Data Flow & Copy Strategy
 
-The code intentionally demonstrates a reference vs. copy bug scenario:
-- Event C (special_revert) should use Event B's *original* value (10) for calculations
-- Event B gets modified during processing (10 → 20 if even)
-- The `find_original_from_list` correctly uses the original `events` parameter, not `events_copy`
-- Expected: C.processed_value = 20 (B's original 10 * 2)
-- Bug would occur if using modified values instead of originals
+**Input Protection**: Shallow copies created (L8) to prevent original list mutation
+**Reference Management**: High priority events get additional copies (L16)
+**Original State Access**: Special revert logic accesses original `events` parameter, not modified copies
 
-## Dependencies
-- No external dependencies
-- Self-contained demo with verification logic (L67-99)
+## Demo Data & Verification
 
-## Architectural Notes
-- Defensive copying pattern to prevent side effects
-- Separation of processed vs. high-priority event collections
-- Built-in verification system to validate correct behavior
-- Extensive commenting explaining the intended bug demonstration
+**initial_events_data** (L59-64)
+- Test dataset with 4 events (A, B, C, D)
+- Event C targets Event B for revert demonstration
+- Event B has high value (10) triggering priority processing
+
+**Verification Logic** (L87-98)
+- Validates that Event C correctly uses Event B's original value (10)
+- Expected C processed_value: 20 (original B value 10 * 2)
+- Detects bug if C uses B's modified value instead
+
+## Architectural Patterns
+
+- **Copy-on-Entry**: Input protection via shallow copying
+- **State Preservation**: Original list maintained for revert operations  
+- **Linear Processing**: Sequential event transformation with side effects
+- **Dual Output Streams**: Processed events + priority event subset
+
+## Critical Invariants
+
+- Original input events remain unmodified
+- Special revert events must reference original state, not processed state
+- High priority events exist in both output streams
+- Event IDs must be unique for revert targeting to work correctly

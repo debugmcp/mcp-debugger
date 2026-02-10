@@ -1,98 +1,82 @@
 # src/session/session-manager-operations.ts
-@source-hash: 50fc1ceaf91efd7a
-@generated: 2026-02-09T18:15:23Z
+@source-hash: ef9c4dcbdb01f9d3
+@generated: 2026-02-10T01:19:07Z
 
 ## Purpose
-Extends SessionManagerData to provide debug session execution control operations including starting/stopping debugging, stepping, breakpoint management, expression evaluation, and process attachment. Core orchestration layer for managing debug adapters through proxy managers.
+SessionManagerOperations extends SessionManagerData to implement core debug operations including session lifecycle management, step debugging, breakpoint management, and expression evaluation. Handles both launch and attach scenarios with dry-run support.
 
-## Key Classes & Interfaces
+## Key Classes & Components
+
+### SessionManagerOperations Class (L49-1514)
+Main class providing debug operation methods. Key responsibilities:
+- Session initialization and proxy management
+- Debug step operations (step over/into/out)
+- Breakpoint management and verification
+- Expression evaluation in debug context
+- Process attachment/detachment
 
 ### EvaluateResult Interface (L35-44)
-Result container for expression evaluation operations with success status, result value, type information, and variable references for expandable objects.
+Defines structure for expression evaluation results with DAP compliance.
 
-### SessionManagerOperations Class (L49-1570)
-Main class extending SessionManagerData providing debug session lifecycle management and execution control.
+## Core Methods
 
-#### Core Session Management
+### startDebugging() (L371-708)
+Primary entry point for session initialization. Handles:
+- Session state transitions (INITIALIZING → ACTIVE)
+- Dry-run mode with timeout handling (L403-487)
+- Normal debugging flow with policy-based handshakes (L494-514)
+- Comprehensive error handling with proxy log capture (L606-707)
 
-**startProxyManager()** (L50-309)
-- Creates session log directories and validates toolchain compatibility
-- Configures adapter with port allocation and breakpoint initialization  
-- Handles both launch and attach modes with language-specific transformations
-- Sets up proxy event handlers and starts ProxyManager with resolved executable paths
+### startProxyManager() (L50-308)
+Creates and configures proxy managers for debug adapters:
+- Log directory setup and validation (L66-81)
+- Adapter configuration and executable resolution (L129-204)
+- Launch vs attach mode detection (L100-120)
+- Toolchain validation handling (L162-181)
 
-**startDebugging()** (L372-764)
-- Main entry point for debug session initialization
-- Handles dry-run mode with timeout-based completion detection (L409-538)
-- Performs language-specific handshakes and waits for adapter readiness
-- Comprehensive error handling with toolchain validation and log capture
+### Step Operations
+- stepOver() (L796-836): Sends DAP 'next' command
+- stepInto() (L838-878): Sends DAP 'stepIn' command  
+- stepOut() (L880-920): Sends DAP 'stepOut' command
+- _executeStepOperation() (L922-1039): Common step execution logic with event handling
 
-**waitForDryRunCompletion()** (L314-370)
-Private helper using Promise.race() for timeout-based dry run completion detection with event cleanup.
+### Breakpoint Management
+- setBreakpoint() (L711-794): Creates and sends breakpoints to active sessions
+- Handles verification and structured logging (L772-784)
 
-#### Stepping Operations
+### Expression Evaluation
+- evaluateExpression() (L1116-1293): Evaluates expressions in debug context
+- Automatic frame detection when frameId not provided (L153-198)
+- Comprehensive error handling and type classification (L1279-1291)
 
-**stepOver()** (L852-892), **stepInto()** (L894-934), **stepOut()** (L936-976)
-- Validate session state (PAUSED) and thread availability
-- Delegate to _executeStepOperation() with command-specific parameters
-- Handle SessionTerminatedError and ProxyNotRunningError
-
-**_executeStepOperation()** (L978-1095)
-- Promise-based step execution with event listeners for stopped/terminated/exited
-- Captures current location from stack trace after step completion (L1037-1059)
-- 5-second timeout with cleanup and state management
-
-**continue()** (L1097-1150)
-Resumes paused session execution with DAP continue request and state transition to RUNNING.
-
-#### Expression Evaluation
-
-**evaluateExpression()** (L1172-1349)
-- Validates session is paused and obtains current frame if not specified
-- Sends DAP evaluate request with context support (watch/repl/hover/variables)
-- Comprehensive error handling with user-friendly error type detection
-- Structured logging for debugging and result truncation for performance
-
-#### Process Attachment
-
-**attachToProcess()** (L1354-1464)
-- Handles remote debugging through port/host or process ID attachment
-- Auto-detects Java JDWP suspend mode for proper state initialization
-- Sets default thread ID and appropriate session state (PAUSED/RUNNING)
-
-**detachFromProcess()** (L1469-1528)
-Graceful detachment with optional process termination using DAP disconnect request.
-
-#### Breakpoint Management
-
-**setBreakpoint()** (L767-850)
-- Creates breakpoint with UUID and validates session lifecycle state
-- Immediately sends to active proxy or queues for session start
-- Updates breakpoint verification status and captures validation messages
+### Process Attachment
+- attachToProcess() (L1298-1408): Attaches to running processes
+- Auto-detects JDWP suspend mode for Java (L1349-1365)
+- Sets appropriate initial state based on stopOnEntry
+- detachFromProcess() (L1413-1472): Handles clean detachment
 
 ## Key Dependencies
-- **@debugmcp/shared**: Core types (Breakpoint, SessionState, AdapterConfig)
-- **@vscode/debugprotocol**: DAP request/response types
-- **ProxyManager**: Debug adapter communication layer
-- **AdapterRegistry**: Language-specific adapter creation and configuration
+- Debug adapters via adapter registry (L140)
+- ProxyManager for DAP communication (L298)
+- Language-specific policies for handshakes (L495-514)
+- File system operations for logging (L69)
+- JDWP detection utilities (L1352)
 
-## Architectural Patterns
+## Error Handling Patterns
+- Session termination checks throughout operations
+- Comprehensive error capture with proxy logs (L608-641)
+- Toolchain validation with continuation support (L170-178)
+- Graceful fallbacks for missing frame contexts
 
-### State Management
-Maintains session state transitions (INITIALIZING → RUNNING/PAUSED → STOPPED/ERROR) with lifecycle validation.
+## State Management
+- Session state transitions through SessionState enum
+- Lifecycle management via SessionLifecycleState
+- Thread ID tracking for multi-threaded debugging
+- Event-driven state updates via proxy manager events
 
-### Event-Driven Architecture
-Extensive use of ProxyManager events (stopped, terminated, exited, adapter-configured) for asynchronous operation coordination.
-
-### Language Policy System
-Delegates to language-specific policies for handshakes and readiness criteria through selectPolicy().
-
-### Error Recovery
-Comprehensive error capture with toolchain validation, log tail extraction, and graceful degradation for Windows CI debugging.
-
-## Critical Constraints
-- Sessions must be PAUSED for stepping operations and expression evaluation
-- Dry run operations have configurable timeout (dryRunTimeoutMs)
-- Thread ID required for all stepping and continuation operations
-- Expression evaluation requires active stack frame context
-- Attach mode requires special handling of launch vs attach configuration transforms
+## Notable Features
+- Dry-run mode for command validation without execution
+- Language-agnostic adapter pattern with policy overrides
+- Structured debug logging for breakpoints and evaluation
+- Timeout handling for step operations and dry runs
+- Auto-detection of debug configuration parameters

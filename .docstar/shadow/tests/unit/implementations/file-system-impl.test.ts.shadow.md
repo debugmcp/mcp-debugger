@@ -1,62 +1,49 @@
 # tests/unit/implementations/file-system-impl.test.ts
-@source-hash: b8f285bb5b4415b6
-@generated: 2026-02-09T18:14:47Z
+@source-hash: 9d69f1db4fa908e7
+@generated: 2026-02-10T01:18:59Z
 
-## FileSystemImpl Unit Tests
+## Purpose
+Comprehensive unit test suite for `FileSystemImpl` class, providing test coverage for file system abstraction layer. Tests all file and directory operations with proper mocking of `fs-extra` library.
 
-**Primary Purpose:** Comprehensive unit test suite for the FileSystemImpl class, testing all file system operations through mocked fs-extra dependencies.
+## Test Structure
+- **Main describe block** (L40-300): `FileSystemImpl` test suite
+- **Setup** (L43-46): Mock clearing and fresh instance creation before each test
+- **Mock configuration** (L8-36): Complete `fs-extra` mock setup with all required methods
 
-### Test Structure
+## Core Test Groups
 
-**Test Setup (L42-48):**
-- Main describe block for FileSystemImpl
-- beforeEach hook resets all mocks and creates fresh FileSystemImpl instance
-- Uses Vitest testing framework with vi mocking utilities
+### Path Operations
+- **pathExists tests** (L48-73): Validates path existence checking, including error propagation
+- **exists tests** (L193-211): Tests alternative existence method using `fs.access`
 
-**Mock Configuration (L8-38):**
-- Complete fs-extra mock covering all used methods
-- Mocks both async and sync operations: pathExists, readFile, writeFile, ensureDir, remove, copy, outputFile, access, mkdir, readdir, rmdir, stat, unlink, ensureDirSync
-- Uses vi.mock with default export structure to match fs-extra usage pattern
+### File I/O Operations  
+- **readFile tests** (L75-101): String reading with encoding options (utf8, default utf-8)
+- **writeFile tests** (L103-127): String and Buffer writing capabilities
+- **outputFile tests** (L177-191): File output with directory creation
 
-### Test Coverage by Method
+### Directory Management
+- **ensureDir tests** (L129-143): Async directory creation
+- **ensureDirSync tests** (L283-299): Synchronous directory creation
+- **directory operations** (L213-256): mkdir, readdir, rmdir with recursive options
 
-**Path Operations:**
-- `pathExists` (L50-75): Tests existence checking, boolean returns, error propagation
-- `exists` (L195-213): Tests access-based existence checking via fs.access
+### File System Operations
+- **remove tests** (L145-159): File/directory removal
+- **copy tests** (L161-175): File/directory copying
+- **file operations** (L258-281): stat and unlink operations
 
-**File I/O Operations:**
-- `readFile` (L77-103): Tests UTF-8 default encoding, explicit encoding parameter, error handling
-- `writeFile` (L105-129): Tests string and Buffer content writing, error propagation
-- `outputFile` (L179-193): Tests file output with directory creation, error handling
-- `stat` (L260-274): Tests file statistics retrieval
-- `unlink` (L276-282): Tests file deletion
+## Key Testing Patterns
+- **Mock setup**: Extensive `vi.mock()` configuration covering all fs-extra methods (L8-36)
+- **Error handling**: Each operation group tests error propagation scenarios
+- **Type flexibility**: Tests handle both string and Buffer content types
+- **Options handling**: Tests both with and without optional parameters (encoding, recursive flags)
 
-**Directory Operations:**
-- `ensureDir` (L131-145): Tests directory creation with error handling
-- `mkdir` (L216-230): Tests directory creation with and without recursive option
-- `readdir` (L232-240): Tests directory content listing
-- `rmdir` (L242-257): Tests directory removal, including recursive removal via remove()
-- `ensureDirSync` (L285-301): Tests synchronous directory creation
+## Dependencies
+- **Testing framework**: Vitest with describe/it/expect/beforeEach/vi
+- **External mock**: fs-extra (comprehensive method mocking)
+- **Target class**: `../../../src/implementations/file-system-impl.js`
 
-**Bulk Operations:**
-- `remove` (L147-161): Tests file/directory removal with error handling
-- `copy` (L163-177): Tests file/directory copying with error handling
-
-### Test Patterns
-
-**Error Handling:** Each method group includes error propagation tests using mockRejectedValue/mockImplementation
-**Mock Verification:** All tests verify correct fs-extra method calls with expected arguments
-**Edge Cases:** Tests cover both success and failure scenarios, different parameter combinations
-
-### Dependencies
-
-- **Vitest**: Testing framework (describe, it, expect, beforeEach, vi)
-- **fs-extra**: File system library being mocked
-- **FileSystemImpl**: Implementation under test from src/implementations/file-system-impl.js
-
-### Key Architectural Decisions
-
-- Comprehensive mocking strategy prevents actual file system operations during testing
-- Separation of sync/async operations testing
-- Consistent error propagation testing across all methods
-- Mock reset in beforeEach ensures test isolation
+## Architecture Notes
+- Uses default export mocking pattern for fs-extra
+- Consistent async/await testing pattern throughout
+- Proper mock clearing in beforeEach to ensure test isolation
+- Tests both success and error scenarios for each method

@@ -1,59 +1,41 @@
 # src/proxy/utils/
-@generated: 2026-02-09T18:16:02Z
+@generated: 2026-02-10T01:19:28Z
 
 ## Purpose
-The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on orphan detection and process termination logic. This module helps proxy processes determine when they should gracefully exit due to becoming orphaned (losing their parent process).
+
+The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on detecting and handling orphaned processes in various deployment environments.
 
 ## Key Components
 
-### Orphan Detection System
-- **Core logic**: `shouldExitAsOrphan()` - Primary decision engine for orphan state detection
-- **Environment integration**: `shouldExitAsOrphanFromEnv()` - Convenience wrapper with environment variable support
-- **Container awareness**: Built-in logic to handle containerized environments where PPID=1 is normal
+**orphan-check.ts** - Core orphan detection module containing:
+- `shouldExitAsOrphan(ppid, inContainer)` - Primary decision logic for orphan detection
+- `shouldExitAsOrphanFromEnv(ppid, env?)` - Environment-aware convenience wrapper
 
 ## Public API Surface
 
-### Main Entry Points
-- `shouldExitAsOrphan(ppid: number, inContainer: boolean): boolean` - Direct orphan check with explicit parameters
-- `shouldExitAsOrphanFromEnv(ppid: number, env?: NodeJS.ProcessEnv): boolean` - Environment-aware orphan check
-
-### Usage Pattern
-```typescript
-// Environment-based detection (recommended)
-if (shouldExitAsOrphanFromEnv(process.ppid)) {
-  process.exit(0);
-}
-
-// Direct control
-if (shouldExitAsOrphan(process.ppid, isInContainer)) {
-  process.exit(0);
-}
-```
+**Primary Entry Points:**
+- `shouldExitAsOrphanFromEnv(ppid, env?)` - Recommended high-level interface that automatically detects container environments
+- `shouldExitAsOrphan(ppid, inContainer)` - Lower-level interface for explicit container state control
 
 ## Internal Organization
-- **Single module design**: Currently contains only orphan detection utilities
-- **Environment abstraction**: Separates container detection logic from core orphan logic
-- **Testing alignment**: Implementation intentionally mirrors buggy patterns to support regression testing
+
+The module follows a layered approach:
+1. **Core Logic Layer**: Pure function implementing the orphan detection algorithm
+2. **Environment Abstraction Layer**: Wrapper that handles environment variable detection and defaults
 
 ## Data Flow
-1. Process PPID obtained from system
-2. Container state determined via `MCP_CONTAINER` environment variable
-3. Orphan decision made based on PPID=1 + container state combination
-4. Boolean result indicates whether process should exit
 
-## Important Patterns & Conventions
+1. Process PPID and environment variables flow into detection functions
+2. Container status is determined from `MCP_CONTAINER` environment variable
+3. Decision logic evaluates PPID=1 condition against container context
+4. Boolean result indicates whether process should exit as orphaned
 
-### Container Handling
-- Uses `MCP_CONTAINER=true` environment variable for container detection
-- Treats PPID=1 as normal in containers (due to PID namespaces)
-- Only considers PPID=1 as orphaning outside container environments
+## Key Patterns & Conventions
 
-### Testing Strategy
-- **Intentional bug preservation**: Maintains buggy behavior patterns from parent modules
-- **Regression protection**: Ensures unit tests catch when bugs are accidentally fixed
-- **Future refactoring**: Temporary implementation pending test validation
+**Container-Aware Design**: The module explicitly handles the containerization paradigm where PPID=1 is normal behavior rather than indicating orphaned status.
 
-## Critical Invariants
-- Container detection relies exclusively on `MCP_CONTAINER` environment variable
-- PPID=1 indicates orphaning only in non-containerized environments
-- Process lifecycle decisions based on parent-child process relationships
+**Environment Variable Convention**: Uses `MCP_CONTAINER` as the standard indicator for container deployment context.
+
+**Pure Function Architecture**: All functions are stateless and side-effect free, making them easily testable and predictable.
+
+**Defensive Defaults**: The environment-aware wrapper uses `process.env` as default, providing convenient usage while maintaining flexibility.

@@ -1,49 +1,70 @@
 # src/session/session-store.ts
 @source-hash: 5a2286b3a68ffcfa
-@generated: 2026-02-09T18:15:06Z
+@generated: 2026-02-10T00:41:57Z
 
-## Purpose
-Pure data management layer for debug sessions, extracted from SessionManager to improve testability and follow Single Responsibility Principle. Handles session lifecycle, state transitions, and CRUD operations without external dependencies.
+## Primary Purpose
+Pure data management layer for debug sessions, providing stateful storage and lifecycle management without external dependencies. Extracted from SessionManager to improve testability and follow Single Responsibility Principle.
 
-## Key Classes & Interfaces
+## Key Interfaces & Types
 
-**SessionStore (L63-221)** - Main class managing session lifecycle and state
-- Private sessions Map<string, ManagedSession> for storage (L64)
-- selectPolicy() (L69-82): Maps DebugLanguage to appropriate AdapterPolicy
-- createSession() (L87-126): Creates new session with UUID, validates language, resolves executable path via policy
-- get/getOrThrow() (L131-144): Session retrieval with optional error throwing
-- update/updateState() (L156-171): Partial updates and state-specific updates with timestamp management
-- remove/clear() (L176-220): Cleanup operations
+**CreateSessionParams (L28-32)**: Input parameters for session creation with language, optional name, and executable path.
 
-**CreateSessionParams (L28-32)** - Session creation parameters
-- language: DebugLanguage (required)
-- name?: string (optional, defaults to generated name)
-- executablePath?: string (language-agnostic executable path)
+**ToolchainValidationState (L36-43)**: Validation metadata for toolchain compatibility including compatibility flag, toolchain info, messages, and binary details.
 
-**ManagedSession (L48-57)** - Internal session representation extending DebugSessionInfo
-- Adds executablePath, proxyManager, breakpoints Map
-- Dual state model: sessionLifecycle (SessionLifecycleState) + executionState (ExecutionState)
-- toolchainValidation for compatibility checking
+**ManagedSession (L48-57)**: Extended session representation inheriting from DebugSessionInfo, adding internal fields like proxyManager, breakpoints Map, sessionLifecycle state, executionState, logDir, and toolchainValidation.
 
-**ToolchainValidationState (L36-43)** - Validation result structure
-- compatible boolean, toolchain string, optional message/suggestions/behavior/binaryInfo
+## Core Class: SessionStore (L63-221)
+
+**Storage**: Uses private Map<string, ManagedSession> for in-memory session storage (L64).
+
+### Key Methods
+
+**selectPolicy() (L69-82)**: Maps DebugLanguage enum to appropriate AdapterPolicy implementations (Python, JavaScript, Rust, Mock, or Default).
+
+**createSession() (L87-126)**: 
+- Generates UUID for session ID
+- Validates language against DebugLanguage enum
+- Uses adapter policy to resolve executable path
+- Initializes ManagedSession with dual state model (legacy SessionState + new SessionLifecycleState)
+- Returns public DebugSessionInfo interface
+
+**Session Retrieval**:
+- get() (L131-133): Safe retrieval returning undefined if not found
+- getOrThrow() (L138-144): Throws SessionNotFoundError for missing sessions
+- set() (L149-151): Direct session injection (testing utility)
+
+**State Management**:
+- update() (L156-160): Partial updates with automatic updatedAt timestamp
+- updateState() (L165-171): Targeted state updates with change detection
+- remove() (L176-178): Session deletion
+
+**Collection Operations**:
+- getAll() (L183-192): Returns public DebugSessionInfo array (filtered view)
+- getAllManaged() (L197-199): Returns full ManagedSession array (internal view)
+- has() (L204-206): Existence check
+- size() (L211-213): Count sessions
+- clear() (L218-220): Bulk deletion
 
 ## Dependencies
-- uuid for session ID generation (L8)
-- @debugmcp/shared for types and policies (L9-22)
-- SessionNotFoundError from local errors (L23)
-- IProxyManager interface (L34)
 
-## Key Patterns
-- Policy pattern for language-specific adapter selection (L98-99)
-- Dual state model: legacy SessionState + new sessionLifecycle/executionState
-- Separation of public (DebugSessionInfo) vs internal (ManagedSession) representations
-- Immutable session creation with validation
-- Automatic timestamp management on updates
-- Error-safe retrieval with getOrThrow pattern
+**External**: uuid for session ID generation, @debugmcp/shared for types and adapter policies, SessionNotFoundError from local errors module.
+
+**Type Dependencies**: IProxyManager interface from proxy module (L34).
+
+## Architectural Patterns
+
+**State Model Transition**: Supports dual state tracking (legacy SessionState + new SessionLifecycleState/ExecutionState) indicating ongoing migration.
+
+**Policy Pattern**: Language-specific behavior delegation through AdapterPolicy selection.
+
+**Data Access Layer**: Pure storage operations without business logic, enabling easy testing and composition.
+
+**Interface Segregation**: Exposes minimal public interface (DebugSessionInfo) while maintaining rich internal representation (ManagedSession).
 
 ## Critical Invariants
-- Sessions must have valid DebugLanguage (validated in createSession L93-95)
-- updatedAt timestamp automatically updated on any state change
-- Session IDs are UUIDs ensuring uniqueness
-- Breakpoints stored as Map for efficient lookup by ID
+
+- Session IDs are UUID-based and unique
+- updatedAt timestamp maintained on all mutations
+- Language validation against DebugLanguage enum on creation
+- Breakpoints stored as Map for efficient lookups
+- Sessions can exist in memory without external resources (proxy managers are optional)

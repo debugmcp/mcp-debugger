@@ -1,84 +1,65 @@
 # packages/adapter-python/src/python-debug-adapter.ts
-@source-hash: 33e93102e4351a3e
-@generated: 2026-02-09T18:14:46Z
+@source-hash: f5bb3929b92b788a
+@generated: 2026-02-10T01:19:09Z
 
-## Primary Purpose
-Python Debug Adapter implementation that provides Python-specific debugging functionality using debugpy. This is a concrete implementation of the IDebugAdapter interface that handles Python executable discovery, environment validation, debugpy integration, and DAP protocol operations for Python debugging sessions.
+## Purpose
+Python-specific debug adapter implementation that provides Python debugging functionality using debugpy. Encapsulates Python executable discovery, environment validation, debugpy integration, and manages DAP protocol operations for Python debugging sessions.
 
 ## Key Classes & Interfaces
 
-### PythonDebugAdapter (L65-670)
-Main adapter class extending EventEmitter and implementing IDebugAdapter. Manages the complete Python debugging lifecycle including initialization, environment validation, connection management, and debug configuration transformation.
+### PythonPathCacheEntry (L39-44)
+Cache structure for Python executable paths with timestamp, version info, and debugpy availability status.
 
-**Core State Management:**
-- `state: AdapterState` (L69) - Current adapter state
-- `pythonPathCache` (L73) - Caches Python executable paths with timestamps
-- `currentThreadId` (L77) - Tracks active debugging thread
-- `connected` (L78) - Connection status flag
+### PythonLaunchConfig (L49-60)
+Extended launch configuration interface for Python-specific debugging options including module execution, Django/Flask support, console types, and subprocess debugging.
 
-**Key Methods:**
-- `initialize()` (L87-116) - Initializes adapter and validates Python environment
-- `validateEnvironment()` (L150-214) - Comprehensive environment validation including Python version and debugpy checks
-- `resolveExecutablePath()` (L235-258) - Finds Python executable with caching
-- `transformLaunchConfig()` (L335-349) - Converts generic launch config to Python-specific configuration
-- `buildAdapterCommand()` (L309-323) - Builds debugpy adapter command
-- `getCapabilities()` (L530-592) - Returns Python debugging capabilities
+### PythonDebugAdapter (L65-668)
+Main adapter class implementing `IDebugAdapter` interface for Python debugging.
 
-### PythonLaunchConfig Interface (L49-60)
-Extends LanguageSpecificLaunchConfig with Python-specific debugging options:
-- `module?` - For `-m` module execution
-- `console?` - Console type (integrated/internal/external)
-- `django?/flask?/jinja?` - Framework-specific debugging flags
-- `redirectOutput?/showReturnValue?/subProcess?` - Advanced debugging options
+**State Management:**
+- `state` (L69): Current adapter state tracking
+- `pythonPathCache` (L73): Cached Python executable information with 1-minute TTL
+- `currentThreadId` (L77): Active debugging thread
+- `connected` (L78): Connection status flag
 
-### PythonPathCacheEntry Interface (L39-44)
-Cache structure for Python executable information including path, timestamp, version, and debugpy availability.
+**Core Lifecycle Methods:**
+- `initialize()` (L87-116): Validates Python environment and transitions to READY state
+- `dispose()` (L118-124): Cleanup method clearing cache and resetting state
+- `validateEnvironment()` (L150-214): Comprehensive environment validation checking Python version, debugpy installation
 
-## Dependencies & Relationships
-- **External:** debugpy module (Python debugging protocol implementation)
-- **Shared Components:** Imports from `@debugmcp/shared` for interfaces, types, and utilities
-- **Utilities:** `python-utils.js` (L34) for Python executable discovery and version checking
-- **Child Processes:** Uses Node.js `spawn` for Python subprocess execution
+**Executable Management:**
+- `resolveExecutablePath()` (L235-258): Cached Python executable resolution with fallback logic
+- `getExecutableSearchPaths()` (L269-305): Platform-specific Python installation path discovery
+- `buildAdapterCommand()` (L309-323): Constructs debugpy adapter command with proper environment
+
+**Debug Configuration:**
+- `transformLaunchConfig()` (L335-349): Converts generic config to Python-specific launch configuration
+- `getCapabilities()` (L529-591): Returns comprehensive DAP capabilities including breakpoints, exception handling, variable inspection
+
+**DAP Protocol Operations:**
+- `sendDapRequest()` (L362-385): Validates Python-specific DAP requests (e.g., exception breakpoint filters)
+- `handleDapEvent()` (L387-395): Processes DAP events and updates thread state
+- `connect()/disconnect()` (L403-422): Connection lifecycle management
+
+**Python-Specific Utilities:**
+- `checkPythonVersion()` (L598-613): Cached Python version detection
+- `checkDebugpyInstalled()` (L618-649): Validates debugpy installation via import test
+- `detectVirtualEnv()` (L654-668): Virtual environment detection using sys module introspection
+
+## Dependencies
+- **External**: `@vscode/debugprotocol`, `@debugmcp/shared`, Node.js built-ins (`events`, `child_process`, `path`)
+- **Internal**: `./utils/python-utils.js` for executable discovery utilities
 
 ## Architecture Patterns
+- **Caching**: Implements TTL-based caching for Python executable paths and metadata
+- **State Machine**: Uses `AdapterState` enum for lifecycle management with event emission
+- **Template Method**: Implements `IDebugAdapter` interface with Python-specific behavior
+- **Command Builder**: Constructs platform-appropriate debugpy commands
+- **Error Translation**: Converts low-level Python errors to user-friendly messages
 
-### Caching Strategy (L73-74, L236-258)
-Implements 1-minute TTL cache for Python executable paths to avoid repeated filesystem lookups and version checks.
-
-### State Machine (L142-146)
-Uses formal state transitions with event emission for lifecycle management (UNINITIALIZED → INITIALIZING → READY → CONNECTED → DEBUGGING).
-
-### Error Translation (L457-477)
-Provides user-friendly error messages for common Python/debugpy installation issues.
-
-## Critical Features & Capabilities
-
-### Environment Validation (L150-214)
-- Python version check (requires 3.7+)
-- debugpy installation verification
-- Virtual environment detection
-- Comprehensive error reporting with recovery suggestions
-
-### Platform Support (L260-305)
-Cross-platform Python executable discovery with platform-specific search paths:
-- Windows: `py` launcher, various Python installation directories
-- macOS: Homebrew, system paths
-- Linux: Standard system paths
-
-### DAP Protocol Integration (L362-400)
-- Python-specific exception breakpoint filters validation
-- Thread ID tracking for debugging sessions
-- Event handling for debugger state changes
-
-## Installation & Setup Guidance
-Provides detailed installation instructions (L427-455) covering:
-- Python 3.7+ installation per platform
-- debugpy installation via pip
-- Virtual environment setup
-- Common troubleshooting scenarios
-
-## Critical Invariants
-- Cache entries expire after 60 seconds to ensure fresh executable discovery
-- State transitions always emit events for external listeners
-- Python 3.7+ version requirement is strictly enforced
-- debugpy must be installed and importable for debugging to function
+## Critical Constraints
+- Requires Python 3.7+ (enforced in validation)
+- Depends on debugpy module availability
+- Cache timeout set to 60 seconds for executable resolution
+- Platform-specific executable search paths and naming conventions
+- Thread safety considerations for concurrent cache access

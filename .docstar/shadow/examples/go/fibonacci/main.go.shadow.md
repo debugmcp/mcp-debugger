@@ -1,36 +1,32 @@
 # examples/go/fibonacci/main.go
 @source-hash: 7b83cd29c5a3c61c
-@generated: 2026-02-09T18:14:28Z
+@generated: 2026-02-10T00:41:21Z
 
-## Primary Purpose
-Educational demonstration program comparing three Fibonacci sequence implementations with performance benchmarking. Serves as a Go programming example showcasing algorithmic complexity differences.
+## Purpose
+Educational demonstration program comparing three Fibonacci number calculation algorithms with performance benchmarking. Showcases algorithmic complexity differences through recursive, iterative, and memoized implementations.
 
 ## Key Functions
 
-**main() (L8-40)**: Entry point that benchmarks three Fibonacci implementations for n=10, measures execution time, and prints the complete sequence 0-10.
+**main() (L8-40)**: Entry point that benchmarks and compares three Fibonacci implementations using n=10. Measures execution time for each approach and displays a complete sequence from F(0) to F(n).
 
-**fibonacciRecursive(n int) int (L43-48)**: Naive recursive implementation with O(2^n) time complexity. Returns n for base cases (n ≤ 1), otherwise computes F(n-1) + F(n-2).
+**fibonacciRecursive() (L43-48)**: Classic recursive implementation with exponential time complexity O(2^n). Returns base cases n for n≤1, otherwise recursively computes F(n-1) + F(n-2). Inefficient for large numbers due to redundant calculations.
 
-**fibonacciIterative(n int) int (L51-66)**: Efficient iterative implementation with O(n) time and O(1) space complexity. Uses two variables to track previous values and iterates forward.
+**fibonacciIterative() (L51-66)**: Optimized iterative implementation with linear time complexity O(n) and constant space O(1). Uses two variables (prev, curr) to track previous values and iteratively builds up to the target.
 
-**fibonacciMemoized(n int, memo map[int]int) int (L69-84)**: Recursive implementation with memoization cache to achieve O(n) time complexity. Checks memo map before computation and stores results.
+**fibonacciMemoized() (L69-84)**: Recursive implementation enhanced with dynamic programming using a memo map. Achieves O(n) time complexity by caching previously computed values, eliminating redundant recursive calls.
 
 ## Dependencies
-- `fmt`: Standard output formatting and printing
-- `time`: Performance measurement with `time.Now()` and `time.Since()`
+- `fmt`: Console output formatting and printing
+- `time`: Performance measurement with time.Now() and time.Since()
 
-## Architecture & Patterns
-- Performance comparison pattern: Each implementation is timed using identical measurement approach
-- Memoization pattern: External cache map passed by reference to maintain state across recursive calls
-- Educational structure: Clear separation of algorithms with descriptive output sections
+## Architecture Pattern
+Performance comparison study demonstrating algorithmic optimization progression:
+1. Naive recursion (exponential complexity)
+2. Iterative optimization (linear complexity) 
+3. Memoization technique (linear complexity with caching)
 
-## Key Implementation Details
-- Fixed test value n=10 for consistent benchmarking
-- Memo map initialized in main() and passed to memoized function
-- Sequence generation (L37-39) uses iterative method for efficiency
-- All functions handle base cases (n ≤ 1) identically
-
-## Critical Invariants
-- All three implementations produce mathematically equivalent results
-- Memoization requires external map initialization for proper function
-- Base case handling is consistent across all implementations
+## Key Invariants
+- All implementations handle base cases n≤1 by returning n
+- Memoized version requires external map initialization and passing
+- Performance measurements use consistent timing methodology
+- Sequence generation relies on iterative implementation for efficiency

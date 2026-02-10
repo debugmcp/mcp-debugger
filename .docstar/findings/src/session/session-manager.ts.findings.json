@@ -1,0 +1,15 @@
+{
+  "source": "src/session/session-manager.ts",
+  "source_hash": "b8ac34c9b165c438",
+  "generated": "2026-02-10T01:18:52Z",
+  "findings": [
+    {
+      "category": "expired_todo",
+      "line_start": 31,
+      "line_end": 34,
+      "severity": "warning",
+      "description": "TODO comment describes implementation need for handleAutoContinue method to accept sessionId parameter, but the method currently just throws an error",
+      "suggestion": "Either implement the method with proper session context handling or remove the TODO if implementation is deferred"
+    }
+  ]
+}

@@ -1,27 +1,40 @@
 # eslint.config.js
 @source-hash: d42dea4d9d647c40
-@generated: 2026-02-09T18:15:13Z
+@generated: 2026-02-10T00:42:03Z
 
-## ESLint Configuration File
+## ESLint Configuration for TypeScript/JavaScript Project
 
-**Purpose**: Defines modern ESLint flat configuration for a TypeScript/JavaScript project with comprehensive rules for different file types and directories.
+**Primary Purpose**: Modern flat-config ESLint setup for a TypeScript project with Node.js environment, supporting mixed TypeScript/JavaScript sources, tests, and build scripts.
 
 ### Configuration Structure
-- **Global Ignores (L7-30)**: Excludes build artifacts, TypeScript declaration files, test utilities, and experimental code from linting
-- **TypeScript Recommended Config (L33)**: Applies `typescript-eslint` recommended rules to TypeScript files
-- **Custom TypeScript Rules (L36-48)**: Configures `@typescript-eslint/no-unused-vars` to ignore variables/parameters prefixed with underscore
-- **JavaScript Configuration (L51-61)**: Sets up Node.js globals and modern ECMAScript for JS/MJS/CJS files
-- **TypeScript Project Files (L64-72)**: Applies Node.js globals to source and test TypeScript files
+
+**Global Ignores (L7-30)**: Comprehensive exclusion patterns for build artifacts, TypeScript declarations, test utilities, and experimental code. Notably excludes `sessions/`, `coverage/`, and `scripts/experiments/**`.
+
+**Core Configurations**:
+- **TypeScript Rules (L33)**: Applies `typescript-eslint` recommended configuration
+- **Unused Variables (L36-48)**: Custom rule allowing underscore-prefixed variables (`^_`) to bypass unused-vars checks in TypeScript files
+- **JavaScript Files (L51-61)**: Standard ESLint recommended rules with Node.js globals and modern ECMAScript support
 
 ### Environment-Specific Rules
-- **Test Files (L75-84)**: More lenient rules for test code, with `no-floating-promises` as error to catch unhandled promises
-- **Mock Files (L87-94)**: Very permissive rules for test mocks, disabling type safety restrictions
-- **Script Utilities (L97-105)**: Relaxed rules for maintenance scripts, allowing unused variables and require imports
+
+**Source Code (L64-72)**: TypeScript files in `src/` and `packages/*/src/` directories with Node.js globals
+
+**Test Files (L75-84)**: Relaxed rules for `tests/**/*.ts`:
+- `no-explicit-any`: warning instead of error
+- `no-floating-promises`: error (prevents unhandled Promise issues)
+- TypeScript strict rules downgraded to warnings
+
+**Mock Files (L87-94)**: Maximum flexibility for `tests/test-utils/mocks/**/*.ts` - disables type safety rules entirely
+
+**Build Scripts (L97-105)**: Lenient rules for `scripts/**/*` files, disabling unused-vars and TypeScript import restrictions
 
 ### Key Dependencies
-- `@eslint/js`: JavaScript recommended configuration
-- `globals`: Environment-specific global variables
-- `typescript-eslint`: TypeScript-specific linting rules
+- `@eslint/js`: Core JavaScript linting
+- `typescript-eslint`: TypeScript-specific rules and parser  
+- `globals`: Environment-specific global variable definitions
 
-### Architecture Pattern
-Uses ESLint flat configuration format with cascading rule precedence - general rules first, then increasingly specific overrides for different file types and directories.
+### Architectural Decisions
+- Flat config format (ESLint 9.x style)
+- File-pattern-based rule inheritance
+- Progressive strictness: strictest for source code, most lenient for utilities
+- Explicit floating promise detection in tests

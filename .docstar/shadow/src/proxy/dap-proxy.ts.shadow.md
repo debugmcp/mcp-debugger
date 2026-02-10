@@ -1,33 +1,40 @@
 # src/proxy/dap-proxy.ts
 @source-hash: 0323e68b484825b8
-@generated: 2026-02-09T18:15:00Z
+@generated: 2026-02-10T00:41:45Z
 
 ## Purpose
-Clean export interface for DAP (Debug Adapter Protocol) proxy functionality, designed for testing and programmatic use without auto-execution. Acts as a facade module that consolidates exports from multiple DAP proxy components.
+Clean export module for DAP (Debug Adapter Protocol) proxy functionality, designed for testing and programmatic use without auto-execution. Acts as a facade providing access to all proxy components.
 
 ## Key Exports
 
 ### Core Functionality (L10-11)
 - `ProxyRunner`: Main proxy execution engine
 - `detectExecutionMode`: Environment detection utility  
-- `shouldAutoExecute`: Execution condition checker
-- `ProxyRunnerOptions`: Configuration type for proxy runner
+- `shouldAutoExecute`: Auto-execution logic
+- `ProxyRunnerOptions`: Configuration interface
 
-### Worker Components (L14-19)
+### Worker System (L14-19)
 - `DapProxyWorker`: Worker thread implementation for proxy operations
-- `ProxyInitPayload`, `DapCommandPayload`, `TerminatePayload`: Message payload types for worker communication
+- `ProxyInitPayload`, `DapCommandPayload`, `TerminatePayload`: Worker communication interfaces
 
-### Dependencies & Utilities (L22-26)
+### Dependencies & Infrastructure (L22-26)
 - `createProductionDependencies`: Factory for production dependency injection
-- `createConsoleLogger`: Logger factory for console output
-- `setupGlobalErrorHandlers`: Global error handling setup
+- `createConsoleLogger`: Logging utility factory
+- `setupGlobalErrorHandlers`: Error handling setup
 
 ### Message Processing (L29)
-- `MessageParser`: DAP message parsing and formatting utility
+- `MessageParser`: DAP message parsing functionality
 
 ### State & Interfaces (L32-33)
-- `ProxyState`: Proxy lifecycle state enumeration
-- `ParentCommand`: Command interface for parent-child communication
+- `ProxyState`: State management enum/interface
+- `ParentCommand`: Command structure interface
 
 ## Architecture
-Follows clean architecture principles with dependency injection support. Separates auto-executing entry points from programmatic interfaces, enabling controlled testing and integration. All exports use ES modules with explicit file extensions for compatibility.
+File serves as a clean API boundary, re-exporting functionality from multiple specialized modules without side effects. Enables safe importing for testing while maintaining separation of concerns across the proxy system.
+
+## Dependencies
+- `./dap-proxy-core.js`: Core proxy logic
+- `./dap-proxy-worker.js`: Worker implementation  
+- `./dap-proxy-interfaces.js`: Type definitions
+- `./dap-proxy-dependencies.js`: Dependency injection
+- `./dap-proxy-message-parser.js`: Message parsing

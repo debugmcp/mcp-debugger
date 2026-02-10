@@ -1,0 +1,6 @@
+{
+  "source": "tests/fixtures/python/debugpy_server.py",
+  "source_hash": "e588a565cc020480",
+  "generated": "2026-02-10T00:41:26Z",
+  "findings": []
+}

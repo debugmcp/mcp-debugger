@@ -1,40 +1,41 @@
 # examples/go/goroutines/main.go
 @source-hash: ea04f5e61defed2b
-@generated: 2026-02-09T18:14:31Z
+@generated: 2026-02-10T00:41:23Z
 
 ## Purpose
-Educational Go program demonstrating three common goroutine patterns: basic concurrent execution, channel-based communication, and worker pool architecture. Designed for debugging and understanding goroutine synchronization mechanisms.
+Educational demonstration of Go goroutine patterns and debugging scenarios. Presents three progressively complex concurrency examples: basic goroutines with WaitGroup, channel communication, and worker pool architecture.
 
 ## Key Functions
 
 ### main (L9-25)
-Entry point orchestrating three goroutine examples with formatted output sections. Sequential execution of demonstration patterns.
+Entry point that sequentially executes three goroutine examples with descriptive output formatting. Orchestrates the demonstration flow.
 
-### simpleGoroutines (L27-41) 
-Basic goroutine pattern using `sync.WaitGroup` for coordination. Spawns 3 concurrent goroutines (L30-38) with closure capturing loop variable. Each goroutine simulates work with 100ms sleep and synchronized completion via `wg.Done()`.
+### simpleGoroutines (L27-41)
+Basic goroutine example using `sync.WaitGroup` for synchronization. Creates 3 concurrent goroutines that simulate work with 100ms sleep. Demonstrates proper goroutine lifecycle management with defer pattern for WaitGroup cleanup.
 
 ### channelCommunication (L43-65)
-Producer-consumer pattern demonstration. Creates buffered channel `messages` (capacity 3) and unbuffered `done` channel. Producer goroutine (L48-53) sends 3 messages then closes channel. Consumer goroutine (L56-62) ranges over messages with 50ms processing delay, signals completion via `done` channel.
+Producer-consumer pattern using buffered and unbuffered channels. Producer goroutine (L48-53) sends 3 messages to buffered channel then closes it. Consumer goroutine (L56-62) ranges over messages with 50ms processing delay. Uses done channel for final synchronization.
 
 ### workerPool (L67-97)
-Advanced pattern implementing worker pool with job distribution. Constants define 3 workers and 5 jobs (L68-69). Uses buffered channels for `jobs` and `results`. Spawns worker goroutines (L76-79), distributes jobs (L82-85), and collects results with channel range pattern (L94-96). Background goroutine closes results channel after all workers complete (L88-91).
+Advanced worker pool implementation with 3 workers processing 5 jobs. Uses buffered channels for job distribution and result collection. Employs WaitGroup for worker lifecycle management and separate goroutine (L88-91) to close results channel after all workers complete.
 
 ### worker (L99-112)
-Worker function processing jobs from channel until closed. Takes worker ID, job input channel (receive-only), results output channel (send-only), and WaitGroup pointer. Simulates processing with 100ms sleep, doubles job value as result, provides detailed logging of job lifecycle.
+Worker function that processes jobs from channel, simulates work (job * 2 calculation), and sends results. Takes worker ID, job/result channels, and WaitGroup pointer. Uses channel ranging pattern for job consumption.
 
 ## Dependencies
-- `fmt`: Output formatting and printing
-- `sync`: WaitGroup for goroutine coordination
-- `time`: Sleep operations for work simulation
+- `sync.WaitGroup`: Goroutine synchronization
+- `time`: Sleep simulation for work delays
+- `fmt`: Output formatting
 
 ## Architectural Patterns
-1. **WaitGroup Synchronization**: Used in simple goroutines and worker pool for coordinated completion
-2. **Channel Communication**: Buffered channels for job queuing, unbuffered for signaling
-3. **Graceful Shutdown**: Proper channel closing and range-based consumption
-4. **Worker Pool**: Scalable pattern with configurable worker count and job distribution
+- **WaitGroup Pattern**: Used in simple goroutines and worker pool for coordinated completion
+- **Producer-Consumer**: Channel-based message passing with proper channel closure
+- **Worker Pool**: Scalable job processing with bounded concurrency
+- **Channel Direction**: Uses directional channels in worker function for type safety
 
-## Critical Invariants
-- All goroutines must call `wg.Done()` to prevent deadlock
-- Channels must be closed by sender to terminate range loops
-- Worker pool requires background goroutine to close results channel after workers complete
-- Job and result channels are buffered to prevent blocking during job distribution
+## Critical Design Points
+- All goroutines properly synchronized to prevent premature main function exit
+- Channels are correctly closed by producers to enable range-based consumption
+- WaitGroup incremented before goroutine creation to avoid race conditions
+- Buffered channels sized appropriately for workload (3 messages, 5 jobs)
+- Results channel closed asynchronously after worker completion to prevent deadlock

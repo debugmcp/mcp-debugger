@@ -1,39 +1,46 @@
 # tests/test-utils/mocks/mock-adapter-registry.ts
 @source-hash: 3e0350ca0ec215f2
-@generated: 2026-02-09T18:14:39Z
+@generated: 2026-02-10T00:41:30Z
 
-## Purpose
-Comprehensive mock factory for `IAdapterRegistry` interface testing, providing realistic adapter behaviors and test utilities for debugging framework components.
+Test utility module providing mock implementations of the IAdapterRegistry interface for comprehensive testing of debug adapter functionality.
 
-## Core Functions
+## Core Purpose
+Creates realistic mock adapter registries with configurable behaviors to test various scenarios including success paths, error conditions, and edge cases in debug adapter management.
 
-### `createMockAdapterRegistry()` (L13-140)
-Primary mock factory returning fully-featured `IAdapterRegistry` implementation with:
-- **Supported languages**: Python and Mock adapters with realistic metadata (L14-40)
-- **Complete adapter creation**: Returns mock `IDebugAdapter` with all lifecycle, DAP protocol, and EventEmitter methods (L49-124)
-- **Critical mock**: `buildAdapterCommand` (L72-76) returns realistic command structure for adapter spawning
-- **State management**: All methods return sensible defaults (ready state, connected, etc.)
+## Key Functions
 
-### Specialized Mock Variants
-- **`createMockAdapterRegistryWithErrors()`** (L146-157): Error simulation variant - no supported languages, rejected adapter creation
-- **`createMockAdapterRegistryWithLanguages(languages)`** (L163-192): Customizable language support with dynamic adapter info generation
+### createMockAdapterRegistry() (L13-140)
+Primary mock factory that creates a fully functional IAdapterRegistry mock with:
+- Pre-configured support for 'python' and 'mock' languages (L14)
+- Realistic AdapterInfo objects with complete metadata (L17-40)
+- Mock IDebugAdapter instances returned by `create()` method (L49-124)
+- All IAdapterRegistry interface methods mocked with sensible default behavior
 
-## Test Utilities
+Critical implementation detail: `buildAdapterCommand()` (L72-76) constructs adapter launch commands using provided config, defaulting to node with mock-adapter.js.
 
-### Verification Helpers
-- **`expectAdapterRegistryLanguageCheck()`** (L197-204): Verifies `isLanguageSupported` call patterns
-- **`expectAdapterCreation()`** (L209-220): Validates adapter creation with expected parameters (sessionId, executablePath)
-- **`resetAdapterRegistryMock()`** (L225-232): Bulk reset of all mock functions via introspection
+### createMockAdapterRegistryWithErrors() (L146-157)
+Error simulation variant that overrides default behavior to return empty language support and rejected promises. Used for testing error handling paths.
 
-## Key Dependencies
-- **Vitest**: Mock framework (`vi.fn()` throughout)
-- **@debugmcp/shared**: `IAdapterRegistry`, `AdapterInfo`, `DebugLanguage` interfaces
+### createMockAdapterRegistryWithLanguages() (L163-192)
+Parameterized mock factory accepting custom language arrays. Dynamically generates AdapterInfo objects for each specified language (L173-184).
 
-## Mock Architecture
-- **Realistic data**: Pre-configured adapter info with proper metadata structure
-- **Behavioral accuracy**: Language checking logic mirrors real implementation patterns
-- **Complete interface coverage**: All `IAdapterRegistry` and `IDebugAdapter` methods mocked
-- **Flexible configuration**: Multiple factory functions for different test scenarios
+## Test Helper Functions
 
-## Usage Patterns
-Designed for unit testing adapter registry consumers, debug session management, and error handling paths. The comprehensive mock coverage ensures tests can verify both happy path and error scenarios without real adapter dependencies.
+### expectAdapterRegistryLanguageCheck() (L197-204)
+Assertion helper verifying `isLanguageSupported()` was called with expected parameters and call count.
+
+### expectAdapterCreation() (L209-220)
+Assertion helper verifying `create()` method invocation with proper language and config object structure.
+
+### resetAdapterRegistryMock() (L225-232)
+Utility to reset all mock function call histories on an adapter registry instance using vitest mock introspection.
+
+## Dependencies
+- **vitest**: Mock function creation and management
+- **@debugmcp/shared**: Core interfaces (IAdapterRegistry, AdapterInfo, DebugLanguage)
+
+## Architecture Notes
+- Comprehensive EventEmitter interface mocking (L108-123) for adapter lifecycle events
+- Mock adapters provide full IDebugAdapter interface compliance with DAP protocol operations
+- Realistic mock data includes file extensions, versioning, and author information
+- Supports testing of adapter installation, connection management, and feature detection workflows

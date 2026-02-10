@@ -1,42 +1,61 @@
 # packages/shared/src/interfaces/adapter-policy-go.ts
-@source-hash: 5f42366b5ead9db2
-@generated: 2026-02-09T18:14:11Z
+@source-hash: 95a7e73ebf544145
+@generated: 2026-02-10T00:41:13Z
 
 ## Purpose
-Implements adapter-specific debugging policy for Go using Delve (dlv) debugger. Provides Delve-specific behaviors for variable handling, scope resolution, executable validation, and DAP (Debug Adapter Protocol) communication through `dlv dap --listen=:port` mode.
+Implements adapter policy for Go Debug Adapter (Delve/dlv) to handle Go-specific debugging behaviors, variable extraction, and DAP protocol interactions.
 
-## Core Implementation
-- **GoAdapterPolicy** (L13-331): Main policy object implementing AdapterPolicy interface for Delve debugger
-- **extractLocalVariables** (L28-77): Extracts local variables from top stack frame, filtering out Go internal variables (underscore-prefixed) and finding "Locals"/"Arguments" scopes
-- **validateExecutable** (L122-142): Asynchronously validates dlv executable by spawning `dlv version` and checking exit code + output
-- **getAdapterSpawnConfig** (L302-331): Builds dlv DAP command with listen address, logging configuration, and custom adapter command support
+## Key Exports
+- **GoAdapterPolicy** (L13-336): Main policy object implementing `AdapterPolicy` interface with Delve-specific configurations and behaviors
 
-## Key Configuration Methods
-- **resolveExecutablePath** (L92-106): Resolves dlv path with precedence: provided > DLV_PATH env > "dlv" default
-- **getLocalScopeName** (L82-84): Returns Go-specific scope names ["Locals", "Arguments"]
-- **getDapAdapterConfiguration** (L86-90): Returns type "dlv-dap"
-- **getDebuggerConfiguration** (L108-115): Sets requiresStrictHandshake=false, supportsVariableType=true
+## Core Configuration (L13-24)
+- **name**: 'go' - policy identifier
+- **supportsReverseStartDebugging**: false - no reverse debugging support
+- **childSessionStrategy**: 'none' - no child session handling
+- **buildChildStartArgs** (L18-20): Throws error as child sessions unsupported
 
-## State Management
-- **createInitialState** (L164-169): Creates state with initialized=false, configurationDone=false
-- **updateStateOnCommand/Event** (L174-187): Tracks "configurationDone" commands and "initialized" events
+## Variable Handling (L28-84)
+- **extractLocalVariables** (L28-77): Extracts local variables from top stack frame, filters Go internal variables (starting with '_'), looks for 'Locals' or 'Local' scopes
+- **getLocalScopeName** (L82-84): Returns ['Locals', 'Arguments'] as Go scope names
+
+## Executable Management (L92-142)
+- **resolveExecutablePath** (L92-106): Resolves dlv executable path with priority: provided > DLV_PATH env > 'dlv' default
+- **validateExecutable** (L122-142): Async validation by spawning 'dlv version' command and checking exit code/output
+
+## Session Management (L147-202)
+- **requiresCommandQueueing**: false - Go adapter processes commands immediately
+- **createInitialState** (L164-169): Creates state with initialized/configurationDone flags
+- **updateStateOnCommand/Event** (L174-187): Updates state based on 'configurationDone' command and 'initialized' event
 - **isInitialized/isConnected** (L192-202): Both check state.initialized flag
 
-## Frame and Variable Filtering
-- **filterStackFrames** (L268-289): Removes Go runtime (/runtime/) and testing (/testing/) frames unless includeInternals=true
-- **isInternalFrame** (L294-297): Identifies internal frames by file path patterns
+## Adapter Recognition (L207-217)
+- **matchesAdapter** (L207-217): Identifies Go adapter by checking for 'dlv', 'delve', or 'dlv dap' in command/args
 
-## Adapter Matching and Behaviors
-- **matchesAdapter** (L207-217): Matches commands containing "dlv", "delve", or "dlv dap" in command/args
-- **getDapClientBehavior** (L236-263): Returns minimal DAP behavior with no child session support, handleReverseRequest for runInTerminal
-- **childSessionStrategy** (L16): Set to "none" - Go doesn't support child debugging sessions
+## Initialization Behavior (L226-235)
+- **getInitializationBehavior**: Returns deferConfigDone: false, defaultStopOnEntry: false
+- Handles Delve quirk where stack traces return "unknown goroutine 1" immediately after stopping on entry
+
+## DAP Client Behavior (L240-267)
+- **getDapClientBehavior**: Minimal implementation as Go doesn't use child sessions
+- **handleReverseRequest** (L243-250): Only handles 'runInTerminal' requests
+- Standard timeouts and no child session features
+
+## Stack Frame Filtering (L272-301)
+- **filterStackFrames** (L272-293): Filters out Go runtime (/runtime/) and testing (/testing/) frames
+- **isInternalFrame** (L298-301): Checks if frame is from runtime or testing packages
+
+## Adapter Spawning (L306-335)
+- **getAdapterSpawnConfig**: Configures dlv dap command execution
+- Uses custom adapter command if provided, otherwise builds 'dlv dap --listen' command with logging options
 
 ## Dependencies
-- Imports from @vscode/debugprotocol, adapter-policy interfaces, SessionState, and model types (L7-11)
-- Dynamic import of child_process.spawn for executable validation (L124)
+- `@vscode/debugprotocol`: DAP types
+- `@debugmcp/shared`: SessionState enum
+- Local interfaces: AdapterPolicy, StackFrame, Variable, DapClientBehavior
+- Runtime: child_process for executable validation
 
-## Key Constraints
-- No reverse debugging support (supportsReverseStartDebugging=false, L15)  
-- No command queueing required (requiresCommandQueueing=false, L147)
-- Child sessions throw error if attempted (L18-20)
-- Note about Delve "unknown goroutine 1" quirk in comments (L222-224)
+## Architecture Notes
+- No child session support (single-session model)
+- Immediate command processing (no queueing)
+- Delve-specific scope and variable naming conventions
+- Built-in Go runtime frame filtering for cleaner stack traces

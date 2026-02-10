@@ -1,82 +1,74 @@
 # packages/shared/tests/
-@generated: 2026-02-09T18:16:36Z
+@generated: 2026-02-10T01:19:52Z
 
 ## Purpose
-This directory provides comprehensive testing infrastructure for the debugmcp shared library, specifically focused on validating debug adapter policy implementations and their compliance with the Debug Adapter Protocol (DAP). It ensures robust, reliable debug adapter integrations across multiple programming languages through systematic unit testing.
 
-## Key Components
+This directory contains the comprehensive test suite for the shared debugging infrastructure, validating language-specific debug adapter policies and their integration with the Debug Adapter Protocol (DAP). The tests ensure robust, cross-platform debugging capabilities for JavaScript/Node.js and Rust development environments.
 
-### Test Organization
-- **unit/**: Contains language-specific unit tests for debug adapter policies
-  - JavaScript/Node.js debug adapter policy validation
-  - Rust/CodeLLDB debug adapter policy validation
-- Comprehensive mock infrastructure for external dependencies
-- Cross-platform testing capabilities with environment simulation
+## Key Components and Organization
 
-### Testing Architecture
-The directory implements a layered testing approach:
+### Language-Specific Adapter Policy Tests
+- **JavaScript Tests** (`unit/adapter-policy-js.spec.ts`): Validates `JsDebugAdapterPolicy` with Node.js debugging workflows
+- **Rust Tests** (`unit/adapter-policy-rust.test.ts`): Validates `RustAdapterPolicy` with CodeLLDB adapter integration
 
-**Core Policy Validation**:
-- Variable extraction and filtering logic
-- Debug adapter state management and lifecycle tracking
-- DAP command queuing and execution sequencing
-- Platform-specific configuration and executable validation
+Both test suites follow consistent patterns while addressing language-specific debugging requirements and toolchain integration.
 
-**Integration Testing**:
-- DAP client communication patterns
-- Session management and readiness determination
-- Reverse request handling and response processing
-- Multi-language adapter compatibility
+## Core Testing Domains
+
+### Debug Adapter Protocol (DAP) Compliance
+- Command queueing and proper initialization flow (initialize → configure → launch)
+- Stack frame processing with internal frame filtering
+- Variable extraction from debug scopes with special handling
+- Session lifecycle and state management validation
+
+### Cross-Platform Adapter Management
+- Executable resolution and validation across platforms
+- Environment-specific configuration (CARGO_PATH, vendored adapters)
+- Process spawning strategies with platform detection
+- Adapter process detection and matching logic
+
+### Data Processing and Filtering
+- Stack frame filtering to surface user code over internal frames
+- Local variable extraction with debugger internal exclusion
+- Fallback behaviors for edge cases (empty stacks, missing data)
+- Language-specific frame normalization
 
 ## Public API Surface
 
-### Test Entry Points
-- Language-specific test suites accessible via standard test runners
-- Mock utilities for simulating debug environments
-- Helper functions for creating test data structures
-- Platform simulation capabilities for cross-platform validation
+The tests validate the core adapter policy interface that all language implementations must support:
 
-### Testing Patterns
-The directory exposes consistent testing patterns that can be extended for additional language support:
-- Structured mock creation for DAP components
-- Environment isolation and restoration
-- State validation utilities
-- Cross-platform behavior verification
+### Primary Entry Points
+- `matchesAdapter()`: Adapter process detection and identification
+- `extractLocalVariables()`: Variable scope processing from debug contexts
+- `validateExecutable()`: Binary validation and resolution workflows
+- `getAdapterSpawnConfig()`: Process configuration generation for adapter launching
 
-## Internal Organization
+### State Management Interface
+- Session initialization tracking and validation
+- Configuration completion detection
+- Connection status monitoring
+- Command queue state transitions
 
-### Data Flow
-Tests follow a standardized execution pattern:
-1. **Environment Setup**: Mock external dependencies (filesystem, process spawning, DAP clients)
-2. **Test Isolation**: Clean state between test cases with mock resets
-3. **Policy Validation**: Exercise adapter methods with controlled test data
-4. **Assertion Verification**: Validate behavior through mock interactions and state inspection
-5. **Cleanup**: Restore original environment and clear modifications
+## Internal Organization and Testing Strategy
 
 ### Mock Infrastructure
-Comprehensive mocking system covering:
-- File system operations for executable validation
-- Process management for adapter spawning
-- DAP protocol structures and communication
-- Platform-specific behavior simulation
+- Comprehensive mocking of file system, child processes, and platform detection
+- DAP protocol object mocking with realistic data structures
+- Event simulation for debugging session workflows
+- Proper cleanup and teardown between test cases
 
-### Language-Specific Considerations
-The testing framework accommodates different adapter policy behaviors:
-- **JavaScript**: Complex initialization flows, command queueing, child session support
-- **Rust**: Direct execution patterns, platform-specific toolchain integration
-- **Extensible Design**: Framework supports addition of new language adapters
+### Test Utilities and Patterns
+- Shared mock factories (`createStackFrame`, `createChild`, `setPlatform`)
+- Consistent edge case testing across all implementations
+- Language-agnostic test patterns with specific customization
+- Integration point validation ensuring consistent behavior
 
-## Important Patterns
+## Integration with Larger System
 
-### Test Data Management
-- Hierarchical mock structures mimicking real debug sessions
-- Consistent naming patterns for stack frames, variables, and scopes
-- Platform-agnostic test data with runtime adaptation
+This test suite validates the debugging infrastructure's ability to:
+- Support multiple programming languages through unified interfaces
+- Maintain DAP compliance across different adapter implementations
+- Handle cross-platform deployment scenarios reliably
+- Process debugging data consistently regardless of language runtime
 
-### Validation Strategies
-- Type-safe internal state access and validation
-- Mock interaction verification for dependency tracking
-- Before/after state comparisons for mutation testing
-- Cross-platform behavior consistency checks
-
-This testing infrastructure ensures the debugmcp shared library maintains high reliability and correctness across diverse debugging scenarios and programming language integrations.
+The tests ensure that language-specific adapter policies integrate seamlessly into the broader debugging system while maintaining their specialized capabilities for their respective development environments.

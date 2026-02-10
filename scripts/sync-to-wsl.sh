@@ -129,7 +129,7 @@ else
     echo -e "${YELLOW}Skipping npm install (--no-install flag set)${NC}"
 fi
 
-# 8. Build project (unless --no-build)
+# 10. Build project (unless --no-build)
 if [ "$NO_BUILD" = false ]; then
     echo -e "${GREEN}Building project...${NC}"
     npm run build

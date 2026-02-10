@@ -1,48 +1,40 @@
 # tests/unit/utils/simple-file-checker.spec.ts
 @source-hash: 39a266bc20945734
-@generated: 2026-02-09T18:14:47Z
+@generated: 2026-02-10T00:41:36Z
 
-## Primary Purpose
-Unit test suite for `SimpleFileChecker` utility class that validates file existence checking behavior in both host and container environments using a true hands-off approach (no path interpretation).
+## Purpose
+Unit test suite for `SimpleFileChecker` utility that validates file existence checking with different path handling behaviors in host vs container environments.
 
 ## Test Structure
+- **Main test suite (L8-165)**: `SimpleFileChecker` with comprehensive mocking setup
+- **Setup (L14-48)**: Creates mocks for `IFileSystem`, `IEnvironment`, and logger with all required interface methods
+- **Host Mode tests (L50-100)**: Tests behavior when not in container mode
+- **Container Mode tests (L102-157)**: Tests path prefixing behavior in containerized environment
+- **Factory function tests (L159-164)**: Validates factory pattern implementation
 
-### Main Test Suite (L8-165)
-- **Setup**: Mock dependencies including `IFileSystem`, `IEnvironment`, and logger (L14-48)
-- **Core Classes Under Test**: `SimpleFileChecker` and `createSimpleFileChecker` factory function
-- **Dependencies**: Vitest testing framework, external dependency interfaces
+## Key Test Scenarios
 
-### Mock Configuration (L14-48)
-- **mockFileSystem**: Complete IFileSystem interface mock with all file operations
-- **mockEnvironment**: Environment interface mock for container detection and workspace configuration
-- **mockLogger**: Simple logger mock for debug output
-- **checker**: SimpleFileChecker instance created with mocked dependencies
+### Host Mode Behavior (L50-100)
+- **File existence check (L56-69)**: Verifies direct path usage without manipulation
+- **Non-existent files (L71-83)**: Tests negative case handling
+- **System errors (L85-99)**: Tests error handling with proper error message formatting
 
-## Test Scenarios
+### Container Mode Behavior (L102-157)
+- **Environment setup (L103-110)**: Mocks `MCP_CONTAINER=true` and `MCP_WORKSPACE_ROOT=/workspace`
+- **Relative path prefixing (L112-125)**: Tests `/workspace/` prefix addition to relative paths
+- **Absolute path handling (L127-140)**: Tests double prefixing behavior (intentional design)
+- **Path format agnostic (L142-156)**: Tests that Windows-style paths get simple prefix without interpretation
 
-### Host Mode Tests (L50-100)
-Tests behavior when not running in container environment:
-- **File Existence Check (L56-69)**: Verifies direct path usage without manipulation
-- **Non-existent Files (L71-83)**: Validates proper handling of missing files
-- **System Errors (L85-99)**: Tests error handling and graceful degradation
+## Dependencies
+- **Testing framework**: Vitest with mocking capabilities
+- **Source imports**: 
+  - `SimpleFileChecker`, `createSimpleFileChecker` from `src/utils/simple-file-checker.js`
+  - Interface types from `src/interfaces/external-dependencies.js`
 
-### Container Mode Tests (L102-157)
-Tests behavior when `MCP_CONTAINER=true` and `MCP_WORKSPACE_ROOT=/workspace`:
-- **Relative Path Handling (L112-125)**: Verifies `/workspace/` prefix addition to relative paths
-- **Absolute Path Handling (L127-140)**: Tests that `/workspace/` is always prepended, even to already absolute paths (creating double prefix)
-- **Path Format Agnostic (L142-156)**: Validates simple prefix addition without path interpretation (Windows-style paths get Unix prefix)
-
-### Factory Function Test (L159-164)
-Validates `createSimpleFileChecker` factory function returns proper instance.
-
-## Key Testing Patterns
-- **Environment Mocking**: Uses `mockImplementation` to simulate different container states
-- **Async Testing**: All file operations are tested as async operations returning promises
-- **Error Simulation**: Tests system-level errors through mock rejection
-- **Path Validation**: Extensive testing of path manipulation logic in different environments
+## Mock Strategy
+Comprehensive interface mocking with all `IFileSystem` methods (L16-32) and `IEnvironment` methods (L35-39), ensuring isolated testing without real file system access.
 
 ## Critical Test Insights
-- Container mode always prepends `/workspace/` regardless of input path format
-- No intelligent path interpretation - purely additive approach
-- Error handling preserves original path information in results
-- Factory function provides proper instantiation interface
+- Container mode always prepends `/workspace/` regardless of input path format (L137-139)
+- No path interpretation or normalization - purely additive prefixing approach
+- Error handling wraps system errors in descriptive messages (L97)

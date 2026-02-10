@@ -47,7 +47,6 @@ def process_events(events, important_threshold=5):
 
 
         processed_events.append(event_data)
-        # print(f"Event {event_data['id']} processed. Value: {event_data['value']}, Processed: {event_data['processed_value']}")
 
     return processed_events, high_priority_events
 

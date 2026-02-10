@@ -1,50 +1,46 @@
 # examples/javascript/typescript_test.js
-@source-hash: 26c8d90a93924bff
-@generated: 2026-02-09T18:15:01Z
+@source-hash: e0e43576cca0db90
+@generated: 2026-02-10T01:19:00Z
 
-## Purpose
-TypeScript debugging test suite compiled to JavaScript for testing MCP debugger capabilities including source map resolution, breakpoints, variable inspection, stepping, and async debugging.
+**Primary Purpose:** Transpiled JavaScript test file for MCP debugger testing, focused on TypeScript debugging scenarios including source maps, breakpoints, and variable inspection.
 
-## Key Components
+**Key Components:**
 
-### Runtime Support (L5-40)
-- `__awaiter` (L5-13): TypeScript-generated async/await runtime helper function
-- `__generator` (L14-40): TypeScript-generated generator runtime helper with complex state machine for async operations
+- `__awaiter` helper (L6-14): TypeScript's async/await transpilation helper for Promise-based operations
+- `__generator` helper (L15-41): TypeScript's generator/yield transpilation helper for async state machines
 
-### Calculator Class (L42-60)
-- Constructor (L43-45): Initializes empty `history` array
-- `add(a, b)` (L46-50): Addition with result logging to history, **Breakpoint 1 at L47**
-- `multiply(a, b)` (L51-55): Multiplication with result logging, **Breakpoint 2 at L52** 
-- `getHistory()` (L56-58): Returns calculation history array
+**Core Classes:**
 
-### Generic Functions
-- `swap<T>(a, b)` (L62-68): Generic value swapping with console logging, **Breakpoint 3 at L64**
+- `Calculator` (L43-61): Test class for stepping through methods
+  - Constructor initializes empty `history` array (L44-46)
+  - `add(a, b)` method with breakpoint marker at L48 (original TS line 18)
+  - `multiply(a, b)` method with breakpoint marker at L53 (original TS line 23)
+  - `getHistory()` returns calculation history array (L57-59)
 
-### Async Operations
-- `fetchData(id)` (L70-91): Async function using generator pattern to simulate API fetch with 100ms delay, returns person object
-- Uses `__awaiter` and `__generator` for async/await transpilation
+**Key Functions:**
 
-### Main Test Orchestration (L93-166)
-- `main()` (L93-166): Comprehensive test suite covering:
-  - Class instantiation and method calls (L101-106)
-  - Generic function testing with numbers and strings (L108-112)  
-  - Async operations with sequential awaits (L114-121)
-  - Complex nested data structures with todos array (L123-153)
-  - Error handling and stack traces (L155-160)
-- **Breakpoint 6 at L148** (for loop iteration)
-- **Breakpoint 7 at L159** (error catch block)
+- `swap<T>(a, b)` (L63-69): Generic function testing with breakpoint at L65 (original TS line 36)
+  - Logs before/after states, returns tuple `[b, a]`
+  
+- `fetchData(id)` (L71-92): Async function using `__awaiter` and `__generator` 
+  - Simulates 100ms delay, creates person objects with computed properties
+  
+- `main()` (L94-167): Main test orchestrator with comprehensive debugging scenarios:
+  - Test 1: Calculator class instantiation and method calls (L102-107)
+  - Test 2: Generic swap function with numbers and strings (L109-113)
+  - Test 3: Sequential async operations with fetchData (L115-122)
+  - Test 4: Complex nested data structures (todos array) with iteration breakpoint at L149 (original TS line 119)
+  - Test 5: Error handling with stack trace testing (L156-161), breakpoint at L160 (original TS line 129)
 
-### Utility Functions
-- `throwTestError()` (L167-169): Throws test error for stack trace inspection
-- Entry point (L171): Executes main with error handling
+- `throwTestError()` (L168-170): Utility function for error testing
 
-## Architecture Notes
-- Compiled TypeScript with source map reference (L172)
-- Uses TypeScript runtime helpers for async/generator support
-- Breakpoint comments reference original TypeScript line numbers
-- Designed for comprehensive debugger feature testing including stepping, variable inspection, async debugging, and error handling
+**Architectural Notes:**
 
-## Dependencies
-- Built-in JavaScript Promise API
-- Console logging for output verification
-- setTimeout for async simulation
+- File contains extensive TypeScript transpilation artifacts (__awaiter, __generator)
+- Comments reference original TypeScript line numbers for breakpoint mapping
+- Source map reference at L173 enables debugging original TypeScript source
+- Designed for comprehensive debugger testing across async, OOP, generics, and error scenarios
+
+**Dependencies:** None (standalone test file)
+
+**Execution:** Self-executing via `main().catch(console.error)` at L172

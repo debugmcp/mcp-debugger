@@ -210,13 +210,6 @@ describe('ChildSessionManager', () => {
       }
     });
     
-    it('should handle attachment failures with retry', async () => {
-      // This test would require modifying the MinimalDapClient mock
-      // to simulate attachment failures, which is complex with the
-      // current mock setup. Skipping for now as the retry logic
-      // is covered by the actual implementation.
-      expect(true).toBe(true);
-    });
   });
   
   describe('Python policy (single-session)', () => {

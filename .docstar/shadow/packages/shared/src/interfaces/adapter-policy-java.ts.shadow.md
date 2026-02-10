@@ -1,74 +1,56 @@
 # packages/shared/src/interfaces/adapter-policy-java.ts
 @source-hash: 0f95edac904989b6
-@generated: 2026-02-09T18:14:11Z
+@generated: 2026-02-10T00:41:12Z
 
-## Purpose
-Implements a Java Debug Adapter (jdb) policy for the Debug Adapter Protocol (DAP), providing Java-specific debugging behaviors and configurations.
+## Java Debug Adapter Policy Implementation
 
-## Core Components
+**Primary Purpose**: Implements adapter-specific behaviors and configurations for the Java Debug Adapter (jdb), providing Java-specific variable handling, session management, and debug protocol interactions.
 
-### JavaAdapterPolicy Object (L12-264)
-Main policy implementation with adapter-specific configurations:
-- **name**: 'java' (L13)
-- **supportsReverseStartDebugging**: false (L14) 
-- **childSessionStrategy**: 'none' (L15)
+### Core Configuration (L12-22)
+- `JavaAdapterPolicy` constant exports the complete policy object
+- Disables reverse debugging support and child sessions
+- Uses 'java' as adapter type identifier
+- Configured for immediate command processing without queueing
 
-### Variable Extraction (L27-73)
-**extractLocalVariables()**: Extracts local variables from Java debug frames
-- Targets top stack frame (L38)
-- Searches for 'Local' or 'Locals' scopes (L46-48)
-- Filters out 'this' variable unless explicitly requested (L58-70)
+### Variable Extraction Logic (L27-73)
+- `extractLocalVariables()` - Extracts local variables from Java debug sessions
+- Targets "Local" or "Locals" scope specifically for Java runtime
+- Filters out `this` reference unless `includeSpecial` flag is set
+- Operates on top stack frame only for current execution context
 
-### Configuration Methods
-- **getLocalScopeName()** (L78-80): Returns ['Local', 'Locals'] scope names
-- **getDapAdapterConfiguration()** (L82-86): Returns {type: 'java'} config
-- **getDebuggerConfiguration()** (L105-112): Java debugger settings including variable type support
+### Java Runtime Integration (L88-133)
+- `resolveExecutablePath()` (L88-103) - Resolves Java executable with fallback chain: provided path → JAVA_HOME/bin/java → system 'java'
+- `validateExecutable()` (L119-133) - Asynchronously validates Java command by spawning `java -version`
+- Cross-platform executable name handling (java.exe on Windows)
 
-### Executable Resolution (L88-103)
-**resolveExecutablePath()**: Resolves Java executable path with priority:
-1. Provided path
-2. JAVA_HOME/bin/java (with Windows .exe handling)
-3. Default 'java' command
+### Session State Management (L155-194)
+- `createInitialState()` (L155-160) - Creates state with `initialized` and `configurationDone` flags
+- State update methods track initialization and configuration completion
+- `isSessionReady()` (L114) - Session ready when in PAUSED state
+- Connection status tied directly to initialization state
 
-### Validation (L119-133)
-**validateExecutable()**: Validates Java executable by spawning `java -version`
-- Uses dynamic import for child_process (L121)
-- Returns Promise<boolean> based on exit code
+### Command Processing (L138-150)
+- No command queueing required for Java adapter
+- `shouldQueueCommand()` returns immediate processing directive
+- Commands processed synchronously without deferral
 
-### State Management (L155-193)
-- **createInitialState()** (L155-160): Creates {initialized: false, configurationDone: false}
-- **updateStateOnCommand()** (L165-169): Updates state on 'configurationDone'
-- **updateStateOnEvent()** (L174-178): Updates state on 'initialized' event
-- **isInitialized()** & **isConnected()** (L183-193): State checking methods
-
-### Command Handling (L138-150)
-- **requiresCommandQueueing()**: Returns false (L138)
-- **shouldQueueCommand()**: Returns immediate processing config (L143-150)
-
-### Adapter Matching (L198-204)
-**matchesAdapter()**: Identifies Java adapter by checking for 'jdb-dap-server' or 'jdb' in arguments
+### Adapter Detection (L198-204)
+- `matchesAdapter()` identifies Java adapters by checking for 'jdb-dap-server' or 'jdb' in command arguments
+- Case-insensitive string matching on joined arguments
 
 ### DAP Client Behavior (L216-243)
-**getDapClientBehavior()**: Returns minimal DAP client configuration
-- Handles 'runInTerminal' reverse requests (L219-226)
-- Disables child session features (L232-234)
-- Sets standard timeouts (L240)
+- Minimal reverse request handling (Java doesn't use child sessions)
+- Handles `runInTerminal` requests with empty acknowledgment
+- No breakpoint mirroring or child session routing
+- Standard 5-second child initialization timeout
 
-### Spawn Configuration (L248-263)
-**getAdapterSpawnConfig()**: Configures Java debug adapter spawning
-- Uses provided adapterCommand directly (L250-258)
-- Throws error if no adapterCommand provided (L262)
+### Adapter Spawning (L248-263)
+- `getAdapterSpawnConfig()` processes spawn configuration
+- Requires `adapterCommand` to be provided in payload
+- Passes through command, arguments, host, port, and environment configuration
 
-## Dependencies
-- @vscode/debugprotocol: DAP types
-- ./adapter-policy.js: Base policy interface
-- @debugmcp/shared: SessionState enum
-- ../models/index.js: StackFrame, Variable types
-- ./dap-client-behavior.js: DAP client interfaces
-
-## Key Characteristics
-- No child session support (throws errors for child session methods)
-- Immediate command processing (no queueing)
-- Platform-aware Java executable resolution
-- Minimal DAP client behavior (no reverse debugging features)
-- State tracking for initialization and configuration phases
+### Dependencies
+- `@vscode/debugprotocol` for Debug Adapter Protocol types
+- `@debugmcp/shared` for SessionState enum
+- Local interfaces for adapter policy contracts and model types
+- Node.js `child_process` for executable validation (dynamically imported)

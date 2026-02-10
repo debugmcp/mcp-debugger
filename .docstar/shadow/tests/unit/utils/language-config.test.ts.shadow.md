@@ -1,44 +1,48 @@
 # tests/unit/utils/language-config.test.ts
 @source-hash: 42777cb854983c43
-@generated: 2026-02-09T18:14:45Z
+@generated: 2026-02-10T00:41:36Z
 
 ## Purpose
-Unit test suite for language configuration utilities that manage disabled programming languages via environment variables. Tests environment variable parsing, language filtering, and case-insensitive matching functionality.
+Unit test suite for language configuration utilities that handle environment-based language disabling functionality. Tests the parsing and querying of disabled languages from the `DEBUG_MCP_DISABLE_LANGUAGES` environment variable.
 
 ## Test Structure
-- **Test Suite (L6-41)**: "language configuration helpers" - comprehensive test coverage for language config utilities
-- **Environment Setup (L4, L7-13)**: Preserves and restores original `process.env` state using `beforeEach`/`afterEach` hooks
-- **Core Functions Under Test**: `getDisabledLanguages()` and `isLanguageDisabled()` imported from `../../../src/utils/language-config.js`
+- **Main test suite** (L6-41): "language configuration helpers" - comprehensive testing of language configuration functions
+- **Environment setup/teardown** (L7-13): Preserves and restores original `process.env` state using `beforeEach`/`afterEach` hooks
+- **Original environment backup** (L4): Captures initial environment state for restoration
+
+## Tested Functions
+Tests two key utilities from `../../../src/utils/language-config.js`:
+- `getDisabledLanguages()`: Parses comma-separated language list from environment variable
+- `isLanguageDisabled(language)`: Checks if specific language is in disabled set
 
 ## Test Cases
 
 ### Environment Variable Parsing (L15-21)
-- **Purpose**: Validates parsing of `DEBUG_MCP_DISABLE_LANGUAGES` environment variable
-- **Behavior**: Tests comma-separated list parsing with whitespace handling and case normalization
-- **Expected**: Input `'python,  Rust , ,  mock'` produces `Set(['python', 'rust', 'mock'])`
+Tests `getDisabledLanguages()` with various input formats:
+- Handles mixed case ("python, Rust")  
+- Trims whitespace around entries
+- Filters out empty strings from extra commas
+- Returns normalized Set with lowercase entries
 
-### Missing Environment Variable (L23-26) 
-- **Purpose**: Ensures graceful handling when environment variable is undefined
-- **Behavior**: Deletes `DEBUG_MCP_DISABLE_LANGUAGES` and verifies empty set return
-- **Expected**: Returns `new Set()` when env var missing
+### Missing Environment Variable (L23-26)
+Verifies graceful handling when `DEBUG_MCP_DISABLE_LANGUAGES` is undefined:
+- Deletes environment variable
+- Expects empty Set return value
 
-### Case Insensitive Detection (L28-34)
-- **Purpose**: Validates case-insensitive language matching in `isLanguageDisabled()`
-- **Setup**: Sets env var to `'PYTHON,RUST'` (uppercase)
-- **Assertions**: Tests mixed-case inputs ('python', 'Rust') return true, 'mock' returns false
+### Case-Insensitive Language Detection (L28-34)
+Tests `isLanguageDisabled()` behavior:
+- Environment contains "PYTHON,RUST" (uppercase)
+- Queries with mixed case ("python", "Rust") return `true`
+- Non-disabled language ("mock") returns `false`
 
 ### Input Validation (L36-40)
-- **Purpose**: Tests handling of falsy/invalid language inputs
-- **Edge Cases**: Empty string and null values should return false
-- **Type Safety**: Uses type assertion `null as unknown as string` for null testing
-
-## Dependencies
-- **Test Framework**: Vitest (`describe`, `it`, `expect`, `beforeEach`, `afterEach`)
-- **System Under Test**: Language config utilities from `../../../src/utils/language-config.js`
-- **Environment**: Node.js `process.env` manipulation
+Tests robustness with invalid inputs:
+- Empty string returns `false`
+- `null` (cast as string) returns `false`
+- Maintains type safety despite forced casting
 
 ## Key Patterns
-- **Environment Isolation**: Careful preservation/restoration of process environment
-- **Case Normalization**: Tests demonstrate lowercase normalization behavior
-- **Set-based Storage**: Disabled languages stored as Set for O(1) lookups
-- **Whitespace Handling**: Parser strips whitespace and filters empty entries
+- **Environment isolation**: Each test runs with clean environment state
+- **Case normalization**: Tests demonstrate case-insensitive language matching
+- **Whitespace handling**: Validates robust parsing of user-provided environment values
+- **Edge case coverage**: Tests both missing data and invalid input scenarios

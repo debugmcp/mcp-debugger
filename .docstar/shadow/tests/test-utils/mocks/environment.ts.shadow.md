@@ -1,34 +1,36 @@
 # tests/test-utils/mocks/environment.ts
 @source-hash: ac99000281932f84
-@generated: 2026-02-09T18:14:35Z
+@generated: 2026-02-10T00:41:26Z
 
 ## Purpose
-Test utility for mocking environment dependencies in unit tests, specifically designed to support `src/utils/container-path-utils.ts`. Provides a consistent interface for testing environment variable access and platform detection.
+Test utility module providing environment variable mocking for Vitest tests, specifically designed to mock interactions with `src/utils/container-path-utils.ts`.
 
-## Core Components
+## Key Components
 
 ### EnvironmentMock Interface (L3-7)
-Defines the contract for environment mocking:
+Defines the contract for environment mocking with three methods:
 - `get(key: string)`: Retrieves environment variable values
 - `getEnv()`: Returns complete environment variable object
-- `isWindows()`: Platform detection utility
+- `isWindows()`: Platform detection for Windows
 
 ### createEnvironmentMock Factory (L19-25)
-Primary factory function that creates configured environment mocks with sensible test defaults:
-- **Default behavior**: `MCP_CONTAINER` returns `'false'` (host mode for tests)
+Creates mock instances with sensible defaults for container path testing:
+- **Default behavior**: `get('MCP_CONTAINER')` returns `'false'` (host mode)
 - **Fallback**: Other environment variables delegate to `process.env`
-- **Platform detection**: Uses actual `process.platform === 'win32'`
-- **Customization**: Accepts partial overrides for test-specific behavior
-
-## Key Behaviors
-- All mock methods are Vitest spy functions (`vi.fn()`) for assertion capabilities
-- Container mode defaults to disabled (`'false'`) in test environment
-- Platform detection uses real system platform unless overridden
-- Supports partial override pattern for flexible test configuration
+- **Platform detection**: `isWindows()` uses actual `process.platform`
+- **Environment object**: `getEnv()` returns empty object by default
+- **Extensibility**: Accepts `overrides` parameter for test-specific customization
 
 ## Dependencies
-- **vitest**: For mock function creation (`vi.fn()`)
-- **Node.js process**: For environment and platform access
+- **vitest**: Uses `vi.fn()` for function mocking
+- **Node.js globals**: Accesses `process.env` and `process.platform`
 
-## Usage Pattern
-Designed for dependency injection in tests requiring environment simulation, particularly for container path resolution logic.
+## Design Patterns
+- **Factory pattern**: Provides consistent mock creation with customization
+- **Interface segregation**: Clean contract definition separate from implementation
+- **Test isolation**: Each mock instance is independent with vi.fn() spies
+
+## Critical Constraints
+- Mock is specifically tailored for container path utilities testing
+- Default `MCP_CONTAINER='false'` assumption may not suit all test scenarios
+- Platform detection uses real process state, not mocked

@@ -1,46 +1,28 @@
 # tests/test-utils/helpers/process-tracker.d.ts
 @source-hash: 2b7483936c39e377
-@generated: 2026-02-09T18:14:35Z
+@generated: 2026-02-10T00:41:24Z
 
-## Purpose
-TypeScript declaration file for a global process tracker utility designed for test environments. Provides centralized management of spawned child processes to prevent orphaned processes after test completion.
+**Purpose**: TypeScript declarations for a global process tracker utility that manages spawned child processes during test execution to prevent orphaned processes.
 
-## Key Types and Interfaces
+**Core Architecture**:
+- **TrackedProcess Interface (L8-17)**: Defines structure for tracked processes with pid, name, process reference, and startTime timestamp
+- **ProcessTracker Class (L18-53)**: Main singleton class managing process lifecycle with private process registry and cleanup timeout configuration
 
-**TrackedProcess Interface (L8-17)**
-- `pid: number` - Process identifier
-- `name: string` - Human-readable process name for debugging
-- `process: ChildProcess | ProcessLike` - Either Node.js ChildProcess or minimal process-like object with kill capability
-- `startTime: number` - Timestamp for process age tracking
+**Key Methods**:
+- `register(process, name)` (L24): Adds new process to tracking registry
+- `unregister(pid)` (L28): Removes process from registry when it exits normally
+- `killProcess(pid, signal?)` (L32): Terminates specific process by PID with optional signal
+- `cleanupAll()` (L36): Asynchronously terminates all tracked processes
+- `getCount()` (L40): Returns number of currently tracked processes
+- `getTrackedProcesses()` (L44-48): Returns array of process info with calculated age
+- `reset()` (L52): Clears tracker state for test isolation
 
-## Core Class
+**Process Support**: Handles both Node.js ChildProcess instances and custom process-like objects with kill() method (L11-15).
 
-**ProcessTracker Class (L18-53)**
-- `processes` (L19) - Private registry of tracked processes
-- `cleanupTimeoutMs` (L20) - Private timeout configuration for cleanup operations
+**Export Pattern**: Provides both singleton instance `processTracker` (L54) and class constructor `ProcessTracker` (L55) for flexibility.
 
-### Registration Methods
-- `register(process, name)` (L24) - Adds process to tracking registry
-- `unregister(pid)` (L28) - Removes process from registry (normal exit cleanup)
+**Dependencies**: 
+- Node.js `child_process` module for ChildProcess type (L7)
+- Node.js signal types for process termination (L32)
 
-### Process Management
-- `killProcess(pid, signal?)` (L32) - Terminates specific process with optional signal, returns success status
-- `cleanupAll()` (L36) - Asynchronously terminates all tracked processes
-
-### Inspection Methods
-- `getCount()` (L40) - Returns number of currently tracked processes
-- `getTrackedProcesses()` (L44-48) - Returns array of process info with computed age
-- `reset()` (L52) - Clears all tracking state for test isolation
-
-## Exports
-- `processTracker` (L54) - Singleton instance for global use
-- `ProcessTracker` (L55) - Class export for custom instances
-
-## Dependencies
-- `child_process.ChildProcess` (L7) - Node.js standard library for process management
-
-## Architecture Notes
-- Designed as singleton pattern for global process lifecycle management
-- Dual-interface support allows tracking both native ChildProcess and mock/wrapper objects
-- Age calculation enables timeout-based cleanup strategies
-- Reset functionality supports test isolation patterns
+**Usage Context**: Test utility for preventing process leaks in test suites by ensuring proper cleanup of spawned processes.

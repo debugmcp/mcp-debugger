@@ -1,38 +1,64 @@
 # packages/adapter-javascript/tests/unit/executable-resolver.throw.edge.test.ts
 @source-hash: a0b24eacf2d3d732
-@generated: 2026-02-09T18:14:00Z
+@generated: 2026-02-10T00:41:10Z
 
-**Primary Purpose:** Edge case and error handling test suite for executable-resolver utilities, specifically testing throw conditions and path resolution fallback mechanisms.
+## Purpose
+Edge case and error handling test suite for the executable-resolver utility module. Specifically tests throw/catch scenarios and boundary conditions in path resolution logic for Node.js executable discovery.
 
-**Test Structure:**
-- MockFileSystem class (L9-34): Test double implementing FileSystem interface with injectable mock behaviors for `existsSync` and `readFileSync`
-- Test helper `withPath()` (L38-44): Environment variable manipulation utility for PATH testing
-- Main test suite (L46-162): Four test cases covering edge cases and error conditions
+## Key Components
 
-**Key Test Cases:**
+### MockFileSystem Class (L9-34)
+- **Purpose**: Test double implementing FileSystem interface for controlled error simulation
+- **Methods**:
+  - `setExistsMock(mock)` (L13-15): Injects custom behavior for file existence checks
+  - `setReadFileMock(mock)` (L17-19): Injects custom behavior for file reading
+  - `existsSync(path)` (L21-26): Returns mock result or false default
+  - `readFileSync(path, encoding)` (L28-33): Returns mock result or empty string default
+- **Pattern**: Dependency injection pattern for filesystem operations
 
-1. **Empty PATH handling** (L66-70): Verifies `whichInPath` returns undefined when PATH is empty
-2. **Exception resilience in whichInPath** (L72-109): Tests that filesystem exceptions during path resolution don't break the search algorithm - continues to next candidate after catching errors
-3. **findNode execPath fallback** (L111-122): Tests fallback behavior when `process.execPath` check throws but PATH is empty - should resolve to `process.execPath` anyway
-4. **findNode PATH search with exceptions** (L124-161): Tests that `findNode` continues searching PATH candidates even when some throw filesystem errors
+### Test Utilities
 
-**Platform-Specific Logic:**
-- Uses `isWindows()` check (L36) to adapt test behavior
-- POSIX systems: Tests multiple directories in PATH
-- Windows systems: Tests multiple executable extensions (.exe, no extension) in same directory
+#### withPath Function (L38-44)
+- **Purpose**: Temporary PATH environment variable manipulation
+- **Returns**: Cleanup function to restore original PATH
+- **Usage**: Creates isolated test environment for PATH-dependent tests
 
-**Dependencies:**
-- `vitest` testing framework
-- `@debugmcp/shared` FileSystem interfaces
-- `../../src/utils/executable-resolver.js` - the module under test
+#### WIN Constant (L36)
+Platform detection flag for Windows-specific test branching
 
-**Testing Patterns:**
-- Mock injection via `setDefaultFileSystem()` (L54)
-- Environment restoration in afterEach (L57-64)
-- Error simulation through mock functions that throw exceptions
-- Platform-conditional test logic for Windows vs POSIX behavior
+### Test Suite Structure (L46-162)
 
-**Critical Invariants:**
-- Mock filesystem is reset between tests
-- PATH environment is restored after each test
-- Exception handling doesn't prevent fallback resolution paths
+#### Setup/Teardown (L50-64)
+- **beforeEach**: Initializes fresh MockFileSystem and sets it as default
+- **afterEach**: Restores environment and resets to NodeFileSystem
+
+#### Test Cases
+
+**Empty PATH Test (L66-70)**
+- Verifies `whichInPath` returns undefined when PATH is empty
+- Tests boundary condition of no search paths
+
+**Exception Recovery Test (L72-109)**
+- **Purpose**: Tests resilience when filesystem operations throw exceptions
+- **POSIX Path** (L74-90): Tests directory-level exception handling
+- **Windows Path** (L92-108): Tests extension-level exception handling
+- **Pattern**: Exception thrown on first candidate, second candidate succeeds
+
+**findNode Exception Tests (L111-161)**
+- **execPath Throws Test (L111-122)**: Tests fallback when process.execPath check fails
+- **PATH Candidate Recovery (L124-161)**: Tests recovery from PATH candidate exceptions
+
+## Dependencies
+- **External**: vitest, path, @debugmcp/shared
+- **Internal**: executable-resolver utility functions (whichInPath, findNode, isWindows, setDefaultFileSystem)
+
+## Test Patterns
+1. **Platform-aware testing**: Different logic paths for Windows vs POSIX
+2. **Exception simulation**: Controlled error injection via mocks
+3. **Environment isolation**: PATH manipulation with cleanup
+4. **Fallback verification**: Ensures graceful degradation on errors
+
+## Key Invariants
+- FileSystem must be reset between tests to avoid cross-contamination
+- PATH modifications must be cleaned up to prevent side effects
+- Platform-specific behavior must be tested separately for Windows/POSIX

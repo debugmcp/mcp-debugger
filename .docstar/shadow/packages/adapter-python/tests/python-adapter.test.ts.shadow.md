@@ -1,28 +1,33 @@
 # packages/adapter-python/tests/python-adapter.test.ts
 @source-hash: a7662bfb5631d779
-@generated: 2026-02-09T18:14:29Z
+@generated: 2026-02-10T00:41:20Z
 
-**Primary Purpose:** Test file for the `@debugmcp/adapter-python` package that validates the public API exports through smoke tests using Vitest framework.
+## Primary Purpose
+Test file for the `@debugmcp/adapter-python` package that performs smoke tests to verify exported functionality.
 
-**Key Test Structure:**
-- Main test suite: `@debugmcp/adapter-python package` (L8-23)
-- Three smoke tests validating core exports without full instantiation
+## Test Structure
+- **Main test suite** (L8-23): `'@debugmcp/adapter-python package'` - validates package exports
+- Uses Vitest testing framework with `describe`, `test`, and `expect` imports (L1)
 
-**Test Cases:**
-1. **PythonAdapterFactory test** (L9-13): Verifies factory class is exported and can be instantiated
-2. **PythonDebugAdapter test** (L15-18): Confirms debug adapter class export (no instantiation due to dependency requirements)
-3. **findPythonExecutable test** (L20-22): Validates utility function export and type
+## Key Test Cases
 
-**Dependencies:**
-- Vitest testing framework (L1)
-- Package exports from `../src/index.js` (L2-6)
+### PythonAdapterFactory Export Test (L9-13)
+- Verifies `PythonAdapterFactory` class is properly exported and instantiable
+- Creates factory instance to confirm constructor works
+- Tests both definition and instantiation
 
-**Testing Strategy:**
-- Smoke testing approach - validates exports exist and have correct types
-- Intentionally avoids complex instantiation that would require mocking dependencies
-- Comment on L17 explains deliberate decision to skip PythonDebugAdapter instantiation
+### PythonDebugAdapter Export Test (L15-18)
+- Validates `PythonDebugAdapter` class is exported
+- **Does not instantiate** - comment notes avoiding instantiation without proper dependencies (L17)
+- Smoke test only checks class availability
 
-**Architectural Notes:**
-- Tests the public API surface of the Python debug adapter package
-- Follows standard Node.js package testing patterns with relative imports
-- Uses factory pattern for adapter creation
+### findPythonExecutable Export Test (L20-22)
+- Confirms `findPythonExecutable` is exported as a function
+- Type check only - does not execute the function
+
+## Dependencies
+- **Vitest**: Testing framework (`describe`, `test`, `expect`)
+- **Local module**: `../src/index.js` - imports all tested exports (L2-6)
+
+## Testing Pattern
+Follows minimal smoke test pattern - verifies exports exist and have correct types without testing full functionality or requiring complex setup. Intentionally lightweight to catch basic packaging/export issues.

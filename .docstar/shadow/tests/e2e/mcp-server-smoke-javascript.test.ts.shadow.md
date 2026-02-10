@@ -1,49 +1,49 @@
 # tests/e2e/mcp-server-smoke-javascript.test.ts
 @source-hash: 0692a51e836a4311
-@generated: 2026-02-09T18:15:13Z
+@generated: 2026-02-10T00:42:02Z
 
-**Primary Purpose**: End-to-end smoke test suite for JavaScript debugging functionality in an MCP (Model Context Protocol) server. Tests verify core debugging operations work correctly without coupling to implementation details.
+## Purpose
+End-to-end smoke test suite for JavaScript debugging functionality via MCP (Model Context Protocol) server. Validates core debugging operations without implementation coupling to ensure functionality survives refactoring.
 
-**Key Test Classes and Structure**:
-- Main test suite: `describe('JavaScript Debugging - Simple Smoke Tests')` (L21-341)
-- Global test state management via `mcpClient`, `transport`, and `sessionId` variables (L22-24)
-- Test setup/teardown managed by `beforeAll` (L26-54), `afterAll` (L56-76), and `afterEach` (L78-90)
+## Test Environment Setup
+- **Test Framework**: Vitest with async beforeAll/afterAll/afterEach hooks (L9, L26-90)
+- **MCP Client Setup**: Uses StdioClientTransport to communicate with mcp-debugger CLI (L36-53)
+- **Target Script**: Tests against `examples/javascript/simple_test.js` (L92)
+- **Session Management**: Tracks sessionId for proper cleanup between tests (L24, L78-90)
 
-**Core Test Functions**:
-- **Full debugging cycle test** (L94-256): Comprehensive test covering session creation, breakpoint setting, execution control, variable inspection, expression evaluation, and cleanup
-- **Multiple breakpoints test** (L258-295): Validates ability to set and manage multiple breakpoints in a single session
-- **Source context test** (L297-340): Verifies source code context retrieval functionality
+## Key Test Cases
 
-**Key Dependencies**:
-- MCP SDK: `@modelcontextprotocol/sdk/client/index.js` and stdio transport (L13-14)
-- Test framework: Vitest for test execution and assertions (L9)
-- Utility: `parseSdkToolResult` from local smoke test utilities (L15)
+### Full Debugging Cycle Test (L94-256)
+Comprehensive workflow validation covering:
+1. **Session Creation** (L98-109): Creates debug session and validates sessionId
+2. **Breakpoint Setting** (L114-125): Sets breakpoint at line 14 and verifies acceptance
+3. **Debug Start** (L129-146): Launches debugging with DAP args, expects paused state
+4. **Stack Trace** (L153-165): Retrieves and validates stack frame structure
+5. **Variable Access** (L169-181): Gets local variables (may be empty but mechanism works)
+6. **Step Execution** (L185-210): Steps over and validates location/context response
+7. **Expression Evaluation** (L214-227): Evaluates "1 + 2", expects result containing "3"
+8. **Execution Control** (L231-238): Continues execution to completion
+9. **Session Cleanup** (L244-253): Properly closes debug session
 
-**MCP Tool Operations Tested**:
-- `create_debug_session`: Session initialization (L98-104, L262-268, L301-307)
-- `set_breakpoint`: Breakpoint management (L114-121, L273-281)
-- `start_debugging`: Debug execution start with DAP launch args (L129-140)
-- `get_stack_trace`: Stack frame retrieval (L153-159)
-- `get_local_variables`: Variable inspection (L169-175)
-- `step_over`: Single-step execution control (L185-188)
-- `evaluate_expression`: Runtime expression evaluation (L214-220)
-- `continue_execution`: Resume program execution (L231-234)
-- `get_source_context`: Source code context retrieval (L312-320)
-- `close_debug_session`: Session cleanup (L245-248, L290-293, L335-338)
+### Multiple Breakpoints Test (L258-295)
+Validates setting multiple breakpoints (lines 11 and 14) in single session.
 
-**Architecture Patterns**:
-- **Test isolation**: Each test creates its own session and cleans up via `afterEach` hook
-- **Error resilience**: Cleanup operations wrapped in try-catch to handle already-closed sessions (L58-65, L79-89)
-- **Timing management**: Strategic delays using `setTimeout` for session stabilization (L149, L210, L241)
-- **Validation approach**: Tests verify tool success flags and basic response structure rather than detailed implementation specifics
+### Source Context Test (L297-340)
+Tests source code retrieval with context lines around target line 14.
 
-**Critical Configuration**:
-- MCP server CLI path: `packages/mcp-debugger/dist/cli.mjs` (L29)
-- Test script target: `examples/javascript/simple_test.js` (L92)
-- Breakpoint line numbers: 11, 14 (primary test points)
-- Timeout settings: 30s setup, 60s main test (L54, L256)
+## Dependencies
+- **MCP SDK**: Client and StdioClientTransport for server communication (L13-14)
+- **Smoke Test Utils**: parseSdkToolResult helper for response parsing (L15)
+- **Node.js**: File system and path utilities for script location (L10-12)
 
-**Environment Requirements**:
-- Requires pre-built MCP debugger CLI bundle with existence check (L30-34)
-- NODE_ENV set to 'test' for server execution (L41)
-- Stdio transport communication with spawned Node.js process (L36-43)
+## Architecture Patterns
+- **Resilient Testing**: Focuses on behavioral validation rather than implementation details
+- **Resource Management**: Proper cleanup in afterEach/afterAll with error handling (L78-90)
+- **CLI Validation**: Ensures mcp-debugger CLI bundle exists before testing (L29-34)
+- **Timeout Handling**: 30s setup timeout, 60s test timeout for stability (L54, L256)
+
+## Critical Invariants
+- Sessions must be properly closed to prevent resource leaks
+- Test waits (1-2s) allow async operations to stabilize
+- All tool calls go through parseSdkToolResult for consistent response handling
+- Tests expect specific tool response formats (success flags, sessionId, etc.)

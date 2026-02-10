@@ -1,53 +1,53 @@
 # packages/adapter-javascript/src/utils/js-debug-launch-barrier.ts
-@source-hash: 20c78e632a524fd7
-@generated: 2026-02-09T18:13:59Z
+@source-hash: 247e3d83da1114ee
+@generated: 2026-02-10T01:18:55Z
 
-## Purpose
-Implements a launch readiness barrier specifically for js-debug adapter, coordinating startup by waiting for either a 'stopped' DAP event or adapter connection confirmation with configurable timeout fallback.
+## Primary Purpose
+Coordinates JavaScript debugger launch readiness by implementing a barrier pattern that waits for either a DAP 'stopped' event or adapter connection status, with timeout fallback. Replaces legacy behavior from ProxyManager.
 
 ## Key Components
 
-**JsDebugLaunchBarrier Class (L12-120)**
-- Implements `AdapterLaunchBarrier` interface from `@debugmcp/shared`
-- Manages launch readiness through promise-based coordination
-- Uses dual trigger mechanism: 'stopped' DAP event OR adapter connection + delay
-- Built-in timeout protection with fallback resolution
+### JsDebugLaunchBarrier Class (L12-119)
+Implements `AdapterLaunchBarrier` interface with promise-based synchronization mechanism.
 
-**Core Properties (L13-22)**
-- `awaitResponse: false` - indicates no response waiting required
-- `promise/resolve/reject` - internal promise coordination machinery
-- `timeoutHandle/adapterConnectedHandle` - timeout management
-- `settled` - prevents double resolution/rejection
+**Core Properties:**
+- `awaitResponse: false` (L13) - indicates this barrier doesn't wait for response completion
+- `promise: Promise<void>` (L19) - main synchronization primitive with external resolve/reject refs (L17-18)
+- `settled: boolean` (L22) - prevents double resolution/rejection
+- `timeoutHandle/adapterConnectedHandle` (L20-21) - manages async timeout operations
 
-**Event Handlers**
-- `onDapEvent()` (L69-76): Resolves on 'stopped' event, ignores event body
-- `onProxyStatus()` (L49-67): Triggers on 'adapter_connected' status with 500ms delay
-- `onProxyExit()` (L78-86): Rejects barrier if proxy exits prematurely
-- `onRequestSent()` (L43-47): Logging only, no barrier logic
+**Constructor (L24-41):**
+- Sets up promise with external resolve/reject references
+- Establishes timeout (default 5000ms) that warns and proceeds anyway
+- Initializes cleanup-safe timeout handling
 
-**Lifecycle Methods**
-- `waitUntilReady()` (L88-90): Returns the internal promise
-- `dispose()` (L92-101): Cleans up timeout handles
-- `resolveBarrier()` (L103-110): Internal resolution with cleanup
-- `rejectBarrier()` (L112-119): Internal rejection with cleanup
+**Event Handlers:**
+- `onRequestSent(requestId)` (L43-47) - logs launch request dispatch
+- `onProxyStatus(status)` (L49-67) - triggers on 'adapter_connected' with 500ms delay
+- `onDapEvent(event, body)` (L69-75) - resolves immediately on 'stopped' event
+- `onProxyExit(code, signal)` (L77-85) - rejects barrier if proxy dies early
 
-## Configuration Constants
-- `DEFAULT_TIMEOUT_MS = 5000` (L4): Default launch timeout
-- `ADAPTER_CONNECTED_DELAY_MS = 500` (L5): Delay after adapter connection
+**Lifecycle Methods:**
+- `waitUntilReady()` (L87-89) - returns the internal promise
+- `dispose()` (L91-100) - cleans up timeout handles
+- `resolveBarrier()/rejectBarrier()` (L102-118) - private settlement methods with cleanup
 
 ## Dependencies
 - `@debugmcp/shared`: AdapterLaunchBarrier interface, ILogger
 - `@vscode/debugprotocol`: DebugProtocol types for DAP events
 
-## Architectural Patterns
-- **Barrier Pattern**: Coordinates async operations until specific conditions met
-- **Promise-based Coordination**: Single promise tracks multiple trigger conditions
-- **Timeout Protection**: Fallback mechanism prevents indefinite blocking
-- **Resource Cleanup**: Proper disposal of timeout handles prevents leaks
-- **Early Settlement Protection**: `settled` flag prevents race conditions
+## Architecture Patterns
+- **Barrier Pattern**: Blocks execution until specific conditions are met
+- **Promise Externalization**: Exposes resolve/reject outside promise constructor
+- **Defensive Settling**: Guards against multiple resolution attempts
+- **Resource Management**: Proper cleanup of timeout handles
 
 ## Critical Invariants
-- Only resolves/rejects once due to `settled` flag checks
-- Always cleans up timeout handles on disposal or settlement
-- Adapter connection requires additional delay before resolution
-- Proxy exit always causes rejection if not already settled
+- Only resolves once via `settled` flag guard
+- Always cleans up timeout handles on settlement
+- Timeout fallback ensures non-blocking behavior (warns but proceeds)
+- 500ms delay on adapter connection prevents race conditions
+
+## Configuration Constants
+- `DEFAULT_TIMEOUT_MS = 5000` (L4)
+- `ADAPTER_CONNECTED_DELAY_MS = 500` (L5)

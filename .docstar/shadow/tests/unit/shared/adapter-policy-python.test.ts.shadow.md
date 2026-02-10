@@ -1,54 +1,52 @@
 # tests/unit/shared/adapter-policy-python.test.ts
 @source-hash: 36c00b4ddcc9b163
-@generated: 2026-02-09T18:14:46Z
+@generated: 2026-02-10T00:41:36Z
 
-## Unit Test Suite for PythonAdapterPolicy
+## Purpose
+Unit test suite for PythonAdapterPolicy class, validating Python debug adapter behavior, environment handling, and state management.
 
-Comprehensive test suite for the Python debug adapter policy implementation, validating core functionality across child session handling, variable extraction, executable resolution, state management, and adapter matching.
+## Test Structure
+**Main describe block (L4-101)**: Comprehensive test coverage with environment mocking setup
+- **beforeEach (L8-11)**: Captures original PYTHON_PATH env var and process.platform property for restoration
+- **afterEach (L13-23)**: Restores original environment state to prevent test interference
 
-### Test Setup & Environment Management (L8-23)
-- **beforeEach**: Captures original `process.env.PYTHON_PATH` and `process.platform` descriptors for isolation
-- **afterEach**: Restores original environment state, properly handling undefined values and platform properties
-- Ensures tests don't affect global environment state
+## Key Test Cases
 
-### Core Functionality Tests
+### Child Session Rejection (L25-27)
+Tests that `buildChildStartArgs()` throws exception for unsupported child session functionality.
 
-**Child Session Rejection (L25-27)**
-- Validates that `PythonAdapterPolicy.buildChildStartArgs()` throws exception with message "does not support child sessions"
+### Local Variable Extraction (L29-55)
+Validates `extractLocalVariables()` method:
+- Filters out special Python variables (names starting with underscore or containing "special")
+- Preserves standard variables and `__name__` 
+- Uses mock frames, scopes, and variables data structures
 
-**Local Variable Extraction (L29-55)**
-- Tests `PythonAdapterPolicy.extractLocalVariables()` with mock debug frames, scopes, and variables
-- Verifies filtering logic that excludes special variables (`special variables`, `_pydevd_bundle`) while preserving regular variables and Python built-ins (`__name__`)
-- Input structure: frames array with IDs, scopes mapping frame IDs to scope arrays, variables mapping scope references to variable arrays
+### Executable Path Resolution (L57-72)
+Tests `resolveExecutablePath()` precedence logic:
+- Explicit path parameter takes highest precedence
+- Falls back to PYTHON_PATH environment variable
+- Platform-specific defaults: 'python' on Windows, 'python3' on Unix-like systems
+- Manipulates `process.platform` using `Object.defineProperty()`
 
-**Executable Path Resolution (L57-72)**
-- Tests `PythonAdapterPolicy.resolveExecutablePath()` precedence rules:
-  1. Explicit path parameter (highest priority)
-  2. `PYTHON_PATH` environment variable
-  3. Platform-specific defaults: 'python' on Windows, 'python3' on other platforms
-- Manipulates `process.env.PYTHON_PATH` and `process.platform` to test different scenarios
+### Command Queueing and State Management (L74-87)
+Validates adapter state behavior:
+- Command queueing disabled by default
+- Initial state reports as uninitialized
+- 'initialized' event triggers both initialized and connected states
+- 'configurationDone' command updates corresponding state flag
 
-**Command Queueing & State Management (L74-87)**
-- Validates that Python adapter doesn't require command queueing (`requiresCommandQueueing()` returns false)
-- Tests state lifecycle:
-  - `createInitialState()`: Creates uninitialized state object
-  - `updateStateOnEvent('initialized')`: Transitions to initialized and connected state
-  - `updateStateOnCommand('configurationDone')`: Sets configuration completion flag
-- Verifies `isInitialized()` and `isConnected()` state queries
+### Adapter Matching (L89-96)
+Tests `matchesAdapter()` method recognizes Python debugpy adapter command signature (`python -m debugpy.adapter`).
 
-**Adapter Matching (L89-96)**
-- Tests `PythonAdapterPolicy.matchesAdapter()` recognition of debugpy commands
-- Returns true for `python -m debugpy.adapter` pattern, false for other command structures
+### Initialization Behavior (L98-100)
+Confirms `getInitializationBehavior()` returns empty object.
 
-**Initialization Behavior (L98-100)**
-- Confirms `PythonAdapterPolicy.getInitializationBehavior()` returns empty object (no special initialization requirements)
+## Dependencies
+- **vitest**: Test framework providing describe/it/expect/beforeEach/afterEach
+- **PythonAdapterPolicy**: Main class under test from shared interfaces
 
-### Dependencies
-- **vitest**: Testing framework providing describe/it/expect/beforeEach/afterEach
-- **PythonAdapterPolicy**: Main class under test from `../../../packages/shared/src/interfaces/adapter-policy-python.js`
-
-### Testing Patterns
-- Environment isolation through setup/teardown
-- Mock data structures for debug protocol objects
-- Platform-specific behavior validation
-- State transition verification
+## Testing Patterns
+- Environment variable mocking with proper cleanup
+- Process platform spoofing for cross-platform testing
+- Mock data structures for complex object interactions
+- State mutation validation

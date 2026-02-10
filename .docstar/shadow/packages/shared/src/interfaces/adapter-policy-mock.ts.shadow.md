@@ -1,58 +1,46 @@
 # packages/shared/src/interfaces/adapter-policy-mock.ts
 @source-hash: 2ab2e45dfe8fb394
-@generated: 2026-02-09T18:14:10Z
+@generated: 2026-02-10T00:41:11Z
 
-**Purpose**: Mock implementation of AdapterPolicy interface for testing debug adapter functionality without real debugger interactions.
+**Purpose:** Mock adapter policy implementation for testing debug adapter behaviors. Provides simplified, test-friendly implementations of all AdapterPolicy interface methods with minimal functionality and immediate command processing.
 
-**Core Structure**:
-- `MockAdapterPolicy` (L11-214): Complete AdapterPolicy implementation with simplified, testing-oriented behaviors
-- Named 'mock' adapter type with minimal configuration requirements
+**Core Implementation:**
+- `MockAdapterPolicy` object (L11-213): Complete AdapterPolicy implementation with mock behaviors
+- Configured as 'mock' type adapter with no child session support (L12-18)
+- `isChildReadyEvent()` (L19-21): Uses 'initialized' event as ready signal
 
-**Key Method Categories**:
+**Stack Frame & Variable Handling:**
+- `filterStackFrames()` (L26-29): Pass-through implementation - returns all frames unfiltered
+- `extractLocalVariables()` (L34-60): Simple extraction from top frame's first scope
+- `getLocalScopeName()` (L65-67): Returns standard ['Local', 'Locals'] scope names
 
-**Session Management** (L13-21):
-- `supportsReverseStartDebugging`: false - no reverse debugging support
-- `childSessionStrategy`: 'none' - no child session handling
-- `buildChildStartArgs`: throws error - child sessions not supported
-- `isChildReadyEvent`: checks for 'initialized' event
+**Configuration Methods:**
+- `getDapAdapterConfiguration()` (L69-73): Returns basic {type: 'mock'} config
+- `resolveExecutablePath()` (L75-79): Returns provided path or 'mock' placeholder
+- `getDebuggerConfiguration()` (L81-88): Minimal config with strict handshake disabled
 
-**Stack Frame & Variable Handling** (L26-67):
-- `filterStackFrames`: pass-through implementation returning all frames unfiltered
-- `extractLocalVariables`: simple extraction from top frame's first scope
-- `getLocalScopeName`: returns basic scope names ['Local', 'Locals']
+**Command Processing:**
+- `requiresCommandQueueing()` (L93): Always returns false - no queueing needed
+- `shouldQueueCommand()` (L98-105): Returns immediate processing policy
+- `updateStateOnCommand()` (L120-124): Tracks 'configurationDone' command
+- `updateStateOnEvent()` (L129-133): Tracks 'initialized' event
 
-**Configuration Methods** (L69-88):
-- `getDapAdapterConfiguration`: returns type 'mock'
-- `resolveExecutablePath`: returns 'mock' placeholder or provided path
-- `getDebuggerConfiguration`: minimal config with strict handshake disabled
+**State Management:**
+- `createInitialState()` (L110-115): Creates state with initialized/configurationDone flags
+- `isInitialized()` (L138-140): Checks state.initialized flag
+- `isConnected()` (L145-148): Uses initialized status as connection indicator
 
-**Command Processing** (L93-105):
-- `requiresCommandQueueing`: always false - immediate processing
-- `shouldQueueCommand`: returns no queueing/deferring behavior
+**Adapter Matching & Spawning:**
+- `matchesAdapter()` (L153-160): Matches commands/args containing 'mock-adapter'
+- `getAdapterSpawnConfig()` (L197-213): Returns custom command config or undefined for mock
+- `getInitializationBehavior()` (L165-167): Empty object - no special requirements
 
-**State Management** (L110-148):
-- `createInitialState`: creates state with initialized/configurationDone flags
-- `updateStateOnCommand`: tracks 'configurationDone' command
-- `updateStateOnEvent`: tracks 'initialized' event
-- `isInitialized`/`isConnected`: both check initialized flag
+**DAP Client Behavior:**
+- `getDapClientBehavior()` (L172-192): Returns minimal behavior config with disabled features and 1000ms timeout
 
-**Adapter Identification** (L153-160):
-- `matchesAdapter`: detects 'mock-adapter' in command or arguments
+**Dependencies:**
+- `@vscode/debugprotocol` for DebugProtocol types
+- Local interfaces: AdapterPolicy, AdapterSpecificState, CommandHandling, DapClientBehavior
+- Models: StackFrame, Variable
 
-**Client Behavior Configuration** (L172-192):
-- `getDapClientBehavior`: returns minimal DapClientBehavior with most features disabled
-- Short timeout (1000ms) for testing efficiency
-
-**Spawn Configuration** (L197-213):
-- `getAdapterSpawnConfig`: returns custom adapter command if provided, otherwise undefined for mock usage
-
-**Dependencies**:
-- `@vscode/debugprotocol` for Debug Adapter Protocol types
-- Local interfaces: AdapterPolicy, StackFrame, Variable, DapClientBehavior
-- Implements complete AdapterPolicy contract for testing scenarios
-
-**Key Design Patterns**:
-- Simplified implementations that prioritize testing over functionality
-- Pass-through or no-op behaviors where complex logic isn't needed for tests
-- State tracking focused on basic initialization lifecycle
-- Error throwing for unsupported operations (child sessions)
+**Architecture:** Implements complete AdapterPolicy interface with simplified mock behaviors for testing scenarios. All complex features (child sessions, command queueing, reverse debugging) are disabled or minimally implemented.

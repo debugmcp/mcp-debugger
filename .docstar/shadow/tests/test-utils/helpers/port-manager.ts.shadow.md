@@ -1,44 +1,41 @@
 # tests/test-utils/helpers/port-manager.ts
 @source-hash: c48ef33850da8718
-@generated: 2026-02-09T18:14:35Z
+@generated: 2026-02-10T00:41:25Z
 
 ## Purpose
-Test utility for centralized port allocation management to prevent conflicts between concurrent test runs. Provides singleton-based port reservation system with range-based allocation.
+Test utility for centralized port allocation to prevent conflicts between concurrent test runs. Manages port assignment across different test categories with dedicated ranges.
 
-## Key Components
+## Core Components
 
 ### PortRange Enum (L12-16)
-Defines three port ranges for different test types:
+Defines test type categories with base offsets:
 - `UNIT_TESTS = 0` → ports 5679-5779
 - `INTEGRATION = 100` → ports 5779-5879  
 - `E2E = 200` → ports 5879-5979
 
 ### TestPortManager Class (L18-102)
-Core port allocation manager with state tracking:
-
 **State Management:**
-- `basePort: number` (L19) - Base port 5679
+- `basePort: number` (L19) - Starting port (5679)
 - `usedPorts: Set<number>` (L20) - Tracks allocated ports
-- `rangeSizes: Map<PortRange, number>` (L21) - Maps ranges to 100-port blocks
+- `rangeSizes: Map<PortRange, number>` (L21) - Range size mapping (all 100 ports)
 
 **Key Methods:**
-- `getPort(range?: PortRange): number` (L39-63) - Primary allocation method with fallback logic
-- `releasePort(port: number): void` (L69-71) - Deallocates specific port
-- `reset(): void` (L76-78) - Clears all allocations
-- `isPortInUse(port: number): boolean` (L85-87) - Port status check
-- `getPorts(count: number, range?: PortRange): number[]` (L95-101) - Bulk allocation
+- `getPort(range?)` (L39-63) - Primary allocation method with fallback logic
+- `releasePort(port)` (L69-71) - Returns port to available pool
+- `reset()` (L76-78) - Clears all allocations
+- `isPortInUse(port)` (L85-87) - Port status checker
+- `getPorts(count, range?)` (L95-101) - Bulk port allocation
 
 ### Singleton Export (L104-107)
-- `portManager` - Default singleton instance for global test use
+Exports single instance `portManager` for global test coordination.
 
-## Architecture Patterns
-- **Singleton Pattern**: Single global instance prevents allocation conflicts
-- **Range-based Allocation**: Segregates port usage by test type
-- **Fallback Strategy**: Falls back to scanning full 1000-port range if preferred range exhausted
-- **State Tracking**: Set-based tracking for O(1) port status checks
+## Allocation Strategy
+1. **Range-based**: Attempts allocation within specified test type range
+2. **Fallback**: If range exhausted, searches entire 1000-port space (L54-59)
+3. **Error handling**: Throws if no ports available in 1000-port window (L62)
 
-## Critical Behavior
-- Port allocation is **not thread-safe** - assumes single-threaded test execution
-- Range calculation: `basePort + rangeOffset` determines starting port
-- Fallback range spans 1000 ports (5679-6678) when preferred ranges exhausted
-- Throws error if all 1000 fallback ports are allocated
+## Architecture Notes
+- Thread-safe for single process (Set operations)
+- No persistence - state resets between process restarts
+- Conservative 1000-port search limit prevents infinite loops
+- Range sizes hardcoded to 100 ports each in constructor

@@ -1,27 +1,21 @@
 # packages/adapter-rust/vitest.config.ts
 @source-hash: fe397d6a657d0a8a
-@generated: 2026-02-09T18:14:57Z
+@generated: 2026-02-10T00:41:42Z
 
-## Purpose
-Vitest configuration file for the `adapter-rust` package, setting up testing environment with TypeScript support and module resolution.
+**Purpose**: Vitest configuration for the adapter-rust package, defining test environment settings, file patterns, and module resolution.
 
-## Configuration Structure
-- **Main Config Export (L4-23)**: Default Vitest configuration object with test and resolve sections
-- **Test Configuration (L5-16)**: Defines test environment, file patterns, and module aliases
-- **Resolve Configuration (L17-22)**: Sets up module resolution for TypeScript files
+**Key Configuration Sections**:
+- **Test Settings (L5-16)**: Configures Vitest with global test utilities enabled, Node.js environment, and file inclusion patterns for `tests/` and `src/` directories with `.test` or `.spec` extensions
+- **Module Aliases (L10-15, L19-21)**: Defines path resolution for `.js` extension stripping (L12) and workspace dependency `@debugmcp/shared` pointing to `../shared/src/index.ts` (L14, L20)
+- **Resolution Configuration (L17-22)**: Sets supported file extensions (`.ts`, `.js`, `.json`, `.node`) and duplicates alias configuration
 
-## Key Settings
-- **Test Environment (L7)**: Node.js environment for server-side testing
-- **File Patterns (L8)**: Includes test files in `tests/` and `src/` directories with `.test.ts` or `.spec.ts` extensions
-- **Exclusions (L9)**: Excludes `node_modules` and `dist` directories from test discovery
-- **JS Extension Handling (L12)**: Regex alias to strip `.js` extensions from imports, enabling TypeScript imports with JS extensions
-- **Workspace Alias (L14, L20)**: Maps `@debugmcp/shared` to local shared package source for development
+**Dependencies**:
+- `vitest/config` for configuration utilities
+- `path` for cross-platform path resolution
+- Workspace dependency on `@debugmcp/shared` package
 
-## Dependencies
-- **vitest/config**: Vitest configuration utilities
-- **path**: Node.js path module for resolving workspace paths
-
-## Architecture Notes
-- Duplicated alias configuration in both `test.alias` and `resolve.alias` sections ensures consistent module resolution across test and build contexts
-- Extension handling supports TypeScript compilation where `.ts` files are imported with `.js` extensions
-- Workspace-relative path resolution enables local development without published packages
+**Architecture Notes**:
+- Follows monorepo structure with workspace-relative imports
+- Handles TypeScript-to-JavaScript compilation artifacts by stripping `.js` extensions from relative imports
+- Duplicated alias configuration between test and resolve sections ensures consistency across different resolution contexts
+- Excludes standard build artifacts (`node_modules`, `dist`) from test discovery

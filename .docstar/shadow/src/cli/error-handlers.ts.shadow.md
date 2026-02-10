@@ -1,27 +1,37 @@
 # src/cli/error-handlers.ts
 @source-hash: c90bdd6371d3cd4f
-@generated: 2026-02-09T18:14:57Z
+@generated: 2026-02-10T00:41:43Z
 
-**Purpose:** Global error handling setup for CLI applications, providing centralized handling of uncaught exceptions and unhandled promise rejections.
+## Primary Purpose
+Global error handling setup for CLI applications. Provides centralized configuration of Node.js process-level error handlers with structured logging and graceful shutdown capabilities.
 
-**Core Components:**
+## Key Components
 
-- `ErrorHandlerDependencies` interface (L3-6): Defines required dependencies with Winston logger and optional process exit function (defaults to `process.exit`)
-- `setupErrorHandlers()` function (L8-25): Main setup function that registers global error event handlers
+**ErrorHandlerDependencies Interface (L3-6)**
+- Defines dependency injection contract for error handler setup
+- `logger`: Winston logger instance for structured error logging
+- `exitProcess`: Optional process exit function (defaults to `process.exit`)
 
-**Key Functionality:**
+**setupErrorHandlers Function (L8-25)**
+- Main setup function that registers global Node.js error handlers
+- Takes dependencies via injection pattern for testability
+- Configures two critical process event handlers:
+  - `uncaughtException` handler (L11-18): Logs synchronous errors with origin context and structured error details
+  - `unhandledRejection` handler (L20-24): Logs async promise rejections with reason and promise context
+- Both handlers terminate the process with exit code 1 after logging
 
-- **Uncaught Exception Handler** (L11-18): Captures synchronous errors that bubble up to the process level, logs structured error details (name, message, stack), and exits with code 1
-- **Unhandled Rejection Handler** (L20-24): Captures unhandled promise rejections, logs both the rejection reason and the promise object, and exits with code 1
+## Key Dependencies
+- Winston logger for structured error output
+- Node.js process events API
+- Dependency injection pattern for testable process exit handling
 
-**Dependencies:**
-- Winston logger for structured error logging
-- Node.js process events (`uncaughtException`, `unhandledRejection`)
+## Architectural Patterns
+- **Dependency Injection**: Accepts logger and exit function as parameters for testing
+- **Centralized Error Handling**: Single point of configuration for all unhandled errors
+- **Structured Logging**: Consistent error format with metadata fields
+- **Fail-Fast**: Immediate process termination on unhandled errors
 
-**Architectural Patterns:**
-- Dependency injection pattern for testability (injectable `exitProcess` function)
-- Structured logging with error metadata extraction
-- Fail-fast approach - both error types result in immediate process termination
-- Defensive logging strategy with separate log entries for rejection details
-
-**Usage Context:** Typically called once during CLI application startup to establish global error safety nets and ensure errors are logged before process termination.
+## Critical Behavior
+- All unhandled errors result in process termination (exit code 1)
+- Error details are logged before termination
+- Default process.exit behavior can be overridden for testing scenarios

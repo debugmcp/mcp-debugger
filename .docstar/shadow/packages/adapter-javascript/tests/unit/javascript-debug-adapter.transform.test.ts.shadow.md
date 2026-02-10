@@ -1,66 +1,63 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.transform.test.ts
 @source-hash: 66f862cabee28827
-@generated: 2026-02-09T18:14:08Z
-
-This is a comprehensive unit test file for testing the `transformLaunchConfig` method of the `JavascriptDebugAdapter` class, specifically verifying launch configuration transformation logic for JavaScript and TypeScript debugging scenarios.
+@generated: 2026-02-10T00:41:14Z
 
 ## Primary Purpose
-Tests the transformation of debug launch configurations, ensuring proper defaults are applied, TypeScript tooling is detected and configured, and environment variables are handled correctly without mutation.
+Unit tests for the `JavascriptDebugAdapter.transformLaunchConfig` method, validating configuration transformation logic for JavaScript and TypeScript debugging scenarios.
 
-## Test Structure & Key Components
+## Test Structure
+- **Main test suite** (L50-259): `JavascriptDebugAdapter.transformLaunchConfig`
+- **Setup/teardown** (L54-69): Mock clearing, environment variable preservation/restoration
+- **Test adapter instance** (L51-55): Created fresh per test with minimal logger dependencies
 
-**Main Test Suite** (L50-259): `JavascriptDebugAdapter.transformLaunchConfig` 
-- Tests configuration transformation for various JavaScript/TypeScript scenarios
-- Uses beforeEach/afterEach hooks for adapter setup and environment cleanup (L54-69)
+## Key Test Categories
 
-**Mock Setup** (L5-25): 
-- Mocks `config-transformer.js` utilities: `isESMProject`, `hasTsConfigPaths`, `determineOutFiles`
-- Mocks `typescript-detector.js` utility: `detectBinary` 
-- Preserves original implementations while allowing spy functionality
+### Basic JavaScript Configuration (L71-95)
+Tests default configuration transformation for JS files:
+- Sets `type: 'pwa-node'`, `request: 'launch'` 
+- Applies default `sourceMaps: false`, `smartStep: true`
+- Normalizes working directory to program directory
+- Merges environment with `NODE_ENV: 'development'` default
+- Sets default `skipFiles` patterns for Node internals/modules
 
-**Test Dependencies** (L37-44):
-- Minimal `AdapterDependencies` stub with logger interface
-- `norm()` helper function (L46-48) for cross-platform path normalization
+### Source Map Handling (L97-112)
+Validates source map configuration when `sourceMaps: true`:
+- Applies default `outFiles` patterns via `determineOutFiles` mock
+- Sets `resolveSourceMapLocations` excludes
 
-## Key Test Scenarios
+### TypeScript Support Detection (L114-136, L138-152)
+Tests TypeScript binary detection and configuration:
+- **ts-node detection** (L114-136): Enables source maps, adds runtime args for register hooks
+- **tsx priority** (L138-152): Prefers tsx over ts-node when available, no additional hooks needed
 
-**Basic JavaScript Configuration** (L71-95):
-- Verifies default values: `type: 'pwa-node'`, `sourceMaps: false`, `smartStep: true`
-- Tests environment variable handling with `NODE_ENV: 'development'` default
-- Ensures `process.env` immutability during transformation
+### ESM Project Handling (L154-172)
+Tests ESM-specific ts-node configuration:
+- Adds `--loader ts-node/esm` for `.mts` files when `isESMProject` returns true
 
-**Source Maps & OutFiles** (L97-112):
-- Tests automatic outFiles generation when sourceMaps enabled
-- Verifies `resolveSourceMapLocations` configuration
+### Path Resolution (L174-191)
+Tests tsconfig paths integration:
+- Adds `tsconfig-paths/register` hook when `hasTsConfigPaths` returns true
 
-**TypeScript with ts-node** (L114-136):
-- Tests automatic TypeScript detection and configuration
-- Verifies runtime hooks injection (`-r ts-node/register`)
-- Tests sourceMaps auto-enablement
+### User Configuration Preservation (L193-245)
+Validates user-provided settings are preserved:
+- **Runtime args** (L193-207): User args appended after auto-detected hooks
+- **Runtime executable overrides** (L209-235): Respects manual tsx/ts-node settings, prevents duplicates
+- **Output files** (L237-245): User `outFiles` passed through unchanged
 
-**TypeScript with tsx** (L138-152):
-- Tests tsx priority over ts-node when available
-- Verifies no additional hooks needed for tsx runtime
+### Environment Safety (L247-258)
+Ensures process.env isolation during configuration transformation.
 
-**ESM Project Support** (L154-172):
-- Tests ESM loader configuration (`--loader ts-node/esm`) for `.mts` files
-- Uses `isESMProject` mock for project type detection
+## Mock Dependencies
+- **config-transformer.js** (L5-15): `isESMProject`, `hasTsConfigPaths`, `determineOutFiles`
+- **typescript-detector.js** (L17-25): `detectBinary` for tool detection
+- **Adapter dependencies** (L37-44): Minimal logger stub for constructor
 
-**tsconfig-paths Integration** (L174-191):
-- Tests automatic tsconfig-paths/register injection when paths mapping detected
-- Uses `hasTsConfigPaths` mock for configuration detection
+## Utilities
+- **norm() function** (L46-48): Normalizes path separators for cross-platform testing
+- **Environment restoration** (L60-69): Comprehensive process.env cleanup between tests
 
-**Runtime Arguments Handling** (L193-235):
-- Tests preservation and ordering of user-provided runtime arguments
-- Tests deduplication logic to prevent duplicate hooks
-- Verifies behavior with explicit runtime executable overrides
-
-**Environment & Configuration Isolation** (L237-258):
-- Tests user environment variable merging without `process.env` mutation
-- Tests user-provided outFiles preservation
-
-## Critical Patterns
-- Extensive mocking of file system and binary detection utilities
-- Environment state preservation/restoration in test lifecycle
-- Path normalization for cross-platform compatibility
-- Mock function behavior simulation for different toolchain scenarios
+## Key Patterns
+- Extensive mocking of filesystem/binary detection utilities
+- Path normalization for cross-platform compatibility  
+- Environment variable isolation to prevent test pollution
+- Configuration object validation with type casting (`as any`)

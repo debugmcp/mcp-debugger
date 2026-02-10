@@ -1,60 +1,77 @@
 # tests/integration/
-@generated: 2026-02-09T18:16:17Z
+@generated: 2026-02-10T01:19:48Z
 
-## Integration Testing Module
+## Purpose
+Comprehensive integration testing suite for validating end-to-end debugging functionality across multiple programming languages within the debugging adapter system. This directory serves as the primary validation layer for real-world debugging scenarios, ensuring the system works correctly with actual development workflows.
 
-**Primary Purpose:** Comprehensive end-to-end integration testing for the debug session management system. This module validates the complete workflow of debug adapters across different programming languages, ensuring proper integration between core components and language-specific debugging capabilities.
+## Key Components
+- **rust/**: Complete Rust debugging integration test suite covering session lifecycle, breakpoint management, and Cargo project integration
+- Additional language-specific test suites (structure suggests support for multiple language adapters)
 
-### Module Organization & Components
+## Testing Architecture
+### Framework & Infrastructure
+- Built on modern **vitest** testing framework for async test execution
+- Integrates with production dependency injection container for realistic testing
+- Uses temporary directories and dedicated log files for test isolation
+- Employs actual production SessionManager and debugging components
 
-The directory contains language-specific integration test suites organized by programming language:
+### Test Isolation Strategy
+- Temporary file system resources prevent test interference
+- Dedicated debug-level logging for test observation
+- Graceful error handling for missing example projects
+- Sequential state management through shared session identifiers
 
-- **Rust Testing Suite** (`rust/`): Complete integration testing for Rust debugging capabilities, including Cargo project handling, breakpoint management, and session lifecycle validation
+## Integration Points
+### Core System Integration
+- **SessionManager**: Primary orchestration point for debugging session management
+- **Production Dependencies**: Uses actual production dependency container rather than mocks
+- **Language Adapters**: Validates language-specific debugging capabilities and detection
+- **File System**: References example projects in standardized locations (`examples/{language}/`)
 
-Each language module follows consistent testing patterns while accommodating language-specific requirements and project structures.
+### Configuration Management
+- Realistic DAP (Debug Adapter Protocol) settings including stop-on-entry and just-my-code debugging
+- Language-specific configuration validation
+- Project workspace handling (e.g., Cargo for Rust)
 
-### Public API Surface
+## Test Coverage Areas
+### Session Lifecycle
+- Debug session creation, retrieval, and proper cleanup
+- Resource management and teardown validation
+- State persistence across test scenarios
 
-**Test Entry Points:**
-- Language-specific test suites accessible via standard test runners (Vitest)
-- Integration validation for debug session lifecycle management
-- End-to-end testing of debug adapter functionality
+### Language-Specific Features
+- Breakpoint operations with comprehensive error handling
+- Language detection and adapter selection
+- Project structure recognition (build systems, workspaces)
+- Source file mapping and navigation
 
-**Key Testing Capabilities:**
-- Debug session creation, configuration, and termination
-- Language-specific project integration (Cargo for Rust, etc.)
-- Breakpoint setting and management across source files
-- Resource cleanup and state management validation
+### Error Handling & Resilience
+- Graceful degradation when test resources are unavailable
+- Validation of error scenarios and edge cases
+- Recovery from failed debugging operations
 
-### Architecture Integration
+## Public API Surface
+### Test Entry Points
+- Language-specific integration test suites (e.g., `rust-integration.test.ts`)
+- Standardized test patterns for adding new language support
+- Shared utilities for debugging session management
 
-The integration tests validate interactions between core system components:
+### Test Flow Patterns
+- Sequential workflow testing that mirrors real user debugging sessions
+- State-dependent test scenarios building on previous operations
+- Comprehensive validation of debug adapter protocol compliance
 
-- **SessionManager Integration**: Tests the central session orchestrator with real debug adapters
-- **Dependency Container**: Validates production dependency injection and configuration
-- **Language Adapters**: Tests language-specific debug adapter implementations
-- **File System Operations**: Validates cross-platform file and project handling
+## Internal Organization
+### Data Flow
+1. **Setup**: Production dependency container initialization and temporary resource creation
+2. **Execution**: Sequential debugging operations maintaining session state
+3. **Validation**: Comprehensive assertion coverage for each debugging capability
+4. **Cleanup**: Proper resource teardown and temporary file removal
 
-### Testing Strategy & Patterns
+### Conventions
+- Language-specific subdirectories for organized test separation
+- Standardized example project locations for consistent test data
+- Shared session management patterns across language adapters
+- Consistent error handling and logging practices
 
-**Production Fidelity:** Uses actual production dependencies rather than mocks to ensure realistic integration testing and catch real-world compatibility issues.
-
-**Isolation & Reliability:** 
-- Temporary directories and separate logging prevent test interference
-- Graceful degradation ensures tests pass even when example projects are unavailable
-- Proper resource cleanup prevents state leakage between test runs
-
-**Comprehensive Coverage:**
-- Session lifecycle validation (creation → operation → cleanup)
-- Language-specific project integration and debugging features
-- Error handling and edge case scenarios
-- Cross-platform compatibility testing
-
-### Data Flow & Test Execution
-
-1. **Environment Setup**: Creates isolated test environments with production-grade configurations
-2. **Session Management**: Validates debug session creation and configuration through SessionManager
-3. **Language Operations**: Tests language-specific debugging features and project integration
-4. **Cleanup & Validation**: Ensures proper resource management and state cleanup
-
-The module serves as the primary validation layer ensuring the debug session management system functions correctly across different programming languages and environments, providing confidence in production deployments.
+This integration testing directory ensures the debugging system functions correctly in real-world scenarios while providing a reliable foundation for adding support for additional programming languages and debugging features.

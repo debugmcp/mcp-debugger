@@ -1,79 +1,73 @@
 # tests/unit/proxy/dap-proxy-connection-manager.test.ts
 @source-hash: 193b74ad00533e27
-@generated: 2026-02-09T18:14:54Z
+@generated: 2026-02-10T00:41:45Z
 
-## Test Suite for DapConnectionManager
+**Test file for DapConnectionManager** - Comprehensive unit tests for Debug Adapter Protocol (DAP) connection management functionality.
 
-This comprehensive test file validates the `DapConnectionManager` class from the DAP (Debug Adapter Protocol) proxy module. The test suite covers connection management, session initialization, event handling, and graceful disconnection scenarios.
+## Test Structure
+- **Main test suite**: `DapConnectionManager` (L10-772) - Tests core DAP client connection orchestration
+- **Test setup/teardown**: Mock infrastructure with fake timers for retry logic testing (L47-84)
 
-### Test Structure & Setup (L47-84)
+## Key Test Helper Functions
+- `waitForRetries(count)` (L27-32) - Simulates retry timing by advancing fake timers by 200ms intervals
+- `expectDisconnectCleanup()` (L34-38) - Validates proper logging during client disconnection
+- `errorScenarios` (L40-45) - Predefined connection error scenarios for parameterized testing
 
-- **Mock Setup**: Creates comprehensive mocks for `IDapClient`, `IDapClientFactory`, and `ILogger` interfaces
-- **Timer Management**: Uses `vi.useFakeTimers()` to control async retry logic and timeouts
-- **Test Helpers**: 
-  - `waitForRetries()` (L27-32): Advances timers to simulate retry intervals (200ms each)
-  - `expectDisconnectCleanup()` (L34-38): Validates proper disconnect logging
-  - `errorScenarios` (L40-45): Test data for various connection error types
+## Test Categories
 
-### Connection Management Tests (L86-240)
+### Connection Management (`connectWithRetry`, L86-240)
+- **Successful connection** (L87-102) - Tests first-attempt success with proper event handler setup
+- **Retry logic** (L104-123) - Validates exponential backoff with 200ms intervals
+- **Max retry failure** (L125-147) - Tests failure after 60 attempts with proper cleanup
+- **Error handling during connection** (L149-175) - Tests temporary error events during connection phase
+- **Retry count validation** (L195-218) - Tests intermediate retry states and progress tracking
+- **Exception cleanup** (L220-239) - Ensures error handlers are removed on unexpected exceptions
 
-**connectWithRetry Method Testing:**
-- **Success Path** (L87-102): Validates successful first-attempt connection with proper event handler setup
-- **Retry Logic** (L104-123): Tests exponential backoff with 200ms intervals, up to 60 attempts
-- **Failure Scenarios** (L125-147): Verifies proper error handling after maximum retry attempts
-- **Error Event Handling** (L149-175): Tests temporary error handler during connection phase
-- **Edge Cases**: Intermediate retry counts (L195-218), exception cleanup (L220-239)
+### Session Initialization (`initializeSession`, L242-269)
+- Tests DAP initialize request with Python adapter configuration
+- Validates proper client ID formatting: `mcp-proxy-{sessionId}`
 
-### Session Management Tests (L242-317)
+### Event Handler Setup (`setupEventHandlers`, L271-317)
+- Tests conditional registration of DAP event handlers (initialized, output, stopped, etc.)
+- Validates partial handler registration and empty handler object handling
 
-**initializeSession Method** (L242-269):
-- Sends DAP initialize request with standardized client configuration
-- Client ID format: `mcp-proxy-{sessionId}`
-- Fixed adapter configuration for Python debugging
+### Disconnection Logic (`disconnect`, L319-429)
+- **Graceful disconnection** (L329-339) - Default `terminateDebuggee: true` behavior
+- **Custom termination control** (L341-349) - Tests `terminateDebuggee: false` option
+- **Timeout handling** (L351-366) - 1000ms timeout for disconnect requests
+- **Error recovery** (L368-409) - Tests both disconnect request and client.disconnect() failures
+- **Race condition testing** (L411-428) - Validates timing between disconnect completion and timeout
 
-**setupEventHandlers Method** (L271-317):
-- Configures optional event handlers for DAP protocol events
-- Supports: initialized, output, stopped, continued, thread, exited, terminated, error, close
-- Handles partial handler objects gracefully
+### Launch Configuration (`sendLaunchRequest`, L431-478)
+- Tests Python debugger launch with configurable parameters:
+  - `stopOnEntry`, `noDebug`, `args`, `console`, `justMyCode`
 
-### Disconnection Management Tests (L319-429)
+### Breakpoint Management (`setBreakpoints`, L480-709)
+- **Single/multiple breakpoints** (L483-547) - Basic breakpoint setting functionality
+- **Conditional breakpoints** (L549-583) - Tests condition expressions
+- **Edge cases** (L585-664) - Empty arrays, invalid data, large arrays (100+ breakpoints)
+- **Duplicate handling** (L666-695) - Validates all breakpoints sent including duplicates
 
-**disconnect Method Features:**
-- **Graceful Shutdown**: Sends DAP disconnect request with configurable `terminateDebuggee` flag
-- **Timeout Handling**: 1000ms timeout for disconnect requests with fallback cleanup
-- **Error Recovery**: Continues cleanup even if disconnect request fails
-- **Null Safety**: Handles null client references without errors
+### Configuration Completion (`sendConfigurationDone`, L711-731)
+- Tests final DAP setup step with proper logging
 
-### DAP Protocol Operations (L431-731)
+### Concurrency Testing (L733-771)
+- **Concurrent connections** (L734-749) - Multiple simultaneous connection attempts
+- **Rapid disconnect/reconnect** (L751-770) - Tests state management during rapid cycles
 
-**sendLaunchRequest Method** (L431-478):
-- Configures Python program launch with customizable parameters
-- Default settings: `stopOnEntry: true`, `justMyCode: true`, `console: 'internalConsole'`
+## Dependencies
+- **Core class**: `DapConnectionManager` from `../../../src/proxy/dap-proxy-connection-manager.js` (L2)
+- **Interfaces**: `IDapClient`, `IDapClientFactory`, `ILogger` (L3-7)
+- **Protocol**: `@vscode/debugprotocol` for DAP message types (L8)
+- **Test framework**: Vitest with comprehensive mocking capabilities (L1)
 
-**setBreakpoints Method** (L480-709):
-- Supports single/multiple breakpoints with optional conditions
-- Handles edge cases: empty arrays, duplicates, large datasets (100+ breakpoints)
-- Validates both successful and failed breakpoint setting
+## Key Constants Referenced
+- `CONNECT_RETRY_INTERVAL`: 200ms (L29)
+- `INITIAL_CONNECT_DELAY`: 500ms (L93)
+- Disconnect timeout: 1000ms (L363)
+- Max retry attempts: 60 (L137, L142)
 
-**sendConfigurationDone Method** (L711-731):
-- Sends final configuration completion signal to debugger
-
-### Concurrency & State Management (L733-771)
-
-Tests for:
-- **Concurrent Connections**: Multiple simultaneous connection attempts to different ports
-- **Rapid Cycles**: Quick disconnect/reconnect sequences without state corruption
-
-### Key Dependencies
-
-- **Vitest**: Testing framework with mock capabilities
-- **@vscode/debugprotocol**: DAP protocol type definitions
-- **DapConnectionManager**: Main class under test from `../../../src/proxy/dap-proxy-connection-manager.js`
-- **Interfaces**: `IDapClient`, `IDapClientFactory`, `ILogger` from proxy interfaces
-
-### Test Constants
-
-- `CONNECT_RETRY_INTERVAL`: 200ms between connection attempts
-- `INITIAL_CONNECT_DELAY`: 500ms before first connection attempt  
-- `MAX_RETRIES`: 60 connection attempts
-- `DISCONNECT_TIMEOUT`: 1000ms for graceful disconnect
+## Mock Architecture
+- Comprehensive `mockDapClient` with all DAP methods (L11-20, L51-63)
+- Factory and logger mocks for dependency injection testing (L22-24, L65-74)
+- Fake timers for deterministic async behavior testing (L49, L82)

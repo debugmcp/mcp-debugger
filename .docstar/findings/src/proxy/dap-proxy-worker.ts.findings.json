@@ -1,0 +1,31 @@
+{
+  "source": "src/proxy/dap-proxy-worker.ts",
+  "source_hash": "c35edafb986069fb",
+  "generated": "2026-02-10T01:19:16Z",
+  "findings": [
+    {
+      "category": "commented_out_code",
+      "line_start": 728,
+      "line_end": 730,
+      "severity": "warning",
+      "description": "Multi-line commented out catch block with 'ignore pause errors' comment",
+      "suggestion": "Remove the commented catch block or convert the comment to proper documentation explaining why pause errors are intentionally ignored"
+    },
+    {
+      "category": "commented_out_code",
+      "line_start": 733,
+      "line_end": 735,
+      "severity": "warning",
+      "description": "Multi-line commented out catch block with 'ignore threads errors' comment",
+      "suggestion": "Remove the commented catch block or convert the comment to proper documentation explaining why threads errors are intentionally ignored"
+    },
+    {
+      "category": "commented_out_code",
+      "line_start": 739,
+      "line_end": 741,
+      "severity": "warning",
+      "description": "Multi-line commented section with 'nothing to unsubscribe' in finally block",
+      "suggestion": "Remove the commented section or convert to proper documentation explaining why no cleanup is needed in the finally block"
+    }
+  ]
+}

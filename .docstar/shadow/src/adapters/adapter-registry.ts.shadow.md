@@ -1,49 +1,53 @@
 # src/adapters/adapter-registry.ts
-@source-hash: 227bfef794c0cf9b
-@generated: 2026-02-09T18:15:05Z
+@source-hash: 0f58642e0abc96d7
+@generated: 2026-02-10T01:19:06Z
 
-**Purpose**: Central registry for managing debug adapter factories and instances with lifecycle management, dynamic loading, and event emission.
+**Purpose**: Central registry for managing debug adapter factories and active adapter instances. Provides lifecycle management including registration, creation, tracking, and disposal with configurable auto-dispose timeout and instance limits.
 
-**Core Classes**:
-- `AdapterRegistry` (L37-389): Main registry implementation extending EventEmitter, manages adapter factories and active instances
-- Singleton pattern via `getAdapterRegistry()` (L399-403) and `resetAdapterRegistry()` (L409-415)
-
-**Key Dependencies**:
-- `@debugmcp/shared`: Core interfaces and error types (L7-18)
-- `AdapterLoader` (L20-21): Handles dynamic adapter loading
-- `createProductionDependencies` (L343): Runtime dependency injection
+**Core Architecture**:
+- `AdapterRegistry` class (L37-387) extends EventEmitter, implements `IAdapterRegistry`
+- Singleton pattern via `getAdapterRegistry()` (L397-402) and `resetAdapterRegistry()` (L407-414)
+- Maps for tracking: factories (L38), activeAdapters (L39), disposeTimers (L41)
+- Optional dynamic adapter loading via `AdapterLoader` (L42)
 
 **Configuration**:
-- `DEFAULT_CONFIG` (L26-32): Validation, override protection, instance limits, auto-disposal with 5min timeout
-- Constructor supports dynamic loading via `enableDynamicLoading` flag or `MCP_CONTAINER` env var (L46-54)
+- `DEFAULT_CONFIG` (L26-32): validateOnRegister=true, allowOverride=false, maxInstancesPerLanguage=10, autoDispose=true, autoDisposeTimeout=5min
+- Dynamic loading enabled via `enableDynamicLoading` config or `MCP_CONTAINER` env var (L50-53)
 
-**Core Operations**:
-- `register()` (L59-76): Factory registration with validation and duplicate protection
-- `unregister()` (L81-103): Factory removal with active adapter cleanup
-- `create()` (L108-169): Adapter instantiation with dynamic loading fallback, instance limits, and lifecycle tracking
-- `disposeAll()` (L296-324): Complete registry cleanup with error handling
+**Key Methods**:
 
-**Language Support**:
-- `getSupportedLanguages()` (L174-176): Returns registered languages
-- `listLanguages()` (L225-254): Includes dynamically available adapters when enabled
-- `listAvailableAdapters()` (L259-291): Detailed metadata with installation status
+**Registration Management**:
+- `register(language, factory)` (L59-76): Validates factory if configured, checks duplicates, emits 'factoryRegistered'
+- `unregister(language)` (L81-103): Disposes all active adapters for language, cleans up timers, emits 'factoryUnregistered'
+
+**Adapter Creation**:
+- `create(language, config)` (L108-169): Core creation method with dynamic loading fallback, instance limit enforcement, auto-dispose setup
+- `createDependencies(config)` (L340-354): Creates production dependencies with logger, fileSystem, environment, etc.
+
+**Discovery & Metadata**:
+- `getSupportedLanguages()` (L174-176): Returns registered factory keys
+- `listLanguages()` (L225-254): Combines registered + dynamically available adapters
+- `listAvailableAdapters()` (L259-291): Returns detailed metadata with install status
+- `getAdapterInfo(language)` (L188-204): Factory metadata + active instance count
+- `getAllAdapterInfo()` (L209-220): Map of all adapter info
 
 **Lifecycle Management**:
-- Auto-disposal system (L361-380): Monitors adapter state changes, triggers disposal on disconnect/error
-- Active instance tracking with Set-based collections (L38-39, L146-165)
-- Dispose timers for cleanup scheduling (L41, L382-388)
+- `setupAutoDispose(language, adapter)` (L359-378): Monitors state changes, sets dispose timer on disconnect/error
+- `clearDisposeTimer(adapter)` (L380-386): Cancels pending dispose timers
+- `disposeAll()` (L296-324): Cleanup all adapters, timers, and tracking maps
+- `getActiveAdapterCount()` (L329-335): Total active instances across all languages
 
-**Event System**:
-- Emits: `factoryRegistered`, `factoryUnregistered`, `adapterCreated`, `registryDisposed`, `error`
-- Adapter state monitoring for auto-disposal decisions
+**Key Dependencies**:
+- `@debugmcp/shared`: Core interfaces and error types
+- `./adapter-loader.js`: Dynamic adapter loading capability
+- `../container/dependencies.js`: Production dependency injection
 
-**Architecture Patterns**:
-- Factory pattern for adapter creation
-- Observer pattern for lifecycle events  
-- Singleton pattern for global registry access
-- Graceful degradation when dynamic loading fails
+**Events Emitted**:
+- 'factoryRegistered', 'factoryUnregistered', 'adapterCreated', 'registryDisposed', 'error'
 
-**Critical Constraints**:
-- Maximum instances per language configurable (default 10)
-- Factory validation on registration (configurable)
-- Backward compatibility preservation for unit tests via dynamic loading opt-in
+**Critical Behaviors**:
+- Dynamic loading attempts on unknown languages when enabled (L111-126)
+- Instance limit enforcement per language (L129-134) 
+- Auto-dispose on disconnect/error states with configurable timeout (L363-377)
+- Graceful error handling during disposal operations (L91-93, L303-306)
+- Backward compatibility preservation for unit tests via dynamic loading opt-in (L43-54)

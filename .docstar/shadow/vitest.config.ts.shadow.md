@@ -1,50 +1,58 @@
 # vitest.config.ts
 @source-hash: 471e754816d5a15b
-@generated: 2026-02-09T18:15:19Z
+@generated: 2026-02-10T00:42:07Z
 
-**Primary Purpose**: Vitest configuration file for a multi-package TypeScript project with monorepo structure, debugging tools, and MCP (Model Context Protocol) adapter packages.
+## Primary Purpose
 
-**Key Configuration Sections**:
+Vitest configuration for a multi-package debugging framework project, providing comprehensive test environment setup with monorepo support, console output filtering, coverage reporting, and TypeScript/ESM module handling.
 
-**Test Configuration (L5-140)**:
-- `globals: true` (L6) - Enables global test APIs
-- `environment: 'node'` (L7) - Node.js test environment 
-- `setupFiles` (L8) - Points to `./tests/vitest.setup.ts` for test initialization
-- Multi-package test discovery (L10-15) - Includes tests from main project and all packages
-- Standard exclusion patterns (L17-22) for `node_modules` and `dist` directories
+## Key Configuration Sections
 
-**Console Output Management (L29-87)**:
-- `onConsoleLog` function provides sophisticated console filtering
-- Important patterns whitelist (L31-44) - Always shows errors, assertions, and specific test markers
-- Noise patterns blacklist (L50-74) - Filters build tools, debug output, timestamps, and verbose logging
-- Special handling for test files and stderr output
+### Test Environment (L4-139)
+- **globals**: Enables global test functions like `describe`, `it` (L6)
+- **environment**: Node.js runtime for backend testing (L7)
+- **setupFiles**: Loads `./tests/vitest.setup.ts` for test initialization (L8)
+- **include patterns**: Covers main project and packages test files (L10-15)
+- **exclude patterns**: Filters out build artifacts and dependencies (L17-22)
 
-**Performance & Execution (L88-136)**:
-- `fileParallelism: false` (L89) - Disables parallel file execution for cleaner output
-- Single-threaded pool configuration (L130-136) - Critical for process spawning tests
-- 30-second test timeout (L128)
+### Reporting & Output (L24-87)
+- **Conditional reporters**: Dot reporter for CI, default for local development (L24)
+- **Console filtering**: Custom `onConsoleLog` function (L29-87) with sophisticated pattern matching:
+  - **Important patterns**: Test failures, errors, specific test tags (L31-44)
+  - **Noise patterns**: Build tools, debug output, timestamps (L50-74)
+  - **Fallback logic**: Allows test file logs, suppresses stdout info/debug (L81-86)
 
-**Coverage Configuration (L90-127)**:
-- Istanbul provider (L91) with comprehensive reporter setup (L92)
-- Extensive exclusion list (L95-122) covering:
-  - Test files and directories
-  - Type definition files
-  - CLI entry points and process-level code
-  - Mock adapters and proxy processes
-  - Factory patterns and barrel exports
-- `all: false` (L126) - Only tracks imported files to prevent duplicate coverage
+### Performance & Parallelism (L89, L129-136)
+- **fileParallelism**: Disabled for cleaner output (L89)
+- **Single-threaded execution**: Essential for process spawning tests (L132-135)
 
-**Module Resolution (L141-160)**:
-- TypeScript-first resolution with `.js` to `.ts` mapping (L145-148)
-- Monorepo package aliases (L152-158) - Maps `@debugmcp/*` packages to their TypeScript sources
-- Core alias `@` maps to `./src` (L151)
+### Coverage Configuration (L90-127)
+- **Provider**: Istanbul for instrumentation (L91)
+- **Extensive exclusions**: Test files, type definitions, CLI entry points, process-level files (L95-122)
+- **Duplicate prevention**: `all: false` prevents multiple file tracking (L126)
 
-**Dependencies (L162-164)**:
-- Pre-optimizes ESM modules: `@modelcontextprotocol/sdk`, `@vscode/debugadapter`, `@vscode/debugprotocol`
+### Module Resolution (L141-160)
+- **TypeScript support**: Maps `.js` imports to `.ts` files (L145-148)
+- **Monorepo aliases**: Package-scoped imports for `@debugmcp/*` packages (L152-158)
+- **Path resolution**: Absolute paths to source directories
 
-**Architectural Decisions**:
-- Monorepo-aware test discovery across packages
-- Single-threaded execution for process management reliability  
-- Aggressive console noise filtering for debugging workflows
-- TypeScript-centric module resolution with JS compatibility
-- Coverage exclusions reflect architectural boundaries (CLI vs library code)
+### ESM Optimization (L162-164)
+- **Pre-bundling**: Debug adapter SDK and VSCode protocol modules
+
+## Dependencies
+
+- `vitest/config`: Test framework configuration
+- `path`: Node.js path utilities for alias resolution
+
+## Architectural Patterns
+
+- **Monorepo structure**: Supports packages with individual test suites
+- **Console noise reduction**: Sophisticated filtering for debugging framework output
+- **TypeScript-first**: Comprehensive `.js` to `.ts` mapping for import resolution
+- **Single-threaded testing**: Prevents race conditions in process spawning tests
+
+## Critical Constraints
+
+- Must run single-threaded due to process spawning in tests
+- Console filtering is essential for managing debug framework verbosity
+- Coverage excludes CLI and process-level code that requires integration testing

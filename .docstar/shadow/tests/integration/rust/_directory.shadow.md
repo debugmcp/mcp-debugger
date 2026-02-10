@@ -1,47 +1,33 @@
 # tests/integration/rust/
-@generated: 2026-02-09T18:16:03Z
+@generated: 2026-02-10T01:19:34Z
 
-## Rust Integration Testing Module
+## Purpose
+Integration testing directory specifically for validating Rust debugging adapter functionality within the larger debugging system. Provides comprehensive end-to-end testing of Rust debug session lifecycle, breakpoint management, and Cargo project integration.
 
-**Primary Purpose:** Comprehensive integration testing for Rust debugging capabilities within the debug session management system. This module validates the complete end-to-end workflow of the Rust debug adapter, from session creation to breakpoint management.
+## Key Components
+- **rust-integration.test.ts**: Complete integration test suite covering the full Rust debugging workflow from session creation through cleanup
 
-### Module Organization
+## Test Coverage Areas
+- **Session Management**: Creation, retrieval, and proper lifecycle management of Rust debug sessions
+- **Language Integration**: Validation of Rust-specific debugging capabilities and language detection
+- **Breakpoint Operations**: Setting and managing breakpoints in Rust source files with error handling
+- **Cargo Project Support**: Testing integration with Cargo-based Rust projects and workspace handling
+- **Resource Management**: Proper cleanup and teardown of test resources and temporary files
 
-**Core Test Suite** (`rust-integration.test.ts`): The primary entry point containing all integration tests for Rust debugging functionality. The test suite follows a standard lifecycle pattern with setup, execution, and teardown phases to ensure isolated and reliable testing.
+## Testing Architecture
+- **Framework**: Built on vitest testing framework for modern async test execution
+- **Dependencies**: Integrates with production dependency injection container and SessionManager
+- **Isolation**: Uses temporary directories and log files for test data separation
+- **Configuration**: Employs realistic DAP settings (stop on entry, just-my-code debugging)
 
-### Key Components & Data Flow
+## Integration Points
+- **SessionManager**: Core integration point for debugging session orchestration
+- **Production Dependencies**: Uses actual production dependency container for realistic testing
+- **File System**: References example Rust projects (`examples/rust/hello_world/src/main.rs`)
+- **Logging System**: Temporary debug-level logging for test observation
 
-1. **Test Environment Setup**: Creates production-grade dependencies with debug logging and configures SessionManager with temporary directories for complete isolation
-2. **Session Management**: Tests session lifecycle including creation, configuration, and termination using the SessionManager as the central orchestrator
-3. **Language-Specific Testing**: Validates Rust-specific functionality including Cargo project handling and source file debugging
-4. **Breakpoint Operations**: Tests breakpoint setting and management in Rust source files with graceful fallback handling
+## Test Flow Pattern
+Maintains sequential state through shared `sessionId`, creating a realistic debugging session workflow that mirrors actual user interactions with the Rust debugging adapter.
 
-### Public API Surface
-
-- **Integration Test Entry Point**: Main test suite accessible via standard Vitest test runner
-- **Rust Debug Session Validation**: Comprehensive testing of Rust debug adapter functionality
-- **Session Lifecycle Testing**: End-to-end validation of debug session creation, operation, and cleanup
-
-### Architecture Dependencies
-
-The module integrates with core system components:
-- **SessionManager**: Central session lifecycle management from the main application
-- **Dependencies Container**: Production dependency injection system
-- **Shared Types**: Language enumeration (`DebugLanguage.RUST`) from shared package
-- **File System Operations**: Cross-platform path and temporary directory handling
-
-### Testing Patterns & Conventions
-
-- **Isolation Strategy**: Uses temporary directories and separate logging to prevent test interference
-- **Graceful Degradation**: Tests pass even when example Rust projects are unavailable, ensuring CI/CD reliability
-- **State Management**: Maintains session state across test cases while ensuring proper cleanup
-- **Production Fidelity**: Uses actual production dependencies rather than mocks for realistic integration testing
-
-### Critical Test Scenarios
-
-1. **Basic Session Creation**: Validates Rust debug session instantiation and configuration
-2. **Project Integration**: Tests integration with Cargo-based Rust projects
-3. **Breakpoint Management**: Validates setting breakpoints in Rust source files
-4. **Session Cleanup**: Ensures proper resource management and session termination
-
-The module serves as the definitive validation suite for Rust debugging capabilities, ensuring the debug adapter functions correctly within the broader debug session management ecosystem.
+## Error Handling Strategy
+Implements graceful degradation for missing test files and optional scenarios, ensuring tests remain stable even when example projects are unavailable while still validating core functionality.

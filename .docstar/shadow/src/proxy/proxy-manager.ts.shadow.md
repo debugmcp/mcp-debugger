@@ -1,90 +1,73 @@
 # src/proxy/proxy-manager.ts
 @source-hash: 27f6b0410b203d31
-@generated: 2026-02-09T18:15:15Z
+@generated: 2026-02-10T00:42:03Z
 
-## ProxyManager - Debug Adapter Protocol Proxy Process Controller
+## Purpose
 
-Core orchestrator for spawning and managing debug proxy child processes that bridge between DAP clients and debug adapters.
+ProxyManager orchestrates spawning and communication with external debug proxy processes. It acts as a bridge between debug clients and language-specific debugger adapters, managing process lifecycle, DAP (Debug Adapter Protocol) message routing, and adapter launch barriers.
 
-### Primary Components
+## Key Components
 
-**ProxyManager Class (L125-1047)**: Main implementation extending EventEmitter
-- Manages proxy process lifecycle (spawn, init, cleanup)
-- Routes DAP requests/responses between client and proxy
-- Handles adapter-specific launch barriers and dry-run operations
-- Maintains pending request tracking and thread state
+### Interfaces
+- **ProxyManagerEvents** (L30-46): Event contract defining DAP lifecycle events (stopped, continued, terminated), proxy status events (initialized, error, exit), and custom events (dry-run-complete, adapter-configured)
+- **IProxyManager** (L51-73): Main interface extending EventEmitter with typed event methods, DAP request handling, and dry-run state queries
 
-**Key Interfaces**:
-- `IProxyManager (L51-73)`: Contract defining proxy management operations
-- `ProxyManagerEvents (L30-46)`: Typed event definitions for DAP lifecycle, proxy status, and errors
+### Message Types
+- **ProxyStatusMessage** (L76-82): Union type for proxy lifecycle status updates with session tracking
+- **ProxyDapEventMessage** (L84-90): DAP event forwarding from proxy to client
+- **ProxyDapResponseMessage** (L92-101): DAP command response with success/failure indication
+- **ProxyMessage** (L110): Discriminated union of all proxy message types
 
-### Critical State Management
+### Core Implementation
+**ProxyManager** (L125-1047): Concrete EventEmitter implementation managing:
+- **Process Management**: Spawning proxy via IProxyProcessLauncher, handling lifecycle events
+- **DAP Communication**: Request/response correlation using UUID requestIds, timeout handling (35s default)
+- **State Synchronization**: Dual state management with functional core (dapState) and imperative local state
+- **Adapter Integration**: Optional IDebugAdapter for environment validation and executable resolution
 
-**Process State (L126-154)**:
-- `proxyProcess`: Active child process handle  
-- `sessionId`: Unique session identifier
-- `currentThreadId`: Active debugging thread
-- `pendingDapRequests`: Map of outstanding DAP requests with Promise resolvers
-- `dapState`: Functional core state mirror for observability
+## Critical Methods
 
-**Lifecycle Flags**:
-- `isInitialized`: Proxy ready for DAP communication
-- `isDryRun`: Operating in command validation mode only
-- `dryRunCompleteReceived`: Dry run execution completed
-- `adapterConfigured`: Debug adapter successfully launched
+**start()** (L166-298): 
+- Validates configuration and spawns proxy process
+- Sets up event handlers and sends initialization command with retry logic (5 attempts)
+- Waits for 'initialized' or 'dry-run-complete' events with 30s timeout
 
-### Key Operations
+**sendDapRequest()** (L345-429):
+- Correlates requests using UUID with timeout handling
+- Integrates AdapterLaunchBarrier for complex launch sequences
+- Manages functional core state mirroring for observability
 
-**start() (L166-298)**: 
-- Validates environment and resolves executable paths
-- Spawns proxy process via `IProxyProcessLauncher`
-- Sends initialization command with retry backoff (L526-601)
-- Waits for initialization or dry-run completion with 30s timeout
+**handleProxyMessage()** (L731-823):
+- Routes messages through functional core when available
+- Fast-path DAP event forwarding to prevent missed breakpoints
+- Executes side-effect commands from functional core (logging, events, process control)
 
-**sendDapRequest() (L345-429)**:
-- Routes DAP commands to proxy with unique request IDs
-- Handles adapter launch barriers for complex startup sequences
-- Maintains request/response correlation via `pendingDapRequests` map
-- 35s timeout per request
+## State Management
 
-**Message Processing (L731-823)**:
-- Validates incoming proxy messages via `isValidProxyMessage`
-- Fast-path forwards DAP events to prevent missing breakpoints/output
-- Delegates to functional core (`handleProxyMessage`) for state transitions
-- Executes commands returned by functional core (logging, events, process control)
+**Dual Architecture**:
+- **Imperative State**: Direct ProxyManager fields for immediate access (currentThreadId, isInitialized)
+- **Functional Core**: dapState managed via pure functions from dap-core module for consistency and testing
 
-### Message Protocol Types (L76-110)
+**Request Tracking**:
+- pendingDapRequests Map for Promise resolution/rejection (L129-133)
+- Mirrored in functional core via addPendingRequest/removePendingRequest
 
-**ProxyStatusMessage**: Lifecycle events (init_received, dry_run_complete, adapter_configured, etc.)
-**ProxyDapEventMessage**: Debug events (stopped, continued, terminated, etc.) 
-**ProxyDapResponseMessage**: DAP command responses with success/error status
-**ProxyErrorMessage**: Error conditions from proxy process
+## Dependencies
 
-### Dependencies
+**External**: @vscode/debugprotocol for DAP types, uuid for request correlation, EventEmitter for pub/sub
+**Internal**: dap-core functional state management, shared interfaces (IFileSystem, ILogger, IProxyProcessLauncher), ProxyConfig for launch parameters
 
-**External**: 
-- `@vscode/debugprotocol` for DAP types
-- `@debugmcp/shared` for abstractions (IDebugAdapter, IProxyProcessLauncher, etc.)
+## Runtime Environment
 
-**Internal**:
-- `../dap-core/index.js` for functional state management
-- `./proxy-config.js` for configuration types
-- `../utils/error-messages.js` for standardized error text
+**ProxyRuntimeEnvironment** (L112-120): Abstraction for module resolution and working directory, enabling testability through dependency injection with DEFAULT_RUNTIME_ENVIRONMENT fallback.
 
-### Architecture Patterns
+## Error Handling
 
-**Hybrid Imperative/Functional**: Maintains imperative shell for event handling while delegating state transitions to pure functional core
+- Comprehensive exit detail capture (L142-149) with stderr buffering during initialization
+- Graceful shutdown with 5s timeout before SIGKILL (L300-343)  
+- Request timeout management with cleanup on proxy exit
+- Retry logic for initialization commands with exponential backoff
 
-**Event-Driven**: Extensive use of EventEmitter for loose coupling between proxy lifecycle, DAP events, and client consumers
+## Thread Management
 
-**Error Resilience**: Comprehensive error handling with retry logic, timeouts, graceful degradation, and stderr capture for diagnostics
-
-**Resource Management**: Careful cleanup of pending requests, barriers, and process handles during shutdown
-
-### Critical Invariants
-
-- Only one proxy process per manager instance
-- All DAP requests must have unique UUIDs for correlation
-- Thread IDs are opportunistically captured from DAP responses
-- Dry run mode exits after command validation without persistent debugging
-- Launch barriers coordinate complex adapter startup sequences
+Opportunistic thread ID capture from 'threads' DAP responses (L847-859) and 'stopped' events (L875-884) for maintaining current debugging context.

@@ -1,32 +1,29 @@
 # packages/adapter-java/src/index.ts
 @source-hash: 71da5a1378549f96
-@generated: 2026-02-09T18:14:28Z
+@generated: 2026-02-10T00:41:19Z
 
-## Java Debug Adapter Package Entry Point
+**Primary Purpose:** Entry point and public API facade for the Java Debug Adapter package within the MCP Debugger ecosystem. Consolidates all public exports for external consumption by the adapter registry system.
 
-This file serves as the main export module for the Java debug adapter within the MCP (Model Context Protocol) debugger system. It orchestrates the public API surface for Java debugging capabilities.
+**Key Exports:**
+- `JavaAdapterFactory` (L9): Factory class for creating Java debug adapter instances, enables dynamic loading by the adapter registry
+- `JavaDebugAdapter` (L10): Main adapter implementation for Java debugging sessions
+- `JavaLaunchConfig` type (L11): TypeScript type definition for Java launch configuration parameters
+- Java utilities (L12): Utility functions for Java-specific operations (wildcard export)
+- `JdbParser` (L13): Parser for JDB (Java Debugger) output and command responses
+- JDB event types (L14-19): TypeScript interfaces for debugger events (`JdbStoppedEvent`, `JdbStackFrame`, `JdbVariable`, `JdbThread`)
+- `JdbWrapper` (L20): Wrapper class for managing JDB process interactions
+- JDB configuration types (L21): TypeScript interfaces for JDB configuration (`JdbConfig`, `JdbBreakpoint`)
 
-### Core Components
+**Architecture Pattern:** Barrel export pattern - this file serves as the single entry point that re-exports the package's public API from various internal modules. Follows modular organization with separation of concerns:
+- Main adapter logic in `java-debug-adapter.js`
+- Factory pattern in `java-adapter-factory.js` 
+- Utility functions organized under `utils/` directory
+- Clean separation between implementation classes and TypeScript type definitions
 
-**Primary Exports:**
-- `JavaAdapterFactory` (L9) - Factory class for creating Java debug adapter instances, enabling dynamic loading by the adapter registry
-- `JavaDebugAdapter` (L10) - Main adapter implementation handling Java debugging sessions
-- `JavaLaunchConfig` type (L11) - TypeScript interface defining configuration options for launching Java debug sessions
+**Dependencies:** All exports reference relative imports from internal modules, indicating this package is self-contained with no external runtime dependencies exposed at the API level.
 
-**Utility Modules:**
-- Java utilities (L12) - General-purpose Java debugging helper functions and constants
-- `JdbParser` (L13) - Parser for JDB (Java Debugger) command output and responses
-- `JdbWrapper` (L20) - Wrapper class providing higher-level interface to the JDB command-line tool
-
-**Type Definitions:**
-- `JdbStoppedEvent`, `JdbStackFrame`, `JdbVariable`, `JdbThread` (L14-19) - Core data structures representing debugging state from JDB parser
-- `JdbConfig`, `JdbBreakpoint` (L21) - Configuration and breakpoint management types for JDB wrapper
-
-### Architecture Pattern
-
-Follows a layered export strategy where the index acts as a facade, exposing:
-1. High-level adapter interfaces (factory + adapter)
-2. Mid-level parsing and wrapping utilities
-3. Low-level type definitions for debugging primitives
-
-The module is designed for consumption by a debugger registry system that dynamically loads language-specific adapters.
+**Critical Design Decisions:**
+- Uses `.js` extensions in imports for ES module compatibility
+- Separates concrete implementations from TypeScript types in exports
+- Modular utility organization under dedicated `utils/` namespace
+- Factory pattern enables dependency injection and dynamic instantiation

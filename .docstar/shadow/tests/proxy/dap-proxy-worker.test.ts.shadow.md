@@ -1,96 +1,73 @@
 # tests/proxy/dap-proxy-worker.test.ts
-@source-hash: 968383526f1d4db7
-@generated: 2026-02-09T18:15:27Z
+@source-hash: e385240be7cb7bf4
+@generated: 2026-02-10T01:19:12Z
 
-## Purpose
-Comprehensive test suite for `DapProxyWorker` class that validates the refactored implementation using the Adapter Policy pattern. Tests all core functionality including state management, policy selection, dry run mode, command handling, and error scenarios.
+## Primary Purpose
+Comprehensive test suite for `DapProxyWorker` class that validates the Debug Adapter Protocol (DAP) proxy implementation using the Adapter Policy pattern. Tests cover initialization, state management, command handling, error scenarios, and policy-specific behavior for JavaScript and Python debugging adapters.
 
-## Test Structure & Key Components
+## Test Structure & Mock Setup
+- **Mock Factory Functions** (L34-90): Creates mock implementations for `ILogger`, `IFileSystem`, `IProcessSpawner`, `IDapClient`, and message sender
+- **Test Fixture Setup** (L99-133): Configures test dependencies with mocked services and proper cleanup handling
+- **afterEach Cleanup** (L117-133): Manages worker termination and timer cleanup to prevent test interference
 
-### Mock Factories (L34-90)
-- `createMockLogger()` (L34): Creates ILogger mock with all logging methods
-- `createMockFileSystem()` (L41): Mocks filesystem operations with default success responses  
-- `createMockProcessSpawner()` (L46): Mocks process spawning returning fake ChildProcess
-- `createMockDapClient()` (L56): Complex mock extending EventEmitter with DAP client interface
-- `createMockMessageSender()` (L88): Simple message sender mock
+## Key Test Categories
 
-### Test Setup & Teardown (L99-133)
-- `beforeEach` (L99): Initializes fresh mocks and DapProxyWorker instance
-- `afterEach` (L117): Cleanup with timer clearing and worker termination to prevent test interference
+### State Management Tests (L135-173)
+- **Initial State Validation** (L136-138): Verifies `UNINITIALIZED` starting state
+- **State Transitions** (L140-172): Tests initialization flow with dry run mode, validates `TERMINATED` state and exit hook behavior
 
-### Core Test Suites
+### Policy Selection Tests (L175-254)
+- **Python Policy Selection** (L176-199): Tests automatic Python adapter policy when no adapter command provided
+- **JavaScript Policy Selection** (L201-226): Validates js-debug adapter detection and policy assignment
+- **Debugpy Policy Selection** (L228-253): Confirms Python debugpy adapter policy selection
 
-#### State Management Tests (L135-173)
-- Validates initialization state transitions (UNINITIALIZED → INITIALIZING → TERMINATED for dry runs)
-- Tests timeout handling with fake timers
+### Dry Run Mode Tests (L256-308)
+- **Command Reporting** (L257-286): Validates dry run execution and command string generation
+- **Error Scenarios** (L288-307): Tests adapter policy failures during dry run
 
-#### Policy Selection Tests (L175-254)  
-- Verifies automatic adapter policy selection based on script type and adapter commands
-- Tests Python policy selection when no adapter command provided (L176)
-- Tests JavaScript policy for js-debug adapter (L201)
-- Tests Python policy for debugpy adapter (L228)
+### Hook Integration Tests (L310-395)
+- **Trace File Creation** (L326-356): Tests custom trace file factory hook integration
+- **Exit Hook Invocation** (L358-375): Validates exit hook behavior on critical failures
+- **Successful Dry Run** (L377-394): Confirms exit hook is not triggered during successful operations
 
-#### Dry Run Mode Tests (L256-308)
-- Validates dry run execution and command reporting without actual process spawning
-- Tests error cases when adapter policy cannot provide spawn configuration
+### Adapter Workflow Internals (L397-729)
+- **Connection Flow** (L419-470): Tests adapter startup and connection for queueing policies (JavaScript)
+- **Session Initialization** (L472-544): Validates non-queueing policy initialization flow (Python)
+- **Initial Stop Handling** (L546-600): Tests thread detection and pause functionality
+- **Event Propagation** (L602-713): Validates adapter process events and DAP event forwarding
+- **Termination Handling** (L715-728): Tests proper shutdown of client and process components
 
-#### Hook Integration Tests (L310-395)
-- Tests custom trace file factory integration during initialization (L326)
-- Tests custom exit hook invocation on critical failures (L358)
-- Tests that successful dry runs don't trigger exit hooks (L377)
+### DAP Command Handling Tests (L731-847)
+- **Pre-connection Rejection** (L732-773): Validates command rejection before connection establishment
+- **Shutdown State Handling** (L775-814): Tests command rejection during shutdown
+- **Error Propagation** (L816-846): Validates adapter error surfacing through sendRequest failures
 
-#### Adapter Workflow Internals (L397-729)
-- Complex integration tests with nested beforeEach/afterEach for worker lifecycle management
-- Tests `startDebugpyAdapterAndConnect` method behavior for different policies (L419, L472)
-- Tests `ensureInitialStop` timeout handling (L546, L568)
-- Tests adapter process event wiring and DAP event propagation (L602)
-- Tests termination and cleanup workflows (L715)
+### Command Queueing Tests (L849-1003)
+- **JavaScript Adapter Queueing** (L850-922): Tests command queueing behavior for JavaScript debugging
+- **Queue Draining** (L924-976): Validates queued command execution and deferred configurationDone injection
+- **Pre-connect Queue** (L978-1002): Tests command queueing before connection establishment
 
-#### DAP Command Handling Tests (L731-847)
-- Tests command rejection before connection establishment
-- Tests command rejection during shutdown
-- Tests error surfacing from adapter sendRequest failures
+### Timeout & Error Handling (L1005-1174)
+- **Request Timeouts** (L1006-1033): Tests tracked request timeout handling and failure responses
+- **Initialization Errors** (L1035-1105): Validates graceful handling of filesystem and spawn failures
+- **Connection Failures** (L1107-1173): Tests DAP connection error handling and exit behavior
 
-#### JavaScript Adapter Command Queueing (L849-922)
-- Tests command queueing behavior specific to JavaScript debug adapter
-- Validates policy-driven queueing decisions
+### Message Communication Tests (L1176-1233)
+- **Status Messages** (L1177-1201): Validates status message sending during operations
+- **Error Messages** (L1203-1232): Tests error message generation for invalid operations
 
-#### Command Queue Management (L924-1003)
-- Tests queue flushing and deferred configurationDone injection (L925)
-- Tests pre-connect queue draining when connection established (L978)
+### Shutdown Tests (L1235-1268)
+- **Clean Shutdown** (L1236-1246): Validates proper termination and status reporting
+- **Multiple Shutdown Calls** (L1248-1257): Tests idempotent shutdown behavior
+- **Shutdown State Management** (L1259-1267): Validates early return for in-progress shutdowns
 
-#### Timeout Handling (L1005-1033)
-- Tests request timeout tracking and failure response emission using fake timers
+## Key Dependencies
+- **External**: `vitest`, `events.EventEmitter`, `child_process`, `path`
+- **Internal**: `DapProxyWorker`, `GenericAdapterManager`, `DapConnectionManager`, adapter policies
+- **Shared**: `@debugmcp/shared` adapter policy implementations
 
-#### Error Handling (L1035-1174)
-- Tests graceful handling of initialization errors with process.exit behavior
-- Tests adapter spawn failure scenarios
-- Tests DAP connection failure scenarios
-
-#### Message Sending Tests (L1176-1233)
-- Tests status and error message sending patterns
-
-#### Shutdown Tests (L1235-1268)
-- Tests clean shutdown behavior
-- Tests multiple shutdown call handling
-- Tests early return when shutdown already in progress
-
-## Key Testing Patterns
-
-### Mock Process.exit Pattern
-Multiple tests mock `process.exit` to prevent test termination while validating exit code behavior (L890, L1053, etc.)
-
-### Fake Timer Usage  
-Strategic use of `vi.useFakeTimers()` and `vi.advanceTimersByTimeAsync()` for testing timeout scenarios (L141, L569, L1007)
-
-### Complex Worker State Management
-Tests create multiple worker instances and carefully track them for cleanup to prevent test interference (L399, L573, L852)
-
-### Spy and Mock Restoration
-Proper cleanup of spies and mocks in finally blocks to prevent test pollution (L1101, L1143)
-
-## Dependencies & Imports
-- Uses Vitest testing framework with comprehensive mocking capabilities
-- Tests integration with GenericAdapterManager, DapConnectionManager  
-- Validates adapter policies from @debugmcp/shared package (DefaultAdapterPolicy, JsDebugAdapterPolicy, PythonAdapterPolicy)
-- Imports all necessary DAP interface types for payload construction
+## Testing Patterns
+- Extensive use of `vi.useFakeTimers()` for timeout testing
+- Mock process.exit to prevent test termination during error scenarios
+- Proper cleanup with timer clearing and worker termination
+- Event emitter simulation for adapter process and DAP client interactions

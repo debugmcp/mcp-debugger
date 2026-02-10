@@ -1,48 +1,57 @@
 # packages/adapter-rust/tests/rust-adapter.test.ts
 @source-hash: cef19ba59fa0e0de
-@generated: 2026-02-09T18:14:36Z
+@generated: 2026-02-10T00:41:27Z
 
-This file contains comprehensive test suites for the Rust Debug Adapter implementation using Vitest framework.
+**Primary Purpose**: Comprehensive test suite for Rust debug adapter implementation, validating functionality of `RustDebugAdapter` and `RustAdapterFactory` classes through unit tests with mocked dependencies.
 
-## Primary Purpose
-Test coverage for the Rust debugging infrastructure, validating adapter functionality, configuration handling, and factory pattern implementation for Rust debugging within the DebugMCP ecosystem.
+**Core Test Structure**:
+- Test setup with comprehensive mock dependencies (L18-50) including fileSystem, logger, environment, and processLauncher
+- Main test suites: `RustDebugAdapter` (L52-248) and `RustAdapterFactory` (L250-282)
 
-## Key Test Suites
+**Key Test Categories**:
 
-### RustDebugAdapter Tests (L52-248)
-- **Basic Properties** (L60-70): Validates adapter initialization, language identification (DebugLanguage.RUST), and initial state (AdapterState.UNINITIALIZED)
-- **Capabilities** (L72-96): Verifies support for Rust debugging features including conditional breakpoints, function breakpoints, data breakpoints, disassembly, and log points. Explicitly tests that reverse debugging (step back) is NOT supported
-- **buildAdapterCommand** (L98-170): Tests CodeLLDB command construction with TCP mode configuration, error handling for missing executable, and port validation
-- **transformLaunchConfig** (L172-221): Validates launch configuration transformation for explicit program paths and Cargo-based builds, including platform-specific handling for Windows (.exe extension)
-- **Connection Management** (L223-235): Tests adapter connection lifecycle and state transitions
-- **Error Messages** (L237-247): Validates error message translation with helpful user guidance
+**Basic Properties Tests (L60-70)**:
+- Validates adapter language identification as `DebugLanguage.RUST`
+- Verifies initial state as `AdapterState.UNINITIALIZED`
+- Confirms adapter name and readiness status
 
-### RustAdapterFactory Tests (L250-282)
-Tests the factory pattern implementation for creating Rust debug adapters, metadata provision, and environment validation.
+**Capabilities Tests (L72-96)**:
+- Tests supported debug features (conditional breakpoints, function breakpoints, data breakpoints, disassemble request, log points)
+- Validates unsupported features (reverse debugging/step back)
+- Verifies comprehensive capabilities object structure
 
-## Mock Infrastructure (L17-50)
-Comprehensive mock setup for `AdapterDependencies` including:
-- File system operations (read/write/stat/mkdir/etc.)
-- Logger interface
-- Environment variable access
-- Process launching capabilities
+**Command Building Tests (L98-170)**:
+- Tests `buildAdapterCommand()` with TCP mode configuration
+- Validates CodeLLDB executable resolution and command construction
+- Tests error handling for missing CodeLLDB executable and invalid ports
+- Platform-specific environment variable handling (Windows PDB reader)
 
-## Key Dependencies
-- `@debugmcp/shared`: Core types and interfaces (AdapterState, DebugLanguage, DebugFeature, etc.)
-- `../src/rust-debug-adapter.js`: Main adapter implementation
-- `../src/rust-adapter-factory.js`: Factory for adapter creation
-- `vitest`: Testing framework with mocking capabilities
-- `path`: Node.js path utilities for cross-platform file handling
+**Launch Config Transformation Tests (L172-221)**:
+- Tests `transformLaunchConfig()` with explicit program paths
+- Validates Cargo-specific configuration handling (bin, release, build flags)
+- Tests error cases for missing program specification
+- Verifies LLDB protocol transformation
 
-## Testing Patterns
-- Uses Vitest's `vi.fn()` for mocking and `vi.spyOn()` for method stubbing
-- Employs type casting to access private methods for testing (L101, L131, L152)
-- Includes platform-specific test logic for Windows vs Unix systems
-- Mock restoration after each test to prevent state leakage
+**Connection Management Tests (L223-235)**:
+- Validates connect/disconnect lifecycle
+- Tests state transitions between CONNECTED/DISCONNECTED states
 
-## Critical Test Scenarios
-- CodeLLDB executable resolution and command building
-- Cargo project detection and binary path construction
-- TCP port validation and connection management
-- Error handling and user-friendly error message generation
-- Platform-specific behavior (Windows PDB reader, executable extensions)
+**Error Translation Tests (L237-247)**:
+- Tests `translateErrorMessage()` for CodeLLDB and Cargo-specific errors
+- Validates helpful error message generation
+
+**Factory Tests (L250-282)**:
+- Tests `RustAdapterFactory.createAdapter()` with dependency injection
+- Validates factory metadata (language, display name, file extensions)
+- Tests environment validation functionality
+
+**Key Dependencies**:
+- Vitest testing framework for mocking and assertions
+- `@debugmcp/shared` types (AdapterState, DebugLanguage, DebugFeature, etc.)
+- Core adapter classes from `../src/` modules
+
+**Testing Patterns**:
+- Extensive use of Vitest mocks (`vi.fn()`, `vi.spyOn()`)
+- Mock restoration pattern in test cleanup
+- Type casting for testing private methods
+- Platform-specific conditional testing (Windows vs Unix)

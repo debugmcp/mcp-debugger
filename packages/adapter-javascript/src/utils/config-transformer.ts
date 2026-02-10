@@ -143,8 +143,9 @@ export function hasTsConfigPaths(
 }
 
 /**
- * Back-compat placeholder: returns config unchanged.
- * Kept to satisfy existing exports until consumers migrate to specific helpers.
+ * Identity transform for launch configuration.
+ * Specific transformation logic is handled by individual helper functions
+ * (determineOutFiles, isESMProject, hasTsConfigPaths) rather than this catch-all.
  */
 export function transformConfig(config: Record<string, unknown>): Record<string, unknown> {
   return { ...config };

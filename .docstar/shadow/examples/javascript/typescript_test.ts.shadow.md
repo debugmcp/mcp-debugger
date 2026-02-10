@@ -1,49 +1,60 @@
 # examples/javascript/typescript_test.ts
 @source-hash: 65709a1a6276d582
-@generated: 2026-02-09T18:14:56Z
+@generated: 2026-02-10T00:41:44Z
 
-## Purpose
-TypeScript debugging test file designed to exercise MCP debugger capabilities across various language features including source maps, breakpoints, variable inspection, and stack traces.
+## Primary Purpose
 
-## Key Components
+TypeScript test file specifically designed for MCP debugger testing. Provides comprehensive scenarios for testing source map resolution, breakpoints, variable inspection, and TypeScript-specific debugging features.
 
-### Core Types & Interfaces
-- **Person interface (L7-11)**: Basic test type with optional email field for type inspection testing
-- **TodoStatus type (L60)**: Union type for status values (`'pending' | 'completed' | 'cancelled'`)
-- **Todo interface (L62-68)**: Complex data structure with Record metadata for advanced variable inspection
+## Key Types and Interfaces
 
-### Main Classes
-- **Calculator class (L14-32)**: Test harness for method debugging
-  - `add()` method (L17-21): Addition with history tracking, breakpoint at L18
-  - `multiply()` method (L23-27): Multiplication with history tracking, breakpoint at L24
-  - `getHistory()` method (L29-31): Returns readonly view of operation history
-  - Private `history` array for state inspection testing
+- `Person` (L7-11): Basic interface with optional email field for type inspection testing
+- `TodoStatus` (L60): Union type representing todo item states
+- `Todo` (L62-68): Complex interface with nested metadata using Record type
 
-### Core Functions
-- **swap<T> function (L35-41)**: Generic function for testing type parameter handling, breakpoint at L37
-- **fetchData() async function (L44-57)**: Promise-based operation for async debugging, breakpoint at L50
-- **throwTestError() function (L138-140)**: Error generator for stack trace testing
-- **main() function (L71-136)**: Test orchestrator executing all debugging scenarios
+## Core Classes
 
-### Debugging Test Points
-The file contains 7 strategically placed breakpoint locations:
-1. L18: Calculator.add() result calculation
-2. L24: Calculator.multiply() result calculation  
-3. L37: Generic function variable assignment
-4. L50: Async function object construction
-5. L77: Method call on class instance
-6. L122: Complex data structure iteration
-7. L132: Error handling catch block
+- `Calculator` (L14-32): Test class for method stepping and private field inspection
+  - `history` field for state tracking
+  - `add()` method (L17-21): Addition with breakpoint at L18
+  - `multiply()` method (L23-27): Multiplication with breakpoint at L24
+  - `getHistory()` method (L29-31): Returns readonly array view
 
-### Test Scenarios
-1. **Class debugging**: Instance creation, method calls, private field inspection
-2. **Generic type handling**: Template function with multiple type instantiations
-3. **Async/await debugging**: Promise resolution and async stack traces
-4. **Complex data structures**: Nested objects, arrays, Record types, union types
-5. **Error handling**: Exception throwing and stack trace inspection
+## Key Functions
 
-### Architectural Patterns
-- Comprehensive debugger feature coverage in a single executable file
-- Strategic breakpoint placement for step-through debugging
-- Mixed sync/async operations for concurrent debugging scenarios
-- Graduated complexity from simple arithmetic to complex nested structures
+- `swap<T>()` (L35-41): Generic function for testing generic type handling and variable swapping, includes console logging and breakpoint at L37
+- `fetchData()` (L44-57): Async function simulating API calls, returns Promise<Person>, breakpoint at L50 for object creation
+- `throwTestError()` (L138-140): Error throwing function for stack trace testing
+- `main()` (L71-136): Orchestrates all test scenarios in sequence
+
+## Test Scenarios
+
+1. **Class Testing** (L75-80): Calculator instantiation and method calls, breakpoint at L77
+2. **Generic Functions** (L83-87): Tests swap function with different types
+3. **Async Operations** (L90-93): Multiple async calls for Promise debugging
+4. **Complex Data** (L96-126): Todo array with nested objects, breakpoint at L122 in loop
+5. **Error Handling** (L129-133): Exception throwing and catching, breakpoint at L132
+
+## Strategic Breakpoint Locations
+
+- L18: Method execution and result calculation
+- L24: Alternative method path
+- L37: Generic function variable assignment  
+- L50: Async object construction
+- L77: Class method invocation
+- L122: Loop iteration with complex data
+- L132: Exception handling
+
+## Dependencies
+
+- Uses native TypeScript features: generics, interfaces, async/await
+- Console API for logging
+- Promise API for async simulation
+- Date API for metadata timestamps
+
+## Architectural Decisions
+
+- Structured as progressive complexity: simple types → classes → generics → async → complex data → errors
+- Each test section isolated with clear console output
+- Breakpoint comments explicitly mark intended debugging points
+- Uses TypeScript-specific features (readonly, optional properties, union types) for comprehensive testing

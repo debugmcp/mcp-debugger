@@ -1,38 +1,34 @@
 # tests/unit/shared/adapter-policy-default.test.ts
 @source-hash: 9d0687523d58f921
-@generated: 2026-02-09T18:14:42Z
+@generated: 2026-02-10T00:41:34Z
 
-**Purpose:** Unit test suite for the DefaultAdapterPolicy class, ensuring it provides safe no-op behaviors as a fallback adapter policy implementation.
+## Test Suite: DefaultAdapterPolicy Unit Tests
 
-**Test Structure:**
-- Main test file for DefaultAdapterPolicy from shared interfaces package
-- Uses Vitest testing framework (L1)
-- Two primary test cases covering different aspects of the default policy
+**Purpose**: Validates the behavior of the `DefaultAdapterPolicy` class, ensuring it provides safe no-op implementations for all adapter policy interface methods.
 
-**Test Coverage:**
+### Test Structure
 
-**Safe No-op Behaviors Test (L5-19):**
-- Verifies default policy properties and methods return safe defaults
-- Tests static properties: name='default', supportsReverseStartDebugging=false, childSessionStrategy='none'
-- Validates method behaviors:
-  - `shouldDeferParentConfigDone()` returns false (L9)
-  - `buildChildStartArgs()` throws exception for safety (L10)
-  - `isChildReadyEvent()` returns false (L11)
-  - Configuration methods return minimal objects (L12-18)
-  - Path resolution passes through unchanged (L13)
+**Main Describe Block** (L4-34): `DefaultAdapterPolicy` test suite containing two behavioral test cases.
 
-**State Management Test (L21-33):**
-- Tests initial state creation and tracking via `createInitialState()` (L22)
-- Verifies default state: initialized=false, configurationDone=false (L23-24)
-- Tests state query methods return false for uninitialized state (L25-26)
-- Confirms optional state update methods are no-ops when called (L28-32)
+### Test Cases
 
-**Key Dependencies:**
-- DefaultAdapterPolicy from '../../../packages/shared/src/interfaces/adapter-policy.js' (L2)
-- Vitest testing utilities (L1)
+**"exposes safe no-op behaviors"** (L5-19): Comprehensive verification of all `DefaultAdapterPolicy` static methods and properties:
+- **Basic Properties** (L6-8): Validates `name`, `supportsReverseStartDebugging`, and `childSessionStrategy` 
+- **Configuration Methods** (L9, 12, 14, 17-18): Tests `shouldDeferParentConfigDone`, `getDapAdapterConfiguration`, `getDebuggerConfiguration`, `getInitializationBehavior`, and `getDapClientBehavior`
+- **Child Session Handling** (L10-11): Verifies `buildChildStartArgs` throws exception and `isChildReadyEvent` returns false
+- **Utility Methods** (L13, 15-16): Tests `resolveExecutablePath`, `requiresCommandQueueing`, and `matchesAdapter`
 
-**Test Pattern:**
-- Comprehensive coverage of all public methods and properties
-- Focuses on safety guarantees - no destructive operations
-- Uses type assertion (`as any`) for event testing (L11)
-- Tests both synchronous returns and exception throwing behavior
+**"tracks state transitions via createInitialState"** (L21-33): Tests state management functionality:
+- **Initial State** (L22-26): Verifies `createInitialState` returns proper default state with `initialized` and `configurationDone` set to false
+- **State Queries** (L25-26): Tests `isInitialized` and `isConnected` methods return false for initial state
+- **State Updates** (L28-32): Validates that `updateStateOnCommand` and `updateStateOnEvent` are no-op implementations
+
+### Dependencies
+- **Testing Framework**: Vitest (`describe`, `it`, `expect`) (L1)
+- **System Under Test**: `DefaultAdapterPolicy` from shared interfaces (L2)
+
+### Key Patterns
+- Uses static method testing pattern throughout
+- Employs type assertion `as any` for mock event objects (L11)
+- Tests both positive behaviors and expected failures (throwing exceptions)
+- Validates that optional chaining operators work correctly for potentially undefined methods (L28, 31)

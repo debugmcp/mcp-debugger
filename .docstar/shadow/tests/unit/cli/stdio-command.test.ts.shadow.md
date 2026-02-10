@@ -1,39 +1,46 @@
 # tests/unit/cli/stdio-command.test.ts
 @source-hash: ee0861db5a04e08b
-@generated: 2026-02-09T18:14:41Z
+@generated: 2026-02-10T00:41:34Z
 
-## Purpose
-Unit test suite for the `handleStdioCommand` function from the CLI module. Tests the STDIO mode server startup flow, including success scenarios, error handling, and dependency injection patterns.
+## Test Suite for STDIO Command Handler
 
-## Test Structure
-- **Main describe block** (L8): "STDIO Command Handler" - comprehensive test coverage for CLI stdio command
-- **Mock setup** (L14-38): Creates mocks for logger, server factory, exit process, and DebugMcpServer instance
-- **beforeEach** (L14-38): Reinitializes all mocks with proper structure before each test
+**Primary Purpose:** Unit tests for the `handleStdioCommand` function that validates server startup behavior in STDIO mode with comprehensive mocking and error handling scenarios.
 
-## Key Test Cases
+### Test Architecture (L8-150)
+- **Test Subject:** `handleStdioCommand` from `../../../src/cli/stdio-command.js` (L2)
+- **Dependencies:** Vitest testing framework, Winston logger types, DebugMcpServer (L1-4)
+- **Mock Strategy:** Server factory pattern with dependency injection for testability (L6, L10, L34)
 
-### Success Path Testing
-- **Basic stdio startup** (L40-72): Verifies successful server initialization with log level setting, server factory invocation, and startup logging
-- **Optional parameters handling** (L74-92): Tests behavior when log level is not provided, ensuring existing logger configuration is preserved
+### Mock Setup (L14-38)
+- **Mock Logger (L16-22):** Winston-compatible logger with all log level methods
+- **Mock Server (L25-31):** DebugMcpServer with nested server.connect(), start(), and stop() methods
+- **Mock Factory (L34):** Returns configured mock server instance
+- **Mock Exit Process (L37):** Testable alternative to process.exit
 
-### Error Handling Testing  
-- **Server start failure** (L94-112): Tests error logging and process exit (code 1) when server.start() rejects
-- **Default process.exit usage** (L114-130): Verifies fallback to `process.exit()` when custom exitProcess function not provided
-- **Factory error handling** (L132-149): Tests error handling when server factory itself throws an exception
+### Test Scenarios
 
-## Dependencies
-- **Vitest testing framework**: `describe`, `it`, `expect`, `vi`, `beforeEach` (L1)
-- **Target function**: `handleStdioCommand` from `../../../src/cli/stdio-command.js` (L2)
-- **Type imports**: Winston Logger type for proper mock typing (L3)
-- **Server class**: `DebugMcpServer` from `../../../src/server.js` (L4, mocked at L6)
+#### Happy Path Testing (L40-72)
+- **Server Startup:** Validates successful STDIO mode initialization with log level setting
+- **Verification Points:** Log level assignment, info logging, server factory invocation, server start, success confirmation
 
-## Mock Architecture
-- **Logger mock** (L16-22): Implements Winston logger interface with spy functions
-- **Server mock** (L25-31): Mock DebugMcpServer with nested server.connect, start, and stop methods
-- **Dependency injection pattern**: Tests use dependency injection to provide mocks via options parameter
+#### Configuration Handling (L74-92)
+- **Optional Log Level:** Tests behavior when logLevel is not provided in options
+- **State Preservation:** Ensures existing logger state remains unchanged when no new level specified
 
-## Testing Patterns
-- Comprehensive mock verification using `toHaveBeenCalledWith` for exact parameter matching
-- Error scenario testing with rejected promises and thrown exceptions  
-- Process exit behavior testing with both custom and default exit functions
-- Log level mutation testing to verify conditional behavior
+#### Error Handling (L94-112)
+- **Server Start Failure:** Tests graceful handling of server.start() rejection
+- **Error Recovery:** Validates error logging and process exit with code 1
+
+#### Dependency Injection (L114-130)
+- **Default Exit Behavior:** Tests fallback to process.exit when custom exitProcess not provided
+- **Spy Integration:** Uses Vitest spies to verify process.exit calls
+
+#### Factory Error Handling (L132-149)
+- **Factory Exceptions:** Tests error handling when serverFactory throws during instantiation
+- **Error Propagation:** Ensures factory errors are logged and cause proper exit behavior
+
+### Key Testing Patterns
+- **Dependency Injection:** All external dependencies (logger, serverFactory, exitProcess) are injectable for isolation
+- **Async Testing:** All tests handle Promise-based operations with proper await patterns
+- **Mock Verification:** Extensive use of `.toHaveBeenCalledWith()` for behavioral verification
+- **Error Simulation:** Multiple error injection points to test resilience

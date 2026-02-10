@@ -1,45 +1,47 @@
 # src/utils/type-guards.ts
 @source-hash: 672866784577006e
-@generated: 2026-02-09T18:15:07Z
+@generated: 2026-02-10T00:41:54Z
 
-**Primary Purpose & Responsibility**
-Runtime type validation and safety utilities for DAP adapter commands and proxy initialization payloads. Ensures type safety at critical system boundaries (IPC, serialization, process spawning) by providing comprehensive validation guards and safe serialization functions.
+## Purpose
 
-**Core Dependencies**
-- `AdapterCommand` from `@debugmcp/shared` - Primary type being validated
-- `ProxyInitPayload` from `../proxy/dap-proxy-interfaces.js` - DAP proxy initialization structure
+Type guards and validation utilities ensuring runtime type safety at critical boundaries like IPC communication and data serialization. Validates `AdapterCommand` and `ProxyInitPayload` types with comprehensive error handling.
 
-**Key Functions & Their Roles**
+## Key Dependencies
 
-**Type Guards (L13-86)**
-- `isValidAdapterCommand(obj: unknown): obj is AdapterCommand` (L13-49) - Core type guard validating AdapterCommand structure: required `command` (string), `args` (string[]), optional `env` (Record<string, string>)
-- `hasValidAdapterCommand(payload: ProxyInitPayload): boolean` (L80-86) - Validates optional adapterCommand field in ProxyInitPayload
+- `AdapterCommand` from `@debugmcp/shared` - Core command structure
+- `ProxyInitPayload` from `../proxy/dap-proxy-interfaces.js` - Proxy initialization data
 
-**Validation Functions (L55-123)**
-- `validateAdapterCommand(obj: unknown, source: string): AdapterCommand` (L55-74) - Throws descriptive errors with validation details if type guard fails
-- `validateProxyInitPayload(payload: unknown): ProxyInitPayload` (L92-123) - Validates required fields: cmd, sessionId, executablePath, adapterHost, adapterPort, logDir, scriptPath; validates optional adapterCommand and launchConfig
+## Core Functions
 
-**Serialization Safety (L129-148)**
-- `serializeAdapterCommand(cmd: AdapterCommand): string` (L129-132) - Pre-validates before JSON serialization
-- `deserializeAdapterCommand(data: string, source: string): AdapterCommand` (L138-148) - Post-validates after JSON parsing with error handling
+### Type Guards
+- `isValidAdapterCommand(obj)` (L13-49): Validates AdapterCommand structure with required `command` (string) and `args` (string[]) fields, plus optional `env` (Record<string, string>)
+- `hasValidAdapterCommand(payload)` (L80-86): Checks optional adapterCommand field in ProxyInitPayload
 
-**Creation & Access Utilities (L154-188)**
-- `createAdapterCommand(command: string, args?: string[], env?: Record<string, string>): AdapterCommand` (L154-171) - Factory function with validation ensuring all required fields present
-- `getAdapterCommandProperty<K>(cmd: unknown, property: K, defaultValue: AdapterCommand[K]): AdapterCommand[K]` (L177-188) - Type-safe property access with fallback defaults
+### Validation Functions
+- `validateAdapterCommand(obj, source)` (L55-74): Throws descriptive errors with validation details and structured error logging
+- `validateProxyInitPayload(payload)` (L92-123): Validates required fields ['cmd', 'sessionId', 'executablePath', 'adapterHost', 'adapterPort', 'logDir', 'scriptPath'] plus optional adapterCommand and launchConfig
 
-**Logging Utility (L194-213)**
-- `logAdapterCommandValidation(cmd: unknown, source: string, isValid: boolean, details?: unknown): void` (L194-213) - Consistent validation logging with timestamps and structured output
+### Serialization Utilities
+- `serializeAdapterCommand(cmd)` (L129-132): Safe JSON serialization with pre-validation
+- `deserializeAdapterCommand(data, source)` (L138-148): Safe JSON parsing with post-validation and error context
 
-**Architectural Patterns**
-- Defensive programming with exhaustive null/undefined checks
-- Source tracking for debugging (all validation functions accept source parameter)
-- Consistent error formatting with structured details
-- Type narrowing through progressive validation
-- Fail-fast validation with descriptive error messages
+### Factory Functions
+- `createAdapterCommand(command, args?, env?)` (L154-171): Type-safe command creation with validation
+- `getAdapterCommandProperty(cmd, property, defaultValue)` (L177-188): Safe property access with fallback
 
-**Critical Invariants**
-- AdapterCommand must have non-empty string `command` and string[] `args`
+### Logging
+- `logAdapterCommandValidation(cmd, source, isValid, details?)` (L194-213): Consistent validation logging with timestamps
+
+## Architectural Patterns
+
+- **Defense in Depth**: Multiple validation layers (type guards → validators → serializers)
+- **Rich Error Context**: All validation failures include source context, expected structure, and received values
+- **Fail-Safe Defaults**: Graceful degradation with default values and warnings
+- **Structured Logging**: Consistent error reporting format with timestamps and details
+
+## Critical Invariants
+
+- AdapterCommand requires non-empty string `command` and string array `args`
 - Environment variables must be string-to-string mappings
-- All validation failures include source context for debugging
-- Serialization is always preceded by validation
-- Property access defaults prevent undefined propagation
+- All validation failures log detailed error information
+- Serialization/deserialization maintains type safety through validation

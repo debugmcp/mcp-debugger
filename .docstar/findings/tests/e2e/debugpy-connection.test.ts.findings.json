@@ -1,0 +1,15 @@
+{
+  "source": "tests/e2e/debugpy-connection.test.ts",
+  "source_hash": "7093f3fab5503db7",
+  "generated": "2026-02-10T01:19:09Z",
+  "findings": [
+    {
+      "category": "dead_code",
+      "line_start": 257,
+      "line_end": 264,
+      "severity": "warning",
+      "description": "Duplicate parseSdkToolResult function definition - identical to the one at lines 107-114",
+      "suggestion": "Remove the duplicate function definition and use the one defined at the top level"
+    }
+  ]
+}

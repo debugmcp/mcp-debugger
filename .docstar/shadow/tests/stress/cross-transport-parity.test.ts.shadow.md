@@ -1,62 +1,62 @@
 # tests/stress/cross-transport-parity.test.ts
 @source-hash: 6c9e2869fe8bf7dd
-@generated: 2026-02-09T18:15:16Z
+@generated: 2026-02-10T00:42:05Z
 
-## Purpose
-Stress test that validates debugging functionality produces identical results across different MCP transport mechanisms (STDIO and SSE). Part of the test suite ensuring transport-agnostic behavior of the debug MCP server.
+## Primary Purpose
+Cross-transport integration test that validates debug operations produce identical results across different MCP transport protocols (STDIO, SSE). Ensures transport layer doesn't affect debug functionality behavior or data integrity.
 
-## Key Components
+## Key Interfaces & Types
 
-### Test Configuration (L18-22)
-- `runStressTests`: Environment flag controlling test execution
-- `describeStress`: Conditional test runner that skips when stress tests disabled
-- `TEST_TIMEOUT`: 60-second timeout for long-running operations
-- `PROJECT_ROOT`: Base directory for spawning server processes
+**DebugSequenceResult (L24-34)**: Captures complete debug session state including session creation status, breakpoint configuration, execution state, stack frame data, variable information, and error collection.
 
-### Data Structures (L24-41)
-- `DebugSequenceResult`: Captures complete debug session metrics including session creation, breakpoint status, stack frame/variable counts, and errors
-- `TransportTestResult`: Wraps transport-specific test outcomes with success status and error details
+**TransportTestResult (L36-41)**: Wraps test execution results per transport with success status, debug sequence results, and error information.
 
-### TransportTester Class (L43-314)
-Core test orchestrator handling multiple transport types:
+## Core Class: TransportTester (L43-314)
 
-#### SSE Transport Management (L47-95)
-- `setupSSETransport()`: Spawns SSE server process, polls health endpoint for readiness
-- `teardownSSE()`: Graceful shutdown with SIGTERM/SIGKILL fallback
-- Uses random ports (4500-5000 range) to avoid conflicts
+**Server Management (L47-95)**:
+- `setupSSETransport(port)` (L47-84): Spawns SSE server process, implements health check polling with 15s timeout
+- `teardownSSE()` (L86-95): Graceful shutdown with SIGTERM fallback to SIGKILL
 
-#### Debug Sequence Execution (L97-220)
-- `runDebugSequence()`: Performs standardized debug workflow across transports
-- Creates session → Sets breakpoint → Starts debugging → Retrieves stack/variables → Cleanup
-- Uses `examples/javascript/simple_test.js` as test target (line 11 breakpoint)
-- Includes 2-second delay for breakpoint hit detection
-- Comprehensive error tracking throughout sequence
+**Debug Sequence Orchestration (L97-220)**:
+- `runDebugSequence(client)` (L97-220): Executes complete debug workflow:
+  1. Creates debug session with JavaScript language config
+  2. Sets breakpoint on `simple_test.js:11`
+  3. Starts debugging with script execution
+  4. Retrieves stack trace and local variables after 2s delay
+  5. Closes session and cleans up resources
 
-#### Transport-Specific Tests (L222-301)
-- `testStdioTransport()`: Creates STDIO client with subprocess server
-- `testSSETransport()`: Sets up SSE server and connects via HTTP transport
-- Both methods wrap `runDebugSequence()` with transport-specific setup/teardown
+**Transport Testing Methods**:
+- `testStdioTransport()` (L222-268): Creates STDIO client transport, executes debug sequence
+- `testSSETransport()` (L270-301): Sets up SSE server, creates SSE client transport, executes debug sequence
+- `parseToolResponse(response)` (L303-313): Extracts JSON from MCP tool response format
 
-#### Response Parsing (L303-313)
-- `parseToolResponse()`: Extracts JSON from MCP tool response format
-- Handles malformed responses gracefully
+## Test Structure (L316-383)
 
-### Test Suite (L316-382)
-- Single test case comparing STDIO vs SSE transport results
-- Validates all operations succeed on both transports
-- Performs parity checks on key metrics (session creation, breakpoints, stack frames, variables)
-- Allows ±1 difference in stack frame counts for minor transport variations
-- Comprehensive result logging for debugging test failures
+**Environment Control**: Uses `RUN_STRESS_TESTS` environment variable to conditionally skip tests (L18-19).
+
+**Main Test Case (L327-382)**: 
+- Executes debug sequences on both STDIO and SSE transports
+- Validates all transports succeed
+- Performs parity comparison ensuring:
+  - Boolean flags (session creation, breakpoint setting, debug start) match exactly
+  - Stack frame counts differ by at most 1 frame
+  - Variable counts match exactly
+  - Both transports report >0 stack frames
 
 ## Dependencies
-- **MCP SDK**: Client and transport implementations for both STDIO and SSE
-- **Vitest**: Test framework with async support and timeouts
-- **Node.js**: Child process spawning, filesystem access, path handling
-- **Server Binary**: Expects compiled server at `dist/index.js` with SSE/STDIO modes
+- **MCP SDK**: Client, SSEClientTransport, StdioClientTransport for protocol implementation
+- **Node.js**: child_process for server spawning, fs/promises for file validation
+- **Vitest**: Test framework with 60s timeout configuration
 
-## Critical Constraints
-- Requires `RUN_STRESS_TESTS=true` environment variable to execute
-- Dependent on `examples/javascript/simple_test.js` existing with debuggable content at line 11
-- SSE transport requires successful health check before proceeding
-- All debug operations must complete within 60-second timeout
-- Stack frame counts must be within ±1 between transports for parity validation
+## Key Assumptions
+- Test script exists at `examples/javascript/simple_test.js`
+- Debug server binary available at `dist/index.js`
+- SSE server provides `/health` endpoint for readiness checks
+- Breakpoint at line 11 of test script is meaningful
+- Debug session hits breakpoint within 2 seconds
+
+## Architectural Patterns
+- **Transport Abstraction**: Tests debug functionality independent of transport mechanism
+- **Result Normalization**: Standardizes debug data for cross-transport comparison
+- **Resource Management**: Explicit cleanup for spawned processes and client connections
+- **Fault Tolerance**: Error collection without test abortion, graceful server shutdown

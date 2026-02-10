@@ -1,33 +1,25 @@
 # tests/test-utils/fixtures/python/debug_test_simple.py
-@source-hash: 890eb7a9078a359c
-@generated: 2026-02-09T18:14:21Z
+@source-hash: 862f2a1fd2683a06
+@generated: 2026-02-10T01:18:50Z
 
-## Purpose
-Test fixture for debugging purposes - a minimal Python script designed to run for an extended period to facilitate debugging testing scenarios.
+**Purpose**: Test fixture script designed for debugging test scenarios, particularly for testing debugger attachment and process monitoring capabilities.
 
-## Core Components
+**Core Functionality**:
+- Simple debug target with predictable execution flow
+- Extended runtime (60-second sleep) to allow external debugging/monitoring
+- Basic computation and output for verification
 
-**sample_function() (L11-15)**
-- Simple arithmetic function that adds two hardcoded integers (5 + 10)
-- Prints the result to stdout
-- Serves as a basic debuggable unit with local variables
+**Key Components**:
+- `sample_function()` (L10-14): Simple arithmetic function that adds two numbers and prints result
+- Main execution flow (L6-21): Sequential execution with status messages and extended sleep period
 
-**Main Execution Flow (L7-22)**
-- Prints Python version and startup messages
-- Executes sample_function() 
-- Sleeps for 60 seconds to maintain process alive for debugging
-- Prints completion message before exit
+**Dependencies**:
+- `sys`: For Python version information display
+- `time`: For sleep functionality to extend script lifetime
 
-## Dependencies
-- `sys` - for Python version information
-- `os` - imported but unused
-- `time` - for sleep functionality
+**Execution Pattern**:
+1. Display Python version and startup message (L6-7)
+2. Execute sample computation function (L17-18)  
+3. Enter 60-second sleep period with status messages (L19-21)
 
-## Key Characteristics
-- Designed for test environments requiring a long-running process
-- Minimal complexity to avoid interference with debugging scenarios
-- Predictable output and timing for test automation
-- Self-contained with no external dependencies beyond stdlib
-
-## Usage Context
-Located in test utilities fixtures, indicating this is used by test frameworks that need to spawn and debug Python processes with known behavior and timing.
+**Test Context**: This appears to be a fixture for testing debugger attachment, process monitoring, or test harness behavior with long-running processes. The extended sleep period suggests it's designed to remain active long enough for external tools to attach and interact with it.

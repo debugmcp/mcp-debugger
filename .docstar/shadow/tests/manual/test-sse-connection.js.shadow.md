@@ -1,42 +1,43 @@
 # tests/manual/test-sse-connection.js
 @source-hash: 06e15248914f92c7
-@generated: 2026-02-09T18:15:08Z
+@generated: 2026-02-10T00:41:53Z
 
 ## Purpose
-Manual testing script for Server-Sent Events (SSE) connection functionality, specifically designed to test a JSON-RPC over SSE implementation with session-based authentication.
+Manual test script for Server-Sent Events (SSE) connection testing against a local server. Validates SSE connectivity, session establishment, and bidirectional communication via SSE + HTTP POST.
 
-## Core Functionality
+## Key Components
 
-**SSE Connection Setup (L1-11)**
-- Imports EventSource polyfill for Node.js environment
-- Establishes connection to `http://localhost:3001/sse` endpoint (L4-7)
-- Registers connection open handler with logging (L9-11)
+**SSE Connection Setup (L7-11)**
+- Creates EventSource connection to `http://localhost:3001/sse`
+- Logs connection establishment
 
-**Message Processing Pipeline (L13-49)**
-- Main message handler processes incoming SSE events (L13-49)
-- JSON parsing with graceful error handling for non-JSON messages (L17-48)
-- Specifically listens for `connection/established` method to extract session ID (L19-22)
+**Message Handler (L13-49)**
+- Processes incoming SSE messages with JSON parsing
+- Extracts session ID from `connection/established` messages (L19-22)
+- Triggers HTTP POST request when session ID is obtained (L25-43)
 
-**Session-Based API Testing (L24-44)**
-- Automatically triggers JSON-RPC POST request when session ID is received
-- Uses extracted session ID in `X-Session-ID` header for authentication (L29)
-- Sends `tools/list` JSON-RPC 2.0 request (L31-35)
-- Includes full response/error handling chain (L37-43)
+**POST Request Logic (L25-43)**
+- Sends JSON-RPC 2.0 `tools/list` method call
+- Uses extracted session ID in `X-Session-ID` header
+- Handles response/error logging
 
-**Error Handling & Process Management (L51-57)**
-- SSE error event listener with logging (L51-53)
-- Process keep-alive mechanism using `process.stdin.resume()` (L56)
-- User-friendly exit instructions (L57)
+**Error Handling (L51-53)**
+- Basic SSE error event logging
 
-## Key Dependencies
-- `eventsource`: Node.js EventSource polyfill for SSE client functionality
-- Built-in `fetch` API for HTTP POST requests
+**Process Management (L56-57)**
+- Keeps Node.js process alive for continuous testing
 
-## Architecture Notes
-- Implements a typical SSE → session extraction → authenticated API call pattern
-- Uses JSON-RPC 2.0 protocol for API communication
-- Session-based authentication model with header-based session passing
-- Graceful handling of mixed message types (JSON vs non-JSON)
+## Dependencies
+- `eventsource` package for EventSource polyfill in Node.js
+- Built-in `fetch` API for HTTP requests
 
-## Usage Context
-This is a development/testing utility for validating SSE connection establishment, session management, and subsequent authenticated API interactions in a local development environment.
+## Communication Protocol
+- Expects JSON-RPC 2.0 messages over SSE
+- Uses session-based authentication via custom header
+- Bidirectional: SSE for server-to-client, HTTP POST for client-to-server
+
+## Test Scenario
+1. Establish SSE connection
+2. Wait for connection confirmation with session ID
+3. Send authenticated JSON-RPC request using session
+4. Monitor both SSE events and HTTP responses

@@ -1,0 +1,6 @@
+{
+  "source": "tests/fixtures/debug-scripts/with-errors.py",
+  "source_hash": "5f1ef6fe59c5429c",
+  "generated": "2026-02-10T01:18:48Z",
+  "findings": []
+}

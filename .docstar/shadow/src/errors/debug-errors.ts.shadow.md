@@ -1,47 +1,61 @@
 # src/errors/debug-errors.ts
 @source-hash: 8a315a7b2787365d
-@generated: 2026-02-09T18:15:03Z
+@generated: 2026-02-10T00:41:53Z
 
-**Primary Purpose**: Defines a typed error hierarchy for the MCP (Model Context Protocol) debugger, providing semantic error types that extend `McpError` with structured data to avoid string-based error detection.
+## Purpose
+Defines a typed error hierarchy for the MCP (Model Context Protocol) debugger, providing semantic error classes that extend the base McpError with structured data and specific error codes to avoid string-based error detection.
 
-**Key Dependencies**:
-- `McpError` and `ErrorCode` from `@modelcontextprotocol/sdk/types.js` (L8, L11-12)
+## Dependencies
+- **@modelcontextprotocol/sdk/types.js**: Imports `McpError` base class and `ErrorCode` enum for standardized MCP error handling
 
-**Error Classes Hierarchy**:
+## Core Error Classes
 
-**Base Language Runtime Error**:
-- `LanguageRuntimeNotFoundError` (L17-30): Base class for language runtime issues with `language` and `executablePath` properties, uses `McpErrorCode.InvalidParams`
+### Runtime Errors
+- **LanguageRuntimeNotFoundError (L17-30)**: Base class for missing language runtime executables
+  - Properties: `language`, `executablePath`
+  - Uses `McpErrorCode.InvalidParams`
+- **PythonNotFoundError (L35-39)**: Python-specific runtime error extending LanguageRuntimeNotFoundError
+- **NodeNotFoundError (L44-48)**: Node.js-specific runtime error (marked for future use)
 
-**Language-Specific Runtime Errors**:
-- `PythonNotFoundError` (L35-39): Extends `LanguageRuntimeNotFoundError` for Python runtime issues
-- `NodeNotFoundError` (L44-48): Extends `LanguageRuntimeNotFoundError` for Node.js runtime issues (marked for future use)
+### Session Management Errors
+- **SessionNotFoundError (L53-64)**: Invalid session ID reference
+  - Property: `sessionId`
+  - Uses `McpErrorCode.InvalidParams`
+- **SessionTerminatedError (L69-82)**: Operations on terminated sessions
+  - Properties: `sessionId`, `state` (defaults to 'TERMINATED')
+  - Uses `McpErrorCode.InvalidRequest`
 
-**Session Management Errors**:
-- `SessionNotFoundError` (L53-64): Handles missing session scenarios with `sessionId` property, uses `McpErrorCode.InvalidParams`
-- `SessionTerminatedError` (L69-82): Handles terminated session operations with `sessionId` and `state` properties, uses `McpErrorCode.InvalidRequest`
+### Language Support Errors
+- **UnsupportedLanguageError (L87-100)**: Unsupported programming language
+  - Properties: `language`, `availableLanguages[]`
+  - Uses `McpErrorCode.InvalidParams`
 
-**Configuration & Validation Errors**:
-- `UnsupportedLanguageError` (L87-100): Handles unsupported language requests with `language` and `availableLanguages` properties, uses `McpErrorCode.InvalidParams`
-- `FileValidationError` (L143-156): Handles file validation failures with `file` and `reason` properties, uses `McpErrorCode.InvalidParams`
+### Operational Errors
+- **ProxyNotRunningError (L105-116)**: Missing active debug proxy
+  - Property: `sessionId`
+  - Constructor accepts `operation` parameter for context
+- **DebugSessionCreationError (L121-138)**: Debug session initialization failures
+  - Properties: `reason`, `originalError?`
+  - Captures original error stack traces
+- **FileValidationError (L143-156)**: File access/validation issues
+  - Properties: `file`, `reason`
+- **PortAllocationError (L161-172)**: Network port allocation failures
+  - Property: `reason` (defaults to 'No available ports')
+- **ProxyInitializationError (L177-190)**: Debug proxy setup failures
+  - Properties: `sessionId`, `reason`
 
-**Infrastructure Errors**:
-- `ProxyNotRunningError` (L105-116): Handles inactive proxy scenarios with `sessionId` property, uses `McpErrorCode.InvalidRequest`
-- `DebugSessionCreationError` (L121-138): Handles session creation failures with `reason` and optional `originalError` properties, uses `McpErrorCode.InternalError`
-- `PortAllocationError` (L161-172): Handles port allocation failures with `reason` property, uses `McpErrorCode.InternalError`
-- `ProxyInitializationError` (L177-190): Handles proxy initialization failures with `sessionId` and `reason` properties, uses `McpErrorCode.InternalError`
+## Utility Functions
 
-**Utility Functions**:
-- `isMcpError<T>()` (L195-200): Type guard for checking specific MCP error types using instanceof
-- `getErrorMessage()` (L205-210): Safe error message extraction utility
-- `isRecoverableError()` (L215-234): Determines if errors can be recovered from - returns false for session termination/not found, true for proxy/runtime issues, false for unknown errors
+### Error Type Guards and Helpers (L195-234)
+- **isMcpError<T> (L195-200)**: Generic type guard for MCP error instances
+- **getErrorMessage (L205-210)**: Safe error message extraction
+- **isRecoverableError (L215-234)**: Determines if errors can be recovered from
+  - Non-recoverable: SessionTerminatedError, SessionNotFoundError
+  - Recoverable: ProxyNotRunningError, LanguageRuntimeNotFoundError
 
-**Architectural Patterns**:
-- All custom errors extend `McpError` and include structured data in constructor
-- Each error type maps to appropriate `McpErrorCode` values
-- Consistent property exposure pattern with readonly fields
-- Error recovery logic categorizes errors by recoverability
-
-**Critical Design Decisions**:
-- Uses semantic error types instead of string-based error detection
-- Structured error data prevents fragile error wrapping
-- Recovery classification enables intelligent error handling strategies
+## Architectural Patterns
+- All errors extend McpError with appropriate error codes
+- Structured data passed to base constructor for consistent error context
+- Type-safe error handling with TypeScript generics
+- Clear separation between recoverable and non-recoverable error conditions
+- Consistent naming convention: `[Context][Condition]Error`

@@ -1,47 +1,36 @@
 # packages/adapter-javascript/tests/unit/config-transformer.edge.test.ts
 @source-hash: 05cd4b9e975baebc
-@generated: 2026-02-09T18:13:59Z
+@generated: 2026-02-10T00:41:07Z
 
-## Purpose
-Edge case test suite for config-transformer utilities, focusing on malformed JSON handling and error resilience. Tests ensure graceful failures when parsing corrupted configuration files.
+## Edge Case Unit Tests for Config Transformer
 
-## Key Classes and Functions
+This test file validates the fault tolerance and edge case handling of the `config-transformer.js` utility functions, specifically focusing on malformed JSON parsing scenarios that could occur in real-world environments.
 
-### MockFileSystem (L14-39)
-Mock implementation of FileSystem interface for controlled testing scenarios.
-- `setExistsMock()` (L18): Configures file existence behavior
-- `setReadFileMock()` (L22): Configures file reading behavior  
-- `existsSync()` (L26): Returns mocked file existence results
-- `readFileSync()` (L33): Returns mocked file content
+### Test Target Functions
+- `isESMProject` - Determines if a project uses ES modules based on package.json/tsconfig.json
+- `hasTsConfigPaths` - Checks if TypeScript path mappings are configured
+- `determineOutFiles` - Returns file patterns for output detection
+- `setDefaultFileSystem` - Dependency injection for filesystem operations
 
-### Test Setup (L46-57)
-- `beforeEach()` (L46): Initializes MockFileSystem, sets default "no files exist" behavior
-- `afterEach()` (L54): Restores NodeFileSystem to prevent test pollution
+### Mock Infrastructure
+- **MockFileSystem (L14-39)**: Test double implementing FileSystem interface with configurable behavior
+  - `setExistsMock()` (L18-20): Controls which file paths appear to exist
+  - `setReadFileMock()` (L22-24): Controls file content returned for specific paths
+  - `existsSync()` (L26-31): Delegates to mock or returns false
+  - `readFileSync()` (L33-38): Delegates to mock or returns empty string
 
-## Test Cases
+### Test Setup
+- **beforeEach (L46-52)**: Initializes fresh MockFileSystem, injects it via `setDefaultFileSystem`, sets default behavior (no files exist)
+- **afterEach (L54-57)**: Restores NodeFileSystem to prevent test pollution
+- **Constants**: Uses `proj-edge` directory structure with `src` subdirectory
 
-### isESMProject Malformed JSON Tests
-- **Program dir package.json** (L59-68): Tests malformed JSON in nested package.json doesn't crash
-- **Root tsconfig.json** (L70-78): Tests malformed tsconfig.json module detection doesn't crash
+### Test Cases
+1. **Malformed package.json (L59-68)**: Verifies `isESMProject` gracefully handles invalid JSON in program directory without throwing
+2. **Malformed tsconfig.json for ESM detection (L70-78)**: Tests `isESMProject` resilience against corrupted tsconfig in project root
+3. **Malformed tsconfig.json for paths (L80-88)**: Ensures `hasTsConfigPaths` fails safely on invalid JSON
+4. **Default output patterns (L90-94)**: Validates `determineOutFiles` fallback behavior when no user configuration provided
 
-### hasTsConfigPaths Malformed JSON Test (L80-88)
-Tests corrupted tsconfig.json with malformed paths configuration returns false gracefully
-
-### determineOutFiles Default Pattern Test (L90-94)
-Validates default output file patterns when no user configuration provided
-
-## Dependencies
-- `vitest`: Testing framework
-- `@debugmcp/shared`: FileSystem interface and NodeFileSystem
-- `config-transformer.js`: Functions under test (determineOutFiles, isESMProject, hasTsConfigPaths, setDefaultFileSystem)
-
-## Testing Patterns
-- **Malformed JSON resilience**: Primary focus on ensuring functions handle corrupted JSON without throwing
-- **Filesystem mocking**: Uses dependency injection pattern via `setDefaultFileSystem()`
-- **Path-specific mocking**: Mock functions check exact paths before returning configured responses
-- **Graceful degradation**: All malformed JSON scenarios should return `false` rather than crash
-
-## Critical Constraints
-- Tests must restore original filesystem after each test to prevent side effects
-- Mock filesystem defaults to "no files exist" to ensure predictable baseline behavior
-- Malformed JSON inputs must not throw exceptions - functions should return default/false values
+### Key Testing Patterns
+- **Fault tolerance**: All tests verify functions return false/defaults instead of throwing on malformed JSON
+- **Path-specific mocking**: Uses exact path matching to simulate realistic file system states
+- **Extension awareness**: Uses `.js` extensions to avoid forcing ESM detection through file extensions

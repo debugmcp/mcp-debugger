@@ -1,80 +1,67 @@
 # packages/adapter-go/
-@generated: 2026-02-09T18:16:38Z
+@generated: 2026-02-10T01:20:09Z
 
-## Purpose
-The `packages/adapter-go` module provides a complete Go debugging adapter for the mcp-debugger system, enabling seamless integration with the Delve (dlv) debugger through the VS Code Debug Adapter Protocol. This production-ready package serves as a specialized language adapter that bridges the gap between VS Code's debugging interface and Go's native debugging capabilities.
+## Overall Purpose and Responsibility
 
-## Architecture Overview
+The `packages/adapter-go` directory implements a complete Go language debug adapter for the mcp-debugger system. This module provides comprehensive Go-specific debugging capabilities by integrating with the Delve debugger (dlv) and its native Debug Adapter Protocol (DAP) support, enabling seamless debugging experiences for Go applications across multiple platforms.
 
-### Component Integration
-The module implements a clean factory pattern architecture with three primary layers:
+## Key Components and Integration
 
-1. **Entry Point Layer**: The `src/index.ts` serves as a barrel export module providing standardized interfaces for the mcp-debugger's dynamic loading system
-2. **Factory Layer**: `GoAdapterFactory` handles adapter instantiation with comprehensive environment validation
-3. **Runtime Layer**: `GoDebugAdapter` manages active debugging sessions using Delve's native DAP support
-4. **Utilities Foundation**: Cross-platform Go toolchain discovery and management utilities
+The adapter follows a layered architecture with clear separation of concerns:
 
-### System Integration Flow
-```
-mcp-debugger → Go Adapter Factory → Environment Validation → Go Debug Adapter → Delve DAP Server
-```
+### Core Architecture Layers
+- **Factory Layer**: `GoAdapterFactory` handles environment validation, toolchain discovery, and adapter instantiation using dependency injection patterns
+- **Adapter Layer**: `GoDebugAdapter` manages debug session lifecycle, DAP protocol communication, and Go-specific features like goroutine management
+- **Infrastructure Layer**: Utilities subsystem (`src/utils/`) provides cross-platform Go toolchain discovery, validation, and version checking
+- **Integration Layer**: Entry point module enables dynamic loading and registration with the mcp-debugger system
+
+### Component Interaction Flow
+1. Factory validates Go 1.18+ and Delve DAP support through utilities layer
+2. Environment validation aggregates system metadata and dependency checks
+3. Adapter creation injects validated dependencies and initializes state management
+4. Debug sessions leverage native DAP integration for direct protocol communication with Delve
 
 ## Public API Surface
 
 ### Main Entry Points
-- **Default Export**: Standardized adapter configuration object compatible with mcp-debugger's dynamic loading mechanism
-- **`GoAdapterFactory`**: Primary factory implementing `IAdapterFactory` for adapter creation and environment validation
-- **`GoDebugAdapter`**: Core adapter class implementing `IDebugAdapter` for debug session management
+- **Default Export**: Adapter configuration object with identifier 'go' and factory reference for mcp-debugger dynamic loading
+- **GoDebugAdapter**: Complete debug adapter implementation with EventEmitter-based lifecycle management
+- **GoAdapterFactory**: Standard factory interface providing `createAdapter()`, `getMetadata()`, and `validate()` methods
+- **Go Utilities**: Toolchain discovery functions (`findGoExecutable`, `findDelveExecutable`) and version validation
 
-### Key Factory Methods
-- `createAdapter()`: Instantiates debug adapter with dependency injection
-- `getMetadata()`: Provides Go language metadata, version information, and visual assets  
-- `validate()`: Performs comprehensive async environment validation (Go 1.18+, Delve DAP support)
+### Key Interfaces and Configuration
+- **GoLaunchConfig**: Go-specific launch configuration supporting multiple debug modes ('debug', 'test', 'exec', 'replay', 'core') with build flags and path substitution
+- **IAdapterFactory**: Standard adapter factory interface for consistent integration patterns
+- **IDebugAdapter**: Core debug adapter interface with state management and DAP protocol handling
 
-### Core Adapter Capabilities
-- `validateEnvironment()`: Runtime environment verification with detailed error reporting
-- `transformLaunchConfig()`: Go-specific debug configuration transformation
-- `getCapabilities()`: Declares comprehensive DAP features (conditional breakpoints, variable evaluation, goroutine management)
-- `supportsFeature()`: Dynamic feature capability queries
+## Internal Organization and Data Flow
 
-## Internal Organization
+The module implements a sophisticated debug session management system:
 
-### Environment Management Strategy
-The module implements a sophisticated multi-phase validation approach:
-- **Discovery**: Cross-platform executable location via PATH, GOPATH, and standard installation directories
-- **Validation**: Version compatibility verification (Go 1.18+, Delve 0.17.0+)
-- **Capability Assessment**: DAP protocol support confirmation
-- **Performance Optimization**: 60-second executable path caching for improved startup times
+### Session Lifecycle Management
+- State transitions: UNINITIALIZED → INITIALIZING → READY → CONNECTED → DEBUGGING → DISCONNECTED
+- Native DAP integration bypasses custom protocol translation layers
+- Event-driven architecture with comprehensive lifecycle event emission
 
-### Debug Session Lifecycle
-1. Factory validates Go environment and toolchain availability
-2. Adapter transforms user configurations to Delve-compatible parameters
-3. Delve DAP server spawning and protocol negotiation
-4. Event forwarding between DAP and VS Code Debug Protocol
-5. Clean session termination and resource cleanup
+### Environment and Toolchain Integration
+- Intelligent caching strategy with 60-second TTL for executable discovery
+- Platform-agnostic design supporting Windows, macOS, and Linux
+- Respects Go workspace conventions (GOBIN, GOPATH) and user environment preferences
+- Graceful error handling with recoverable vs non-recoverable error classification
 
-## Key Design Patterns
+## Important Patterns and Conventions
 
-### Factory Pattern Implementation
-- Standardized `IAdapterFactory` interface compliance for mcp-debugger integration
-- Dependency injection architecture for enhanced testability
-- Comprehensive validation with structured error reporting and recovery guidance
+- **Native Protocol Integration**: Direct DAP delegation rather than custom protocol adapters
+- **Dependency Injection**: Factory pattern encapsulates all external dependencies
+- **Cross-Platform Compatibility**: Unified interface across operating systems with platform-specific optimizations
+- **Environment Respect**: Honors user toolchain preferences and workspace configurations
+- **Performance Optimization**: Strategic caching of toolchain discovery results
 
-### Cross-Platform Compatibility
-- Windows executable suffix handling (.exe)
-- Platform-aware search paths and environment variables
-- Consistent path manipulation across operating systems
+## Critical System Requirements
 
-### Error Handling & User Experience
-- Graceful degradation with informative error messages
-- Platform-specific installation instructions
-- Clear distinction between recoverable warnings and blocking errors
+- Go 1.18+ runtime compatibility
+- Delve debugger with DAP protocol support
+- Integration compatibility with mcp-debugger's dynamic adapter loading system
+- Cross-platform executable discovery and process management capabilities
 
-## Integration Role
-This adapter serves as a critical bridge between:
-- The mcp-debugger system and Go-specific debugging requirements
-- VS Code's Debug Protocol and Delve's native DAP implementation
-- Cross-platform environments and Go toolchain discovery
-- User debug configurations and Delve's command-line interface
-
-The module enables comprehensive Go debugging features including conditional breakpoints, variable inspection, goroutine management, stack trace analysis, and real-time code evaluation through a unified, IDE-agnostic debugging interface.
+This directory provides a production-ready, feature-complete Go debugging solution that seamlessly integrates with the broader mcp-debugger ecosystem while maintaining Go-specific debugging capabilities and established adapter development patterns.

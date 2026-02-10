@@ -1,71 +1,82 @@
 # examples/asciinema_demo/run_rich_demo.py
-@source-hash: 049bf260eee8c17d
-@generated: 2026-02-09T18:15:08Z
+@source-hash: 743361c72faeca34
+@generated: 2026-02-10T01:19:13Z
 
-## Purpose
-Rich-based terminal UI demo for an MCP (Model Context Protocol) debugger client. Creates a split-pane interface showing debug session logs on the left and Python source code with breakpoint/execution highlighting on the right.
+## Primary Purpose
 
-## Architecture
-The script demonstrates MCP debugger protocol usage through a visual terminal interface:
-- Spawns an MCP server as Node.js subprocess communicating via STDIN/STDOUT
-- Implements synchronous request/response with basic event handling
-- Manages debug session lifecycle: create → set breakpoints → start debugging → get stack trace → cleanup
+Rich-based terminal UI demo for an MCP (Model Context Protocol) debugger server. Demonstrates interactive debugging workflow with split-pane layout showing debug logs and source code with syntax highlighting, breakpoints, and execution line markers.
 
-## Key Components
+## Key Configuration & Setup
 
-### Configuration (L14-36)
-- `PROJECT_ROOT`: Resolved from script location, assumes `examples/asciinema_demo/` structure
-- `SCRIPT_TO_DEBUG_ABSPATH`: Target Python script for debugging (`buggy_event_processor.py`)
-- `MCP_SERVER_JS_ABSPATH`: Compiled MCP server at `dist/index.js`
-- Validates both target script and MCP server existence before proceeding
+**File Paths (L14-35):**
+- PROJECT_ROOT: Resolves to two levels above script location
+- SCRIPT_TO_DEBUG_RELPATH: Points to `examples/asciinema_demo/buggy_event_processor.py`
+- MCP_SERVER_JS_ABSPATH: Points to compiled MCP server at `dist/index.js`
+- Validates both target script and MCP server existence on startup
 
-### UI Layout (L39-49)
-- Rich Layout with header/main_row/footer structure
-- Main row split into left pane (logs) and right pane (code viewer)
-- Global state: `log_lines`, `current_line_highlight`, `breakpoint_lines`
+**Rich UI Layout (L40-49):**
+- Three-panel vertical layout: header, main_row, footer
+- Main row splits into left (logs) and right (code) panes
+- Console instance for screen management
 
-### MCP Server Management
-- `start_mcp_server()` (L106-152): Spawns Node.js subprocess with PIPE communication
-- `stop_mcp_server()` (L237-263): Graceful shutdown with timeout handling and forced termination
-- Global `mcp_server_process` tracks subprocess state
+## Core State Management
 
-### MCP Protocol Implementation
-- `send_mcp_request()` (L153-209): Synchronous request/response with JSON payloads
-- Request format: `{"type": "request", "id": request_id, "tool": tool_name, "arguments": arguments}`
-- Handles event messages that arrive before responses (L190-202)
-- `handle_mcp_event()` (L210-235): Processes `stoppedEvent` and `breakpointEvent`
-
-### Code Visualization
-- `update_code_pane()` (L67-104): Renders source with line numbers, breakpoint markers, execution highlights
-- Manual syntax highlighting for Python keywords using Rich Text objects
-- Line prefixes: "H>" for current execution, "B>" for breakpoints, "   " for normal lines
-
-### Demo Flow (L266-394)
-1. **Session Creation**: `create_debug_session` with language="python"
-2. **Breakpoint Setting**: `set_breakpoint` at line 13 of target script  
-3. **Debug Start**: `start_debugging` with script path, attempts to read multiple events
-4. **Stack Trace**: `get_stack_trace` to determine current execution line
-5. **Cleanup**: `close_debug_session` and server shutdown
-
-## Critical Implementation Details
-
-### Event Handling Limitations (L337-354)
-Attempts non-blocking reads of stdout for events after `start_debugging`, but implementation is fragile:
-- Uses `channel.setblocking(0)` which may not exist on all platforms
-- Limited to 5 event reads with basic error handling
-- Real implementation would need proper async message loop
-
-### Path Resolution (L365-372)
-Stack trace frame matching uses `Path.samefile()` to compare target script with frame files, with fallback to first frame if no match.
-
-## Dependencies
-- **Rich**: Console UI, Layout, Panel, Syntax highlighting, Text styling
-- **subprocess**: MCP server process management  
-- **json**: MCP protocol message serialization
-- **pathlib**: File path resolution and validation
-
-## State Management
+**MCP Communication State (L51-57):**
+- `mcp_server_process`: Subprocess handle for Node.js MCP server
 - `mcp_request_id_counter`: Incremental request IDs
 - `current_mcp_session_id`: Active debug session identifier
-- `current_line_highlight`: Line number for execution pointer display
-- `breakpoint_lines`: List of breakpoint line numbers for UI rendering
+- `log_lines`: Text buffer for debug log display
+- `current_line_highlight`: Line number for execution pointer
+- `breakpoint_lines`: List of breakpoint line numbers
+
+## Key Functions
+
+**UI Management:**
+- `add_log_message(message, style)` (L61-65): Appends styled text to log with overflow management
+- `update_code_pane()` (L67-96): Renders source code with line numbers, breakpoint markers ("B>"), execution highlight ("H>"), and basic Python syntax highlighting
+
+**MCP Server Lifecycle:**
+- `start_mcp_server()` (L99-141): Launches Node.js MCP server via subprocess with stdin/stdout pipes
+- `stop_mcp_server()` (L227-252): Graceful shutdown with timeout and forced termination fallback
+
+**MCP Communication:**
+- `send_mcp_request(tool_name, arguments)` (L143-198): Synchronous request/response with JSON protocol
+- `handle_mcp_event(event_payload)` (L200-225): Processes asynchronous events (stoppedEvent, breakpointEvent)
+
+## Demo Workflow (L256-384)
+
+**Main Demo Steps:**
+1. **Session Creation (L274-288)**: Creates debug session via `create_debug_session` tool
+2. **Breakpoint Setup (L290-309)**: Sets breakpoint at line 13 of target script
+3. **Debug Execution (L311-369)**: Starts debugging and attempts to process events
+4. **Cleanup (L371-383)**: Closes session and stops server
+
+**Event Processing (L327-343):**
+- Attempts non-blocking reads for multiple events after `start_debugging`
+- Uses stack trace requests to determine current execution line
+- Updates UI highlights based on execution state
+
+## Dependencies
+
+- **Rich Library**: Console, Layout, Panel, Syntax, Text for terminal UI
+- **Subprocess**: Node.js MCP server process management
+- **JSON**: MCP protocol message serialization
+- **Pathlib**: Cross-platform file path handling
+
+## Critical Patterns
+
+**Error Handling:**
+- File existence validation before execution
+- Graceful server shutdown with progressive escalation (wait → terminate → kill)
+- Exception handling for JSON parsing and subprocess communication
+
+**UI Updates:**
+- Synchronous UI refresh after each major operation
+- Log message styling for different event types
+- Code pane highlighting for breakpoints and execution position
+
+## Architectural Notes
+
+- Simplified MCP client implementation (single request/response, basic event handling)
+- Demo-focused design with hardcoded delays for visualization
+- Mixed synchronous/asynchronous communication patterns with manual event polling

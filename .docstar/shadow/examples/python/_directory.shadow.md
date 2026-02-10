@@ -1,74 +1,59 @@
 # examples/python/
-@generated: 2026-02-09T18:16:08Z
+@generated: 2026-02-10T01:19:38Z
 
-## Purpose
-Collection of Python test scripts designed for MCP (Model Context Protocol) server debugging and testing scenarios. Provides diverse examples of Python code patterns, control structures, and debugging scenarios to validate debugger functionality and demonstrate debugging techniques.
+## Overall Purpose
 
-## Key Components
+The `examples/python` directory serves as a comprehensive test suite for MCP (Message Control Protocol) Server debugging functionality. This collection of Python scripts provides controlled debugging scenarios with varying complexity levels, from simple variable operations to recursive algorithms, designed to exercise and validate debugger capabilities.
 
-### Test Scripts by Complexity
+## Key Components and Organization
 
-**Simple Test Cases**
-- `simple_test.py`: Minimal debugging example with variable swapping and clear breakpoint locations
-- Basic entry point for debugging practice with straightforward execution flow
+### Core Test Scripts
+- **`simple_test.py`** - Minimal debugging target with basic variable swap operation, ideal for initial breakpoint testing
+- **`test_python_debug.py`** - Intermediate complexity with mathematical functions (factorial, list processing) for step-through debugging
+- **`python_test_comprehensive.py`** - Full-featured test suite with 6 distinct debugging scenarios covering all major Python constructs
+- **`fibonacci.py`** - Specialized debugging exercise with intentional bugs and algorithm comparison scenarios
 
-**Comprehensive Test Suite**
-- `python_test_comprehensive.py`: Full-featured test script with 6 distinct debugging scenarios covering recursion, loops, data structures, and conditional logic
-- Primary test orchestrator for thorough MCP debugger validation
-
-**Mathematical Function Tests**
-- `test_python_debug.py`: Collection of mathematical operations (factorial, summation, data transformation) with predictable input/output relationships
-- `fibonacci.py`: Dual implementation test (recursive vs iterative) with intentional bugs for debugging practice
-
-## Component Relationships
-
-### Shared Patterns
-- **Fibonacci implementations**: Both `fibonacci.py` and `python_test_comprehensive.py` include Fibonacci calculations for recursive debugging scenarios
-- **Mathematical operations**: Factorial and summation functions appear across multiple scripts for algorithm debugging
-- **Print-based verification**: All scripts use console output for state inspection and result validation
-
-### Testing Hierarchy
-1. **Entry Level**: `simple_test.py` for basic debugging concepts
-2. **Intermediate**: `test_python_debug.py` for mathematical function debugging  
-3. **Advanced**: `python_test_comprehensive.py` for comprehensive language construct testing
-4. **Specialized**: `fibonacci.py` for intentional bug detection and correction
+### Complexity Progression
+The directory follows a graduated complexity approach:
+1. **Simple** → Basic variable operations and control flow
+2. **Intermediate** → Mathematical algorithms and data processing
+3. **Comprehensive** → Multi-scenario testing with diverse Python features
+4. **Advanced** → Bug injection and comparative algorithm analysis
 
 ## Public API Surface
 
-### Entry Points
-All scripts follow standard Python execution pattern with `if __name__ == "__main__"` and `main()` function as primary entry point.
+### Main Entry Points
+Each script follows the standard Python execution pattern:
+```python
+if __name__ == "__main__":
+    main()  # or direct execution
+```
 
-### Key Functions by Category
-- **Recursive algorithms**: `fibonacci()`, `factorial()`  
-- **Iterative processing**: `sum_list()`, `calculate_sum()`, `process_data()`
+### Key Debugging Functions
+- **Mathematical algorithms**: `factorial()`, `fibonacci_recursive()`, `fibonacci_iterative()`
+- **Data processing**: `sum_list()`, `calculate_sum()`, `process_data()`
 - **Test orchestration**: `main()` functions in each script
 
-## Internal Organization
+## Internal Data Flow
 
-### Data Flow Pattern
-1. **Variable initialization** with simple data types and collections
-2. **Function execution** with clear input parameters
-3. **Result computation** and intermediate value tracking
-4. **Output verification** through print statements
+1. **Script Selection**: Choose appropriate test script based on debugging complexity needs
+2. **Function Execution**: Each script demonstrates specific programming patterns (recursion, iteration, data manipulation)
+3. **Breakpoint Placement**: Strategic locations marked for debugger interaction
+4. **State Inspection**: Variable changes and algorithm behavior observable at each step
 
-### Debugging Features
-- **Breakpoint-friendly code**: Explicit variable assignments and state changes
-- **Linear execution flow**: Minimal branching for predictable debugging
-- **State visibility**: Print statements at key execution points
-- **Error scenarios**: Intentional bugs in `fibonacci.py` for debugging practice
+## Important Patterns and Conventions
 
-## Important Conventions
+### Debugging-Optimized Design
+- **Self-contained**: No external dependencies beyond Python standard library
+- **Predictable outputs**: Deterministic behavior for consistent debugging sessions  
+- **Clear variable naming**: Optimized for inspection rather than brevity
+- **Strategic comments**: Explicit breakpoint location indicators
 
-### Code Structure
-- No external dependencies (pure Python standard library)
-- Procedural design with clear function separation
-- Consistent naming patterns and documentation
-- Self-contained execution without file I/O or network operations
+### Algorithm Coverage
+- **Recursive patterns**: Fibonacci and factorial implementations for call stack debugging
+- **Iterative patterns**: Loop-based algorithms for step-through analysis
+- **Data structure operations**: Lists, dictionaries, and basic collections
+- **Control flow**: Conditionals, loops, and function calls
 
-### Debugging Optimization  
-- **Clear variable names** for easy inspection
-- **Predictable algorithms** with known correct outputs
-- **Multiple complexity levels** for progressive debugging skill development
-- **Isolation**: Each script can run independently for focused testing
-
-This directory serves as a comprehensive testing suite for MCP debugger functionality, providing both simple learning examples and complex debugging scenarios to validate server capabilities across different Python language constructs.
+### Educational Structure
+Each script balances simplicity with instructional value, providing graduated learning experiences for debugging techniques while serving as comprehensive test cases for MCP Server validation.

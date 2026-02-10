@@ -1,51 +1,97 @@
 # tests/unit/implementations/process-launcher-impl-debug.test.ts
 @source-hash: e4a4e574a020bf4f
-@generated: 2026-02-09T18:14:45Z
+@generated: 2026-02-10T00:41:46Z
 
-## Unit Tests for DebugTargetLauncherImpl
+## Primary Purpose
 
-This test suite comprehensively validates the `DebugTargetLauncherImpl` class, which provides Python debug process launching capabilities using the `debugpy` module.
+Comprehensive unit test suite for `DebugTargetLauncherImpl` class, testing Python debug target launching capabilities with debugpy integration. Validates process spawning, port allocation, termination handling, and edge cases for debugging Python scripts.
 
-### Core Test Structure
+## Test Architecture
 
-- **Primary Subject**: `DebugTargetLauncherImpl` (L68) - main class under test for launching Python debug targets
-- **Mock Infrastructure**: `MockChildProcess` interface (L13-23) and `createMockProcess` helper (L26-45) create realistic process mocks with EventEmitter capabilities
-- **Test Dependencies**: ProcessManagerImpl, ProcessLauncherImpl, and NetworkManager mocks for isolated testing
+**Main Test Class Under Test**: `DebugTargetLauncherImpl` from `process-launcher-impl` (L5-6)
 
-### Key Test Categories
+**Key Dependencies**:
+- `ProcessLauncherImpl` and `ProcessManagerImpl` for process management (L6-8)
+- `INetworkManager` for port allocation (L9)
+- `IDebugTarget` interface for debug target contract (L10)
 
-**Launch Python Debug Target Tests (L85-236)**
-- Auto port allocation via `findFreePort()` (L86-111)
-- Specific port assignment bypassing auto-allocation (L113-139)
-- Custom Python interpreter path handling (L141-157)
-- Windows path compatibility testing (L159-174)
-- Error handling for port allocation failures (L176-184)
-- Invalid Python executable error propagation (L186-209)
-- Complete debugpy command argument verification (L211-235)
+## Mock Infrastructure
 
-**Process Termination Tests (L238-322)**
-- Graceful SIGTERM termination (L239-252)
-- Already-terminated process handling (L254-267)
-- Force SIGKILL after 5-second timeout (L269-296)
-- Immediate resolution when process exits during termination (L298-321)
+**MockChildProcess Interface** (L13-23): Extends EventEmitter with IChildProcess, providing complete child process simulation including streams, kill/send methods, and lifecycle properties.
 
-**Debug Target Properties Tests (L324-360)**
-- Process and debug port exposure validation (L325-338)
-- Event handling verification for error/exit events (L340-360)
+**createMockProcess Helper** (L26-45): Factory function creating realistic mock processes with:
+- Configurable PID (default 12345)
+- Simulated kill behavior with exit event emission
+- Mock stdin/stdout/stderr streams
+- Process state tracking (killed, exitCode, signalCode)
 
-**Edge Case Tests (L362-400)**
-- Relative script paths without directories (L363-377)
-- File paths with spaces handling (L379-399)
+## Test Setup & Teardown
 
-### Critical Test Patterns
+**beforeEach** (L55-70): 
+- Initializes fake timers for timeout testing
+- Creates fresh mock process and manager instances
+- Configures network manager mock with port 5678
+- Resets created targets array for cleanup tracking
 
-- **Resource Cleanup**: `createdTargets` array (L53) tracks all launched targets for proper cleanup in `afterEach` (L72-83)
-- **Timer Management**: Fake timers for testing timeout behavior in termination scenarios
-- **Process Mocking**: Realistic child process simulation with proper signal handling and event emission
-- **Command Verification**: Precise validation of debugpy command construction with listen addresses and client wait flags
+**afterEach** (L72-83): 
+- Cleans up all spawned debug targets
+- Restores real timers and clears all mocks
+- Ensures no process leakage between tests
 
-### Dependencies & Interfaces
+## Core Test Categories
 
-- **External Interfaces**: IChildProcess, INetworkManager, IDebugTarget from process-interfaces
-- **Implementation Classes**: DebugTargetLauncherImpl, ProcessLauncherImpl, ProcessManagerImpl
-- **Test Framework**: Vitest with comprehensive mocking and timer control capabilities
+### Launch Python Debug Target (L85-236)
+
+**Auto Port Allocation** (L86-111): Verifies debugpy launch with `findFreePort()` call and correct command line assembly including debugpy module, listen address, wait-for-client flag.
+
+**Specific Port Usage** (L113-139): Tests explicit port specification bypassing port allocation, ensuring correct 127.0.0.1:PORT format.
+
+**Custom Python Path** (L141-157): Validates custom Python interpreter usage while maintaining debugpy argument structure.
+
+**Platform-Specific Handling** (L159-174): Windows-only test for path handling (conditional execution).
+
+**Error Scenarios**:
+- Port allocation failure (L176-184)
+- Invalid Python path with spawn errors (L186-209)
+
+**Command Line Verification** (L211-235): Comprehensive argument order validation for complex debugpy invocations.
+
+### Process Termination (L238-322)
+
+**Graceful Termination** (L239-252): SIGTERM signal usage and process state verification.
+
+**Already Terminated Handling** (L254-267): Idempotent termination behavior for killed processes.
+
+**Force Kill Timeout** (L269-296): SIGKILL escalation after 5-second timeout using fake timers.
+
+**Exit During Termination** (L298-321): Race condition handling when process exits during graceful shutdown.
+
+### Debug Target Properties (L324-360)
+
+**Interface Compliance** (L325-338): Validates IDebugTarget contract with process, debugPort, and terminate method exposure.
+
+**Event Handling** (L340-359): Process event propagation testing for error and exit events.
+
+### Edge Cases (L362-400)
+
+**Path Edge Cases**: 
+- Empty dirname handling (L363-377)
+- Spaces in paths and arguments (L379-399)
+
+## Critical Test Patterns
+
+**Resource Management**: Systematic cleanup using `createdTargets` array prevents test pollution and process leakage.
+
+**Timer Management**: Fake timer usage enables deterministic timeout testing without real delays.
+
+**Mock Isolation**: Each test gets fresh mocks preventing cross-test interference.
+
+**Error Simulation**: Comprehensive error path coverage including network failures, spawn errors, and process lifecycle issues.
+
+## Key Invariants
+
+- All debug targets use debugpy module with `--wait-for-client` flag
+- Default listen address is `127.0.0.1` with allocated or specified port
+- Process termination follows graceful-then-force pattern with 5s timeout
+- Script arguments are preserved and passed through correctly
+- Process cleanup prevents resource leaks between test runs

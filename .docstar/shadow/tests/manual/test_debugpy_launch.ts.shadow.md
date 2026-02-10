@@ -1,39 +1,40 @@
 # tests/manual/test_debugpy_launch.ts
-@source-hash: 493d4e0c96e09267
-@generated: 2026-02-09T18:15:12Z
+@source-hash: f3d9c27a877a3888
+@generated: 2026-02-10T01:18:55Z
 
-**Primary Purpose**: Manual integration test script for verifying debugpy adapter process spawning and lifecycle management.
+## Purpose
+Manual test script for launching and observing a debugpy adapter process. Validates debugpy.adapter module execution with proper configuration, logging, and process lifecycle management.
 
-**Core Functionality**:
-- Tests the ability to spawn a Python debugpy adapter as a child process (L36-43)
-- Monitors adapter process output streams and lifecycle events (L57-75) 
-- Provides a controlled test environment with cleanup (L77-90)
+## Key Functions
 
-**Key Function**:
-- `testLaunch()` (L6-90): Main test orchestrator that handles the complete adapter lifecycle from spawn to termination
+### testLaunch() (L6-89)
+Main test function that:
+- Sets up debugpy adapter configuration with hardcoded Windows Python path (L9)
+- Creates log directory in temp folder with session-based naming (L15-21)
+- Spawns debugpy.adapter subprocess with host/port/log-dir arguments (L35-38)
+- Monitors process stdout/stderr streams and lifecycle events (L56-74)
+- Runs for 30-second observation period before cleanup (L78)
+- Terminates adapter process with SIGTERM signal (L82)
 
-**Configuration & Dependencies**:
-- Hardcoded Python path: `C:\Python313\python.exe` (L9)
-- Uses localhost:5678 for adapter binding (L10-11)
-- Creates temporary log directory using `fs-extra` (L14-22)
-- Spawns adapter with args: `-m debugpy.adapter --host --port --log-dir` (L24-29)
+## Configuration
+- **Python Path**: Hardcoded to `C:\Python313\python.exe` (L9)
+- **Network**: Binds to localhost:5678 (L10-11)
+- **Logging**: Uses temp directory with test-session prefix (L12, L15)
+- **Process Options**: Attached mode with piped stdio (L36-37)
 
-**Process Management Pattern**:
-- Spawns with piped stdio for output capture (L36-39)
-- Implements comprehensive event handling for stdout/stderr/error/exit/close events (L57-75)
-- Uses graceful termination with SIGTERM after 30-second observation period (L81-89)
+## Process Management
+- Comprehensive error handling for spawn failures (L39-52)
+- Event listeners for stdout/stderr data streams (L56-62)
+- Process lifecycle monitoring (error, exit, close events) (L64-74)
+- Graceful termination with fallback error handling (L80-88)
 
-**Error Handling**:
-- Validates spawn success and PID assignment (L45-53)
-- Provides detailed spawn failure diagnostics including spawnfile/spawnargs inspection (L49-51)
-- Handles directory creation failures with non-fatal logging (L19-22)
+## Dependencies
+- Node.js child_process for subprocess management
+- fs-extra for directory operations
+- Standard path/os modules for file system utilities
 
-**Test Structure**:
-- Fixed 30-second runtime for observation (L78-79)
-- Automatic cleanup with process termination
-- Console logging for all major events and state changes
-
-**Architectural Notes**:
-- Designed as a standalone manual test (not automated test suite)
-- Mimics production debugger adapter spawning patterns
-- Uses detached:false to maintain parent-child relationship
+## Architecture Notes
+- Designed as standalone manual test (executed via direct function call L91)
+- Uses async/await pattern with Promise-based delays
+- Implements defensive programming with null checks and error boundaries
+- Mimics production PythonDebugger log directory setup pattern

@@ -1,45 +1,54 @@
 # src/container/dependencies.ts
 @source-hash: 33a382c684f87d09
-@generated: 2026-02-09T18:15:03Z
+@generated: 2026-02-10T00:41:50Z
 
-**Purpose:** Central dependency injection container that assembles and wires all application dependencies for production use. Acts as the composition root for the debug MCP application.
+## Central Dependency Container
 
-**Key Interface & Types:**
-- `Dependencies` (L45-64): Complete dependency contract defining all required services - core implementations (filesystem, process/network managers, logger, environment), process launchers, factories, and adapter registry
-- `BundledAdapterEntry` (L36-39): Type for globally registered adapters with language and factory constructor
-- `ContainerConfig` imported from `./types.js`: Configuration interface for container setup
+This file implements the main dependency injection container for the debug-mcp application, responsible for wiring together all production dependencies with their concrete implementations.
 
-**Primary Function:**
-- `createProductionDependencies(config)` (L71-170): Main factory function that instantiates and wires all dependencies
-  - Creates logger with configurable options (L73-77)
-  - Instantiates core services with concrete implementations (L80-83)
-  - Builds process launcher hierarchy with dependency injection (L86-88)
-  - Creates factories for proxy management and session storage (L91-97)
-  - Configures adapter registry with dynamic loading enabled (L99-107)
-  - Handles bundled adapter registration from global registry (L109-123)
-  - Performs conditional container-mode adapter pre-registration (L127-156)
+### Primary Purpose
+Creates and configures the complete dependency graph for production use, including core services, process launchers, factories, and adapter registry with dynamic loading capabilities.
 
-**Dependency Architecture:**
-- Follows composition over inheritance pattern with interface segregation
-- Implements layered dependency injection: core services → process launchers → factories → registry
-- Process launchers form a hierarchy: `ProcessLauncherImpl` → `ProxyProcessLauncherImpl` → `DebugTargetLauncherImpl`
-- Factory pattern used for `ProxyManagerFactory` and `SessionStoreFactory`
+### Key Components
 
-**Adapter System:**
-- Global bundled adapter registration via `__DEBUG_MCP_BUNDLED_ADAPTERS__` key (L40, L109-123)
-- Dynamic adapter loading in container mode with fire-and-forget imports (L127-156)
-- Language-based adapter discovery with environment variable disabling support
-- Supports mock, python, javascript, rust, go, and java adapters
+**Dependencies Interface (L45-64)**
+- Defines the complete contract for all application dependencies
+- Groups dependencies into: core implementations, process launchers, factories, and adapter support
+- Serves as the main dependency container type
 
-**Critical Patterns:**
-- Fire-and-forget dynamic imports to prevent blocking dependency creation (L134-147)
-- Environment-based conditional loading (`MCP_CONTAINER` check at L127)
-- Promise-aware error handling for async adapter registration (L114-118)
-- Language filtering through `isLanguageDisabled()` utility (L129-132)
+**createProductionDependencies Function (L71-171)**
+- Main factory function that creates the entire dependency graph
+- Takes optional ContainerConfig for service configuration
+- Returns fully wired Dependencies object for production use
 
-**Dependencies:**
-- Core implementations from `../implementations/` 
-- Shared interfaces from `@debugmcp/shared`
-- Factory classes from `../factories/`
-- Adapter registry from `../adapters/`
-- Language configuration utilities
+### Dependency Wiring Structure
+
+**Core Services (L73-83)**
+- Logger with configurable level/file output
+- Environment, FileSystem, ProcessManager, NetworkManager implementations
+
+**Process Launchers (L86-88)**
+- ProcessLauncher -> ProxyProcessLauncher -> DebugTargetLauncher hierarchy
+- Each launcher wraps lower-level components with additional functionality
+
+**Factories (L91-97)**
+- ProxyManagerFactory: Creates proxy managers with launcher/filesystem dependencies
+- SessionStoreFactory: Creates session storage instances
+
+**Adapter Registry (L102-156)**
+- Configured with validation disabled during registration (validated at creation time)
+- Dynamic loading enabled for on-demand adapter discovery
+- Handles bundled adapters via global registry (L109-123)
+- Container-specific adapter preloading (L127-156) for mock, python, javascript, rust, go, java
+
+### Key Dependencies
+- `@debugmcp/shared`: Core interfaces and types
+- `../implementations/`: Concrete service implementations  
+- `../factories/`: Factory implementations
+- `../utils/`: Logging and language configuration utilities
+
+### Notable Patterns
+- Fire-and-forget dynamic imports for optional adapters in container mode
+- Layered dependency injection with explicit dependency passing
+- Separation of registration-time and creation-time validation
+- Environment-based conditional loading (MCP_CONTAINER flag)

@@ -1,73 +1,74 @@
 # tests/unit/shared/
-@generated: 2026-02-09T18:16:12Z
+@generated: 2026-02-10T01:19:42Z
 
-## Overall Purpose
+## Test Suite: Shared Infrastructure Unit Tests
 
-The `tests/unit/shared` directory contains comprehensive unit tests for the shared infrastructure layer that supports debugging adapters across multiple languages and environments. This test suite validates the adapter policy system, filesystem abstractions, and core debugging protocol implementations that form the foundation for language-specific debug adapter coordination.
+**Purpose**: Comprehensive unit test coverage for shared debugging infrastructure components, including adapter policies, filesystem abstractions, and core debugging protocols. This test directory validates the foundational building blocks used across different debugging adapters and ensures robust error handling and state management.
 
-## Key Components & Architecture
+### Key Components & Testing Coverage
 
-### Adapter Policy System Tests
-The directory primarily tests the adapter policy abstraction layer through multiple implementations:
+#### Adapter Policy Framework
+The test suite validates a polymorphic adapter policy system that provides debug-adapter-specific behavior:
 
-- **DefaultAdapterPolicy** (`adapter-policy-default.test.ts`): Tests the fallback/no-op policy ensuring safe defaults when no specific adapter is available
-- **JsDebugAdapterPolicy** (`adapter-policy-js.test.ts`): Validates JavaScript/Node.js specific debugging behaviors including DAP command sequencing, variable filtering, and stack frame processing
-- **PythonAdapterPolicy** (`adapter-policy-python.test.ts`): Tests Python debugger integration including debugpy command recognition and executable path resolution
-- **MockAdapterPolicy** (`adapter-policy-mock.test.ts`): Validates testing/development adapter functionality for simulation scenarios
+- **DefaultAdapterPolicy** (`adapter-policy-default.test.ts`): Tests the base no-op implementation that provides safe defaults for all adapter policy interface methods
+- **JsDebugAdapterPolicy** (`adapter-policy-js.test.ts`): Comprehensive testing of JavaScript/Node.js debugging behavior including command queueing, breakpoint management, variable filtering, and DAP handshake flows
+- **PythonAdapterPolicy** (`adapter-policy-python.test.ts`): Validates Python-specific debugging features like executable path resolution, environment variable handling, and debugpy adapter detection
+- **MockAdapterPolicy** (`adapter-policy-mock.test.ts`): Tests mock adapter functionality for development and testing scenarios
 
-### Infrastructure Tests
-- **Filesystem Abstraction** (`filesystem.test.ts`): Tests the NodeFileSystem implementation and global filesystem instance management, providing a testable interface for file operations
+#### Filesystem Abstraction Layer
+- **NodeFileSystem** (`filesystem.test.ts`): Tests filesystem abstraction that provides safe defaults when Node.js fs operations fail, including error handling and global instance management
 
-## Test Coverage & Patterns
+### Public API Surface & Entry Points
 
-### Core Functionality Validation
-All adapter policy tests follow consistent patterns:
-- **State Management**: Testing initialization, configuration, and connection state tracking
-- **Command Processing**: Validating DAP protocol command handling, queueing, and sequencing
-- **Variable/Frame Filtering**: Testing language-specific debugging data extraction and filtering
-- **Child Session Handling**: Validating multi-session debugging coordination capabilities
-- **Adapter Matching**: Testing command/configuration recognition for routing to appropriate adapters
+#### Core Policy Interface Methods
+All adapter policies implement a common interface tested across files:
+- `matchesAdapter()` - Adapter detection and matching
+- `createInitialState()` / `updateStateOnEvent()` / `updateStateOnCommand()` - State management
+- `buildChildStartArgs()` - Child session configuration  
+- `extractLocalVariables()` - Debug variable filtering
+- `requiresCommandQueueing()` / `shouldQueueCommand()` - Command ordering
+- `resolveExecutablePath()` - Runtime executable resolution
+- `getInitializationBehavior()` - Debug session setup configuration
 
-### Integration Testing
-The test suite includes complex integration scenarios:
-- **Handshake Flows**: Full DAP initialization sequences with mocked EventEmitter coordination
-- **Async State Transitions**: Using fake timers for precise async behavior validation
-- **Environment Isolation**: Proper setup/teardown for platform-specific behaviors
+#### Filesystem Operations
+- `existsSync()` / `readFileSync()` - Safe filesystem operations with error handling
+- `setDefaultFileSystem()` / `getDefaultFileSystem()` - Global filesystem instance management
 
-## Public API Surface
+### Internal Organization & Data Flow
 
-The tests validate the primary entry points of the shared debugging infrastructure:
+#### Debug Session Lifecycle Management
+Tests validate the complete debug session flow:
+1. **Initialization Phase**: Adapter detection → state creation → configuration
+2. **Setup Phase**: Command queueing → breakpoint configuration → handshake
+3. **Runtime Phase**: Variable extraction → stack frame filtering → child session handling
 
-### Adapter Policy Interface
-- `matchesAdapter()`: Command/configuration recognition
-- `buildChildStartArgs()`: Multi-session debugging configuration  
-- `createInitialState()`: State initialization
-- `updateStateOnEvent/Command/Response()`: State transition management
-- `extractLocalVariables()`: Language-specific variable filtering
-- `filterStackFrames()`: Stack trace processing
-- `shouldQueueCommand()`: Command ordering logic
+#### State Management Pattern
+All policies follow event-driven state management:
+- Initial state creation with default values
+- State updates triggered by DAP events (`initialized`, `configurationDone`)  
+- State queries for initialization and connection status
 
-### Filesystem Interface
-- `existsSync()`: File existence checking with error handling
-- `readFileSync()`: Safe file reading with fallback behavior
-- `setDefaultFileSystem()/getDefaultFileSystem()`: Global instance management
+#### Error Handling Strategy
+Tests ensure graceful degradation:
+- Filesystem operations return safe defaults on errors
+- Unsupported operations (child sessions) throw explicit exceptions
+- Command queueing provides ordering guarantees during initialization
 
-## Internal Organization & Data Flow
+### Important Testing Patterns
 
-The test suite reveals a layered architecture:
+#### Mock-Heavy Integration Testing
+- Extensive use of Vitest mocks (`vi.fn()`) for DAP request simulation
+- Fake timer control for async handshake flow testing
+- Event emitter mocking for proxy manager simulation
 
-1. **Abstract Policy Layer**: Common interface for all adapter implementations
-2. **Language-Specific Policies**: Concrete implementations with specialized behaviors
-3. **State Management**: Centralized debugging session state tracking
-4. **Command Coordination**: DAP protocol message routing and sequencing
-5. **Infrastructure Services**: Filesystem and utility abstractions
+#### Environment Isolation
+- Proper setup/teardown to prevent test contamination
+- Environment variable mocking with restoration
+- Platform-specific testing with `process.platform` manipulation
 
-## Testing Framework & Conventions
+#### Type Safety with Flexibility
+- Strategic use of `as any` type assertions for test convenience
+- Optional chaining (`?.`) for conditionally defined methods
+- Private member access via type assertions for error simulation
 
-- **Vitest**: Primary testing framework across all test files
-- **Mock Management**: Comprehensive mocking with proper cleanup and isolation
-- **Type Safety**: Strategic use of type assertions for test data structures
-- **Environment Simulation**: Platform-specific behavior testing with controlled environment manipulation
-- **Integration Patterns**: Complex async scenarios using EventEmitter coordination and fake timers
-
-The test suite ensures robust validation of the debugging infrastructure that supports multiple language adapters while maintaining consistent interfaces and safe fallback behaviors.
+This test suite ensures the shared debugging infrastructure provides reliable, adapter-agnostic foundations while supporting specific debugging requirements across different language runtimes.

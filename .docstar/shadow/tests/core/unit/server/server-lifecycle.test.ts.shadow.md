@@ -1,37 +1,39 @@
 # tests/core/unit/server/server-lifecycle.test.ts
-@source-hash: 22b7663f7df9535c
-@generated: 2026-02-09T18:14:23Z
+@source-hash: 8b6269ea912ad720
+@generated: 2026-02-10T01:18:54Z
 
 ## Purpose
-Unit test suite for `DebugMcpServer` lifecycle operations (start/stop) using Vitest framework. Tests server initialization, startup, and shutdown behaviors with comprehensive mocking of external dependencies.
+Unit test suite for DebugMcpServer lifecycle management using Vitest, focusing on server start/stop operations and error handling scenarios.
 
 ## Test Structure
-- **Main Test Suite** (L23-102): "Server Lifecycle Tests" covering start/stop operations
-- **Setup/Teardown** (L29-45): Mock initialization in `beforeEach`, cleanup in `afterEach`
-- **Server Start Tests** (L47-65): Validates server startup with stdio transport
-- **Server Stop Tests** (L67-102): Validates server shutdown and session cleanup
+- **Main test suite** (L23): "Server Lifecycle Tests" with comprehensive mocking setup
+- **BeforeEach setup** (L29-41): Configures mock dependencies, Server SDK, StdioServerTransport, and SessionManager
+- **AfterEach cleanup** (L43-45): Clears all mocks between tests
 
-## Key Dependencies & Mocks
-- **External SDK Mocks** (L18-19): `@modelcontextprotocol/sdk` server and stdio transport
-- **Internal Component Mocks** (L20-21): `SessionManager` and dependency container
-- **Test Helpers** (L10-15): Mock factory functions from `server-test-helpers.js`
+## Key Test Groups
 
-## Mock Objects
-- **mockDependencies** (L30): Production dependencies mock via `createMockDependencies()`
-- **mockServer** (L33): MCP Server instance mock via `createMockServer()`
-- **mockSessionManager** (L39): Session management mock with adapter registry
-- **mockStdioTransport** (L36): Transport layer mock for stdio communication
+### Server Start Tests (L47-63)
+- **Basic start test** (L48-54): Verifies server starts successfully with stdio transport and logs startup message
+- **Error handling test** (L56-62): Tests server start error scenarios (though implementation appears incomplete)
 
-## Test Scenarios
-- **Basic Start** (L48-55): Verifies successful server startup with logging
-- **Start Error Handling** (L57-64): Tests error scenarios during startup
-- **Clean Stop** (L68-76): Validates proper shutdown with session cleanup
-- **Stop with Session Errors** (L78-90): Tests error handling during session closure
-- **Stop with Server Errors** (L92-101): Tests error handling during server closure
+### Server Stop Tests (L65-98)
+- **Clean stop test** (L66-74): Verifies server stops gracefully, closes all sessions, and logs shutdown message
+- **Session close error test** (L76-87): Tests error propagation when SessionManager.closeAllSessions fails
+- **Server close error test** (L89-97): Tests server shutdown with session cleanup success
 
-## Key Behaviors Tested
-- Server initialization with mocked dependencies
-- Stdio transport configuration
-- Session manager integration during shutdown
-- Error propagation and logging during lifecycle operations
-- Proper cleanup of resources and sessions
+## Dependencies & Mocking
+- **External mocks** (L18-21): Server SDK, StdioServerTransport, SessionManager, and production dependencies
+- **Test helpers** (L11-15): Custom mock factories from server-test-helpers.js
+- **Mock objects** (L24-27): debugServer (SUT), mockServer, mockSessionManager, mockDependencies
+
+## Key Patterns
+- Comprehensive mocking strategy using Vitest vi.mock()
+- Dependency injection testing through createProductionDependencies mock
+- Error scenario testing with promise rejection handling
+- Consistent assertion patterns for logger calls and method invocations
+
+## Critical Test Coverage
+- Server lifecycle state transitions (start/stop)
+- Error propagation from dependency failures  
+- Resource cleanup verification (session closure)
+- Logging behavior validation

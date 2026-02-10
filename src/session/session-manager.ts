@@ -27,11 +27,13 @@ export { SessionManagerOperations } from './session-manager-operations.js';
  */
 export class SessionManager extends SessionManagerOperations {
   /**
-   * Override handleAutoContinue to call the continue method
+   * Override handleAutoContinue to call the continue method.
+   * TODO: Implement with proper session context - this method is called from
+   * setupProxyEventHandlers where sessionId is available via closure, but this
+   * override does not currently have access to it. Needs refactoring to accept
+   * sessionId as a parameter or capture it from the event handler context.
    */
   protected async handleAutoContinue(): Promise<void> {
-    // This method is called from event handlers where sessionId is in scope
-    // For now, we'll throw an error since this needs to be implemented properly
-    throw new Error('handleAutoContinue must be implemented with proper session context');
+    throw new Error('handleAutoContinue not yet implemented: requires session context refactoring');
   }
 }

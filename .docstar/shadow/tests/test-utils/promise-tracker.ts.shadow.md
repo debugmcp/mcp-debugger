@@ -1,49 +1,60 @@
 # tests/test-utils/promise-tracker.ts
 @source-hash: 8786e3cef8cf1332
-@generated: 2026-02-09T18:15:11Z
+@generated: 2026-02-10T00:41:59Z
 
-## Promise Tracking Utility for Test Debugging
+## Purpose
+Test utility for debugging promise memory leaks by tracking promise lifecycle across test sessions. Helps identify unresolved promises or promises that weren't properly cleaned up after test completion.
 
-**Primary Purpose**: Test utility for tracking and debugging promise leaks in test suites by monitoring promise lifecycle and identifying unresolved or improperly cleaned up promises.
+## Key Data Structures
 
-### Core Data Structures
+**TrackedPromise Interface (L5-12)**
+- Core tracking object containing promise metadata: ID, session, test name, creation timestamp, stack trace, and resolution status
 
-- **TrackedPromise Interface (L5-12)**: Defines promise tracking metadata including ID, session, test name, creation timestamp, stack trace, and resolution status
-- **activePromises Map (L15)**: Global registry mapping promise IDs to TrackedPromise objects 
-- **sessionPromises Map (L18)**: Session-based grouping of promise IDs using Sets for efficient cleanup
+**Global State (L15-18)**
+- `activePromises`: Map tracking all currently monitored promises by ID
+- `sessionPromises`: Map grouping promise IDs by session for bulk cleanup
 
-### Key Functions
+## Core Functions
 
-**Promise Lifecycle Management:**
-- **trackPromise() (L23-44)**: Registers new promise with metadata capture, stack trace generation, and optional debug logging
-- **resolvePromise() (L49-58)**: Marks promise as resolved without removing from tracking
-- **untrackPromise() (L63-81)**: Complete cleanup - removes from both global and session maps with automatic session cleanup when empty
+**trackPromise() (L23-44)**
+- Registers new promise for tracking with creation timestamp and stack trace
+- Associates promise with session and test context
+- Optional debug logging via `DEBUG_PROMISE_LEAKS` env var
 
-**Session Management:**
-- **cleanupSession() (L86-93)**: Bulk cleanup of all promises for a specific session ID
-- **clearAllTracking() (L128-131)**: Nuclear option - clears all tracking state
+**resolvePromise() (L49-58)**
+- Marks tracked promise as resolved (but keeps it in tracking for cleanup verification)
+- Does not remove from active tracking - cleanup still required
 
-**Debugging & Reporting:**
-- **reportLeakedPromises() (L98-123)**: Identifies and formats leak reports for unresolved or untracked promises with age calculation
-- **getPromiseStats() (L136-163)**: Provides aggregate statistics including total, resolved/unresolved counts, and per-test breakdowns
+**untrackPromise() (L63-81)**
+- Removes promise from all tracking structures
+- Cleans up empty session entries automatically
+- Final cleanup step after promise resolution and disposal
 
-### Architectural Patterns
+## Session Management
 
-- **Two-tier tracking**: Global promise registry with session-based grouping for efficient bulk operations
-- **Debug-conditional logging**: All console output gated by `DEBUG_PROMISE_LEAKS` environment variable
-- **Stack trace capture**: Uses `new Error().stack` for promise creation location tracking
-- **Defensive programming**: Null-safe operations throughout with existence checks
+**cleanupSession() (L86-93)**
+- Bulk cleanup utility that removes all promises associated with a test session
+- Iterates through session's promise set and calls untrackPromise for each
 
-### Usage Context
+## Debugging & Reporting
 
-Designed for test environments to identify:
-- Promises that never resolve/reject (blocking test completion)
-- Resolved promises not properly cleaned up (memory leaks)
-- Session-scoped promise management for test isolation
+**reportLeakedPromises() (L98-123)**
+- Scans active promises for leaks (unresolved or resolved but not cleaned)
+- Returns detailed leak reports with stack traces, ages, and test context
+- Distinguishes between unresolved promises vs resolved but uncleaned promises
 
-### Critical Invariants
+**getPromiseStats() (L136-163)**
+- Provides aggregated statistics: total/resolved/unresolved counts and per-test breakdown
+- Useful for test suite health monitoring
 
-- Promise IDs must be unique across sessions
-- Session cleanup automatically removes empty session entries
-- Stack traces captured at promise creation time for debugging
-- Resolution status independent of cleanup status (resolved promises may still be tracked)
+**clearAllTracking() (L128-131)**
+- Emergency cleanup that clears all tracking state
+- Intended for test infrastructure cleanup
+
+## Architecture Notes
+
+- Uses two-level tracking (global + session-scoped) for flexible cleanup strategies
+- Promise lifecycle: track → resolve → untrack (3-step process)
+- Debug mode controlled by `DEBUG_PROMISE_LEAKS` environment variable
+- Stack trace capture at creation time enables precise leak source identification
+- Session-based grouping allows test framework integration for automatic cleanup

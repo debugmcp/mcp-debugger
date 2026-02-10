@@ -28,18 +28,6 @@ describe('JavascriptDebugAdapter additional branch coverage', () => {
     vi.restoreAllMocks();
   });
 
-  it('determineRuntimeExecutable: no runners logs to console.warn when no dependency logger', async () => {
-    const adapter = new JavascriptDebugAdapter(depsNoLogger);
-    const spyConsole = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.spyOn(adapter as any, 'detectTypeScriptRunners').mockResolvedValue({ tsx: undefined, tsNode: undefined });
-
-    const exec = await (adapter as any).determineRuntimeExecutable(true);
-    expect(exec).toBe('node');
-    expect(spyConsole).toHaveBeenCalledTimes(1);
-
-    spyConsole.mockRestore();
-  });
-
   it('dispose without prior connect: emits only disposed (no disconnected), state reset', async () => {
     const adapter = new JavascriptDebugAdapter(depsWithLogger);
     vi.spyOn(adapter, 'validateEnvironment').mockResolvedValue({

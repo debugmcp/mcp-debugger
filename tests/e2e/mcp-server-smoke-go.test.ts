@@ -33,7 +33,7 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
     
     // Create transport for MCP server
     transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [path.join(ROOT, 'dist', 'index.js'), '--log-level', 'info'],
       env: {
         ...process.env,

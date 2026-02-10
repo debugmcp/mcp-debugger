@@ -569,8 +569,10 @@ export class JdbWrapper extends EventEmitter {
   }
 
   /**
-   * Convert file path to Java class name
-   * TODO: This is simplified - needs package resolution
+   * Convert file path to Java class name.
+   * Reads the source file to extract the package declaration and constructs
+   * the fully qualified class name. Falls back to the basename if the file
+   * cannot be read or has no package declaration.
    */
   private fileToClassName(file: string): string {
     // Remove .java extension

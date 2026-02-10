@@ -1,36 +1,34 @@
 # examples/visualizer/record_session.py
 @source-hash: 5e66985eec688eb5
-@generated: 2026-02-09T18:14:58Z
+@generated: 2026-02-10T00:41:41Z
 
 ## Purpose
-Utility script for recording debugging demonstration sessions using asciinema for the MCP debugger project. Creates terminal recordings that can be converted to GIFs for documentation purposes.
+Script for recording terminal sessions of MCP debugger demonstrations using asciinema. Creates screencasts for documentation and demo purposes.
 
-## Key Functions
-- `main()` (L9-48): Orchestrates the entire recording workflow
-  - Validates asciinema installation via subprocess check (L13-21)
-  - Displays user instructions for demo setup (L23-33)
-  - Launches asciinema recording with predefined configuration (L38-45)
+## Core Functionality
 
-## Dependencies
-- `subprocess`: For system command execution (asciinema validation and recording)
-- `sys`: For script termination on missing dependencies
+**main() (L9-48)**: Primary orchestrator function that:
+- Validates asciinema installation via subprocess check (L13)
+- Provides comprehensive user instructions and terminal setup guidance (L23-32)
+- Configures and launches asciinema recording with specific parameters for demo consistency (L38-45)
+- Outputs post-recording workflow instructions (L47-48)
+
+## Key Dependencies
+- `subprocess`: Used for system command execution and asciinema availability checking
+- `sys`: Provides exit functionality for error conditions
 - `pathlib.Path`: Imported but unused in current implementation
 
-## Workflow
-1. **Dependency Check**: Verifies asciinema availability using `which` command
-2. **User Guidance**: Provides comprehensive setup instructions including terminal sizing
-3. **Interactive Start**: Waits for user confirmation before recording
-4. **Recording Configuration**: 
-   - Fixed filename: "mcp-debugger-demo-swap-bug.cast"
-   - Terminal size: 120x30
-   - Idle time limit: 3 seconds
-   - Descriptive title for the recording
+## Configuration Parameters
+- **Output filename**: Hardcoded as "mcp-debugger-demo-swap-bug.cast" (L36)
+- **Terminal dimensions**: Fixed at 120x30 for consistent demo appearance (L42-43)
+- **Idle timeout**: 3 seconds to trim dead time in recordings (L41)
+- **Recording title**: Descriptive metadata for the cast file (L40)
 
-## Architecture Notes
-- Script assumes external demo_runner.py process is already running
-- Hard-coded recording parameters optimized for demo presentation
-- Provides fallback installation instructions for multiple platforms
-- Uses subprocess.run() for both validation and recording execution
+## Workflow Integration
+Positioned as part of a larger demo pipeline:
+1. Expects `demo_runner.py` to be running concurrently
+2. References `convert_to_gif.py` as the next step in the processing chain
+3. Targets specific debugging scenario (variable swap bug demonstration)
 
-## Integration Context
-Part of visualizer toolchain - output feeds into convert_to_gif.py for final processing. Designed for creating standardized demo recordings of MCP debugger capabilities, specifically focused on variable swap bug scenarios.
+## Error Handling
+Robust asciinema dependency checking with multi-platform installation instructions and fallback suggestions for alternative recording methods (L13-21).

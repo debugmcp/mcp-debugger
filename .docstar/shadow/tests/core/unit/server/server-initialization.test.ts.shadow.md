@@ -1,57 +1,48 @@
 # tests/core/unit/server/server-initialization.test.ts
 @source-hash: 505ec4fcb10637b9
-@generated: 2026-02-09T18:14:20Z
+@generated: 2026-02-10T00:41:13Z
 
-## Primary Purpose
-Test suite for DebugMcpServer initialization, configuration, and tool handler registration using Vitest framework.
+## Purpose
+Comprehensive unit tests for DebugMcpServer initialization, configuration, and tool handler registration. Validates server constructor behavior, dependency injection, error handling, and MCP tool availability.
 
 ## Test Structure
 
 ### Main Test Suite (L25-177)
-- **Constructor Tests (L50-111)**: Validates server initialization with different configurations
-- **Tool Handler Tests (L113-176)**: Verifies tool registration and execution behavior
+- **Constructor Tests (L50-111)**: Server initialization with various configurations
+- **Tool Handler Tests (L113-176)**: MCP tool registration and execution validation
 
-### Key Test Scenarios
+## Key Test Cases
 
-#### Server Initialization (L51-96)
-- Tests correct MCP server configuration with name/version metadata (L54-57)
-- Validates dependency injection with various log configurations (L66-81)
-- Handles dependency creation failures gracefully (L83-89)
-- Confirms tool handler registration count (L91-96)
+### Server Initialization (L51-110)
+- **Basic Configuration (L51-64)**: Validates server creation with debug log level, checks Server SDK initialization with correct metadata
+- **Log File Configuration (L66-81)**: Tests custom log file path handling and session log directory derivation using `path.resolve()`
+- **Error Handling (L83-89)**: Verifies graceful handling of dependency creation failures
+- **Tool Registration (L91-96)**: Confirms proper MCP request handler setup (ListTools, CallTool)
+- **Error Handler Setup (L98-110)**: Tests server error callback configuration and logging integration
 
-#### Error Handling (L98-110)
-- Sets up error handler on MCP server instance (L101)
-- Routes server errors to dependency logger (L109)
+### Tool Handler Validation (L114-175)
+- **Tools List Handler (L114-140)**: Validates all 14 debugging tools are properly registered:
+  - Session management: create_debug_session, list_debug_sessions, close_debug_session
+  - Debugging control: start_debugging, set_breakpoint, step_over/into/out, continue/pause_execution
+  - Inspection tools: get_variables, get_stack_trace, get_scopes, evaluate_expression, get_source_context
+- **Unknown Tool Error (L142-153)**: Tests proper error handling for invalid tool names
+- **Tool Execution Errors (L155-175)**: Validates error propagation and logging for failed tool operations
 
-#### Tool Registration Verification (L114-140)
-- Tests `tools/list` endpoint returns all 14 required debug tools
-- Validates presence of core debugging tools:
-  - Session management: `create_debug_session`, `list_debug_sessions`, `close_debug_session`
-  - Breakpoint control: `set_breakpoint`, `start_debugging`
-  - Execution control: `step_over`, `step_into`, `step_out`, `continue_execution`, `pause_execution`
-  - Inspection: `get_variables`, `get_stack_trace`, `get_scopes`, `evaluate_expression`, `get_source_context`
+## Mock Infrastructure
+- Uses comprehensive mocking via `server-test-helpers.js` (L12-17)
+- Mocks SDK components: Server, StdioServerTransport (L20-21)
+- Mocks application components: SessionManager, dependencies (L22-23)
+- **Mock Setup (L32-44)**: Creates interconnected mock objects with proper dependency injection
 
-#### Error Scenarios (L142-176)
-- Unknown tool handling with proper error messages (L142-153)
-- Tool execution failure propagation with logging (L155-175)
+## Dependencies
+- **Vitest**: Testing framework with mocking capabilities (L4)
+- **MCP SDK**: Server and transport abstractions (L5-6)
+- **Application Components**: DebugMcpServer, SessionManager, dependency container (L7-9)
+- **Test Utilities**: Comprehensive mock factory functions (L11-17)
 
-## Dependencies & Mocking
-
-### Mocked Components (L20-23)
-- `@modelcontextprotocol/sdk/server/index.js` - Core MCP server
-- `@modelcontextprotocol/sdk/server/stdio.js` - STDIO transport
-- `../../../../src/session/session-manager.js` - Session management
-- `../../../../src/container/dependencies.js` - Dependency injection
-
-### Test Setup (L32-44)
-Creates comprehensive mock ecosystem with production dependencies, MCP server, STDIO transport, and session manager instances.
-
-## Configuration Testing
-Tests log file path resolution for session log directory derivation (L67-81), ensuring platform-specific path handling using Node.js path utilities.
-
-## Architecture Validation
-Confirms DebugMcpServer properly integrates with MCP SDK patterns:
-- Server metadata registration
-- Capability declaration (`tools: {}`)
-- Request handler registration
-- Error handling setup
+## Testing Patterns
+- Consistent mock setup/teardown lifecycle (L32-48)
+- Error boundary testing with expected exceptions
+- Async handler testing with proper error propagation
+- Integration-style testing of component interactions
+- Configuration validation through dependency injection verification

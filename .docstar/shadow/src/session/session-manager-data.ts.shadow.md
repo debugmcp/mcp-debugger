@@ -1,65 +1,50 @@
 # src/session/session-manager-data.ts
-@source-hash: 5b425fa6b13cd1b0
-@generated: 2026-02-09T18:15:11Z
+@source-hash: 4d2aa403cb3520b4
+@generated: 2026-02-10T01:19:04Z
 
-## SessionManagerData
+## Purpose
+Data retrieval operations for debug session management, providing methods to fetch variables, stack traces, and scopes from debug adapters with language-specific policy application.
 
-Data retrieval layer for debug session management. Extends SessionManagerCore to provide operations for fetching variables, stack traces, and scopes via Debug Adapter Protocol (DAP).
+## Core Architecture
+Abstract class `SessionManagerData` (L24) extends `SessionManagerCore`, implementing data fetching layer for debug session inspection. Uses adapter policies for language-specific filtering and variable extraction.
 
-### Core Purpose
-- Bridge between session management and debug adapter data retrieval
-- Apply language-specific policies for stack frame filtering and variable extraction
-- Handle DAP communication through proxy managers
+## Key Components
 
-### Key Components
-
-#### SessionManagerData Class (L24-266)
-Primary class providing data access methods with built-in validation and error handling.
-
-**selectPolicy(language)** (L28-48)
-- Maps language strings/enums to appropriate AdapterPolicy implementations
+### Policy Selection System
+- `selectPolicy()` (L28-48): Maps debug language strings/enums to appropriate adapter policies
 - Supports: Python, JavaScript, Rust, Go, Mock, with DefaultAdapterPolicy fallback
-- Returns policy objects for language-specific behavior customization
+- Returns policy objects that define language-specific data handling rules
 
-**getVariables(sessionId, variablesReference)** (L50-83)
-- Fetches variables for a given reference ID via DAP 'variables' request
-- Validates session state (must be PAUSED) and proxy availability
-- Maps DAP Variable responses to internal Variable format with expandable flag
-- Returns empty array on errors/invalid states
+### Core Data Operations
+- `getVariables()` (L50-83): Fetches variables by reference ID from debug adapter
+  - Validates session state (must be PAUSED) and proxy availability
+  - Sends DAP 'variables' request, transforms response to internal Variable format
+  - Maps DAP Variable to: {name, value, type, variablesReference, expandable}
 
-**getStackTrace(sessionId, threadId?, includeInternals)** (L85-134)
-- Retrieves stack frames via DAP 'stackTrace' request
-- Uses current thread ID if threadId not provided
-- Applies language-specific filtering through AdapterPolicy.filterStackFrames
-- Maps DAP StackFrame to internal StackFrame format
+- `getStackTrace()` (L85-134): Retrieves call stack with optional filtering
+  - Handles threadId resolution (parameter or current session thread)
+  - Applies language policy filtering via `policy.filterStackFrames()` (L118-123)
+  - Maps DAP StackFrame to: {id, name, file, line, column}
 
-**getScopes(sessionId, frameId)** (L136-164)
-- Fetches scopes for specific stack frame via DAP 'scopes' request
-- Returns raw DebugProtocol.Scope array
-- Used as input for variable retrieval
+- `getScopes()` (L136-164): Fetches variable scopes for a stack frame
+  - Returns raw DebugProtocol.Scope[] without transformation
+  - Used by other methods to enumerate variable containers
 
-**getLocalVariables(sessionId, includeSpecial)** (L172-265)
-- High-level orchestration method combining stack trace, scopes, and variables
-- Collects data from all frames and scopes into maps
-- Delegates to AdapterPolicy.extractLocalVariables for language-specific local variable identification
-- Returns structured result with variables, frame context, and scope name
-- Fallback behavior: first non-global scope from top frame
+### High-Level Orchestration
+- `getLocalVariables()` (L172-265): Convenience method combining stack/scope/variable operations
+  - Multi-step process: stack trace → scopes for all frames → variables for all scopes
+  - Delegates to adapter policy's `extractLocalVariables()` for language-specific filtering
+  - Returns structured result: {variables, frame, scopeName}
+  - Builds comprehensive data maps (scopesMap, variablesMap) for policy consumption
 
-### Dependencies
-- SessionManagerCore (base class)
-- @debugmcp/shared types (Variable, StackFrame, SessionState, AdapterPolicy variants)
-- @vscode/debugprotocol for DAP types
-- Session proxy managers for DAP communication
+## Dependencies
+- Extends `SessionManagerCore` for session management primitives
+- Uses `@debugmcp/shared` types: Variable, StackFrame, SessionState, adapter policies
+- Communicates via VSCode Debug Adapter Protocol (DebugProtocol types)
+- Requires active `proxyManager` for DAP communication
 
-### Error Handling Pattern
-All methods follow consistent validation:
-1. Check proxy manager existence and running state
-2. Verify session is in PAUSED state
-3. Wrap DAP requests in try-catch with logging
-4. Return empty arrays/null objects on failures
+## Error Handling
+Consistent pattern across all methods: validates session state → attempts operation → logs and returns empty results on failure. No exceptions propagated to callers.
 
-### Architectural Notes
-- Language-agnostic design with policy-based customization
-- Extensive logging with session ID prefixes for debugging
-- Defensive programming with multiple validation layers
-- Maps between DAP protocol types and internal representations
+## Logging
+Extensive structured logging with sessionId prefixes for operation tracking and debugging adapter communication.

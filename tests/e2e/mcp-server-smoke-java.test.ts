@@ -77,7 +77,7 @@ describe('MCP Server Java Debugging Smoke Test', () => {
 
     // Create transport for MCP server
     transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [path.join(ROOT, 'dist', 'index.js'), '--log-level', 'info'],
       env: {
         ...process.env,

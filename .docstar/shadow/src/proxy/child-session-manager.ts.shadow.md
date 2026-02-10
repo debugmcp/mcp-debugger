@@ -1,81 +1,54 @@
 # src/proxy/child-session-manager.ts
 @source-hash: be3a89035593d014
-@generated: 2026-02-09T18:15:18Z
+@generated: 2026-02-10T00:42:00Z
 
-## Primary Purpose
+**Primary Purpose**: Manages child debug adapter sessions for multi-session debugging scenarios, particularly JavaScript debugging with js-debug/pwa-node which requires concurrent sessions. Handles child session creation, lifecycle management, event forwarding, and breakpoint mirroring.
 
-Manages child debug sessions for multi-session debug adapters, specifically designed for JavaScript debugging scenarios where the main debugger spawns multiple concurrent sessions (like js-debug/pwa-node).
+**Core Classes & Functions**:
+- `ChildSessionManager` (L68-496): Main orchestrator for child session lifecycle
+- `createChildSafePolicy()` (L24-59): Creates adapter policy variants that disable reverse debugging in child sessions to prevent infinite recursion
+- `createInstanceId()` (L20-22): Generates unique hex identifiers for manager instances
 
-## Key Components
+**Key State Management** (L75-86):
+- `adoptedTargets`: Set tracking pending target IDs to prevent double-adoption
+- `childSessions`: Map of pending ID to MinimalDapClient instances  
+- `activeChild`: Current primary child session reference
+- `storedBreakpoints`: Cached breakpoints for mirroring to new children
+- `adoptionInProgress`: Flag preventing concurrent child creation
 
-### Core Class: ChildSessionManager (L68-496)
-Extends EventEmitter to provide event-driven child session lifecycle management. Handles creation, configuration, and cleanup of child DAP sessions with sophisticated state tracking.
+**Critical Methods**:
+- `createChildSession()` (L186-258): Main entry point for child session creation with retry logic and comprehensive error handling
+- `shouldRouteToChild()` (L134-159): Determines if DAP commands should be routed to child sessions based on policy configuration
+- `storeBreakpoints()` (L163-181): Caches and mirrors breakpoints to active children
+- `wireChildEvents()` (L413-432): Forwards child DAP events to parent session
 
-**Key Properties:**
-- `policy: AdapterPolicy` - Controls child session behavior and capabilities
-- `dapBehavior: DapClientBehavior` - Extracted behavior configuration from policy
-- `activeChild: MinimalDapClient | null` - Current primary child session
-- `childSessions: Map<string, MinimalDapClient>` - All managed child sessions by pendingId
-- `adoptedTargets: Set<string>` - Prevents duplicate adoption of pending targets
-- `storedBreakpoints: Map<string, DebugProtocol.SourceBreakpoint[]>` - Breakpoint mirroring cache
+**Session Lifecycle Flow**:
+1. `initializeChild()` (L262-279): Sends DAP initialize request with timeout handling
+2. `configureChild()` (L283-320): Sets exception breakpoints and mirrors stored breakpoints  
+3. `attachChild()` (L324-349): Attaches to pending target with retry logic (max 20 attempts)
+4. `handlePostAttachInit()` (L353-373): Handles post-attach initialized events
+5. `ensureChildStopped()` (L377-409): Forces pause if policy requires it
 
-### Utility Functions
+**Dependencies**:
+- `@vscode/debugprotocol`: DAP types and interfaces
+- `@debugmcp/shared`: Policy and configuration types
+- `./minimal-dap.js`: Dynamically imported to avoid circular dependencies (L211)
+- `../utils/logger.js`: Logging infrastructure
 
-**createInstanceId() (L20-22):** Generates unique 8-character hex identifiers for manager instances
+**Architectural Patterns**:
+- EventEmitter pattern for child session lifecycle events (`childCreated`, `childError`, `childClosed`, `childEvent`)
+- Policy-driven behavior configuration through `AdapterPolicy` and `DapClientBehavior`
+- Defensive programming with extensive try-catch blocks and timeout handling
+- State machine pattern for adoption lifecycle management
 
-**createChildSafePolicy() (L24-59):** Critical security function that strips reverse debugging capabilities from child sessions to prevent infinite recursion. Returns modified policy with:
-- `supportsReverseStartDebugging: false`
-- `childSessionStrategy: 'none'`
-- Cleared child-specific behaviors (breakpoint mirroring, command routing, etc.)
-- Wrapped `handleReverseRequest` to acknowledge but not spawn grandchildren
+**Critical Invariants**:
+- Only one adoption process can run concurrently (enforced by `adoptionInProgress` flag)
+- Child sessions use modified policies that disable reverse debugging to prevent recursion
+- Breakpoint mirroring is conditional on policy configuration
+- All child sessions are properly cleaned up on shutdown
 
-## Key Methods
-
-### Session Management
-**createChildSession() (L186-258):** Primary orchestration method for child session creation with comprehensive error handling and state management:
-1. Validates adoption eligibility and prevents concurrent adoptions
-2. Dynamically imports MinimalDapClient to avoid circular dependencies
-3. Creates child-safe policy and establishes DAP connection
-4. Executes initialization sequence: initialize → configure → attach → post-attach handling
-5. Implements retry logic for attachment with exponential backoff
-
-**isAdopted() (L102-104):** Prevents duplicate target adoption
-**hasActiveChildren() (L117-121):** State query for session routing decisions
-**shouldRouteToChild() (L134-159):** Command routing logic based on DAP behavior configuration
-
-### Configuration and Initialization
-**initializeChild() (L263-279):** Sends DAP initialize request with standardized client identification
-**configureChild() (L284-320):** Applies breakpoint mirroring and exception filters, conditionally sends configurationDone
-**attachChild() (L325-349):** Robust attachment with 20-retry mechanism and 200ms intervals
-
-### Event Management
-**wireChildEvents() (L414-432):** Establishes event forwarding from child to parent sessions:
-- Forwards all child events as 'childEvent' emissions
-- Handles connection cleanup on child close
-- Maintains activeChild state consistency
-
-**waitForEvent() (L437-468):** Generic event waiting utility with timeout handling for DAP protocol synchronization
-
-## Architectural Patterns
-
-**State Machine Design:** Uses adoption flags (`adoptionInProgress`, `childConfigComplete`) to prevent race conditions during concurrent child creation attempts.
-
-**Event-Driven Architecture:** Leverages EventEmitter pattern for loose coupling between child sessions and parent components.
-
-**Dynamic Imports:** Uses dynamic import for MinimalDapClient (L211) to break circular dependency cycles in the module graph.
-
-**Retry Patterns:** Implements exponential backoff for child attachment (L333-343) to handle timing-sensitive DAP protocol interactions.
-
-## Dependencies
-
-- `@vscode/debugprotocol` - DAP protocol type definitions
-- `@debugmcp/shared` - Policy and configuration types
-- `./minimal-dap.js` - DAP client implementation (dynamically imported)
-- `../utils/logger.js` - Logging infrastructure
-
-## Critical Invariants
-
-1. **No Recursive Debugging:** Child policies must never support reverse debugging to prevent infinite session spawning
-2. **Single Active Child:** Only one activeChild can exist at a time, enforced through adoption state tracking  
-3. **Breakpoint Consistency:** All stored breakpoints are mirrored to new children if policy enables it
-4. **Graceful Cleanup:** Child sessions are properly shutdown and removed from tracking maps on close events
+**Error Handling**:
+- Comprehensive timeout handling for all DAP operations
+- Retry logic for child attachment (up to 20 attempts with 200ms delays)
+- Graceful degradation when optional operations fail (breakpoint mirroring, configuration)
+- Proper cleanup in error scenarios

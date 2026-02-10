@@ -73,9 +73,12 @@ export async function getCodeLLDBVersion(): Promise<string | null> {
   }
   
   // Try to get version from manifest file
+  // NOTE: Platform detection is intentionally duplicated from resolveCodeLLDBExecutable()
+  // because the two functions may be called independently, and extracting a shared helper
+  // would add coupling without meaningful benefit for this small mapping.
   const platform = process.platform;
   const arch = process.arch;
-  
+
   let platformDir = '';
   if (platform === 'win32') {
     platformDir = 'win32-x64';

@@ -1,63 +1,61 @@
 # packages/shared/src/interfaces/adapter-policy-python.ts
 @source-hash: cfc363d8bade0fa7
-@generated: 2026-02-09T18:14:14Z
+@generated: 2026-02-10T00:41:10Z
 
-## Python Debug Adapter Policy Implementation
+## Python Debug Adapter Policy
 
-This file implements a comprehensive adapter policy for Python's debugpy debug adapter, encapsulating all Python-specific debugging behaviors and configurations within the larger debug adapter framework.
+Implements the `AdapterPolicy` interface for Python's debugpy debug adapter protocol. Defines Python-specific debugging behaviors, variable handling, and session management strategies.
 
-### Core Purpose
-The `PythonAdapterPolicy` (L12-308) serves as a configuration and behavior definition for Python debugging sessions, implementing the `AdapterPolicy` interface to handle Python-specific debug protocol nuances, variable extraction, and adapter lifecycle management.
+### Core Configuration
+- **name**: 'python' (L13)
+- **childSessionStrategy**: 'none' - Python doesn't support child debug sessions (L15)
+- **supportsReverseStartDebugging**: false (L14)
 
-### Key Components
+### Key Methods
 
-**Policy Configuration (L12-23)**
-- Defines adapter name as 'python' and disables reverse debugging support
-- Sets child session strategy to 'none' since Python doesn't use multi-session debugging
-- Configures event handling for initialization detection
+**Variable Extraction (L27-85)**
+- `extractLocalVariables`: Filters Python locals from stack frames, excluding special variables (__dunder__, _pydev, etc.) unless explicitly requested
+- Searches for "Locals" or "Local" scope names (L46-48)
+- Preserves common dunder variables like `__name__`, `__file__`, `__doc__` (L71-72)
 
-**Variable Management (L27-92)**
-- `extractLocalVariables()` (L27-85): Core logic for filtering Python variables from debug scopes
-  - Extracts from top stack frame's "Locals" scope
-  - Filters out Python internals: dunder variables, debugger variables (`_pydev`, `_`)
-  - Preserves common dunders like `__name__`, `__file__`, `__doc__`
-- `getLocalScopeName()` (L90-92): Returns Python's standard scope name
+**Executable Resolution (L100-115)**
+- `resolveExecutablePath`: Resolves Python executable with priority: provided path > PYTHON_PATH env > platform default
+- Uses 'python' on Windows, 'python3' on Unix-like systems (L114)
 
-**Executable Resolution (L100-161)**
-- `resolveExecutablePath()` (L100-115): Handles Python executable discovery with fallback chain
-- `validateExecutable()` (L132-161): Critical Windows validation to detect/reject Microsoft Store Python aliases
-  - Uses child process execution to test real Python availability
-  - Detects Windows Store redirect patterns in stderr
+**Executable Validation (L132-161)**
+- `validateExecutable`: Critical Windows Store alias detection to avoid false Python executables
+- Spawns test process with exit code 9009 detection and stderr parsing for Store indicators (L148-152)
 
-**Adapter Configuration (L94-124)**
-- `getDapAdapterConfiguration()`: Sets debugpy as adapter type
-- `getDebuggerConfiguration()`: Configures Python debugger capabilities (variable types supported)
+**Command Handling**
+- `requiresCommandQueueing`: Returns false - Python processes commands immediately (L166)
+- `shouldQueueCommand`: No command queuing needed (L171-178)
 
-**Command and State Management (L166-221)**
-- No command queueing required for Python adapter
-- State tracking for initialization and configuration completion
-- Session readiness tied to PAUSED state
+**State Management (L183-221)**
+- `createInitialState`: Tracks initialized/configurationDone flags
+- `updateStateOnCommand`/`updateStateOnEvent`: Updates state on 'configurationDone'/'initialized' events
+- `isConnected`/`isInitialized`: State checks based on initialized flag
 
 **Adapter Matching (L226-235)**
-- `matchesAdapter()`: Detects Python debugging contexts via command/args analysis
+- `matchesAdapter`: Detects debugpy/python in command strings and arguments
 - Looks for 'debugpy', 'python', or '-m debugpy' patterns
 
-**DAP Client Integration (L247-274)**
-- `getDapClientBehavior()`: Minimal reverse request handling since Python uses single-session model
-- Standard timeout configurations without child session complexity
+**DAP Client Behavior (L247-274)**
+- Minimal reverse request handling - only acknowledges 'runInTerminal' (L250-256)
+- No child session routing, mirroring, or special timeouts needed
 
-**Adapter Spawning (L279-307)**
-- `getAdapterSpawnConfig()`: Constructs debugpy adapter launch command
-- Supports custom adapter commands or builds standard `python -m debugpy.adapter` invocation
-- Handles host/port/logging configuration
+**Adapter Spawn Configuration (L279-307)**
+- `getAdapterSpawnConfig`: Builds debugpy adapter command with host/port/log-dir args
+- Uses custom adapter command if provided, otherwise constructs `python -m debugpy.adapter` command
 
 ### Dependencies
-- Imports from VSCode Debug Protocol, shared models, and adapter policy interfaces
-- Runtime imports child_process for executable validation
-- Integrates with SessionState enumeration
+- `@vscode/debugprotocol` - Debug protocol types
+- `./adapter-policy.js` - Core policy interface
+- `@debugmcp/shared` - SessionState enum
+- `../models/index.js` - StackFrame, Variable types
+- `./dap-client-behavior.js` - DAP client interfaces
 
 ### Architecture Notes
-- Single-session debugging model (no child processes)
-- Focuses on local variable extraction and filtering for Python semantics
-- Emphasizes Windows compatibility with Store Python detection
-- Minimal DAP client behavior due to straightforward Python debugging model
+- Implements single-session debugging only (no child sessions)
+- Focuses on local variable filtering for Python-specific debugging experience
+- Handles Windows-specific Python executable validation edge cases
+- Uses standard DAP flow without command queueing requirements

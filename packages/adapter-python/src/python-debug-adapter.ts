@@ -396,7 +396,6 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   handleDapResponse(_response: DebugProtocol.Response): void {
     // Python adapter doesn't need special response handling
-    void _response;
   }
   
   // ===== Connection Management =====

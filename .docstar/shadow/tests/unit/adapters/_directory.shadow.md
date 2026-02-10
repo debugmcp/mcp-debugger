@@ -1,68 +1,94 @@
 # tests/unit/adapters/
-@generated: 2026-02-09T18:16:12Z
+@generated: 2026-02-10T01:19:40Z
 
-## Overall Purpose
+## Unit Test Suite for Debug Adapters Module
 
-This directory contains comprehensive unit tests for the MCP debugging adapter system, focusing on adapter lifecycle management, dynamic loading, registration, and specific adapter implementations. The test suite validates the core infrastructure that enables dynamic discovery, loading, and management of debug adapters for different programming languages.
+**Primary Purpose**: Comprehensive unit test suite validating the debug adapter system's core components including dynamic loading, registration, lifecycle management, and implementation-specific behaviors for different debug adapter types.
 
-## Key Components and Relationships
+## Test Coverage Overview
 
-### Core Infrastructure Tests
-- **AdapterLoader Tests** (`adapter-loader.test.ts`): Validates the dynamic loading system with fallback mechanisms, caching, and error handling for adapter discovery
-- **AdapterRegistry Tests** (`adapter-registry.test.ts`): Tests centralized adapter lifecycle management, factory registration, instance limits, and auto-disposal features
+This directory contains unit tests for the complete debug adapter ecosystem, ensuring reliable dynamic loading, proper state management, and correct behavior across multiple adapter implementations.
 
-### Specific Adapter Implementation Tests
-- **JavascriptDebugAdapter Tests** (`javascript-debug-adapter.test.ts`): Validates JavaScript-specific debugging features, TypeScript support, and launch coordination
-- **MockDebugAdapter Tests** (`mock-debug-adapter.test.ts`): Tests the mock adapter used for development and testing scenarios
+### Core System Components
 
-### Utility Component Tests
-- **JsDebugLaunchBarrier Tests** (`js-debug-launch-barrier.test.ts`): Tests synchronization utilities for coordinating debug session startup timing
+**AdapterLoader Testing** (`adapter-loader.test.ts`):
+- Dynamic module loading with fallback strategies (node_modules, packages, createRequire)
+- Adapter package resolution and caching mechanisms
+- Availability detection and metadata retrieval for all supported languages (Python, JavaScript, Rust, Go, C++, Mock)
+- Error handling for missing packages with helpful installation guidance
 
-## Test Architecture Patterns
+**AdapterRegistry Testing** (`adapter-registry.test.ts`):
+- Factory registration and validation with duplicate prevention
+- Adapter lifecycle management (creation, disposal, cleanup)
+- Instance limits enforcement per language type
+- Dynamic loading integration and auto-disposal mechanisms
+- Bulk operations for registry cleanup
 
-### Comprehensive Mocking Strategy
-All tests employ extensive mocking of external dependencies (file system, process launcher, network manager, module loading) to ensure isolated unit testing. Mock factories like `createDependencies()` and `createAdapterStub()` provide consistent test fixtures.
+### Implementation-Specific Testing
 
-### Dynamic Loading Test Coverage
-Tests cover the complete adapter loading pipeline:
-1. Primary package path resolution (`@debugmcp/adapter-{name}`)
-2. Fallback to node_modules locations
-3. createRequire as final fallback mechanism
-4. Comprehensive error handling with user-friendly messages
+**JavaScript Adapter Testing** (`javascript-debug-adapter.test.ts`):
+- TypeScript runtime integration and argument deduplication
+- Node.js error translation and feature support validation
+- Launch barrier coordination for DAP communication
+- Runtime helper processing and configuration transformation
 
-### State Management Validation
-Tests validate adapter state transitions (READY → CONNECTED → DISCONNECTED) and ensure proper cleanup through disposal patterns and registry management.
+**Mock Adapter Testing** (`mock-debug-adapter.test.ts`):
+- State transition validation (READY → CONNECTED → DISCONNECTED)
+- Feature support reporting and error message translation
+- Error scenario injection for testing failure conditions
+- Mock debugging behavior verification
 
-## Key Test Utilities
+### Utility Testing
 
-### Mock Adapters and Factories
-- Event-handling capable adapter stubs with proper cleanup
-- Configurable factory functions with validation and metadata generation
-- Consistent adapter configuration structure across all tests
+**Launch Barrier Testing** (`js-debug-launch-barrier.test.ts`):
+- DAP event-based readiness detection ('stopped', 'adapter_connected')
+- Timeout handling and fallback mechanisms
+- Proxy exit error handling and duplicate signal prevention
+- Async coordination for JavaScript debugging sessions
 
-### Async Testing Infrastructure
-- Fake timer manipulation for timeout and auto-disposal testing
-- Promise-based testing for launch barriers and connection coordination
-- Proper async/await patterns throughout test suites
+## Key Testing Patterns
 
-## Critical Validation Areas
+**Mocking Strategy**:
+- Comprehensive vitest mocking for external dependencies (ModuleLoader, createRequire, loggers)
+- Factory pattern for creating standardized test fixtures
+- Isolation through cache clearing and fresh mock creation
 
-### Error Handling and User Experience
-- Translation of low-level errors (ENOENT) into actionable user guidance
-- Comprehensive error scenarios including missing adapters, validation failures, and connection timeouts
-- Proper error propagation with specific error types (DuplicateRegistrationError, FactoryValidationError, AdapterNotFoundError)
+**Error Scenario Coverage**:
+- Module loading failures with appropriate fallback testing
+- Network and filesystem error translation validation
+- Timeout and connection failure simulation
+- Proper error propagation and user-friendly messaging
 
-### Performance and Resource Management
-- Instance limit enforcement with automatic cleanup
-- Caching behavior validation to avoid redundant operations
-- Auto-disposal mechanisms with configurable timeouts
-- Memory leak prevention through proper event handler cleanup
+**State Management Validation**:
+- Adapter lifecycle state transitions
+- Cache behavior and persistence testing
+- Resource cleanup and disposal verification
+- Configuration-driven behavior validation
 
-### Development Environment Support
-- Monorepo development environment fallback paths
-- TypeScript runtime argument deduplication and configuration
-- Feature support matrix validation (conditional breakpoints, data breakpoints, evaluate for hovers)
+## Dependencies and Integration
 
-## Integration Points
+**External Dependencies**:
+- Vitest testing framework with comprehensive mocking capabilities
+- @debugmcp/shared package for common types and error classes
+- Individual adapter packages (adapter-python, adapter-javascript, adapter-mock)
 
-The tests validate the complete adapter ecosystem from discovery through execution, ensuring that adapters can be dynamically loaded, properly configured, and managed throughout their lifecycle. The test suite provides confidence in the system's ability to handle various adapter types, error conditions, and development scenarios while maintaining proper resource management and user experience.
+**Internal Coordination**:
+- Tests validate integration between AdapterLoader and AdapterRegistry
+- Launch barrier coordination with DAP protocol events
+- Feature detection and support matrix validation across adapter types
+
+## API Surface Validation
+
+**Public Methods Tested**:
+- `loadAdapter()`, `isAdapterAvailable()`, `listAvailableAdapters()` (AdapterLoader)
+- `register()`, `createAdapter()`, `disposeAll()` (AdapterRegistry)
+- `initialize()`, `connect()`, `disconnect()`, `supportsFeature()` (Adapters)
+- `waitUntilReady()`, `dispose()` (Launch utilities)
+
+**Configuration Testing**:
+- Dynamic loading enablement/disabling
+- Auto-disposal timeout configuration
+- Maximum instances per language enforcement
+- Feature support matrix validation
+
+This test suite ensures the debug adapter system maintains reliability and correctness across all supported programming languages and debugging scenarios, with particular focus on error resilience and proper resource management.

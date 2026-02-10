@@ -1,28 +1,36 @@
 # scripts/act-test.sh
 @source-hash: 6051ecc27d2ff579
-@generated: 2026-02-09T18:15:09Z
+@generated: 2026-02-10T00:41:58Z
 
-**Purpose:** Shell script wrapper for running GitHub Actions workflows locally using Act, specifically designed for MCP Debugger project testing.
+## Purpose
+Shell script that provides a simplified wrapper around Act (GitHub Actions local test runner) for the MCP Debugger project. Enables local testing of GitHub Actions workflows without pushing to remote repository.
 
-**Core Functionality:**
-- `show_help()` (L9-25): Displays usage instructions and examples for the script
-- Main command dispatcher (L27-48): Case statement handling different test execution modes
+## Core Functionality
 
-**Supported Operations:**
-- **ci** (L28-31): Default mode, runs CI workflow with Ubuntu matrix using `act -j build-and-test --matrix os:ubuntu-latest`
-- **release** (L32-35): Executes release workflow tests targeting specific workflow file
-- **e2e** (L36-39): Runs only end-to-end tests by passing test filter event data
-- **help** (L40-42): Shows usage documentation
-- Invalid option handling (L43-47): Error message and help display with exit code 1
+### Main Script Flow (L27-48)
+- **Case statement dispatcher**: Routes execution based on command-line argument
+- **Default behavior**: Runs CI workflow if no argument provided (L28)
+- **Error handling**: Shows help and exits with code 1 for invalid options (L43-47)
 
-**Dependencies:**
-- Requires `act` CLI tool for local GitHub Actions execution
-- Expects Docker image `mcp-debugger:local` to be pre-built
-- Relies on `.github/workflows/release.yml` workflow file
+### Command Options
+- **`ci` or empty** (L28-31): Executes CI workflow tests targeting ubuntu-latest matrix
+- **`release`** (L32-35): Runs release workflow tests from `.github/workflows/release.yml`
+- **`e2e`** (L36-39): Executes only E2E tests within CI workflow using test filter
+- **`help`** (L40-42): Displays usage information
 
-**Key Parameters:**
-- Uses Ubuntu-latest matrix for CI testing
-- Passes JSON event data for E2E test filtering
-- Targets specific workflow jobs (`build-and-test`)
+### Helper Functions
+- **`show_help()` (L9-25)**: Comprehensive usage documentation including examples and Docker build prerequisite
 
-**Usage Pattern:** Single command-line argument dispatcher with sensible defaults (empty arg defaults to CI mode).
+## Act Command Patterns
+- Uses `-j build-and-test` job targeting across workflows
+- Applies `--matrix os:ubuntu-latest` for CI consistency
+- Leverages `-e` flag for environment variable injection (E2E filtering)
+- Specifies workflow file explicitly with `-W` for release testing
+
+## Dependencies
+- **External**: Requires Act CLI tool installed locally
+- **Docker**: Assumes `mcp-debugger:local` image exists (referenced in help)
+- **Repository structure**: Expects standard `.github/workflows/` directory layout
+
+## Usage Patterns
+Script designed for developer workflow automation, reducing friction for local GitHub Actions testing. Provides sensible defaults while exposing key testing scenarios through simple command interface.

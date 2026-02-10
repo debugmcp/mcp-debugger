@@ -1,50 +1,65 @@
 # src/dap-core/handlers.ts
 @source-hash: e31b73d9b6bbc34d
-@generated: 2026-02-09T18:15:01Z
+@generated: 2026-02-10T00:41:53Z
 
 ## Purpose
-Pure functional message handlers for Debug Adapter Protocol (DAP) proxy messages. Implements stateless processing that transforms incoming proxy messages into command lists and state updates.
+Pure message handlers for DAP (Debug Adapter Protocol) communication, providing stateless processing of proxy messages and state transitions for debugging sessions.
 
-## Architecture
-Follows functional programming pattern with immutable state transformations. Main dispatcher delegates to specialized handlers based on message type.
+## Core Architecture
+The file implements a functional message dispatch system with state transformation:
+- **Main Entry Point**: `handleProxyMessage` (L25-63) - validates session ID and routes messages by type
+- **State Transformation**: Handlers return `DAPProcessingResult` containing commands and optional new state
+- **Message Types**: status, error, dapEvent, dapResponse
 
 ## Key Functions
 
-### handleProxyMessage (L25-63)
-Main message dispatcher that validates session ID and routes messages to appropriate handlers. Returns DAPProcessingResult with commands and optional state updates.
+### Message Routing
+- `handleProxyMessage` (L25-63): Primary dispatcher, validates sessionId and routes to type-specific handlers
+- `isValidProxyMessage` (L259-266): Type guard for message validation
 
-### handleStatusMessage (L68-135)
-Processes proxy lifecycle status messages including:
-- `adapter_connected` (L96-101): Sets initialized state and emits event
-- `adapter_configured_and_launched` (L103-118): Updates adapter state with conditional initialization
-- Exit conditions (L120-131): Handles adapter termination scenarios
+### Status Message Handler
+- `handleStatusMessage` (L68-135): Processes phase 1 proxy status updates
+- **Key Status Types**:
+  - `proxy_minimal_ran_ipc_test` (L75-80): IPC validation, kills process
+  - `init_received` (L82-87): Initialization acknowledgment
+  - `dry_run_complete` (L89-94): Command validation complete
+  - `adapter_connected` (L96-101): Transport layer ready, sets initialized state
+  - `adapter_configured_and_launched` (L103-118): Full setup complete, handles dual initialization
+  - Exit states (L120-131): `adapter_exited`, `dap_connection_closed`, `terminated`
 
-### handleErrorMessage (L140-158)
-Simple error handler that logs proxy errors and emits error events.
+### Error Message Handler
+- `handleErrorMessage` (L140-158): Logs and emits error events
 
-### handleDapEvent (L163-228)
-Processes DAP debugging events with state tracking:
-- `stopped` event (L179-192): Extracts threadId and updates current thread state
-- Standard DAP events (continued, terminated, exited) forwarded as events
-- Unknown events forwarded as generic 'dap-event'
+### DAP Event Handler
+- `handleDapEvent` (L163-228): Phase 2 placeholder, handles debugging events
+- **Supported Events**: 
+  - `stopped` (L179-192): Updates current thread ID state
+  - `continued`, `terminated`, `exited` (L194-216): Basic event forwarding
+  - Unknown events forwarded as generic `dap-event` (L218-224)
 
-### handleDapResponse (L233-254)
-Placeholder for Phase 3 implementation. Currently validates pending requests and removes them from state.
-
-### isValidProxyMessage (L259-266)
-Type guard validating message structure with sessionId and type fields.
+### DAP Response Handler
+- `handleDapResponse` (L233-254): Phase 3 placeholder, matches responses to pending requests
+- Currently minimal implementation - removes pending request from state
 
 ## Dependencies
-- State management functions from './state.js' for immutable state updates
-- Type definitions from './types.js' for all message and state types
+- **Types**: Imports DAP protocol types and message interfaces from `./types.js`
+- **State Management**: Uses pure state transformation functions from `./state.js` (setInitialized, setAdapterConfigured, setCurrentThreadId, etc.)
 
 ## State Management Pattern
-Functions never mutate input state directly. State updates use helper functions (setInitialized, setAdapterConfigured, etc.) that return new state objects.
+Functions are pure - they receive state and return new state via `DAPProcessingResult.newState`. Key state transitions:
+- Session initialization tracking (L101, L114-115)
+- Adapter configuration status (L110)
+- Current debugging thread ID (L185)
+- Pending request lifecycle (L252)
 
-## Command Pattern
-All handlers return DAPCommand arrays for external systems to execute (logging, events, process management).
+## Command Generation
+All handlers generate `DAPCommand` arrays for:
+- Logging at various levels
+- Event emission to external listeners  
+- Process control (killProcess)
+- State notifications
 
-## Development Status
-- Phase 1: Status and error handling (complete)
-- Phase 2: DAP event handling (basic implementation)  
-- Phase 3: DAP response handling (placeholder)
+## Implementation Status
+- **Phase 1**: Status/error handling (complete)
+- **Phase 2**: DAP event handling (basic implementation)
+- **Phase 3**: DAP response handling (placeholder - L248-249 comments indicate future expansion)

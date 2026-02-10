@@ -1,56 +1,48 @@
 # tests/proxy/child-session-manager.test.ts
-@source-hash: ebf486621af551c4
-@generated: 2026-02-09T18:15:13Z
+@source-hash: feee5f0a7c21fdf2
+@generated: 2026-02-10T01:18:55Z
 
-## Purpose
-Test suite for `ChildSessionManager` class that validates child session management abstraction for debug adapters. Tests multi-session support, command routing, breakpoint mirroring, and policy-specific behaviors across JavaScript, Python, and default adapter policies.
+## Test Suite for ChildSessionManager
 
-## Key Test Structure
+**Purpose:** Comprehensive test suite validating the ChildSessionManager class, which abstracts multi-session debugging scenarios and policy-driven child session management.
 
-### MockMinimalDapClient (L14-53)
-Mock implementation of `MinimalDapClient` that extends `EventEmitter`. Provides:
-- Connection simulation with `connected` flag
-- Request tracking in `requests` array
-- Mock responses for `initialize` and `threads` commands
-- Simulated event emission for testing event forwarding
+### Mock Infrastructure
 
-### Test Organization
-- **JavaScript Policy Tests (L68-220)**: Multi-session support with command routing and breakpoint mirroring
-- **Python Policy Tests (L222-248)**: Single-session behavior with minimal routing
-- **Default Policy Tests (L250-265)**: Basic fallback behavior
-- **Shutdown Tests (L267-291)**: Cleanup verification
+**MockMinimalDapClient (L14-53):** Complete mock implementation extending EventEmitter that simulates DAP client behavior:
+- Tracks connection state, requests, and provides policy support
+- Simulates async `connect()`, `sendRequest()` with realistic responses for 'initialize' and 'threads' commands
+- Includes shutdown/disconnect lifecycle methods
 
-## Key Test Scenarios
+**Module Mocking (L56-58):** Uses Vitest to mock MinimalDapClient import to avoid circular dependencies.
 
-### Multi-Session Management (L78-97, L143-190)
-- Child session creation with event emission validation
-- Adoption progress handling to prevent race conditions
-- Duplicate adoption request prevention
-- Active child tracking and state management
+### Test Structure
 
-### Command Routing (L99-109, L232-236)
-Tests policy-specific routing decisions:
-- JavaScript: Routes execution commands (`threads`, `pause`, `continue`) to children
-- Python: Routes no commands to children (single-session model)
-- Validates commands that stay with parent (`initialize`, `launch`)
+**JavaScript Policy Tests (L68-213):** Validates multi-session debugging behavior:
+- Child session creation with event emission verification (L78-97)
+- Command routing logic - routes execution commands to children but not initialization commands (L99-109) 
+- Breakpoint mirroring functionality with storage validation (L111-140)
+- Concurrent adoption handling and duplicate request protection (L143-190)
+- Event forwarding from child to parent sessions (L193-211)
 
-### Breakpoint Mirroring (L111-140, L238-247)
-- JavaScript policy: Stores and mirrors breakpoints to active children
-- Python policy: No breakpoint mirroring
-- Tests breakpoint storage in `storedBreakpoints` Map
-- Validates automatic mirroring on child session creation
+**Python Policy Tests (L215-241):** Validates single-session debugging behavior:
+- Confirms commands are NOT routed to children (L225-229)
+- Verifies breakpoints are NOT mirrored for Python sessions (L231-240)
 
-### Event Forwarding (L193-211)
-Validates child-to-parent event propagation using `childEvent` emission pattern.
+**Default Policy Tests (L243-258):** Basic validation for fallback policy with no child session support.
 
-## Dependencies
-- `vitest` testing framework with mocks and spies
-- `@vscode/debugprotocol` types for DAP structures
-- `@debugmcp/shared` adapter policies (`JsDebugAdapterPolicy`, `PythonAdapterPolicy`, `DefaultAdapterPolicy`)
-- `ChildSessionManager` from `../../src/proxy/child-session-manager.js`
+**Shutdown Tests (L260-284):** Verifies proper cleanup of all child sessions during manager shutdown.
 
-## Architecture Insights
-- Uses policy pattern for adapter-specific behavior differentiation
-- Implements event-driven communication between parent and child sessions
-- Supports concurrent session management with adoption state tracking
-- Provides abstraction layer over raw DAP client connections
+### Key Dependencies
+
+- `@vscode/debugprotocol` - DAP protocol types
+- `@debugmcp/shared` - AdapterPolicy implementations (JsDebugAdapterPolicy, PythonAdapterPolicy, DefaultAdapterPolicy)
+- `ChildSessionManager` from proxy module
+- `MinimalDapClient` interface type
+
+### Testing Patterns
+
+- Event-driven testing using spies and event listeners
+- Async session creation with Promise handling
+- Policy-specific behavior validation across different adapter types
+- Mock request tracking for command verification
+- State assertion patterns for session lifecycle management

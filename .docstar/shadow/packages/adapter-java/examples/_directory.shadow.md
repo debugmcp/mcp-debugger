@@ -1,42 +1,40 @@
 # packages/adapter-java/examples/
-@generated: 2026-02-09T18:16:05Z
+@generated: 2026-02-10T01:19:34Z
 
-## Purpose and Responsibility
-
-This directory contains example Java programs specifically designed as test targets for the Java debug adapter. The examples serve as controlled, predictable test cases to validate debugging functionality including breakpoint placement, variable inspection, step-through execution, and state observation.
+## Purpose
+Example Java programs for testing and demonstrating the Java debug adapter functionality. Provides simple, well-structured code samples that exercise common debugging scenarios and adapter features.
 
 ## Key Components
 
-- **HelloWorld.java**: Primary example program providing a simple, deterministic execution environment with basic Java constructs
-- Serves as the main test target for debug adapter validation scenarios
+### HelloWorld.java
+- **Primary test program**: Simple execution flow with variables, loops, and console output
+- **Debug scenario coverage**: Multiple breakpoint opportunities, variable state changes, control flow testing
+- **Minimal dependencies**: Uses only standard Java library for focused testing
 
-## Public API and Entry Points
-
-The directory provides executable Java programs with standard `main` method entry points:
-- `HelloWorld.main(String[] args)`: Primary test target offering multiple debugging scenarios in a single execution
-
-## Testing Scenarios Enabled
-
-The examples are architected to support comprehensive debug adapter testing:
-- **Breakpoint Testing**: Multiple strategic locations for breakpoint placement
-- **Variable Inspection**: Primitive type variables (String, int) with predictable state changes
-- **Step Debugging**: Clear program phases (initialization, iteration, finalization) for step-through validation
-- **State Observation**: Deterministic variable mutations suitable for automated testing
+## Public API Surface
+- **Entry Points**: Standard Java main methods that can be executed directly
+- **Debug Targets**: Programs designed to be launched and debugged through the adapter
+- **Test Scenarios**: Code patterns that exercise step-over, step-into, breakpoints, and variable inspection
 
 ## Internal Organization
+The directory contains minimal, self-contained Java programs that:
+- Provide clear execution flows for debug testing
+- Include multiple breakpoint opportunities at strategic locations
+- Feature variable state changes suitable for watch/inspection testing
+- Use simple control structures (loops, sequential execution) for testing debug navigation
 
-Programs follow a simple, linear execution pattern:
-1. Initialization phase with variable declarations
-2. Controlled iteration with state changes
-3. Final output demonstrating program completion
+## Debug Adapter Testing Features
+- **Breakpoint Testing**: Multiple console output statements for breakpoint placement
+- **Step Debugging**: Simple loops and sequential code for step-over/step-into testing
+- **Variable Inspection**: Local variables with changing state throughout execution
+- **Lifecycle Testing**: Clear program phases (initialization → processing → completion)
 
-## Design Patterns
+## Patterns and Conventions
+- Single-class programs for focused testing
+- Intentionally simple logic to isolate debug adapter behavior
+- Sequential execution flows without complex branching
+- Console output at key points for visual debugging confirmation
+- No external dependencies to minimize setup complexity
 
-- **Deterministic Execution**: All programs produce predictable output and variable states
-- **Minimal Dependencies**: Limited to standard Java runtime to reduce test complexity
-- **Clear Program Phases**: Distinct execution stages for targeted debugging validation
-- **Educational Structure**: Simple, readable code suitable for debugging demonstrations
-
-## Integration Context
-
-These examples integrate with the Java debug adapter testing framework, providing reliable test targets that exercise core debugging capabilities without external dependencies or complex execution flows.
+## Role in System
+Serves as the validation and demonstration layer for the Java debug adapter, providing concrete test cases that verify adapter functionality across common Java debugging scenarios.

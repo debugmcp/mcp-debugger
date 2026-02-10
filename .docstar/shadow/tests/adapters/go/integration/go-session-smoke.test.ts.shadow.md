@@ -1,44 +1,54 @@
 # tests/adapters/go/integration/go-session-smoke.test.ts
 @source-hash: a3269bf73a8fcfae
-@generated: 2026-02-09T18:14:13Z
+@generated: 2026-02-10T00:41:12Z
 
 ## Purpose
-Integration smoke test suite for the Go debugging adapter, validating core functionality without requiring actual process launch. Tests adapter command generation, launch configuration transformation, and factory methods.
+Integration smoke test for the Go debugger adapter, validating core functionality without launching actual debugger processes.
 
 ## Test Structure
-- **Test Suite** (L44-153): "Go adapter - session smoke (integration)"
-- **Mock Dependencies Factory** (L8-42): Creates stub `AdapterDependencies` with no-op implementations
-- **Setup/Teardown** (L54-65): Manages `DLV_PATH` environment variable for test isolation
+- **Test Suite** (L44-153): `Go adapter - session smoke (integration)`
+- **Mock Dependencies** (L8-42): Creates fake AdapterDependencies with no-op implementations
+- **Environment Setup** (L54-65): Manages DLV_PATH environment variable for testing
 
 ## Key Test Cases
 
-### Command Building Test (L67-86)
-- Verifies `buildAdapterCommand` generates proper dlv DAP command
-- Validates TCP port configuration and absolute path resolution
-- Uses fake dlv path (`process.execPath`) to avoid delve dependency
+### Command Building (L67-86)
+- Tests `buildAdapterCommand()` method
+- Validates dlv DAP command generation with TCP port configuration
+- Verifies command path is absolute and executable exists
+- Checks for required 'dap' argument and listen parameter format
 
-### Launch Config Transformation Tests
-- **Normal Mode** (L88-106): Tests standard Go program configuration normalization
-- **Test Mode** (L108-123): Validates test-specific configuration handling
-- Both verify proper `type`, `request`, `mode`, and path handling
+### Launch Configuration (L88-106) 
+- Tests `transformLaunchConfig()` for normal Go programs
+- Validates standard debug mode configuration
+- Ensures proper handling of program path, cwd, args, and env
 
-### Factory Metadata Tests (L125-152)
-- **Metadata Validation** (L125-132): Checks display name, file extensions, description
-- **Dependencies** (L134-142): Verifies Go and Delve dependency reporting
-- **Installation Instructions** (L144-152): Validates setup guidance content
+### Test Mode Configuration (L108-123)
+- Tests Go test mode support via `transformLaunchConfig()`
+- Validates test-specific argument handling (-test.v, -test.run)
+- Ensures mode is correctly set to 'test'
 
-## Configuration Constants
-- `adapterPort`: 48766 (L45)
-- `sessionId`: 'session-go-smoke' (L46) 
-- `adapterHost`: '127.0.0.1' (L47)
-- Sample paths for Go examples and fake dlv executable (L48-50)
+### Metadata Validation (L125-132)
+- Tests factory metadata exposure
+- Validates display name, file extensions (.go), and description
+
+### Dependencies & Installation (L134-152)
+- Tests required dependencies reporting (Go + Delve)
+- Validates installation instructions contain expected references
+
+## Test Configuration
+- **Test Port**: 48766 (L45)
+- **Session ID**: 'session-go-smoke' (L46) 
+- **Fake DLV Path**: Uses process.execPath as mock delve binary (L50)
+- **Sample Paths**: References examples/go/main.go and examples/go-hello (L49, L91)
 
 ## Dependencies
-- `@debugmcp/adapter-go`: GoAdapterFactory for adapter creation
-- `@debugmcp/shared`: AdapterDependencies type definition
-- Standard Node.js modules: path, fs, vitest testing framework
+- **vitest**: Test framework
+- **@debugmcp/shared**: AdapterDependencies type
+- **@debugmcp/adapter-go**: GoAdapterFactory class
+- **fs/path**: File system utilities
 
-## Architectural Notes
-- Uses dependency injection pattern with mock implementations
-- Avoids actual process spawning via error-throwing processLauncher mock (L37-41)
-- Environment variable isolation ensures test independence
+## Architecture Notes
+- Mock processLauncher throws error to prevent actual process execution (L38-40)
+- All file system operations return empty/false values for isolation
+- Environment access uses real process.env but with controlled DLV_PATH

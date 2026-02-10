@@ -1,29 +1,22 @@
 # tests/fixtures/debug-scripts/with-errors.py
-@source-hash: 447149c2b4a90400
-@generated: 2026-02-09T18:14:36Z
+@source-hash: 5f1ef6fe59c5429c
+@generated: 2026-02-10T01:18:48Z
 
 ## Purpose
-Test fixture script designed to generate runtime exceptions for debugging/testing purposes. Deliberately creates a ZeroDivisionError to test error handling, logging, or debugging tools.
+Test fixture script designed to generate ZeroDivisionError exceptions for debugging/testing purposes.
 
-## Key Functions
-- **divide(a, b)** (L4-5): Simple division function that will raise ZeroDivisionError when b=0
-- **main()** (L7-12): Entry point that orchestrates the error scenario by calling divide(10, 0)
+## Key Components
+- **divide() (L4-5)**: Simple division function that performs `a / b` operation, intentionally vulnerable to ZeroDivisionError when b=0
+- **main() (L7-12)**: Entry point that sets up error conditions by calling divide(10, 0), guaranteed to throw exception at L10
+- **Execution flow (L14-15)**: Standard Python module pattern with `if __name__ == "__main__"` guard
 
-## Execution Flow
-1. Sets x=10, y=0 (L8-9)
-2. Calls divide(10, 0) which triggers ZeroDivisionError at L5
-3. Lines 11-12 are unreachable due to unhandled exception
+## Architecture
+Simple procedural script with intentional error path. The divide function has no error handling, making it suitable for testing exception handling in debugging tools or test frameworks.
 
-## Architecture Notes
-- Classic test fixture pattern for exception scenarios
-- No error handling implemented (intentional for testing)
-- Standard Python executable script structure with `if __name__ == "__main__"` guard (L14-15)
+## Critical Invariants
+- Will always throw ZeroDivisionError when executed
+- Lines 11-12 are unreachable due to unhandled exception at L10
+- Designed for controlled failure scenarios
 
 ## Dependencies
-- Standard Python library only
-- Executable via shebang `#!/usr/bin/env python3`
-
-## Critical Behavior
-- **Always fails** with ZeroDivisionError when executed
-- Designed for testing error conditions, not normal operation
-- Exception occurs at L5 during division operation
+None - uses only Python builtins

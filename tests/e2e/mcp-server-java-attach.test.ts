@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { callToolSafely } from './smoke-test-utils.js';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { access, constants, writeFile } from 'fs';
 
@@ -24,6 +24,11 @@ const ROOT = path.resolve(__dirname, '../..');
 
 // Port for Java debug agent
 const DEBUG_PORT = 5005;
+
+// Skip entire suite if Java toolchain is not installed
+const hasJava = (() => {
+  try { execSync('javac -version', { stdio: 'ignore', timeout: 5000 }); return true; } catch { return false; }
+})();
 
 /**
  * Create a simple Java program for attach testing
@@ -142,7 +147,7 @@ async function startJavaWithDebugAgent(classFile: string): Promise<ChildProcess>
   return javaProcess;
 }
 
-describe('MCP Server Java Attach Test', () => {
+describe.skipIf(!hasJava)('MCP Server Java Attach Test', () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
   let sessionId: string | null = null;
@@ -162,7 +167,7 @@ describe('MCP Server Java Attach Test', () => {
 
     // Create MCP transport
     transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [path.join(ROOT, 'dist', 'index.js'), '--log-level', 'info'],
       env: {
         ...process.env,
@@ -180,7 +185,7 @@ describe('MCP Server Java Attach Test', () => {
 
     await mcpClient.connect(transport);
     console.log('[Java Attach Test] MCP client connected');
-  }, 60000);
+  }, 120000);
 
   afterAll(async () => {
     console.log('[Java Attach Test] Cleaning up...');

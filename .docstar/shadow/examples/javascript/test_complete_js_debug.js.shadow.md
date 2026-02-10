@@ -1,47 +1,36 @@
 # examples/javascript/test_complete_js_debug.js
 @source-hash: 82636f381ecc3d5c
-@generated: 2026-02-09T18:14:56Z
+@generated: 2026-02-10T00:41:40Z
 
 ## Purpose
-Test harness for JavaScript debugging features, designed to exercise breakpoints, stack traces, variable inspection, and expression evaluation capabilities in debugging environments.
+JavaScript debugging demonstration script that showcases various debugging features including breakpoints, stack traces, variable inspection, and expression evaluation. Designed as a test harness for debugging tools and environments.
 
 ## Key Components
 
-**Test Data (L13-17)**
-- `testData` object: Static configuration with metadata about the debugging test suite
-- Contains test identification and feature list for reference during debugging sessions
+### Data Structures
+- **testData** (L13-17): Configuration object containing metadata about the debugging test, including name, version, and feature list
 
-**Stack Depth Testing (L20-28)**
-- `deepFunction(level)`: Recursive function that creates a call stack of specified depth
-- Base case at level 0 creates local variable `localVar` for inspection
-- Line 25 marked as optimal breakpoint location for stack examination
-- Returns string value from bottom of call stack
+### Core Functions
+- **deepFunction(level)** (L20-28): Recursive function that creates a call stack of specified depth. Returns when level reaches 0, setting up a predictable stack trace for debugging. Contains strategic console.log at L25 for breakpoint placement.
 
-**Variable Testing (L31-42)**
-- `testVariables()`: Demonstrates various JavaScript data types for debugger inspection
-- Creates primitive types (number, string), collections (array), and nested objects
-- Line 37 marked as breakpoint location for variable state examination
-- Includes expression evaluation test with `result = number * 2`
+- **testVariables()** (L31-42): Demonstrates variable inspection capabilities with diverse data types (number, string, array, object with nested properties). Includes console.log at L37 as breakpoint target and expression evaluation via arithmetic operation.
 
-**Main Execution Flow (L45-60)**
-- `main()`: Async orchestrator function that runs test sequence
-- Executes stack trace test (L51) and variable inspection test (L56)
-- Provides console output for test progress tracking
-- Uses structured test sections with clear delimiters
+- **main()** (L45-60): Async orchestrator function that executes the debugging tests in sequence. Runs stack trace test with depth 3, then variable inspection test, with detailed console output for each phase.
 
-**Error Handling (L63-66)**
-- Top-level error handler with process exit on failure
-- Catches and logs any unhandled promise rejections from main()
+### Execution Context
+- **Script entry point** (L63-66): Executes main() with error handling, ensuring process exit on failure
 
 ## Architecture Patterns
-- Sequential test execution with clear separation of concerns
-- Console logging for debugging session visibility
-- Async/await pattern for main execution despite synchronous operations
-- Explicit breakpoint location comments for debugging guidance
+- **Test segmentation**: Clear separation of different debugging scenarios (stack traces vs variable inspection)
+- **Breakpoint markers**: Strategic console.log statements at L25 and L37 specifically noted as "good for breakpoint" in comments
+- **Progressive complexity**: Tests move from simple stack depth to complex variable structures
 
 ## Dependencies
-- Node.js runtime (implied by `process.exit`)
+- Node.js runtime (implied by `process.exit(1)`)
 - Console API for output and debugging markers
 
-## Usage Context
-Intended for debugging tool validation, debugger training, or testing IDE debugging capabilities with realistic JavaScript code patterns.
+## Debug-Specific Design
+- Recursive function creates predictable call stack depths
+- Mixed data types in testVariables() enable comprehensive variable inspection
+- Synchronous execution flow with async wrapper for error handling
+- Clear console output sections for test phase identification

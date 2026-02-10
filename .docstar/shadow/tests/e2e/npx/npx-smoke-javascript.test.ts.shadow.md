@@ -1,65 +1,53 @@
 # tests/e2e/npx/npx-smoke-javascript.test.ts
 @source-hash: 4cfd6747ba75441a
-@generated: 2026-02-09T18:14:39Z
+@generated: 2026-02-10T00:41:33Z
 
-## NPX JavaScript Smoke Tests
+**NPX JavaScript Smoke Tests - E2E Test Suite**
 
-E2E test suite verifying JavaScript debugging functionality when running via npx (npm package execution). Critical test ensuring the JavaScript adapter is properly included in npx distribution after a packaging fix.
+**Primary Purpose**: End-to-end testing of JavaScript debugging functionality when the MCP debug server is run via `npx` package distribution. Specifically validates the critical fix that ensures JavaScript adapter is included in the npm package.
 
-### Core Purpose
-Tests the complete JavaScript debugging workflow through npx to verify:
-- JavaScript language adapter availability in packaged distribution
-- Full debugging cycle (session creation, breakpoints, stepping, variables)
-- NPX installation and execution pipeline
+**Key Test Structure**:
+- **Main test suite** (L19-273): `describe.sequential('NPX: JavaScript Debugging Smoke Tests')`
+- **Setup/teardown lifecycle** (L25-101): Manages global npm package installation and MCP client connection
+- **Language availability test** (L103-123): Verifies JavaScript is in supported languages list
+- **Full debugging cycle test** (L125-272): Complete JavaScript debugging workflow validation
 
-### Test Structure
-**Sequential Test Suite (L19)**: Uses Vitest with sequential execution to avoid race conditions
-- `mcpClient`: MCP client instance for tool calls (L20)
-- `cleanup`: Cleanup function from npx utilities (L21)  
-- `sessionId`: Active debugging session identifier (L22)
-- `tarballPath`: Path to built npm package (L23)
+**Core Dependencies**:
+- `vitest` test framework (L8)
+- `@modelcontextprotocol/sdk/client` for MCP communication (L13)
+- Custom utilities: `buildAndPackNpmPackage`, `installPackageGlobally`, `createNpxMcpClient`, `cleanupGlobalInstall` from `npx-test-utils.js` (L11)
+- `parseSdkToolResult` from `smoke-test-utils.js` (L12)
 
-### Setup & Teardown
-**beforeAll (L25-65)**: 
-- Builds and packs npm package via `buildAndPackNpmPackage()`
-- Installs package globally via `installPackageGlobally()`
-- Creates MCP client via `createNpxMcpClient()` with debug logging
-- Wraps `callTool` with request/response logging (L39-60)
+**Test State Management**:
+- `mcpClient` (L20): MCP SDK client instance with instrumented `callTool` method (L38-61)
+- `sessionId` (L22): Debug session identifier, managed across test lifecycle
+- `tarballPath` (L23): Path to built npm package for global installation
+- `cleanup` (L21): Cleanup function for MCP client resources
 
-**afterAll (L67-87)**: Closes debug session, runs cleanup, removes global install
-**afterEach (L89-101)**: Ensures session cleanup between tests
+**Critical Test Validations**:
 
-### Key Dependencies
-- `./npx-test-utils.js`: NPX-specific utilities for package building/installation (L11)
-- `../smoke-test-utils.js`: `parseSdkToolResult` for response parsing (L12)
-- `@modelcontextprotocol/sdk/client`: MCP client types (L13)
+1. **JavaScript Language Support** (L103-123):
+   - Calls `list_supported_languages` tool (L104-107)
+   - Validates `javascript` language exists with correct metadata (L115-119)
+   - **Critical assertion**: `expect(jsLang).toBeDefined()` (L118) - verifies the core fix
 
-### Critical Tests
+2. **Complete Debugging Workflow** (L125-272):
+   - Session creation (L130-142): `create_debug_session` with language='javascript'
+   - Breakpoint setting (L146-168): `set_breakpoint` at line 14 of test script
+   - Debug execution (L172-184): `start_debugging` with script path
+   - Variable inspection (L191-211): `get_local_variables` before code execution
+   - Code stepping (L215-222): `step_over` to advance execution
+   - Variable validation (L228-244): Confirms variable state changes after step
+   - Session cleanup (L248-269): `continue_execution` and `close_debug_session`
 
-**Language Support Test (L103-123)**:
-- Calls `list_supported_languages` tool
-- Verifies JavaScript language with ID 'javascript' is available
-- **Critical assertion**: Ensures JavaScript adapter is included in npx distribution (L118-122)
+**Test Infrastructure**:
+- **Setup** (L25-65): Builds npm package, installs globally, creates npx-based MCP client
+- **Logging instrumentation** (L38-61): Wraps `callTool` with detailed request/response logging
+- **Cleanup** (L67-101): Ensures debug sessions are closed and global packages are removed
+- **Timeouts**: 240s for setup (L65), 120s for main test (L272)
 
-**Full Debugging Cycle Test (L125-272)**:
-Complete 8-step workflow testing:
-1. Creates debug session for JavaScript (L130-142)
-2. Sets breakpoint at line 14 of test script (L146-168)
-3. Starts debugging with script path (L172-184)
-4. Retrieves variables before execution (L191-211)
-5. Steps over one instruction (L215-222)
-6. Verifies variable changes after step (L228-244)
-7. Continues execution to completion (L248-255)
-8. Closes debug session (L261-268)
-
-### Test Configuration
-- Extended timeouts: 240s for setup, 120s for debugging cycle
-- Uses `examples/javascript/simple_test.js` as test script (L126)
-- Validates variable swapping: a=1→2, b=2→1 (L208-209, L241-242)
-- Includes debug logging and error handling throughout
-
-### Architectural Notes
-- Sequential execution prevents resource conflicts
-- Comprehensive logging for debugging test failures  
-- Graceful error handling in cleanup operations
-- Validates both tool availability and functional debugging workflow
+**Architectural Notes**:
+- Uses sequential test execution to avoid npm package conflicts
+- Employs global npm installation to simulate real npx usage
+- Includes defensive error handling for cleanup operations (L74-76, L96-98)
+- Tests actual JavaScript file execution (`examples/javascript/simple_test.js`) rather than mocks

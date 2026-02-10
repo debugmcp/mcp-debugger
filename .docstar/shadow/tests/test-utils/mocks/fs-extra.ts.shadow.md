@@ -1,28 +1,34 @@
 # tests/test-utils/mocks/fs-extra.ts
 @source-hash: 492f3e084e15adce
-@generated: 2026-02-09T18:14:35Z
+@generated: 2026-02-10T00:41:26Z
 
 ## Purpose
-Mock module for the `fs-extra` library used in Vitest test environments. Provides stubbed implementations of filesystem operations to avoid actual file system interactions during testing.
+Mock implementation for the `fs-extra` library used in Vitest test environments. Provides stubbed filesystem operations to avoid actual file system interactions during testing.
 
 ## Key Components
-- **fsExtraMock object (L3-7)**: Main mock object containing stubbed fs-extra functions
-- **ensureDir mock (L4)**: Async function mock that simulates directory creation, returns resolved void promise
-- **pathExists mock (L5)**: Async function mock that simulates path existence checking, always returns true
-- **Mock setup (L10-11)**: Explicit configuration of mock return values using Vitest's mockResolvedValue
+
+**fsExtraMock object (L3-7)**
+- Mock object containing stubbed implementations of fs-extra functions
+- `ensureDir`: Mock function returning resolved void promise (L4)
+- `pathExists`: Mock function returning resolved true promise (L5)
+- Designed for easy extension with additional fs-extra methods as needed
+
+**Mock Configuration (L10-11)**
+- Explicit configuration of mock return values using Vitest's `mockResolvedValue`
+- `ensureDir` configured to resolve with `undefined` (L10)
+- `pathExists` configured to resolve with `true` (L11)
 
 ## Dependencies
-- **vitest**: Uses `vi.fn()` for creating function mocks
-- **fs-extra**: Target library being mocked (implicit dependency)
+- **vitest**: Testing framework providing `vi.fn()` mock utilities (L1)
 
-## Architecture Notes
-- Uses Vitest's mocking system with `vi.fn()` for creating spy functions
-- Follows pattern of creating mock object first, then configuring return values
-- Designed for import/export as default module replacement
-- Extensible structure (comment L6 indicates more functions can be added)
+## Usage Pattern
+This mock follows the common pattern of:
+1. Creating mock functions with default implementations
+2. Explicitly setting resolved values for async operations
+3. Exporting as default for module replacement in test environments
 
-## Key Characteristics
-- All mocked functions are async and return resolved promises
-- `pathExists` always returns `true` (optimistic mocking)
-- `ensureDir` returns `undefined` (standard void promise resolution)
-- Ready for ES module replacement in test environments
+## Architectural Notes
+- Async-first design - all mocked functions return promises
+- Optimistic defaults - `pathExists` always returns `true`, `ensureDir` always succeeds
+- Extensible structure - comment indicates easy addition of other fs-extra functions (L6)
+- Uses Vitest's mock system rather than manual function stubs

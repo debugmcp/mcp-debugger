@@ -283,6 +283,8 @@ export interface AdapterPolicy {
     trackInitializeResponse?: boolean;
     /** Whether to ensure initial stop after launch/attach */
     requiresInitialStop?: boolean;
+    /** Override default stopOnEntry when user hasn't explicitly set it */
+    defaultStopOnEntry?: boolean;
   };
 
   /**

@@ -1,41 +1,40 @@
 # scripts/check-bundle-size.js
 @source-hash: 235d3ba0b8152e38
-@generated: 2026-02-09T18:15:13Z
+@generated: 2026-02-10T00:41:58Z
 
-## Purpose
-Node.js script for monitoring build output size to enforce bundle size constraints and prevent bloated distributions. Specifically targets the `mcp-debugger` package's `cli.mjs` bundle.
+## Bundle Size Validation Script
 
-## Core Functionality
-**checkBundleSize()** (L19-94): Main validation function that:
-- Validates existence of `packages/mcp-debugger/dist/cli.mjs` bundle
-- Measures file size and converts to MB/KB for reporting
-- Applies size thresholds: 8MB warning, 15MB error (L16-17)
-- Analyzes bundle composition via optional `bundle-meta.json` metadata
-- Validates presence of required adapters (JavaScript, Python, Mock)
+**Purpose**: Build-time validation tool that monitors the size of the mcp-debugger CLI bundle to ensure it remains suitable for "batteries included" npm distribution. Specifically checks `cli.mjs` bundle size against predefined thresholds.
+
+### Key Components
+
+**Main Function**: `checkBundleSize()` (L19-94) - Core validation logic that:
+- Validates presence of dist directory and cli.mjs bundle
+- Measures file size in KB/MB (L36-38)
+- Applies warning (8MB) and error (15MB) thresholds (L46-62)
+- Analyzes bundle contents via optional metafile (L64-88)
 - Provides actionable feedback for size violations
 
-## Size Enforcement Logic
-- **ERROR_SIZE_MB = 15** (L17): Hard limit triggering exit code 1 with remediation suggestions
-- **WARN_SIZE_MB = 8** (L16): Soft limit showing warnings but allowing continuation
-- Size calculation: `stats.size / 1024 / 1024` for MB conversion (L37-38)
+**Configuration**: 
+- `WARN_SIZE_MB = 8` (L16) - Warning threshold for bundle size monitoring
+- `ERROR_SIZE_MB = 15` (L17) - Hard limit that causes build failure
+- Target bundle path: `packages/mcp-debugger/dist/cli.mjs` (L20-30)
 
-## Bundle Analysis Features
-- **Metadata parsing** (L65-88): Reads `bundle-meta.json` to inspect bundle contents
-- **Adapter validation** (L74-87): Ensures critical adapters are bundled:
-  - JavaScript adapter (required for npx distribution)
-  - Python adapter
-  - Mock adapter
-- **Input file counting**: Reports total number of bundled files
+**Bundle Analysis**: Enhanced reporting (L64-88) that:
+- Parses optional `bundle-meta.json` to show included files
+- Validates presence of critical adapters (JavaScript, Python, Mock)
+- Warns if JavaScript adapter is missing (breaks npx distribution)
 
-## Path Resolution
-- **ROOT directory**: Resolves to parent of script directory (L13)
-- **Target bundle**: `packages/mcp-debugger/dist/cli.mjs` (L20, L30)
-- **Metadata file**: `dist/bundle-meta.json` (L65)
+### Dependencies
+- Node.js fs/path modules for file system operations
+- ES modules with `import.meta.url` for path resolution (L11-13)
 
-## Exit Behavior
-- Exit 0: Missing dist/bundle (L26, L33) or success
-- Exit 1: Bundle exceeds error threshold (L53) or runtime error (L98)
+### Exit Behavior
+- Exit 0: No dist directory or cli.mjs found (soft failures)
+- Exit 1: Bundle exceeds error threshold or unexpected errors
+- Graceful exit for acceptable sizes
 
-## Dependencies
-- Node.js built-ins: `fs`, `path`, `url` modules (L7-9)
-- Requires ES modules support (import statements)
+### Critical Constraints
+- Designed specifically for mcp-debugger package structure
+- Assumes esbuild metafile format for bundle analysis
+- JavaScript adapter presence is critical for npm distribution

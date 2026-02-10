@@ -1,70 +1,61 @@
 # packages/adapter-mock/
-@generated: 2026-02-09T18:16:34Z
+@generated: 2026-02-10T01:20:01Z
 
-## Purpose and Responsibility
+## Overall Purpose and Responsibility
 
-The `packages/adapter-mock` module provides a complete mock debug adapter system designed for testing the DebugMCP framework. It implements a fully functional Debug Adapter Protocol (DAP) simulation environment that allows developers to test debug adapter integrations, protocol implementations, and VS Code debugging workflows without requiring actual runtime environments or external dependencies.
+The `adapter-mock` package provides a comprehensive mock debug adapter implementation designed for testing the MCP debugger system. This package enables isolated testing of debug client functionality, adapter lifecycle management, and Debug Adapter Protocol (DAP) interactions without requiring external debugger dependencies. It serves as both a testing utility for the broader MCP system and a reference implementation demonstrating proper adapter architecture patterns.
 
-## Key Components and Integration
+## Key Components and Relationships
 
 ### Core Architecture
-The module follows a layered factory pattern with four primary components working in concert:
+- **MockAdapterFactory**: Primary factory class implementing `IAdapterFactory` that creates configured mock adapter instances
+- **MockDebugAdapter**: Main adapter implementation that simulates complete DAP operations with configurable behavior and realistic debugging scenarios
+- **MockDebugAdapterProcess**: Standalone executable DAP server enabling integration testing with external clients
+- **MockErrorScenario**: Enumeration system for simulating specific failure conditions and edge cases
+- **MockAdapterConfig**: Configuration interface providing extensive customization of adapter behavior
 
-- **MockAdapterFactory**: Entry-point factory implementing `IAdapterFactory` that creates adapter instances with dependency injection and configuration validation
-- **MockDebugAdapter**: Primary adapter implementation managing debugging state through a permissive state machine and delegating DAP operations to external processes
-- **MockDebugAdapterProcess**: Standalone DAP server that runs as a separate process, providing complete protocol simulation including breakpoint management, execution control, and variable inspection
-- **DAPConnection**: Low-level protocol handler managing DAP wire protocol with Content-Length framing and message buffering
-
-### Data Flow Integration
-1. **Creation**: Factory creates adapter instances with injected dependencies and MockAdapterConfig
-2. **Process Management**: Adapter launches separate MockDebugAdapterProcess for DAP protocol simulation
-3. **Communication**: DAPConnection handles low-level messaging while the process handles command logic
-4. **State Coordination**: Adapter maintains debugging state and manages lifecycle transitions (INITIALIZING → READY → CONNECTED → DEBUGGING)
+### Component Interaction Flow
+The factory creates adapter instances with injected dependencies and user-defined configuration. Adapters delegate DAP protocol operations through a proxy manager while maintaining proper state transitions and emitting lifecycle events. The standalone process provides a complete DAP server that supports both stdio and TCP transport modes for comprehensive testing scenarios.
 
 ## Public API Surface
 
-The module exposes a clean, minimal public interface through its main entry points:
+### Main Entry Points
+- **`MockAdapterFactory`**: Core factory class for creating and configuring mock adapters
+- **`MockDebugAdapter`**: Primary adapter implementation with full DAP simulation
+- **`createMockAdapterFactory()`**: Convenience function for simplified factory instantiation
+- **`MockErrorScenario`**: Error simulation configuration enumeration
+- **`MockAdapterConfig`**: Configuration interface for behavior customization
 
-**Primary Exports:**
-- `MockDebugAdapter` - Main adapter implementation for direct integration
-- `MockAdapterFactory` - Factory class for creating adapter instances
-- `createMockAdapterFactory()` - Convenience factory function for simplified instantiation
+### Key Capabilities
+- **Configurable Behavior**: Operation timing delays, error probability simulation, feature support toggles
+- **Comprehensive DAP Support**: Full protocol implementation with realistic mock data generation
+- **Error Simulation**: Configurable failure scenarios including timeouts, crashes, and invalid operations
+- **Transport Flexibility**: Support for stdio and TCP communication modes
+- **Event-Driven Architecture**: Lifecycle event emission for monitoring and validation
 
-**Configuration Types:**
-- `MockAdapterConfig` - Configuration interface controlling timing delays, feature support, and error simulation
-- `MockErrorScenario` - Enumeration of testable error conditions (timeouts, crashes, missing executables)
+## Internal Organization and Data Flow
 
-## Key Features and Capabilities
+### State Management
+Adapters follow a permissive state transition model (INITIALIZING → READY → CONNECTED → DEBUGGING → DISCONNECTED) that allows flexible testing of various lifecycle scenarios. State changes emit proper events for external monitoring and validation.
 
-### Configuration-Driven Testing
-All mock behavior is controlled through `MockAdapterConfig`, enabling fine-tuned testing scenarios with:
-- Customizable timing delays for realistic response patterns
-- Probability-based error injection for failure scenario testing
-- Feature toggle support for testing different adapter capabilities
-- Dual communication modes (stdio and TCP) for various integration patterns
+### Protocol Implementation
+DAP requests flow through the adapter's proxy manager, which delegates to appropriate handlers with realistic response generation. The system provides comprehensive mock data including stack traces, variable scopes, breakpoint verification, and debugging session management.
 
-### Comprehensive DAP Simulation
-Provides authentic debugging experience with:
-- Full DAP protocol implementation including initialization sequences
-- Complete breakpoint management and execution control
-- Mock file system with `.mock` and `.test` extensions
-- Simulated variable scopes, stack frames, and thread management
-- Proper DAP capability advertisement and event handling
+### Configuration System
+Extensive configuration options enable testing of different adapter capabilities, performance characteristics, and error conditions. This includes feature support matrices, timing simulation, and failure mode injection.
 
-### Robust Testing Infrastructure
-The module includes comprehensive test coverage validating:
-- Package exports and factory instantiation (integration tests)
-- Adapter lifecycle management and state transitions (unit tests)
-- DAP protocol compliance and error scenario handling
-- Dependency injection patterns and mock isolation
+## Important Patterns and Conventions
 
-## Internal Organization
+### Factory Pattern with Dependency Injection
+The package uses the factory pattern for adapter creation, enabling clean dependency injection and configuration customization while maintaining proper interface compliance.
 
-The module maintains clear separation of concerns across layers:
-- **Public API Layer**: Clean exports through index file
-- **Factory Layer**: Instance creation and validation logic
-- **Adapter Layer**: State management and protocol integration coordination
-- **Process Layer**: Standalone DAP server implementation
-- **Protocol Layer**: Low-level message handling and wire protocol management
+### Transport Abstraction
+Support for multiple transport modes (stdio/TCP) enables testing in various deployment scenarios, from unit tests to full integration testing with external debug clients.
 
-This architecture enables comprehensive testing of debug adapter functionality while providing flexible configuration options for various testing scenarios, making it an essential component for validating debugger frameworks and VS Code extension development workflows.
+### Comprehensive Test Coverage
+The package includes thorough test suites covering both package exports and internal implementation details, with shared test infrastructure for consistent dependency mocking and validation patterns.
+
+### Event-Driven Lifecycle
+Adapters emit standardized lifecycle events (initialized, connected, disconnected, disposed) enabling proper integration with debugging frameworks and monitoring systems.
+
+This package serves as the foundation for testing debug adapter functionality within the MCP ecosystem, providing both programmatic testing capabilities and standalone server functionality for comprehensive validation of debug client implementations.

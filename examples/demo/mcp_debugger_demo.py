@@ -11,7 +11,6 @@ This is designed to be recorded as a GIF/video for the README.
 
 import time
 import sys
-from pathlib import Path
 
 # ANSI color codes for pretty output
 class Colors:

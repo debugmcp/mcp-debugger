@@ -1,79 +1,46 @@
 # packages/shared/src/interfaces/adapter-registry.ts
 @source-hash: 6f8ace40109ff3b2
-@generated: 2026-02-09T18:14:14Z
+@generated: 2026-02-10T00:41:09Z
 
-## Purpose
-Registry pattern implementation for managing language-specific debug adapters. Provides centralized lifecycle management, factory-based adapter creation, and metadata handling for debugger extensions.
+**Purpose**: TypeScript interface definitions for a debug adapter registry system that manages language-specific debug adapters using the registry pattern with factory-based instantiation.
 
-## Core Interfaces
+**Core Interfaces**:
 
-**IAdapterRegistry (L14-83)**: Main registry interface providing adapter management
-- `register(language, factory)` (L23): Register new adapter factories, throws on duplicates
-- `create(language, config)` (L41): Async adapter instance creation with dependency injection
-- `getSupportedLanguages()` (L49): Returns array of registered language identifiers
-- `disposeAll()` (L76): Cleanup all active adapters and clear registry
+- `IAdapterRegistry (L14-83)`: Main registry interface providing centralized management of debug adapters
+  - Registration: `register()`, `unregister()` methods for managing adapter factories
+  - Creation: `create()` method for instantiating adapters with async support
+  - Discovery: Language support queries and metadata retrieval
+  - Lifecycle: Disposal and instance tracking capabilities
 
-**IAdapterFactory (L88-107)**: Factory pattern for adapter instantiation
-- `createAdapter(dependencies)` (L94): Creates configured adapter instances
-- `validate()` (L106): Async environment validation with detailed results
-- `getMetadata()` (L100): Returns adapter metadata for UI/discovery
+- `IAdapterFactory (L88-107)`: Factory interface for creating debug adapter instances
+  - `createAdapter()`: Creates instances with dependency injection
+  - `getMetadata()`: Returns adapter metadata
+  - `validate()`: Async environment validation
 
-**AdapterDependencies (L112-118)**: Dependency injection container
-- Required: fileSystem, logger, environment, processLauncher
-- Optional: networkManager for network-aware adapters
+**Key Data Structures**:
 
-## Data Types
+- `AdapterDependencies (L112-118)`: Dependency injection container with required services (file system, logger, environment, process launcher) and optional network manager
+- `AdapterMetadata (L123-150)`: Static adapter information including language, version, capabilities, and UI properties
+- `AdapterInfo (L155-167)`: Runtime-enhanced metadata with availability status and instance tracking
+- `AdapterRegistryConfig (L213-228)`: Configuration options for registry behavior (validation, overrides, instance limits, auto-disposal)
 
-**AdapterMetadata (L123-150)**: Static adapter information
-- Core fields: language, displayName, version, author, description
-- Optional: documentationUrl, minimumDebuggerVersion, fileExtensions, icon
+**Error Handling**:
+- `AdapterNotFoundError (L235-243)`: Language not registered
+- `FactoryValidationError (L248-256)`: Factory validation failures  
+- `DuplicateRegistrationError (L261-266)`: Duplicate language registration
 
-**AdapterInfo (L155-167)**: Runtime adapter state extending metadata
-- `available` (L157): Current adapter availability status
-- `activeInstances` (L160): Count of running adapter instances
-- `registeredAt` (L166): Registration timestamp for tracking
+**Implementation Helpers**:
+- `BaseAdapterFactory (L191-208)`: Abstract base class with default validation implementation
+- Type guards: `isAdapterFactory()` (L273-281), `isAdapterRegistry()` (L286-294)
+- Utility types: `AdapterFactoryMap`, `ActiveAdapterMap` (L301-306)
 
-**FactoryValidationResult (L172-184)**: Validation outcome structure
-- `valid` boolean with separate `errors` and `warnings` arrays
-- Extensible `details` object for custom validation data
+**Dependencies**: 
+- Imports `IDebugAdapter` and `AdapterConfig` from debug-adapter interface
+- External dependencies from separate interface files (file system, logger, environment, process launcher, network manager)
 
-## Implementation Helpers
-
-**BaseAdapterFactory (L191-208)**: Abstract base class for factory implementations
-- Provides default validation logic (returns valid with empty errors)
-- Concrete implementations must override `createAdapter()`
-
-**AdapterRegistryConfig (L213-228)**: Registry behavior configuration
-- `validateOnRegister`, `allowOverride` for registration policies
-- `maxInstancesPerLanguage`, `autoDispose` for resource management
-
-## Error Handling
-
-**AdapterNotFoundError (L235-243)**: Language not registered
-- Includes available languages list for user guidance
-
-**FactoryValidationError (L248-256)**: Factory validation failures
-- Embeds full validation result for debugging
-
-**DuplicateRegistrationError (L261-266)**: Duplicate language registration attempts
-
-## Type Safety
-
-**Type Guards (L273-294)**: Runtime interface validation
-- `isAdapterFactory()` and `isAdapterRegistry()` for duck typing
-- Check required method presence for interface compliance
-
-**Utility Types (L301-306)**: Type aliases for internal data structures
-- `AdapterFactoryMap`: language → factory mapping
-- `ActiveAdapterMap`: language → active adapter set mapping
-
-## Dependencies
-- Imports `IDebugAdapter`, `AdapterConfig` from debug-adapter module (L9)
-- External interfaces: IFileSystem, ILogger, IEnvironment, IProcessLauncher, INetworkManager (L310-314)
-
-## Architecture Notes
-- Registry pattern with factory method for adapter creation
-- Dependency injection for testability and modularity
-- Lifecycle management with disposal and instance tracking
-- Validation-first approach with detailed error reporting
-- Extensible metadata system for UI integration
+**Architectural Patterns**:
+- Registry pattern for centralized adapter management
+- Factory pattern for adapter instantiation
+- Dependency injection for adapter dependencies
+- Async/Promise-based operations for creation and validation
+- Comprehensive error taxonomy with custom error types

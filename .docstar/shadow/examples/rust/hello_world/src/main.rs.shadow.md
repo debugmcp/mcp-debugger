@@ -1,25 +1,37 @@
 # examples/rust/hello_world/src/main.rs
 @source-hash: 55d7e2fa9b5f2ac5
-@generated: 2026-02-09T18:13:50Z
+@generated: 2026-02-10T00:41:04Z
 
 ## Purpose
-Educational Rust example demonstrating basic debugging scenarios with variable inspection, stepping, and breakpoint placement for MCP Debugger testing.
+Simple Rust hello world program designed as a debugging demonstration example. Showcases basic Rust syntax, variable types, and control flow structures with debugging-friendly features.
 
 ## Key Functions
-- **main()** (L9-38): Primary entry point showcasing various debugging scenarios including variable declaration, function calls, collections, string formatting, conditionals, and loops
-- **calculate_sum(a: i32, b: i32) -> i32** (L40-44): Simple addition function designed for parameter inspection and breakpoint testing
+- **main()** (L9-38): Entry point demonstrating core Rust concepts including variable declarations, function calls, collections, string formatting, conditionals, and loops
+- **calculate_sum(a: i32, b: i32) -> i32** (L40-44): Simple arithmetic function taking two integers and returning their sum, designed for breakpoint testing
 
-## Code Structure & Debugging Features
-- **Variable inspection targets** (L13-15): Basic types (string, float, boolean) for debugger variable viewing
-- **Function call debugging** (L18): Invokes calculate_sum for step-into/over scenarios  
-- **Collection manipulation** (L22-23): Mutable vector operations for memory/collection inspection
-- **String formatting** (L26): Demonstrates complex variable interpolation
-- **Control flow** (L30-32): Conditional logic for step-through debugging
-- **Loop iteration** (L35-37): Range-based loop for stepping and iteration inspection
+## Program Flow
+1. Prints greeting message (L10)
+2. Declares variables of different types: string slice, float, boolean (L13-15)
+3. Calls calculation function and displays result (L18-19)
+4. Demonstrates mutable vector operations (L22-23)
+5. Shows string formatting and interpolation (L26-27)
+6. Executes conditional logic based on boolean flag (L30-32)
+7. Performs counted loop with iteration display (L35-37)
+
+## Variable Types Demonstrated
+- String slices (`&str`) for immutable text
+- Floating point (`f64`) for decimal numbers
+- Booleans for conditional logic
+- Mutable vectors (`Vec<i32>`) for dynamic collections
+- Owned strings (`String`) from formatting operations
+
+## Debugging Features
+- Multiple variable types for inspection testing
+- Function parameters for breakpoint analysis
+- Loop constructs for stepping practice
+- Collection mutations for memory observation
+- Strategic print statements for output verification
 
 ## Dependencies
-- Standard library only: `println!`, `vec!`, `format!` macros
-- No external crates
-
-## Debugging Patterns
-The code is intentionally structured with clear breakpoint opportunities at L18 (function call), L41 (parameter inspection), and throughout the loop (L35-37). Each section introduces different variable types and operations to exercise debugger capabilities comprehensively.
+- Standard library only (println! macro, vec! macro, format! macro)
+- No external crates required

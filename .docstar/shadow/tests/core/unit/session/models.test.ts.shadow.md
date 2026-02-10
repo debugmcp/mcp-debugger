@@ -1,48 +1,52 @@
 # tests/core/unit/session/models.test.ts
 @source-hash: 5783779d9ff6dbbe
-@generated: 2026-02-09T18:14:22Z
+@generated: 2026-02-10T00:41:18Z
 
-## Purpose
-Comprehensive unit tests for session model state mapping functions in the DebugMCP system. Tests critical backward compatibility between legacy flat state model (`SessionState`) and new hierarchical state model (`SessionLifecycleState` + `ExecutionState`).
+## Primary Purpose
+Comprehensive unit test suite for debugging session state models and mapping functions, ensuring backward compatibility between legacy and new state models. Critical for validating the debugging session lifecycle management system.
 
-## Test Structure & Coverage
+## Key Test Groups
 
-### Core Mapping Functions Tested
-- **mapLegacyState** (L19-84): Tests conversion from legacy flat states to new hierarchical model
-- **mapToLegacyState** (L86-151): Tests conversion from new hierarchical model back to legacy states
-- **Round-trip consistency** (L153-202): Validates bidirectional mapping integrity
+### mapLegacyState Tests (L19-84)
+Tests conversion from legacy SessionState enum to new {lifecycle, execution} model:
+- **CREATED** → {lifecycle: CREATED} (L20-26)
+- **INITIALIZING/READY** → {lifecycle: ACTIVE, execution: INITIALIZING} (L28-42)
+- **RUNNING/PAUSED/ERROR** → {lifecycle: ACTIVE, execution: respective state} (L44-74)
+- **STOPPED** → {lifecycle: TERMINATED} (L60-66)
+- String value compatibility test (L77-83)
 
-### Key State Mappings Validated
+### mapToLegacyState Tests (L86-151)
+Tests reverse conversion from {lifecycle, execution} to legacy SessionState:
+- Lifecycle precedence: CREATED/TERMINATED override execution state (L87-105)
+- **ACTIVE lifecycle mappings** (L107-142): execution state determines legacy state
+- Default ACTIVE → READY when execution undefined (L133-141)
+- String value compatibility (L145-150)
 
-**Legacy → New Model (mapLegacyState):**
-- `CREATED` → `{lifecycle: CREATED}` (L20-26)
-- `INITIALIZING` → `{lifecycle: ACTIVE, execution: INITIALIZING}` (L28-34)  
-- `READY` → `{lifecycle: ACTIVE, execution: INITIALIZING}` (L36-42)
-- `RUNNING` → `{lifecycle: ACTIVE, execution: RUNNING}` (L44-50)
-- `PAUSED` → `{lifecycle: ACTIVE, execution: PAUSED}` (L52-58)
-- `STOPPED` → `{lifecycle: TERMINATED}` (L60-66)
-- `ERROR` → `{lifecycle: ACTIVE, execution: ERROR}` (L68-74)
-
-**New → Legacy Model (mapToLegacyState):**
-- Terminal lifecycle states (`CREATED`, `TERMINATED`) take precedence over execution states (L87-105)
-- `ACTIVE` lifecycle maps to execution-dependent legacy states (L107-142)
+### Round-trip Consistency Tests (L153-202)
+Validates bidirectional mapping consistency for all states:
+- Tests legacy → new → legacy conversion preserves original state
+- **Exception**: READY maps to INITIALIZING in round-trip (L172)
 
 ### Enum Validation Tests (L204-268)
-- **DebugLanguage**: Validates 6 supported languages including Python, JavaScript, Java, Rust, Go, and Mock (L205-222)
-- **SessionLifecycleState**: 3 states - CREATED, ACTIVE, TERMINATED (L224-235) 
-- **ExecutionState**: 5 states - INITIALIZING, RUNNING, PAUSED, TERMINATED, ERROR (L237-250)
-- **SessionState (legacy)**: 7 states for backward compatibility (L252-267)
+Verifies enum definitions and completeness:
+- **DebugLanguage**: 6 languages including python, javascript, java, rust, go, mock (L205-222)
+- **SessionLifecycleState**: 3 states (created, active, terminated) (L224-235)
+- **ExecutionState**: 5 states (initializing, running, paused, terminated, error) (L237-250)
+- **SessionState (legacy)**: 7 states (L252-267)
 
-### Edge Case Coverage
-- String value handling for JSON deserialization compatibility (L77-83, L145-150)
-- All possible state combination validation without errors (L270-290)
-- Type definition verification with mock DebugSession object (L292-314)
+### Edge Cases & Robustness (L270-290)
+- Exhaustive combination testing to prevent runtime errors (L271-281)
+- Error-free handling of all legacy states (L283-289)
 
-## Critical Design Insights
-- **Backward Compatibility**: READY legacy state maps to INITIALIZING in new model, creating intentional round-trip inconsistency (L168-173)
-- **Hierarchical State Model**: New model separates session lifecycle from execution state for better debugging granularity
-- **Error Handling**: All mapping functions are designed to never throw, ensuring robust state transitions
+### Type Integration Test (L292-314)
+Validates TypeScript type exports and DebugSession interface structure using mock object construction (L298-310).
 
 ## Dependencies
 - **vitest**: Testing framework (L8)
-- **@debugmcp/shared**: Core session models and enums (L9-16)
+- **@debugmcp/shared**: Core session models and mapping functions (L9-16)
+
+## Architecture Insights
+- Demonstrates two-tier state model: high-level lifecycle + detailed execution states
+- Emphasizes backward compatibility for existing debugging tools
+- Comprehensive edge case coverage indicates production-critical functionality
+- Type-safe enum validation ensures API contract integrity

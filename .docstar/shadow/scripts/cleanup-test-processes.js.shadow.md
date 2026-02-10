@@ -1,53 +1,65 @@
 # scripts/cleanup-test-processes.js
 @source-hash: 88a41c937c802e52
-@generated: 2026-02-09T18:15:15Z
+@generated: 2026-02-10T00:42:03Z
 
 ## Purpose
-Cross-platform test process cleanup script that identifies and terminates orphaned MCP-related processes after test suite execution. Specifically addresses proxy-bootstrap process orphaning issues on Unix systems.
+Cross-platform utility script that cleans up orphaned test processes after test suite execution. Specifically designed to address issues with proxy-bootstrap and related MCP debugger processes becoming orphaned on Unix systems during test runs.
 
 ## Key Functions
 
-### executeCommand(cmd, silent = false) (L34-44)
-Wrapper for execSync that handles command execution errors gracefully. Returns command output on success, null on failure. Silent mode suppresses error logging.
+**executeCommand(cmd, silent = false)** (L34-44)
+- Wraps execSync with error handling and optional silent mode
+- Returns command output or null on failure
+- Used for all system command execution throughout the script
 
-### getProcessList() (L46-56)
-Platform-specific process enumeration:
-- Windows: Uses `wmic process get ProcessId,ParentProcessId,CommandLine /format:csv`
-- Unix: Uses `ps aux`
-Returns raw process list string.
+**getProcessList()** (L46-56) 
+- Platform-specific process listing
+- Windows: Uses WMIC with CSV format output
+- Unix: Uses ps aux command
+- Returns raw process list as string
 
-### findMcpProcesses() (L58-103)
-Parses process list to identify MCP-related processes using patterns (L64-69):
-- `${projectRoot}.*proxy-bootstrap` - Project-specific proxy processes
-- `${projectRoot}.*dap-proxy` - Debug adapter proxy processes
-- `vitest.*${projectRoot}` - Vitest test runners
-- `debugpy.*${projectRoot}` - Python debugger processes
+**findMcpProcesses()** (L58-103)
+- Core process discovery logic
+- Searches for MCP-related processes using project-specific patterns (L64-69):
+  - `${projectRoot}.*proxy-bootstrap`
+  - `${projectRoot}.*dap-proxy` 
+  - `vitest.*${projectRoot}`
+  - `debugpy.*${projectRoot}`
+- Parses PIDs from platform-specific output formats
+- Returns array of {pid, command} objects
 
-Extracts PIDs using platform-specific parsing (Windows CSV vs Unix space-delimited).
-
-### killProcess(pid) (L105-129)
-Platform-specific process termination:
-- Windows: `taskkill /F /PID`
+**killProcess(pid)** (L105-129)
+- Platform-specific process termination
+- Windows: Uses taskkill /F /PID
 - Unix: Graceful SIGTERM followed by SIGKILL after 100ms delay
+- Returns success boolean
 
-### cleanup() (L132-175)
-Main cleanup orchestrator. Skips on Windows (L134-137). Finds orphaned processes, reports findings, and terminates them. Shows memory status on Linux systems.
+**cleanup()** (L132-175)
+- Main orchestration function
+- Skips entirely on Windows (L134-137)
+- Discovers, reports, and terminates orphaned processes
+- Shows memory status on Linux systems
 
 ## Architecture & Flow
 
-**Platform Detection** (L18-21): Sets boolean flags for Windows, Darwin, and Linux.
+1. **Platform Detection** (L18-20): Sets boolean flags for OS-specific behavior
+2. **Project Context** (L22-26): Derives project root and name from script location
+3. **Conditional Execution** (L177-186): Runs only on non-Windows, non-CI environments
+4. **Process Matching Strategy**: Uses project root path matching to avoid killing unrelated processes
 
-**Project Context** (L22-26): Derives project root from script location, used for process pattern matching.
-
-**Execution Logic** (L177-186): Runs cleanup only when not in CI environment and not on Windows platform.
-
-## Dependencies
-- `child_process.execSync` - Command execution
-- `os` - Platform detection
-- `path` - File system operations
-- `url.fileURLToPath` - ES module path resolution
+## Key Dependencies
+- `child_process.execSync`: System command execution
+- `os`, `path`: Platform and filesystem utilities
+- `url.fileURLToPath`: ES module path resolution
 
 ## Critical Constraints
-- Only runs on non-Windows platforms outside CI environments
-- Process matching is project-root specific to avoid killing unrelated processes
-- Implements graceful termination with fallback to force-kill
+- **Windows Exclusion**: Completely skips Windows due to different process model
+- **CI Exclusion**: Skips in CI environments (assumes CI handles cleanup)
+- **Project-Scoped**: Only targets processes containing the specific project root path
+- **Graceful Degradation**: Continues on individual process kill failures
+
+## Notable Patterns
+- Cross-platform command execution with fallback handling
+- Project-scoped process matching to prevent accidental kills
+- Graceful Unix process termination (SIGTERM → SIGKILL)
+- Environment-aware execution (CI detection, platform detection)

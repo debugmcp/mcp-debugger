@@ -132,6 +132,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     command: string;
   }>();
   private isInitialized = false;
+  private isStopped = false;
   private isDryRun = false;
   private dryRunCompleteReceived = false;
   private dryRunCommandSnapshot?: string;
@@ -161,6 +162,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   ) {
     super();
     this.runtimeEnv = runtimeEnv;
+    // Safety handler: prevents Node.js from throwing when 'error' is emitted
+    // after all named listeners have been removed (e.g., late IPC messages from
+    // a child process that hasn't fully exited yet).
+    this.on('error', () => {});
   }
 
   async start(config: ProxyConfig): Promise<void> {
@@ -169,6 +174,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     this.sessionId = config.sessionId;
+    this.isStopped = false;
     this.isDryRun = config.dryRunSpawn === true;
     this.dryRunCompleteReceived = false;
     this.dryRunCommandSnapshot = undefined;
@@ -305,6 +311,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.logger.info(`[ProxyManager] Stopping proxy for session ${this.sessionId}`);
 
     // Mark as shutting down to stop processing new messages
+    this.isStopped = true;
     const process = this.proxyProcess;
     
     // Immediately cleanup to prevent "unknown request" warnings
@@ -729,6 +736,11 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   private handleProxyMessage(rawMessage: unknown): void {
+    // Skip all message processing after stop() to prevent emitting events with no listeners
+    if (this.isStopped) {
+      this.logger.debug(`[ProxyManager] Ignoring late message after stop (session ${this.sessionId})`);
+      return;
+    }
     if ((rawMessage as { type?: string })?.type === 'ipc-heartbeat') {
       const heartbeat = rawMessage as { counter?: number; timestamp?: number };
       this.logger.debug(

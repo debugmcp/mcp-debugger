@@ -1,0 +1,15 @@
+{
+  "source": "tests/test-utils/helpers/test-dependencies.ts",
+  "source_hash": "c86d125ca505de13",
+  "generated": "2026-02-10T00:41:33Z",
+  "findings": [
+    {
+      "category": "stale_comment",
+      "line_start": 72,
+      "line_end": 72,
+      "severity": "warning",
+      "description": "Comment refers to moving implementations to a different path but import is already using the referenced location",
+      "suggestion": "Remove the outdated comment about moving implementations since they appear to already be in the correct location"
+    }
+  ]
+}

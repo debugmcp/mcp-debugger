@@ -44,7 +44,7 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
     }
 
     const transport = new StdioClientTransport({
-      command: 'node',
+      command: process.execPath,
       args: [serverScriptPath, '--log-level', 'debug'],
       env: filteredEnv,
     });

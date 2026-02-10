@@ -24,7 +24,7 @@ export class RequestTracker implements IRequestTracker {
       const request = this.pendingRequests.get(requestId);
       if (request) {
         this.pendingRequests.delete(requestId);
-        // Timeout callback would be handled by the worker
+        // Base class has no timeout callback; see CallbackRequestTracker for callback support
       }
     }, timeout);
 

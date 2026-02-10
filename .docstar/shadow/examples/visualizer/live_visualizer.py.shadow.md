@@ -1,40 +1,45 @@
 # examples/visualizer/live_visualizer.py
 @source-hash: 2e76aa790b21ae62
-@generated: 2026-02-09T18:14:56Z
+@generated: 2026-02-10T00:41:44Z
 
-## Primary Purpose
-Live visualization entry point that connects MCP server debug logs to a real-time TUI visualizer. Orchestrates log watching, event parsing, and visualization components to provide live debugging session monitoring.
+## Purpose
+Live debugger visualizer that connects to MCP server logs to provide real-time TUI visualization of debugging sessions. Acts as an integration layer between log file monitoring and visualization components.
 
 ## Key Components
 
-**main() (L20-101)** - Main entry point that:
-- Accepts optional log file path via command line argument (default: "../../logs/debug-mcp-server.log")
-- Creates/validates log file and directory structure
-- Initializes DebugVisualizer and LogEventParser components
-- Sets up comprehensive event handler mapping for all debug event types
-- Manages application lifecycle with proper cleanup on exit
+### Main Entry Point
+- **main() (L20-101)**: Primary orchestration function that sets up log monitoring, event parsing, and visualization
+  - Handles command-line log path argument (defaults to "../../logs/debug-mcp-server.log")
+  - Creates log file if it doesn't exist with proper error handling
+  - Coordinates LogWatcher, LogEventParser, and DebugVisualizer components
+  - Registers comprehensive event handlers for MCP debugging events
+  - Manages application lifecycle with graceful shutdown
 
-**Event Handler Registry (L52-66)** - Maps debug event types to parser methods:
-- Tool events: `tool:call`, `tool:response`, `tool:error`
-- Session events: `session:created`, `session:closed` 
-- Debug events: `debug:state`, `debug:breakpoint`, `debug:variables`, `debug:output`
-
-**Convenience Handlers (L69-75)** - Lambda functions for events without dedicated parsers:
-- `debug:stack_trace` - Reports frame count to tool activity
-- `debug:scopes` - Reports scope count to tool activity
+### Event Handler Registration
+- **Event handlers mapping (L52-62)**: Maps MCP debug event types to parser methods
+  - `tool:call/response/error` - Tool execution tracking
+  - `session:created/closed` - Session lifecycle management  
+  - `debug:state/breakpoint/variables/output` - Debug state tracking
+- **Convenience handlers (L69-75)**: Lambda handlers for stack traces and scopes without dedicated parsers
 
 ## Dependencies
-- **DebugVisualizer** (L15): TUI component for real-time visualization
-- **LogWatcher** (L16): File monitoring for log changes  
-- **LogEventParser** (L17): Structured log event parsing
+- **DebugVisualizer**: TUI interface for real-time debugging visualization
+- **LogWatcher**: File monitoring component that watches for log changes
+- **LogEventParser**: Parses structured log events and updates visualizer state
+- **Path manipulation**: Uses pathlib for cross-platform file path handling
 
 ## Architecture Patterns
-- **Observer Pattern**: LogWatcher notifies registered event handlers
-- **Component Integration**: Bridges three separate modules (watcher, parser, visualizer)
-- **Graceful Lifecycle**: Proper initialization, cleanup on interruption/error
+- **Event-driven architecture**: Uses callback registration for decoupled event handling
+- **Integration layer**: Bridges file I/O monitoring with UI visualization
+- **Error resilience**: Comprehensive exception handling for file operations and runtime errors
+- **Graceful lifecycle**: Proper cleanup in finally block with KeyboardInterrupt handling
 
 ## Critical Behaviors
-- Creates log file/directory if missing (L36-39)
-- Clears watcher position to start fresh each run (L79)
-- Blocks on visualizer.run() until user interruption (L89)
-- Ensures watcher cleanup in finally block (L99)
+- Clears log watcher position on startup to start fresh (L79)
+- 500ms initialization delay after watcher start (L85-86)
+- Blocking visualization run until Ctrl+C (L89)
+- Automatic log file creation with parent directory structure
+- Command-line log path override capability
+
+## Usage Context
+Designed to be run as a standalone script for live MCP server debugging sessions. Expects MCP server to be writing structured debug events to the monitored log file.

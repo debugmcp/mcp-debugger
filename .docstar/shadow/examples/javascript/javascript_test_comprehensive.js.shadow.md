@@ -1,39 +1,40 @@
 # examples/javascript/javascript_test_comprehensive.js
 @source-hash: 3097d163e8b22c79
-@generated: 2026-02-09T18:14:55Z
+@generated: 2026-02-10T00:41:38Z
 
 ## Purpose
-Test script designed for MCP (Model Context Protocol) debugger validation, demonstrating various JavaScript language features and debugging scenarios through a comprehensive suite of functions and execution patterns.
+Comprehensive JavaScript test script designed for MCP (Model Context Protocol) debugger testing. Provides various debugging scenarios including recursive functions, loops, objects, and conditional logic to validate debugger functionality.
 
-## Core Functions
+## Key Functions
 
-**fibonacci(n)** (L6-12): Recursive implementation calculating Fibonacci numbers. Uses classic base case (n <= 1) and recursive calls for larger values. Inefficient O(2^n) complexity but useful for testing recursive debugging scenarios.
+### `fibonacci(n)` (L6-12)
+Recursive implementation of Fibonacci sequence calculation. Takes integer `n` and returns nth Fibonacci number using classic recursive approach with base case for n ≤ 1.
 
-**calculateSum(numbers)** (L14-21): Iterates through array using for-of loop, accumulating sum in local variable. Demonstrates basic array processing and variable state changes during iteration.
+### `calculateSum(numbers)` (L14-21)
+Array summation utility using for-of loop iteration. Accepts array of numbers and returns total sum through accumulator pattern.
 
-**factorial(n)** (L23-33): Iterative factorial calculation using traditional for loop. Shows variable mutation patterns and conditional logic with base case handling.
+### `factorial(n)` (L23-33)
+Iterative factorial calculation with explicit loop. Uses base case for n ≤ 1, then iteratively multiplies from 2 to n.
 
-**main()** (L35-78): Orchestrates seven distinct test scenarios covering:
-- Variable assignment and arithmetic (L39-42)
-- Array operations with function calls (L45-47) 
-- Recursive function invocation (L50-51)
-- Iterative calculations (L54-55)
-- Object creation and property access (L58-63)
-- Conditional branching logic (L66-70)
-- Arrow function definition and execution (L73-75)
+### `main()` (L35-78)
+Primary test orchestrator containing 7 distinct debugging test scenarios:
+- Simple arithmetic operations (L38-42)
+- Array processing with function calls (L44-47)
+- Recursive function testing (L49-51)
+- Iterative calculation validation (L53-55)
+- Object property access (L57-63)
+- Conditional branching logic (L65-70)
+- Arrow function usage (L72-75)
 
-## Execution Flow
-Script auto-executes via `main()` call (L81), providing immediate test results through console output. Each test section demonstrates different debugging challenges: variable inspection, call stack depth, loop iteration, object properties, and control flow.
+## Architecture & Patterns
+- **Test-driven structure**: Each test case demonstrates different debugging scenarios
+- **Functional decomposition**: Separate utility functions for mathematical operations
+- **Console output**: Extensive logging for debugging visibility
+- **Mixed paradigms**: Combines recursive, iterative, and functional programming styles
 
-## Architectural Patterns
-- Functional decomposition with single-responsibility functions
-- Mixed paradigms: recursive vs iterative implementations
-- Console-driven output for debugging visibility
-- Self-contained test scenarios for isolated debugging sessions
+## Dependencies
+- Node.js runtime environment (shebang L1)
+- Console API for output logging
 
-## Key Dependencies
-- Node.js runtime (shebang L1)
-- Native JavaScript features only (no external modules)
-
-## Critical Characteristics
-All functions are pure (no side effects except console output), making state inspection predictable. The script provides graduated complexity from simple arithmetic to recursive calls, ideal for testing debugger capabilities across different execution contexts.
+## Execution
+Script automatically executes via `main()` call at L81, making it immediately runnable for debugging session testing.

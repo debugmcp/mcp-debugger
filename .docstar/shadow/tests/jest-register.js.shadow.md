@@ -1,18 +1,20 @@
 # tests/jest-register.js
 @source-hash: 0e859bb63243ea2f
-@generated: 2026-02-09T18:15:10Z
+@generated: 2026-02-10T00:41:58Z
 
-**Primary Purpose**: Jest test configuration file that registers TypeScript transpilation support for E2E testing environment.
+## Purpose
+Jest test environment setup file that configures TypeScript runtime compilation for E2E tests. Enables Jest to execute TypeScript files in setup scripts and test utilities without pre-compilation.
 
-**Core Functionality**:
-- TypeScript Registration (L3-6): Configures ts-node to handle TypeScript files during Jest execution with transpile-only mode and ESM support enabled
+## Key Functionality
+- **TypeScript Runtime Registration (L3-6)**: Registers ts-node with Jest to handle .ts/.tsx files on-the-fly
+  - `transpileOnly: true`: Skips type checking for faster compilation during testing
+  - `esm: true`: Enables ESModule support for modern TypeScript/JavaScript syntax
 
-**Key Dependencies**:
-- `ts-node`: TypeScript execution engine for Node.js, enabling direct execution of .ts files
+## Dependencies
+- `ts-node`: TypeScript execution engine for Node.js runtime compilation
 
-**Configuration Details**:
-- `transpileOnly: true` (L4): Disables type checking for faster compilation during tests
-- `esm: true` (L5): Enables ES modules support for modern JavaScript imports/exports
+## Architectural Role
+Acts as a Jest setup hook (likely referenced in jest.config.js setupFilesAfterEnv or similar) to bootstrap TypeScript support across the test suite. Critical for projects where test utilities, setup files, or helper modules are written in TypeScript but Jest needs to execute them directly.
 
-**Architectural Role**: 
-Bootstrap configuration file that must be loaded before Jest runs E2E tests, ensuring TypeScript files in test setup and utilities can be executed without pre-compilation. Typically referenced in Jest's setupFilesAfterEnv or similar configuration.
+## Usage Pattern
+Loaded early in Jest's lifecycle to ensure all subsequent TypeScript imports are properly transpiled. The transpileOnly flag prioritizes execution speed over type safety during testing.

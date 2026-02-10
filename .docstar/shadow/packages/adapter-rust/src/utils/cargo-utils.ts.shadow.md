@@ -1,78 +1,72 @@
 # packages/adapter-rust/src/utils/cargo-utils.ts
 @source-hash: 0bfd359c192a062d
-@generated: 2026-02-09T18:14:13Z
+@generated: 2026-02-10T00:41:23Z
 
-## cargo-utils.ts - Cargo Project Management Utilities
+## Cargo Project Utilities
 
-**Primary Purpose**: Provides comprehensive utilities for interacting with Rust Cargo projects, including metadata parsing, building, testing, and dependency analysis. Part of a Rust adapter package for language tooling integration.
+This utility module provides comprehensive Rust Cargo project management functionality for a Rust adapter. It handles project discovery, metadata extraction, building, testing, and file system operations for Cargo-based Rust projects.
 
-### Core Types and Interfaces
+### Core Data Structures
 
-**CargoTarget (L12-16)**: Interface defining Cargo build targets with name, kind array (bin, lib, test, etc.), and source path.
+**CargoTarget Interface (L12-16)**: Represents a Cargo compilation target with name, kind array (bin, lib, test, etc.), and source path.
 
-### Project Analysis Functions
+### Primary Functions
 
-**resolveCargoProject (L21-49)**: Main project resolver that:
-- Reads and parses Cargo.toml using regex patterns for name/version extraction
-- Calls getCargoTargets() to fetch build targets via cargo metadata
-- Returns project info object or null on failure
-- Uses simplified TOML parsing rather than full parser
+**resolveCargoProject(projectPath) (L21-49)**: Main project resolver that:
+- Reads and parses Cargo.toml for project name/version using regex
+- Fetches compilation targets via cargo metadata
+- Returns structured project info or null on failure
+- Uses simplified TOML parsing instead of full parser
 
-**getCargoTargets (L54-96)**: Spawns `cargo metadata` subprocess to extract project targets:
-- Executes cargo metadata command with format-version 1
-- Parses JSON output to extract targets from packages
-- Filters targets by manifest path matching project directory
-- Returns empty array on any errors (spawn failures, JSON parsing issues)
+**getCargoTargets(projectPath) (L54-96)**: Executes `cargo metadata --format-version 1` to extract target information:
+- Spawns cargo process and captures JSON output
+- Filters packages by project path to avoid workspace conflicts  
+- Maps cargo metadata format to CargoTarget interface
+- Returns empty array on any failure
 
-**findBinaryTargets (L101-106)**: Convenience wrapper filtering targets to binary executables only.
+**findBinaryTargets(projectPath) (L101-106)**: Convenience function that filters targets for binary executables only.
 
-### Build and Test Operations
-
-**runCargoTest (L111-151)**: Executes cargo test with optional test name filtering:
-- Spawns cargo test subprocess with configurable arguments
-- Captures both stdout and stderr
+**runCargoTest(projectPath, testName?) (L111-151)**: Test execution wrapper:
+- Spawns `cargo test` with optional test name filter
+- Captures stdout/stderr and combines for output
 - Returns success boolean and combined output
 
-**runCargoBuild (L228-264)**: Generic cargo build executor:
-- Takes custom build arguments array
-- Captures build output but doesn't determine binary path
-- Returns success status and full output
+**needsRebuild(projectPath, binaryName, release?) (L156-197)**: Intelligent rebuild detection:
+- Compares binary mtime against source files and Cargo.toml
+- Handles platform-specific executable extensions (.exe on Windows)
+- Uses getAllRustFiles helper for recursive .rs file discovery
+- Returns true if binary missing or sources newer
 
-**buildCargoProject (L319-383)**: High-level build function with progress reporting:
-- Supports debug/release build modes
-- Integrates with optional logger for progress messages
-- Determines binary path after successful build
-- Returns comprehensive result object with binary path
+**runCargoBuild(projectPath, args) (L228-264)**: Generic build executor that spawns cargo with custom arguments and returns success status with output.
 
-### Build Optimization
+**getDefaultBinary(projectPath) (L269-289)**: Binary name resolution with fallback chain:
+1. First binary target from cargo metadata
+2. Package name from Cargo.toml
+3. Project directory name if main.rs exists
+4. "main" as last resort
 
-**needsRebuild (L156-197)**: Intelligent rebuild detection comparing modification times:
-- Checks if target binary exists in appropriate debug/release directory
-- Compares binary mtime against all .rs source files
-- Includes Cargo.toml modification time check
-- Handles Windows .exe extension automatically
+**findCargoProjectRoot(filePath) (L294-314)**: Walks up directory tree from given file path to locate nearest Cargo.toml, similar to git root discovery.
 
-**getAllRustFiles (L202-223)**: Private recursive directory scanner for .rs files.
+**buildCargoProject(projectRoot, logger?, buildMode?) (L319-383)**: High-level build function with:
+- Progress logging integration
+- Debug/release mode support
+- Binary path resolution post-build
+- Comprehensive error handling and reporting
 
-### Path Resolution
+### Internal Utilities
 
-**findCargoProjectRoot (L294-314)**: Walks directory tree upward to locate Cargo.toml:
-- Starts from given file path and traverses parent directories
-- Stops at filesystem root or when Cargo.toml found
-- Throws error if no Cargo project found
+**getAllRustFiles(dir) (L202-223)**: Recursive directory walker that collects all .rs files, used by needsRebuild for change detection.
 
-**getDefaultBinary (L269-289)**: Determines primary binary name using fallback strategy:
-- First tries binary targets from cargo metadata
-- Falls back to package name from Cargo.toml
-- Last resort checks for src/main.rs existence
+### Key Patterns
 
-### Dependencies and Architecture
+- **Promise-based async operations**: All functions return Promises, with spawn operations wrapped in Promise constructors
+- **Graceful error handling**: Most functions return null/empty arrays instead of throwing
+- **Cross-platform compatibility**: Handles Windows .exe extensions and uses shell: true for spawn calls
+- **Cargo CLI integration**: Heavy reliance on spawning cargo subcommands rather than parsing internals
+- **File system monitoring**: Uses mtime comparisons for efficient rebuild detection
 
-**Key Dependencies**:
+### Dependencies
+
 - Node.js fs/promises for async file operations
 - child_process.spawn for cargo command execution
-- path module for cross-platform path handling
-
-**Error Handling Pattern**: Most functions use try-catch with graceful degradation, returning null/empty arrays rather than throwing exceptions.
-
-**Cross-Platform Considerations**: Handles Windows .exe extension in multiple locations, uses shell:true for spawn calls.
+- path module for cross-platform file path handling

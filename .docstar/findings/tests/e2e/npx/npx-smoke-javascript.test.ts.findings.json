@@ -1,0 +1,6 @@
+{
+  "source": "tests/e2e/npx/npx-smoke-javascript.test.ts",
+  "source_hash": "4cfd6747ba75441a",
+  "generated": "2026-02-10T00:41:33Z",
+  "findings": []
+}

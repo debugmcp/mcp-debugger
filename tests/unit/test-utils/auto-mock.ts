@@ -5,7 +5,7 @@
  * and validate that mocks match their real implementations.
  */
 
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 
 /**
  * Creates a mock object from a real implementation or class prototype.
@@ -31,7 +31,7 @@ export function createMockFromInterface<T extends object>(
      */
     includeInherited?: boolean;
   } = {}
-): T & { [K in keyof T]: T[K] extends (...args: any[]) => any ? jest.Mock : T[K] } {
+): T & { [K in keyof T]: T[K] extends (...args: any[]) => any ? Mock : T[K] } {
   const mock = {} as any;
   const {
     excludeMethods = [],
@@ -248,21 +248,21 @@ export function createValidatedMock<T extends object>(
 export function createEventEmitterMock<T extends object>(
   additionalMethods: Partial<T> = {}
 ): T & {
-  on: jest.Mock;
-  once: jest.Mock;
-  emit: jest.Mock;
-  off: jest.Mock;
-  removeListener: jest.Mock;
-  removeAllListeners: jest.Mock;
-  setMaxListeners: jest.Mock;
-  getMaxListeners: jest.Mock;
-  addListener: jest.Mock;
-  prependListener: jest.Mock;
-  prependOnceListener: jest.Mock;
-  listeners: jest.Mock;
-  rawListeners: jest.Mock;
-  listenerCount: jest.Mock;
-  eventNames: jest.Mock;
+  on: Mock;
+  once: Mock;
+  emit: Mock;
+  off: Mock;
+  removeListener: Mock;
+  removeAllListeners: Mock;
+  setMaxListeners: Mock;
+  getMaxListeners: Mock;
+  addListener: Mock;
+  prependListener: Mock;
+  prependOnceListener: Mock;
+  listeners: Mock;
+  rawListeners: Mock;
+  listenerCount: Mock;
+  eventNames: Mock;
 } {
   return {
     // Core EventEmitter methods

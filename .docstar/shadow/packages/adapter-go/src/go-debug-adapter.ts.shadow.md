@@ -1,62 +1,63 @@
 # packages/adapter-go/src/go-debug-adapter.ts
-@source-hash: b5757af4ed3b775d
-@generated: 2026-02-09T18:14:36Z
+@source-hash: 1fefc1d4c0c4d55b
+@generated: 2026-02-10T01:19:08Z
 
-## Purpose
-Go Debug Adapter implementation using Delve DAP (Debug Adapter Protocol) for debugging Go programs through the VS Code Debug Protocol interface.
+**Purpose**: Go debugging adapter that provides Go-specific debug functionality using Delve (dlv) with native DAP support via `dlv dap` command.
 
-## Architecture
-- **Primary Class**: `GoDebugAdapter` (L69-653) - Main adapter implementing `IDebugAdapter` interface
-- **Configuration Interface**: `GoLaunchConfig` (L50-64) - Go-specific debug launch configuration
-- **Caching Interface**: `GoPathCacheEntry` (L41-45) - Cached executable paths with timestamps
+**Core Architecture**:
+- Extends EventEmitter and implements IDebugAdapter interface (L69-70)
+- Uses Delve's native DAP protocol instead of custom protocol translation
+- Manages state transitions between UNINITIALIZED → INITIALIZING → READY → CONNECTED → DEBUGGING → DISCONNECTED
+- Implements comprehensive caching for executable paths (60-second TTL)
 
-## Key Dependencies
-- `@vscode/debugprotocol` - Debug Adapter Protocol definitions
-- `@debugmcp/shared` - Core adapter interfaces and types
-- `./utils/go-utils.js` - Go/Delve utility functions (findDelveExecutable, getGoVersion, etc.)
+**Key Classes & Interfaces**:
 
-## Core Functionality
+**GoPathCacheEntry** (L41-45): Cache structure for Go/Delve executable paths with version tracking
 
-### Environment Management
-- `validateEnvironment()` (L155-223) - Validates Go 1.18+ and Delve DAP support
-- `resolveExecutablePath()` (L244-264) - Resolves Delve executable with caching
-- `getRequiredDependencies()` (L225-240) - Returns Go and Delve dependency info
+**GoLaunchConfig** (L50-64): Go-specific launch configuration extending LanguageSpecificLaunchConfig
+- Supports debug modes: 'debug', 'test', 'exec', 'replay', 'core'
+- Go-specific options: buildFlags, backend, stackTraceDepth, goroutine filtering
+- Path substitution for source mapping
 
-### State Management
-- State tracking via `AdapterState` enum with transitions (L147-151)
-- Connection status management (`connected` flag, L403-419)
-- Current thread tracking (`currentThreadId`, L143-145)
+**GoDebugAdapter** (L69-650): Main adapter implementation
+- **State Management** (L132-151): Tracks adapter lifecycle with event emission
+- **Environment Validation** (L155-223): Validates Go 1.18+ and Delve DAP support
+- **Executable Resolution** (L244-272): Resolves Delve (not Go) executable with caching
+- **DAP Protocol Handling** (L349-398): Maps DAP events to adapter state, delegates requests to DAP client
+- **Connection Management** (L401-416): Simple connected state tracking
+- **Feature Support** (L485-589): Comprehensive Go debugging capabilities
 
-### Configuration Handling
-- `transformLaunchConfig()` (L307-336) - Transforms generic config to Go-specific
-- `buildAdapterCommand()` (L276-295) - Builds `dlv dap` command with host/port
-- Default Go debugging settings (stack depth: 50, hide system goroutines, etc.)
+**Critical Methods**:
+- `initialize()` (L92-120): Validates environment and transitions to READY state
+- `validateEnvironment()` (L155-223): Checks Go 1.18+, Delve installation, and DAP support
+- `resolveExecutablePath()` (L244-264): Returns Delve path (not Go), implements caching
+- `buildAdapterCommand()` (L276-295): Constructs `dlv dap --listen=host:port` command
+- `transformLaunchConfig()` (L307-338): Converts generic config to Go-specific with defaults
+- `handleDapEvent()` (L356-394): Maps DAP events to state transitions and thread tracking
 
-### DAP Protocol Integration
-- `handleDapEvent()` (L356-394) - Maps DAP events to adapter state changes
-- Event forwarding for stopped/continued/terminated/output events
-- State transitions based on debug events
+**Dependencies**:
+- @vscode/debugprotocol for DAP types
+- @debugmcp/shared for adapter interfaces and types
+- ./utils/go-utils.js for Go/Delve detection utilities
 
-### Feature Support
-- `supportsFeature()` (L488-503) - Declares supported debug features
-- `getCapabilities()` (L537-592) - Comprehensive DAP capabilities declaration
-- Supports conditional breakpoints, function breakpoints, variable evaluation, log points
+**Key Design Patterns**:
+- Caching pattern for executable path resolution with TTL expiration
+- Event-driven state management with EventEmitter
+- Template method pattern for adapter lifecycle
+- Delegation pattern for DAP protocol handling
 
-### Error Handling
-- `translateErrorMessage()` (L460-484) - Go-specific error message translation
-- `getInstallationInstructions()` (L423-445) - Detailed setup instructions
-- Environment validation with recoverable/non-recoverable error classification
+**Configuration Defaults**:
+- stopOnEntry: false (prevents Delve "unknown goroutine" issues)
+- stackTraceDepth: 50
+- hideSystemGoroutines: true
+- Default mode: 'debug'
 
-## Caching Strategy
-- Path caching with 60-second timeout (`cacheTimeout`, L79)
-- Separate caches for Go (`goPathCache`) and Delve (`delvePathCache`) executables
-- Version caching within path cache entries
+**Error Handling**:
+- Translates common Go/Delve errors to user-friendly messages
+- Provides installation instructions for missing dependencies
+- Recoverable vs non-recoverable error classification
 
-## Debug Modes
-Supports Go debug modes: `debug`, `test`, `exec`, `replay`, `core` via `mode` configuration property.
-
-## Key Architectural Decisions
-1. Uses Delve's native DAP support (`dlv dap`) rather than custom protocol translation
-2. Implements comprehensive caching to avoid repeated executable lookups
-3. Separates Go and Delve path resolution for flexibility
-4. Provides extensive capability declarations for rich debugging features
+**Platform Considerations**:
+- Windows executable name handling (.exe suffix)
+- Cross-platform path resolution via getGoSearchPaths()
+- Environment variable passthrough to child processes

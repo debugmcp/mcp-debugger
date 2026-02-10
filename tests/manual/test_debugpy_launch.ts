@@ -6,7 +6,7 @@ import * as fs from 'fs-extra'; // For ensuring log directory
 async function testLaunch() {
   console.log('Starting debugpy.adapter launch test...');
 
-  const pythonPath = 'C:\\Python313\\python.exe'; // Use the confirmed Python path
+  const pythonPath = 'C:\\Python313\\python.exe'; // Hardcoded Windows path - update for your environment
   const adapterHost = '127.0.0.1';
   const adapterPort = 5678; // Fixed port for this test
   const sessionIdForLog = 'test-session'; // Dummy session ID for log path
@@ -18,7 +18,6 @@ async function testLaunch() {
     console.log(`Adapter log directory ensured: ${adapterLogPathDefault}`);
   } catch (dirError) {
     console.error(`Error ensuring log directory ${adapterLogPathDefault}:`, dirError);
-    // Decide if you want to proceed without a log dir or throw
   }
   
   const adapterArgs = [

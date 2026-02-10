@@ -1,23 +1,37 @@
 # packages/shared/vitest.config.ts
 @source-hash: a85c5636cfedc300
-@generated: 2026-02-09T18:14:55Z
+@generated: 2026-02-10T00:41:42Z
 
 ## Purpose
-Configuration file for Vitest test runner in the shared package. Defines test environment settings, coverage reporting, and module resolution for TypeScript testing.
+Test configuration file for Vitest testing framework in the shared package. Configures test environment, coverage reporting, and module resolution settings.
 
-## Key Configuration (L4-26)
-- **Test Environment**: Node.js environment with global test functions enabled (L6-7)
-- **Coverage Setup**: Istanbul provider with multi-format reporting - text, JSON, and HTML outputs (L8-18)
-- **Module Resolution**: TypeScript/JavaScript support with `@` alias pointing to `./src` directory (L20-25)
+## Configuration Structure
+- **Main export** (L4-26): Default Vitest configuration object using `defineConfig`
+- **Test settings** (L5-19): Core test environment and coverage configuration
+- **Module resolution** (L20-25): Path aliases and file extension handling
+
+## Key Configuration Sections
+
+### Test Environment (L5-19)
+- **globals**: Enables global test functions (describe, it, expect) without imports
+- **environment**: Set to 'node' for server-side testing context
+- **coverage** (L8-18): Istanbul-based code coverage with multiple output formats
+
+### Coverage Settings (L8-18)
+- **provider**: Uses Istanbul for coverage analysis
+- **reporter**: Outputs text, JSON, and HTML coverage reports
+- **exclude** (L11-17): Excludes common non-source directories and test files from coverage
+
+### Module Resolution (L20-25)
+- **extensions**: Supports TypeScript, JavaScript, and JSON imports
+- **alias** (L22-24): Maps '@' to './src' directory for cleaner imports
 
 ## Dependencies
-- `vitest/config`: Core Vitest configuration utilities (L1)
-- `path`: Node.js path module for directory resolution (L2)
-
-## Coverage Exclusions (L11-17)
-Excludes common non-testable files: node_modules, dist directory, TypeScript declarations, and test files themselves from coverage reports.
+- `vitest/config`: Core Vitest configuration utilities
+- `path`: Node.js path manipulation for alias resolution
 
 ## Architectural Notes
-- Uses ES module syntax with default export
-- Provides standard TypeScript project setup with source aliasing
-- Configured for monorepo shared package testing with comprehensive coverage reporting
+- Standard monorepo shared package test configuration
+- Istanbul coverage provider chosen over c8 for compatibility
+- Alias setup suggests src-based project structure
+- Excludes test files from coverage to focus on source code metrics

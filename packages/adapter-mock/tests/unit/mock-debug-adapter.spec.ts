@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DebugFeature, AdapterState, AdapterErrorCode } from '@debugmcp/shared';
 import { MockDebugAdapter, MockErrorScenario } from '../../src/mock-debug-adapter.js';
 import type { AdapterDependencies } from '@debugmcp/shared';

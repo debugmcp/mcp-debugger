@@ -1,22 +1,25 @@
 # examples/debugging/test-sse-fix.js
 @source-hash: a69826185c4e17f3
-@generated: 2026-02-09T18:14:46Z
+@generated: 2026-02-10T00:41:34Z
 
-## Purpose
-Simple debugging test script designed for setting breakpoints and testing debugging workflows. Part of SSE (Server-Sent Events) debugging examples.
+## Primary Purpose
+Simple debugging test script designed for setting breakpoints and testing basic arithmetic operations. Serves as a minimal example for debugging workflows.
 
 ## Key Functions
-- **testFunction()** (L2-8): Basic arithmetic function that adds two hardcoded values (10 + 20), with an intentional breakpoint location at line 5. Returns the sum and logs intermediate result.
+- **testFunction()** (L2-8): Core test function that performs basic arithmetic (10 + 20) and logs results. Contains explicit breakpoint instruction at line 5 for debugging purposes.
 
 ## Execution Flow
-- Function invocation (L11): Calls testFunction() and stores result
-- Output logging (L12): Displays final result to console
+- Function definition and immediate execution pattern (L2-8, L11)
+- Dual console output: internal function logging (L6) and external result verification (L12)
+- Return value propagation from function to caller (L7, L11)
 
-## Dependencies
-- Native JavaScript console API for logging
+## Architecture Notes
+- No dependencies or imports - standalone script
+- Synchronous execution model
+- Hard-coded test values for predictable debugging behavior
+- Comment-guided breakpoint placement for debugging tools
 
-## Architectural Notes
-- Minimal test case structure optimized for debugging tools
-- Hardcoded values ensure predictable execution paths
-- Strategic breakpoint comment (L5) indicates intended debugging workflow
-- No error handling or complex logic - designed for clean debugging experience
+## Key Variables
+- Local constants `x`, `y` (L3-4): Test operands
+- `result` (L5): Computation result and return value
+- `output` (L11): Function return value capture

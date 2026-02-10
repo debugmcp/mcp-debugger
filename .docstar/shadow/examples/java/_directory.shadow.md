@@ -1,47 +1,61 @@
 # examples/java/
-@generated: 2026-02-09T18:16:02Z
+@generated: 2026-02-10T01:19:36Z
 
-## Java Examples Directory
+## Purpose
+Educational Java examples directory containing sample programs designed for debugging practice and learning Java development fundamentals. Provides concrete, executable code for testing debugger attachment, breakpoint functionality, and basic Java programming patterns.
 
-**Overall Purpose**: Educational code examples demonstrating Java debugging scenarios and debugger attachment workflows. This directory provides practical test programs for learning and validating debugging capabilities in Java development environments.
-
-**Key Components**:
+## Key Components
 
 ### AttachTestProgram.java
-- **Purpose**: Long-running test process designed for debugger attachment demonstrations
-- **Behavior**: Infinite counter loop with predictable 1-second intervals
-- **Features**: Clear breakpoint targets, observable state changes, graceful interruption handling
-- **Use Case**: IDE debugging tutorials, attach-to-process workflow training
+**Role**: Debugger attachment target and breakpoint testing platform
+- Infinite loop with predictable 1-second intervals
+- Clear console output for execution tracking
+- Designated breakpoint locations at counter >= 5
+- Graceful interruption handling for clean termination
 
 ### TestJavaDebug.java
-- **Purpose**: Comprehensive debugging practice script with multiple algorithmic scenarios
-- **Operations**: Factorial computation, array processing, data transformation
-- **Features**: Static utility methods, predictable execution flow, formatted output
-- **Use Case**: Step-through debugging exercises, breakpoint placement practice
+**Role**: Mathematical and array processing utilities for debugging practice
+- Static utility methods demonstrating common programming patterns
+- Recursive algorithms (factorial computation)
+- Array operations (summation, transformation)
+- Progressive complexity from basic arithmetic to data processing
 
-**Public API Surface**:
-- `AttachTestProgram.main(String[] args)`: Entry point for attachment testing
-- `TestJavaDebug.main(String[] args)`: Entry point for debugging exercises
-- `TestJavaDebug.factorial(int n)`: Recursive factorial computation
-- `TestJavaDebug.sumArray(int[] numbers)`: Array summation utility
-- `TestJavaDebug.processData(int[] data)`: Array transformation utility
+## Public API Surface
 
-**Internal Organization**:
-Both programs follow simple, linear execution patterns optimized for debugging visibility:
-- Clear method boundaries for step-over/step-into practice
-- Predictable timing and state changes
-- Observable intermediate results through console output
-- Strategic locations for breakpoint placement
+### AttachTestProgram Entry Points
+- **main(String[] args)**: Primary entry point for debugger attachment testing
+- Console output: "Program started, ready for debugger attachment"
+- Execution loop with visible state transitions
 
-**Data Flow**:
-- **AttachTestProgram**: Counter state → Console output → Sleep → Repeat
-- **TestJavaDebug**: Input data → Method processing → Formatted output → Final computation
+### TestJavaDebug Entry Points
+- **main(String[] args)**: Demonstration driver showcasing all utility methods
+- **factorial(int n)**: Recursive factorial computation
+- **sumArray(int[] numbers)**: Array summation using enhanced for-loop
+- **processData(int[] data)**: Array transformation (doubling operation)
 
-**Important Patterns**:
-- **Zero external dependencies**: Both programs use only standard Java runtime
-- **Static method design**: No object instantiation required, simplified debugging
-- **Explicit timing controls**: Predictable execution speed for debugging practice
-- **Clear demarcation points**: Comments and structure optimized for breakpoint placement
-- **Error-free execution**: Designed to complete successfully under normal conditions
+## Internal Organization
 
-**Usage Context**: Intended for debugging education, IDE testing, and development environment validation. Programs can be run independently or used together to demonstrate different debugging scenarios (attach vs. launch debugging).
+### Data Flow Patterns
+1. **AttachTestProgram**: Linear execution with timing-controlled loops
+   - Initialization → Counter loop → Sleep mechanism → Debug targets
+2. **TestJavaDebug**: Sequential method demonstrations
+   - Basic arithmetic → Recursive computation → Array processing → Result combination
+
+### Common Design Principles
+- **Debugging-friendly**: Both programs prioritize clear state visibility and predictable execution
+- **Educational focus**: Simple, understandable implementations over optimization
+- **Self-contained**: No external dependencies beyond Java standard library
+- **Console-driven**: Extensive output for tracking program state during debugging
+
+## Integration Patterns
+- **Standalone execution**: Each program runs independently as debugging targets
+- **Complementary functionality**: AttachTestProgram for debugger mechanics, TestJavaDebug for algorithm debugging
+- **Progressive complexity**: From simple loops to mathematical computations and data structures
+- **Consistent timing**: Predictable execution patterns facilitate debugging practice
+
+## Development Conventions
+- Static method design for utility functions
+- Clear variable naming and console output messages
+- Explicit commenting for debugging target locations
+- Standard Java exception handling patterns
+- No production-level error handling or input validation (intentionally simplified for educational use)

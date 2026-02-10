@@ -194,4 +194,3 @@ export class GenericAdapterManager {
   }
 }
 
-// DebugpyAdapterManager removed - functionality moved to PythonAdapterPolicy

@@ -1,52 +1,40 @@
 # tests/test-utils/helpers/test-setup.ts
 @source-hash: d1b6360bcc3cf79f
-@generated: 2026-02-09T18:14:40Z
+@generated: 2026-02-10T00:41:30Z
 
-## Purpose
-Test setup utilities module that provides factory functions for creating test instances of SessionManager and related components with mock dependencies. Enables isolated unit testing by standardizing mock creation patterns.
+## Test Setup Utilities
 
-## Key Functions
+This module provides factory functions for creating test instances with mock dependencies, specifically focused on SessionManager and related components. Serves as the primary entry point for setting up isolated test environments.
 
-### `createTestSessionManager` (L30-66)
-Primary factory function that creates a SessionManager instance with mocked dependencies:
-- **Parameters**: `overrides` (partial dependency overrides), `config` (SessionManager config)
-- **Returns**: Object containing sessionManager instance, dependencies, and typed factory references
-- **Pattern**: Creates base dependencies via `createTestDependencies()`, applies overrides, constructs SessionManager
-- **Special handling**: Auto-creates mock environment if not provided (L42-46)
+### Core Factory Functions
 
-### `createTestSessionStore` (L72-80)
-Simple factory for SessionStore instances:
-- Creates MockSessionStoreFactory and returns both store and factory
-- No configuration options - returns basic test instance
+**createTestSessionManager** (L30-66) - Main factory function that creates a SessionManager instance with configurable mock dependencies. Returns the manager, dependencies object, and typed mock factories. Automatically creates mock environment if not provided (L42-46).
 
-### `createMockProxyManager` (L87-114)
-Configurable ProxyManager mock creation:
-- **Parameters**: Configuration object with sessionId, isRunning, currentThreadId
-- **Behavior**: Can simulate started state (L96-106) and stopped state with thread ID (L108-111)
-- **Usage pattern**: Preconfigure mock state before injection into tests
+**createTestSessionStore** (L72-80) - Creates a SessionStore instance via MockSessionStoreFactory. Simple factory without configuration options.
 
-### `createTestSessionManagerWithProxyManager` (L120-143)
-Specialized factory for testing ProxyManager interactions:
-- Accepts a specific MockProxyManager instance
-- Creates custom MockProxyManagerFactory that returns the provided mock
-- Useful for testing specific ProxyManager behavior scenarios
+**createTestSessionManagerWithProxyManager** (L120-143) - Specialized factory that injects a specific MockProxyManager instance into a SessionManager. Overrides the factory's create method to return the provided mock (L132).
 
-### Helper Functions
-- `createMockFileSystemWithDefaults` (L148-159): Pre-configured FileSystem mock with common behaviors
-- `createMockNetworkManagerWithDefaults` (L164-172): NetworkManager mock with port allocation simulation
-- `waitForEvent` (L177-192): Promise-based event waiting utility with timeout
-- `simulateProxyManagerLifecycle` (L197-212): Automated ProxyManager event sequence simulation
+### Mock Creation Utilities
 
-## Dependencies
-- **External**: vitest mocking framework
-- **Internal**: SessionManager system, test-dependencies module, factory classes
-- **Mock types**: MockProxyManagerFactory, MockProxyManager, MockSessionStoreFactory
+**createMockProxyManager** (L87-114) - Creates a preconfigured MockProxyManager with optional state setup. Can simulate running state via start() call (L96-106) and set thread ID via simulateStopped() (L108-111).
 
-## Architecture Patterns
-- **Factory pattern**: Consistent `createTest*` naming convention
-- **Dependency injection**: All functions accept override parameters
-- **Mock composition**: Base dependencies + selective overrides
-- **Type safety**: Returns strongly typed mock factory references
+**createMockFileSystemWithDefaults** (L148-159) - Creates mock FileSystem with common test behaviors pre-configured (pathExists=true, file operations mocked).
 
-## Test Lifecycle Support
-The module supports complete test lifecycle management from setup through event simulation, with particular focus on async ProxyManager state transitions and debugging scenarios.
+**createMockNetworkManagerWithDefaults** (L164-172) - Creates mock NetworkManager with incrementing port allocation behavior starting at 5678.
+
+### Test Utilities
+
+**waitForEvent** (L177-192) - Promise-based event waiter with timeout support. Generic utility for async event testing.
+
+**simulateProxyManagerLifecycle** (L197-212) - Orchestrates typical ProxyManager initialization sequence with configurable stop-on-entry behavior. Uses setTimeout for async simulation.
+
+### Key Dependencies
+
+- Imports from `test-dependencies.js` for base mock creation
+- Uses Vitest mocking (`vi.fn()`) throughout
+- Integrates with SessionManager, MockProxyManager, and factory classes
+- Environment mocking defaults to process.env wrapper (L42-46)
+
+### Architecture Pattern
+
+Follows dependency injection pattern where overrides merge with defaults. All factory functions return both the instance and its dependencies for test introspection and further mocking.

@@ -398,27 +398,6 @@ print(f"Fibonacci(5) = {result}")
         throw error;
       }
 
-      // Since we are at module level, 'n' won't be in locals.
-      // Check for 'result' or 'fibonacci' function object if needed, or skip variable check here.
-      // For now, let's remove the variable check as it's not the primary goal.
-      // const scopesCall = await mcpSdkClient.callTool({ name: 'get_scopes', arguments: { sessionId: debugSessionId, frameId: frameId } });
-      // const scopesResponse = parseSdkToolResult(scopesCall);
-      // expect(scopesResponse.success).toBe(true);
-      // const localsScope = scopesResponse.scopes.find((s: any) => s.name === 'Locals' || s.name === 'Local'); 
-      // expect(localsScope).toBeDefined();
-      // const variablesReference = localsScope.variablesReference;
-
-      // const variablesCall = await mcpSdkClient.callTool({
-      //   name: 'get_variables',
-      //   arguments: { sessionId: debugSessionId, scope: variablesReference }
-      // });
-      // const variablesResponse = parseSdkToolResult(variablesCall);
-      // expect(variablesResponse.variables).toEqual(
-      //   expect.arrayContaining([
-      //     expect.objectContaining({ name: 'n' }) // This will fail if at module level
-      //   ])
-      // );
-      
       // If paused at line 4, step over it.
       const stepCall = await mcpSdkClient.callTool({ name: 'step_over', arguments: { sessionId: debugSessionId } });
       const stepResponse = parseSdkToolResult(stepCall);

@@ -1,0 +1,23 @@
+{
+  "source": "packages/adapter-java/tests/unit/java-utils.test.ts",
+  "source_hash": "86bbe63a3df90ba6",
+  "generated": "2026-02-10T01:19:01Z",
+  "findings": [
+    {
+      "category": "stale_comment",
+      "line_start": 151,
+      "line_end": 152,
+      "severity": "warning",
+      "description": "Comment explains why inline mocking doesn't work but the test doesn't actually attempt inline mocking - it just checks for any valid result type",
+      "suggestion": "Update comment to better reflect the actual test behavior or remove if the explanation is no longer relevant"
+    },
+    {
+      "category": "stale_comment",
+      "line_start": 113,
+      "line_end": 114,
+      "severity": "warning",
+      "description": "Comment mentions 'fake timers' but the test doesn't appear to use fake timers, and the skip reason may be outdated",
+      "suggestion": "Update comment to accurately describe the current reason for skipping this test"
+    }
+  ]
+}

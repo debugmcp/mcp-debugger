@@ -1,54 +1,74 @@
 # scripts/docker-build-if-needed.js
 @source-hash: 0e57bf943f16f8db
-@generated: 2026-02-09T18:15:15Z
+@generated: 2026-02-10T00:42:02Z
 
-## Primary Purpose
-Intelligent Docker image build script that conditionally builds the `mcp-debugger:local` image only when source files are newer than the existing image, optimizing CI/CD performance by avoiding unnecessary rebuilds.
+## scripts/docker-build-if-needed.js
 
-## Key Configuration & Constants (L8-12)
-- `IMAGE_NAME`: Docker image name from env or defaults to 'mcp-debugger:local'
-- `FORCE_REBUILD`: Environment flag to force rebuild regardless of file timestamps
-- `PACK_LOCK_PATH`: Lock file path for NPX packaging operations
+**Primary Purpose**: Intelligent Docker image builder that conditionally builds Docker images only when needed, with robust handling of NPM package operations and comprehensive file change detection.
+
+### Key Configuration (L8-12)
+- `IMAGE_NAME`: Docker image name from env or 'mcp-debugger:local' default
+- `FORCE_REBUILD`: Environment flag to force rebuilds
+- `PACK_LOCK_PATH`: Lock file path for NPM pack operations
 - `PACKAGE_BACKUP_PATH`: Backup location for package.json during pack operations
-- `PACK_LOCK_MAX_WAIT_MS`: 5-minute timeout for pack lock operations
+- `PACK_LOCK_MAX_WAIT_MS`: 5-minute timeout for pack lock waiting
 
-## Core Functions
+### Core Functions
 
-### `waitForPackLockIfNeeded()` (L16-31)
-Waits for NPX packaging operations to complete by monitoring lock file existence. Implements timeout protection to prevent indefinite blocking.
+**waitForPackLockIfNeeded() (L16-31)**
+- Monitors and waits for NPM pack operations to complete
+- Implements timeout mechanism with 1-second polling intervals
+- Prevents Docker build conflicts during package operations
 
-### `restorePackageManifestIfNeeded()` (L33-42)  
-Recovers from interrupted NPX pack operations by restoring package.json from backup using external script.
+**restorePackageManifestIfNeeded() (L33-42)**
+- Recovers from interrupted NPM pack operations
+- Calls external `scripts/prepare-pack.js restore` script
+- Handles restoration failures gracefully with warnings
 
-### `getLatestModifiedTime()` (L44-61)
-Recursive filesystem walker that finds the most recent modification time across directory trees. Skips hidden directories and node_modules for performance.
+**getLatestModifiedTime() (L44-61)**
+- Recursive directory traversal for modification time detection
+- Excludes hidden directories and node_modules
+- Returns newest modification time across all files in directory tree
 
-### `main()` (L63-180)
-Primary orchestration function implementing the build decision logic:
-1. **Environment checks**: Validates Docker availability and respects skip flags
-2. **Lock management**: Waits for packaging locks and restores manifests
-3. **Image inspection**: Determines if current image exists and its build timestamp
-4. **File monitoring**: Tracks modification times of critical files and source directories
-5. **Build decision**: Compares image timestamp against newest file modifications
-6. **Build execution**: Removes old image, builds new one with cache-busting, and verifies success
+**main() (L63-180)**
+- Orchestrates entire build decision process
+- Docker availability verification (docker + buildx)
+- Image freshness comparison using timestamps
+- Conditional build execution with proper cleanup
 
-## File Tracking Strategy (L95-134)
-Monitors specific configuration files (Dockerfile, package.json, tsconfig.json, etc.) and recursively scans source directories (src/, scripts/, packages/) to determine if rebuild is needed.
+### Build Decision Logic (L136-148)
+1. Force rebuild if `FORCE_REBUILD` is true
+2. Build if image doesn't exist
+3. Build if image is older than newest source file
+4. Skip if image is current
 
-## Build Process Features
-- **Cache busting**: Uses timestamp in build args to ensure fresh builds
-- **BuildKit support**: Enables Docker BuildKit for improved performance  
-- **Image verification**: Post-build inspection to confirm successful creation
-- **Error handling**: Comprehensive error recovery with process exit codes
-- **Logging**: Detailed console output with timestamps and build reasoning
+### File Change Detection (L96-134)
+Monitors critical files:
+- Docker configuration: `Dockerfile`
+- Dependencies: `package.json`, `package-lock.json`
+- Build config: `tsconfig.json`, `vitest.workspace.ts`
+- Scripts: `scripts/bundle.js`
+- Shared packages: `packages/shared/package.json`
 
-## Dependencies
-- Node.js child_process for Docker command execution
-- File system operations for timestamp checking and lock file monitoring
-- Path utilities for cross-platform file path handling
+Scans directories recursively:
+- `src/` - source code
+- `scripts/` - build scripts  
+- `packages/` - package modules
 
-## Critical Behaviors
-- Respects `SKIP_DOCKER_TESTS` environment variable to bypass all operations
-- Implements defensive programming with try-catch blocks around Docker operations
-- Uses inheritance of stdio for build output visibility
-- Maintains atomic operations through lock file coordination
+### Build Process (L149-179)
+1. Remove existing image if present
+2. Execute docker build with cache-busting timestamp
+3. Enable BuildKit for enhanced performance
+4. Verify successful image creation post-build
+5. Exit with error code on any build failure
+
+### Environment Integration
+- Respects `SKIP_DOCKER_TESTS` to bypass entirely
+- Uses `DOCKER_BUILDKIT=1` for optimized builds
+- Supports configurable image naming via environment
+
+### Error Handling Strategy
+- Graceful degradation when Docker unavailable
+- Comprehensive try-catch blocks around critical operations
+- Process exit codes for CI/CD integration
+- Warning messages for non-fatal issues

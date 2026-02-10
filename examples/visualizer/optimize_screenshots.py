@@ -108,13 +108,5 @@ def verify_authenticity():
 
 
 if __name__ == "__main__":
-    # Check for PIL/Pillow
-    try:
-        from PIL import Image
-    except ImportError:
-        print("Error: Pillow is required for screenshot optimization")
-        print("Install with: pip install Pillow")
-        sys.exit(1)
-    
     verify_authenticity()
     sys.exit(optimize_screenshots())

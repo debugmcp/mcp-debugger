@@ -1,64 +1,60 @@
 # tests/unit/utils/
-@generated: 2026-02-09T18:16:14Z
+@generated: 2026-02-10T01:19:41Z
 
-## Overall Purpose
+## Purpose
+Unit test directory for utility modules, providing comprehensive test coverage for core system utilities including container path resolution, error handling, language configuration, file operations, logging, and file existence checking.
 
-The `tests/unit/utils` directory contains comprehensive unit tests for utility modules that provide core infrastructure services across the debug-mcp-server system. These utilities handle path resolution, error management, logging, language configuration, file operations, and line-based content reading with container environment awareness.
+## Key Test Modules
 
-## Key Components and Testing Coverage
+### Container & Path Management
+- **container-path-utils.spec.ts**: Tests container path resolution utilities with workspace root handling, path prefixing in container mode, and descriptive path formatting
+- **simple-file-checker.spec.ts / simple-file-checker.test.ts**: Tests file existence checking with environment-aware path resolution (two implementations testing same functionality)
 
-### Container and Path Management
-- **container-path-utils.spec.ts**: Tests container mode detection and workspace path resolution with MockEnvironment dependency injection
-- **simple-file-checker.spec.ts & simple-file-checker.test.ts**: Dual test coverage for file existence checking with container-aware path manipulation
+### Error & Message Handling  
+- **error-messages.test.ts**: Validates error message generation for timeout scenarios (DAP requests, proxy initialization, step operations) and error message extraction from various input types
+- **logger.test.ts**: Tests winston-based logger creation, transport configuration, container environment handling, and error boundary behavior
 
-### Error and Message Handling  
-- **error-messages.test.ts**: Validates timeout message formatting for DAP operations, debug proxy initialization, and step timeouts
-- **logger.test.ts**: Tests Winston logger configuration, transport setup, and environment-specific logging behavior
+### Configuration & Language Support
+- **language-config.test.ts**: Tests environment-based language disabling functionality, parsing comma-separated language lists from `DEBUG_MCP_DISABLE_LANGUAGES`
 
-### Configuration and Language Support
-- **language-config.test.ts**: Tests language filtering via environment variables with case-insensitive matching and Set-based storage
+### File Operations
+- **line-reader.spec.ts**: Comprehensive testing of file reading utilities including line context extraction, caching behavior, binary detection, size limits, and multi-line range operations
 
-### File Content Processing
-- **line-reader.spec.ts**: Comprehensive testing of line context extraction, multi-line reading, caching, and binary file detection
-
-## Testing Patterns and Public API
-
-### Common Test Infrastructure
-All test files follow consistent patterns:
-- Mock dependency injection for clean isolation
-- Environment variable preservation/restoration 
-- Comprehensive error condition testing
-- Both positive and negative case validation
-
-### Key API Entry Points Tested
-- **Path Resolution**: `isContainerMode()`, `getWorkspaceRoot()`, `resolvePathForRuntime()`, `getPathDescription()`
-- **Error Utilities**: `ErrorMessages` static methods, `getErrorMessage()` function
-- **Language Config**: `getDisabledLanguages()`, `isLanguageDisabled()`
-- **File Operations**: `LineReader` class, `createLineReader()`, `SimpleFileChecker` class, `createSimpleFileChecker()`
-- **Logging**: Logger initialization and transport configuration
-
-### Container Environment Integration
-Multiple test suites validate container-aware behavior:
-- Path prefixing with `/workspace/` in container mode
-- Environment variable detection (`MCP_CONTAINER`, `MCP_WORKSPACE_ROOT`)
-- Container-specific logging paths (`/app/logs/debug-mcp-server.log`)
-
-## Internal Organization
+## Testing Patterns & Architecture
 
 ### Mock Strategy
-- **Filesystem abstraction**: IFileSystem interface mocking for testable file operations
-- **Environment abstraction**: IEnvironment interface for consistent environment variable handling
-- **Winston mocking**: Complete logger framework mocking with transport verification
+- **Comprehensive Interface Mocking**: All tests use complete interface implementations (IFileSystem, IEnvironment, Logger) for isolated testing
+- **Environment Manipulation**: Systematic testing of container vs host mode behaviors through environment variable control
+- **External Dependency Isolation**: Complete mocking of winston, filesystem operations, and path utilities
 
-### Data Flow Validation
-Tests verify proper data flow through:
-1. Environment detection → Path resolution → File operations
-2. Error conditions → Message formatting → User-friendly output  
-3. Configuration parsing → Language filtering → Runtime behavior
-4. File content → Line extraction → Context generation with caching
+### Error Boundary Testing
+- **Graceful Degradation**: Tests validate proper error handling across all utilities
+- **Error Message Consistency**: Standardized error message formatting and propagation
+- **Edge Case Coverage**: Boundary conditions, missing files, invalid inputs, and system failures
 
-### Performance and Reliability Testing
-- **Caching verification**: LineReader cache behavior and statistics
-- **Error resilience**: Graceful degradation when file operations fail
-- **Cross-platform support**: Windows CRLF line ending compatibility
-- **Resource management**: File size limits and binary file detection
+### Environment Awareness
+- **Container Mode Detection**: Tests validate `MCP_CONTAINER` environment variable handling
+- **Path Resolution**: Container workspace root prefixing vs direct path usage
+- **Configuration Parsing**: Environment-based feature toggling and language disabling
+
+## Public API Testing Coverage
+
+### Core Utilities Under Test
+- **Container Path Utilities**: `isContainerMode()`, `getWorkspaceRoot()`, `resolvePathForRuntime()`, `getPathDescription()`
+- **Error Messaging**: `ErrorMessages` static methods, `getErrorMessage()` function
+- **Language Configuration**: `getDisabledLanguages()`, `isLanguageDisabled()`
+- **Line Reading**: `LineReader` class with caching and context extraction
+- **Logging**: `createLogger()`, `getLogger()` factory functions
+- **File Checking**: `SimpleFileChecker` class and factory function
+
+### Integration Points
+- Tests validate proper integration between path utilities and file checkers
+- Error handling consistency across different utility modules
+- Environment-based configuration affecting multiple subsystems
+- Caching behavior and performance optimization validation
+
+## Critical System Behaviors Validated
+- **Container Environment Adaptation**: Path prefixing, workspace root resolution, log file locations
+- **Error Resilience**: Graceful handling of missing files, invalid configurations, system errors
+- **Performance Features**: File content caching, size limit enforcement, binary detection
+- **User Experience**: Descriptive error messages, case-insensitive language matching, robust input parsing

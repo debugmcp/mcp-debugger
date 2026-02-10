@@ -1,46 +1,50 @@
 # src/proxy/dap-proxy-dependencies.ts
-@source-hash: 3f59d69171b3fae9
-@generated: 2026-02-09T18:15:04Z
+@source-hash: d86010d2291b5308
+@generated: 2026-02-10T01:18:55Z
 
-## Primary Purpose
-Dependency injection factory for DAP (Debug Adapter Protocol) proxy worker processes. Provides production implementations of file system operations, process spawning, logging, DAP client creation, and inter-process communication.
+## DAP Proxy Dependencies Factory
 
-## Key Exports
+Production dependency injection factory for the DAP (Debug Adapter Protocol) Proxy Worker. Provides concrete implementations of external dependencies to enable worker process isolation and testability.
 
-### createProductionDependencies() (L19-55)
-Factory function that returns a `DapProxyDependencies` object containing all runtime dependencies:
-- **loggerFactory**: Async factory creating session-specific loggers with file output to `proxy-{sessionId}.log` (L21-27)
-- **fileSystem**: Wrapper around fs-extra for directory operations (L32-35)
-- **processSpawner**: Direct binding to Node.js `spawn` function (L37-39) 
-- **dapClientFactory**: Creates MinimalDapClient instances with type coercion workaround (L41-43)
-- **messageSender**: IPC abstraction using `process.send()` or stdout fallback (L45-53)
+### Key Functions
 
-### createConsoleLogger() (L60-67)
-Simple logger implementation routing all levels to `console.error` with prefixed labels. Used for pre-initialization error reporting.
+**createProductionDependencies() (L19-55)**
+- Primary factory function returning DapProxyDependencies object with production implementations
+- Creates logger factory for session-specific file logging with delayed initialization (L21-27)
+- Provides fs-extra wrappers for file system operations (L32-35)
+- Exposes child_process.spawn for process spawning (L37-39)
+- Creates MinimalDapClient factory with type compatibility workaround (L41-43)
+- Implements message sender supporting both IPC and stdout fallback (L45-53)
 
-### setupGlobalErrorHandlers() (L72-109)
-Comprehensive process-level error handling setup:
-- **Uncaught exceptions**: Logs error, sends IPC message, triggers shutdown (L78-86)
-- **Unhandled rejections**: Similar handling for promise rejections (L88-96)
-- **SIGINT/SIGTERM**: Graceful shutdown on process signals (L98-108)
+**createConsoleLogger() (L60-67)**
+- Simple pre-initialization logger using console methods
+- All log levels route to console.log/console.error for early error handling
 
-## Dependencies
-- `child_process.spawn`: Process creation
-- `fs-extra`: Enhanced file system operations
-- `path`: Path manipulation utilities
-- `MinimalDapClient`: Local DAP client implementation
-- `createLogger`: Utility logger factory
-- Interface types from `dap-proxy-interfaces.js`
+**setupGlobalErrorHandlers() (L72-109)**
+- Registers process-level error handlers for worker process robustness
+- Handles uncaughtException and unhandledRejection with structured error messages (L78-96)
+- Implements graceful shutdown on SIGINT/SIGTERM signals (L98-108)
+- Sends error notifications via message sender before process termination
 
-## Architecture Notes
-- Uses dependency injection pattern for testability
-- Message sender abstracts IPC vs stdout communication
-- Type coercion used for DAP client due to interface compatibility issues
-- All logging routed through stderr to avoid stdout interference
-- Graceful shutdown pattern with cleanup callbacks
+### Dependencies
 
-## Critical Behaviors
-- Logger factory creates session-scoped log files in specified directory
-- Message sender falls back to stdout JSON when `process.send` unavailable
-- Global error handlers always exit process after cleanup
-- All console logging uses stderr to preserve stdout for data communication
+- `child_process.spawn` - Process spawning capability
+- `fs-extra` - Enhanced file system operations
+- `MinimalDapClient` - DAP client implementation
+- `createLogger` - Session-specific file logging
+- `DapProxyDependencies` interface - Dependency contract definition
+
+### Architecture Notes
+
+- Uses dependency injection pattern to enable testing and modularity
+- Worker process operates in isolated environment with structured communication
+- Dual message transport: IPC when available, stdout fallback for broader compatibility
+- Session-based logging with predictable file naming pattern
+- Type compatibility issue acknowledged with explicit any casting for DAP client
+
+### Critical Behavior
+
+- Process exits with code 1 on unhandled errors after cleanup
+- Graceful shutdown (code 0) on termination signals
+- Message sender automatically detects IPC vs stdout mode
+- Logger factory creates session-scoped loggers in specified directory

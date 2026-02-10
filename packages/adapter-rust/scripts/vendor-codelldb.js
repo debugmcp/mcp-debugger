@@ -5,7 +5,7 @@
  * Based on research: official VSIX structure from vadimcn.vscode-lldb
  * 
  * Environment variables:
- *   - CODELLDB_VERSION: Version to download (default: '1.11.0')
+ *   - CODELLDB_VERSION: Version to download (default: '1.11.8')
  *   - CI: Set to 'true' in CI environments
  *   - SKIP_ADAPTER_VENDOR: Set to 'true' to skip vendoring
  *   - CODELLDB_PLATFORMS: Comma-separated list of platforms (default: current platform or all in CI)

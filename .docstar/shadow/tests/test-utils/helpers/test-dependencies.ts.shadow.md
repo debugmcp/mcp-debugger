@@ -1,49 +1,42 @@
 # tests/test-utils/helpers/test-dependencies.ts
 @source-hash: c86d125ca505de13
-@generated: 2026-02-09T18:14:42Z
+@generated: 2026-02-10T00:41:33Z
 
-## Primary Purpose
-Test utilities file providing mock dependencies and test server creation for the DebugMCP test suite. Centralizes all test-only dependency injection patterns and provides both fake implementations and Vitest mock objects.
+## Purpose
+Test utility module providing factory functions and mock implementations for creating isolated test environments. Centralizes test dependency creation to avoid production code contamination.
 
-## Key Functions & Interfaces
+## Key Exports
 
-### Core Factory Functions
-- **`createTestServer(options)`** (L32-40): Creates DebugMcpServer configured for testing with 'error' log level default
-- **`createTestDependencies()`** (L66-95): Async factory returning complete Dependencies with fake implementations (imports from test/fake-process-launcher)
-- **`createMockDependencies()`** (L119-144): Sync factory returning Dependencies with vi.fn() mocks for all methods
-- **`createMockSessionManagerDependencies()`** (L101-112): Factory for SessionManager-specific dependency container
+### Factory Functions
+- `createTestServer(options)` (L32-40): Creates DebugMcpServer with test-safe configuration (defaults to 'error' log level)
+- `createTestDependencies()` (L66-95): Async factory returning complete dependency container with fake implementations from test modules
+- `createMockDependencies()` (L119-144): Synchronous factory returning dependencies with vi.fn() mocks for all methods
+- `createMockSessionManagerDependencies()` (L101-112): Specialized factory for SessionManager testing with all required dependencies
+- `createFullAdapterRegistry()` (L222-238): Creates populated adapter registry with Python and Mock adapters
 
-### Dependency Container Interface
-- **`Dependencies`** (L45-60): Complete application dependency interface covering core implementations, process launchers, and factories
+### Mock Creators (L148-215)
+Individual mock factories for each interface:
+- `createMockLogger()`, `createMockFileSystem()`, `createMockProcessManager()`, `createMockNetworkManager()`
+- `createMockProcessLauncher()`, `createMockProxyProcessLauncher()`, `createMockDebugTargetLauncher()`
+- `createMockEnvironment()`: Delegates to actual process.env
 
-### Mock Creation Helpers (L148-215)
-Individual mock creators for each interface type:
-- **`createMockLogger()`** (L148-155): ILogger with vi.fn() methods
-- **`createMockFileSystem()`** (L157-175): IFileSystem with comprehensive file operation mocks
-- **`createMockProcessManager()`** (L177-182): IProcessManager with spawn/exec mocks
-- **`createMockNetworkManager()`** (L184-189): INetworkManager with findFreePort defaulting to 5678
-- **`createMockProcessLauncher()`** (L191-195): IProcessLauncher mock
-- **`createMockProxyProcessLauncher()`** (L197-201): IProxyProcessLauncher mock
-- **`createMockDebugTargetLauncher()`** (L203-207): IDebugTargetLauncher mock
-- **`createMockEnvironment()`** (L209-215): IEnvironment mock delegating to process.env
+### Type Definition
+- `Dependencies` interface (L45-60): Complete dependency container type covering all core implementations, process launchers, and factories
 
-### Advanced Registry Factory
-- **`createFullAdapterRegistry()`** (L222-239): Async factory creating real adapter registry with Python and Mock adapters registered
+## Architecture Patterns
+- **Dependency Injection**: Provides complete dependency containers for isolated testing
+- **Factory Pattern**: Multiple factory functions for different testing scenarios (fake vs mock implementations)
+- **Interface Compliance**: All mocks implement production interfaces ensuring type safety
+- **Dynamic Imports**: Uses async imports to avoid circular dependencies and enable lazy loading
 
 ## Key Dependencies
-- Vitest framework (vi) for mocking
-- External dependency interfaces from `src/interfaces/`
-- Process interfaces from `src/interfaces/process-interfaces.js`
-- Mock implementations from local mocks and factories
-- Real adapter implementations (@debugmcp/adapter-python, @debugmcp/adapter-mock)
+- Vitest (`vi`) for mock functions
+- Production interfaces from `src/interfaces/` for type compliance
+- Fake implementations from `tests/implementations/test/`
+- Mock factories from `src/factories/`
+- Adapter packages for full registry testing
 
-## Architectural Patterns
-- **Dependency Injection**: Provides multiple strategies (fakes vs mocks) for test isolation
-- **Factory Pattern**: Consistent creation functions for different testing scenarios
-- **Interface Segregation**: Separate mock creators for each interface type
-- **Dynamic Imports**: Uses async imports to avoid require() and manage optional dependencies
-
-## Critical Constraints
-- **Test-only usage**: Explicitly documented as DO NOT import in production (L2)
-- **Mock vs Fake distinction**: `createTestDependencies()` uses fake implementations, `createMockDependencies()` uses vi.fn() mocks
-- **Default test configuration**: Test server defaults to 'error' log level for noise reduction
+## Testing Strategy
+- **Fake vs Mock**: `createTestDependencies()` uses fake implementations, `createMockDependencies()` uses vi.fn() spies
+- **Isolation**: Each factory creates fresh instances preventing test pollution
+- **Completeness**: Covers all application dependencies ensuring comprehensive test coverage

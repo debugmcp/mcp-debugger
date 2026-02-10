@@ -199,7 +199,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       language,
       available: true,
       activeInstances: activeSet?.size || 0,
-      registeredAt: new Date(), // In a real implementation, track this
+      registeredAt: new Date(),
     };
   }
 
@@ -338,8 +338,6 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
    * Create dependencies for adapter creation
    */
   private async createDependencies(config: AdapterConfig): Promise<AdapterDependencies> {
-    // In a real implementation, these would be injected or created from a container
-    // For now, we'll import the implementations directly
     const { createProductionDependencies } = await import('../container/dependencies.js');
     const deps = createProductionDependencies({
       logLevel: 'debug',

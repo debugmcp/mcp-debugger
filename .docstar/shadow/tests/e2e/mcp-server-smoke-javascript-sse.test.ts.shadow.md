@@ -1,49 +1,56 @@
 # tests/e2e/mcp-server-smoke-javascript-sse.test.ts
 @source-hash: 9c223250b3965053
-@generated: 2026-02-09T18:15:13Z
+@generated: 2026-02-10T00:42:04Z
 
-## Purpose & Responsibility
-End-to-end test file validating JavaScript debugging functionality through SSE (Server-Sent Events) transport. Tests the critical console silencing fix for preventing IPC channel corruption in parent-child-grandchild debugging architecture.
+## Purpose
+End-to-end test for MCP server's JavaScript debugging capabilities via SSE (Server-Sent Events) transport. Critical test that validates a production issue where console output during SSE server operation corrupts IPC channels, causing JavaScript debugging to fail with empty stack traces.
 
-## Key Test Scenarios
-- **Main JavaScript Debug Test (L431-497)**: Validates complete JavaScript debugging workflow via SSE transport with stack traces and local variables
-- **Default Launch Args Test (L499-542)**: Tests debugging without custom launch arguments to ensure default behavior works
+## Core Issue & Fix (L1-25)
+Comprehensive comment block documents a critical production bug: console output during SSE mode corrupts IPC channels between parent-child-grandchild processes in JavaScript debugging architecture. The fix requires adding `hasSSE ||` to `shouldSilenceConsole` logic in `src/index.ts`. Without this fix, inherited stdio causes IPC corruption leading to ~35 second timeouts and empty stack traces.
 
-## Critical Components
+## Test Architecture
+- **Test Environment**: Jest/Vitest node environment with 60-second timeout (L38)
+- **Global State**: Manages `mcpSdkClient`, `sseServerProcess`, and `serverPort` (L40-43)
+- **Dependencies**: MCP SDK client/transport, child_process spawning, network utilities
 
-### Server Management Functions
-- **`findAvailablePort()` (L107-144)**: Finds available ports by attempting to bind, with retry logic for port conflicts
-- **`startSSEServer()` (L154-247)**: Spawns SSE server process with inherited stdio (matching production), includes retry logic and comprehensive error handling
-- **`afterEach()` cleanup (L47-102)**: Graceful shutdown with SIGTERM → SIGKILL fallback pattern
+## Key Functions
 
-### Debug Sequence Execution
-- **`executeJavaScriptDebugSequence()` (L260-429)**: Core debugging workflow implementation:
-  - Creates debug session for JavaScript
-  - Sets breakpoint at line 11 in target script
-  - Starts debugging with configurable launch args
-  - Polls for stack trace availability with timeout
-  - Retrieves local variables
-  - Validates presence of stack frames and variables
+### `findAvailablePort()` (L107-144)
+Port discovery utility with retry logic (max 10 attempts). Uses ephemeral port range 49152-65535, includes Windows-specific 200ms delay for port release.
 
-### Key Configuration
-- **Test timeout**: 60 seconds (L38) - extended for JavaScript SSE operations
-- **Target script**: `examples/javascript/simple_test.js` with breakpoint at line 11
-- **SSE endpoint**: `http://localhost:{port}/sse` (L453)
+### `startSSEServer()` (L154-247)
+**CRITICAL FUNCTION**: Spawns SSE server with inherited stdio to match production environment (`start-sse-server.cmd`). Uses retry logic (max 3 attempts) and comprehensive error handling. Validates the console silencing fix by using inherited stdio that would trigger IPC corruption without proper silencing.
 
-## Critical Architecture Insight
-The test uses `stdio: 'inherit'` (L178) to match production environment behavior. This validates that console silencing in `src/index.ts` prevents IPC channel corruption when SSE server spawns proxy processes. Without proper console silencing (`hasSSE ||` condition), console output corrupts IPC channels causing empty stack traces and 35-second timeouts.
+### `executeJavaScriptDebugSequence()` (L260-429)
+Reproduces the reported debugging issue through complete debug workflow:
+1. Creates debug session for JavaScript
+2. Sets breakpoint at line 11 in test script
+3. Starts debugging with configurable launch args
+4. Polls for stack trace availability (with timeout/retry)
+5. Retrieves local variables
+6. Validates both stack frames and variables are populated
+
+## Test Cases
+
+### Main Test: `should successfully debug JavaScript via SSE transport` (L431-497)
+Primary test that reproduces and validates the fix for the SSE IPC corruption issue. Uses inherited stdio and expects successful debugging after the console silencing fix is applied.
+
+### Secondary Test: Default launch args test (L499-542)
+Validates debugging works with null launch args (allowing default behavior) and deferred stack trace collection.
+
+## Critical Patterns
+- **Inherited stdio usage**: Matches production environment to validate IPC corruption fix
+- **Graceful cleanup**: Two-stage process termination (SIGTERM → SIGKILL) with timeouts
+- **Polling with timeouts**: Stack trace availability checked with configurable intervals
+- **Comprehensive error context**: All failures include detailed error messages and state
 
 ## Dependencies
-- **MCP SDK**: `@modelcontextprotocol/sdk/client/index.js` and `/sse.js` for SSE transport
-- **Test utilities**: `./smoke-test-utils.js` for `waitForPort()` and `parseSdkToolResult()`
-- **Node.js modules**: `child_process`, `net`, `path`, `os` for process management and networking
+- `@modelcontextprotocol/sdk`: Client and SSE transport
+- `smoke-test-utils.js`: Port waiting and SDK result parsing utilities
+- Test target: `examples/javascript/simple_test.js` with breakpoint at line 11
 
-## Error Patterns
-- Port binding failures with EADDRINUSE/EACCES retry logic
-- IPC channel corruption symptoms: empty stack traces, 35-second timeouts, no debug adapter response
-- Server startup validation through port availability checking
-
-## Test State Management
-- Global variables for cleanup: `mcpSdkClient`, `sseServerProcess`, `serverPort` (L40-42)
-- Session-scoped cleanup in finally blocks for debug sessions
-- Two-phase shutdown: graceful SIGTERM with timeout, then SIGKILL
+## Constraints
+- 60-second global timeout for all operations
+- Inherited stdio required to match production environment
+- Console silencing in SSE mode is mandatory for JavaScript debugging success
+- Graceful shutdown patterns prevent resource leaks

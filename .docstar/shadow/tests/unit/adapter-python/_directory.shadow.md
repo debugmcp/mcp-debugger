@@ -1,69 +1,58 @@
 # tests/unit/adapter-python/
-@generated: 2026-02-09T18:16:06Z
+@generated: 2026-02-10T01:19:35Z
 
-## Python Debug Adapter Test Module
+## Python Debug Adapter Unit Tests
 
-**Purpose:** Comprehensive unit testing module for Python-specific debugging functionality within the debug adapter system. This module validates the `PythonDebugAdapter` implementation, ensuring robust Python debugging capabilities including environment validation, debugpy integration, and DAP (Debug Adapter Protocol) compliance.
+This directory contains comprehensive unit tests for the Python language debug adapter implementation. It validates the complete lifecycle and functionality of Python debugging capabilities within the larger debug adapter ecosystem.
 
-### Key Components and Organization
+### Overall Purpose
 
-**Test Infrastructure**
-- **Framework:** Vitest-based testing with extensive mocking capabilities
-- **Mock Strategy:** Heavy reliance on mocked external dependencies (`child_process`, `python-utils.js`)
-- **Test Helpers:** Centralized dependency creation via `createDependencies()` helper
-- **Pattern:** Event-driven testing with comprehensive state management validation
+The test suite ensures the `PythonDebugAdapter` class correctly:
+- Manages Python environment validation and dependency checking
+- Transforms debug configurations for Python-specific requirements
+- Handles DAP (Debug Adapter Protocol) communication and event processing
+- Provides user-friendly error messages and installation guidance
+- Maintains proper state transitions throughout debug sessions
 
-### Core Testing Areas
+### Key Test Components
 
-**Environment & Runtime Validation**
-- **Python version compatibility:** Ensures Python 3.7+ requirement enforcement
-- **Executable resolution:** Tests Python interpreter discovery and path caching mechanisms
-- **Debugpy detection:** Validates debugpy package availability and version checking
-- **Virtual environment support:** Tests environment detection and configuration
+#### Environment Management Testing
+- **Python executable resolution**: Validates caching and path resolution logic
+- **Version compatibility**: Ensures Python 3.7+ requirement enforcement
+- **Dependency validation**: Tests debugpy installation detection in various environments
+- **Virtual environment support**: Validates handling of Python virtual environments
 
-**DAP Protocol Compliance**
-- **Command building:** Validates debugpy-specific adapter command generation
-- **Request handling:** Tests DAP request processing including exception filters
-- **Event management:** Validates DAP event handling and thread tracking
-- **Capabilities reporting:** Tests feature support and requirement declarations
+#### DAP Protocol Integration Testing
+- **Command generation**: Tests debugpy adapter command construction with proper arguments
+- **Exception filtering**: Validates DAP exception breakpoint filter handling
+- **Event processing**: Tests thread ID tracking and event transformation
+- **Capabilities reporting**: Ensures correct DAP capability advertisement
 
-**Lifecycle Management**
-- **Initialization flow:** Tests adapter startup, environment validation, and error handling
-- **Connection management:** Validates state transitions and event emission patterns
-- **Cleanup procedures:** Tests disposal, resource cleanup, and state reset
+#### Configuration & Lifecycle Testing
+- **Launch configuration transformation**: Tests application of Python-specific defaults
+- **Adapter initialization flow**: Validates environment setup and error state handling
+- **Connection management**: Tests connect/disconnect state transitions
+- **Resource cleanup**: Ensures proper disposal and state reset
 
-### Testing Patterns and Conventions
+#### User Experience Testing
+- **Error translation**: Tests conversion of technical errors to user-friendly messages
+- **Installation guidance**: Validates helper methods for dependency installation
+- **Feature requirements**: Tests feature support detection and requirement descriptions
 
-**Mock-Heavy Architecture**
-- Extensive use of private method mocking via type casting
-- External dependency isolation (file system, process spawning)
-- Event emitter pattern testing for async operations
+### Testing Architecture
 
-**State Management Focus**
-- Comprehensive adapter state validation (CONNECTED, DISCONNECTED, ERROR)
-- Cache behavior testing for performance-critical operations
-- Error scenario coverage with specific error code validation
-
-**Feature Testing Strategy**
-- Feature support detection (`LOG_POINTS`, `DISASSEMBLE_REQUEST`)
-- Configuration transformation and default application
-- User guidance and installation instruction validation
+The test suite employs several key patterns:
+- **Dependency injection**: Uses factory pattern for creating standardized mock dependencies
+- **Comprehensive mocking**: Isolates adapter logic from external dependencies (file system, processes, network)
+- **State machine validation**: Tests adapter lifecycle state transitions
+- **Event-driven testing**: Validates EventEmitter patterns and async communication
 
 ### Integration Points
 
-This test module validates the Python adapter's integration with:
-- **Core debug adapter framework** via shared types and interfaces
-- **Python runtime environment** via executable resolution and version checking
-- **Debugpy debugging backend** via spawn-based detection and command building
-- **DAP protocol implementation** via request/response/event handling
+This test directory validates the adapter's integration with:
+- **Python runtime environment**: Executable detection, version checking, virtual environments
+- **Debugpy debugger**: Installation detection, command generation, process management
+- **DAP protocol**: Request/response handling, event processing, capability negotiation
+- **Configuration system**: Launch config transformation and default value application
 
-### Quality Assurance Coverage
-
-The test suite ensures:
-- **Robustness:** Comprehensive error scenario testing
-- **Performance:** Caching mechanism validation
-- **Compatibility:** Python version and environment requirement testing
-- **Protocol compliance:** DAP specification adherence
-- **User experience:** Clear error messages and installation guidance
-
-This module serves as the quality gate for Python debugging functionality, ensuring reliable and feature-complete Python development support within the broader debug adapter ecosystem.
+The tests ensure the Python debug adapter can reliably bridge between the generic debug adapter infrastructure and Python-specific debugging requirements, providing a robust and user-friendly debugging experience.

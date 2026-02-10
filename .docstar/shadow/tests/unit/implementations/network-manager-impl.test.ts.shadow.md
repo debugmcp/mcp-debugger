@@ -1,40 +1,49 @@
 # tests/unit/implementations/network-manager-impl.test.ts
 @source-hash: 404a514014ac913c
-@generated: 2026-02-09T18:14:42Z
+@generated: 2026-02-10T00:41:33Z
 
 ## Purpose
-Unit test suite for `NetworkManagerImpl` class, testing network operations like server creation and free port detection. Uses Vitest testing framework with comprehensive mocking of Node.js `net` module.
+Unit test suite for NetworkManagerImpl class using Vitest testing framework. Tests network server creation and port discovery functionality with comprehensive mocking of Node.js net module.
 
-## Test Structure
-- **Main test suite**: `NetworkManagerImpl` (L39-188)
-- **Test setup**: `beforeEach` hook (L42-52) creates fresh instance and clears all mocks
-- **Mock configuration**: Comprehensive `net` module mock (L32-37) with `mockServer` object (L9-29)
+## Key Test Structure
+- **Test Suite**: `NetworkManagerImpl` (L39-188)
+  - Tests for `createServer` method (L54-69)
+  - Tests for `findFreePort` method (L71-187)
 
-## Key Test Groups
+## Mock Infrastructure
+- **mockServer**: Comprehensive mock object (L9-29) implementing full Node.js Server interface with all EventEmitter methods
+- **net module mock**: Mocks `net.createServer` to return mockServer (L32-37)
+- **beforeEach setup**: Resets all mocks and clears server state (L42-52)
+
+## Test Coverage
 
 ### createServer Tests (L54-69)
-- **Basic functionality** (L55-60): Verifies server creation via `net.createServer()`
-- **Error handling** (L62-68): Tests exception propagation during server creation
+- **Basic functionality**: Verifies server creation and net.createServer invocation (L55-60)
+- **Error handling**: Tests exception propagation during server creation (L62-68)
 
 ### findFreePort Tests (L71-187)
-- **Happy path** (L72-99): Tests successful port discovery using ephemeral port (0)
-- **Server listen errors** (L101-114): Tests error event handling during port binding
-- **Invalid address formats** (L116-136): Tests string address handling (Unix sockets)
-- **Null address handling** (L138-158): Tests null address return scenarios
-- **Resource cleanup** (L160-186): Verifies proper server closure and resource management
+- **Successful port discovery**: Tests complete flow with mock server lifecycle (L72-99)
+  - Mocks server.listen with port 0 and callback execution
+  - Mocks server.address returning port number
+  - Verifies server cleanup with unref() and close()
+- **Listen error handling**: Tests server error event propagation (L101-114)
+- **Invalid address handling**: Tests string address format rejection (L116-136)
+- **Null address handling**: Tests null address rejection (L138-158)
+- **Resource cleanup verification**: Tests proper server cleanup on success (L160-186)
 
-## Mock Architecture
-- **mockServer** (L9-29): Comprehensive Node.js Server interface mock with all EventEmitter methods
-- **net module mock** (L32-37): Replaces `net.createServer()` to return `mockServer`
-- **Dynamic mock behavior**: Tests configure mock implementations per scenario using `mockImplementation()`
-
-## Key Testing Patterns
-- **Async callback simulation**: Uses `process.nextTick()` to simulate Node.js async behavior
-- **Event-driven testing**: Mocks EventEmitter patterns for error/success scenarios  
-- **Resource lifecycle verification**: Ensures `unref()` and `close()` are called for cleanup
-- **Error boundary testing**: Validates exception handling and rejection propagation
+## Mock Patterns
+- Uses `process.nextTick()` for asynchronous callback simulation
+- Implements conditional callback execution based on parameter presence
+- Comprehensive EventEmitter method mocking for complete interface coverage
+- Type assertions using `as any` for TypeScript compatibility with mocks
 
 ## Dependencies
-- **Vitest**: Testing framework with mocking capabilities
-- **Node.js net module**: Mocked for network operations
-- **NetworkManagerImpl**: Implementation under test from `../../../src/implementations/network-manager-impl.js`
+- Vitest testing framework with describe/it/expect/beforeEach/vi
+- Node.js net module (mocked)
+- NetworkManagerImpl from production code
+
+## Test Architecture
+- Isolation through vi.clearAllMocks() in beforeEach
+- Complete interface mocking to prevent real network operations
+- Async/await pattern for promise-based method testing
+- Error simulation through mock implementation switching

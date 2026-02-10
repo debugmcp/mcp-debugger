@@ -1,88 +1,93 @@
 # src/dap-core/
-@generated: 2026-02-09T18:16:12Z
+@generated: 2026-02-10T01:19:43Z
 
 ## Overall Purpose
+The `dap-core` module provides a functional, stateless implementation of Debug Adapter Protocol (DAP) message processing and session management. It serves as the core computational engine for handling DAP communication between debug clients, proxies, and debug adapters using pure functional programming principles.
 
-The `src/dap-core` module provides a functional, stateless implementation of Debug Adapter Protocol (DAP) message handling and session state management. It serves as the core processing engine for DAP proxy communications, implementing pure functional patterns with immutable state transformations and command-based side effect management.
+## Architecture Pattern
+The module follows a strict functional architecture with clear separation of concerns:
+- **Pure State Management**: Immutable state transformations without side effects
+- **Command-Based Side Effects**: All I/O operations represented as data structures (`DAPCommand`)
+- **Message Dispatch**: Type-safe routing and processing of proxy messages
+- **Effect-State Separation**: Processing functions return both commands to execute and new state
 
 ## Key Components and Relationships
 
-### Type System Foundation (`types.ts`)
-- Defines comprehensive type definitions for all DAP session structures, proxy messages, and command patterns
-- Establishes discriminated unions for type-safe message handling
-- Provides immutable data structures using `readonly` modifiers throughout
-- Creates command pattern abstractions that separate action description from execution
+### Core State Management (`state.ts`)
+Provides pure functions for managing `DAPSessionState`:
+- Session initialization and configuration tracking
+- Debug thread management  
+- Pending request lifecycle
+- Immutable state transformations with defensive copying
 
-### State Management (`state.ts`)
-- Implements pure functional state operations for DAP session lifecycle
-- Provides factory functions for initial state creation and immutable update operations
-- Manages pending request tracking with defensive Map cloning
-- Enforces architectural invariants through TypeScript utility types (Partial, Omit)
+### Message Handlers (`handlers.ts`)
+Stateless message processors that transform proxy messages into commands and state updates:
+- **Primary Entry**: `handleProxyMessage` - validates and routes all incoming messages
+- **Status Handler**: Manages proxy lifecycle events (initialization, adapter setup, termination)
+- **Event Handler**: Processes DAP debugging events (breakpoints, execution control)
+- **Response Handler**: Matches DAP responses to pending requests
+- **Error Handler**: Processes and logs error conditions
 
-### Message Processing (`handlers.ts`)
-- Contains specialized pure functions for each proxy message type
-- Main dispatcher (`handleProxyMessage`) routes messages to appropriate handlers
-- Transforms proxy communications into command arrays and state updates
-- Implements stateless processing with no side effects or external dependencies
-
-### Public API (`index.ts`)
-- Barrel export pattern providing unified access to all core functionality
-- Single import point for types, state management, and handlers
-- Facade pattern hiding internal module organization
+### Type System (`types.ts`)
+Defines the complete contract layer:
+- **State Types**: `DAPSessionState`, `PendingRequest` for session management
+- **Command Types**: `DAPCommand` union for representing side effects as data
+- **Message Types**: `ProxyMessage` hierarchy for type-safe communication
+- **Result Types**: `DAPProcessingResult` for handler return values
 
 ## Public API Surface
 
 ### Main Entry Points
-- **Types**: All DAP protocol types, state structures, and message definitions
-- **State Management**: `createInitialState`, state update functions, pending request management
-- **Message Processing**: `handleProxyMessage` (primary dispatcher), specialized handlers for status, error, DAP events, and responses
-- **Command System**: `DAPCommand` union for describing side effects, `DAPProcessingResult` for processing outcomes
+- **`handleProxyMessage`**: Primary message processor - validates session and routes by message type
+- **State Management Functions**: `createInitialState`, `setInitialized`, `setAdapterConfigured`, `setCurrentThreadId`, etc.
+- **Type Exports**: Complete TypeScript interface definitions for consumers
 
 ### Integration Pattern
-External systems integrate by:
-1. Creating initial session state via `createInitialState`
-2. Processing proxy messages through `handleProxyMessage`
-3. Executing returned commands (logging, events, proxy communication)
-4. Updating session state with returned state changes
+1. **Initialize**: Create session state with `createInitialState(sessionId)`
+2. **Process**: Call `handleProxyMessage(message, currentState)` 
+3. **Execute**: Process returned `DAPCommand[]` array (logging, client communication, etc.)
+4. **Update**: Apply `newState` if provided in result
 
 ## Internal Organization and Data Flow
 
-### Processing Pipeline
-1. **Message Validation**: Type guards verify proxy message structure
-2. **Session Routing**: Messages dispatched by sessionId and type
-3. **Specialized Handling**: Type-specific handlers process messages and update state
-4. **Command Generation**: Handlers emit commands for external execution
-5. **State Updates**: New state objects returned for immutable updates
+### Message Processing Pipeline
+```
+ProxyMessage → validateSession → routeByType → specificHandler → DAPProcessingResult
+```
 
-### State Flow
-- Session state flows unidirectionally through pure functions
-- State updates always return new objects, never mutate inputs
-- Pending requests managed through defensive Map cloning
-- Thread tracking and adapter lifecycle maintained immutably
+### State Evolution
+Session state progresses through defined phases:
+- **Phase 1**: Proxy status handling (initialization, adapter setup)
+- **Phase 2**: DAP event processing (debugging lifecycle)
+- **Phase 3**: DAP response correlation (request/response matching)
 
-### Command Pattern
-- Core never executes side effects directly
-- All external actions described as `DAPCommand` objects
-- External systems responsible for command execution (logging, IPC, events)
-- Clear separation between processing logic and side effect execution
+### Effect Handling
+All side effects are represented as `DAPCommand` data structures:
+- `sendToClient`/`sendToProxy`: Communication commands
+- `log`: Structured logging with levels
+- `emitEvent`: Custom event emission
+- `killProcess`: Process control
 
 ## Important Patterns and Conventions
 
-### Functional Programming Principles
-- Pure functions with no side effects
-- Immutable state management throughout
-- Command pattern for side effect management
-- Discriminated unions for type-safe message handling
+### Functional Purity
+- All functions are pure - no direct side effects or mutations
+- State transformations return new objects, never modify inputs
+- Side effects represented as returnable command data structures
 
-### Development Phases
-- **Phase 1**: Status and error handling (complete)
-- **Phase 2**: DAP event handling (implemented)
-- **Phase 3**: DAP response handling (placeholder implementation)
+### Immutability
+- State uses `readonly` properties and `ReadonlyMap` for collections
+- Defensive copying in state management functions
+- Session ID is immutable after creation
 
-### Architectural Constraints
-- No direct external dependencies beyond standard DAP protocol types
-- State mutations only through provided helper functions
-- All handlers return structured results with commands and optional state updates
-- Type safety enforced through comprehensive TypeScript definitions
+### Type Safety
+- Discriminated unions for message and command types
+- Type guards for message validation
+- Explicit handling of all message variants
 
-This module serves as the foundational layer for DAP proxy communication, providing a clean functional interface for message processing while maintaining complete separation from side effects and external system integration.
+### Error Handling
+- Graceful degradation with logging for unknown message types
+- Session validation prevents processing invalid messages
+- Clear error propagation through command system
+
+This module enables predictable, testable DAP session management by isolating pure computational logic from I/O operations and providing a clear functional interface for DAP protocol handling.

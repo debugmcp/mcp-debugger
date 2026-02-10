@@ -613,7 +613,8 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       deferConfigDone: true,          // Must defer configurationDone until after launch/attach
       addRuntimeExecutable: true,      // Needs to add runtimeExecutable to launch args
       trackInitializeResponse: true,   // Must track initialize response separately
-      requiresInitialStop: true        // Must ensure initial stop after launch/attach
+      requiresInitialStop: true,       // Must ensure initial stop after launch/attach
+      defaultStopOnEntry: false        // Default to false unless user explicitly requests
     };
   },
 

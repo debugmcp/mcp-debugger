@@ -1,35 +1,35 @@
 # packages/adapter-java/examples/HelloWorld.java
 @source-hash: 9bb57ebd85c3f37a
-@generated: 2026-02-09T18:14:28Z
+@generated: 2026-02-10T00:41:19Z
 
-## Primary Purpose
-Simple Java test program designed for testing Java debug adapter functionality. Serves as a basic debugging target with predictable execution flow and variable state changes.
+## Purpose
+Test program for Java debug adapter functionality. Provides a simple execution flow with variables, loops, and console output for debugging scenarios.
 
 ## Key Components
-- **HelloWorld class (L4-20)**: Main container class with single static entry point
-- **main method (L5-19)**: Entry point demonstrating basic Java constructs for debugging scenarios
 
-## Program Flow
-1. Initialization phase (L6-9): Outputs start message, declares string message and integer counter
-2. Loop execution (L11-14): Simple for-loop that increments counter and prints iteration state
-3. Final output (L16-18): Displays message and final program state
+### HelloWorld Class (L4-20)
+- **main method (L5-19)**: Entry point with sequential execution flow designed for debug testing
+  - Variable initialization: `message` string (L8), `count` integer (L9)
+  - For loop (L11-14): Iterates 3 times, accumulates values in `count`, prints iteration state
+  - Console output statements (L6, L13, L16-18): Multiple print points for debugging breakpoints
 
-## Key Variables for Debug Testing
-- **message (L8)**: String literal "Hello, World!" - unchanged throughout execution
-- **count (L9)**: Integer accumulator starting at 0, incremented by loop index values (0+1+2=3)
-- **i (L11)**: Loop iterator variable (0, 1, 2)
+## Execution Flow
+1. Initialization phase with startup message (L6)
+2. Variable setup with string and counter (L8-9) 
+3. Loop execution with state tracking (L11-14)
+4. Final output phase with results display (L16-18)
 
-## Debug Adapter Test Scenarios
-- Breakpoint placement opportunities at multiple print statements
-- Variable inspection points for primitive types (int, String)
-- Step-through debugging of loop iteration
-- State observation across method execution lifecycle
+## Debug Adapter Testing Features
+- Multiple breakpoint opportunities at print statements
+- Variable state changes in loop for step-through debugging
+- Simple control flow for testing step-over/step-into functionality
+- Clear program lifecycle (start → process → end)
 
 ## Dependencies
-- Standard Java runtime (System.out for console output)
-- No external libraries or complex dependencies
+- Standard Java library (`System.out` for console output)
+- No external dependencies
 
-## Execution Characteristics
-- Deterministic output and variable states
-- Short execution time suitable for automated testing
-- Clear program phases for debugging validation
+## Architecture Notes
+- Minimal single-class design for focused debug testing
+- Intentionally simple logic to isolate debug adapter behavior
+- Sequential execution without complex branching or error handling

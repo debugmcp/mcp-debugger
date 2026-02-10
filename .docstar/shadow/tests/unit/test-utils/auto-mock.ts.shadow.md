@@ -1,65 +1,50 @@
 # tests/unit/test-utils/auto-mock.ts
-@source-hash: 4500b84821bdf832
-@generated: 2026-02-09T18:14:54Z
+@source-hash: f23bd9aee71af25e
+@generated: 2026-02-10T01:19:01Z
 
-## Automatic Mock Generation Utilities
+## Purpose
+Provides automatic mock generation utilities for test environments, creating type-safe mocks from real implementations with validation capabilities. Integrates with Vitest testing framework to ensure mocks stay synchronized with actual interfaces.
 
-This module provides comprehensive utilities for generating, validating, and managing mocks in Vitest tests, particularly focused on ensuring mock-interface compatibility.
+## Core Functions
 
-### Core Functions
+### `createMockFromInterface<T>` (L18-131)
+Primary mock generation function that creates mocks from real implementations or class constructors:
+- **Input**: Target object/class + configuration options (exclude patterns, default returns, inheritance)
+- **Process**: Walks prototype chain, converts methods to `vi.fn()` mocks, preserves property structure
+- **Output**: Mock object with same interface as target, all methods become Mock functions
+- **Key features**: Handles getters/setters (L115-122), smart default returns for method naming patterns (L106-114), prototype chain traversal (L67-71)
 
-**`createMockFromInterface<T>()` (L18-131)**
-- Primary utility for auto-generating mocks from real implementations or class constructors
-- Supports both instances and constructor functions as input
-- Creates `vi.fn()` mocks for all methods, preserves property structure
-- Features:
-  - Method exclusion via regex or property name array (L24)
-  - Default return value configuration (L27)
-  - Prototype chain traversal control (L31)
-  - Smart default returns for getter/boolean methods (L106-112)
-  - Proper getter/setter property handling (L115-122)
+### `validateMockInterface` (L141-220)
+Validation function ensuring mock-real interface consistency:
+- **Validation checks**: Missing members (L170-177), type compatibility (L183-185), function arity (L188-198)
+- **Error handling**: Distinguishes errors vs warnings, reports private member discrepancies as warnings
+- **Throws**: Error if critical mismatches found, suggesting use of `createMockFromInterface`
 
-**`validateMockInterface()` (L141-220)**
-- Validates mock objects against their real implementations
-- Performs comprehensive interface compatibility checking:
-  - Missing member detection (L170-177)
-  - Type compatibility validation (L183-185) 
-  - Function arity comparison (L188-198)
-  - Extra member detection (L203-207)
-- Distinguishes between errors (interface violations) and warnings (suspicious patterns)
-- Provides detailed error messages with remediation suggestions
+### `createValidatedMock` (L231-242)
+Convenience wrapper combining mock creation with immediate validation, guaranteeing interface consistency.
 
-**`createValidatedMock()` (L231-242)**
-- Convenience wrapper combining mock creation and validation
-- Ensures immediate validation after mock generation
-- Returns type-safe mock with guaranteed interface compliance
+### `createEventEmitterMock` (L248-289)
+Specialized mock for EventEmitter pattern, common in the codebase:
+- **Returns**: Complete EventEmitter interface with sensible defaults (chains return `this`, listeners return arrays)
+- **Extensible**: Accepts additional methods via parameter
 
-### Specialized Mock Creators
+### `autoValidateMock` (L307-334)
+Lazy validation decorator using Proxy pattern:
+- **Strategy**: Defers validation until first method access
+- **Use case**: Prevents test setup overhead while ensuring validation occurs
+- **Implementation**: Proxy handler intercepts first property access to trigger validation
 
-**`createEventEmitterMock()` (L248-289)**
-- Creates mocks for EventEmitter-based classes (common pattern in the codebase)
-- Pre-configured with all standard EventEmitter methods (L269-285)
-- Methods return appropriate default values (chains return `this`, emit returns `true`)
-- Supports extension with additional methods via parameter
+## Dependencies
+- **Vitest**: Core testing framework (`vi`, `Mock` types)
+- **Built-in**: Object reflection APIs for prototype traversal and property inspection
 
-**`autoValidateMock()` (L307-334)**
-- Proxy-based lazy validation system
-- Validates mock interface on first property access rather than creation
-- Caches validation result to avoid repeated checks
-- Designed for use in test setup (beforeEach hooks)
+## Architecture Patterns
+- **Type safety**: Heavy use of TypeScript generics and conditional types (L34)
+- **Lazy evaluation**: Proxy-based validation deferral
+- **Prototype introspection**: Comprehensive property discovery across inheritance chains
+- **Configuration-driven**: Flexible options for customizing mock behavior
 
-### Key Dependencies
-- `vitest` - Core testing framework, uses `vi.fn()` for mock creation
-- Native JavaScript reflection APIs for prototype chain traversal
-
-### Architecture Patterns
-- **Type-safe mock generation**: Preserves TypeScript interface contracts
-- **Lazy validation**: Defers expensive validation until mock usage
-- **Flexible configuration**: Supports various mock customization scenarios
-- **Error categorization**: Separates critical errors from warnings for better DX
-
-### Critical Invariants
-- All generated mocks maintain the same interface as their real counterparts
-- Method mocks are created as `vi.fn()` instances for Vitest compatibility
-- Prototype chain traversal respects inheritance hierarchies
-- Validation failures provide actionable error messages
+## Critical Constraints
+- Requires Vitest environment (vi.fn() dependency)
+- Mock validation assumes synchronous property access patterns
+- Prototype chain traversal stops at Object.prototype to avoid system methods

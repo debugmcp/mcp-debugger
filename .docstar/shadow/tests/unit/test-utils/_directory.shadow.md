@@ -1,98 +1,88 @@
 # tests/unit/test-utils/
-@generated: 2026-02-09T18:16:10Z
+@generated: 2026-02-10T01:19:45Z
 
-## Test Utilities Directory
+## Overall Purpose
+Provides comprehensive testing utilities and mock generation infrastructure for the debugging system. This module serves as the testing foundation, offering automated mock creation, validation utilities, standardized factory functions, and test-specific implementations that enable reliable, deterministic testing of complex debugging components.
 
-This directory provides a comprehensive testing infrastructure for creating, validating, and managing mocks in the Vitest testing environment, with specialized support for Node.js process mocking and debug adapter protocol (DAP) testing.
+## Key Components and Integration
 
-### Overall Purpose
+### Core Mock Generation (`auto-mock.ts`)
+Central engine for automated mock creation from real implementations:
+- **`createMockFromInterface`**: Primary entry point for generating type-safe mocks with prototype chain traversal
+- **`validateMockInterface`**: Ensures mock-real interface consistency with comprehensive validation
+- **`createValidatedMock`**: One-step convenience wrapper combining creation and validation
+- **`autoValidateMock`**: Lazy validation using Proxy pattern for performance optimization
 
-The `test-utils` directory serves as the central hub for test infrastructure, providing:
-- **Automated mock generation** with TypeScript interface validation
-- **Factory functions** for complex Node.js and debugging-related mocks
-- **Test-specific implementations** that override production classes for deterministic testing
-- **Validation utilities** ensuring mock-interface compatibility
+### Standardized Mock Factories (`mock-factories.ts`)
+Pre-configured factory functions for common system components:
+- **Process mocks**: Child processes, proxy processes, Python validation processes
+- **Service mocks**: Session managers, adapter registries, network managers
+- **Infrastructure mocks**: Loggers, file systems, environment detection
+- All factories provide success-oriented defaults to enable positive test paths
 
-### Key Components and Organization
+### Test-Specific Implementations (`test-proxy-manager.ts`)
+Specialized test doubles that override complex runtime behavior:
+- **TestProxyManager**: Synchronous, deterministic ProxyManager implementation
+- Mock response configuration and state simulation capabilities
+- Maintains full interface compatibility while eliminating external dependencies
 
-**Core Mock Generation (`auto-mock.ts`)**
-- `createMockFromInterface<T>()`: Primary utility for auto-generating type-safe mocks from real implementations
-- `validateMockInterface()`: Comprehensive interface compatibility validation
-- `createValidatedMock()`: Combined creation and validation workflow
-- `createEventEmitterMock()`: Specialized EventEmitter mock generation
-- `autoValidateMock()`: Proxy-based lazy validation system
+### Validation and Testing (`mock-validation.test.ts`)
+Comprehensive test suite validating the mock generation utilities themselves:
+- Interface compliance testing with inheritance handling
+- Validation rule verification and error detection
+- Integration testing with real-world usage patterns
 
-**Mock Factory Library (`mock-factories.ts`)**
-- Process mocks: `createMockChildProcess()`, `createMockProxyProcess()`
-- Session management: `createMockSessionManager()` with full debugging capabilities
-- Infrastructure mocks: Logger, FileSystem, NetworkManager, Environment utilities
-- Specialized process validators for Python environment testing
+## Public API Surface
 
-**Testing Infrastructure (`test-proxy-manager.ts`)**
-- `TestProxyManager`: Extended ProxyManager for deterministic DAP testing
-- Synchronous overrides of complex async initialization
-- Mock DAP response simulation and event injection
-- Helper factories for testing dependencies
+### Primary Entry Points
+- **`createMockFromInterface<T>`**: Generate typed mocks from classes/objects
+- **`createValidatedMock<T>`**: Create and validate mocks in one step
+- **Factory functions**: `createMockChildProcess`, `createMockSessionManager`, `createMockLogger`, etc.
+- **`TestProxyManager`**: Test-friendly ProxyManager implementation
 
-### Public API Surface
-
-**Primary Entry Points:**
-```typescript
-// Auto-mock generation
-createMockFromInterface<T>(target, options?)
-createValidatedMock<T>(target, options?)
-createEventEmitterMock<T>(target, methods?)
-
-// Factory functions
-createMockChildProcess()
-createMockSessionManager()
-createMockAdapterRegistry()
-// ... plus specialized process and infrastructure mocks
-
-// Test implementations
-TestProxyManager // Extended ProxyManager for testing
-```
-
-### Internal Data Flow
-
-1. **Mock Creation Pipeline**: Interface analysis → Method enumeration → Vitest spy generation → Optional validation
-2. **Factory Pattern**: Pre-configured mocks with realistic defaults → Type-safe returns → Event simulation capabilities
-3. **Test Orchestration**: Production class extension → Complex behavior override → Deterministic test execution
-
-### Key Patterns and Conventions
-
-**Type Safety First**
-- All mocks maintain TypeScript interface contracts
-- Generic typing preserves original class signatures
-- Compile-time validation prevents interface drift
-
-**Vitest Integration**
-- Consistent use of `vi.fn()` for method mocking
-- Spy function validation with `vi.isMockFunction()`
-- Proper cleanup and restoration patterns
-
-**Event-Driven Testing**
-- EventEmitter-based mocks for Node.js patterns
-- Event simulation methods for testing async flows
-- Immediate event emission for synchronous testing
-
-**Configuration Flexibility**
-- Method exclusion via regex or arrays
+### Configuration Options
+- Method exclusion patterns (regex or arrays)
 - Custom return value configuration
-- Prototype chain traversal control
-- Lazy validation options
+- Inheritance chain inclusion/exclusion
+- EventEmitter-specific mock extensions
 
-### Dependencies
+## Internal Organization and Data Flow
 
-- **vitest**: Core testing framework and spy functions
-- **@vscode/debugprotocol**: DAP types for debugging infrastructure
-- **events**: Node.js EventEmitter for event-based mocks
-- **child_process**: Node.js process types for system integration testing
+### Mock Generation Pipeline
+1. **Interface Analysis**: Prototype chain traversal to discover all methods and properties
+2. **Mock Creation**: Convert methods to `vi.fn()` spies with intelligent defaults
+3. **Validation**: Compare mock interface against original for consistency
+4. **Specialization**: Apply domain-specific behaviors (EventEmitter patterns, etc.)
 
-### Critical Design Principles
+### Integration Patterns
+- **Factory → Auto-mock**: Standard factories use core mock generation utilities
+- **Test classes → Validation**: Test implementations validate against real interfaces
+- **Mock validation → Test suite**: Self-testing ensures mock generation reliability
 
-- **Interface Preservation**: Generated mocks exactly match original class interfaces
-- **Deterministic Testing**: Overrides eliminate timing and environment dependencies  
-- **Comprehensive Coverage**: Factory functions cover all major system components
-- **Error Categorization**: Distinguishes critical errors from warnings for better developer experience
-- **Lazy Loading**: Defers expensive operations until actually needed in tests
+## Important Patterns and Conventions
+
+### Type Safety First
+- Heavy use of TypeScript generics for compile-time interface matching
+- Conditional types for method signature preservation
+- Mock validation prevents runtime interface drift
+
+### Lazy Evaluation
+- Proxy-based validation deferral to optimize test performance
+- Just-in-time mock response configuration for TestProxyManager
+
+### Success-Oriented Defaults
+- All factory mocks return success states by default
+- Boolean methods default to `false`, object methods to `undefined`
+- Async operations return `{ success: true }` objects
+
+### Event-Driven Testing
+- EventEmitter inheritance for process and service mocks
+- Automatic event emission for process lifecycle simulation
+- Deterministic timing using `process.nextTick()`
+
+## Dependencies and Environment
+- **Vitest ecosystem**: Core testing framework integration (`vi.fn()`, `Mock` types)
+- **Node.js built-ins**: EventEmitter, child_process types, prototype reflection APIs
+- **Type definitions**: VSCode Debug Protocol for DAP testing support
+
+This module enables reliable testing by providing consistent, validated mocks that stay synchronized with real implementations while offering the flexibility needed for comprehensive test scenarios.

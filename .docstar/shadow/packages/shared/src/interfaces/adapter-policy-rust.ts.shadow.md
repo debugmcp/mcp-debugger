@@ -1,49 +1,60 @@
 # packages/shared/src/interfaces/adapter-policy-rust.ts
 @source-hash: 32e092ec69552b0a
-@generated: 2026-02-09T18:14:12Z
+@generated: 2026-02-10T00:41:12Z
 
-## Primary Purpose
-Rust-specific adapter policy for debugging with CodeLLDB (LLDB-based debugger). Implements the `AdapterPolicy` interface to handle Rust/CodeLLDB debugging behaviors, variable extraction, and adapter lifecycle management.
+## Purpose
+Implements adapter policy for Rust debugging using the CodeLLDB debug adapter. Provides Rust-specific behaviors, variable handling, and configuration for the DAP (Debug Adapter Protocol) client.
 
-## Core Components
+## Key Components
 
-### Interface Definition
-- **RustAdapterPolicyInterface (L13-22)**: Defines Rust-specific debugging capabilities including Cargo support, `.rs` file extensions, compilation requirements, and build commands
+### RustAdapterPolicyInterface (L13-22)
+Type interface defining Rust-specific capabilities:
+- Compilation requirement with Cargo support
+- Default build commands (`cargo build`, `cargo build --release`)
+- Supported file extensions (`.rs`)
+- Debug target configuration
 
-### Main Policy Export  
-- **RustAdapterPolicy (L24-333)**: Complete adapter policy implementation with 20+ methods handling all aspects of Rust debugging workflow
+### RustAdapterPolicy Object (L24-333)
+Main adapter policy implementation containing:
 
-## Key Methods & Responsibilities
+**Core Configuration:**
+- `name: 'rust'` (L25)
+- No child session support (L27, L29-30)
+- Uses `lldb` adapter type (L100)
 
-### Variable Management
-- **extractLocalVariables (L39-88)**: Extracts local variables from top stack frame, filtering out LLDB internals (`$`, `__`, `_lldb`, `_debug` prefixes) unless `includeSpecial=true`
-- **getLocalScopeName (L94-96)**: Returns scope names CodeLLDB uses for locals: `['Local', 'Locals']`
+**Variable Handling:**
+- `extractLocalVariables()` (L39-89): Extracts local variables from top stack frame, filters LLDB internal variables (names starting with `$`, `__`, `_lldb`, `_debug`)
+- `getLocalScopeName()` (L94-96): Returns `['Local', 'Locals']` scope names used by CodeLLDB
 
-### Adapter Configuration
-- **getDapAdapterConfiguration (L98-102)**: Returns `{type: 'lldb'}` for CodeLLDB adapter
-- **getDebuggerConfiguration (L117-126)**: Configures CodeLLDB capabilities (supports variable types, value formatting, memory references)
-- **getAdapterSpawnConfig (L280-333)**: Handles adapter spawning with platform-specific executable paths and CodeLLDB arguments
+**Executable Resolution:**
+- `resolveExecutablePath()` (L104-115): Checks provided path, then `CARGO_PATH` env var, falls back to adapter auto-detection
+- `validateExecutable()` (L133-162): Validates CodeLLDB by checking file existence and running `--version` command
 
-### Session Lifecycle
-- **validateExecutable (L133-162)**: Validates CodeLLDB binary by checking file existence and executing `--version` command
-- **createInitialState (L184-189)**: Creates adapter state tracking `initialized` and `configurationDone` flags
-- **updateStateOnCommand/Event (L194-207)**: Updates state based on `configurationDone` commands and `initialized` events
+**Command Management:**
+- `requiresCommandQueueing()` (L167): Returns false - CodeLLDB processes commands immediately
+- `shouldQueueCommand()` (L172-179): Always returns no queueing needed
 
-### Command Handling
-- **requiresCommandQueueing/shouldQueueCommand (L167-179)**: Returns false - CodeLLDB processes commands immediately without queueing
-- **matchesAdapter (L227-236)**: Matches adapter commands containing `codelldb`, `lldb-server`, or `lldb` strings
+**State Management:**
+- `createInitialState()` (L184-189): Creates state with `initialized: false, configurationDone: false`
+- State update methods (L194-207) track initialization and configuration events
+- Connection checking methods (L212-222)
 
-### DAP Client Behavior
-- **getDapClientBehavior (L248-275)**: Returns minimal DAP behavior since Rust doesn't use child sessions, handles basic `runInTerminal` reverse requests
+**Adapter Matching:**
+- `matchesAdapter()` (L227-236): Matches commands/args containing 'codelldb', 'lldb-server', or 'lldb'
+
+**DAP Client Behavior:**
+- `getDapClientBehavior()` (L248-275): Minimal reverse request handling, no child session routing, standard timeouts
+
+**Adapter Spawning:**
+- `getAdapterSpawnConfig()` (L280-333): Platform-aware CodeLLDB executable resolution with vendored fallback paths, Windows-specific PDB reader environment variable
 
 ## Dependencies
-- `@vscode/debugprotocol`: Debug Adapter Protocol types
-- `path`: Node.js path utilities for executable resolution  
-- Local interfaces: `AdapterPolicy`, `StackFrame`, `Variable`, `DapClientBehavior`
-- `@debugmcp/shared`: Session state management
+- `@vscode/debugprotocol`: DAP types
+- `@debugmcp/shared`: SessionState enum
+- Local interfaces: AdapterPolicy, DapClientBehavior, models
 
-## Key Characteristics
-- **No child session support**: Throws errors for child session operations (L29-30)
-- **Platform-aware**: Handles Windows, macOS (x64/arm64), Linux (x64/arm64) executable paths
-- **Cargo integration**: Supports standard Cargo build workflows
-- **LLDB-specific**: Tailored for CodeLLDB adapter behaviors and variable naming conventions
+## Architecture Notes
+- Single-session adapter (no child session support)
+- Immediate command processing (no queueing)
+- Platform-specific executable resolution with vendored CodeLLDB binaries
+- LLDB internal variable filtering for cleaner debugging experience

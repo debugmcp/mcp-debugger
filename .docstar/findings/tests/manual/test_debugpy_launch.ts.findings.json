@@ -1,0 +1,15 @@
+{
+  "source": "tests/manual/test_debugpy_launch.ts",
+  "source_hash": "f3d9c27a877a3888",
+  "generated": "2026-02-10T01:18:55Z",
+  "findings": [
+    {
+      "category": "stale_comment",
+      "line_start": 9,
+      "line_end": 9,
+      "severity": "warning",
+      "description": "Hardcoded Windows path comment suggests this needs manual updates for different environments, but provides no guidance on how to configure it properly",
+      "suggestion": "Replace hardcoded path with environment variable or configuration mechanism, or provide clear instructions for path configuration"
+    }
+  ]
+}

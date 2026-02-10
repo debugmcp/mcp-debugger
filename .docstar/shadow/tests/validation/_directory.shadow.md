@@ -1,61 +1,41 @@
 # tests/validation/
-@generated: 2026-02-09T18:16:20Z
+@generated: 2026-02-10T01:19:45Z
 
-## Overall Purpose and Responsibility
+## Overall Purpose
 
-The `tests/validation/breakpoint-messages` directory serves as a comprehensive validation suite for debugpy's breakpoint message handling system. It systematically tests how the Python debugger processes and responds to breakpoint placement requests across diverse code constructs, syntax conditions, and edge cases to ensure robust and predictable debugging behavior.
+The `tests/validation` directory serves as a comprehensive test infrastructure for validating debugpy's breakpoint message system and behavior. It contains specialized test suites designed to systematically verify how debuggers handle breakpoint placement across various Python code scenarios, edge cases, and error conditions.
 
-## Key Components and Integration
+## Key Components and Relationships
 
-### Test File Architecture
+The directory is organized around a multi-layered validation strategy with complementary test modules:
 
-The validation suite is organized into four specialized test categories that work together to provide comprehensive coverage:
+- **breakpoint-messages/** - Core test suite containing four specialized test files that collectively validate breakpoint behavior across different Python constructs, from basic code patterns to error scenarios and edge cases
+- Each component focuses on specific aspects of breakpoint validation while maintaining isolation to prevent test interference
+- The subdirectory employs a systematic approach covering line type validation, error handling, and boundary condition testing
 
-- **`test_debugpy_messages.py`**: Core validation driver containing extensive line-by-line breakpoint scenarios across comments, executable code, docstrings, blank lines, and control flow constructs
-- **`test_scenarios.py`**: Realistic mixed-content testing with typical development patterns combining comments, docstrings, and executable statements
-- **`test_syntax_error.py`**: Negative testing for error detection and reporting when breakpoints encounter malformed code
-- **`test_empty.py`**: Boundary condition testing for empty file scenarios and debugger limits
+## Public API Surface
 
-### Validation Strategy and Data Flow
+The directory functions as a test data collection rather than providing traditional APIs:
 
-The test suite employs a layered validation approach:
+- **Primary Entry Points**: Individual test files can be executed standalone or integrated into automated test suites
+- **Test Scenarios**: Each file represents distinct validation scenarios for debugpy integration
+- **Reference Points**: Line-numbered comments throughout test files serve as precise breakpoint behavior reference points
+- **Validation Framework**: Provides comprehensive coverage for debugger message system testing
 
-1. **Normal Operations Layer**: Primary test files validate standard breakpoint placement across Python language constructs
-2. **Error Handling Layer**: Syntax error scenarios ensure robust error detection and meaningful feedback
-3. **Boundary Conditions Layer**: Edge cases test debugger behavior at operational limits (empty files, beyond EOF references)
+## Internal Organization and Data Flow
 
-## Public API Surface and Entry Points
+The validation framework follows a structured testing methodology:
 
-While these are test files rather than production code, they define the validation contract for breakpoint message handling:
+1. **Systematic Coverage**: Tests progress from simple constructs to complex scenarios (empty files → basic code → syntax errors)
+2. **Isolation Principle**: Each test file maintains independence with no cross-dependencies
+3. **Explicit Tracking**: All test files use inline line number comments for precise validation message testing
+4. **Minimal Dependencies**: Self-contained test files with no external imports to ensure clean testing environments
 
-### Primary Test Targets
-- **Line-by-Line Validation**: Testing breakpoint placement on every type of Python code line
-- **Message Response Validation**: Ensuring appropriate debugger feedback for valid/invalid breakpoint requests  
-- **Error Condition Handling**: Validating error detection and reporting mechanisms
+## Important Patterns and Conventions
 
-### Integration Points
-- **Debugpy Message System**: Direct integration with debugpy's breakpoint request processing
-- **Parser Validation**: Testing interaction with Python syntax parsing during breakpoint placement
-- **Error Reporting**: Validation of error message generation and formatting
+- **Line Type Methodology**: Comprehensive coverage of breakpoint placement on comments, blank lines, executable statements, function definitions, docstrings, and control structures
+- **Error Scenario Validation**: Systematic testing of debugger behavior with malformed Python code and boundary conditions
+- **Incremental Complexity**: Test scenarios build from basic constructs to edge cases, ensuring thorough validation coverage
+- **Debugging Tool Integration**: Purpose-built for validating debugpy's breakpoint message system with explicit focus on message accuracy and consistency
 
-## Internal Organization and Patterns
-
-### Common Testing Conventions
-- Strategic line number referencing in comments for precise breakpoint targeting
-- Controlled mixing of executable and non-executable code lines
-- Simple, dependency-free code constructs to ensure isolated testing
-- Consistent variable assignments and function definitions for predictable test targets
-
-### Data Flow Architecture
-The validation flow progresses from basic scenarios through increasingly complex edge cases:
-- Basic line type validation → Mixed content scenarios → Error conditions → Boundary cases
-
-## Role in Larger System
-
-This validation directory serves as the quality gate for debugpy's breakpoint message handling, ensuring that:
-- Breakpoint placement requests are processed correctly across all Python code constructs
-- Error conditions are detected and reported appropriately
-- Debugger behavior remains consistent across different code patterns and edge cases
-- Regression testing maintains debugger reliability through development cycles
-
-The test suite provides both functional validation and serves as living documentation of expected debugger behavior for breakpoint message handling scenarios.
+This directory serves as the foundational validation layer for ensuring debugpy's reliability across diverse Python code scenarios and debugging contexts.

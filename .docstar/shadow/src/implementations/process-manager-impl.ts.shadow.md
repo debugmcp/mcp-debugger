@@ -1,34 +1,38 @@
 # src/implementations/process-manager-impl.ts
 @source-hash: 5605097425cb62b3
-@generated: 2026-02-09T18:15:02Z
+@generated: 2026-02-10T00:41:46Z
 
 ## ProcessManagerImpl
 
-**Primary Purpose**: Concrete implementation of IProcessManager interface that wraps Node.js child_process module for spawning and executing processes.
+**Purpose**: Concrete implementation of IProcessManager interface that wraps Node.js child_process module for process spawning and execution.
 
 **Key Components**:
-- **ProcessManagerImpl class (L10)**: Main implementation class
-- **spawn method (L11-14)**: Creates child processes using Node.js spawn, returns IChildProcess interface
-- **exec method (L16-41)**: Executes commands and returns stdout/stderr, handles multiple return type scenarios
-- **execAsync constant (L8)**: Promisified version of Node.js exec function
 
-**Architecture & Dependencies**:
-- Implements `IProcessManager` interface from `@debugmcp/shared` package
-- Direct dependency on Node.js `child_process` module
-- Uses `promisify` utility for async/await pattern with exec
-- Type casting from Node.js ChildProcess to IChildProcess interface (L13)
+- **ProcessManagerImpl class (L10-42)**: Main implementation class that provides process management capabilities
+  - Implements IProcessManager interface from @debugmcp/shared
+  - Wraps Node.js child_process functionality with consistent interface
 
-**Critical Logic Patterns**:
-The exec method implements robust handling for different execution environments:
-1. **Standard Node.js behavior (L21-23)**: Handles normal promisified exec result objects
-2. **Array-based mocks (L26-28)**: Accommodates test mocks returning [stdout, stderr] arrays  
-3. **String-only mocks (L31-33)**: Handles simplified mocks returning only stdout
-4. **Fallback handling (L39-40)**: Warning + type casting for unexpected result types
+**Methods**:
 
-**Type Safety Considerations**:
-- Uses type assertion (`as unknown as IChildProcess`) for spawn return value
-- Multiple type guards in exec method to handle runtime type variations
-- Fallback type casting with console warning for unexpected scenarios
+- **spawn() (L11-14)**: Creates child processes using Node.js spawn()
+  - Parameters: command (string), args (string[]), options (SpawnOptions)
+  - Returns: IChildProcess (casted from Node.js ChildProcess)
+  - Direct passthrough to Node.js spawn with type casting
 
-**Testing Accommodation**: 
-The exec method's multi-case handling specifically accounts for different mocking strategies in test environments, making it resilient to various testing frameworks and mock implementations.
+- **exec() (L16-41)**: Executes commands and returns stdout/stderr
+  - Uses promisified version of Node.js exec()
+  - Handles multiple return type scenarios for testing compatibility:
+    - Standard object with stdout/stderr properties (L21-23)
+    - Array format [stdout, stderr] for mocked environments (L26-28)
+    - String-only stdout with empty stderr fallback (L31-33)
+  - Includes fallback warning and type casting for unexpected cases (L39-40)
+
+**Dependencies**:
+- Node.js child_process module (spawn, exec, SpawnOptions)
+- util.promisify for async exec wrapper
+- @debugmcp/shared for IProcessManager and IChildProcess interfaces
+
+**Architecture Notes**:
+- Type casting used to bridge Node.js ChildProcess with custom IChildProcess interface
+- Multi-case handling in exec() suggests accommodation for different testing environments
+- Defensive programming with console.warn for unexpected execution paths

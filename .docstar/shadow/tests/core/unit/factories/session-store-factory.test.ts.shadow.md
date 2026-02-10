@@ -1,56 +1,103 @@
 # tests/core/unit/factories/session-store-factory.test.ts
 @source-hash: c0e50c8ea7fcf9af
-@generated: 2026-02-09T18:14:21Z
+@generated: 2026-02-10T00:41:20Z
 
-## Purpose
-Unit test suite for session store factory components, validating factory pattern implementation and mock functionality for debugging session management.
+## Session Store Factory Test Suite
 
-## Test Structure
+Comprehensive unit tests for session store factory pattern implementation, verifying factory behavior for both production and mock implementations.
+
+### Test Structure
+
+**Main Test Groups:**
+- `SessionStoreFactory` tests (L11-135): Production factory implementation
+- `MockSessionStoreFactory` tests (L137-226): Mock factory for testing
+- `MockSessionStore` tests (L228-390): Mock store with call tracking
+
+### Dependencies
+
+**Core Imports:**
+- `SessionStoreFactory`, `MockSessionStoreFactory`, `MockSessionStore`, `ISessionStoreFactory` (L2-7): Factory classes under test
+- `SessionStore`, `CreateSessionParams` (L8): Core session management types
+- `DebugLanguage` (L9): Enum for supported debug languages
+- Vitest testing framework (L1): Test runner and assertions
 
 ### SessionStoreFactory Tests (L16-135)
-Tests the main production factory that creates SessionStore instances:
-- **Instance Creation (L17-37)**: Validates factory creates proper SessionStore instances with all required methods
-- **Independence Verification (L39-55)**: Ensures each factory.create() call returns distinct instances  
-- **Memory Management (L57-73)**: Confirms factory doesn't retain references to created instances
-- **Functional Testing (L75-99)**: Tests created stores work with actual session creation/retrieval
-- **Interface Compliance (L101-107)**: Verifies ISessionStoreFactory interface implementation
-- **State Isolation (L109-134)**: Confirms stores created by same factory maintain independent state
 
-### MockSessionStoreFactory Tests (L137-226) 
-Tests the testing/mock factory with tracking capabilities:
-- **Mock Instance Creation (L138-150)**: Validates creation of MockSessionStore instances
-- **Store Tracking (L152-168)**: Tests factory's createdStores array functionality
-- **Independence (L170-184)**: Ensures mock stores have independent tracking arrays
-- **Factory Isolation (L186-201)**: Confirms different factory instances maintain separate state
-- **Interface Compliance (L203-209)**: Verifies ISessionStoreFactory interface implementation
-- **Test Utility Access (L211-225)**: Tests ability to access all created stores for testing
+**Factory Instance Creation (L17-37):**
+- Verifies factory creates `SessionStore` instances
+- Confirms all required interface methods exist
+- Tests method signatures and types
 
-### MockSessionStore Tests (L228-389)
-Tests the mock store implementation with call tracking:
-- **Inheritance (L229-244)**: Validates MockSessionStore extends SessionStore properly
-- **Call Tracking (L246-267)**: Tests createSessionCalls tracking functionality
-- **Dual Functionality (L269-292)**: Ensures base functionality works while tracking calls
-- **Instance Independence (L294-320)**: Confirms independent tracking between instances
-- **Order Preservation (L322-342)**: Tests calls tracked in correct order
-- **Parameter Handling (L344-357)**: Tests tracking with minimal parameters
-- **Method Preservation (L359-372)**: Validates all SessionStore methods available
-- **Parameter Fidelity (L374-388)**: Ensures exact parameter tracking
+**Instance Independence (L39-74):**
+- Validates each `create()` call returns unique instances
+- Ensures factory maintains no internal state
+- Confirms proper isolation between created stores
 
-## Key Dependencies
-- **Vitest Framework**: Testing utilities (describe, it, expect, vi, beforeEach, afterEach)
-- **Source Factories**: SessionStoreFactory, MockSessionStoreFactory, MockSessionStore, ISessionStoreFactory
-- **Session Components**: SessionStore, CreateSessionParams
-- **Debug Language**: DebugLanguage enum from @debugmcp/shared
+**Functional Verification (L75-99):**
+- Tests created stores work with real session operations
+- Uses Python debug language for realistic scenarios
+- Validates session creation, retrieval, and storage
 
-## Architecture Patterns
-- **Factory Pattern**: Both production and mock factories implement create() method
-- **Mock/Spy Pattern**: MockSessionStore tracks method calls while preserving base functionality  
-- **Interface Segregation**: All factories implement ISessionStoreFactory interface
-- **Independent Instance Creation**: Factories create isolated instances without shared state
+**Interface Compliance (L101-107):**
+- Ensures `SessionStoreFactory` implements `ISessionStoreFactory`
+- Type-checks factory interface methods
 
-## Critical Invariants
-- Factory instances must not retain references to created stores (production factory)
-- Mock factory must track all created stores in createdStores array
-- MockSessionStore must preserve all base SessionStore functionality while adding tracking
-- Each factory.create() call must return a new, independent instance
-- Mock stores must track createSession calls with exact parameters in order
+**State Isolation (L109-134):**
+- Verifies stores created by same factory maintain independent state
+- Tests session isolation between different store instances
+
+### MockSessionStoreFactory Tests (L137-226)
+
+**Mock Instance Creation (L138-150):**
+- Verifies factory creates `MockSessionStore` instances
+- Confirms inheritance from both `MockSessionStore` and `SessionStore`
+- Validates mock-specific tracking properties
+
+**Store Tracking (L152-168):**
+- Tests `createdStores` array maintenance
+- Verifies chronological tracking of created instances
+- Ensures proper reference management
+
+**Factory Independence (L186-201):**
+- Confirms separate factory instances maintain independent state
+- Tests isolation of `createdStores` arrays
+
+### MockSessionStore Tests (L228-390)
+
+**Inheritance Structure (L229-244):**
+- Verifies `MockSessionStore` extends `SessionStore`
+- Confirms type compatibility and method availability
+- Tests initial state of tracking arrays
+
+**Call Tracking (L246-267):**
+- Tests `createSessionCalls` array for method invocation tracking
+- Verifies parameter capture and chronological ordering
+- Ensures accurate parameter preservation
+
+**Functional Integration (L269-292):**
+- Confirms base `SessionStore` functionality remains intact
+- Tests simultaneous operation and tracking
+- Validates session management while monitoring calls
+
+**Independence Testing (L294-320):**
+- Ensures separate `MockSessionStore` instances maintain independent tracking
+- Tests isolation of call history arrays
+
+**Parameter Handling (L322-388):**
+- Tests tracking with various parameter configurations
+- Verifies minimal and complex parameter scenarios
+- Confirms exact parameter preservation without modification
+
+### Key Test Patterns
+
+**Verification Strategy:**
+- Instance type checking with `toBeInstanceOf()`
+- Method existence validation with `toBeTypeOf('function')`
+- Reference inequality testing with `not.toBe()`
+- Array length and content validation
+- Parameter deep equality comparison
+
+**Test Data:**
+- Uses `DebugLanguage.PYTHON` and `DebugLanguage.MOCK` for realistic scenarios
+- Employs varying session names and executable paths
+- Tests both minimal and comprehensive parameter sets

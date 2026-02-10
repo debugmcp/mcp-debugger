@@ -1,46 +1,48 @@
 # packages/adapter-javascript/src/javascript-adapter-factory.ts
 @source-hash: f9d07a7d072ff717
-@generated: 2026-02-09T18:14:33Z
+@generated: 2026-02-10T00:41:23Z
 
-## Primary Purpose
-Factory class for creating JavaScript/TypeScript debug adapter instances. Extends the shared `BaseAdapterFactory` to provide language-specific validation and instantiation logic for JavaScript/TypeScript debugging environments.
+## JavaScript Adapter Factory
 
-## Key Components
+**Primary Purpose**: Factory implementation for creating JavaScript/TypeScript debug adapter instances, extending the shared AdapterFactory pattern to provide language-specific validation and instantiation.
 
-### AdapterMetadata Configuration (L21-31)
-Static metadata object defining JavaScript adapter characteristics:
-- Supports 8 file extensions: `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.tsx`, `.mts`, `.cts`
-- Requires minimum debugger version 2.0.0
-- Contains placeholder base64 SVG icon
+### Key Components
 
-### JavascriptAdapterFactory Class (L36-139)
-Primary factory class extending `BaseAdapterFactory`:
-- **Constructor (L37-39)**: Passes metadata to base class
-- **validate() (L47-131)**: Comprehensive environment validation with three checks:
-  1. Node.js version ≥14 validation using regex parsing (L52-60)
-  2. Bundled js-debug adapter presence at `../vendor/js-debug/vsDebugServer.js` (L62-76)
-  3. TypeScript runner detection for tsx/ts-node in local and PATH locations (L78-118)
-- **createAdapter() (L136-138)**: Factory method returning `JavascriptDebugAdapter` instance
+**JavascriptAdapterFactory (L36-138)**: Main factory class extending BaseAdapterFactory
+- Constructor (L37-39): Initializes with predefined metadata
+- `validate()` (L47-131): Comprehensive environment validation for JS/TS debugging
+- `createAdapter()` (L136-138): Instantiates JavascriptDebugAdapter with dependencies
 
-## Dependencies
-- **@debugmcp/shared**: Base factory classes and interfaces
-- **Local**: `JavascriptDebugAdapter` from same package
-- **Node.js built-ins**: fs, path, url modules
+**Metadata Configuration (L21-31)**: Static adapter metadata defining:
+- Language support: JavaScript/TypeScript with 8 file extensions (L28)
+- Version and compatibility requirements (L24, L27)
+- Placeholder SVG icon (base64-encoded, L30)
 
-## Architecture Patterns
-- **Factory Pattern**: Implements adapter creation with dependency injection
-- **Validation Chain**: Multi-stage environment validation with errors vs warnings distinction
-- **Cross-platform Support**: Windows-aware executable detection with extension handling (L79-81)
-- **Path Resolution**: ESM-compatible path resolution using `import.meta.url` (L64-66)
+### Validation Logic (L47-131)
 
-## Key Behaviors
-- **Graceful Degradation**: TypeScript runners generate warnings, not errors
-- **Safe File Operations**: Error-catching wrappers for filesystem calls (L82-88)
-- **Short-circuit Optimization**: Early exit when both TypeScript runners found (L113)
-- **Flexible Vendor Path**: Works from both src and dist directories due to sibling vendor directory
+**Node.js Version Check (L52-60)**: 
+- Parses version string using regex (L54-57)
+- Requires major version ≥ 14, adds error if not met
 
-## Validation Result Structure
-Returns `FactoryValidationResult` with:
-- Boolean validity based on error count
-- Separate error/warning arrays
-- Detailed validation context including Node version and tool availability
+**Vendor Dependency Check (L64-76)**:
+- Resolves js-debug adapter path relative to current file location (L64-66)
+- Validates existence of `vsDebugServer.js` in vendor directory
+- Safe error handling for filesystem operations (L73-75)
+
+**TypeScript Runner Detection (L78-118)**:
+- Platform-aware executable extension handling (L79-80)
+- Checks both local `node_modules/.bin` and system PATH
+- Searches for `tsx` and `ts-node` executables
+- Generates warnings (not errors) if neither found
+
+### Dependencies
+
+- **Internal**: `@debugmcp/shared` (AdapterFactory, types), `./javascript-debug-adapter.js`
+- **Node.js Built-ins**: `fs`, `path`, `url.fileURLToPath`
+
+### Architecture Notes
+
+- Follows factory pattern with validation-before-creation semantics
+- Path resolution works for both development (`src/`) and production (`dist/`) contexts
+- Defensive programming with safe filesystem operations and fallback error handling
+- Separation of critical errors (Node.js version, vendor files) from warnings (TS runners)

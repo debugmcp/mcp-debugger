@@ -1,47 +1,58 @@
 # examples/agent_demo.py
 @source-hash: 98d6ab5a2f9e4c59
-@generated: 2026-02-09T18:15:13Z
+@generated: 2026-02-10T00:42:00Z
 
-**Purpose**: Demonstrates an LLM agent that autonomously interacts with a debug-mcp-server to perform debugging operations through a predefined sequence of MCP tool calls.
+## Purpose
+Demonstrates an autonomous LLM agent that executes a predefined debugging workflow using the debug-mcp-server. The agent creates a debug session, sets breakpoints, starts debugging, and inspects execution state in a systematic manner.
 
 ## Key Components
 
-### MCP Communication Layer
-- `call_mcp_tool()` (L14-46): Core MCP client function that sends JSON-RPC requests to the debug server
-  - Handles session management via HTTP headers
-  - Processes and normalizes tool responses
-  - Includes error handling and response parsing
-  - Returns both result and updated session ID
+### Configuration
+- `MCP_SERVER_URL` (L11): Server endpoint for MCP tool calls
+- Target script: `examples/python_simple_swap/swap_vars.py` (L56, L150)
 
-### Mock Agent Implementation  
-- `MockLLM` class (L49-94): Simulates an AI agent with predefined debugging workflow
-  - `plan` (L52-61): Hardcoded sequence of debugging operations (create session → set breakpoint → start debugging → inspect → cleanup)
-  - `think()` (L66-94): State machine that executes next planned action
-  - Maintains both debug session ID and MCP HTTP session ID
-  - Dynamically injects session IDs into tool arguments
-  - Handles file path resolution for breakpoints
+### Core Functions
+- `call_mcp_tool()` (L14-46): HTTP client for MCP tool invocations
+  - Handles JSON-RPC 2.0 protocol formatting
+  - Manages session ID propagation via headers
+  - Parses and processes tool results with error handling
+  - Returns tuple of (processed_result, session_id)
 
-### Agent Control Loop
-- `agent_loop()` (L96-146): Main execution engine
-  - Iterative observation-action cycle with max 10 iterations
-  - Processes tool results and updates agent state
-  - Special handling for debug session creation and startup timing
-  - Includes cleanup logic for unclosed debug sessions
-  - Error recovery feeds exceptions back as observations
+### Agent Architecture
+- `MockLLM` (L49-94): Simulated LLM with predefined action plan
+  - Maintains conversation history and execution state
+  - Stores `debug_session_id` and `mcp_http_session_id` for session continuity
+  - `think()` method (L66-94): Returns next tool action or None when complete
+  - Dynamic parameter injection for sessionId requirements
 
-## Dependencies & Configuration
-- Target script: `examples/python_simple_swap/swap_vars.py` (hardcoded)
-- MCP server endpoint: `http://localhost:3000/mcp` (L11)
-- External libraries: `requests`, `json`, `time`, `os`, `uuid`, `sys`
+### Execution Plan
+The agent follows a hardcoded sequence (L52-61):
+1. Create debug session with Python language support
+2. Set breakpoint at line 9 of swap_vars.py
+3. Start debugging the target script
+4. Retrieve stack trace when breakpoint hits
+5. Close debug session for cleanup
 
-## Architectural Patterns
-- **State Management**: Agent maintains both debugging context (session IDs) and execution state (current plan step)
-- **Error Resilience**: Exceptions are captured and fed back as observations rather than terminating execution
-- **Session Lifecycle**: Automatic cleanup ensures debug sessions don't leak if agent terminates unexpectedly
-- **Timing Simulation**: Includes sleep delays to simulate realistic debugging workflow timing
+### Main Loop
+- `agent_loop()` (L96-146): Core execution engine
+  - Iterative observation-action cycle (max 10 iterations)
+  - Tool result processing and state updates
+  - Error handling with fallback observation
+  - Cleanup logic for orphaned debug sessions
+- `main` (L148-159): Entry point with prerequisite validation
 
-## Critical Invariants
-- Debug session ID must be injected into most tool calls except session creation/listing
-- File paths for breakpoints must be absolute
-- MCP HTTP session ID must be maintained across requests for proper server-side state management
-- Agent plan execution is sequential and non-backtracking
+## Dependencies
+- `requests`: HTTP client for MCP server communication
+- `json`, `time`, `os`, `uuid`, `sys`: Standard library utilities
+
+## Key Patterns
+- **Session Management**: Dual session tracking (MCP HTTP + debug session)
+- **State Propagation**: Automatic sessionId injection based on tool requirements
+- **Error Recovery**: Graceful error handling with cleanup guarantees
+- **Path Resolution**: Automatic conversion of relative to absolute file paths
+
+## Constraints
+- Hardcoded execution plan (not dynamically generated)
+- Requires pre-existing target script at expected location
+- No retry logic for failed tool calls
+- Fixed 3-second wait assumption for breakpoint activation (L128)

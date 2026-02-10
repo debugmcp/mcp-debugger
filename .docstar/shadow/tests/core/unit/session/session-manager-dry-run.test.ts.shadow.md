@@ -1,44 +1,55 @@
 # tests/core/unit/session/session-manager-dry-run.test.ts
 @source-hash: 77e4903f7c161e84
-@generated: 2026-02-09T18:14:21Z
+@generated: 2026-02-10T00:41:17Z
 
 ## Purpose
-Test suite focused on race conditions and timing issues in SessionManager's dry run functionality, specifically testing edge cases around event timing, timeouts, and proper cleanup.
+Test suite specifically focused on dry run race condition scenarios in SessionManager. Tests timing-sensitive behavior around dry run operations, ensuring proper handling of delays, timeouts, race conditions, and event listener cleanup.
 
-## Test Structure
-- **Main Test Suite**: `SessionManager - Dry Run Race Condition Tests` (L6)
-- **Setup/Teardown**: Fake timers setup (L12) and cleanup (L25-29)
-- **Dependencies**: Mock proxy manager and test configuration (L7-23)
+## Key Test Structure
+- **Test Suite Setup (L6-29)**: Configures fake timers and mock dependencies for controlled timing tests
+- **Mock Configuration Pattern**: Each test overrides `mockProxyManager.start` to control dry-run-complete event timing
+- **Timing Control**: Uses `vi.advanceTimersByTimeAsync()` to precisely control timer progression
 
-## Key Test Cases
+## Core Test Scenarios
 
-### Delayed Dry Run Completion (L32-78)
-Tests waiting for dry run completion beyond the default 500ms timeout. Overrides `mockProxyManager.start` to emit `dry-run-complete` after 1000ms delay, verifying the system waits appropriately.
+### Slow Completion Test (L32-78)
+Tests SessionManager's ability to wait beyond the default 500ms timeout for dry run completion. Verifies:
+- 1000ms delay handling with proper duration measurement
+- Success state with dry run metadata
+- Event-driven completion flow
 
-### Timeout Handling (L80-131)
-Tests graceful timeout behavior when dry run never completes. Uses shorter 2000ms timeout and verifies failure response with timeout error message.
+### Timeout Handling Test (L80-131)
+Validates graceful timeout when dry-run-complete never fires:
+- Custom 2-second timeout configuration
+- Failure state with timeout error message
+- Proper error reporting with timeout duration
 
-### Race Condition Handling (L133-174) 
-Tests scenario where `dry-run-complete` event fires before event listener setup using `process.nextTick`. Verifies the system can still detect completion by checking state.
+### Race Condition Test (L133-174)
+Tests early event emission using `process.nextTick()` to simulate dry-run-complete firing before event listener setup:
+- Immediate event emission scenario
+- State-based fallback verification
+- Race condition resilience
 
-### Fast Completion (L176-218)
-Tests very fast dry run completion (10ms) to ensure no unnecessary delays are introduced in the happy path.
+### Fast Completion Test (L176-218)
+Verifies efficient handling of very quick (10ms) dry run completion:
+- Minimal delay scenarios
+- Performance validation (under 100ms total)
+- No unnecessary waiting
 
-### Event Listener Cleanup (L220-270)
-Tests proper cleanup of event listeners on timeout using spies on `once` and `removeListener` methods to verify listeners are properly removed.
-
-## Key Patterns
-- **Mock Override Strategy**: Each test overrides `mockProxyManager.start` to control event timing
-- **Timer Manipulation**: Uses `vi.advanceTimersByTimeAsync()` to control time progression
-- **Duration Verification**: Measures actual vs expected timing with CI-tolerant bounds
-- **State Verification**: Checks both success/failure status and session state transitions
+### Cleanup Test (L220-269)
+Ensures proper event listener management on timeout:
+- Event listener setup verification via spies
+- Cleanup validation using `removeListener` spy
+- Memory leak prevention
 
 ## Dependencies
-- **SessionManager**: Main class under test from `session-manager.js`
-- **Mock Dependencies**: From `session-manager-test-utils.js` (L4)
-- **Shared Types**: `SessionState`, `DebugLanguage` from `@debugmcp/shared` (L3)
+- **SessionManager**: Main class under test from `../../../../src/session/session-manager.js`
+- **Mock Utilities**: `createMockDependencies()` from `./session-manager-test-utils.js`
+- **Shared Types**: `SessionState`, `DebugLanguage` from `@debugmcp/shared`
 
-## Test Configuration
-- Base log directory: `/tmp/test-sessions` (L15)
-- Default DAP launch args with `stopOnEntry` and `justMyCode` (L16-19)
-- Custom timeout configurations for specific tests (L82, L222)
+## Testing Patterns
+- **Fake Timer Control**: All tests use `vi.useFakeTimers()` for deterministic timing
+- **Mock Proxy Override**: Each test customizes `mockProxyManager.start` behavior
+- **Event Emission Control**: Tests precisely control when `dry-run-complete` events fire
+- **Duration Validation**: Tests measure actual vs expected timing with CI-friendly tolerances
+- **Spy-based Verification**: Uses Vitest spies to verify internal event listener management

@@ -1,72 +1,61 @@
 # tests/test-utils/fixtures/python/
-@generated: 2026-02-09T18:16:10Z
+@generated: 2026-02-10T01:19:37Z
 
-## Overall Purpose
-This directory contains Python test fixtures specifically designed for debugging and development testing scenarios within the MCP (Model Context Protocol) test framework. It provides controlled Python environments and debug server infrastructure to support comprehensive debugging integration tests.
+## Test Fixtures for Python Debugging and Process Testing
 
-## Key Components and Relationships
+This directory contains specialized test fixture scripts designed to support testing of debugging capabilities, process monitoring, and debugger attachment scenarios within the MCP (Model Context Protocol) ecosystem.
 
-### Debug Test Target (`debug_test_simple.py`)
-- **Purpose**: Minimal, long-running Python process for debugging scenarios
-- **Key Features**: 
-  - Predictable execution flow with sample_function() providing debuggable units
-  - 60-second runtime to maintain process availability for test connections
-  - Simple arithmetic operations with local variables for breakpoint testing
-  - Self-contained with stdlib-only dependencies
+### Overall Purpose
+The module provides controlled test environments for validating debugging workflows, particularly focused on:
+- Debugger attachment and detachment scenarios
+- Long-running process monitoring
+- Debug server/client communication patterns
+- MCP server debugging capabilities
 
-### Debug Server Infrastructure (`debugpy_server.py`) 
-- **Purpose**: DAP (Debug Adapter Protocol) server implementation for MCP debugging tests
-- **Key Features**:
-  - Configurable debugpy server with host/port binding
-  - Built-in test payload (Fibonacci calculator) with programmatic breakpoints
-  - Command-line interface supporting multiple execution modes
-  - Robust error handling and cleanup procedures
+### Key Components
 
-## Public API Surface
+**debug_test_simple.py** - Basic Debug Target
+- Simple, predictable execution script for testing debugger attachment
+- 60-second runtime window for external tool interaction
+- Minimal computation logic for verification and breakpoint testing
+- Primary use case: Testing process monitoring and debugger attachment workflows
 
-### Primary Entry Points
-- **debugpy_server.py CLI**: Main interface for starting debug servers
-  - `--host/--port`: Network configuration
-  - `--no-wait`: Non-blocking server startup
-  - `--run-test`: Execute test scenarios with breakpoints
-- **debug_test_simple.py**: Direct execution for simple debugging targets
+**debugpy_server.py** - Debug Protocol Server
+- Full-featured debugpy server implementation for DAP (Debug Adapter Protocol) testing
+- Configurable host/port binding (default: 127.0.0.1:5679)
+- Built-in test scenarios with Fibonacci calculations and programmatic breakpoints
+- CLI interface for flexible deployment in different test configurations
 
-### Core Functions
-- `start_debugpy_server(host, port, wait_for_client)`: Server initialization
-- `run_fibonacci_test()`: Breakpoint-enabled test execution
-- `sample_function()`: Basic debuggable unit in simple fixture
+### Public API Surface
 
-## Internal Organization and Data Flow
+**Command-Line Interfaces:**
+- `python debug_test_simple.py` - Launches basic debug target
+- `python debugpy_server.py [--host HOST] [--port PORT] [--no-wait] [--run-test]` - Configurable debug server
 
-### Architecture Pattern
-The directory implements a **client-server debugging model** where:
-1. `debugpy_server.py` acts as the DAP server (listening/waiting)
-2. External MCP processes connect as debug clients
-3. `debug_test_simple.py` provides simple target processes for basic debugging scenarios
+**Key Entry Points:**
+- `start_debugpy_server(host, port, wait_for_client)` - Programmatic server initialization
+- `run_fibonacci_test()` - Pre-built debugging scenario with breakpoints
+- `fibonacci(n)` - Simple test function for debugging demonstrations
 
-### Execution Flow
-1. Test frameworks spawn debug servers using `debugpy_server.py`
-2. Servers bind to configurable ports (default: 5679) and await client connections
-3. MCP processes under test connect as debug clients
-4. Test payloads (Fibonacci, sample_function) provide controllable breakpoint targets
-5. Cleanup mechanisms ensure proper resource management
+### Internal Organization and Data Flow
 
-## Important Patterns and Conventions
+**Testing Workflow Pattern:**
+1. **Setup Phase**: Initialize debug server or simple target process
+2. **Connection Phase**: External debugging tools/MCP servers attach as clients
+3. **Execution Phase**: Run test scenarios with predictable breakpoints and outputs
+4. **Validation Phase**: Verify debugger interaction and protocol compliance
 
-### Configuration Standards
-- Default localhost binding (127.0.0.1:5679) for test isolation
-- Non-standard debug ports to prevent conflicts with development environments
-- Consistent command-line argument patterns across fixtures
+**Component Relationship:**
+- `debug_test_simple.py` serves as a lightweight debug target for basic attachment testing
+- `debugpy_server.py` provides comprehensive debugging infrastructure for complex MCP server testing
+- Both components support extended execution windows to accommodate external tool interaction
 
-### Test Design Principles
-- **Predictable Timing**: Fixed sleep periods and execution flows for test automation
-- **Minimal Complexity**: Simple, debuggable code paths to avoid test interference
-- **Self-Contained**: No external dependencies beyond Python stdlib and debugpy
-- **Graceful Cleanup**: Proper signal handling and resource cleanup patterns
+### Important Patterns and Conventions
 
-### Error Handling
-- Import validation for debugpy availability
-- Keyboard interrupt handling for clean server shutdown
-- Boolean return codes for programmatic integration
+**Debugger Architecture**: Implements correct debugpy usage where fixture scripts act as debug servers and external MCP processes connect as DAP clients, avoiding common server/client role confusion.
 
-This fixture directory enables comprehensive testing of MCP debugging capabilities by providing both simple debugging targets and full DAP server infrastructure in a controlled, predictable environment.
+**Configuration Standards**: Uses non-standard port 5679 to prevent conflicts with development debugging sessions, with localhost-only binding for security.
+
+**Error Handling**: Graceful degradation with import validation and boolean status returns for programmatic integration.
+
+**Test Isolation**: Self-contained fixtures with minimal external dependencies, suitable for automated testing pipelines and manual debugging scenarios.

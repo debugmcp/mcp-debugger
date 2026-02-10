@@ -1,80 +1,64 @@
 # tests/unit/proxy/proxy-manager.start.test.ts
 @source-hash: a62c52f899e8a6f2
-@generated: 2026-02-09T18:14:55Z
+@generated: 2026-02-10T00:41:44Z
 
-## Purpose
+## ProxyManager.start() Unit Test Suite
 
-Unit test suite for the `ProxyManager.start()` method and related functionality, providing comprehensive coverage of proxy process initialization, lifecycle management, and error handling scenarios.
+This file provides comprehensive test coverage for the `ProxyManager` class's start functionality and related lifecycle operations. It's a critical test suite validating the initialization, communication, and error handling patterns of the proxy debugging system.
 
-## Core Test Structure
+### Test Infrastructure & Mocks
 
-- **FakeProxyProcess** (L10-23): Mock implementation of `IProxyProcess` extending EventEmitter with stubbed methods for `send`, `sendCommand`, `kill`, and `waitForInitialization`
-- **Main test suite** (L25-1062): Tests `ProxyManager.start()` method with various configurations and failure modes
-- **Helper test suite** (L1064-1210): Tests internal helper methods for script resolution and spawn context preparation
+**FakeProxyProcess (L10-23)**: Mock implementation of `IProxyProcess` extending EventEmitter. Provides stubbed methods for IPC communication (`send`, `sendCommand`, `kill`) and process lifecycle simulation. Key for isolating proxy behavior in tests.
 
-## Key Test Categories
+**Test Setup (L25-89)**: Configures comprehensive mock ecosystem including:
+- `proxyProcessLauncher` with `launchProxy` spy
+- `fileSystem` with `pathExists` stub  
+- `logger` with all log level methods
+- Default `sendCommand` mock handling init handshake protocol
 
-### Initialization Flow (L108-196)
-- Basic proxy launch and init command sending (L108-120)
-- Prevention of multiple concurrent starts (L122-126)
-- Dry-run command snapshot recording (L128-162, L164-195, L197-229)
+### Core Test Scenarios
 
-### Environment Validation (L231-287)
-- Adapter environment validation failures (L231-258)
-- Executable path resolution errors (L260-287)
+**Basic Startup Flow (L108-120)**: Validates standard proxy initialization - process launch, init command dispatch, and session ID propagation.
 
-### Retry Handling (L289-361)
-- Init command retry logic with fake timers (L298-332)
-- Exhaustive retry failure with detailed error reporting (L334-360)
+**Concurrent Start Protection (L122-126)**: Ensures `start()` throws when proxy already running, preventing resource conflicts.
 
-### Timeout and Exit Scenarios (L363-433)
-- Proxy initialization timeout (L363-390)
-- Clean dry-run exit handling (L392-409)
-- Proxy exit with stderr capture (L411-425)
-- Missing bootstrap script validation (L427-433)
+**Dry-Run Command Capture (L128-162, L164-195)**: Tests adapter command snapshot functionality for dry-run executions. Validates command reconstruction from adapter config vs fallback to executable path.
 
-### Process Management (L435-506)
-- Invalid PID handling (L435-442)
-- Proxy script resolution for different module layouts (L444-506)
+**Environment Validation (L231-287)**: Tests adapter environment validation integration - validates failure paths when environment invalid or executable resolution fails.
 
-### Stop and Cleanup (L508-568)
-- Graceful termination with force kill fallback (L509-531)
-- Already-exited process handling (L533-543)
-- Cleanup of pending requests and launch barriers (L545-567)
+### Retry & Error Handling
 
-### Command Diagnostics (L570-636)
-- Send command validation and error handling (L571-599)
-- Exit details logging for post-mortem debugging (L601-635)
+**Init Retry Logic (L289-361)**: Complex test suite using fake timers to validate retry behavior on transient IPC failures. Tests exponential backoff and ultimate failure after retry exhaustion.
 
-### Event Handling (L638-851)
-- IPC telemetry and heartbeat logging (L638-673)
-- Proxy exit event processing (L675-720)
-- Launch barrier integration for fire-and-forget operations (L722-754)
-- Status message forwarding and lifecycle events (L756-850)
+**Timeout Handling (L363-390)**: Validates 30-second initialization timeout when proxy never signals readiness.
 
-### DAP Request Management (L852-1061)
-- Response resolution and thread ID capture (L852-889)
-- Error propagation and timeout handling (L891-938)
-- Transport failure recovery (L940-950)
-- Concurrent stop/start interaction (L1010-1061)
+**Exit During Initialization (L411-425, L972-1008)**: Tests failure scenarios where proxy exits before completing initialization, with stderr capture.
 
-## Key Dependencies
+### Process Lifecycle Management  
 
-- **Vitest**: Test framework with mocking capabilities
-- **EventEmitter**: For mock process communication
-- **Path utilities**: File system path resolution
-- **@debugmcp/shared**: Core interfaces (`IProxyProcess`, `IDebugAdapter`, etc.)
-- **DAP state management**: From `../../../src/dap-core/index.js`
+**Stop Behavior (L508-568)**: Tests graceful shutdown with terminate command, force kill timeout, concurrent stop calls, and cleanup of pending requests/launch barriers.
 
-## Test Configuration
+**Event Forwarding (L756-850)**: Validates proxy message handling and event emission for status updates (dry-run-complete, initialized, adapter-configured, exit).
 
-- **Base config** (L91-100): Standard proxy configuration for JavaScript debugging
-- **Fake timers**: Used extensively for timeout and retry testing
-- **Mock implementations**: Comprehensive mocking of file system, logger, and process launcher
+### DAP Request Handling
 
-## Notable Patterns
+**Request/Response Flow (L852-889)**: Tests DAP command dispatch through proxy with response correlation and thread ID extraction.
 
-- Extensive use of type assertions to access private ProxyManager internals
-- Async/await with fake timer advancement for timeout scenarios
-- Event-driven test patterns matching the EventEmitter-based architecture
-- Comprehensive error message validation for different failure modes
+**Error Scenarios (L891-970)**: Validates DAP request failures on proxy errors, timeouts, transport failures, and proxy exit during pending requests.
+
+### Script Resolution
+
+**findProxyScript Logic (L444-506)**: Tests bootstrap script path resolution across different deployment patterns (dist/, development layout, bundled).
+
+**Runtime Environment Integration (L1086-1209)**: Tests spawn context preparation with adapter integration, environment cloning, and validation failure handling.
+
+### Key Dependencies
+
+- `@debugmcp/shared` types for proxy interfaces
+- `../../../src/proxy/proxy-manager.js` - main class under test
+- `../../../src/dap-core/index.js` for DAP state management
+- Vitest testing framework with extensive timer mocking
+
+### Test Patterns
+
+The suite uses sophisticated async testing patterns with `vi.useFakeTimers()`, event emission simulation, and promise coordination. Heavy use of type casting to access private members for state verification and test orchestration.

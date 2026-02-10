@@ -1,50 +1,51 @@
 # tests/core/unit/session/session-manager-multi-session.test.ts
 @source-hash: edaf4a5de47f4b32
-@generated: 2026-02-09T18:14:23Z
+@generated: 2026-02-10T00:41:12Z
 
-This test file validates multi-session management capabilities of the SessionManager class, ensuring proper isolation and coordination of concurrent debug sessions.
+This is a comprehensive test suite for the SessionManager's multi-session management capabilities, ensuring concurrent debugging sessions are properly isolated and managed.
 
-## Primary Purpose
-Tests the SessionManager's ability to handle multiple simultaneous debug sessions, including proper state isolation, concurrent operations, and cleanup mechanisms.
+## Purpose
+Tests the SessionManager's ability to handle multiple simultaneous debugging sessions with proper state isolation, resource management, and error handling.
 
-## Key Test Structure
-- **Test Suite Setup** (L15-33): Configures mock dependencies, fake timers, and SessionManager instance with test configuration
-- **Teardown** (L29-33): Resets timers, mocks, and proxy managers to ensure test isolation
+## Test Setup (L10-33)
+- Uses Vitest framework with mocked dependencies
+- Creates fresh SessionManager instance per test with mock configuration (L18-26)
+- Configures fake timers for controlled async behavior testing
+- Uses createMockDependencies() utility and MockProxyManager for isolation
 
-## Core Test Cases
+## Key Test Cases
 
-### Multiple Concurrent Sessions (L35-70)
-- Creates 3 simultaneous debug sessions with MOCK language
-- Validates concurrent session startup and state management
-- Verifies each session maintains independent PAUSED state after debugging starts
-- Tests Promise.all coordination for parallel session operations
+### Concurrent Session Management (L35-70)
+Tests creation and simultaneous operation of multiple debug sessions:
+- Creates 3 separate debugging sessions with unique names
+- Validates concurrent startDebugging operations across all sessions
+- Verifies each session maintains independent PAUSED state
 
-### Session State Isolation (L72-106)  
-- Creates separate MockProxyManager instances for different sessions (L74-80)
-- Tests that session state changes don't affect other sessions
-- Validates proxy manager factory creates distinct instances per session
-- Simulates debug events (stopped, continued) on individual sessions
+### Session State Isolation (L72-106)
+Critical test ensuring proper separation between sessions:
+- Creates separate MockProxyManager instances per session (L74-80)
+- Tests that state changes in one session don't affect others
+- Validates continue operation affects only targeted session while others remain paused
 
-### Bulk Session Management (L108-170)
-- **closeAllSessions with Active Sessions** (L108-130): Tests cleanup of multiple active debugging sessions
-- **Empty Session List Handling** (L132-142): Validates graceful handling when no sessions exist
-- **Error Resilience** (L144-170): Tests that individual session failures don't prevent overall cleanup
+### Bulk Session Management (L108-130)
+Tests closeAllSessions() functionality:
+- Creates multiple active sessions
+- Verifies all sessions transition to STOPPED state
+- Confirms proper cleanup through proxy manager stop calls
+
+### Edge Cases
+- Empty session list handling in closeAllSessions (L132-142)
+- Error resilience during bulk session closure (L144-170)
 
 ## Key Dependencies
-- `SessionManager` from `../../../../src/session/session-manager.js` (L5)
-- `DebugLanguage, SessionState` from `@debugmcp/shared` (L6)
-- `MockProxyManager` for test doubles (L7)
-- `createMockDependencies` utility for test setup (L8)
+- SessionManager from `../../../../src/session/session-manager.js`
+- DebugLanguage, SessionState from `@debugmcp/shared`
+- MockProxyManager and createMockDependencies test utilities
 
 ## Testing Patterns
-- Uses Vitest fake timers with `shouldAdvanceTime: true` for async operation testing
-- Implements mock proxy manager factory pattern for session isolation testing
-- Employs Promise.all for testing concurrent operations
-- Validates state transitions through direct session state inspection
+- Extensive use of vi.runAllTimersAsync() for async operation completion
+- Promise.all() for concurrent operation testing
+- Mock proxy manager simulation for DAP events
+- State verification through SessionManager.getSession() calls
 
-## Critical Validations
-- Session count management and retrieval
-- Independent session state maintenance
-- Proper proxy manager association per session
-- Error handling during bulk operations
-- Logging behavior verification for operational visibility
+The tests ensure the SessionManager can reliably handle multiple concurrent debugging contexts without state leakage or resource conflicts.

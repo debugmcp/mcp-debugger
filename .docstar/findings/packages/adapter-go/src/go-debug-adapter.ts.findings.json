@@ -1,0 +1,23 @@
+{
+  "source": "packages/adapter-go/src/go-debug-adapter.ts",
+  "source_hash": "1fefc1d4c0c4d55b",
+  "generated": "2026-02-10T01:19:08Z",
+  "findings": [
+    {
+      "category": "commented_out_code",
+      "line_start": 93,
+      "line_end": 120,
+      "severity": "warning",
+      "description": "Multiple console.error statements wrapped in CI environment checks for debugging purposes",
+      "suggestion": "Consider using structured logging instead of conditional console.error statements, or remove debug logging from production code"
+    },
+    {
+      "category": "stale_comment",
+      "line_start": 314,
+      "line_end": 316,
+      "severity": "warning",
+      "description": "Comment about Delve returning 'unknown goroutine' when stopOnEntry is true may be outdated",
+      "suggestion": "Verify if this is still an issue with current Delve versions and update comment accordingly"
+    }
+  ]
+}

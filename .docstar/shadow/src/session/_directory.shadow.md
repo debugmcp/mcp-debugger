@@ -1,124 +1,89 @@
 # src/session/
-@generated: 2026-02-09T18:16:15Z
+@generated: 2026-02-10T01:19:46Z
 
-## Overall Purpose
+## Session Management Module
 
-The `src/session` module provides comprehensive debug session management functionality for the Debug MCP Server. This is the core orchestration layer that manages debug session lifecycle, coordinates with debug adapters through proxy managers, and provides a unified API for debug operations including execution control, data retrieval, and session state management.
+**Overall Purpose**: Core debug session management system providing complete lifecycle orchestration, data operations, and state management for debug adapters. Implements a layered architecture that separates storage, operations, and control flow for maximum testability and maintainability.
 
-## Architecture Overview
+## Key Components & Architecture
 
-The module follows a layered architecture with clear separation of concerns:
+### Layered Inheritance Design
+The module follows a structured inheritance hierarchy that separates concerns:
 
-```
-SessionManager (facade/entry point)
-    ↓ extends
-SessionManagerOperations (execution control & operations)
-    ↓ extends  
-SessionManagerData (data retrieval via DAP)
-    ↓ extends
-SessionManagerCore (lifecycle & event management)
-    ↓ uses
-SessionStore (pure data layer)
-```
+1. **SessionManagerCore** (base): Abstract foundation providing dependency injection, event handling, and proxy lifecycle management
+2. **SessionManagerData** (extends Core): Adds data retrieval operations for variables, stack traces, and scopes with language-specific policies  
+3. **SessionManagerOperations** (extends Data): Implements complete debug operations including launching, stepping, breakpoints, and expression evaluation
+4. **SessionManager** (extends Operations): Main entry point and facade class
 
-## Key Components & Relationships
-
-### SessionManager (Main Entry Point)
-- **File:** `session-manager.ts`  
-- **Role:** Primary facade and composition root
-- **API:** Complete debug session management interface
-- **Usage:** Main class consumers should instantiate
-
-### Core Functionality Layers
-
-**SessionManagerCore**
-- Event-driven session lifecycle management
-- Proxy manager event coordination (stopped/continued/terminated/error)
-- Dependency injection pattern with full testing support
-- WeakMap-based event handler tracking for memory safety
-
-**SessionManagerData**  
-- Debug Adapter Protocol (DAP) data retrieval operations
-- Language-specific policy system for adapter behavior customization
-- Methods: `getVariables()`, `getStackTrace()`, `getScopes()`, `getLocalVariables()`
-
-**SessionManagerOperations**
-- Debug execution control and session operations
-- Methods: `startDebugging()`, stepping operations, `evaluateExpression()`, breakpoint management
-- Process attachment/detachment capabilities
-- Dry-run mode with timeout-based completion detection
-
-**SessionStore**
-- Pure data layer for session CRUD operations
-- Session state management with dual state model (legacy + new lifecycle/execution states)
-- Language policy integration and toolchain validation
-- No external dependencies for improved testability
+### Pure Data Layer
+**SessionStore**: Isolated storage layer managing session state without external dependencies. Uses Map-based storage with UUID session IDs and supports dual state models (legacy + new lifecycle states). Implements policy pattern for language-specific behavior delegation.
 
 ## Public API Surface
 
 ### Primary Entry Points
-- `SessionManager` class - Main interface for all session operations
-- `createSession(params)` - Initialize new debug session
-- `startDebugging(sessionId, launchArgs)` - Begin debug session execution  
-- `closeSession(sessionId)` / `closeAllSessions()` - Session cleanup
+- **SessionManager**: Main class providing complete debug session management interface
+- **SessionStore**: Direct session storage operations for specialized use cases
+- **SessionManagerDependencies**: Dependency injection container interface defining required services
 
-### Debug Operations
-- **Execution Control:** `stepOver()`, `stepInto()`, `stepOut()`, `continue()`
-- **Data Retrieval:** `getVariables()`, `getStackTrace()`, `getLocalVariables()`
-- **Expression Evaluation:** `evaluateExpression()`
-- **Breakpoints:** `setBreakpoint()`
-- **Process Management:** `attachToProcess()`, `detachFromProcess()`
+### Core Operations
+- **Session Lifecycle**: `createSession()`, `startDebugging()`, `closeSession()`, `closeAllSessions()`
+- **Debug Control**: `stepOver()`, `stepInto()`, `stepOut()`, breakpoint management
+- **Data Inspection**: `getVariables()`, `getStackTrace()`, `getScopes()`, `getLocalVariables()`
+- **Process Management**: `attachToProcess()`, `detachFromProcess()`
+- **Expression Evaluation**: `evaluateExpression()` with automatic frame detection
 
-### Configuration & Dependencies
-- `SessionManagerConfig` - Configuration options with sensible defaults
-- `SessionManagerDependencies` - Full dependency injection interface
-- Support for custom launch arguments and adapter-specific parameters
+### Configuration Types
+- **CustomLaunchRequestArguments**: VSCode debug protocol extensions
+- **SessionManagerConfig**: Logging, timeout, and launch configuration
+- **DebugResult**: Standardized result interface with MCP error codes
 
 ## Internal Organization & Data Flow
 
-### Session Lifecycle
-1. **Creation:** SessionStore creates session with UUID and language validation
-2. **Initialization:** Proxy manager setup with adapter configuration and event handlers
-3. **Execution:** State transitions managed through proxy events (INITIALIZING → RUNNING/PAUSED → STOPPED/ERROR)
-4. **Operations:** Debug commands routed through proxy managers via DAP
-5. **Cleanup:** Event handler removal and proxy manager termination
+### Session Creation Flow
+1. **SessionStore.createSession()** → UUID generation, language validation, policy selection
+2. **SessionManagerOperations.startProxyManager()** → Adapter configuration, executable resolution
+3. **SessionManagerOperations.startDebugging()** → Proxy initialization, handshakes, state transitions
+4. **Event handler setup** → Lifecycle management through proxy events
 
 ### State Management
-- Dual state model maintaining both legacy `SessionState` and new `sessionLifecycle`/`executionState`
-- Event-driven state transitions with comprehensive logging
-- Auto-continue logic for `stopOnEntry=false` scenarios
-- Stale event protection and session validation
+- **Dual State Model**: Legacy `SessionState` + new `SessionLifecycleState`/`ExecutionState` 
+- **Event-Driven Updates**: Proxy events trigger state transitions via `setupProxyEventHandlers()`
+- **Thread Tracking**: Multi-threaded debugging support with threadId management
 
-### Language Policy System
-- `AdapterPolicy` implementations for Python, JavaScript, Rust, Go, Mock
-- Language-specific handshakes, stack frame filtering, and variable extraction
-- Executable path resolution and toolchain validation
+### Data Retrieval Pipeline
+1. **Session validation** → State checks (PAUSED required)
+2. **Language policy selection** → Maps debug language to appropriate adapter policy
+3. **DAP communication** → Variables/stack/scope requests via proxy manager
+4. **Policy filtering** → Language-specific data transformation and filtering
+5. **Result structuring** → Internal format conversion for consistency
 
-## Key Design Patterns
+## Important Patterns & Conventions
 
 ### Dependency Injection
-Full constructor injection enabling testing and modular design across all layers.
+Complete DI container pattern enables testability and modularity:
+- Filesystem, network, logging services
+- Factory patterns for proxy managers and session stores
+- Adapter registry for debug protocol implementations
 
-### Event-Driven Architecture  
-Proxy manager events drive session state transitions with comprehensive handler management.
+### Memory Management
+- **WeakMap event handlers**: Prevents memory leaks during session cleanup
+- **Structured cleanup sequences**: Event handler removal before proxy termination
+- **Double-cleanup protection**: Resilient cleanup with error handling
 
-### Policy Pattern
-Language-specific behavior customization through pluggable AdapterPolicy implementations.
+### Error Handling
+- **Graceful degradation**: Operations return empty results rather than throwing
+- **Comprehensive logging**: Structured debug output with session ID prefixes
+- **State validation**: Pre-operation checks prevent invalid state transitions
 
-### Layered Architecture
-Clear separation between data access, operations, lifecycle management, and storage concerns.
+### Language Agnostic Design
+- **Adapter policies**: Language-specific behavior through policy pattern
+- **Protocol abstraction**: VSCode Debug Adapter Protocol communication layer
+- **Toolchain validation**: Dynamic adapter compatibility checking
 
-## Critical Invariants
+### Special Features
+- **Dry-run mode**: Command validation without execution for testing
+- **Auto-continue support**: Configurable `stopOnEntry` behavior with policy overrides
+- **JDWP detection**: Automatic Java debug configuration
+- **Process attachment**: Runtime attachment to existing processes
 
-- Sessions must be in PAUSED state for stepping operations and expression evaluation
-- Proxy manager event handlers must be properly cleaned up to prevent memory leaks
-- Session state consistency maintained across both legacy and new state models
-- Thread ID required for all execution control operations
-- Each session requires its own ProxyManager instance for process isolation
-
-## Configuration Defaults
-
-- Log directory: `${tmpdir}/debug-mcp-server/sessions`
-- `stopOnEntry`: true, `justMyCode`: true  
-- `dryRunTimeoutMs`: 10000ms
-- Comprehensive error handling with toolchain validation and graceful degradation
+The module provides a complete, production-ready debug session management system with clear separation of concerns, comprehensive error handling, and language-agnostic extensibility.

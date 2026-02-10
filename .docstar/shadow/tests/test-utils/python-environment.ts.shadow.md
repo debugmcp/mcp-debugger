@@ -1,38 +1,43 @@
 # tests/test-utils/python-environment.ts
 @source-hash: c463912123cd93e2
-@generated: 2026-02-09T18:15:09Z
+@generated: 2026-02-10T00:41:58Z
 
 ## Purpose
-Test utility module for detecting Python environment capabilities. Provides async functions to check for Python interpreter availability and specific package installations in test environments.
+Test utility module for detecting Python runtime environment availability. Provides async functions to check if Python interpreter and debugpy module are accessible in the current system environment.
 
 ## Key Functions
 
-### `isPythonAvailable()` (L9-54)
+### isPythonAvailable() (L9-54)
 - **Purpose**: Detects if any Python interpreter is available on the system
-- **Strategy**: Tests multiple common Python command variants (`python`, `python3`, `py`) sequentially
-- **Implementation**: Spawns child processes with `--version` flag, validates both exit code (0) and output presence
-- **Timeout**: 2-second timeout per command attempt with process cleanup
+- **Strategy**: Tries multiple common Python commands (`python`, `python3`, `py`) sequentially
+- **Detection Method**: Spawns `--version` subprocess for each command, validates both exit code (0) and output presence
+- **Timeout**: 2-second timeout per command attempt (L39-42)
 - **Returns**: `Promise<boolean>` - true if any Python command succeeds
 
-### `isDebugpyAvailable()` (L59-106)
-- **Purpose**: Checks if the `debugpy` Python package is installed and importable
-- **Dependencies**: Calls `isPythonAvailable()` first as prerequisite check
-- **Strategy**: Executes Python import test (`import debugpy; print("OK")`) across command variants
-- **Validation**: Requires both zero exit code and "OK" string in stdout output
-- **Timeout**: 3-second timeout per command attempt
-- **Returns**: `Promise<boolean>` - true if debugpy can be imported
+### isDebugpyAvailable() (L59-106)  
+- **Purpose**: Checks if Python debugpy module is installed and importable
+- **Dependency**: First calls `isPythonAvailable()` as prerequisite (L60-62)
+- **Detection Method**: Executes Python import statement `import debugpy; print("OK")` and validates "OK" output
+- **Timeout**: 3-second timeout per command attempt (L91-94)
+- **Returns**: `Promise<boolean>` - true if debugpy import succeeds
 
-## Architecture Patterns
-- **Error Resilience**: Both functions use try-catch blocks and continue-on-failure patterns
-- **Command Fallbacks**: Systematic testing of multiple Python command variants for cross-platform compatibility
-- **Process Management**: Proper cleanup with timeouts and error handlers for spawned processes
-- **Async/Promise Wrapping**: Child process operations wrapped in Promise-based APIs
+## Implementation Patterns
+
+### Process Management
+- Uses `child_process.spawn()` with shell execution for cross-platform compatibility
+- Implements proper event handling for `stdout`, `stderr`, `close`, and `error` events
+- Includes timeout mechanisms to prevent hanging processes
+- Graceful error handling with try-catch blocks around Promise-based subprocess calls
+
+### Command Fallback Strategy
+- Both functions iterate through standard Python command variants
+- Early return on first successful detection
+- Silent failure progression through command list
 
 ## Dependencies
-- `child_process.spawn`: For executing Python commands
-- Shell execution enabled for cross-platform compatibility
+- Node.js `child_process` module for subprocess spawning
+- No external npm dependencies
 
-## Critical Constraints
-- Hard-coded timeouts (2s/3s) may need adjustment for slower systems
-- Assumes shell availability for command execution
-- Requires stdout/stderr output validation beyond just exit codes
+## Cross-Platform Considerations
+- Uses `shell: true` option for Windows compatibility with command resolution
+- Tests multiple Python executable names common across different OS environments

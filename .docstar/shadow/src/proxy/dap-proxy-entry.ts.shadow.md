@@ -1,44 +1,44 @@
 # src/proxy/dap-proxy-entry.ts
 @source-hash: 20e6fcc1abc4cae4
-@generated: 2026-02-09T18:15:02Z
+@generated: 2026-02-10T00:41:50Z
 
-## Purpose
-Production entry point for DAP (Debug Adapter Protocol) proxy worker process. Handles automatic detection of execution context and conditionally starts the proxy runner based on how the process was launched.
+## Primary Purpose
+Production entry point for DAP (Debug Adapter Protocol) proxy worker process. Handles environment detection and conditionally auto-starts the proxy runner based on execution context.
 
 ## Key Components
 
 ### Execution Detection (L19-20)
-- Uses `detectExecutionMode()` to identify how the process was started
-- Returns object with flags: `isDirectRun`, `hasIPC`, `isWorkerEnv`
+- `detectExecutionMode()`: Analyzes how the process was started (direct execution, IPC spawn, or environment flag)
+- Returns execution mode object with boolean flags for different detection methods
 
 ### Auto-execution Logic (L28-53)
-- Conditional startup using `shouldAutoExecute(executionMode)` (L28)
-- Only runs when detected as worker process (bypasses test environment checks)
+- `shouldAutoExecute()` (L28): Determines if proxy should start automatically based on execution mode
+- Only executes when running as a worker process (bypasses test environment checks per L27 comment)
 - Creates production dependencies and console logger (L32-33)
 - Instantiates `ProxyRunner` with dependencies (L36)
 
 ### Error Handling Setup (L38-42)
 - Configures global error handlers via `runner.setupGlobalErrorHandlers()`
 - Stop callback: `() => runner.stop()`
-- Session ID accessor: Accesses private `currentSessionId` field from worker
+- Session ID accessor: Accesses private `currentSessionId` field via bracket notation for error reporting
 
-### Process Lifecycle (L45-48)
-- Async start with error handling
-- Process exit on startup failure
-- Ready confirmation logging
+### Process Lifecycle (L44-48)
+- Starts runner asynchronously with `.start()`
+- On failure: logs error and exits with code 1
+- On success: logs ready message (L50)
 
 ## Dependencies
-- `./dap-proxy-core.js`: Core proxy functionality and execution detection
-- `./dap-proxy-dependencies.js`: Dependency injection and logging utilities
+- `dap-proxy-core.js`: Core proxy functionality (`ProxyRunner`, detection utilities)
+- `dap-proxy-dependencies.js`: Production dependency injection and logging setup
 
-## Architecture Notes
-- **No test environment detection**: Explicit comment indicates production-only behavior (L27)
-- **Private field access**: Direct access to worker's private `currentSessionId` for error reporting (L41)
-- **Console logging**: Extensive stderr logging for process visibility and debugging
-- **Conditional execution**: Safe to import without side effects - only executes when appropriate
+## Architectural Decisions
+- **Environment-aware startup**: Uses multiple detection methods for flexible deployment
+- **Production-only scope**: Explicitly bypasses test environment considerations
+- **Dependency injection**: Separates concerns by injecting dependencies rather than hardcoding
+- **Global error handling**: Centralizes error management for the worker process
+- **Console-based logging**: Uses `console.error` for worker process communication
 
-## Process Flow
-1. Detect execution mode and log diagnostics
-2. Check if should auto-execute based on worker context
-3. If worker: create dependencies → instantiate runner → setup error handlers → start
-4. If not worker: log and exit without action
+## Critical Constraints
+- Auto-execution only occurs when `shouldAutoExecute()` returns true
+- Private field access pattern used for session ID retrieval in error contexts
+- Process exits with code 1 on startup failure

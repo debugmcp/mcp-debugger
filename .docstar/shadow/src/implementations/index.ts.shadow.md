@@ -1,28 +1,31 @@
 # src/implementations/index.ts
 @source-hash: ea404b38c0273e52
-@generated: 2026-02-09T18:14:58Z
+@generated: 2026-02-10T00:41:44Z
 
-**Primary Purpose:**
-Central export hub for all concrete implementation classes in the implementations module. Acts as a single entry point for accessing various system-level implementation classes.
+## Primary Purpose
+Module index file that centralizes exports of all concrete implementation classes from the implementations package. Acts as the main entry point for consumers to import implementation classes without needing to know their specific file locations.
 
-**Key Exports:**
+## Key Exports
 
-**Core System Implementations (L4-6):**
-- `FileSystemImpl` - Concrete file system operations implementation
-- `ProcessManagerImpl` - Process management implementation  
-- `NetworkManagerImpl` - Network operations implementation
+### Core Implementation Classes (L4-6)
+- **FileSystemImpl** - Concrete file system operations implementation
+- **ProcessManagerImpl** - Process management implementation 
+- **NetworkManagerImpl** - Network operations implementation
 
-**Process Launcher Implementations (L9-14):**
-- `ProcessLauncherImpl` - Standard process launching implementation
-- `DebugTargetLauncherImpl` - Debug-enabled process launcher
-- `ProxyProcessLauncherImpl` - Proxy-wrapped process launcher
-- `ProcessLauncherFactoryImpl` - Factory for creating process launcher instances
+### Process Launcher Implementations (L9-14)
+- **ProcessLauncherImpl** - Standard process launching implementation
+- **DebugTargetLauncherImpl** - Debug-specific process launcher
+- **ProxyProcessLauncherImpl** - Proxy-wrapped process launcher
+- **ProcessLauncherFactoryImpl** - Factory for creating process launcher instances
 
-**Dependencies:**
+## Architectural Pattern
+Follows the barrel export pattern, providing a clean API surface by re-exporting implementation classes from their respective modules. This enables consumers to import all implementations from a single location while maintaining modular file organization.
+
+## Dependencies
 - `./file-system-impl.js` (L4)
 - `./process-manager-impl.js` (L5) 
 - `./network-manager-impl.js` (L6)
 - `./process-launcher-impl.js` (L14)
 
-**Architectural Pattern:**
-Follows barrel export pattern to provide clean, centralized access to implementation classes. Separates core system implementations from specialized process launcher variants, suggesting a layered architecture where process launching has multiple specialized implementations.
+## Usage Pattern
+Typical consumer import: `import { FileSystemImpl, ProcessManagerImpl } from '@package/implementations'`

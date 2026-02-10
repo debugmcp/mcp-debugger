@@ -1,41 +1,48 @@
 # src/implementations/which-command-finder.ts
 @source-hash: 436c6b566d7360dd
-@generated: 2026-02-09T18:15:01Z
+@generated: 2026-02-10T00:41:46Z
 
-## Purpose
-Production implementation of the CommandFinder interface using the 'which' npm package to locate executable commands in the system PATH.
+## Primary Purpose
+Production implementation of the `CommandFinder` interface that locates executable commands in the system PATH using the 'which' npm package.
 
-## Key Components
+## Key Classes and Functions
 
-### WhichCommandFinder Class (L10-51)
-Implements the `CommandFinder` interface to provide command path resolution with optional caching.
+### WhichCommandFinder (L10-51)
+Concrete implementation of `CommandFinder` interface that provides command path resolution with optional caching.
 
 **Constructor (L16):**
-- `useCache: boolean = true` - Controls whether found command paths are cached
-
-**Private Fields:**
-- `cache: Map<string, string>` (L11) - Stores command name to path mappings for performance
+- `useCache: boolean = true` - Controls whether found command paths are cached for performance
 
 **Key Methods:**
-- `find(command: string): Promise<string>` (L24-43) - Locates executable path for given command name
-  - Checks cache first if enabled (L26-28)
-  - Uses `which` package for path resolution (L31)
-  - Caches successful results (L34-36)
-  - Converts `which` errors to `CommandNotFoundError` (L40-41)
-- `clearCache(): void` (L48-50) - Empties the command path cache
+- `find(command: string): Promise<string>` (L24-43) - Core method that resolves command name to full executable path
+- `clearCache(): void` (L48-50) - Utility method to clear the internal cache
+
+**Internal State:**
+- `cache: Map<string, string>` (L11) - Private cache mapping command names to resolved paths
 
 ## Dependencies
-- `which` npm package (L4) - External command location utility
-- `CommandFinder` interface and `CommandNotFoundError` (L5) - Core abstractions
+- `which` npm package - External library for command path resolution
+- `CommandFinder` interface and `CommandNotFoundError` from `../interfaces/command-finder.js`
+
+## Implementation Details
+
+### Caching Strategy (L25-28, L34-36)
+- Checks cache before external lookup when `useCache` is enabled
+- Stores successful lookups in cache for subsequent requests
+- Cache can be disabled via constructor parameter
+
+### Error Handling (L39-42)
+- Catches all errors from the `which` package
+- Converts native errors to custom `CommandNotFoundError` type
+- Maintains consistent error interface across different implementations
 
 ## Architectural Patterns
-- **Interface Implementation**: Concrete implementation of `CommandFinder` abstraction
-- **Caching Strategy**: Optional in-memory cache with Map for performance optimization
-- **Error Translation**: Converts external library errors to domain-specific exceptions
-- **Dependency Injection**: Cache behavior configurable via constructor
+- **Strategy Pattern**: Implements `CommandFinder` interface, allowing different command resolution strategies
+- **Caching Decorator**: Built-in caching layer around the external `which` library
+- **Error Translation**: Abstracts third-party error types into domain-specific exceptions
 
-## Key Behaviors
-- Cache is consulted before external `which` calls when enabled
-- All `which` package errors are uniformly converted to `CommandNotFoundError`
-- Cache can be disabled for scenarios requiring fresh lookups
-- Non-null assertion used on cache hits (L27) assuming cache integrity
+## Key Characteristics
+- Async/await pattern for command resolution
+- Optional performance optimization through caching
+- Clean separation between interface contract and implementation details
+- Testability support via `clearCache()` method

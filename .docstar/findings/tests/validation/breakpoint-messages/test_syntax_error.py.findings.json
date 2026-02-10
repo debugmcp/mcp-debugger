@@ -1,0 +1,15 @@
+{
+  "source": "tests/validation/breakpoint-messages/test_syntax_error.py",
+  "source_hash": "aca52c71bae6da5b",
+  "generated": "2026-02-10T01:18:51Z",
+  "findings": [
+    {
+      "category": "dead_code",
+      "line_start": 5,
+      "line_end": 8,
+      "severity": "warning",
+      "description": "Code after syntax error on line 4 is unreachable due to missing closing parenthesis in function definition",
+      "suggestion": "This appears to be intentional for testing purposes, but the unreachable code should be noted"
+    }
+  ]
+}

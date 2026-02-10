@@ -1,81 +1,92 @@
 # packages/adapter-python/tests/unit/python-utils.comprehensive.test.ts
 @source-hash: 617edf2a0d91327a
-@generated: 2026-02-09T18:14:20Z
+@generated: 2026-02-10T00:41:23Z
 
-**Comprehensive Test Suite for Python Discovery Utilities**
+## Comprehensive Test Suite for Python Discovery Utilities
 
-Tests the `python-utils.js` module's Python executable discovery functionality across platforms with extensive edge case coverage and mocking.
+This TypeScript test file provides extensive coverage for Python executable discovery functionality across different platforms and scenarios. It uses Vitest testing framework with comprehensive mocking of child processes and file system operations.
 
-## Key Test Components
+### Primary Purpose
+Tests the `python-utils.js` module's ability to find and validate Python executables across Windows, Linux, and macOS platforms with various edge cases and error conditions.
 
-### Mock Infrastructure (L6-58)
-- **Child Process Mock** (L7-11): Mocks `child_process.spawn` for controlled process simulation
-- **Which Library Mock** (L14-16): Mocks `which` command lookup utility  
-- **Process Mock Factory** `createSpawn()` (L37-58): Creates EventEmitter-based mock processes with configurable exit codes, stdout/stderr, and errors
+### Test Structure & Key Components
 
-### Core Test Categories
+**Mock Setup (L6-36)**
+- Mocks `child_process.spawn` and `which` library for controlled testing
+- `createSpawn()` helper (L37-58) creates mock child processes with configurable exit codes, stdout/stderr output, and errors
+- Preserves original environment and platform for restoration
 
-#### CommandNotFoundError Tests (L63-76)
-- Validates custom error class with `command` property
-- Tests inheritance from base Error class
+**Core Test Suites:**
 
-#### Command Finder Configuration (L78-96)
-- Tests `setDefaultCommandFinder()` function for swapping discovery strategies
-- Validates return of previous finder when setting new one
+**CommandNotFoundError Tests (L63-76)**
+- Validates custom error class behavior and inheritance
+- Tests error properties and instanceof checks
 
-#### Platform-Specific Windows Behavior (L110-248)
-- **Path Normalization** (L111-130): Tests `Path` to `PATH` environment variable conversion
-- **Windows Store Alias Filtering** (L132-154): Filters out Microsoft Store Python stubs
-- **Extension Handling** (L156-183): Tests `.exe` extension handling on Windows
-- **Debug Discovery Logging** (L185-215): Verbose logging when `DEBUG_PYTHON_DISCOVERY=true`
-- **Store Alias Detection** (L217-247): Detects Windows Store aliases via stderr content
+**Command Finder Management (L78-96)**
+- Tests `setDefaultCommandFinder()` function for dependency injection
+- Verifies previous finder return and restoration
 
-#### Environment Variable Handling (L250-325)
-- **PYTHON_EXECUTABLE** (L251-268): Direct executable path specification
-- **PythonLocation** (L270-296): Windows-specific Python installation root
-- **pythonLocation** (L298-324): Unix-style installation root with `bin/` subdirectory
+**Windows Platform Behavior (L110-248)**
+- Path environment variable handling (`Path` to `PATH` conversion) (L111-130)
+- Windows Store alias filtering and detection (L132-247)
+- Handles `.exe` extension requirements on Windows (L156-183)
+- Verbose discovery logging with `DEBUG_PYTHON_DISCOVERY=true` (L185-215)
+- Multiple detection methods for Windows Store aliases (stderr content analysis)
 
-#### Preferred Path Parameter (L327-399)
-- Tests custom Python executable preference
-- Validates fallback to auto-discovery when preferred path invalid
+**Environment Variable Handling (L250-325)**
+- Tests `PYTHON_EXECUTABLE`, `PythonLocation`, `pythonLocation` environment variables
+- Platform-specific path resolution (Windows vs Unix-like systems)
+- File system existence checks with `fs.existsSync` mocking
+
+**Preferred Path Parameter (L327-399)**
+- Tests explicit Python path preference handling
 - Error propagation for non-CommandNotFoundError exceptions
+- Fallback behavior when preferred path is invalid
 
-#### Debugpy Preference Logic (L401-470)
-- **Multi-Python Selection** (L402-440): Prefers Python installations with debugpy module
-- **Fallback Strategy** (L442-469): Returns first valid Python when none have debugpy
+**Multiple Python Installations (L401-470)**
+- debugpy module preference logic - prefers Python installations with debugpy available
+- Fallback to first valid Python when no installations have debugpy
+- Tests debugpy availability checking via spawn calls
 
-#### Error Scenarios (L472-509)
-- **Comprehensive Error Messages** (L473-488): Lists tried paths in failure messages
-- **CI Environment Logging** (L490-508): Enhanced failure logging in CI environments
+**Error Scenarios (L472-509)**
+- Comprehensive error handling and reporting
+- CI environment specific logging behavior
+- Error message formatting with tried paths
 
-### Python Version Detection Tests (L512-574)
-- Tests `getPythonVersion()` function with various output formats
-- Handles version parsing from stdout/stderr
-- Error handling for spawn failures and non-zero exits
+**getPythonVersion Function Tests (L512-574)**
+- Version string extraction from Python `--version` output
+- Handles stdout and stderr version output
+- Error handling for spawn failures and non-zero exit codes
+- Returns null for invalid scenarios
 
-### Advanced Discovery Behavior (L576-908)
-- **Spawn Error Handling** (L588-614): Graceful handling of process spawn errors during debugpy checks
-- **Debug Message Logging** (L616-640): Verification of discovery debug messages
-- **Complex Validation Scenarios** (L642-756): Multiple validation attempts and Windows Store detection
-- **Auto-detect Loop Error Handling** (L770-793): Error recovery during candidate iteration
+**Command Finder Class Behavior (L576-757)**
+- Integration testing of WhichCommandFinder class
+- Error handling during debugpy checks
+- Debug message logging during discovery process
+- Windows Store alias detection by path analysis
+- Environment variable lookup error handling
 
-### Verbose Discovery Logging (L910-1069)
-- **Windows Debug Output** (L922-963): Comprehensive logging on Windows with DEBUG flag
-- **PATH Issue Detection** (L965-996): Logs PATH configuration problems  
-- **Python PATH Entries** (L998-1030): Lists discovered Python installations in PATH
-- **CI Failure Logging** (L1032-1068): Detailed failure information in CI environments
+**Additional Edge Cases (L759-908)**
+- Auto-detect loop error handling
+- Multiple validation scenarios
+- Candidate collection and selection logic
 
-## Key Dependencies
-- **vitest**: Test framework with mocking capabilities
-- **node:events**: EventEmitter for process simulation
-- **node:path**: Path manipulation utilities
-- **node:fs**: File system existence checks
-- **child_process**: Process spawning (mocked)
-- **which**: Command lookup utility (mocked)
+**Verbose Discovery Logging (L910-1069)**
+- Comprehensive logging when `DEBUG_PYTHON_DISCOVERY=true`
+- PATH environment analysis and issue detection
+- CI-specific verbose failure reporting
+- Console output verification for debugging scenarios
 
-## Testing Patterns
-- Extensive platform mocking (`process.platform`, environment variables)
-- Process behavior simulation with configurable outcomes
-- Error injection and recovery testing
-- Debug/verbose logging verification
-- Cross-platform compatibility validation
+### Key Testing Patterns
+- Extensive use of `vi.spyOn()` for mocking system calls and console output
+- Platform-specific behavior testing using `process.platform` mocking
+- Environment variable manipulation with proper cleanup
+- Mock restoration in `beforeEach`/`afterEach` hooks
+- Comprehensive error scenario coverage including spawn errors, file system errors, and validation failures
+
+### Critical Test Coverage Areas
+- Cross-platform Python discovery (Windows Store aliases, Unix PATH resolution)
+- Environment variable precedence and validation
+- debugpy module preference for development scenarios
+- Verbose logging for CI/debugging environments
+- Error handling and user-friendly error messages

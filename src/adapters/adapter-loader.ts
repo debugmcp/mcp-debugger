@@ -165,16 +165,6 @@ export class AdapterLoader {
     return `@debugmcp/adapter-${language.toLowerCase()}`;
   }
 
-  /**
-   * Compute a monorepo fallback path to the adapter dist entry.
-   * This supports running from the source tree and inside the Docker image where packages are copied.
-   */
-  private getFallbackModulePath(language: string): string {
-    // When bundled, import.meta.url resolves to dist/bundle.cjs
-    // Prefer node_modules path in runtime images
-    return new URL(`../node_modules/@debugmcp/adapter-${language}/dist/index.js`, import.meta.url).href;
-  }
-
   // Try multiple fallback locations (node_modules first, then packages for non-container/dev images)
   private getFallbackModulePaths(language: string): string[] {
     return [

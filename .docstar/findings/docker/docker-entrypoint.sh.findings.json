@@ -1,0 +1,6 @@
+{
+  "source": "docker/docker-entrypoint.sh",
+  "source_hash": "b085bb377cadfdf9",
+  "generated": "2026-02-10T00:41:56Z",
+  "findings": []
+}

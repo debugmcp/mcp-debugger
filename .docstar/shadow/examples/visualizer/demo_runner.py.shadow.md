@@ -1,46 +1,59 @@
 # examples/visualizer/demo_runner.py
 @source-hash: 55b18bb4094f8bec
-@generated: 2026-02-09T18:14:58Z
+@generated: 2026-02-10T00:41:45Z
 
-## Purpose
-Demo orchestration script that launches and coordinates both an MCP debug server and live visualizer to provide a complete debugging demonstration environment.
+## Primary Purpose
+Demo orchestration script that launches and manages both an MCP debug server and a live visualizer for demonstration purposes. Provides a complete end-to-end debugging demo experience with proper process lifecycle management.
 
-## Architecture & Control Flow
-- **Process Management**: Tracks two subprocesses (`server_proc`, `viz_proc`) globally (L20-21)
-- **Cleanup Orchestration**: Registers cleanup handlers for graceful shutdown (L24-43)
-- **Sequential Startup**: Starts server first, validates it's running, then launches visualizer (L46-169)
-- **Terminal Handoff**: Passes terminal control to visualizer for interactive display
+## Key Components
 
-## Key Functions
+### Global Process Tracking (L20-21)
+- `server_proc`: Subprocess handle for MCP server
+- `viz_proc`: Subprocess handle for visualizer  
 
-### cleanup() (L24-39)
-Process termination handler that gracefully shuts down both server and visualizer subprocesses. Uses terminate() first, falls back to kill() after 2-second timeout.
+### Process Management
+- `cleanup()` (L24-38): Graceful shutdown handler that terminates/kills subprocesses with 2-second timeout
+- Signal handlers (L42-43): Registered for `atexit` and `SIGTERM` to ensure cleanup
 
-### main() (L46-169)
-Primary orchestration logic:
-- **Path Resolution** (L50-54): Locates server binary, log file, and visualizer script relative to project structure
-- **Server Validation** (L56-62): Checks if MCP server is built at expected location
-- **Log Management** (L64-73): Clears existing logs and ensures log directory exists  
-- **Server Launch** (L79-120): Starts Node.js MCP server with info-level logging, validates startup success
-- **Visualizer Launch** (L122-162): Starts Python visualizer with terminal control, provides user instructions
+### Main Demo Flow - `main()` (L46-168)
 
-### print_usage() (L171-187)
-Help text showing prerequisites, usage, and command-line options.
+#### Path Resolution (L50-54)
+- `project_root`: Three levels up from current file
+- `server_path`: Expected at `dist/index.js` (Node.js MCP server)
+- `log_path`: Debug logs at `logs/debug-mcp-server.log`
+- `visualizer_path`: Local `live_visualizer.py`
 
-## Dependencies & File Structure
-- **Server Binary**: `dist/index.js` (Node.js MCP server)
-- **Visualizer**: `live_visualizer.py` (Python script in same directory)
-- **Log Output**: `logs/debug-mcp-server.log` (structured debug events)
-- **Project Root**: Resolved relative to script location (`../../..`)
+#### Server Startup (L79-120)
+- Validates server build exists (L56-62)
+- Clears existing log files (L64-73)
+- Launches Node.js server with command: `node dist/index.js --log-level info --log-file <path>`
+- Uses `subprocess.Popen` with pipes to capture startup errors
+- 2-second startup validation with process poll check
 
-## Error Handling Patterns
-- **Subprocess Monitoring**: Polls server process after startup to detect early failures
-- **Graceful Degradation**: Captures and displays subprocess stdout/stderr on failures
-- **Resource Cleanup**: Uses atexit and signal handlers to ensure process cleanup
-- **Timeout Management**: 2-second timeout for graceful termination before force-kill
+#### Visualizer Integration (L122-167)
+- Launches Python visualizer subprocess with log file path
+- Passes through stdin/stdout/stderr for terminal control
+- Provides comprehensive user instructions for MCP client interaction
+- Waits for visualizer exit with keyboard interrupt handling
 
-## Critical Behavior
-- Server must start successfully before visualizer launches
-- Log file is cleared on each run for fresh debugging session
-- Visualizer inherits terminal control for interactive display
-- Demo provides example MCP commands for user guidance
+### Utility Functions
+- `print_usage()` (L171-186): Help documentation with prerequisites and usage
+
+## Dependencies
+- **subprocess**: Process management and execution
+- **pathlib**: Path manipulation and validation  
+- **signal/atexit**: Process cleanup registration
+- **time**: Startup delays
+
+## Architecture Patterns
+- **Process orchestration**: Manages lifecycle of two dependent services
+- **Graceful degradation**: Robust error handling with cleanup guarantees
+- **Terminal passthrough**: Visualizer gets direct terminal access while runner manages processes
+- **Validation-first**: Checks prerequisites before attempting launches
+
+## Critical Constraints
+- Requires pre-built Node.js server at `dist/index.js`
+- Expects `live_visualizer.py` in same directory
+- Creates `logs/` directory structure as needed
+- Server must start within 2-second validation window
+- Uses info-level logging for structured log capture

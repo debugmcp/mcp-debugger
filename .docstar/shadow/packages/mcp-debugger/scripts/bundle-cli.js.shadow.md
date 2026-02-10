@@ -1,34 +1,36 @@
 # packages/mcp-debugger/scripts/bundle-cli.js
 @source-hash: bcf04facb9fd8345
-@generated: 2026-02-09T18:14:34Z
+@generated: 2026-02-10T00:41:23Z
 
-**MCP Debugger CLI Bundle Script**
+**Purpose**: Node.js build script that bundles the MCP debugger CLI and its dependencies for distribution using tsup bundler.
 
-This script orchestrates the complete build pipeline for the MCP debugger CLI distribution, producing three key artifacts: runtime bundle in `dist/`, mirrored package bundle, and npm tarball.
+**Key Functions**:
+- `bundleProxy()` (L23-45): Builds proxy bundle from DAP proxy entry point
+  - Creates `dist/proxy/proxy-bundle.cjs` as CommonJS bundle for SSE/stdio transports
+  - Uses tsup with aggressive bundling (noExternal for all modules)
+- `bundleCLI()` (L47-213): Main CLI bundling function orchestrating the complete build process
+  - Bundles TypeScript CLI to ESM format with Node 18 target
+  - Creates executable wrapper script with shebang (L81-93)
+  - Copies runtime assets from repo-level dist directories (L98-118)
+  - Handles vendor directory copying for debug adapters (L123-190)
+  - Mirrors build artifacts to package directory for npm distribution (L192-203)
+  - Generates npm pack tarball (L205-210)
 
-## Core Functions
+**Build Outputs**:
+- `packages/mcp-debugger/dist/`: Primary runtime bundle
+- `packages/mcp-debugger/package/dist/`: Mirror for npm packaging
+- `packages/mcp-debugger/package/debugmcp-*.tgz`: npm pack tarball
 
-**bundleProxy() (L23-45)**: Bundles the DAP proxy component using tsup with CommonJS format targeting Node 18. Outputs to `dist/proxy/proxy-bundle.cjs` from the repo-level `dist/proxy/dap-proxy-entry.js` source.
+**Dependencies & Architecture**:
+- Uses tsup for TypeScript bundling with ESM output and require() shimming
+- Copies selective runtime assets: proxy, errors, adapters, session, utils (L100)
+- Handles platform-specific debug adapter payloads:
+  - JavaScript: js-debug vendor directory (L123-146)
+  - Rust: CodeLLDB with platform filtering via CODELLDB_PACKAGE_PLATFORMS env var (L148-190)
+- Uses shell commands (`cp`, `rm`) instead of fs.cpSync for better permission handling
 
-**bundleCLI() (L47-213)**: Main bundling orchestrator performing:
-1. CLI bundle creation via tsup (L54-77) - outputs ESM format with `.mjs` extension
-2. Wrapper script generation (L79-93) - creates executable shim with shebang
-3. Runtime asset copying (L98-118) - mirrors repo dist directories (proxy, errors, adapters, session, utils)
-4. Vendor payload integration (L123-190) - handles js-debug and CodeLLDB platform-specific binaries
-5. Package mirroring (L192-203) - duplicates dist to package/ for npm pack
-6. Tarball generation (L205-210) - creates distributable npm package
-
-## Key Dependencies & Configuration
-
-- **tsup**: Primary bundler for both CLI and proxy components
-- **Platform handling**: Environment variable `CODELLDB_PACKAGE_PLATFORMS` controls Rust debugger inclusion
-- **Shell commands**: Uses `execSync` with `cp`/`rm` for file operations to handle permission issues
-- **Path resolution**: Calculates repo structure from script location (L18-21)
-
-## Bundle Strategy
-
-The CLI bundle uses ESM with require shim injection (L68-72) and creates a wrapper for execution safety (L81-88). Vendor payloads are conditionally included based on availability - js-debug from adapter-javascript and CodeLLDB from adapter-rust with platform filtering.
-
-## Error Handling
-
-Graceful degradation for missing vendor components with warning messages and build instructions. File operation failures are caught and logged as warnings to prevent pipeline interruption.
+**Key Patterns**:
+- Defensive copying with cleanup of existing destinations to avoid permission issues
+- Platform-aware bundling with environment variable configuration
+- Graceful degradation with warnings when vendor directories are missing
+- Error handling with process.exit(1) on build failure (L215-220)

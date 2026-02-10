@@ -1,39 +1,44 @@
 # tests/unit/utils/simple-file-checker.test.ts
 @source-hash: 0416fa826bed7263
-@generated: 2026-02-09T18:14:44Z
+@generated: 2026-02-10T00:41:36Z
 
-## Purpose
-Unit test suite for `SimpleFileChecker` utility class, testing file existence checking functionality with path resolution and error handling.
+**Purpose**: Unit tests for SimpleFileChecker class, verifying file existence checking functionality with path resolution and error handling.
 
-## Test Structure
-- **Main describe block** (L18-84): Tests for `SimpleFileChecker` class
-- **Mock setup** (L3-11): Hoisted mocks for container path utilities
-- **Test fixtures** (L19-23): Mock filesystem, environment, and logger objects
+**Key Test Structure**:
+- Uses Vitest framework with mocking capabilities (L1, L3-11)
+- Tests `SimpleFileChecker` class and `createSimpleFileChecker` factory function (L14-16)
+- Mock setup for path utilities using vi.hoisted pattern (L3-6) and vi.mock for module mocking (L8-11)
 
-## Key Test Cases
+**Test Dependencies**:
+- Mocks `container-path-utils.js` functions: `resolvePathForRuntime` and `getPathDescription` (L8-11)
+- Creates mock file system with `pathExists` method (L19-21)
+- Mock logger with debug method (L23)
+- Mock environment object (L22)
 
-### Successful Path Resolution Test (L32-48)
-- Tests normal operation flow: path resolution → existence check → result formatting
-- Verifies correct result structure with `exists`, `originalPath`, `effectivePath` fields
-- Validates debug logging with path descriptions
+**Test Cases**:
 
-### Path Resolution Error Handling (L50-64) 
-- Tests error propagation when `resolvePathForRuntime` throws
-- Uses factory function `createSimpleFileChecker` instead of constructor
-- Verifies error message inclusion in result and fallback to original path
+1. **Successful Path Resolution** (L32-48):
+   - Verifies normal operation when path resolution and existence check succeed
+   - Tests return structure with `exists: true`, `originalPath`, and `effectivePath`
+   - Validates debug logging behavior
 
-### Filesystem Error Handling (L66-83)
-- Tests behavior when `pathExists` operation fails
-- Validates error message formatting with "Cannot check file existence:" prefix
-- Confirms debug logging of failure details
+2. **Path Resolution Error Handling** (L50-64):
+   - Tests behavior when `resolvePathForRuntime` throws an error
+   - Uses factory function `createSimpleFileChecker` instead of constructor
+   - Verifies error propagation with `exists: false` and `errorMessage` fields
 
-## Dependencies
-- **Vitest framework**: Test runner with mocking capabilities
-- **Mocked modules**: `container-path-utils.js` via `vi.mock()`
-- **Under test**: `SimpleFileChecker` class and `createSimpleFileChecker` factory
+3. **File System Error Handling** (L66-83):
+   - Tests behavior when `pathExists` operation fails
+   - Validates error message formatting: "Cannot check file existence: [error]"
+   - Confirms debug logging for failed checks
 
-## Test Patterns
-- Mock clearing in `beforeEach` (L25-30) ensures test isolation
-- Type assertions with `as any` for mock objects
-- Consistent result structure validation across success/error scenarios
-- Debug logging verification in both success and failure paths
+**Test Setup Pattern**:
+- `beforeEach` hook (L25-30) clears all mocks for test isolation
+- Consistent mock object structure with typed vi.fn declarations
+- Uses `as any` type assertions for dependency injection compatibility
+
+**Key Behaviors Tested**:
+- Path resolution integration via mocked utilities
+- Error boundary handling for both resolution and file system operations
+- Logging integration with structured debug messages
+- Return value consistency across success/failure scenarios

@@ -1,47 +1,45 @@
 # tests/unit/implementations/process-manager-impl.test.ts
-@source-hash: 84b7a5b0c7f657ae
-@generated: 2026-02-09T18:14:44Z
+@source-hash: 9047a770380a7a3c
+@generated: 2026-02-10T01:18:53Z
 
-## Primary Purpose
-Unit test file for ProcessManagerImpl class that validates edge cases in process spawning and execution, particularly focusing on how Node.js `util.promisify` behaves across different versions and return types.
+## Purpose
+Unit test file for ProcessManagerImpl focusing on edge cases in util.promisify behavior across Node.js versions. Tests both spawn and exec methods with comprehensive mocking strategies.
 
-## Test Architecture & Global Mock Control System
-- Uses sophisticated global variable system to control `util.promisify` behavior (L10-11, L49-51, L57-58)
-- Global variables `__promisifyResult` and `__promisifyBehavior` manipulate mock responses
-- Mocks `child_process` (spawn, exec) and `util` (promisify) modules (L14-34)
-- Custom promisify mock dynamically returns/throws based on global state (L20-33)
+## Architecture & Testing Strategy
+- Uses Vitest framework with comprehensive mocking (L7)
+- Mocks child_process (L10-13) and util (L15-30) modules at module level
+- Implements custom promisify mock with global state control via `__promisifyBehavior` and `__promisifyResult` (L21-22)
+- Setup/teardown manages mock state and console spying (L40-55)
 
 ## Key Test Suites
 
-### ProcessManager.spawn Tests (L61-104)
-- Basic spawn functionality with command, args, and options (L62-76)
-- Spawn without options parameter (L78-86) 
-- Error handling for invalid commands (L88-92)
-- Default empty args handling when not provided (L94-103)
+### Spawn Tests (L57-100)
+Tests ProcessManagerImpl.spawn() method covering:
+- Basic spawn with command, args, and options (L58-72)
+- Spawn without options (L74-82) 
+- Error handling for invalid commands (L84-88)
+- Default empty args parameter (L90-99)
 
-### ProcessManager.exec Tests (L106-234)
-Complex testing of promisify return value variations:
+### Exec Tests (L102-230)
+Comprehensive testing of ProcessManagerImpl.exec() method addressing util.promisify variations:
+- Object return with stdout/stderr properties (L103-116)
+- Array return [stdout, stderr] format (L118-128) 
+- String-only return (L130-140)
+- Unexpected type handling with console warnings (L142-156)
+- Null return fallback (L158-172)
+- Object without stdout/stderr properties (L174-188)
+- Empty array handling (L190-200)
+- Error rejection scenarios (L202-208)
+- Error objects with exit codes and partial output (L210-229)
 
-#### Standard Return Types:
-- Object with stdout/stderr properties (L107-120)
-- Array format [stdout, stderr] (L122-132)  
-- String-only output (L134-144)
-- Empty array handling (L194-204)
+## Key Implementation Details
+- Global state variables control promisify mock behavior for isolated test scenarios
+- Console.warn spy captures warning messages for unexpected return types (L43, L149-151)
+- Mock process objects include standard properties (pid, stdout, stderr, on, kill) for realistic testing
+- Error objects include code, stdout, stderr properties for comprehensive error handling validation
 
-#### Edge Cases & Fallbacks:
-- Unexpected return types with console warnings (L146-160)
-- Null return values (L162-176)
-- Objects without stdout/stderr properties (L178-192)
-- Error handling and rejection scenarios (L206-212)
-- Non-zero exit codes with partial output (L214-233)
-
-## Test Infrastructure
-- **Setup/Teardown**: Mock clearing, console.warn spy, global variable management (L44-59)
-- **Mock Dependencies**: spawn, exec from child_process; promisify from util
-- **Error Validation**: Tests both thrown errors and structured error objects with exit codes
-
-## Critical Testing Patterns
-- Tests reference specific line numbers in source code (comments like "line 22", "line 27")
-- Validates console warning behavior for unexpected promisify return types
-- Comprehensive coverage of Node.js exec callback transformation edge cases
-- Maintains clean global state between tests to prevent interference
+## Dependencies
+- vitest testing framework
+- Mocked child_process (spawn, exec)
+- Mocked util.promisify with custom behavior control
+- ProcessManagerImpl from implementations directory (L33)

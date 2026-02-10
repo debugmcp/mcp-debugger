@@ -227,6 +227,10 @@ export const GoAdapterPolicy: AdapterPolicy = {
     return {
       // Go/Delve doesn't need deferred configDone
       deferConfigDone: false,
+      // Delve returns "unknown goroutine" when stack traces are requested
+      // immediately after stopping on entry. Default to false so the program
+      // runs until the first breakpoint instead.
+      defaultStopOnEntry: false,
     };
   },
 

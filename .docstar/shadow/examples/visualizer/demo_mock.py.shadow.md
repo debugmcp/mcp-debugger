@@ -1,47 +1,50 @@
 # examples/visualizer/demo_mock.py
 @source-hash: fc50915a74cf4046
-@generated: 2026-02-09T18:15:01Z
-
-**examples/visualizer/demo_mock.py** - Mock debugging session demo for the TUI visualizer.
+@generated: 2026-02-10T00:41:46Z
 
 ## Purpose
-Demonstrates the DebugVisualizer TUI capabilities by simulating a complete debugging session on the `swap_vars.py` example file. Creates a realistic debugging flow with breakpoints, variable inspection, and step-by-step execution without requiring an actual debugger.
+Mock demonstration script for the MCP Debug Visualizer TUI. Simulates a complete debugging session using the `swap_vars.py` example to showcase visualizer capabilities without requiring actual debugging infrastructure.
 
 ## Key Functions
 
-### run_mock_debugging_session(viz) (L25-197)
-Core simulation engine that orchestrates a 19-step mock debugging session:
-- Validates target file existence (`swap_vars.py`) (L37-41)
-- Defines step sequence with actions, delays, and descriptions (L44-182)
-- Each step is a dict containing lambda action, delay timing, and description
-- Simulates realistic debugging workflow: session creation → breakpoints → stepping → variable inspection
-- Silent error handling to prevent TUI interference (L189-191)
-- Automatically stops visualizer after completion (L197)
+### `run_mock_debugging_session(viz: DebugVisualizer)` (L25-197)
+Core simulation function that orchestrates a 19-step debugging session:
+- **Path Resolution (L32-41)**: Calculates absolute path to `swap_vars.py` example file with existence validation
+- **Step Definition (L44-182)**: Defines array of debugging steps, each containing:
+  - `action`: Lambda function calling visualizer methods
+  - `delay`: Sleep duration between steps (2.0-3.0 seconds)
+  - `description`: Human-readable step description
+- **Execution Loop (L184-191)**: Executes steps sequentially with error handling that silently breaks on exceptions
+- **Cleanup (L193-197)**: Final delay and visualizer shutdown
 
-**Key simulation steps:**
-- Session creation with ID "abc-123-def-456" (L47)
-- Breakpoint placement at lines 4, 10, 20 (L54-70)
-- Variable state updates showing bug progression (L89, L117, L145-150)
-- Step commands with different types ("over") (L96, L103, etc.)
-- Continue/pause cycle demonstration (L131, L138)
+**Step Sequence Highlights**:
+- Session creation and breakpoint setting (steps 1-4)
+- Debug start and breakpoint hits (steps 5-6)
+- Variable state tracking through buggy swap execution (steps 7-15)
+- Program flow continuation and error demonstration (steps 16-19)
 
-### main() (L200-232)
-Entry point providing user interface and orchestration:
-- Informational output about demo capabilities (L202-210)
-- Creates DebugVisualizer instance (L214)
-- Launches mock session in daemon thread (L217-222)
-- Handles visualizer execution with proper exception handling (L224-232)
+### `main()` (L200-232)
+Entry point providing user interface and thread management:
+- **User Instructions (L202-211)**: Prints demo description and capabilities
+- **Thread Orchestration (L217-222)**: Launches mock session in daemon thread
+- **Visualizer Execution (L224-232)**: Runs blocking visualizer with comprehensive error handling
 
 ## Dependencies
-- **DebugVisualizer**: Main TUI component being demonstrated (L22)
-- **Threading**: Concurrent execution of simulation and UI (L15, L217)
-- **Path/OS**: File system navigation and validation (L17, L14)
+- **External**: `time`, `os`, `threading`, `sys`, `pathlib.Path`
+- **Internal**: `DebugVisualizer` from `examples.visualizer.debug_visualizer`
+- **Path Manipulation (L19-20)**: Dynamic sys.path modification for relative imports
 
-## Architecture Pattern
-**Threaded Simulation**: Uses daemon thread to run mock debugging session while main thread handles TUI interaction. This prevents blocking and allows clean shutdown.
+## Architecture Patterns
+- **Producer-Consumer**: Main thread runs visualizer UI, daemon thread feeds mock data
+- **State Machine Simulation**: Sequential step execution mimics real debugging flow
+- **Error Isolation**: Silent exception handling in simulation to prevent TUI corruption
+- **Resource Management**: Proper cleanup with `viz.stop()` call
 
-## File Resolution
-Dynamically calculates path to target `swap_vars.py` file using relative path navigation from current file location (L33-35). Falls back gracefully if file not found.
+## Critical Constraints
+- **File Dependency**: Requires `examples/python_simple_swap/swap_vars.py` to exist
+- **Timing Sensitive**: Fixed delays between steps (may need adjustment for different systems)
+- **Thread Safety**: Assumes DebugVisualizer is thread-safe for concurrent updates
+- **Mock Fidelity**: Variable states and line numbers must match actual `swap_vars.py` structure
 
-## Timing Control
-Each simulation step includes calibrated delays (2.0-3.0 seconds) to provide realistic debugging session pacing and allow users to observe state changes.
+## Demo Flow
+Simulates discovering a buggy variable swap where `a = b; b = a` results in both variables having the same value, demonstrating how the visualizer tracks variable state changes and execution flow through breakpoints.

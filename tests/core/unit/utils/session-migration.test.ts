@@ -12,7 +12,6 @@ describe('Session Migration Verification', () => {
     // TypeScript should prevent this at compile time
     const params = {
       language: DebugLanguage.PYTHON,
-      // pythonPath: '/usr/bin/python3'  // This should not be allowed
       executablePath: '/usr/bin/python3'
     } as CreateSessionParams;
     

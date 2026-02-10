@@ -1,85 +1,70 @@
 # packages/adapter-javascript/
-@generated: 2026-02-09T18:17:14Z
+@generated: 2026-02-10T01:20:16Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/adapter-javascript` directory implements a complete JavaScript/TypeScript debugging adapter for the MCP (Model Context Protocol) ecosystem. This module bridges VS Code's Debug Adapter Protocol (DAP) with Microsoft's js-debug engine, providing intelligent debugging capabilities with automatic runtime detection, configuration transformation, and comprehensive lifecycle management for Node.js and TypeScript applications.
+The `packages/adapter-javascript` directory implements a comprehensive JavaScript/TypeScript debug adapter for the DebugMCP framework. This package provides intelligent debugging capabilities by wrapping VS Code's proven js-debug adapter with sophisticated environment detection, automatic configuration transformation, and seamless TypeScript runtime integration.
 
-## Key Components and Integration Architecture
+## Key Components and Integration
 
-### Core Debugging Stack
-The module consists of four integrated layers that work together to provide seamless debugging:
-
-1. **Source Code Layer** (`src/`): Main adapter implementation with factory pattern, DAP protocol handling, and environment detection utilities
-2. **Vendored Runtime** (`vendor/`): Microsoft's js-debug debugging engine with process injection, protocol communication, and code analysis capabilities
-3. **Build Infrastructure** (`scripts/`): Automated vendoring system that acquires and packages js-debug releases with fallback build-from-source support
-4. **Quality Assurance** (`tests/`, `coverage/`): Comprehensive test suite with interactive coverage reporting and cross-platform validation
+### Core Architecture
+- **Source Implementation (`src/`)**: Contains the complete adapter implementation with factory pattern, debug session management, and intelligent configuration handling
+- **Build Infrastructure (`scripts/`)**: Comprehensive vendoring system that acquires, builds, and installs Microsoft's js-debug DAP server through multiple strategies (prebuilt releases, source compilation, local overrides)
+- **Test Suite (`tests/`)**: Extensive validation framework covering all debugging capabilities, platform behaviors, and edge cases
+- **Configuration (`vitest.config.ts`)**: Test framework setup with high coverage standards and monorepo workspace support
 
 ### Component Integration Flow
-The components integrate through a well-orchestrated initialization and runtime flow:
+```
+Build Scripts → Vendor js-debug → Source Implementation → Test Validation → Production Package
+```
 
-**Build-Time Integration:**
-- Scripts automatically vendor the latest js-debug engine from GitHub releases
-- Vitest configuration ensures comprehensive testing with high coverage thresholds (90%+)
-- Build system handles multiple acquisition strategies (prebuilt/local/source) with resilient networking
-
-**Runtime Integration:**
-- Factory validates environment prerequisites (Node.js ≥14, js-debug presence, TypeScript tooling)
-- Adapter transforms generic debug configurations to js-debug-specific format
-- Utilities provide cross-platform executable resolution and TypeScript runner detection
-- Vendored js-debug provides the actual debugging runtime with process injection and CDP protocol handling
-
-**Development Integration:**
-- Interactive coverage reports with syntax highlighting and keyboard navigation
-- Mock-based testing with comprehensive edge case coverage
-- Continuous integration with hermetic test isolation
+The build system ensures js-debug availability before the adapter can function, while the source implementation provides the intelligent wrapper layer that transforms DebugMCP requests into js-debug compatible operations.
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **`JavascriptAdapterFactory`**: Main factory class for creating and validating debug adapter instances
-  - `validate()`: Environment validation with detailed error/warning reporting
-  - `createAdapter()`: Creates configured debug adapter with runtime detection
-- **`JavascriptDebugAdapter`**: Core debug adapter implementing full DAP protocol
-  - `initialize()`: Adapter setup with capability negotiation
-  - `transformLaunchConfig()`: Intelligent configuration transformation
-  - `connect()`/`disconnect()`: Session lifecycle management with state tracking
+- **`JavascriptAdapterFactory`**: Main factory for creating validated adapter instances with environment requirement checks (Node.js ≥14, vendor dependencies, TypeScript runtimes)
+- **`JavascriptDebugAdapter`**: Core debugging session manager implementing IDebugAdapter interface with DAP protocol handling
+- **`JsDebugConfig`**: TypeScript interface defining flexible debugging configuration options
 
-### Configuration Interface
-- **`JsDebugConfig`**: TypeScript interface defining supported debug configuration options
-- **Configuration transformation utilities**: ESM/CommonJS detection, TypeScript tooling integration
-- **Environment variable management**: Automatic injection of debugging options
-
-### Utility APIs
-- **`resolveNodeExecutable()`**: Cross-platform Node.js executable discovery with PATH resolution
-- **`detectTsRunners()`**: TypeScript runtime detection (tsx, ts-node) with intelligent caching
-- **`transformConfig()`**: Configuration transformation with environment-specific optimization
+### Key Capabilities
+- **Intelligent Configuration**: Automatic project type detection (ESM/CommonJS), TypeScript runtime selection (tsx, ts-node), and path resolution
+- **Cross-Platform Support**: Handles Windows/Unix differences, executable discovery, and platform-specific behaviors
+- **Runtime Integration**: Seamless TypeScript debugging with source map support and automatic configuration transformation
+- **Environment Adaptation**: Local-first resolution, container support, and workspace environment handling
 
 ## Internal Organization and Data Flow
 
-### Debugging Session Lifecycle
-1. **Environment Assessment**: Factory validates Node.js version, js-debug availability, and TypeScript tooling
-2. **Configuration Processing**: Adapter transforms generic launch config to js-debug format with runtime-specific arguments
-3. **Process Coordination**: Launch barrier manages js-debug adapter startup synchronization
-4. **Protocol Bridging**: Adapter handles bidirectional DAP communication with comprehensive event processing
-5. **Session Management**: State machine tracks debugging lifecycle with proper cleanup and resource disposal
+### Adapter Lifecycle
+1. **Factory Validation**: Environment checks and dependency verification
+2. **Configuration Intelligence**: Project analysis and automatic TypeScript detection
+3. **Debug Session Management**: DAP protocol translation and state tracking
+4. **Vendor Integration**: Communication with underlying js-debug adapter via TCP
 
-### Cross-Component Dependencies
-- **Factory → Core Adapter**: Creates validated adapter instances with environment-specific configuration
-- **Adapter → Utilities**: Leverages utilities for executable resolution and configuration analysis  
-- **Scripts → Vendor**: Build system populates vendor directory with debugging runtime
-- **Tests → All Components**: Comprehensive validation with hermetic isolation and cross-platform compatibility
-- **Coverage → Development**: Interactive reporting enhances development workflow and code quality
+### Build System Flow
+1. **Strategy Determination**: Environment analysis to select acquisition method (local/prebuilt/source)
+2. **Asset Acquisition**: GitHub API interaction, download, or local compilation
+3. **Vendoring**: Installation to vendor directory with CommonJS boundaries and validation
+4. **Validation**: Checksum verification and sidecar presence confirmation
 
-### Key Design Patterns
-- **Factory Pattern**: Clean separation between adapter creation and operation with comprehensive validation
-- **State Machine**: Explicit debugging session state transitions with event emission
-- **Dependency Injection**: Filesystem abstraction enables hermetic testing and cross-platform reliability
-- **Strategy Pattern**: Multiple js-debug acquisition methods with automatic fallback
-- **Caching**: Intelligent memoization for expensive operations (executable discovery, TypeScript detection)
+## Important Patterns and Conventions
 
-## Role in MCP Ecosystem
+### Design Principles
+- **Defensive Programming**: No-throw utilities with graceful fallbacks and comprehensive error handling
+- **Intelligent Defaults**: Automatic detection with manual override capabilities
+- **Dependency Isolation**: Vendored js-debug with controlled boundaries and deterministic output
+- **Cross-Platform First**: Consistent behavior across development environments
 
-This adapter serves as the complete JavaScript/TypeScript debugging solution within the MCP ecosystem, providing intelligent environment detection, robust error handling, and seamless integration with VS Code's debugging infrastructure. It handles the complexity of bridging generic debug configurations to specific js-debug requirements while ensuring cross-platform compatibility and comprehensive error resilience.
+### Quality Assurance
+- **High Coverage Standards**: 90% minimum coverage across all metrics
+- **Comprehensive Testing**: Unit tests covering all functional areas, platform behaviors, and edge cases
+- **Mock Infrastructure**: Standardized filesystem abstraction and dependency injection for reliable testing
+- **Integration Validation**: End-to-end workflow testing from configuration to debug session establishment
 
-The module's architecture prioritizes reliability, performance, and developer experience through comprehensive testing, interactive tooling, and intelligent automation of complex debugging infrastructure management.
+### Runtime Guarantees
+- **Idempotent Operations**: Cache-aware execution with force-rebuild capability
+- **Deterministic Output**: SHA256 checksums and provenance metadata
+- **Offline Development**: Local override mechanisms for development workflows
+- **Robust Error Handling**: User-friendly error messages with actionable guidance
+
+This adapter serves as the critical bridge between DebugMCP's standardized debugging interface and the rich JavaScript/TypeScript debugging ecosystem, providing intelligent automation while maintaining the flexibility and power of VS Code's proven debugging infrastructure.

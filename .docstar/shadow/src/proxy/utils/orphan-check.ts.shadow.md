@@ -1,33 +1,20 @@
 # src/proxy/utils/orphan-check.ts
-@source-hash: e18d72528f6416f5
-@generated: 2026-02-09T18:14:33Z
+@source-hash: 25d1a00cf87a291a
+@generated: 2026-02-10T01:18:49Z
 
-## Purpose
-Utility module for determining when a proxy process should exit due to orphaned state. Contains intentionally buggy implementation to support regression testing strategy.
+**Purpose**: Utility module for determining when a proxy process should exit due to being orphaned, with special handling for containerized environments.
 
-## Key Functions
+**Core Logic**: 
+- `shouldExitAsOrphan(ppid, inContainer)` (L11-14): Primary decision function that returns true only when PPID=1 (orphaned) AND not in a container environment. In containers, PPID=1 is normal due to PID namespaces.
+- `shouldExitAsOrphanFromEnv(ppid, env?)` (L19-25): Convenience wrapper that determines container status from `MCP_CONTAINER` environment variable before calling core logic.
 
-### `shouldExitAsOrphan(ppid: number, inContainer: boolean): boolean` (L12-15)
-Core decision logic for orphan detection. Returns `true` when process should exit as orphaned.
-- **Current logic**: Exit when not in container AND PPID equals 1
-- **Parameters**: `ppid` - parent process ID, `inContainer` - container environment flag
-- **Container awareness**: Avoids false positives in containerized environments where PPID=1 is normal
+**Key Behavioral Rules**:
+- Normal host process with PPID=1 → should exit (orphaned)
+- Container process with PPID=1 → should NOT exit (expected behavior)
+- Any process with PPID≠1 → should NOT exit (has living parent)
 
-### `shouldExitAsOrphanFromEnv(ppid: number, env?: NodeJS.ProcessEnv): boolean` (L20-26)
-Convenience wrapper that extracts container flag from environment variables.
-- **Environment detection**: Reads `MCP_CONTAINER` env var to determine container state (L24)
-- **Default parameter**: Uses `process.env` when env not provided (L22)
-- **Delegates to**: `shouldExitAsOrphan()` for actual decision logic (L25)
+**Dependencies**: 
+- NodeJS.ProcessEnv type for environment variable handling
+- process.env as default parameter
 
-## Architecture Notes
-- **Testing strategy**: Implementation intentionally mirrors buggy behavior from `proxy-bootstrap` to ensure unit tests catch regressions
-- **Future refactoring**: Comments indicate this is temporary implementation pending test validation
-- **Container handling**: Recognizes that PPID=1 in containers (PID namespaces) is expected behavior, not orphaning
-
-## Dependencies
-- Node.js `ProcessEnv` type for environment variable typing
-- No external dependencies
-
-## Critical Invariants
-- Container detection relies on `MCP_CONTAINER=true` environment variable
-- PPID=1 only indicates orphaning outside container environments
+**Architecture Pattern**: Simple pure functions with explicit container-awareness to handle the common Docker/container deployment scenario where init process (PID 1) is the normal parent.

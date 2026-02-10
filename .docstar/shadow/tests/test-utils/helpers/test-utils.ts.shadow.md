@@ -1,48 +1,49 @@
 # tests/test-utils/helpers/test-utils.ts
 @source-hash: 98776f1ccfde2eda
-@generated: 2026-02-09T18:14:41Z
+@generated: 2026-02-10T00:41:32Z
 
-## Primary Purpose
-Test utilities module providing comprehensive helper functions for Debug MCP Server testing, focusing on session mocking, async condition waiting, event handling, file system operations, and proxy process simulation.
+## Purpose
+Test utilities for the Debug MCP Server testing framework, providing mock objects, event handling helpers, timing utilities, and specialized fake implementations for proxy processes.
 
 ## Key Functions
 
-### Core Test Utilities
-- **createMockSession** (L14-27): Creates mock DebugSession objects with configurable overrides, defaulting to Python language and CREATED state
-- **delay** (L221-223): Simple promise-based delay utility
-- **withTimeout** (L232-239): Wraps functions with timeout protection using Promise.race
+### Mock Creation Utilities
+- `createMockSession(L14-27)` - Creates mock DebugSession objects with configurable overrides, defaulting to Python language and CREATED state
+- `createMockEventEmitter(L104-161)` - Creates vitest-mocked EventEmitter with internal listener tracking
+- `mockAsyncFunction(L169-171)` - Creates vitest mock functions that return resolved promises
+- `createMockLogger(L319-326)` - Creates ILogger mock with all logging methods
+- `createMockFileSystem(L332-351)` - Creates IFileSystem mock with default successful responses
 
-### Async Condition & Event Handling
-- **waitForCondition** (L37-53): Polls condition function until true or timeout (5s default), with configurable intervals (100ms default)
-- **waitForEvent** (L63-81): Returns promise resolving when specific event fires on EventEmitter, with cleanup on timeout
-- **waitForEvents** (L91-99): Sequentially waits for array of events using waitForEvent internally
+### Event & Timing Utilities
+- `waitForCondition(L37-53)` - Polls condition function until true or timeout (default 5s)
+- `waitForEvent(L63-81)` - Promise that resolves when specific EventEmitter event fires
+- `waitForEvents(L91-99)` - Waits for multiple events in sequence
+- `delay(L221-223)` - Simple timeout promise wrapper
+- `withTimeout(L232-239)` - Races function execution against timeout rejection
 
-### Event Emitter Mocking
-- **createMockEventEmitter** (L104-161): Creates complete EventEmitter mock with vitest spies, tracking listeners internally and supporting once/on/emit/removeListener/removeAllListeners methods
+### File System Test Helpers
+- `createTempTestFile(L180-198)` - Creates temporary files in OS temp directory under 'debug-mcp-tests'
+- `cleanupTempTestFiles(L203-213)` - Removes entire temp test directory
 
-### File System Testing
-- **createTempTestFile** (L180-198): Creates files in OS temp directory under 'debug-mcp-tests' subfolder
-- **cleanupTempTestFiles** (L203-213): Removes entire temp test directory recursively
-
-### Mock Factories
-- **mockAsyncFunction** (L169-171): Creates vitest mock returning resolved promise with given value
-- **createMockLogger** (L319-326): Creates ILogger mock with info/error/warn/debug spies
-- **createMockFileSystem** (L332-351): Creates comprehensive IFileSystem mock with all methods stubbed with sensible defaults
-
-### Proxy Testing Utilities
-- **createFakeProxyProcess** (L252-270): Creates FakeProcess configured to handle 'terminate' command messages
-- **setupProxyManagerTest** (L276-313): Complete test setup factory returning ProxyManager instance with all dependencies mocked (launcher, filesystem, logger)
+### Proxy Testing Framework
+- `createFakeProxyProcess(L252-270)` - Creates FakeProcess with terminate message handling
+- `setupProxyManagerTest(L276-313)` - Complete ProxyManager test setup with all mock dependencies
 
 ## Dependencies
-- EventEmitter from Node.js 'events'
-- @debugmcp/shared types (DebugLanguage, SessionState, DebugSession)
-- uuid for session ID generation
-- vitest for mocking (`vi.fn()`)
-- Internal test doubles: FakeProxyProcessLauncher, FakeProcess
-- ProxyManager and interface types from main source
+- **@debugmcp/shared**: DebugLanguage, SessionState, DebugSession types
+- **uuid**: Session ID generation
+- **vitest**: Mock framework (vi.fn())
+- **Internal**: FakeProxyProcessLauncher, ProxyManager, interface types
 
 ## Architecture Notes
-- Functions are pure/stateless except for file system utilities which create/cleanup temp directories
-- Event utilities properly handle cleanup to prevent memory leaks
-- Mock factories return fully-configured objects following dependency injection patterns
-- Proxy test utilities abstract complex setup into single function calls
+- Uses Node.js require() for fs/path/os modules in temp file functions rather than imports
+- Mock event emitter maintains internal listener state for proper cleanup
+- Proxy test utilities integrate with fake process implementation system
+- All timing functions use configurable timeouts with sensible defaults
+- File system operations target isolated temp directory for test safety
+
+## Critical Patterns
+- Mock objects provide vitest spy functions for assertion verification
+- Event utilities handle cleanup to prevent memory leaks
+- Temp file operations are scoped to prevent test interference
+- Proxy mocks simulate real process lifecycle including termination handling

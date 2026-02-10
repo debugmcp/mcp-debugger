@@ -1,35 +1,32 @@
 # tests/unit/proxy/proxy-manager-test-setup.ts
 @source-hash: 6a1344462d12f434
-@generated: 2026-02-09T18:14:40Z
+@generated: 2026-02-10T00:41:30Z
 
 ## Purpose
-Test utility module for ProxyManager test suite that manages expected unhandled Promise rejections during timeout testing scenarios. Prevents test noise from expected timeout failures while preserving error handling for genuine issues.
+Test utility module for managing unhandled promise rejections during ProxyManager timeout tests. Provides controlled handling of expected timeout exceptions to prevent test noise while preserving error detection for genuine issues.
 
-## Key Components
+## Key Functions
 
-### State Management
-- `unhandledRejectionHandler` (L6): Global handler storage for cleanup reference
+**setupTimeoutTestHandler() (L11-35)**
+- Installs custom unhandled rejection handler for test environment
+- Captures original process handler before replacement (L13)
+- Filters expected timeout rejections based on message patterns (L18-20):
+  - "Proxy initialization timeout"
+  - "Timeout waiting for DAP response"
+- Silently ignores expected timeouts, forwards unexpected rejections to original handler or console
+- Completely replaces process unhandled rejection listeners (L33-34)
 
-### Core Functions
-- `setupTimeoutTestHandler()` (L11-35): Installs custom unhandled rejection handler
-  - Preserves original Node.js handler for non-test rejections
-  - Filters expected timeout messages: "Proxy initialization timeout" and "Timeout waiting for DAP response"
-  - Silently ignores expected rejections, forwards unexpected ones to original handler
-  - Completely replaces process-level rejection handling
+**cleanupTimeoutTestHandler() (L40-45)**
+- Removes custom handler and resets module state
+- Should be called in test teardown to restore normal error handling
 
-- `cleanupTimeoutTestHandler()` (L40-44): Removes custom handler and resets state
-
-## Architecture Patterns
-- **Test Isolation**: Provides setup/cleanup pattern for test environment modification
-- **Selective Error Suppression**: Uses message pattern matching to distinguish expected vs unexpected failures
-- **Handler Preservation**: Maintains original Node.js error handling for non-test scenarios
-
-## Critical Constraints
-- Must call `cleanupTimeoutTestHandler()` after tests to restore normal error handling
-- Handler replacement affects global process behavior
-- Timeout message patterns must match actual ProxyManager implementation
-- Only suppresses rejections with specific timeout-related messages
+## State Management
+- **unhandledRejectionHandler (L6)**: Tracks active custom handler instance
+- Module maintains single global handler state
 
 ## Dependencies
-- Node.js `process` global for unhandled rejection event management
-- Expects ProxyManager to throw rejections with specific message patterns during timeout scenarios
+- Node.js process events API for unhandled rejection management
+- Relies on specific error message patterns from ProxyManager implementation
+
+## Usage Pattern
+Designed for test setup/teardown cycle where timeout tests are expected to generate unhandled rejections that should not fail the test suite. Critical for maintaining clean test output while preserving error detection capabilities.

@@ -6,10 +6,6 @@
  */
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-// Create a variable to control promisify behavior
-const promisifyResult: any = null;
-const promisifyBehavior: 'resolve' | 'reject' = 'resolve';
-
 // Mock modules - vi.mock is hoisted, so we can't use external variables
 vi.mock('child_process', () => ({
   spawn: vi.fn(),

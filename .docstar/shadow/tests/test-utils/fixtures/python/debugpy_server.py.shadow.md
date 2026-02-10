@@ -1,40 +1,50 @@
 # tests/test-utils/fixtures/python/debugpy_server.py
 @source-hash: 7558beaff6bfb3b2
-@generated: 2026-02-09T18:14:24Z
+@generated: 2026-02-10T00:41:20Z
 
-## Primary Purpose
-Test fixture that implements a debugpy server for MCP debugging tests. Acts as a DAP (Debug Adapter Protocol) server that MCP servers can connect to as clients for debugging integration testing.
+## Debugpy Server Test Fixture
 
-## Key Functions
+A test utility script that sets up a debugpy server for testing MCP (Model Context Protocol) server debugging capabilities. Implements the correct debugpy usage pattern where this script acts as the debug server and external MCP servers connect as DAP clients.
 
-### `start_debugpy_server(host, port, wait_for_client)` (L25-53)
-Core server initialization function. Starts debugpy in listening mode on specified host/port. Uses `debugpy.listen()` to create server socket and optionally `debugpy.wait_for_client()` to block until client connection. Returns boolean success status.
+### Key Configuration
+- **DEFAULT_HOST** (L22): "127.0.0.1" - localhost binding
+- **DEFAULT_PORT** (L23): 5679 - non-standard port to avoid conflicts
 
-### `fibonacci(n)` (L55-70)
-Simple recursive Fibonacci calculator for debugging demonstration. Includes debug print statements to trace execution flow. Used as test payload for debugging sessions.
+### Core Functions
 
-### `run_fibonacci_test()` (L72-82)
-Test execution function that sets programmatic breakpoint via `debugpy.breakpoint()` and runs fibonacci calculation. Designed to provide debugging targets for client connection testing.
+**start_debugpy_server(host, port, wait_for_client)** (L25-53)
+- Primary server initialization function
+- Uses `debugpy.listen()` to start server in listening mode (L41)
+- Optional client wait via `debugpy.wait_for_client()` (L47)
+- Returns boolean success status
 
-## Configuration Constants
-- `DEFAULT_HOST = "127.0.0.1"` (L22)
-- `DEFAULT_PORT = 5679` (L23) - Uses non-standard port to avoid conflicts
+**fibonacci(n)** (L55-70)
+- Simple test function for debugging demonstrations
+- Iterative Fibonacci calculation with debug output
+- Provides predictable execution flow for breakpoint testing
 
-## Command Line Interface (L84-110)
-Argument parser supporting:
-- `--host`: Server bind address
-- `--port`: Server bind port  
-- `--no-wait`: Skip client connection waiting
-- `--run-test`: Execute fibonacci test with breakpoint
+**run_fibonacci_test()** (L72-82)
+- Test scenario with programmatic breakpoint
+- Sets breakpoint via `debugpy.breakpoint()` (L75)
+- Executes fibonacci(10) for debugging practice
 
-## Execution Modes
-1. **Server mode** (L100-106): Runs indefinitely with keyboard interrupt handling
-2. **Test mode** (L97-98): Executes fibonacci test then maintains server
-3. **Always includes 5-second cleanup delay** (L109-110)
+### CLI Interface (L84-111)
+- **--host**: Override default host
+- **--port**: Override default port (5679)
+- **--no-wait**: Skip client connection wait
+- **--run-test**: Execute fibonacci test scenario
 
-## Dependencies
-- `debugpy`: Core DAP server implementation (L14-19 with import validation)
-- Standard library: `sys`, `os`, `time`, `argparse`
+### Execution Modes
+1. **Server Mode** (default): Runs indefinitely waiting for connections
+2. **Test Mode** (--run-test): Executes fibonacci test with breakpoint
 
-## Architecture Notes
-Implements proper debugpy server pattern where this script acts as server and external MCP processes connect as clients. Contrasts with typical debugging where debugger connects to target process.
+### Dependencies
+- **debugpy**: Core debugging protocol implementation
+- **argparse**: CLI argument parsing
+- **time**: Sleep operations for server persistence
+
+### Architecture Notes
+- Follows correct debugpy server pattern (not client)
+- Designed for external MCP server DAP client connections
+- Graceful error handling with import validation
+- Configurable wait behavior for different test scenarios

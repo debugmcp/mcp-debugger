@@ -177,3 +177,14 @@ packages/mcp-debugger/package/
 packages/mcp-debugger/.pack-lock
 packages/mcp-debugger/package.json.backup
 packages/mcp-debugger/package-cache/
+
+# Bogus "undefined" directories from path resolution bugs
+undefined/
+**/undefined/
+
+# Compiled Go binaries
+examples/go/**/*.exe
+examples/go/**/hello_world
+
+# E2E test result artifacts
+tests/e2e/*-results.json

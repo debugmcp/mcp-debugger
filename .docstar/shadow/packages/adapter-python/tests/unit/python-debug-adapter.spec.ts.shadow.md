@@ -1,36 +1,36 @@
 # packages/adapter-python/tests/unit/python-debug-adapter.spec.ts
 @source-hash: 58c5df4f1ff50aa6
-@generated: 2026-02-09T18:14:05Z
+@generated: 2026-02-10T00:41:07Z
 
 ## Purpose
-Unit test suite for the PythonDebugAdapter class, verifying initialization, environment validation, state transitions, and error handling behaviors.
+Unit test suite for the PythonDebugAdapter class, validating initialization, error handling, environment validation, and state management functionality.
 
-## Test Structure
-- **Main describe block (L30-98)**: Groups all PythonDebugAdapter tests
-- **beforeEach setup (L33-35)**: Creates fresh mock dependencies for each test
-- **Test dependencies factory (L6-21)**: Creates mock AdapterDependencies with vi.fn() stubs for filesystem, process launcher, environment, and logger
+## Test Infrastructure
+- **createDependencies() (L6-21)**: Factory function creating mock dependencies with stubbed fileSystem, processLauncher, environment services, and Vitest-spied logger methods
+- **setSuccessfulEnvironment() (L23-28)**: Test helper that mocks all Python environment checks to return successful values (executable path, version 3.10.1, debugpy installed, no virtual env)
 
-## Key Test Scenarios
+## Key Test Cases
 
 ### Initialization Tests
-- **Successful initialization (L37-49)**: Verifies adapter transitions to READY state and emits 'initialized' event when all environment checks pass
-- **Failed initialization (L51-62)**: Tests error state transition when debugpy is missing, expecting ENVIRONMENT_INVALID error code
+- **Successful initialize test (L37-49)**: Verifies adapter transitions to READY state, emits 'initialized' event, and returns correct ready status when environment setup succeeds
+- **Failed initialize test (L51-62)**: Tests initialization failure when debugpy is missing, expects ENVIRONMENT_INVALID error code and ERROR state
 
-### Environment Validation Tests  
-- **Environment validation (L64-80)**: Tests validation with old Python version (3.6.9) and missing debugpy, verifying multiple error conditions are reported correctly
+### Environment Validation
+- **validateEnvironment test (L64-80)**: Tests comprehensive environment validation with multiple issues (Python 3.6.9 too old, debugpy missing, virtual env detected). Validates error reporting structure and logging behavior
 
-### State Management Tests
-- **Dispose functionality (L82-91)**: Confirms adapter resets to UNINITIALIZED state and clears thread ID after disposal
-- **Error message translation (L93-97)**: Tests user-friendly error message generation for ENOENT errors
+### Lifecycle Management
+- **dispose test (L82-91)**: Verifies proper cleanup - state reset to UNINITIALIZED, thread ID cleared, ready status false
 
-## Test Utilities
-- **setSuccessfulEnvironment helper (L23-28)**: Mocks all environment checks to return successful values (Python 3.10.1, debugpy installed, no virtual env)
-- **Mock strategy**: Uses vi.fn() to mock private methods via type assertion casting
+### Error Handling
+- **translateErrorMessage test (L93-97)**: Tests user-friendly error message translation for ENOENT system errors
 
 ## Dependencies
-- **vitest**: Testing framework with mocking capabilities
 - **@debugmcp/shared**: Provides AdapterState enum, AdapterErrorCode enum, and AdapterDependencies interface
-- **PythonDebugAdapter**: The class under test from the main source
+- **PythonDebugAdapter**: Main class under test from relative import
+- **Vitest**: Testing framework with spies and mocking capabilities
 
-## Test Patterns
-Tests follow AAA pattern (Arrange-Act-Assert) with consistent mocking of private methods to control environment validation outcomes. Event emission testing uses arrays to capture async events.
+## Testing Patterns
+- Uses type casting with `(adapter as any)` to mock private methods for controlled testing scenarios
+- Event-driven testing with adapter.on() listeners
+- Promise-based async testing with expect().rejects patterns
+- Comprehensive error validation using expect.objectContaining() and expect.arrayContaining() matchers

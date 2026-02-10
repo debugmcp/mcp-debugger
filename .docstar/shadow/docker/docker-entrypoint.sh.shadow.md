@@ -1,43 +1,43 @@
 # docker/docker-entrypoint.sh
 @source-hash: b085bb377cadfdf9
-@generated: 2026-02-09T18:15:08Z
+@generated: 2026-02-10T00:41:56Z
 
-## Docker Entry Point Script
+## Purpose
+Docker container entrypoint script that orchestrates the startup of a development environment with debugging capabilities for an MCP (Model Context Protocol) server.
 
-Shell script that serves as the Docker container entry point for an MCP (Model Context Protocol) server with debugging capabilities.
+## Key Components
 
-### Primary Purpose
-Orchestrates startup of both an MCP server and a Python debugpy adapter, handling workspace mounting and graceful shutdown.
+### Workspace Setup (L5-7)
+Conditionally changes to `/workspace` directory if mounted as a volume, enabling development workflow with host filesystem integration.
 
-### Key Components
+### Debug Server (L10-11)
+Launches Python debugpy server in background:
+- **Host**: `0.0.0.0` (accepts external connections)
+- **Port**: `5679` (standard debugpy port)
+- **Mode**: `--no-wait` (non-blocking startup)
+- **Location**: `tests/fixtures/python/debugpy_server.py`
+- **PID tracking**: Stored in `$DBG_PID` for cleanup
 
-**Workspace Setup (L4-7)**
-- Conditionally changes to `/workspace` directory if mounted
-- Enables flexible workspace mounting for development containers
+### MCP Server (L14)
+Starts the main Node.js application (`dist/index.js`) with debug logging enabled.
 
-**Debug Server Launch (L9-11)**
-- Spawns Python debugpy server in background using `debugpy_server.py`
-- Configures remote debugging on `0.0.0.0:5679`
-- Captures process ID for later cleanup
-- Uses `--no-wait` flag to avoid blocking startup
+### Process Management (L17-18)
+- **Trap handler**: Ensures graceful shutdown of debug server on SIGINT/SIGTERM
+- **Wait**: Keeps script alive to maintain both processes
 
-**MCP Server Execution (L14)**
-- Launches compiled JavaScript MCP server from `dist/index.js`
-- Runs with debug-level logging enabled
-- Primary application process (foreground)
+## Architecture Patterns
+- **Multi-process orchestration**: Manages two concurrent services
+- **Background + foreground**: debugpy runs detached, MCP server runs attached
+- **Signal handling**: Proper cleanup on container termination
+- **Development-friendly**: Supports volume mounting and remote debugging
 
-**Signal Handling (L16-18)**
-- Implements graceful shutdown via trap for INT/TERM signals
-- Ensures debug server process cleanup on container termination
-- Uses `wait` to maintain container lifecycle
+## Dependencies
+- Python 3 runtime with debugpy package
+- Node.js runtime 
+- Compiled JavaScript distribution at `dist/index.js`
+- Debug server fixture at `tests/fixtures/python/debugpy_server.py`
 
-### Dependencies
-- Node.js runtime for MCP server
-- Python3 for debugpy adapter
-- Shell environment with signal handling support
-
-### Architectural Notes
-- Dual-process architecture: debug adapter + main application
-- Background/foreground process coordination
-- Container-aware workspace handling
-- Clean shutdown semantics for Docker environments
+## Critical Constraints
+- Requires pre-built JavaScript distribution
+- Assumes debugpy server fixture exists and is executable
+- Port 5679 must be available for debug connections

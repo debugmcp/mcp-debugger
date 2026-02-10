@@ -237,7 +237,7 @@ class TransportTester {
       });
 
       const transport = new StdioClientTransport({
-        command: 'node',
+        command: process.execPath,
         args: [
           path.join(PROJECT_ROOT, 'dist', 'index.js'),
           'stdio',

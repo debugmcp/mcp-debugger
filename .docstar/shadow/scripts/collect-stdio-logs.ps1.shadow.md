@@ -1,40 +1,34 @@
 # scripts/collect-stdio-logs.ps1
 @source-hash: bbd84a81d61aee27
-@generated: 2026-02-09T18:15:10Z
+@generated: 2026-02-10T00:41:59Z
 
-## Purpose
-PowerShell diagnostic script for collecting stdout/stderr logs from the mcp-debugger Docker container. Used for troubleshooting and analyzing CLI command execution.
+**Purpose**: PowerShell script for collecting MCP debugger diagnostic output by running CLI commands in a Docker container and capturing stdio/logging to host filesystem for analysis.
 
-## Core Functionality
+**Core Functionality**:
+- **Directory Setup (L5-8)**: Creates `logs/diag-stdio` directory in current project location for output collection
+- **Docker Volume Binding (L10-11)**: Maps host output directory to container `/app/logs` path for log extraction
+- **Container Execution (L14)**: Single complex Docker command that:
+  - Clears existing logs in container
+  - Runs `node dist/index.js --help` capturing output to `cli-help.txt`
+  - Runs `node dist/index.js stdio` in background capturing to `cli-stdio.txt`
+  - Sleeps 3 seconds to allow stdio command to generate output
+  - Lists container logs directory contents
+  - Kills background stdio process
+- **Log Display (L16-33)**: Outputs collected diagnostic files with different formatting:
+  - Full directory listing (L17)
+  - Complete cli-help.txt content (L19-21)
+  - First 200 lines of cli-stdio.txt (L23-25)
+  - Complete bundle-start.log content (L27-29)
+  - Last 200 lines of debug-mcp-server.log (L31-33)
 
-**Setup Phase (L1-8)**
-- No parameters required
-- Creates logs/diag-stdio directory in project root
-- Sets strict error handling with $ErrorActionPreference = 'Stop'
+**Key Dependencies**:
+- Docker with `mcp-debugger:local` image
+- PowerShell environment
+- Node.js application with CLI interface at `dist/index.js`
 
-**Docker Execution (L10-14)**
-- Mounts host logs/diag-stdio to container /app/logs via volume binding
-- Executes containerized commands in mcp-debugger:local image:
-  - Clears existing logs with `rm -f /app/logs/*`
-  - Captures CLI help output to cli-help.txt
-  - Runs stdio command in background, kills after 3 seconds
-  - All stdout/stderr redirected to respective log files
+**Architecture Pattern**: Diagnostic collection script using Docker for isolated execution and volume mounting for log extraction. Uses defensive programming with file existence checks and error handling via `|| true` for non-critical failures.
 
-**Log Display Phase (L16-33)**
-- Shows host directory contents
-- Displays four key log files with conditional existence checks:
-  - cli-help.txt: Full CLI help output
-  - cli-stdio.txt: First 200 lines of stdio command output
-  - bundle-start.log: Complete bundle startup logs
-  - debug-mcp-server.log: Last 200 lines of server debug logs
-
-## Key Dependencies
-- Docker with mcp-debugger:local image
-- PowerShell cmdlets: Get-Location, Join-Path, New-Item, Test-Path, Get-Content
-- Container must have Node.js with dist/index.js available
-
-## Architecture Notes
-- Uses volume mounting strategy for log extraction from ephemeral containers
-- Implements graceful failure handling with `|| true` patterns
-- Background process management with PID tracking and cleanup
-- Truncated output display prevents overwhelming console output
+**Critical Constraints**:
+- Requires `mcp-debugger:local` Docker image to exist
+- Assumes Node.js app structure with `dist/index.js` entry point
+- 3-second timeout for stdio command execution may be insufficient for slow operations

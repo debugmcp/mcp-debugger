@@ -1,70 +1,64 @@
 # examples/visualizer/log_watcher.py
 @source-hash: 577536bf710e4b2c
-@generated: 2026-02-09T18:15:01Z
+@generated: 2026-02-10T00:41:45Z
 
-## Primary Purpose
-Real-time log file watcher for MCP debugger events that parses JSON log lines and dispatches them to registered callbacks for visualization. Supports file rotation, position persistence, and graceful error handling.
+## Purpose
+Real-time log file watcher for MCP debugger events. Tails log files, parses JSON events, and dispatches them to registered callbacks for visualization components.
 
-## Key Components
+## Core Classes
 
-### LogWatcher Class (L18-228)
-Main file watcher with threaded log monitoring capabilities.
+### LogWatcher (L18-228)
+Main class that monitors log files using polling with position tracking and file rotation detection.
 
-**Constructor** (L21-36):
-- `log_path`: Path to watched log file
-- `polling_interval`: Check frequency (default 0.1s)  
-- `position`: Current file read position
-- `callbacks`: Event type → callback function mapping
-- `_position_file`: Persistence file for resume capability
+**Key State:**
+- `log_path` (L29): Target log file path
+- `position` (L31): Current file read position
+- `callbacks` (L33): Event type → callback function mapping
+- `running` (L32): Thread control flag
+- `_position_file` (L36): Persistent position storage for resume capability
 
-**Event Registration** (L38-46):
-- `on_event(event_type, callback)`: Maps event types (e.g., 'tool:call') to callback functions
+**Key Methods:**
+- `__init__(log_path, polling_interval=0.1)` (L21-37): Sets up file path and polling rate
+- `on_event(event_type, callback)` (L38-46): Registers callbacks for specific message types
+- `parse_log_line(line)` (L48-79): JSON parsing with structured event filtering
+- `watch()` (L111-198): Main monitoring loop with file rotation and position management
+- `start()` (L199-203): Spawns daemon thread for background watching
+- `stop()` (L205-209): Clean shutdown with thread join
 
-**Log Processing** (L48-79):
-- `parse_log_line(line)`: Parses JSON log lines, filters for registered event types
-- Adds `readable_time` field by converting numeric timestamps
-- Silently ignores malformed JSON, logs unexpected errors to stderr
+## Key Features
 
-**Timestamp Formatting** (L81-92):
-- `_format_timestamp(timestamp)`: Converts millisecond Unix timestamp to HH:MM:SS.mmm format
+**File Rotation Handling (L126-135, L178-182):**
+- Tracks file inode to detect rotation
+- Resets position when file is rotated
+- Gracefully handles file deletion/recreation
 
-**Position Persistence** (L94-109):
-- `_load_position()`: Restores file position from `.visualizer_position`
-- `_save_position()`: Saves current position for resume capability
+**Position Persistence (L94-109):**
+- Saves/loads read position to `.visualizer_position`
+- Enables resume after restart without re-processing old events
+- Silent error handling for position file operations
 
-**Core Watching Logic** (L111-198):
-- `watch()`: Main polling loop (runs in thread)
-- Handles file rotation via inode tracking (L127-135)
-- Supports partial line detection and backtrack (L167-171)
-- Graceful error handling with backoff strategies
-- Creates log file/directory if missing
+**Robust Parsing (L58-79):**
+- Filters for JSON lines starting with '{'
+- Only processes events with 'message' field matching registered callbacks
+- Converts numeric timestamps to readable format (L68-71)
+- Graceful JSON error handling
 
-**Thread Management** (L199-209):
-- `start()`: Spawns daemon thread for watching
-- `stop()`: Graceful shutdown with 2s timeout
-
-**Utilities** (L211-228):
-- `inject_event()`: Manual event injection for testing
-- `clear_position()`: Reset position tracking
+**Threading Model (L199-209):**
+- Uses daemon threads for non-blocking operation
+- Proper cleanup with timeout join
+- Thread safety through single-writer design
 
 ## Dependencies
-- `json`, `threading`: Core functionality
-- `pathlib.Path`: File system operations  
-- `datetime`: Timestamp formatting
-- `os.stat()`: File rotation detection via inodes
+- Standard library: `json`, `time`, `os`, `threading`, `datetime`, `pathlib`
+- No external dependencies
 
-## Key Patterns
-- **Event-driven architecture**: Callback registration system for different event types
-- **Robust file handling**: Handles rotation, deletion, partial reads, encoding issues
-- **State persistence**: Resume capability via position file
-- **Graceful degradation**: Continues operation despite individual errors
-- **Thread safety**: Daemon thread with controlled shutdown
+## Event Flow
+1. Register callbacks with `on_event()` for specific message types
+2. Start background monitoring with `start()`
+3. Continuously polls file for new lines
+4. Parses JSON and filters by registered message types
+5. Dispatches matching events to callbacks
+6. Maintains position for resume capability
 
-## Critical Invariants
-- Only processes JSON lines with `message` field matching registered callbacks
-- Maintains file position accuracy for reliable resume
-- Inode tracking prevents duplicate processing after rotation
-- Callback errors don't interrupt main watching loop
-
-## Example Usage (L232-249)
-Demonstrates basic setup: creates watcher, registers event callbacks, starts monitoring with keyboard interrupt handling.
+## Usage Pattern
+Designed for MCP debugger visualization - expects structured JSON log events with 'message' field indicating event type (e.g., 'tool:call', 'session:created').

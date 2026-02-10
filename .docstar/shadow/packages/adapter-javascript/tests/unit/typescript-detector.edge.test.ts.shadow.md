@@ -1,57 +1,51 @@
 # packages/adapter-javascript/tests/unit/typescript-detector.edge.test.ts
 @source-hash: 3a513b54e6f1de09
-@generated: 2026-02-09T18:14:06Z
+@generated: 2026-02-10T00:41:08Z
 
 ## Purpose
-Edge test suite for TypeScript binary detection logic, focusing on PATH precedence and platform-specific executable suffix ordering. Validates cross-platform behavior differences between Windows and POSIX systems.
+Unit test file for TypeScript binary detection edge cases, focusing on executable ordering and PATH precedence behavior across Windows and POSIX systems.
 
 ## Key Components
 
-### MockFileSystem (L10-35)
-Test double implementing FileSystem interface with configurable mock behaviors:
-- `setExistsMock()` (L14-16): Configure file existence simulation
-- `setReadFileMock()` (L18-20): Configure file content simulation  
-- `existsSync()` (L22-27): Mock file existence check
-- `readFileSync()` (L29-34): Mock file reading
+### MockFileSystem Class (L10-35)
+Test double implementing `FileSystem` interface with configurable mock behaviors:
+- `setExistsMock()` (L14-16): Configures file existence checks
+- `setReadFileMock()` (L18-20): Configures file reading behavior
+- `existsSync()` (L22-27): Returns mocked existence results
+- `readFileSync()` (L29-34): Returns mocked file content
 
 ### Test Utilities
-- `withPath()` (L39-45): Helper for temporarily modifying PATH environment variable
+- `withPath()` helper (L39-45): Temporarily modifies PATH environment variable for testing
 - `WIN` constant (L37): Platform detection flag using `isWindows()`
 
-## Test Structure
+### Test Suite Structure (L47-138)
+Tests `detectBinary` function from `typescript-detector.js` with focus on:
 
-### Setup/Teardown (L51-67)
-- `beforeEach`: Initializes MockFileSystem and sets default "no files exist" behavior
-- `afterEach`: Restores original PATH and resets to NodeFileSystem
+**Setup/Teardown (L51-67)**:
+- Installs MockFileSystem before each test
+- Restores environment and default filesystem after each test
 
-### Test Cases
+**Windows Executable Priority Test (L69-97)**:
+- Validates Windows-specific suffix ordering: `.cmd > .exe > bare`
+- Tests local `node_modules/.bin` directory precedence
+- Skips on POSIX systems with undefined expectation
 
-#### Windows Suffix Priority (L69-97)
-Tests local `node_modules/.bin` suffix ordering on Windows:
-- Priority: `.cmd > .exe > bare`
-- Verifies detectBinary respects suffix precedence within single directory
-- POSIX systems return undefined when no files exist
+**PATH Directory Precedence Test (L99-117)**:
+- Verifies directory-first resolution across PATH entries
+- Tests that earlier PATH directories win regardless of suffix priority
+- Uses multi-directory PATH setup
 
-#### PATH Directory Precedence (L99-117)
-Validates directory-first resolution across PATH entries:
-- Earlier PATH directories win regardless of suffix priority
-- Tests with `ts-node` binary across directories A and B
-- Ensures local node_modules exclusion works correctly
-
-#### Platform-Specific Single Directory (L119-137)
-Tests suffix preference within single PATH directory:
-- Windows: prefers `.cmd` over `.exe` over bare
-- POSIX: prefers bare executable
-- All suffix variants present in same directory
+**Platform-Specific Suffix Preference Test (L119-137)**:
+- Windows: prefers `.cmd` over `.exe` and bare within same directory
+- POSIX: prefers bare executable over extensions
 
 ## Dependencies
-- **vitest**: Test framework (describe, it, expect, beforeEach, afterEach)
-- **@debugmcp/shared**: FileSystem interfaces (FileSystem, NodeFileSystem)
-- **typescript-detector.js**: Target module (detectBinary, setDefaultFileSystem)
-- **executable-resolver.js**: Platform detection (isWindows)
+- `vitest`: Testing framework
+- `@debugmcp/shared`: FileSystem interfaces
+- `../../src/utils/typescript-detector.js`: Function under test
+- `../../src/utils/executable-resolver.js`: Platform detection
 
-## Testing Patterns
-- Mock-based isolation using dependency injection
-- Platform-conditional test logic with early returns
-- Environment variable manipulation with cleanup
-- Path resolution testing across different directory structures
+## Architecture Notes
+- Uses dependency injection pattern with configurable FileSystem
+- Platform-conditional test logic for cross-platform compatibility
+- Environment isolation ensures tests don't affect system state

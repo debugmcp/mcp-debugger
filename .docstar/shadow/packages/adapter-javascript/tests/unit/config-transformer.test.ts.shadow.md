@@ -1,39 +1,50 @@
 # packages/adapter-javascript/tests/unit/config-transformer.test.ts
 @source-hash: 0e1e6336a01f2741
-@generated: 2026-02-09T18:14:00Z
+@generated: 2026-02-10T00:41:10Z
 
-**Test file for config-transformer utilities in JavaScript adapter**
+Test suite for config-transformer utility functions that handle TypeScript/JavaScript project configuration detection and file output patterns.
 
-This test suite validates configuration transformation functions used by the JavaScript adapter, focusing on project type detection and output file determination. Tests use filesystem mocking for isolation.
+## Primary Purpose
+Unit tests for three core functions in the config-transformer module that analyze project structure and configuration to make build decisions.
 
-## Core Components
+## Key Test Classes
 
-**MockFileSystem class (L14-39)**: Test double implementing FileSystem interface with configurable mocks for existsSync and readFileSync operations. Provides `setExistsMock` and `setReadFileMock` methods to control filesystem behavior during tests.
+**MockFileSystem (L14-39)**: Test double implementing FileSystem interface
+- `setExistsMock(mock)` (L18): Sets custom file existence behavior  
+- `setReadFileMock(mock)` (L22): Sets custom file reading behavior
+- `existsSync(path)` (L26): Returns mocked existence result or false
+- `readFileSync(path, encoding)` (L33): Returns mocked file content or empty string
 
 ## Test Suites
 
-**determineOutFiles tests (L41-50)**: Validates output file pattern determination logic. Tests both custom outFiles arrays and default fallback behavior (`['**/*.js', '!**/node_modules/**']`).
+**determineOutFiles Tests (L41-50)**: Validates output file pattern logic
+- Tests custom outFiles pass-through (L42-45)
+- Tests default pattern fallback: `['**/*.js', '!**/node_modules/**']` (L47-49)
 
-**isESMProject tests (L52-130)**: Comprehensive ESM project detection testing with filesystem mocking setup (L57-68). Tests multiple ESM indicators:
-- File extension detection (.mjs, .mts files)
-- package.json `type: "module"` in program directory and cwd
-- TypeScript config module settings (ESNext, NodeNext)
-- Fallback to CommonJS when no indicators present
+**isESMProject Tests (L52-130)**: Comprehensive ESM project detection
+- File extension detection: `.mjs` (L70-72), `.mts` (L74-76) 
+- package.json analysis: `type: "module"` in program dir (L78-88) or cwd (L90-100)
+- tsconfig.json analysis: `module: "ESNext"` (L102-112) or `module: "NodeNext"` (L114-124)
+- Fallback behavior when no indicators present (L126-129)
 
-**hasTsConfigPaths tests (L132-187)**: Validates TypeScript path mapping detection by parsing tsconfig.json. Tests scenarios with populated paths, empty paths objects, and missing tsconfig files.
+**hasTsConfigPaths Tests (L132-187)**: TypeScript path mapping detection
+- Detects non-empty `compilerOptions.paths` configuration (L149-165)
+- Handles empty paths object (L167-181)
+- Handles missing tsconfig.json (L183-186)
 
-## Dependencies & Architecture
-
-- **Vitest framework**: Standard test utilities (describe, it, expect, beforeEach, afterEach)
+## Dependencies
+- **vitest**: Test framework (`describe`, `it`, `expect`, `beforeEach`, `afterEach`)
 - **@debugmcp/shared**: FileSystem interface and NodeFileSystem implementation
-- **config-transformer module**: Functions under test (determineOutFiles, isESMProject, hasTsConfigPaths, setDefaultFileSystem)
+- **config-transformer.js**: Functions under test
 
 ## Test Patterns
+- Each test suite uses MockFileSystem with setup/teardown (beforeEach/afterEach)
+- Default filesystem restored after each test to prevent interference
+- JSON.stringify used to mock configuration file contents
+- Path.join for cross-platform path handling
 
-Each filesystem-dependent test suite follows consistent pattern:
-1. Create MockFileSystem instance in beforeEach
-2. Set default filesystem via setDefaultFileSystem
-3. Configure mocks for specific test scenarios
-4. Restore NodeFileSystem in afterEach
-
-Critical for understanding how the adapter determines project configuration based on filesystem inspection and config file parsing.
+## Key Behaviors Tested
+- ESM detection hierarchy: file extension → package.json → tsconfig.json
+- Configuration file lookup in both program directory and project root
+- TypeScript module resolution compatibility (ESNext, NodeNext)
+- Path mapping presence validation for build optimization decisions

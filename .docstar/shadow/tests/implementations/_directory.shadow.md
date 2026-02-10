@@ -1,80 +1,68 @@
 # tests/implementations/
-@generated: 2026-02-09T18:16:36Z
+@generated: 2026-02-10T01:19:52Z
 
-## Purpose
-Comprehensive test implementations module providing fake/mock versions of all process-related interfaces for deterministic unit testing. Enables complete isolation from real system processes, external dependencies, and I/O operations while maintaining interface compatibility and realistic behavior patterns.
+## Overall Purpose and Responsibility
 
-## Key Components and Architecture
+The `tests/implementations` directory provides a comprehensive test double ecosystem for process management functionality. It serves as the primary testing infrastructure for all process-related operations, offering controllable, deterministic mock implementations that eliminate the need to spawn real processes during testing. This enables reliable unit testing of complex process lifecycles, debugging workflows, and inter-process communication patterns.
 
-### Test Double Ecosystem
-The directory provides a complete suite of fake implementations organized around process lifecycle management:
+## Key Components and How They Relate
 
-- **FakeProcess**: Core process simulation with controllable PID, streams, IPC messaging, and lifecycle events
-- **FakeProcessLauncher**: Basic process spawning with launch tracking capabilities  
-- **FakeDebugTargetLauncher**: Specialized Python debug target launcher with port management
-- **FakeProxyProcessLauncher**: Advanced proxy process launcher with command/response handling
-- **FakeProxyProcess**: Extended process implementing proxy-specific interfaces and session management
-- **FakeProcessLauncherFactory**: Centralized factory providing singleton access to all implementations
+The directory implements a complete parallel hierarchy to the production process system, organized in three architectural layers:
 
-### Unified Architecture
-All components follow consistent patterns:
-- EventEmitter-based for realistic async behavior
-- Comprehensive state tracking for test assertions
-- Pre-configuration capabilities for scenario setup
-- Automatic response handling with override support
+**Foundation Layer**
+- `FakeProcess` - Core process simulation implementing the `IProcess` interface with full lifecycle control
+- `FakeProcessLauncher` - Basic process factory for standard process creation scenarios
+
+**Specialized Process Layer**
+- `FakeDebugTargetLauncher` - Handles Python debugging scenarios with automatic debug port management
+- `FakeProxyProcess` - Enhanced process mock with command interception and proxy-specific behaviors
+- `FakeProxyProcessLauncher` - Specialized factory for proxy processes with built-in initialization handling
+
+**Orchestration Layer**
+- `FakeProcessLauncherFactory` - Centralized singleton factory providing unified access to all launcher types
+
+The components work together through a factory pattern where the central factory manages instances of all specialized launchers, enabling coordinated testing across different process types while maintaining isolation and state consistency.
 
 ## Public API Surface
 
-### Primary Entry Point
-**FakeProcessLauncherFactory** serves as the main entry point with:
-- `createProcessLauncher()`: Basic process spawning interface
-- `createDebugTargetLauncher()`: Python debug session management  
-- `createProxyProcessLauncher()`: Proxy process with command handling
-- `reset()`: Unified state clearing across all components
+**Primary Entry Points:**
+- `FakeProcessLauncherFactory` - Main access point for obtaining any launcher type in the system
+- Individual launcher classes (`FakeProcessLauncher`, `FakeDebugTargetLauncher`, `FakeProxyProcessLauncher`) for direct instantiation in isolated tests
 
-### Test Control Interface
-- **Pre-configuration**: `prepare*()` methods for setting up specific behaviors before launch
-- **State Inspection**: `launched*` arrays and `getLast*()` methods for test assertions
-- **Event Simulation**: Methods to trigger process events, outputs, and state changes
-- **Lifecycle Control**: Process termination, signal handling, and exit code management
+**Core Testing Interface:**
+- `launch()` family of methods - Create mock processes with configurable behavior
+- `simulate*()` methods - Control process events (output generation, error conditions, exit scenarios)
+- `prepare*()` methods - Pre-configure upcoming process behavior for deterministic testing
+- `reset()` methods - Clean slate initialization for test isolation
+
+**Process Control API:**
+- Standard process operations (`kill()`, `terminate()`) with controllable outcomes
+- Stream-based I/O simulation using Node.js PassThrough streams
+- Event-driven lifecycle simulation matching real process behavior patterns
 
 ## Internal Organization and Data Flow
 
-### State Management
-- Singleton pattern ensures state persistence across test operations
-- Comprehensive tracking of all launched processes, commands, and session details
-- Auto-increment patterns (PIDs, ports) prevent test interference
+**State Architecture:**
+- Each fake maintains comprehensive launch history and process registries
+- Process state managed through private fields mirroring real process properties
+- Automatic resource allocation (PIDs, debug ports) with predictable defaults for test reproducibility
 
-### Event Flow
-- Uses `process.nextTick()` for proper event loop timing
-- Automatic 'exit' and 'close' event emission for realistic lifecycle simulation
-- Built-in IPC message handling with async response patterns
+**Event Simulation Pipeline:**
+- EventEmitter-based async behavior using `process.nextTick()` for realistic timing
+- Stream-based I/O handling with controllable output and error generation
+- Command interception and auto-response for common initialization patterns
 
-### Command Processing
-- Proxy processes automatically handle 'init' commands unless overridden
-- JSON message parsing and response generation
-- Session-based operation support with initialization tracking
+**Cross-Component Coordination:**
+- Centralized factory enables global state management and coordinated resets
+- Shared conventions for deterministic behavior (fixed PIDs, sequential port allocation)
+- Consistent async simulation patterns across all fake implementations
 
 ## Important Patterns and Conventions
 
-### True Fake Pattern
-All implementations are working fakes (not stubs or mocks) that:
-- Provide actual functionality rather than just recording calls
-- Maintain full interface compatibility with production code
-- Enable both positive and negative test scenarios
-- Support complex interaction patterns and state transitions
+**Comprehensive Test Double Strategy:** The implementation provides rich, controllable fakes rather than simple stubs, enabling complex scenario simulation while maintaining deterministic behavior essential for reliable testing.
 
-### Factory Pattern
-- Single factory instance coordinates all launcher types
-- Unified reset capability for test isolation
-- Consistent creation patterns across different process types
-- Centralized configuration and state management
+**Centralized Factory Management:** The singleton factory pattern ensures consistent access to test doubles while enabling global state coordination and cleanup operations.
 
-### Builder Configuration
-- `prepare*()` methods enable pre-configuring specific instances
-- Clear separation between preparation and execution phases
-- Chainable configuration for complex test scenarios
-- Override capabilities for edge case testing
+**Realistic Async Simulation:** All fakes maintain the async, event-driven nature of real processes through careful use of EventEmitter patterns and `process.nextTick()` timing, ensuring tests accurately reflect production behavior timing.
 
-## Testing Philosophy
-This module embodies a comprehensive approach to process testing, providing deterministic, controllable alternatives to real system processes while maintaining the complexity and interaction patterns of production code. The unified factory pattern and consistent interfaces enable sophisticated testing scenarios without external dependencies or unpredictable system behavior.
+**Zero External Dependencies:** The entire test infrastructure operates without spawning actual processes or requiring external resources, making tests fast, reliable, and suitable for any environment.

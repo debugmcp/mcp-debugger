@@ -1,40 +1,51 @@
 # packages/adapter-mock/tests/unit/mock-debug-adapter.spec.ts
-@source-hash: a963214dd1985ed6
-@generated: 2026-02-09T18:14:05Z
+@source-hash: c7dab162d8bcf604
+@generated: 2026-02-10T01:18:53Z
 
-## Purpose
-Comprehensive unit test suite for the MockDebugAdapter class, validating state transitions, connection handling, DAP event processing, feature support, and error scenarios in the @debugmcp/adapter-mock package.
+**Mock Debug Adapter Test Suite**
 
-## Test Structure
-- **Primary test suite**: MockDebugAdapter (L24-118) with beforeEach setup (L27-29)
-- **Mock dependencies factory**: createDependencies (L6-22) creates minimal AdapterDependencies with vi.fn() mocked logger
+This test file comprehensively validates the MockDebugAdapter implementation, covering initialization, connection management, error scenarios, and feature support.
 
-## Key Test Categories
+## Test Utilities & Setup
 
-### Initialization & State Management (L31-50)
-- **Successful initialization test** (L31-42): Verifies state progression from INITIALIZING → READY with event tracking
-- **Failed initialization test** (L44-50): Tests error scenario handling with EXECUTABLE_NOT_FOUND causing ERROR state
+- `createDependencies()` (L6-22): Factory function creating mock AdapterDependencies with spy logger functions for testing
+- Test setup (L27-29): Resets mock dependencies before each test
 
-### Connection Lifecycle (L52-77)
-- **Connect/disconnect flow** (L52-67): Tests connection state transitions with logging verification and connection flag management
-- **Connection timeout error** (L69-77): Validates error scenario handling with CONNECTION_TIMEOUT producing appropriate AdapterErrorCode
+## Core Functionality Tests
 
-### DAP Event Processing (L79-97)
-- **Event handling test** (L79-97): Verifies DAP event processing for 'stopped' (sets threadId, transitions to DEBUGGING) and 'terminated' (clears threadId, returns to CONNECTED) events
+**Initialization & State Management** (L31-50):
+- Tests successful initialization flow: INITIALIZING → READY state transitions
+- Validates error scenario handling when `MockErrorScenario.EXECUTABLE_NOT_FOUND` is set
+- Verifies state event emission and error state transitions
 
-### Feature Support System (L99-110)
-- **Feature configuration test** (L99-110): Validates feature support detection and requirement reporting based on adapter configuration
+**Connection Management** (L52-77):
+- Tests connect/disconnect cycle with state transitions: READY → CONNECTED → DISCONNECTED
+- Validates connection flags and thread ID reset on disconnect
+- Tests connection timeout error scenario with proper error code matching
 
-### Error Handling & Messaging (L112-117)
-- **Error translation test** (L112-117): Tests installation instructions, missing executable errors, and filesystem error message translation
+**DAP Event Handling** (L79-97):
+- Tests `handleDapEvent()` method with 'stopped' and 'terminated' events
+- Validates thread ID tracking (threadId: 42) and state transitions (CONNECTED → DEBUGGING → CONNECTED)
+- Ensures proper cleanup of thread context on termination
 
-## Dependencies
-- **Testing framework**: vitest (describe, it, expect, beforeEach)
-- **Core types**: @debugmcp/shared (DebugFeature, AdapterState, AdapterErrorCode, AdapterDependencies)
-- **Test target**: MockDebugAdapter, MockErrorScenario from ../../src/mock-debug-adapter.js
+**Feature Support & Configuration** (L99-110):
+- Tests feature support reporting based on `supportedFeatures` configuration
+- Validates `supportsFeature()` method for enabled/disabled features
+- Tests `getFeatureRequirements()` method return structure
+
+**Error Translation & Messaging** (L112-117):
+- Tests installation instructions, missing executable errors, and filesystem error translation
+- Validates mock-specific error message formatting
+
+## Key Dependencies
+
+- **vitest**: Test framework with spy functions for logger mocking
+- **@debugmcp/shared**: Core types (DebugFeature, AdapterState, AdapterErrorCode, AdapterDependencies)
+- **MockDebugAdapter**: Primary test subject with configurable error scenarios
 
 ## Test Patterns
-- State transition tracking via event listeners
-- Mock dependency injection with stubbed services
-- Error scenario simulation through MockErrorScenario configuration
-- Async/await patterns for adapter lifecycle operations
+
+- State transition validation through event listeners
+- Error scenario simulation using `MockErrorScenario` enum
+- Async/await patterns for adapter lifecycle methods
+- Mock dependency injection for isolated testing

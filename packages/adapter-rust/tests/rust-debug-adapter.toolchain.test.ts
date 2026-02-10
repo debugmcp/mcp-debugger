@@ -193,7 +193,9 @@ describe('RustDebugAdapter toolchain logic', () => {
     it('injects dlltool path into environment when available on Windows', () => {
       const restorePlatform = setPlatform('win32');
       const originalPath = process.env.PATH;
+      const originalDlltool = process.env.DLLTOOL;
       process.env.PATH = '/usr/bin';
+      delete process.env.DLLTOOL;
 
       const adapterWithMethod = adapter as unknown as {
         resolveCodeLLDBExecutableSync: () => string | null;
@@ -221,6 +223,11 @@ describe('RustDebugAdapter toolchain logic', () => {
         expect(command.args).toEqual(['--port', '4000']);
       } finally {
         resolveSpy.mockRestore();
+        if (originalDlltool === undefined) {
+          delete process.env.DLLTOOL;
+        } else {
+          process.env.DLLTOOL = originalDlltool;
+        }
         if (originalPath === undefined) {
           delete process.env.PATH;
         } else {

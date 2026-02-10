@@ -1,35 +1,35 @@
 # src/proxy/proxy-config.ts
 @source-hash: f7a4c9bde41f40c1
-@generated: 2026-02-09T18:15:04Z
+@generated: 2026-02-10T00:41:50Z
 
-## Primary Purpose
-Defines the configuration interface for starting a debug proxy server, providing language-agnostic debugging configuration that bridges between different language-specific debuggers and a common adapter interface.
+**Purpose**: Defines the configuration interface for starting a debug proxy, providing language-agnostic proxy startup parameters for the MCP debug system.
 
-## Key Interface
-**ProxyConfig (L9-30)** - Main configuration interface containing:
-- Core session management: `sessionId` (L10), `language` (L11) 
-- Adapter connection: `adapterHost` (L13), `adapterPort` (L14)
-- Script execution: `scriptPath` (L16), `scriptArgs` (L17), `executablePath` (L12)
-- Debug behavior: `stopOnEntry` (L18), `justMyCode` (L19), `initialBreakpoints` (L20)
-- Operational settings: `logDir` (L15), `dryRunSpawn` (L21)
-- Extension points: `launchConfig` (L22), `adapterCommand` (L25-29)
+**Key Interface**:
+- `ProxyConfig` (L9-30): Main configuration interface containing all parameters needed to spawn and configure a debug proxy session
 
-## Dependencies
-- `@debugmcp/shared`: Imports `DebugLanguage` enum and `LanguageSpecificLaunchConfig` type (L4)
+**Core Configuration Fields**:
+- `sessionId` (L10): Unique identifier for the debug session
+- `language` (L11): Debug language enum determining which debugger adapter to use
+- `executablePath` (L12): Optional path to target executable (auto-discovered if omitted)
+- `adapterHost/adapterPort` (L13-14): Network location where debug adapter should bind
+- `logDir` (L15): Directory for debug session logs
+- `scriptPath` (L16): Path to script/program being debugged
+- `scriptArgs` (L17): Optional command-line arguments for target script
 
-## Architectural Decisions
-- **Language abstraction**: Uses `DebugLanguage` enum to support multiple debugging backends while maintaining unified interface
-- **Optional adapter discovery**: `executablePath` is optional, allowing adapters to auto-discover executables
-- **Flexible command specification**: `adapterCommand` object (L25-29) encapsulates spawn requirements with command, args, and environment
-- **Extensibility**: `launchConfig` allows language-specific configuration injection without breaking interface
+**Debug Control Options**:
+- `stopOnEntry` (L18): Whether to pause execution at program entry point
+- `justMyCode` (L19): Debug scope limitation flag
+- `initialBreakpoints` (L20): Pre-configured breakpoints with file/line/condition
+- `dryRunSpawn` (L21): Flag for testing spawn process without execution
 
-## Key Patterns
-- **Configuration object pattern**: Single interface encapsulating all proxy startup requirements
-- **Optional vs required separation**: Required fields for basic operation, optional fields for advanced features
-- **Nested configuration**: `adapterCommand` and `initialBreakpoints` use structured sub-objects for complex data
+**Advanced Configuration**:
+- `launchConfig` (L22): Language-specific launch parameters via shared types
+- `adapterCommand` (L25-29): Spawn command specification for debug adapter process including command, arguments, and environment variables
 
-## Critical Constraints
-- `sessionId` must be unique for session isolation
-- `adapterHost`/`adapterPort` must be valid network endpoints
-- `scriptPath` must point to executable script/program
-- `initialBreakpoints` requires valid file paths and line numbers
+**Dependencies**:
+- Imports `DebugLanguage` and `LanguageSpecificLaunchConfig` from shared module (L4)
+
+**Architecture Notes**:
+- Designed as language-agnostic configuration that can be specialized via `launchConfig`
+- Separation of proxy configuration from adapter spawn details enables flexible deployment models
+- Interface supports both auto-discovery (`executablePath` optional) and explicit configuration patterns

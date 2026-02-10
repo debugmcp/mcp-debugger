@@ -1,79 +1,85 @@
 # examples/
-@generated: 2026-02-09T18:21:28Z
+@generated: 2026-02-10T01:20:27Z
 
 ## Overall Purpose and Responsibility
 
-The `examples` directory serves as a comprehensive demonstration and testing ecosystem for the MCP (Model Context Protocol) Debugger project. It provides a complete collection of educational resources, test programs, and demonstration tools across multiple programming languages and debugging scenarios. This directory functions as both a learning resource for developers and a validation suite for the MCP debugging infrastructure.
+The `examples` directory serves as a **comprehensive demonstration and testing ecosystem** for the MCP (Model Context Protocol) debugger system. It provides educational examples, integration tests, validation scenarios, and interactive demonstrations across multiple programming languages and debugging workflows. The directory functions as both a learning resource for MCP debugging concepts and a comprehensive test suite for validating debugger functionality.
 
 ## Key Components and Integration
 
-### Multi-Language Test Suite
-The directory contains extensive test programs across major programming languages:
-- **Python examples**: From simple variable swapping (`python_simple_swap/`) to comprehensive debugging scenarios (`python/`), including educational scripts and MCP client demonstrations
-- **JavaScript/TypeScript**: Complete test coverage (`javascript/`) including async debugging, source maps, and complex data structures
-- **Rust**: Async programming patterns (`rust/async_example/`) and debugging-focused examples (`rust/hello_world/`) with cached dependencies
-- **Java**: Debugger attachment workflows and step-through debugging practice programs
-- **Go**: Educational progression from basic syntax to advanced concurrency patterns with goroutines
+### Multi-Language Debugging Target Scripts
+- **Python examples** (`python/`, `python_simple_swap/`): Complete progression from simple variable swaps to comprehensive debugging scenarios with recursive algorithms and intentional bugs
+- **JavaScript/TypeScript examples** (`javascript/`): Full-featured test suite including TypeScript source map debugging, async patterns, and comprehensive language feature coverage
+- **Java examples** (`java/`): Educational debugging targets with infinite loops for attachment testing and mathematical utilities for algorithm debugging
+- **Go examples** (`go/`): Progressive complexity from basic syntax to advanced concurrency patterns using goroutines and channels
+- **Rust examples** (`rust/`): Foundation-to-advanced progression covering core language concepts and async/Tokio programming patterns
 
-### MCP Protocol Demonstrations
-- **Agent Demo** (`agent_demo.py`): Autonomous LLM agent that demonstrates complete MCP debugging workflows through predefined tool sequences
-- **Debug Orchestration** (`python_simple_swap/debug_swap_demo.py`): End-to-end MCP client implementation showing session management and debugging automation
-- **Rich Terminal Interface** (`asciinema_demo/`): Visual debugging demonstrations with syntax highlighting and real-time breakpoint management
+### Interactive Demonstration Systems
+- **Rich Terminal UI Visualizer** (`visualizer/`): Real-time TUI system for visualizing MCP debugging sessions with code highlighting, breakpoint tracking, and variable inspection
+- **Asciinema Demo Environment** (`asciinema_demo/`): Complete recording infrastructure with buggy target scripts and Rich-based demo controllers for documentation
+- **Agent Simulation** (`agent_demo.py`): Autonomous LLM agent demonstration executing predefined debugging workflows through MCP server integration
+- **Theatrical Demo** (`demo/`): AI-powered debugging simulation with color-coded output and educational narrative progression
 
-### Visualization and User Experience
-- **Live TUI System** (`visualizer/`): Complete terminal-based debugging interface with real-time log monitoring, code viewing, and variable inspection
-- **Demo Recording Pipeline** (`demo/`): Automated recording and conversion tools for creating promotional materials and documentation
-- **Interactive Demonstrations** (`debugging/`): Integration tests and regression validation for MCP debugging infrastructure
+### Integration Test Infrastructure
+- **Debug Session Testing** (`debugging/`): Comprehensive validation of MCP debugging across languages with timing bug regression tests and SSE transport validation
+- **Expression Evaluation Testing** (`test_evaluate_expression.py`, `pause_test.py`): Controlled environments for testing debugger expression evaluation and breakpoint functionality
+- **Recording and Documentation** (`demo/record_demo.sh`, `visualizer/record_session.py`): Automated pipeline for creating professional demo recordings and documentation assets
 
 ## Public API Surface and Entry Points
 
-### Primary Demonstration Scripts
-- **`agent_demo.py`**: Autonomous debugging agent demonstration
-- **`visualizer/live_visualizer.py`**: Real-time TUI debugging interface
-- **`asciinema_demo/run_rich_demo.py`**: Rich terminal debugging demonstration
-- **`demo/record_demo.sh`**: Automated demo recording pipeline
+### Primary Demonstration Interfaces
+- **`agent_demo.py`**: Autonomous debugging agent demonstration with predefined workflow execution
+- **`visualizer/live_visualizer.py`**: Real-time MCP session visualization with terminal UI
+- **`asciinema_demo/run_rich_demo.py`**: Interactive demo controller with split-pane interface
+- **`demo/mcp_debugger_demo.py`**: Theatrical debugging simulation with educational narrative
+- **`python_simple_swap/debug_swap_demo.py`**: Complete MCP debugging workflow demonstration
 
-### Language-Specific Test Programs
-Each language directory provides self-contained examples:
-- **Python**: `main()` functions with progressive complexity from simple swapping to comprehensive debugging scenarios
-- **JavaScript**: Node.js executables with breakpoint markers and variable inspection points
-- **Rust**: Cargo-based projects with async patterns and debugging-friendly architecture
-- **Java**: Standard main methods for attachment testing and algorithmic debugging
-- **Go**: Independent programs demonstrating concurrency and basic language features
+### Language-Specific Test Targets
+Each language directory provides graduated complexity levels:
+- **Entry-level**: Basic syntax and simple operations for initial debugger testing
+- **Intermediate**: Mathematical algorithms and data processing for step-through debugging  
+- **Advanced**: Complex patterns like recursion, concurrency, async operations, and intentional bugs
 
-### MCP Client Integration
-- **HTTP JSON-RPC clients**: Direct MCP server communication with session management
-- **Tool orchestration**: Automated debugging workflows including breakpoint setting, stepping, and variable inspection
-- **Error handling**: Robust debugging session cleanup and error recovery patterns
+### Recording and Documentation Tools
+- **Demo recording**: `demo/record_demo.sh`, `visualizer/record_session.py`
+- **Media conversion**: `visualizer/convert_to_gif.py` and optimization utilities
+- **Documentation integration**: Complete pipeline from demonstration to shareable assets
 
 ## Internal Organization and Data Flow
 
-### Educational Progression Architecture
-The examples follow a structured learning path:
-1. **Foundation**: Simple variable manipulation and basic debugging concepts
-2. **Intermediate**: Algorithm implementation, data structure processing, and function-level debugging
-3. **Advanced**: Async programming, concurrency patterns, and complex debugging scenarios
-4. **Integration**: Complete MCP workflows, automated debugging, and visualization tools
+### Debugging Workflow Architecture
+The directory implements a **layered demonstration approach**:
 
-### Component Relationships
-- **Test Programs → MCP Clients → Visualization**: Test programs provide debugging targets, MCP clients orchestrate debugging sessions, visualization components provide user interfaces
-- **Language Examples → Protocol Demonstrations**: Language-specific examples serve as targets for MCP protocol demonstrations
-- **Mock Systems → Live Integration**: Mock demonstrations provide controlled environments while live integration shows real MCP server connectivity
+1. **Target Layer**: Language-specific scripts providing debugging scenarios
+2. **Client Layer**: MCP client implementations demonstrating protocol usage (`agent_demo.py`, debug demos)
+3. **Visualization Layer**: Rich TUI systems for real-time debugging session visualization
+4. **Recording Layer**: Documentation and demo recording infrastructure
+5. **Integration Layer**: End-to-end testing and validation systems
 
-### Shared Patterns and Conventions
-- **Self-contained execution**: All examples run independently with minimal dependencies
-- **Breakpoint-friendly design**: Strategic code organization optimized for debugging tool interaction
-- **Educational output**: Console logging and structured output for learning visibility
-- **Error resilience**: Graceful failure handling and session cleanup across all components
+### Component Interaction Patterns
+- **MCP Protocol Communication**: JSON-RPC 2.0 client implementations with session management
+- **Real-time Event Processing**: Log monitoring and state synchronization for live visualization
+- **Educational Progression**: Graduated complexity across languages and scenarios
+- **Documentation Pipeline**: From live demonstration through recording to optimized media assets
 
-## Role in Larger MCP Ecosystem
+## Important Patterns and Conventions
 
-This directory serves as the **complete reference implementation and validation suite** for MCP debugging capabilities. It provides:
+### Debugging-Optimized Design
+- **Strategic Breakpoint Placement**: All target scripts include explicit breakpoint location markers
+- **Predictable Execution Flow**: Deterministic behavior for consistent debugging experiences
+- **Extensive Logging**: Console output and state visibility optimized for educational purposes
+- **Self-Contained Examples**: Minimal external dependencies for reliable execution
 
-- **Developer Onboarding**: Progressive examples from simple debugging concepts to advanced MCP integration
-- **Tool Validation**: Comprehensive test cases for validating MCP debugger functionality across multiple languages
-- **Documentation Materials**: Recording and visualization tools for creating educational content
-- **Integration Templates**: Reference implementations for building MCP debugging clients and tools
-- **Regression Testing**: Automated validation of debugging workflows and protocol implementations
+### Integration Testing Strategy
+- **Multi-Language Coverage**: Comprehensive validation across Python, JavaScript/TypeScript, Java, Go, and Rust
+- **Transport Protocol Testing**: SSE and HTTP-based MCP communication validation
+- **Session Lifecycle Testing**: Complete debugging session management with proper cleanup
+- **Timing and Synchronization**: Regression tests for session readiness and event handling
 
-The examples directory represents the practical application layer of the MCP Debugger project, bridging the gap between the protocol specification and real-world debugging workflows through hands-on demonstrations and comprehensive testing infrastructure.
+### Educational Architecture
+- **Progressive Complexity**: Examples build from basic concepts to advanced debugging scenarios
+- **Cross-Language Consistency**: Similar debugging patterns implemented across different languages
+- **Visual Learning**: Rich terminal interfaces and recorded demonstrations for multiple learning styles
+- **Practical Application**: Real debugging scenarios with intentional bugs and problem-solving workflows
+
+This directory represents the definitive reference implementation and demonstration suite for MCP debugging, providing both educational resources for learning debugging concepts and comprehensive validation tools for MCP debugger development.

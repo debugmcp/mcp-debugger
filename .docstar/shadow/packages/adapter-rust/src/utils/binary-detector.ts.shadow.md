@@ -1,45 +1,38 @@
 # packages/adapter-rust/src/utils/binary-detector.ts
 @source-hash: 90e21bd7d61a24ee
-@generated: 2026-02-09T18:14:05Z
+@generated: 2026-02-10T00:41:06Z
 
 ## Purpose
-Binary format detection utility for Rust executables, designed to classify Windows PE binaries as MSVC or GNU-compiled and identify debug information availability.
+Binary format detection utility for Rust binaries, analyzing executable files to determine their compiler toolchain (MSVC vs GNU), debug information presence, and import dependencies.
 
-## Core Interface
-**BinaryInfo (L4-10)**: Result interface containing:
-- `format`: Binary classification ('msvc' | 'gnu' | 'unknown')
-- `hasPDB`: External .pdb file presence
-- `hasRSDS`: RSDS debug signature in binary
-- `imports`: Detected DLL imports
-- `debugInfoType`: Debug format classification ('pdb' | 'dwarf' | 'none')
+## Key Interface
+- `BinaryInfo` (L4-10): Core data structure containing format classification, debug info flags, and import list
+- `detectBinaryFormat()` (L64-110): Main async function that analyzes an executable file and returns comprehensive binary information
 
-## Main Function
-**detectBinaryFormat(exePath) (L64-110)**: Async function that analyzes a binary file:
-1. Checks file existence and reads first 1MB (MAX_SCAN_BYTES)
-2. Scans for companion .pdb file in same directory
-3. Searches binary content for RSDS signature and import patterns
-4. Returns comprehensive BinaryInfo object
+## Core Detection Logic
+- `bufferContains()` (L18-20): Simple buffer search utility for binary signatures
+- `collectImports()` (L22-33): Scans binary content for known DLL imports using ASCII conversion and pattern matching
+- `detectDebugInfo()` (L35-46): Determines debug format (PDB/DWARF/none) based on file presence and binary signatures
+- `classifyFormat()` (L48-62): Categorizes binary as MSVC/GNU/unknown based on import patterns and debug info
 
-## Classification Logic
-**classifyFormat() (L48-62)**: Determines binary format based on:
-- MSVC indicators: vcruntime140.dll, ucrtbase.dll, msvcp140.dll imports
-- GNU indicators: msvcrt.dll, libstdc++, libgcc imports or DWARF debug info
-- Falls back to 'unknown' if no clear pattern
+## Detection Strategies
+**Format Classification:**
+- MSVC: Presence of vcruntime140.dll, ucrtbase.dll, msvcp140.dll imports
+- GNU: Presence of msvcrt.dll, libstdc++, libgcc imports or DWARF debug info
+- Fallback to 'unknown' if no clear indicators
 
-**detectDebugInfo() (L35-46)**: Prioritizes PDB over DWARF detection:
-- Returns 'pdb' if .pdb file or RSDS signature found
-- Returns 'dwarf' if DWARF hints detected in binary content
-- Defaults to 'none'
+**Debug Info Detection:**
+- PDB: External .pdb file existence or RSDS signature in binary
+- DWARF: String patterns '.debug_info' or 'dwarf' in binary content
+- None: No debug information detected
 
-## Utility Functions
-**bufferContains() (L18-20)**: Simple binary pattern matching
-**collectImports() (L22-33)**: Extracts known DLL imports from ASCII representation
+## Implementation Details
+- Scans first 1MB of binary (MAX_SCAN_BYTES) for performance
+- Uses filesystem checks for external PDB files
+- ASCII string conversion for import/signature detection
+- Graceful error handling returns default empty BinaryInfo on failures
 
-## Constants
-- MAX_SCAN_BYTES (L12): 1MB scan limit for performance
-- RSDS_SIGNATURE (L13): Microsoft debug signature
-- MSVC_IMPORTS/GNU_IMPORTS (L15-16): Toolchain identification patterns
-- DWARF_HINTS (L14): DWARF debug format indicators
-
-## Error Handling
-Gracefully handles file access errors and returns default BinaryInfo with 'unknown'/'none' values. Uses try-catch blocks around file operations.
+## Dependencies
+- Node.js fs/promises for file operations
+- path module for file path manipulation
+- Buffer operations for binary data processing

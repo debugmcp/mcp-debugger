@@ -62,8 +62,6 @@ class BackendManager {
     this.child = null;
     /** @type {Client | null} */
     this.mcpClient = null;
-    /** @type {Array<object>} */
-    this.cachedTools = [];
     /** @type {number | null} */
     this.startedAt = null;
   }
@@ -107,12 +105,9 @@ class BackendManager {
     // Connect MCP Client
     await this._connectClient();
 
-    // Cache tool list
-    await this._cacheTools();
-
     this.startedAt = Date.now();
     this.state = 'running';
-    log(`Backend running (PID=${this.child.pid}, tools=${this.cachedTools.length})`);
+    log(`Backend running (PID=${this.child.pid})`);
   }
 
   async stop() {
@@ -169,7 +164,6 @@ class BackendManager {
       pid: this.child?.pid ?? null,
       port: BACKEND_PORT,
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : null,
-      toolCount: this.cachedTools.length,
       projectRoot: PROJECT_ROOT,
       buildCmd: BUILD_CMD,
     };
@@ -237,18 +231,6 @@ class BackendManager {
         log(`Ignoring client close error: ${err.message}`);
       }
       this.mcpClient = null;
-    }
-  }
-
-  async _cacheTools() {
-    if (!this.mcpClient) return;
-    try {
-      const result = await this.mcpClient.listTools();
-      this.cachedTools = result.tools || [];
-      log(`Cached ${this.cachedTools.length} tools from backend`);
-    } catch (err) {
-      log(`Failed to cache tools: ${err.message}`);
-      this.cachedTools = [];
     }
   }
 
@@ -337,12 +319,13 @@ const DEV_TOOLS = [
   },
 ];
 
-async function handleDevTool(backend, name, args) {
+async function handleDevTool(backend, server, name, args) {
   switch (name) {
     case 'dev_restart_debugger': {
       try {
         if (args?.rebuild) {
           const buildOutput = await backend.rebuildAndRestart();
+          await server.sendToolListChanged();
           return {
             content: [
               {
@@ -362,6 +345,7 @@ async function handleDevTool(backend, name, args) {
           };
         }
         await backend.restart();
+        await server.sendToolListChanged();
         return {
           content: [
             {
@@ -381,6 +365,7 @@ async function handleDevTool(backend, name, args) {
     case 'dev_rebuild_and_restart': {
       try {
         const buildOutput = await backend.rebuildAndRestart();
+        await server.sendToolListChanged();
         return {
           content: [
             {
@@ -430,12 +415,20 @@ async function main() {
   // Create the MCP Server that Claude Code talks to (via stdio)
   const server = new Server(
     { name: 'dev-proxy', version: '1.0.0' },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: { listChanged: true } } }
   );
 
-  // ListTools: merge backend tools + dev tools
+  // ListTools: forward live to backend, fall back to dev-tools-only when backend is down
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: [...backend.cachedTools, ...DEV_TOOLS] };
+    if (backend.state === 'running' && backend.mcpClient) {
+      try {
+        const result = await backend.mcpClient.listTools();
+        return { tools: [...(result.tools || []), ...DEV_TOOLS] };
+      } catch (err) {
+        log(`Live tools/list failed: ${err.message}`);
+      }
+    }
+    return { tools: [...DEV_TOOLS] };
   });
 
   // CallTool: route dev_* locally, forward everything else to backend
@@ -444,7 +437,7 @@ async function main() {
 
     // Dev tools are always handled locally
     if (name.startsWith('dev_')) {
-      return await handleDevTool(backend, name, args);
+      return await handleDevTool(backend, server, name, args);
     }
 
     // Forward to backend
@@ -480,6 +473,8 @@ async function main() {
   // Start the backend automatically
   try {
     await backend.start();
+    // Notify Claude Code that tools changed — initial tools/list arrived before backend was up
+    await server.sendToolListChanged();
   } catch (err) {
     log(`Initial backend start failed: ${err.message}`);
     log('Dev tools are still available — use dev_restart_debugger to retry');

@@ -1,44 +1,57 @@
 # mcp_debugger_launcher/tests/test_launcher.py
 @source-hash: 1b81f3b89c6d6785
-@generated: 2026-02-09T18:14:59Z
+@generated: 2026-02-10T00:41:45Z
 
-## Purpose
-Test script for validating the debug-mcp-server launcher functionality. Provides comprehensive testing of runtime detection, command generation, and module imports without actually executing server commands.
+## Purpose and Responsibility
+Test suite for the debug-mcp-server launcher package. Validates runtime detection, command generation, and CLI module functionality through manual testing with console output.
 
-## Key Components
+## Key Functions and Their Roles
 
-### Test Functions
-- **test_runtime_detection()** (L11-43): Tests runtime environment detection capabilities
-  - Validates Node.js/npx availability and versions (L17-25)
-  - Checks Docker availability and version (L27-31)
-  - Tests full runtime detection and recommendation logic (L34-41)
-  - Returns detected runtime information for use by other tests
+### `test_runtime_detection()` (L11-43)
+Tests the RuntimeDetector class functionality by:
+- Checking individual runtime availability (Node.js, npx, Docker)
+- Running full runtime detection
+- Testing recommendation logic
+- Returns detected runtimes dict for further use
 
-- **test_dry_run()** (L45-66): Demonstrates command construction without execution
-  - Shows NPX commands for stdio and SSE modes (L52-58)
-  - Shows Docker commands for stdio and SSE modes with port mapping (L60-66)
-  - Uses DebugMCPLauncher instance to access package/image constants
+### `test_dry_run()` (L45-66)
+Tests command generation without execution by:
+- Creating DebugMCPLauncher instance with verbose mode
+- Displaying NPX commands for stdio and SSE modes
+- Displaying Docker commands for stdio and SSE modes
+- Demonstrates proper command construction patterns
 
-- **test_cli_import()** (L68-81): Validates CLI module importability and basic attributes
-  - Attempts to import cli module and access version/main function
-  - Returns boolean success status for summary reporting
+### `test_cli_import()` (L68-81)
+Validates CLI module integration by:
+- Testing import of cli module
+- Extracting version and main function information
+- Returns boolean success status for summary
 
-- **main()** (L83-109): Orchestrates all tests and provides summary
-  - Runs all test functions sequentially (L89-91)
-  - Evaluates overall system readiness based on runtime availability (L97-100)
-  - Provides usage guidance for actual launcher testing (L107-109)
+### `main()` (L83-110)
+Orchestrates the complete test suite:
+- Runs all test functions sequentially
+- Provides summary of runtime availability
+- Reports CLI module status
+- Suggests manual testing commands for actual launcher
 
-## Dependencies
-- **detectors.RuntimeDetector**: Runtime environment detection utilities
-- **launcher.DebugMCPLauncher**: Main launcher class for command construction
-- **cli**: CLI module for version and main function access
+## Dependencies and Imports
+- **RuntimeDetector** (L8): Core runtime detection functionality
+- **DebugMCPLauncher** (L9): Main launcher class for command generation
+- **cli module** (L74): CLI entry point module (tested via import)
 
-## Architecture Notes
-- Uses path manipulation (L5-6) to ensure local module imports work correctly
-- Designed as a validation tool rather than unit tests - focuses on integration testing
-- Provides human-readable output with clear success/failure indicators
-- No actual subprocess execution - purely validation and demonstration
+## Architecture and Patterns
+- **Manual test framework**: Uses print statements rather than unittest/pytest
+- **Integration testing**: Tests actual system dependencies (Node.js, Docker)
+- **Dry run validation**: Tests command construction without execution
+- **Graceful failure**: Continues testing even if components fail
 
-## Key Constants Referenced
-- `launcher.NPM_PACKAGE`: NPM package identifier for npx commands
-- `launcher.DOCKER_IMAGE`: Docker image identifier for container commands
+## Key Constants and Configuration
+- Uses `launcher.NPM_PACKAGE` and `launcher.DOCKER_IMAGE` from DebugMCPLauncher
+- Tests both stdio and SSE modes with port 8080
+- Verbose mode enabled for detailed output
+
+## Critical Behavior Notes
+- Path manipulation (L5-6) ensures local imports work correctly
+- Tests validate actual system state rather than mocked dependencies
+- No automated assertions - relies on manual verification of output
+- Provides actionable next steps for manual testing

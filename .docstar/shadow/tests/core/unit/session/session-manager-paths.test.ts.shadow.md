@@ -1,33 +1,32 @@
 # tests/core/unit/session/session-manager-paths.test.ts
 @source-hash: 889a56fa4759a192
-@generated: 2026-02-09T18:14:26Z
+@generated: 2026-02-10T00:41:14Z
 
-## Primary Purpose
-Test suite validating SessionManager's path resolution behavior across different operating systems and path formats. Focuses on ensuring paths are handled correctly when setting breakpoints, particularly for Windows/Unix path separators and absolute/relative path handling.
+## Purpose
+Unit test suite for SessionManager path resolution behavior across different operating systems and path formats. Tests Windows-specific path handling, relative/absolute path processing, and breakpoint file path normalization.
 
-## Key Test Structure
-- **Main describe block** (L9-137): "SessionManager - Path Resolution" 
-- **Setup/teardown** (L14-32): Configures fake timers, mock dependencies, and SessionManager instance with test config
-- **Windows Path Handling** (L34-92): Tests Windows-specific path scenarios with drive letters and backslashes
-- **Breakpoint Path Resolution** (L94-136): Tests general path handling for breakpoints
+## Test Structure
+- **Main Test Suite** (L9-137): Tests SessionManager path resolution capabilities
+- **Setup/Teardown** (L14-32): Configures mock dependencies, fake timers, and test environment
+- **Windows Path Handling** (L34-92): Tests Windows drive letters, backslash normalization, and path passthrough
+- **Breakpoint Path Resolution** (L94-136): Tests relative paths, absolute paths, and cross-OS normalization
 
-## Critical Test Cases
-- **Windows absolute paths** (L35-55): Validates handling of `C:\Users\test\file.py` and mixed separator formats
-- **Backslash normalization** (L57-73): Tests conversion of `src\debug\file.py` format
-- **Path pass-through behavior** (L75-91): Verifies paths are passed without modification
-- **Relative path handling** (L95-106): Tests `src/test.py` style paths
-- **Mixed separator normalization** (L121-135): Tests `src\components/test.py` format
-
-## Dependencies
-- **SessionManager** (L5): Core class under test from `../../../../src/session/session-manager.js`
-- **DebugLanguage.MOCK** (L6): Test language enum from `@debugmcp/shared`
-- **createMockDependencies** (L7): Test utilities from local test utils
+## Key Test Dependencies
+- **SessionManager** (L5): Main class under test from session module
+- **DebugLanguage.MOCK** (L6): Mock debug language for testing
+- **createMockDependencies** (L7): Test utility for creating mock dependencies
+- **Vitest Framework** (L4): Test runner with timing control
 
 ## Test Configuration
-- **logDirBase**: `/tmp/test-sessions` (L18)
-- **defaultDapLaunchArgs**: stopOnEntry and justMyCode flags (L19-22)
-- **Language**: Always uses DebugLanguage.MOCK for consistency
-- **Python path**: Generic 'python' string
+- **Base Config** (L17-23): Uses `/tmp/test-sessions` log directory with DAP launch args
+- **Mock Dependencies** (L16, L31): ProxyManager reset in teardown
+- **Timing Control** (L15, L29): Fake timers for controlled test execution
 
-## Architecture Notes
-Tests validate that SessionManager now adopts a "pass-through" approach for path handling rather than performing normalization internally. Path resolution responsibility has been moved to server level (L89). All assertions verify the breakpoint file property matches input paths exactly, indicating minimal path transformation at this layer.
+## Critical Test Behaviors
+- **Path Passthrough** (L88-90, L104-105, L117-118): SessionManager now passes paths without modification
+- **Windows Compatibility** (L41-54): Tests both backslash and forward slash Windows paths
+- **Cross-Platform Normalization** (L127-134): Verifies mixed separator handling
+- **Breakpoint Integration** (L48, L63, L82): Tests path handling through setBreakpoint method
+
+## Architectural Notes
+Comments indicate a shift in responsibility where SessionManager no longer performs path resolution - this is now handled at the server level (L89, L104). Tests verify passthrough behavior rather than normalization.

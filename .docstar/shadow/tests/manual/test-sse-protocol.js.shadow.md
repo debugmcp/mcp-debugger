@@ -1,43 +1,53 @@
 # tests/manual/test-sse-protocol.js
 @source-hash: a677ad0e427e54c4
-@generated: 2026-02-09T18:15:09Z
+@generated: 2026-02-10T00:41:59Z
 
-**Manual test script for MCP SDK SSE (Server-Sent Events) protocol implementation**
+## Purpose
+Manual test script for SSE (Server-Sent Events) connection handling with MCP SDK protocol integration. Tests bi-directional communication via SSE endpoint establishment and subsequent JSON-RPC POST requests.
 
-This is a Node.js test client that validates the SSE-based communication protocol used by the MCP (Model Context Protocol) SDK, specifically testing the two-phase connection pattern: initial SSE endpoint discovery followed by authenticated JSON-RPC communication.
+## Key Components
 
-## Primary Components
+### Constants & Configuration
+- `SSE_URL` (L4): Target endpoint `http://localhost:3001/sse` for SSE connection
+- Default headers (L30-32): Standard SSE client headers with cache control
 
-### SSE Event Parser (L8-26)
-- **parseSSEEvents()**: Parses raw SSE chunk data into structured event objects
-- Handles standard SSE format: `event:` and `data:` lines separated by newlines
-- Returns array of parsed events with `{event, data}` structure
+### Core Functions
 
-### Main SSE Connection (L28-68)
-- Establishes GET request to `http://localhost:3001/sse` with proper SSE headers
-- Listens for `endpoint` events containing session information
-- Extracts session ID using regex pattern `/sessionId=([a-f0-9-]+)/` (L51)
-- Triggers POST request test after 1-second delay when session ID obtained
+#### `parseSSEEvents(chunk)` (L9-26)
+Parses raw SSE data chunks into structured event objects. Handles SSE protocol format:
+- Extracts `event:` and `data:` fields from incoming chunks
+- Returns array of parsed events with event type and data content
+- Manages event boundary detection via empty lines
 
-### POST Request Handler (L74-120)
-- **testPostRequest(sessionId)**: Sends JSON-RPC 2.0 request to same endpoint
-- Uses session ID in `X-Session-ID` header for authentication
-- Sends `tools/list` method call as test payload
-- Maintains SSE connection to receive potential responses
+#### `testPostRequest(sessionId)` (L75-120)
+Executes JSON-RPC POST request using extracted session ID:
+- Sends `tools/list` method call with JSON-RPC 2.0 format
+- Includes session ID in `X-Session-ID` header for correlation
+- Logs complete request/response cycle for debugging
 
-## Protocol Flow
+### Protocol Flow
 
-1. **Discovery Phase**: Client connects via SSE to receive endpoint/session information
-2. **Authentication Phase**: Client uses extracted session ID for subsequent API calls
-3. **Communication Phase**: Standard JSON-RPC 2.0 over HTTP POST with session authentication
+#### SSE Connection Establishment (L29-68)
+1. Initiates HTTP GET request to SSE endpoint with proper headers
+2. Monitors for `endpoint` events containing session information
+3. Extracts session ID via regex pattern `/sessionId=([a-f0-9-]+)/` (L51)
+4. Triggers POST request after 1-second delay (L57-59)
 
-## Key Dependencies
-- Node.js `http` module for both SSE and POST requests
-- Hardcoded endpoint: `localhost:3001/sse`
-- Expects MCP SDK SSE protocol with session-based authentication
+#### Session Management
+- Session ID extraction from SSE endpoint event data (L51-54)
+- Session correlation via `X-Session-ID` header in subsequent requests (L92)
 
-## Architectural Notes
-- Keeps process alive with `process.stdin.resume()` (L123) for continuous testing
-- Designed for manual testing/debugging of SSE protocol implementation
-- Follows standard SSE client patterns with proper error handling
-- Tests both phases of MCP SDK connection protocol in sequence
+## Dependencies
+- `http` module for raw HTTP client operations
+- No external MCP SDK imports (manual protocol implementation)
+
+## Architecture Notes
+- Implements manual SSE parsing instead of using EventSource API
+- Follows MCP SDK SSE protocol pattern with session-based communication
+- Maintains persistent SSE connection while testing POST operations
+- Uses setTimeout for connection sequencing rather than promise chains
+
+## Critical Behaviors
+- Script keeps running indefinitely via `process.stdin.resume()` (L123) to observe ongoing SSE events
+- Expects specific SSE event format with `endpoint` event type for session establishment
+- POST request uses same endpoint (`/sse`) as SSE connection for protocol consistency

@@ -1,46 +1,42 @@
 # src/implementations/file-system-impl.ts
 @source-hash: d346a8479a1bdbdb
-@generated: 2026-02-09T18:15:02Z
+@generated: 2026-02-10T00:41:46Z
 
-## Purpose
-Concrete file system implementation that wraps fs-extra functionality to provide standardized async file operations. Acts as an adapter between the IFileSystem interface and Node.js file system operations.
+**Primary Purpose:** Concrete implementation of the `IFileSystem` interface using the `fs-extra` library, providing enhanced file system operations with promise-based APIs.
 
-## Key Components
+**Key Class:**
+- `FileSystemImpl` (L8-78): Main implementation class that wraps `fs-extra` methods to fulfill the `IFileSystem` contract
 
-### FileSystemImpl Class (L8-78)
-Implements IFileSystem interface using fs-extra as the underlying provider. All methods are thin wrappers that delegate to fs-extra with consistent error handling and type safety.
+**Core Methods:**
 
-**Core File Operations:**
-- `readFile()` (L10-12): Reads file content with UTF-8 default encoding
-- `writeFile()` (L14-16): Writes string or Buffer data to file
-- `exists()` (L18-25): Checks file existence using fs.access() with try/catch pattern
-- `unlink()` (L39-41): Deletes files
+**Basic File Operations (L10-41):**
+- `readFile(path, encoding?)` (L10): Reads file content with UTF-8 default encoding
+- `writeFile(path, data)` (L14): Writes string or Buffer data to file
+- `exists(path)` (L18): Checks file/directory existence using `fs.access()` with try/catch pattern
+- `mkdir(path, options?)` (L27): Creates directories with optional recursive flag
+- `readdir(path)` (L31): Lists directory contents
+- `stat(path)` (L35): Returns file/directory statistics
+- `unlink(path)` (L39): Deletes files
 
-**Directory Operations:**
-- `mkdir()` (L27-29): Creates directories with optional recursive flag
-- `readdir()` (L31-33): Lists directory contents
-- `rmdir()` (L43-48): Removes directories, uses fs.remove() for recursive deletion
-- `ensureDir()/ensureDirSync()` (L51-57): Creates directory and parent directories if needed
+**Advanced Directory Operations:**
+- `rmdir(path, options?)` (L43): Removes directories, uses `fs.remove()` for recursive deletion, otherwise `fs.rmdir()`
 
-**Enhanced fs-extra Features:**
-- `pathExists()` (L59-61): Alternative existence check
-- `existsSync()` (L63-65): Synchronous existence check
-- `remove()` (L67-69): Removes files/directories recursively
-- `copy()` (L71-73): Copies files/directories
-- `outputFile()` (L75-77): Writes file and creates parent directories
+**fs-extra Enhanced Methods (L51-77):**
+- `ensureDir(path)` (L51): Creates directory and parent directories if they don't exist
+- `ensureDirSync(path)` (L55): Synchronous version of ensureDir
+- `pathExists(path)` (L59): Alternative existence check method
+- `existsSync(path)` (L63): Synchronous existence check
+- `remove(path)` (L67): Recursively removes files/directories
+- `copy(src, dest)` (L71): Copies files/directories
+- `outputFile(file, data)` (L75): Writes file and creates parent directories if needed
 
-## Dependencies
-- `fs-extra`: Primary file system operations provider
-- `fs.Stats`: Type definition for file statistics
-- `@debugmcp/shared.IFileSystem`: Interface contract
+**Dependencies:**
+- `fs-extra`: Primary dependency for enhanced file system operations
+- `fs.Stats`: Type import for file statistics
+- `@debugmcp/shared.IFileSystem`: Interface contract being implemented
 
-## Architectural Patterns
-- **Adapter Pattern**: Wraps fs-extra to conform to IFileSystem interface
-- **Promise-based API**: All operations return Promises for consistency
-- **Thin Wrapper**: Minimal abstraction over fs-extra, preserving original functionality
-- **Dual API Support**: Provides both async and sync variants where applicable (ensureDir, exists)
-
-## Critical Implementation Details
-- `rmdir()` switches to `fs.remove()` for recursive operations (L44-45)
-- `exists()` uses access() pattern instead of deprecated fs.exists (L19-24)
-- Default UTF-8 encoding applied to readFile operations (L11)
+**Architecture Notes:**
+- Simple adapter pattern wrapping fs-extra methods
+- Provides both async and sync variants for certain operations
+- Consistent error handling through fs-extra's promise-based API
+- Dual approach for directory removal (recursive vs non-recursive)

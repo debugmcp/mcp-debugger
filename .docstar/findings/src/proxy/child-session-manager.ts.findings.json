@@ -1,0 +1,23 @@
+{
+  "source": "src/proxy/child-session-manager.ts",
+  "source_hash": "be3a89035593d014",
+  "generated": "2026-02-10T00:42:00Z",
+  "findings": [
+    {
+      "category": "commented_out_code",
+      "line_start": 264,
+      "line_end": 264,
+      "severity": "warning",
+      "description": "Parameter _parentConfig is declared but unused, with void statement to suppress warnings",
+      "suggestion": "Consider removing unused parameter or implement the intended functionality"
+    },
+    {
+      "category": "commented_out_code",
+      "line_start": 285,
+      "line_end": 285,
+      "severity": "warning",
+      "description": "Parameter _parentConfig is declared but unused, with void statement to suppress warnings",
+      "suggestion": "Consider removing unused parameter or implement the intended functionality"
+    }
+  ]
+}

@@ -50,14 +50,12 @@ describe('Server Lifecycle Tests', () => {
       
       await debugServer.start();
       
-      // The server doesn't currently implement start
       expect(mockDependencies.logger.info).toHaveBeenCalledWith('Debug MCP Server started');
     });
 
     it('should handle server start errors', async () => {
       debugServer = new DebugMcpServer();
       
-      // The server start method doesn't currently throw errors
       await debugServer.start();
       
       expect(mockDependencies.logger.info).toHaveBeenCalledWith('Debug MCP Server started');
@@ -79,11 +77,10 @@ describe('Server Lifecycle Tests', () => {
       debugServer = new DebugMcpServer();
       mockSessionManager.closeAllSessions.mockRejectedValue(new Error('Close sessions failed'));
       
-      // The server stop method doesn't currently propagate errors
       try {
         await debugServer.stop();
       } catch (error) {
-        // Expected - the error is not currently caught by stop()
+        // Expected - closeAllSessions rejection propagates from stop()
       }
       
       expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
@@ -93,7 +90,6 @@ describe('Server Lifecycle Tests', () => {
       debugServer = new DebugMcpServer();
       mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
       
-      // The server stop method doesn't have a close method to fail
       await debugServer.stop();
       
       expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();

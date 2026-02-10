@@ -1,0 +1,6 @@
+{
+  "source": "tests/e2e/docker/docker-smoke-rust.test.ts",
+  "source_hash": "2cd38450379899ec",
+  "generated": "2026-02-10T00:41:28Z",
+  "findings": []
+}

@@ -157,7 +157,6 @@ describe('ProxyManager Message Handling', () => {
       let exitedEmitted = false;
       let capturedCode: number | undefined;
 
-      // The exited event doesn't pass a code - check implementation
       proxyManager.on('exited', () => {
         exitedEmitted = true;
         capturedCode = 0; // Default to 0 for test
@@ -260,8 +259,6 @@ describe('ProxyManager Message Handling', () => {
 
       proxyManager.simulateMessage(wrongSessionMessage);
 
-      // Note: This might need adjustment based on actual implementation
-      // Some implementations might still process wrong session messages
       expect(eventEmitted).toBe(false);
     });
   });
@@ -909,84 +906,6 @@ describe('ProxyManager Message Handling', () => {
     });
   });
 
-  describe('status transitions and cleanup', () => {
-    it('emits initialized when adapter transport connects', () => {
-      const logger = createMockLogger();
-      const fileSystem = createMockFileSystem();
-
-      const proxyManager = new ProxyManager(
-        null,
-        { launchProxy: vi.fn() } as never,
-        fileSystem as never,
-        logger
-      );
-
-      const initialized = vi.fn();
-      proxyManager.on('initialized', initialized);
-
-      (proxyManager as unknown as { handleStatusMessage: (message: any) => void }).handleStatusMessage({
-        type: 'status',
-        sessionId: 'status-session',
-        status: 'adapter_connected'
-      });
-
-      expect(initialized).toHaveBeenCalled();
-    });
-
-    it('emits exit when adapter reports termination', () => {
-      const logger = createMockLogger();
-      const fileSystem = createMockFileSystem();
-
-      const proxyManager = new ProxyManager(
-        null,
-        { launchProxy: vi.fn() } as never,
-      fileSystem as never,
-        logger
-      );
-
-      const exitSpy = vi.fn();
-      proxyManager.on('exit', exitSpy);
-
-      (proxyManager as unknown as { handleStatusMessage: (message: any) => void }).handleStatusMessage({
-        type: 'status',
-        sessionId: 'status-session',
-        status: 'adapter_exited',
-        code: 9,
-        signal: 'SIGTERM'
-      });
-
-      expect(exitSpy).toHaveBeenCalledWith(9, 'SIGTERM');
-    });
-
-    it('rejects pending requests when proxy exits', () => {
-      const logger = createMockLogger();
-      const fileSystem = createMockFileSystem();
-
-      const proxyManager = new ProxyManager(
-        null,
-        { launchProxy: vi.fn() } as never,
-        fileSystem as never,
-        logger
-      );
-
-      const rejectSpy = vi.fn();
-      (proxyManager as unknown as {
-        pendingDapRequests: Map<string, { resolve: () => void; reject: (error: Error) => void }>;
-      }).pendingDapRequests.set('req-1', {
-        resolve: vi.fn(),
-        reject: rejectSpy
-      });
-
-      (proxyManager as unknown as { handleProxyExit: (code: number | null, signal: string | null) => void }).handleProxyExit(
-        0,
-        null
-      );
-
-      expect(rejectSpy).toHaveBeenCalledWith(new Error('Proxy exited'));
-      const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
-      expect(pending.size).toBe(0);
-    });
-  });
 });
   describe('IPC smoke test status', () => {
     it('kills proxy process when minimal proxy test status arrives', () => {

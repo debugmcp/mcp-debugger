@@ -1,39 +1,30 @@
 # tests/manual/test_python_debugger_instantiation.ts
-@source-hash: 0b63d6a19ea2f87e
-@generated: 2026-02-09T18:15:09Z
+@source-hash: 196c06e18deede90
+@generated: 2026-02-10T01:18:52Z
 
 ## Purpose
-Manual test file for verifying PythonDebugger instantiation functionality. Serves as a diagnostic tool to isolate and test the basic constructor behavior of PythonDebugger without full session setup.
+Manual test file for validating PythonDebugger class instantiation. Tests basic constructor functionality without launching actual debugging sessions.
 
 ## Key Components
-
-### Main Test Function
-- **testInstantiation() (L4-36)**: Async function that performs the core instantiation test
-  - Creates dummy configuration with Windows Python path
-  - Attempts PythonDebugger constructor call with extensive logging
-  - Validates successful instantiation and non-null instance
-  - Comprehensive error handling with tagged console output
-
-### Configuration Setup
-- **dummyConfig (L8-11)**: PythonDebuggerConfig object with:
-  - Test session ID: 'test-instantiation-session'
-  - Hard-coded Python path: 'C:\\Python313\\python.exe'
-
-### Execution Flow
-- **Test execution (L38)**: Direct function call - runs immediately when file is loaded
-- Extensive console logging with `[INSTANTIATION_TEST]` tags for easy filtering
+- **testInstantiation() function (L4-28)**: Main test function that attempts to create a PythonDebugger instance with minimal configuration and validates successful instantiation
+- **Test execution (L30)**: Immediately invokes the test function when file is run
 
 ## Dependencies
-- `PythonDebugger, PythonDebuggerConfig` from debugpy module
-- `SessionConfig, DebugLanguage` from session models (imported but unused)
+- `PythonDebugger, PythonDebuggerConfig` from `../../src/debugger/python/debugpy.js` (L1)
+- `SessionConfig, DebugLanguage` from `../../src/session/models.js` (L2) - imported but unused
 
-## Architecture Notes
-- Minimal test scope: focuses solely on constructor validation
-- Environment-specific: hardcoded Windows Python path
-- Manual execution model: no test framework integration
-- Defensive programming: null checks and comprehensive error catching
+## Test Configuration
+- **dummyConfig (L8-11)**: Minimal PythonDebuggerConfig with hardcoded Windows Python path (`C:\Python313\python.exe`)
+- **sessionId**: Uses test-specific identifier `'test-instantiation-session'` (L7)
 
-## Critical Constraints
-- Requires valid Python installation at specified path
-- Windows-specific path configuration
-- No cleanup or teardown logic
+## Test Logic
+1. Creates PythonDebugger instance with basic config (L15)
+2. Validates instance is not null (L18-22)
+3. Comprehensive error handling with detailed logging (L24-26)
+4. Console logging throughout for debugging test execution
+
+## Architectural Notes
+- Manual test (not part of automated test suite)
+- Platform-specific: hardcoded Windows Python path
+- Focused solely on constructor validation, no actual debugging operations
+- Defensive null checking despite constructor throwing on failure

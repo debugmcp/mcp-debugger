@@ -1,0 +1,15 @@
+{
+  "source": "packages/adapter-rust/src/utils/codelldb-resolver.ts",
+  "source_hash": "d3ce87d62d99b002",
+  "generated": "2026-02-10T01:19:01Z",
+  "findings": [
+    {
+      "category": "stale_comment",
+      "line_start": 76,
+      "line_end": 78,
+      "severity": "warning",
+      "description": "Comment about intentional code duplication may be misleading - the platform detection logic is duplicated between resolveCodeLLDBExecutable() and getCodeLLDBVersion(), but the justification about 'coupling without meaningful benefit' is questionable since a simple helper function would reduce maintenance burden",
+      "suggestion": "Consider extracting platform detection into a shared helper function or update the comment to better justify the duplication"
+    }
+  ]
+}

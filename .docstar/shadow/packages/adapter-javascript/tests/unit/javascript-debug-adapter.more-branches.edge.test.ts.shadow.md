@@ -1,56 +1,35 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.more-branches.edge.test.ts
 @source-hash: 70781ae99304dcf1
-@generated: 2026-02-09T18:14:04Z
+@generated: 2026-02-10T00:41:07Z
 
-## Purpose and Responsibility
+**Purpose**: Edge case and branch coverage test suite for `JavascriptDebugAdapter`, targeting specific code paths and error conditions not covered by main unit tests.
 
-Edge case test suite for JavascriptDebugAdapter that covers additional branch paths and error conditions not tested in primary unit tests. Focuses on logging behavior, state transitions, configuration transformations, event handling, and dependency requirements.
+**Test Structure**:
+- Setup with mock dependencies (L8-19): `depsWithLogger` with mock logger, `depsNoLogger` without logger
+- Standard vitest lifecycle hooks (L22-29) for mock management
 
-## Key Test Structure
+**Key Test Cases**:
 
-**Mock Dependencies (L8-19):**
-- `depsWithLogger` (L8-15): Mock dependencies with vitest logger functions
-- `depsNoLogger` (L17-19): Dependencies with undefined logger for fallback testing
+1. **Runtime Executable Fallback (L31-41)**: Tests `determineRuntimeExecutable` when no TypeScript runners are detected and no dependency logger exists. Verifies fallback to console.warn and returns 'node' executable.
 
-**Test Setup (L21-29):**
-- Standard vitest hooks with mock restoration and clearing
+2. **Disposal Without Connection (L43-61)**: Tests adapter disposal without prior connection, ensuring only 'disposed' event is emitted (not 'disconnected'), and state resets to `UNINITIALIZED`.
 
-## Critical Test Cases
+3. **Launch Config Environment Handling (L63-73)**: Tests `transformLaunchConfig` respects user-provided `NODE_ENV` and merges with `process.env`, ensuring environment variable precedence.
 
-**Runtime Detection Edge Case (L31-41):**
-- Tests `determineRuntimeExecutable()` fallback when no TypeScript runners detected
-- Validates console.warn fallback when dependency logger unavailable
-- Mocks `detectTypeScriptRunners` to return undefined runners
+4. **DAP Event Handling - Continued (L75-88)**: Tests `handleDapEvent` with 'continued' event leaves adapter state unchanged.
 
-**Disposal Without Connection (L43-61):**
-- Tests `dispose()` behavior when adapter never connected
-- Validates event emission sequence (only 'disposed', not 'disconnected')
-- Confirms state reset to UNINITIALIZED and connection status false
+5. **DAP Event Handling - Unknown Events (L90-106)**: Tests default branch in `handleDapEvent` for unknown events, verifying custom events are emitted with their body objects intact.
 
-**Configuration Transformation (L63-73):**
-- Tests `transformLaunchConfig()` environment variable handling
-- Validates user-provided NODE_ENV preservation
-- Confirms process.env merging with custom variables
+6. **Dependency Requirements (L108-115)**: Tests `getRequiredDependencies` returns Node.js dependency information with version and installation URL.
 
-**Event Handling Branches (L75-88, L90-106):**
-- Tests 'continued' event handling (state unchanged)
-- Tests unknown/custom event handling via default branch
-- Validates event re-emission with body preservation
+**Dependencies**:
+- `JavascriptDebugAdapter` from main source
+- `AdapterState` enum from `@debugmcp/shared`
+- `DebugProtocol` types from `@vscode/debugprotocol`
+- Vitest testing framework
 
-**Dependency Requirements (L108-115):**
-- Tests `getRequiredDependencies()` return structure
-- Validates Node.js dependency specification with version and install URL
-
-## Dependencies and Imports
-
-- **JavascriptDebugAdapter** (L3): Main class under test
-- **AdapterState** (L4): Enum for adapter state validation
-- **DebugProtocol** (L5): VSCode Debug Adapter Protocol types
-- **Vitest testing framework** (L2): Test runner and mocking utilities
-
-## Testing Patterns
-
-- **Type casting with `as any`** for accessing private methods/properties
-- **Event listener pattern** for testing event emissions
-- **Mock spying** on console methods and internal functions
-- **Async/await** for testing promise-based adapter methods
+**Testing Patterns**:
+- Heavy use of method mocking with `vi.spyOn()` and `mockImplementation()`
+- Event emission verification
+- State transition validation
+- Type casting with `as any` for accessing private methods

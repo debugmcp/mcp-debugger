@@ -1,59 +1,60 @@
 # tests/proxy/dap-client-behavior.test.ts
 @source-hash: a0e5af43495c6591
-@generated: 2026-02-09T18:15:11Z
+@generated: 2026-02-10T00:42:01Z
 
-## Test Suite for DAP Client Behavior Implementations
+## Test Suite: DapClientBehavior Implementations
 
-**Primary Purpose:** Comprehensive test suite validating DAP (Debug Adapter Protocol) client behavior implementations across different adapter policies. Tests proxy-side handling of reverse requests, command routing, and policy-specific configurations.
+**Purpose**: Comprehensive test coverage for DAP (Debug Adapter Protocol) client behavior implementations across different adapter policies in the debugmcp proxy system.
 
 ### Test Structure
+- **Main Suite**: `DapClientBehavior` (L15-242)
+- **Mock Context Setup**: `mockContext` with vitest mocks for DAP operations (L18-25)
 
-**Main Test Suite (L15-242):** `DapClientBehavior` with shared mock context setup
-- **Mock Context Setup (L16-25):** Creates `DapClientContext` with mocked functions for sendResponse, createChildSession, and tracking collections
+### Core Policy Test Coverage
 
-### JavaScript Debug Adapter Policy Tests (L27-139)
+#### JsDebugAdapterPolicy Tests (L27-139)
+- **Reverse Request Handling** (L30-103):
+  - `startDebugging` with `__pendingTargetId` - creates child sessions for new targets (L31-53)
+  - Duplicate target adoption prevention (L55-75)
+  - `runInTerminal` request handling (L77-89)
+  - Unknown command rejection (L91-102)
 
-**Reverse Request Handling (L30-103):**
-- Tests `startDebugging` request with valid `__pendingTargetId` (L31-53)
-- Validates child session creation and configuration extraction
-- Tests duplicate target adoption prevention (L55-75) 
-- Tests `runInTerminal` request handling (L77-89)
-- Tests unknown command rejection (L91-102)
+- **Command Routing Configuration** (L105-121):
+  - Child-routed commands: threads, pause, continue, stackTrace, scopes, variables, evaluate (L106-114)
+  - Parent-only commands: initialize, launch, attach (L116-120)
 
-**Command Routing Tests (L105-121):**
-- Verifies debuggee-scoped commands route to child sessions (L106-114)
-- Ensures initialization commands remain parent-scoped (L116-120)
+- **JavaScript-Specific Settings** (L123-138):
+  - Child session management flags: `mirrorBreakpointsToChild=true`, `deferParentConfigDone=true`, `pauseAfterChildAttach=true`
+  - Extended timeout: `childInitTimeout=12000ms`
+  - Adapter ID normalization: `javascript` → `pwa-node` (L132-137)
 
-**Configuration Tests (L123-138):**
-- Validates JavaScript-specific behavior flags (L124-130)
-- Tests adapter ID normalization from 'javascript' to 'pwa-node' (L132-137)
+#### PythonAdapterPolicy Tests (L141-183)
+- **Limited Reverse Request Support**: Only handles `runInTerminal`, rejects `startDebugging` (L144-171)
+- **Python-Specific Configuration**: No child routing, minimal session management, `childInitTimeout=5000ms` (L173-182)
 
-### Python Adapter Policy Tests (L141-183)
+#### MockAdapterPolicy Tests (L185-197)
+- **Minimal Implementation**: No reverse request handling, basic configuration with `childInitTimeout=1000ms`
 
-**Reverse Request Handling (L144-171):**
-- Tests `runInTerminal` support (L145-157)
-- Validates `startDebugging` rejection (L159-170)
+#### DefaultAdapterPolicy Tests (L199-207)
+- **Empty Behavior**: Returns empty object `{}` with no specialized functionality
 
-**Configuration Tests (L173-182):**
-- Verifies Python-specific settings and disabled child session features
-
-### Mock and Default Policy Tests (L185-207)
-
-**MockAdapterPolicy (L185-197):** Tests minimal behavior implementation
-**DefaultAdapterPolicy (L199-207):** Validates empty behavior object
-
-### Policy Comparison Tests (L209-241)
-
-**Feature Comparison (L210-226):** Validates that only JavaScript policy supports child sessions and breakpoint mirroring
-**Policy Uniqueness (L228-240):** Ensures all adapter policies have distinct names
+### Cross-Policy Comparison Tests (L209-241)
+- **JavaScript Uniqueness**: Only policy with child session support and breakpoint mirroring (L210-226)
+- **Policy Distinctness**: Validates all policies have unique names (L228-240)
 
 ### Key Dependencies
-- Vitest testing framework with mocking capabilities
-- @vscode/debugprotocol for DAP types
-- @debugmcp/shared for adapter policy implementations and context types
+- **Testing Framework**: vitest with mocking capabilities
+- **Protocol Types**: `@vscode/debugprotocol` for DAP request/response structures
+- **Shared Types**: `@debugmcp/shared` for context interfaces and policy implementations
 
-### Architecture Notes
-- Tests validate behavior objects returned by static `getDapClientBehavior()` methods
-- JavaScript policy uniquely supports child session creation for multi-target debugging
-- Each policy implements different timeout values and feature flags
-- Reverse request handling enables debugger-to-client communication flow
+### Testing Patterns
+- Mock-based isolation using vitest `vi.fn()`
+- Async request/response testing with `ReverseRequestResult`
+- Configuration validation through property assertions
+- Cross-policy behavioral comparison testing
+
+### Critical Behaviors Tested
+- Child session creation logic with pending target tracking
+- Command routing to appropriate session contexts
+- Adapter-specific timeout and behavioral configurations
+- Request handling for terminal operations and debugging sessions

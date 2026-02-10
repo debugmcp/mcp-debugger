@@ -1,20 +1,6 @@
-﻿import { describe, it, expect, beforeEach, vi } from 'vitest';
+﻿import { describe, it, expect, vi } from 'vitest';
 import { JavascriptDebugAdapter } from '../../../packages/adapter-javascript/src/javascript-debug-adapter.js';
 import { DebugFeature } from '@debugmcp/shared';
-
-const mockDetectRunners = vi.fn();
-const mockDetectBinary = vi.fn();
-
-vi.mock('../../../packages/adapter-javascript/src/utils/config-transformer.js', () => ({
-  determineOutFiles: vi.fn(),
-  isESMProject: vi.fn().mockReturnValue(true),
-  hasTsConfigPaths: vi.fn().mockReturnValue(true)
-}));
-
-vi.mock('../../../packages/adapter-javascript/src/utils/typescript-detector.js', () => ({
-  detectTsRunners: (...args: unknown[]) => mockDetectRunners(...args),
-  detectBinary: (...args: unknown[]) => mockDetectBinary(...args)
-}));
 
 const createDependencies = () => ({
   logger: {
@@ -30,29 +16,6 @@ const createDependencies = () => ({
 });
 
 describe('JavascriptDebugAdapter runtime helpers', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDetectBinary.mockReturnValue(undefined);
-  });
-
-  it('deduplicates ts-node runtime hooks when computing runtime arguments', async () => {
-    mockDetectRunners.mockResolvedValue({ tsNode: 'ts-node', tsx: undefined });
-    const adapter = new JavascriptDebugAdapter(createDependencies());
-    vi.spyOn(adapter as any, 'detectTypeScriptRunners').mockResolvedValue({ tsNode: 'ts-node' });
-
-    const args = await (adapter as any).determineRuntimeArgs(true, {
-      program: '/workspace/app.ts',
-      cwd: '/workspace',
-      runtimeArgs: ['-r', 'ts-node/register'],
-      runtimeExecutable: process.execPath
-    });
-
-    const tsNodeRegisterCount = args.filter((entry: string) => entry === 'ts-node/register').length;
-    expect(tsNodeRegisterCount).toBe(1);
-    expect(args).toContain('ts-node/register/transpile-only');
-    expect(args).toContain('--loader');
-  });
-
   it('translates ENOENT errors into actionable guidance', () => {
     const adapter = new JavascriptDebugAdapter(createDependencies());
     const message = adapter.translateErrorMessage(new Error('ENOENT: spawn node ENOENT'));

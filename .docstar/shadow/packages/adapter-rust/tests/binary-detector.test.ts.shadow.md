@@ -1,44 +1,40 @@
 # packages/adapter-rust/tests/binary-detector.test.ts
 @source-hash: 55506f3edd47d545
-@generated: 2026-02-09T18:14:33Z
+@generated: 2026-02-10T00:41:25Z
 
-## Primary Purpose
-Test suite for binary format detection functionality in the adapter-rust package. Validates the `detectBinaryFormat` utility's ability to identify MSVC vs GNU binary formats and extract debug information characteristics.
+**Primary Purpose**: Test suite for binary format detection utility in a Rust adapter package. Tests the `detectBinaryFormat` function's ability to distinguish between MSVC and GNU compiler outputs based on binary signatures and debug information.
 
-## Key Functions
+**Key Test Utilities**:
+- `createTempDir()` (L9-11): Creates temporary directories using OS temp folder with prefixed naming
+- `writeBinary()` (L13-17): Writes binary content (Buffer or string) to files in specified directory
+- `tempDirs` array (L19): Tracks temporary directories for cleanup
+- `afterEach` cleanup hook (L21-35): Removes all temporary directories and files after each test
 
-**createTempDir() (L9-11)**: Creates temporary directories for test isolation using OS temp directory with consistent prefix.
+**Test Coverage**:
+- **MSVC Binary Detection** (L38-61): Tests detection of MSVC-compiled binaries via:
+  - RSDS signature presence (`hasRSDS: true`)
+  - PDB file existence (`hasPDB: true`) 
+  - DLL import extraction (`vcruntime140.dll`, `ucrtbase.dll`)
+  - Debug info type classification (`debugInfoType: 'pdb'`)
+  - Format classification (`format: 'msvc'`)
 
-**writeBinary() (L13-17)**: Helper to write binary content (Buffer or string) to files within test directories, returning the full file path.
+- **GNU Binary Detection** (L63-83): Tests detection of GNU-compiled binaries via:
+  - DWARF debug section hints (`.debug_info` string)
+  - Absence of RSDS/PDB markers
+  - DLL import parsing (`msvcrt.dll`)
+  - Debug info type classification (`debugInfoType: 'dwarf'`)
+  - Format classification (`format: 'gnu'`)
 
-## Test Structure
+- **Unknown Binary Handling** (L85-96): Tests graceful degradation for unrecognized binary formats with safe defaults
 
-**Global cleanup (L19-35)**: 
-- Maintains `tempDirs` array for tracking created directories
-- `afterEach` hook ensures complete cleanup of temporary files and directories
-- Robust error handling prevents test failures due to cleanup issues
+**Dependencies**:
+- `detectBinaryFormat` from `../src/utils/binary-detector.js` - core function under test
+- Vitest testing framework for test structure and assertions
+- Node.js filesystem APIs for temp file management
 
-**Main test suite (L37-97)**:
+**Test Data Pattern**: Uses synthetic binary data with embedded signatures (`MZ` PE header, `RSDS` debug signature, `.debug_info` DWARF marker) and DLL import strings to simulate real compiler outputs without requiring actual compiled binaries.
 
-### MSVC Binary Detection (L38-61)
-- Creates synthetic binary with MSVC signatures: "MZ" header, "RSDS" debug signature
-- Includes mock imports: "vcruntime140.dll", "ucrtbase.dll" 
-- Creates companion PDB file to test debug info detection
-- Validates: `hasPDB=true`, `hasRSDS=true`, imports extraction, `debugInfoType='pdb'`, `format='msvc'`
-
-### GNU Binary Detection (L63-83)
-- Creates binary with DWARF debug hints: ".debug_info" section marker
-- Includes "msvcrt.dll" import for testing cross-format scenarios
-- Validates: `hasPDB=false`, `hasRSDS=false`, imports extraction, `debugInfoType='dwarf'`, `format='gnu'`
-
-### Unknown Binary Handling (L85-96)
-- Tests graceful handling of unrecognizable binary formats
-- Validates fallback behavior: `format='unknown'`, no debug info detected
-
-## Dependencies
-- **vitest**: Test framework (describe, it, expect, afterEach)
-- **Node.js built-ins**: fs/promises, os, path for file system operations
-- **../src/utils/binary-detector.js**: Core detection utility being tested
-
-## Test Data Patterns
-Uses synthetic binary data with recognizable signatures rather than real binaries for predictable, lightweight testing. Mock data includes format-specific markers (RSDS, DWARF sections) and import lists for comprehensive validation.
+**Architecture Notes**: 
+- Follows isolated test pattern with proper cleanup to prevent test pollution
+- Uses Buffer construction to create controlled binary test data
+- Tests both positive detection cases and graceful failure handling

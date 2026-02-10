@@ -1,62 +1,57 @@
 # packages/shared/tests/unit/adapter-policy-js.spec.ts
 @source-hash: 494eb56e2db92070
-@generated: 2026-02-09T18:14:15Z
+@generated: 2026-02-10T00:41:20Z
 
-## Test Suite for JavaScript Debug Adapter Policy
+**Test Suite for JavaScript Debug Adapter Policy**
 
-This test file comprehensively validates the `JsDebugAdapterPolicy` class behavior for JavaScript/Node.js debugging session management.
+This file contains comprehensive unit tests for the `JsDebugAdapterPolicy` class, which manages JavaScript/Node.js debugging sessions through the Debug Adapter Protocol (DAP).
 
-### Key Test Structure
-- **Helper Function**: `createStackFrame` (L5-13) - Utility to generate mock debug protocol stack frames with id, name, and file path
-- **Main Test Suite**: `JsDebugAdapterPolicy` (L15-230) - Validates all static methods and behaviors
+## Test Utilities
+- `createStackFrame()` (L5-13): Helper function that generates mock DebugProtocol.StackFrame objects for testing
 
-### Core Functionality Tests
+## Core Functionality Tests
 
-**Child Session Management** (L16-26)
-- Tests `buildChildStartArgs` method for creating attach commands with pending target IDs
-- Validates command structure includes `request: 'attach'`, `__pendingTargetId`, and `continueOnAttach: true`
+### Child Process Management
+- `buildChildStartArgs` tests (L16-26): Validates creation of attach commands for pending debug targets with proper configuration including `__pendingTargetId` and `continueOnAttach` flags
 
-**Stack Frame Filtering** (L28-43)
-- Tests `filterStackFrames` method behavior for removing Node.js internal frames
-- Validates fallback behavior: keeps first frame when all frames would be filtered
-- Uses `<node_internals>/` pattern recognition
+### Stack Frame Filtering  
+- `filterStackFrames` tests (L28-43): Ensures internal Node.js frames (like `<node_internals>/lib.js`) are filtered out while preserving at least one frame as fallback when all frames are internal
 
-**Variable Extraction** (L45-94)
-- Tests `extractLocalVariables` method with comprehensive scope/variable mocking
-- Validates filtering of special variables (`this`, `__proto__`) by default
-- Tests optional inclusion of special variables when explicitly requested
-- Uses structured test data with scope references (100, 200) and variable hierarchies
+### Variable Extraction
+- `extractLocalVariables` tests (L45-94): Tests extraction of local variables from debug scopes, including:
+  - Empty frame handling
+  - Filtering out special variables (`this`, `__proto__`) by default (L53-73)
+  - Optional inclusion of special variables when requested (L75-93)
 
-**Command Queueing Logic** (L96-135)
-- Tests `shouldQueueCommand` and `processQueuedCommands` for proper DAP command sequencing
-- Validates initialization flow: commands queue until initialize response received
-- Tests deferred execution: launch waits for configurationDone
-- Validates command ordering: configuration → configurationDone → launch → others
+### Command Queue Management
+- Command queueing tests (L96-135): Critical DAP initialization flow management:
+  - `initialize` commands bypass queueing (L97-101)
+  - Commands queue until initialize response received (L103-108) 
+  - `launch` commands defer until `configurationDone` sent (L110-118)
+  - Command ordering: configuration → configDone → start → others (L120-134)
 
-**State Management** (L137-150)
-- Tests state update methods: `updateStateOnCommand` and `updateStateOnEvent`
-- Validates state flags: `startSent`, `initialized`, `initializeResponded`
-- Tests connection and initialization status helpers
+### State Management
+- State helper tests (L137-150): Validates state transitions during debug session lifecycle including connection and initialization status tracking
 
-**Adapter Identification** (L152-168)
-- Tests `matchesAdapter` method for recognizing js-debug adapter instances
-- Uses pattern matching against command paths containing 'js-debug' and 'vsDebugServer.cjs'
+### Adapter Detection
+- `matchesAdapter` tests (L152-168): Identifies js-debug adapter processes by looking for specific tokens in command/args
 
-**Configuration Behaviors** (L170-176, L208-229)
-- Tests `getInitializationBehavior` returning `deferConfigDone: true` and `addRuntimeExecutable: true`
-- Tests `getAdapterSpawnConfig` for adapter process spawning with environment variables
+### Initialization Behavior
+- Configuration tests (L170-176): Verifies enablement of configuration deferral and runtime executable injection
 
-**DAP Client Integration** (L178-206)
-- Tests `getDapClientBehavior` including adapter ID normalization ('javascript' → 'pwa-node')
-- Tests reverse debugging request handling with mock context and response capture
-- Validates child session creation with pending target adoption
+### DAP Client Behavior  
+- Client behavior tests (L178-206): Tests adapter ID normalization (`javascript` → `pwa-node`) and reverse start debugging request handling with child session creation
 
-### Dependencies
-- **Vitest**: Testing framework (L1)
-- **VSCode Debug Protocol**: Type definitions for DAP structures (L2)
-- **JsDebugAdapterPolicy**: Main class under test from adapter-policy-js.js (L3)
+### Adapter Spawning
+- Spawn configuration tests (L208-229): Validates adapter process spawn configuration including command, args, environment, and network settings
 
-### Architecture Notes
-- Extensive use of non-null assertion operator (!) indicating optional method testing
-- Mock-heavy approach using structured test data for complex DAP scenarios
-- State mutation testing with type assertions (`as any`) for internal state access
+## Key Dependencies
+- Uses vitest testing framework
+- Imports `@vscode/debugprotocol` types for DAP compliance
+- Tests the `JsDebugAdapterPolicy` from `adapter-policy-js.js`
+
+## Testing Patterns
+- Extensive use of mock objects and type assertions
+- Tests both positive and edge cases (empty arrays, all-internal frames)
+- Validates complex state transitions and command ordering logic
+- Uses non-null assertion operator (`!`) extensively, indicating optional method testing

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterAll } from 'vitest';
 
 const statMock = vi.fn();
 const detectBinaryFormatMock = vi.fn();

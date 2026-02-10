@@ -1,35 +1,36 @@
 # tests/unit/cli/version.test.ts
 @source-hash: c7d94f832e06fb89
-@generated: 2026-02-09T18:14:39Z
+@generated: 2026-02-10T00:41:30Z
 
 ## Purpose
-Unit test suite for the `getVersion()` utility function that reads version information from package.json. Tests error handling, edge cases, and console output suppression.
+Unit test suite for the CLI version utility module, testing the `getVersion` function's behavior under various success and failure scenarios.
 
 ## Test Structure
-- **Test Suite** (L7-86): "Version Utility" - comprehensive coverage of version reading functionality
-- **Setup/Teardown** (L10-17): Console error spy management with proper cleanup
-- **Core Dependencies**: Vitest testing framework, mocked `fs` module (L5)
+- **Main describe block** (L7): "Version Utility" - contains all test cases
+- **Setup/teardown** (L10-17): Console error spy management with beforeEach/afterEach hooks
+- **Six test cases** covering different scenarios:
 
-## Test Cases
+## Key Test Cases
+1. **Happy path** (L19-31): Verifies successful version extraction from valid package.json
+2. **Missing version field** (L33-44): Tests fallback to "0.0.0" when version field absent
+3. **File read failure** (L46-56): Tests error handling when fs.readFileSync throws
+4. **Invalid JSON** (L58-65): Tests JSON parsing error handling
+5. **Empty package.json** (L67-73): Tests behavior with empty JSON object
+6. **Silenced console output** (L75-85): Tests error suppression via environment variable
 
-### Happy Path
-- **Version Reading Test** (L19-31): Verifies successful extraction of version "1.2.3" from valid package.json
-- **Missing Version Test** (L33-44): Handles package.json without version field, expects fallback to "0.0.0"
-- **Empty Package Test** (L67-73): Validates behavior with empty JSON object
+## Dependencies & Mocking
+- **Vitest testing framework**: describe, it, expect, vi, beforeEach, afterEach (L1)
+- **Node.js fs module**: Mocked via `vi.mock('fs')` (L2, L5)
+- **Target module**: `getVersion` from `../../../src/cli/version.js` (L3)
 
-### Error Scenarios  
-- **File Read Error Test** (L46-56): Tests file system errors, expects "0.0.0" return and error logging
-- **Invalid JSON Test** (L58-65): Handles malformed JSON, expects "0.0.0" return and error logging
-- **Console Suppression Test** (L75-85): Verifies error logging is suppressed when `CONSOLE_OUTPUT_SILENCED=1`
+## Test Patterns
+- **Console spy pattern** (L8, L11): Captures and silences console.error calls
+- **Mock data pattern** (L20-23, L34-37): Creates realistic package.json structures
+- **Error simulation** (L47-50, L77-79): Forces exceptions to test error paths
+- **Environment variable testing** (L76, L84): Tests conditional behavior based on env vars
 
-## Key Patterns
-- Consistent fallback behavior: all error conditions return "0.0.0"
-- Error logging verification using console spy
-- Environment variable handling for output control
-- Proper mock cleanup in afterEach hook (L14-17)
-
-## Testing Strategy
-- Mock-first approach with `vi.mock('fs')` (L5)
-- Console output interception for error validation
-- Edge case coverage including malformed data and missing files
-- Environment variable testing for conditional logging
+## Assertions
+- Version string validation against expected values
+- File system interaction verification via mock call expectations
+- Error logging behavior validation through console spy
+- Environment-based conditional logging verification

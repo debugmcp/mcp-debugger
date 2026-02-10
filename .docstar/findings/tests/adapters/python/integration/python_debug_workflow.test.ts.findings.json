@@ -1,0 +1,23 @@
+{
+  "source": "tests/adapters/python/integration/python_debug_workflow.test.ts",
+  "source_hash": "84d12534a612e431",
+  "generated": "2026-02-10T01:19:06Z",
+  "findings": [
+    {
+      "category": "commented_out_code",
+      "line_start": 9,
+      "line_end": 9,
+      "severity": "warning",
+      "description": "Commented import reference '// Removed StdioClientTransportParameters' suggests removed dependency",
+      "suggestion": "Remove the comment as it provides no current value and may confuse future maintainers"
+    },
+    {
+      "category": "commented_out_code",
+      "line_start": 59,
+      "line_end": 62,
+      "severity": "warning",
+      "description": "Multi-line comment block describes deprecated manual stderr attachment approach",
+      "suggestion": "Remove outdated implementation notes since the transport now handles this automatically"
+    }
+  ]
+}

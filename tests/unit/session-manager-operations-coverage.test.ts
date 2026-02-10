@@ -7,6 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
+
+/** Concrete subclass for testing the abstract SessionManagerOperations */
+class TestableSessionManagerOperations extends SessionManagerOperations {
+  protected async handleAutoContinue(): Promise<void> {
+    // no-op for tests
+  }
+}
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { 
   SessionNotFoundError,
@@ -115,7 +122,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     };
 
     // Create operations instance with config
-    operations = new SessionManagerOperations(
+    operations = new TestableSessionManagerOperations(
       { logDirBase: '/tmp/logs' },
       mockDependencies as any
     );

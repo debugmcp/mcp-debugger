@@ -1,53 +1,31 @@
 # tests/unit/cli/error-handlers.test.ts
 @source-hash: 129bd4d179f22fc0
-@generated: 2026-02-09T18:14:41Z
+@generated: 2026-02-10T00:41:30Z
 
-## Purpose
-Unit test suite for the CLI error handlers module, specifically testing the `setupErrorHandlers` function that registers global process error listeners for uncaught exceptions and unhandled promise rejections.
+**Purpose**: Unit tests for CLI error handlers module, validating global error handling setup for uncaught exceptions and unhandled promise rejections.
 
-## Key Test Structure
-- **Test Suite**: "Error Handlers" (L5-125)
-- **Setup/Teardown**: Mock logger and process event system (L11-42)
-- **Core Tests**: Handler registration and behavior verification (L44-124)
+**Test Structure**:
+- **Test Suite** (L5-125): "Error Handlers" - comprehensive testing of `setupErrorHandlers` function
+- **Mock Setup** (L11-36): Creates Winston logger mock, process exit spy, and process.on interception system
+- **Cleanup** (L38-42): Restores original process.on and clears listeners map
 
-## Test Components
+**Key Test Cases**:
+- **Handler Registration** (L44-54): Verifies that error handlers are properly registered for `uncaughtException` and `unhandledRejection` events
+- **Uncaught Exception Handling** (L56-81): Tests error logging format, stack trace capture, and process exit with code 1
+- **Unhandled Rejection Handling** (L83-104): Tests promise rejection logging and graceful shutdown behavior
+- **Default Exit Behavior** (L106-124): Validates fallback to `process.exit()` when no custom exit function provided
 
-### Mock Setup (L11-36)
-- `mockLogger` (L13-19): Winston logger mock with standard logging methods
-- `mockExitProcess` (L22): Spy function to capture process exit calls
-- `processListeners` (L26): Map to track registered event listeners
-- Process.on mocking (L29-35): Captures event listener registrations
+**Testing Infrastructure**:
+- **Mock Logger** (L13-19): Stubbed Winston logger with error/warn/info/debug methods
+- **Process Listener Capture** (L28-35): Custom process.on mock that stores event listeners in Map for later invocation
+- **Exit Function Mock** (L22): Testable alternative to process.exit for verification
 
-### Test Cases
+**Key Dependencies**:
+- `../../../src/cli/error-handlers.js` - Main implementation under test
+- `winston` types for logger interface
+- `vitest` testing framework with mocking capabilities
 
-**Handler Registration Tests (L44-54)**
-- Verifies `uncaughtException` handler registration (L44-48)
-- Verifies `unhandledRejection` handler registration (L50-54)
-
-**Exception Handling Test (L56-81)**
-- Creates test error with stack trace (L59-61)
-- Extracts and triggers uncaughtException handler (L64-67)
-- Validates logging format: `[Server UNCAUGHT_EXCEPTION]` with error details (L70-77)
-- Confirms process exit with code 1 (L79-80)
-
-**Rejection Handling Test (L83-104)**
-- Creates test promise rejection (L86-90)
-- Extracts and triggers unhandledRejection handler (L93-96)
-- Validates dual logging: reason and promise objects (L99-100)
-- Confirms process exit with code 1 (L102-103)
-
-**Default Exit Behavior Test (L106-124)**
-- Tests fallback to `process.exit` when no custom exit function provided (L107-109)
-- Uses `vi.spyOn` to mock `process.exit` (L107)
-- Validates default exit behavior (L121)
-
-## Dependencies
-- **Testing**: Vitest framework with mocking capabilities
-- **Source**: `../../../src/cli/error-handlers.js` - the module under test
-- **Types**: Winston Logger type definitions
-
-## Test Patterns
-- **Process Mocking**: Custom process.on implementation to capture listeners
-- **Error Simulation**: Manual error creation and handler triggering
-- **Spy Verification**: Detailed assertion of log calls and exit behavior
-- **Cleanup**: Proper restoration of original process methods in afterEach
+**Testing Patterns**:
+- Process event listener interception and manual triggering
+- Structured error logging verification with specific message formats
+- Graceful shutdown testing with configurable exit mechanisms

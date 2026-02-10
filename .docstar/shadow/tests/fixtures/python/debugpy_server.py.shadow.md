@@ -1,43 +1,34 @@
 # tests/fixtures/python/debugpy_server.py
 @source-hash: e588a565cc020480
-@generated: 2026-02-09T18:14:36Z
+@generated: 2026-02-10T00:41:26Z
 
-## Purpose
-Mock debugpy server implementation for testing DAP (Debug Adapter Protocol) connections. Simulates a minimal debugpy server that accepts socket connections and handles basic DAP commands with proper protocol formatting.
+**Purpose**: Test fixture that simulates a minimal debugpy server for testing MCP Server debugpy connections. Implements a basic DAP (Debug Adapter Protocol) server that can handle standard debugging protocol messages.
 
-## Key Components
+**Architecture**: Simple socket-based server with synchronous connection handling. Each connection is processed sequentially in a blocking manner.
 
-### Signal Handling
-- `signal_handler()` (L13-16): Graceful shutdown handler for SIGINT/SIGTERM signals
+**Key Functions**:
+- `signal_handler(sig, frame)` (L13-16): Graceful shutdown handler for SIGINT/SIGTERM signals
+- `send_dap_response(conn, request_id, command, body=None)` (L18-32): Constructs and sends DAP-compliant responses with proper Content-Length headers and JSON payloads
+- `handle_connection(conn, addr)` (L34-113): Core connection handler that:
+  - Implements DAP message parsing with buffering for incomplete messages
+  - Handles standard DAP commands: initialize, launch, configurationDone, threads, disconnect
+  - Uses simple header parsing to extract Content-Length for message boundaries
+- `main()` (L115-147): Server entry point with argument parsing, socket setup, and connection acceptance loop
 
-### DAP Protocol Implementation
-- `send_dap_response()` (L18-32): Formats and sends DAP responses with proper HTTP-like headers (`Content-Length`) and JSON message body. Increments sequence numbers and maintains DAP response structure.
-- `handle_connection()` (L34-113): Core connection handler implementing DAP message parsing:
-  - Maintains receive buffer for incomplete messages
-  - Parses HTTP-like headers to extract Content-Length
-  - Handles message framing and JSON deserialization
-  - Responds to DAP commands: `initialize`, `launch`, `configurationDone`, `threads`, `disconnect`
-  - Returns capability information in initialize response (L73-87)
+**DAP Protocol Implementation**:
+- Supports basic capability negotiation via initialize command (L72-87)
+- Returns mock thread information (single MainThread with ID 1)
+- Implements proper message framing with Content-Length headers
+- Handles disconnect requests for clean session termination
 
-### Server Infrastructure
-- `main()` (L115-150): Main server loop with:
-  - Command-line argument parsing (port, no-wait compatibility flag)
-  - Socket setup with SO_REUSEADDR
-  - Single-threaded connection handling
-  - Signal handler registration
+**Dependencies**: Standard library only (socket, json, signal, argparse, sys, time)
 
-## Architecture Patterns
-- Blocking I/O with single-threaded connection handling (one connection at a time)
-- HTTP-like message framing with JSON payloads following DAP specification
-- State-machine approach to message parsing with buffer accumulation
-- Graceful error handling for malformed JSON and connection errors
+**Configuration**: 
+- Default port 5678 (standard debugpy port)
+- Listens only on localhost (127.0.0.1)
+- Supports --no-wait flag for compatibility (unused in implementation)
 
-## Dependencies
-- Standard library only: socket, json, signal, argparse
-- Listens on localhost:5678 (default) for debugger connections
-
-## Critical Constraints
-- Single-threaded: only handles one connection at a time
-- Simplified DAP implementation: basic command set only
-- No actual debugging capabilities: pure mock/test fixture
-- TCP socket bound to localhost only for security
+**Limitations**: 
+- Single-threaded, handles one connection at a time
+- Minimal DAP implementation - only handles basic commands
+- No actual debugging capabilities - purely for protocol testing

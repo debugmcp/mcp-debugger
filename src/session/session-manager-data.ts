@@ -21,7 +21,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 /**
  * Data retrieval functionality for session management
  */
-export class SessionManagerData extends SessionManagerCore {
+export abstract class SessionManagerData extends SessionManagerCore {
   /**
    * Selects the appropriate adapter policy based on language
    */

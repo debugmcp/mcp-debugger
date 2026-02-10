@@ -59,7 +59,7 @@ export function createProductionDependencies(): DapProxyDependencies {
  */
 export function createConsoleLogger(): ILogger {
   return {
-    info: (...args: unknown[]) => console.error('[INFO]', ...args),
+    info: (...args: unknown[]) => console.log('[INFO]', ...args),
     error: (...args: unknown[]) => console.error('[ERROR]', ...args),
     debug: (...args: unknown[]) => console.error('[DEBUG]', ...args),
     warn: (...args: unknown[]) => console.error('[WARN]', ...args)

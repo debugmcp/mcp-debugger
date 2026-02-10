@@ -1,62 +1,67 @@
 # tests/core/
-@generated: 2026-02-09T18:16:56Z
+@generated: 2026-02-10T01:20:17Z
 
-## Overall Purpose and Responsibility
+## Overall Purpose
 
-The `tests/core` directory serves as the comprehensive testing foundation for the **DebugMCP Core** system, providing complete validation of all critical debugging components within the Model Context Protocol (MCP) framework. This test suite ensures system reliability, protocol compliance, and integration integrity across the entire Debug Adapter Protocol (DAP) implementation, validating everything from low-level type safety to high-level debugging tool orchestration.
+The `tests/core` directory serves as the comprehensive validation layer for DebugMCP's core debugging infrastructure. This directory ensures the reliability, protocol compliance, and architectural integrity of the entire debugging system through extensive unit testing coverage spanning from low-level adapter interfaces to high-level server operations.
 
-## Key Components and Integration Architecture
+## Key Components and Integration
 
-### Layered Testing Strategy
-The test suite is organized into a cohesive multi-layer architecture that mirrors the production system structure:
+### Testing Architecture Overview
+The directory is organized around a single comprehensive unit testing module (`unit/`) that validates the complete DebugMCP system through multiple interconnected layers:
 
-**Unit Test Layer** (`unit/`)
-- **Server Integration Tests**: Validate the main DebugMCP Server exposing 14 debugging tools through MCP
-- **Session Management Tests**: Comprehensive validation of debug session lifecycles and state machine transitions
-- **Factory Pattern Tests**: Ensure proper dependency injection and mock framework integration
-- **Adapter Type Tests**: Validate complete TypeScript type system for DAP protocol compliance
-- **Utility Function Tests**: Test critical system utilities for parameter migration and runtime safety
+- **Adapter Interface Validation**: Tests foundational contracts between DebugMCP and language-specific debug adapters, including state management, error categorization, and capability discovery
+- **Factory Pattern Testing**: Validates dependency injection and instance creation patterns for proxy managers and session stores with comprehensive mock utilities  
+- **Server Protocol Testing**: Complete validation of the MCP debug server with all 14 debugging tools, session management, and protocol compliance
+- **Session Management Testing**: Extensive validation of the SessionManager orchestrator covering state machines, DAP operations, multi-session coordination, and error recovery
+- **Utility Layer Testing**: Type safety validation and API migration testing for critical system boundaries
 
-### Component Interaction Flow
-The test components work together to validate the complete debugging pipeline:
+### Component Integration Flow
+```
+Unit Test Suite
+    ↓
+Adapter Interface Tests → Factory Tests → Server Tool Tests → Session Management Tests → Utility Tests
+         ↓                    ↓               ↓                      ↓                    ↓
+   Type contracts      Instance creation  MCP protocol      DAP orchestration    Data validation
+```
 
-1. **Protocol Validation**: Adapter types ensure DAP specification compliance and type safety
-2. **Core Logic Testing**: Session management and factory patterns provide the business logic foundation
-3. **Service Layer Validation**: Server tests ensure proper MCP integration and tool exposure
-4. **Infrastructure Testing**: Utilities and factories provide the supporting framework validation
+## Public API Surface
 
-## Public API Surface and Test Coverage
+### Core Testing Entry Points
+- **Debug Adapter Validation Suite**: Tests 40+ interface properties, 3 critical enums (AdapterState, AdapterErrorCode, DebugFeature), and comprehensive error handling contracts
+- **MCP Server Tool Testing**: Complete coverage of debugging tool interfaces including:
+  - Session management (`create_debug_session`, `list_debug_sessions`)
+  - Execution control (`start_debugging`, breakpoint operations, step debugging)
+  - Runtime inspection (`get_variables`, `get_stack_trace`, `get_scopes`)
+- **Session Lifecycle Testing**: End-to-end validation of session states (CREATED → INITIALIZING → PAUSED/RUNNING → STOPPED/ERROR) with error recovery and multi-session support
+- **Type Safety Boundary Testing**: Runtime validation for AdapterCommand, ProxyInitPayload, and serialization safety
 
-### Primary Testing Entry Points
-- **MCP Tool Interface Testing**: Validation of 14 debugging tools with comprehensive parameter and response testing
-- **SessionManager API Coverage**: Complete lifecycle management, DAP operations, and multi-session coordination
-- **Factory Pattern Validation**: ProxyManagerFactory and SessionStoreFactory with full mock ecosystem support
-- **Type System Compliance**: End-to-end DAP type validation and adapter interface testing
-- **Cross-Platform Utilities**: Session migration, serialization safety, and platform-specific functionality
+### Testing Infrastructure API
+- **Centralized Mock Factories**: Consistent dependency injection patterns across all test suites
+- **Cross-Platform Validation**: Windows/Unix path handling and platform-specific behavior testing
+- **Integration Test Patterns**: Component interaction testing while maintaining unit test isolation
+- **Performance and Resource Testing**: Memory cleanup validation and scalability testing
 
-### Critical System Boundaries Validated
-- **MCP Protocol Boundaries**: Tool registration, parameter validation, and AI-friendly documentation
-- **DAP Communication Layer**: Adapter command validation and protocol message handling
-- **IPC Safety Boundaries**: Serialization integrity and inter-process communication
-- **Multi-Session Isolation**: Session independence and concurrent debugging support
-- **Error Recovery Systems**: Graceful degradation and system resilience under failure conditions
+## Internal Organization and Data Flow
 
-## Internal Organization and Testing Patterns
+### Test Execution Architecture
+The unit testing framework follows a structured validation flow:
 
-### Testing Infrastructure
-- **Comprehensive Mock Strategy**: All external dependencies isolated through centralized mock factories
-- **State Machine Validation**: Session lifecycle transitions and adapter state management testing
-- **Dependency Injection Testing**: Consistent mock strategy ensuring component isolation and testability
-- **Memory Safety Validation**: Event listener cleanup and resource leak prevention testing
+1. **Interface Contract Validation**: Ensures adapter interfaces and type safety at system boundaries
+2. **Factory Creation Testing**: Validates dependency injection and instance isolation patterns
+3. **Server Protocol Testing**: Confirms MCP tool registration and protocol compliance
+4. **Session Orchestration Testing**: Validates DAP workflow management and state machine transitions
+5. **Utility Function Testing**: Ensures migration safety and runtime type checking
 
-### Quality Assurance Standards
-- **Behavioral Verification**: Mock function call patterns and state verification across all components
-- **Edge Case Coverage**: Comprehensive testing of error conditions, boundary cases, and race scenarios
-- **Performance Validation**: Scalability testing and memory leak prevention across the debugging pipeline
-- **Protocol Compliance**: Strict adherence to DAP specification and MCP tool interface requirements
+### Key Testing Patterns and Conventions
+- **Mock Strategy**: Vitest-based comprehensive mocking with state tracking capabilities
+- **State-Based Testing**: Systematic validation of state transitions and lifecycle management
+- **Error Boundary Testing**: Complete coverage of failure scenarios and recovery paths
+- **Concurrent Operations Testing**: Multi-session validation with proper resource isolation
+- **Protocol Compliance Testing**: MCP and DAP protocol structure validation
 
-### Data Flow Validation
-Tests ensure proper data flow through the complete system:
-**MCP Tool Invocation** → **Parameter Validation** → **SessionManager Operations** → **DAP Protocol Communication** → **Debug Adapter Interaction** → **Response Formatting** → **MCP Tool Response**
+## Quality Assurance Standards
 
-This directory serves as the complete quality assurance foundation for the DebugMCP system, ensuring reliable debugging functionality, protocol compliance, and system integrity across all supported programming languages and development environments. The comprehensive test coverage provides confidence in the system's ability to handle complex debugging scenarios while maintaining strict protocol adherence and cross-platform compatibility.
+The testing directory enforces critical quality patterns including comprehensive coverage with positive/negative cases and edge conditions, fake timer control for deterministic async testing, memory management validation for event listener cleanup, cross-platform consistency testing, and API evolution testing to ensure backward compatibility and type safety.
+
+This testing infrastructure serves as both validation framework and living documentation of the DebugMCP system's architecture, providing confidence in protocol compliance and multi-language debug adapter support while ensuring system reliability and maintainability across the entire debugging infrastructure.

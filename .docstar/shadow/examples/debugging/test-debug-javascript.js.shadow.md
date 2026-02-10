@@ -1,54 +1,29 @@
 # examples/debugging/test-debug-javascript.js
 @source-hash: 7b3844907faa5a88
-@generated: 2026-02-09T18:14:52Z
+@generated: 2026-02-10T00:41:35Z
 
-## Purpose
-Test script for demonstrating debugging capabilities with MCP debugger. Provides a controlled environment for exercising common JavaScript debugging scenarios including arithmetic operations, array processing, recursion, and object manipulation.
+**Purpose**: Test script for debugging JavaScript applications with MCP debugger. Provides a comprehensive set of debugging scenarios including arithmetic operations, array processing, recursion, and object manipulation.
 
-## Key Functions
+**Core Functions**:
+- `calculateProduct(a, b)` (L6-11): Performs multiplication of two numbers with console logging for trace visibility
+- `processArray(items)` (L13-21): Iterates through array elements, logs each item, and calculates sum using traditional for-loop
+- `fibonacci(n)` (L23-30): Recursive implementation of Fibonacci sequence calculation with base case handling
+- `main()` (L32-62): Orchestrates all test scenarios and demonstrates debugging patterns
 
-**calculateProduct(a, b)** (L6-11)
-- Multiplies two numbers with console logging
-- Returns product result
-- Purpose: Simple arithmetic debugging test case
+**Execution Flow**:
+1. Arithmetic test: Multiplies predefined values (15 * 3)
+2. Array processing: Sums array [10, 20, 30, 40, 50] with iteration logging
+3. Recursive computation: Calculates 6th Fibonacci number
+4. Object creation: Combines results into structured data
+5. Final aggregation: Sums object properties for final result
 
-**processArray(items)** (L13-21)
-- Iterates through array, logging each item and accumulating sum
-- Returns total sum of array elements
-- Purpose: Array iteration and state tracking debugging scenario
+**Debugging Features**:
+- Extensive console.log statements throughout for execution tracing
+- Multiple data types (primitives, arrays, objects) for variable inspection
+- Recursive function for call stack analysis
+- Mixed operations for breakpoint testing
+- Return value propagation for result verification
 
-**fibonacci(n)** (L23-30)
-- Recursive implementation of Fibonacci sequence
-- Base case: returns n for n <= 1
-- Purpose: Recursive function call stack debugging test
+**Dependencies**: Node.js runtime (shebang L1), native console API
 
-**main()** (L32-62)
-- Orchestrates all test scenarios in sequence
-- Creates test data: x=15, y=3, numbers=[10,20,30,40,50], fibNumber=6
-- Builds composite testObject containing results from all operations
-- Returns final computed result (product + arraySum + fibResult)
-- Purpose: Main execution flow for comprehensive debugging session
-
-## Execution Flow
-1. Simple multiplication test (L36-38)
-2. Array processing test (L41-42) 
-3. Recursive function test (L45-47)
-4. Object creation and manipulation (L50-54)
-5. Final result computation (L58-61)
-
-## Architecture
-- Standalone Node.js script with shebang (L1)
-- Sequential execution model with clear separation of concerns
-- Heavy use of console.log for debugging visibility
-- Functional programming approach with pure functions
-- Global execution at module level (L65-66)
-
-## Dependencies
-- Node.js runtime environment
-- Console API for logging output
-
-## Notable Patterns
-- Each function includes descriptive comments matching their purpose
-- Consistent logging pattern for traceability
-- Progressive complexity: simple operations → arrays → recursion → objects
-- All intermediate results preserved for inspection
+**Architectural Patterns**: Simple procedural design with clear separation of concerns, designed for step-through debugging rather than production use.

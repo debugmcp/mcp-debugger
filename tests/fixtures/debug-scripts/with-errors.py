@@ -2,14 +2,14 @@
 """Test script that throws exceptions"""
 
 def divide(a, b):
-    return a / b  # Line 4: Will throw ZeroDivisionError
+    return a / b  # Line 5: Will throw ZeroDivisionError
 
 def main():
-    x = 10  # Line 7
-    y = 0   # Line 8
-    result = divide(x, y)  # Line 9: Error here
-    print(result)  # Line 10: Never reached
-    return result  # Line 11
+    x = 10  # Line 8
+    y = 0   # Line 9
+    result = divide(x, y)  # Line 10: Error here
+    print(result)  # Line 11: Never reached
+    return result  # Line 12
 
 if __name__ == "__main__":
     main()

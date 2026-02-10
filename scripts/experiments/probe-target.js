@@ -10,7 +10,7 @@ console.log('probe-target start');
 
 debugger; // Force an early stop regardless of breakpoint binding
 
-const probeVar = 123; // Suggested breakpoint line (use --line 6 when running the probe)
+const probeVar = 123; // Suggested breakpoint line (use --line 13 when running the probe)
 
 function add(a, b) {
   return a + b;

@@ -1,81 +1,57 @@
 # tests/unit/adapter-python/python-debug-adapter.test.ts
 @source-hash: 680b31f600fe78f8
-@generated: 2026-02-09T18:14:51Z
+@generated: 2026-02-10T00:41:37Z
 
-## Python Debug Adapter Test Suite
+## Test Suite for PythonDebugAdapter
 
-**Purpose:** Comprehensive unit test suite for `PythonDebugAdapter` class, validating Python-specific debugging functionality including environment validation, executable resolution, debugpy integration, and DAP protocol handling.
+This file contains comprehensive unit tests for the `PythonDebugAdapter` class using Vitest framework. Tests the Python language debug adapter's functionality including environment validation, configuration transformation, and debug session management.
 
-### Test Structure & Dependencies (L1-30)
-- **Framework:** Vitest with mocking capabilities
-- **Mocked modules:** `child_process` (L6-9), `python-utils.js` (L11-14)  
-- **Helper:** `createDependencies()` (L19-30) - creates mock dependency objects with logger, fileSystem, environment, processLauncher
-- **Imports:** PythonDebugAdapter, shared types (AdapterState, AdapterError, DebugFeature)
+### Test Structure & Setup
 
-### Core Functionality Tests
+- **Mock configuration (L6-17)**: Mocks `child_process` and `python-utils` modules for isolated testing
+- **Dependency factory (L19-30)**: `createDependencies()` creates standardized mock dependencies with logger interface
+- **Test cleanup (L33-35)**: Automatic mock clearing after each test
 
-**Executable Resolution & Caching (L37-47)**
-- Validates caching mechanism for `resolveExecutablePath()` 
-- Ensures `findPythonExecutable` called only once despite multiple calls
+### Key Test Categories
 
-**Environment Validation (L49-85)**
-- **Python version validation** (L49-60): Tests rejection of Python < 3.7
-- **Debugpy detection** (L62-75): Validates debugpy installation checking with virtual environment detection
-- **Executable resolution failure** (L77-85): Handles Python executable not found scenarios
+#### Environment Validation Tests
+- **Executable caching (L37-47)**: Verifies `resolveExecutablePath()` caches results and calls utilities only once
+- **Version validation (L49-60)**: Tests environment invalidation for Python versions < 3.7
+- **Dependency checking (L62-75)**: Validates debugpy installation detection and virtual environment handling
+- **Error handling (L77-85)**: Tests graceful handling of Python executable resolution failures
+- **Cache utilization (L87-96)**: Verifies version information caching to avoid redundant checks
 
-**Version Caching System (L87-96)**
-- Tests internal `pythonPathCache` Map usage for storing version information
-- Validates cache hits prevent redundant `getPythonVersion` calls
+#### Command Building & DAP Communication
+- **Adapter command (L98-113)**: Tests `buildAdapterCommand()` generates correct debugpy adapter invocation with proper arguments and environment variables
+- **Exception filters (L115-129)**: Validates DAP request filtering for exception breakpoints, rejecting invalid filters
+- **Event handling (L131-141)**: Tests thread ID tracking from stopped events
 
-### Command Building & DAP Protocol (L98-141)
+#### Feature Support & Requirements
+- **Feature detection (L143-151)**: Tests `supportsFeature()` and `getFeatureRequirements()` for various debug capabilities
+- **Requirement details (L168-178)**: Validates feature-specific requirement descriptions (debugpy versions, Python versions)
 
-**Adapter Command Generation (L98-113)**
-- Tests `buildAdapterCommand()` with debugpy-specific arguments
-- Validates environment variable setup (`DEBUGPY_LOG_DIR`)
+#### Error Translation & User Experience
+- **Error message translation (L153-166)**: Tests `translateErrorMessage()` for common Python/debugpy errors with user-friendly messages
+- **Installation guidance (L307-312)**: Tests helper methods providing installation instructions and error messages
 
-**DAP Request Handling (L115-129)**
-- Exception filter validation (rejects invalid filters, allows 'raised'/'uncaught')
-- Tests `sendDapRequest()` with exception breakpoint management
+#### Lifecycle Management
+- **Initialization flow (L180-206)**: Tests successful initialization with environment validation and error state transitions
+- **Connection management (L208-224)**: Tests state transitions for connect/disconnect operations with event emission
+- **Disposal (L280-292)**: Tests proper cleanup and state reset
 
-**Event Processing (L131-141)**
-- Tests `handleDapEvent()` for 'stopped' events
-- Validates thread ID tracking via `getCurrentThreadId()`
+#### Debugpy Integration
+- **Installation detection (L226-260)**: Tests spawn-based debugpy version detection with success/failure scenarios
+- **Process management**: Mock EventEmitter setup for child process simulation
 
-### Feature Support & Requirements (L143-178)
-- **Feature detection:** `supportsFeature()` for LOG_POINTS (true), DISASSEMBLE_REQUEST (false)
-- **Requirements mapping:** `getFeatureRequirements()` returns version/dependency requirements
-- **Error translation:** `translateErrorMessage()` for debugpy-specific and common Python errors
+#### Configuration Management
+- **Launch config transformation (L262-278)**: Tests `transformLaunchConfig()` applying Python-specific defaults
+- **Default configuration (L314-322)**: Tests `getDefaultLaunchConfig()` baseline settings
+- **Capabilities exposure (L294-305)**: Tests DAP capabilities reporting including exception breakpoint filters
 
-### Lifecycle Management (L180-224)
+### Architecture Patterns
 
-**Initialization (L180-206)**
-- Tests successful initialization with environment validation
-- Error handling when validation fails (throws AdapterError, sets ERROR state)
-
-**Connection Management (L208-224)**
-- State transitions: CONNECTED → DISCONNECTED
-- Event emission: 'connected', 'disconnected' events
-- Connection status tracking via `isConnected()`
-
-### Advanced Features (L226-322)
-
-**Debugpy Detection (L226-260)**
-- Spawn-based detection using `python -c "import debugpy; print(debugpy.__version__)"`
-- Error handling for spawn failures
-
-**Configuration Management (L262-278)**
-- `transformLaunchConfig()` applies Python-specific defaults
-- Sets console, redirectOutput, showReturnValue, etc.
-
-**Cleanup & Metadata (L280-322)**
-- **Disposal** (L280-292): State reset, event emission, cleanup
-- **Capabilities** (L294-305): DAP capabilities and exception breakpoint filters
-- **User guidance** (L307-312): Installation instructions, error messages
-- **Default configuration** (L314-322): Provides sensible launch config defaults
-
-### Key Patterns
-- Extensive use of private method mocking via `(adapter as any)` casting
+- Uses dependency injection pattern for testability
+- Extensive mocking of external dependencies (file system, process launching, network)
+- State machine testing for adapter lifecycle
 - Event-driven testing with EventEmitter patterns
-- Mock-heavy approach for external dependencies (child_process, file system)
-- Comprehensive state management validation
-- Error scenario coverage with specific error codes
+- Type casting to access private methods for internal state validation

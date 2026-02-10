@@ -1,82 +1,78 @@
 # tests/core/unit/utils/type-guards.test.ts
-@source-hash: b2c71879f89f765f
-@generated: 2026-02-09T18:14:39Z
+@source-hash: 6168cb6f31f4abb0
+@generated: 2026-02-10T01:19:05Z
 
-## Primary Purpose
-Comprehensive unit test suite for type guard and validation utilities, ensuring runtime type safety at critical boundaries like IPC communication and data serialization. Tests 9 validation functions with 150+ test cases covering edge cases, error handling, and performance characteristics.
+## Purpose
+Unit test suite for type guard utilities that validate data structures at critical boundaries (IPC, serialization). Tests runtime type safety for AdapterCommand and ProxyInitPayload validation functions.
 
 ## Test Structure
-- **Main describe block** (L20-677): "Type Guards" with console spy setup (L25-33) and teardown (L31-33)
-- **beforeEach/afterEach hooks** (L25-33): Mock console methods (error, log, warn) to capture validation logging
 
-## Core Functions Under Test
+**Main Test Suites:**
 
 ### isValidAdapterCommand Tests (L35-192)
-Tests the primary type guard function with comprehensive validation:
-- **Valid commands** (L36-75): Basic validation, optional fields, TypeScript type narrowing verification
-- **Invalid inputs** (L77-138): null/undefined, primitive types, missing/invalid fields, malformed args/env
-- **Edge cases** (L140-191): Symbol properties, prototype pollution, deep nesting, performance with large arrays
+Tests runtime type guard for AdapterCommand validation:
+- Valid command structures (L36-62)
+- TypeScript type narrowing verification (L64-75)
+- Null/undefined/primitive rejection (L77-91)
+- Missing/invalid field validation (L93-138)
+- Edge cases: symbol properties, prototype pollution, deep nesting (L140-176)
+- Performance validation for large datasets (L178-191)
 
-### validateAdapterCommand Tests (L194-254)
-Tests validation function that throws on invalid input:
-- **Success cases** (L195-204): Returns valid commands unchanged
-- **Error handling** (L206-253): Detailed error messages with source context, special character handling
+### validateAdapterCommand Tests (L194-253)
+Tests validation function that throws on invalid commands:
+- Returns valid commands unchanged (L195-204)
+- Throws with detailed error messages including source context (L206-243)
+- Error structure includes receivedType, receivedValue, requiredStructure (L245-253)
 
 ### hasValidAdapterCommand Tests (L256-303)
-Tests ProxyInitPayload validation:
-- **Optional field handling** (L257-268): Payloads without adapterCommand
-- **Nested validation** (L271-302): Valid and invalid nested adapterCommand objects
+Tests validation for ProxyInitPayload.adapterCommand property:
+- Handles missing adapterCommand (optional field) (L257-269)
+- Validates present adapterCommand fields (L271-302)
 
 ### validateProxyInitPayload Tests (L305-372)
-Tests comprehensive payload validation:
-- **Required fields** (L332-343): All 7 required fields (cmd, sessionId, executablePath, etc.)
-- **Type validation** (L321-330): Non-object input handling
-- **Nested command validation** (L345-371): AdapterCommand integration with error logging
+Tests complete ProxyInitPayload validation:
+- Required field validation: cmd, sessionId, executablePath, adapterHost, adapterPort, logDir, scriptPath (L332-343)
+- Optional adapterCommand validation (L345-371)
+- Type checking and error logging (L321-330)
 
-### Serialization Tests (L374-436)
-**serializeAdapterCommand** tests JSON serialization:
-- **Basic serialization** (L375-386): Valid command to JSON conversion
-- **Validation integration** (L388-393): Pre-serialization validation
-- **Error cases** (L414-435): Circular references, BigInt handling
+### Serialization Tests (L374-486)
+**serializeAdapterCommand (L374-436):**
+- JSON serialization with pre-validation (L375-393)
+- Field preservation (L395-412)
+- Error handling for circular references and non-serializable types (L414-435)
 
-### Deserialization Tests (L438-486)
-**deserializeAdapterCommand** tests JSON parsing:
-- **Round-trip integrity** (L474-485): Serialize/deserialize consistency
-- **Error handling** (L450-472): Invalid JSON, malformed structures
-- **Source tracking** (L462-465): Error message context preservation
+**deserializeAdapterCommand (L438-486):**
+- JSON parsing with post-validation (L439-472)
+- Round-trip consistency (L474-485)
+- Source-aware error messaging
 
-### Factory Function Tests (L488-541)
-**createAdapterCommand** tests object creation:
-- **Parameter handling** (L489-517): Command, args, env combinations
-- **Input validation** (L519-526): Invalid command rejection
-- **Output validation** (L533-540): Created objects pass type guards
+### createAdapterCommand Tests (L488-541)
+Tests factory function for AdapterCommand creation:
+- Default value handling (args=[], env={}) (L489-507)
+- Input validation for command parameter (L519-526)
+- Output validation ensures valid AdapterCommand (L533-540)
 
-### Property Access Tests (L543-581)
-**getAdapterCommandProperty** tests safe property access:
-- **Valid access** (L550-554): Property retrieval from valid commands
-- **Fallback behavior** (L556-580): Default values for invalid inputs with warning logs
+### getAdapterCommandProperty Tests (L543-581)
+Tests safe property accessor with fallback:
+- Property extraction from valid commands (L550-554)
+- Default fallback for invalid commands with warning logging (L556-563)
+- Null/undefined input handling (L575-580)
 
-### Logging Tests (L583-676)
-**logAdapterCommandValidation** tests structured logging:
-- **Timestamp mocking** (L585-592): Consistent test timestamps using fake timers
-- **Output formatting** (L594-651): console.log vs console.error, JSON indentation
-- **Complex data handling** (L653-675): Nested objects, detailed error structures
+### logAdapterCommandValidation Tests (L583-676)
+Tests structured logging utility:
+- Conditional logging (console.log for valid, console.error for invalid) (L594-631)
+- Timestamp inclusion and JSON formatting (L633-651)
+- Complex details object handling (L653-675)
 
 ## Key Dependencies
-- **vitest**: Test framework with mocking capabilities (L5)
-- **@debugmcp/shared**: AdapterCommand type definition (L17)
-- **type-guards.js**: All tested validation functions (L6-16)
-- **dap-proxy-interfaces.js**: ProxyInitPayload type (L18)
+- `vitest` testing framework with mocking capabilities
+- `@debugmcp/shared` for AdapterCommand type
+- Console mock spies for logging validation (L21-33)
+- Fake timers for consistent timestamp testing (L585-592)
 
-## Testing Patterns
-- **Console spy pattern**: Mock console methods to verify logging behavior
-- **Error message validation**: Detailed error content and source tracking verification
-- **Performance testing**: Large array handling with timing constraints (L178-191)
-- **Edge case coverage**: Symbol properties, prototype manipulation, circular references
-- **Type narrowing verification**: Ensures TypeScript type guards work correctly (L64-75)
-
-## Notable Architectural Decisions
-- **Comprehensive error context**: All validation functions include source information for debugging
-- **Structured logging**: JSON-formatted validation logs with timestamps and detailed metadata
-- **Performance considerations**: Tests ensure validation scales with large inputs
-- **Type safety boundaries**: Critical for IPC communication and serialization integrity
+## Test Patterns
+- Console spy setup/teardown in beforeEach/afterEach hooks
+- Type narrowing verification using TypeScript compiler
+- Performance benchmarks for large data validation
+- Error message content validation
+- Round-trip serialization testing

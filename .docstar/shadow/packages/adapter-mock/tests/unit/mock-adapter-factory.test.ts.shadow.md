@@ -1,36 +1,34 @@
 # packages/adapter-mock/tests/unit/mock-adapter-factory.test.ts
 @source-hash: 80bbaaacb041fb51
-@generated: 2026-02-09T18:14:04Z
+@generated: 2026-02-10T00:41:08Z
 
-## Purpose
-Unit test suite for MockAdapterFactory, validating factory pattern implementation for creating mock debug adapters in a debugger testing framework.
+## Test Suite for MockAdapterFactory
 
-## Key Test Structure
+**Purpose:** Unit tests validating the MockAdapterFactory class functionality and its factory helper function. Tests the creation, configuration, and validation behavior of mock debug adapters.
 
-**createDependencies helper (L7-22)**: Factory function that creates mock AdapterDependencies with stub implementations for fileSystem, processLauncher, environment, and logger. Returns test-friendly dependencies with no-op logger methods.
+**Key Components:**
 
-**Main test suite (L24-86)**: Comprehensive validation of MockAdapterFactory functionality across five test scenarios:
+- **`createDependencies()` (L7-22):** Helper function that creates mock AdapterDependencies object with stubbed implementations for file system, process launcher, environment, and logger interfaces. Returns type-extended interface including logger methods.
 
-### Core Factory Tests
-- **Instance creation test (L25-35)**: Verifies factory creates MockDebugAdapter instances with correct feature support configuration
-- **Metadata validation test (L37-47)**: Validates factory exposes accurate adapter metadata including language, display name, version, and file extensions
-- **Default validation test (L49-56)**: Confirms factory validates successfully with empty configuration
+- **MockAdapterFactory Creation Test (L25-35):** Validates that factory properly instantiates MockDebugAdapter with custom configuration (supportedFeatures, defaultDelay) and respects feature flags.
 
-### Configuration Warning Tests  
-- **Error probability warning test (L58-65)**: Validates factory reports warnings when errorProbability exceeds 70%
-- **Delay warning test (L67-74)**: Validates factory reports warnings when defaultDelay exceeds 2000ms
+- **Metadata Validation Test (L37-47):** Verifies factory returns correct adapter metadata including language type (MOCK), display name, version, author, and supported file extensions.
 
-### Helper Function Test
-- **createMockAdapterFactory test (L76-85)**: Verifies the convenience function properly forwards configuration to MockAdapterFactory constructor
+- **Default Validation Test (L49-56):** Confirms factory validation succeeds with empty configuration and returns clean validation result structure.
 
-## Dependencies
-- **vitest**: Testing framework providing describe/it/expect
-- **@debugmcp/shared**: Core types (AdapterDependencies, DebugFeature, DebugLanguage)
-- **MockAdapterFactory/createMockAdapterFactory**: Factory classes under test
-- **MockDebugAdapter**: Expected adapter instance type
+- **High Error Probability Warning Test (L58-65):** Tests validation warning system when errorProbability exceeds threshold (0.8), ensuring proper warning message generation.
 
-## Test Patterns
-- Uses dependency injection pattern with mock dependencies
-- Validates both positive paths (successful creation) and warning conditions
-- Tests both class constructor and convenience function approaches
-- Focuses on factory contract compliance rather than adapter implementation details
+- **High Delay Warning Test (L67-74):** Validates warning generation for excessive defaultDelay values (2500ms), providing performance guidance for test scenarios.
+
+- **Helper Function Test (L76-85):** Verifies `createMockAdapterFactory` convenience function properly forwards configuration and creates functional factory instances.
+
+**Dependencies:**
+- Vitest testing framework for test structure and assertions
+- `@debugmcp/shared` types (AdapterDependencies, DebugFeature, DebugLanguage)
+- MockAdapterFactory and MockDebugAdapter from local source modules
+
+**Test Patterns:**
+- Uses object type casting (`{} as unknown`) for dependency mocking
+- Tests both direct constructor usage and factory helper function
+- Validates both positive cases and configuration warning scenarios
+- Focuses on interface compliance and configuration propagation

@@ -1,43 +1,47 @@
 # tests/adapters/python/integration/env-utils.ts
 @source-hash: 809fce482a16bae1
-@generated: 2026-02-09T18:14:14Z
+@generated: 2026-02-10T00:41:10Z
 
-## Test Environment Python Configuration Utility
+## env-utils.ts
 
-**Primary Purpose**: Ensures Windows CI environments have a functional Python installation with debugpy debugging support available for MCP server integration tests.
+**Purpose**: Utility module for ensuring Python environments with debugpy debugging support are available on PATH, specifically targeting Windows CI environments where Python installations may be present but not properly configured.
 
-**Core Functions**:
-- `hasDebugpy(pythonExe)` (L8-19): Validates if a Python installation has debugpy package by spawning `python -m debugpy --version`
-- `installDebugpy(pythonExe)` (L21-40): Attempts pip installation of debugpy with `--user --upgrade` flags, returns success status and logs
-- `ensurePythonOnPath(env)` (L47-181): Main orchestration function that modifies PATH environment variable to include Python with debugpy
+### Core Functions
 
-**Architecture**:
-- Windows-specific implementation (early return on non-win32 platforms at L48-50)
-- Priority-based Python discovery system:
-  1. `PYTHONLOCATION` environment variable (L61-69) - typically from GitHub Actions setup-python
-  2. Hosted toolcache Python versions (L72-90) - sorted numerically by version for stability
-- Fallback chain: prefer existing debugpy → attempt installation → use any available Python
+- **hasDebugpy(pythonExe)** (L8-19): Synchronously checks if a Python executable has debugpy installed by running `python -m debugpy --version` with 5-second timeout. Returns boolean result, catching all exceptions as false.
 
-**Key Dependencies**:
+- **installDebugpy(pythonExe)** (L21-40): Attempts to install debugpy via pip with `--user --upgrade` flags. Uses 2-minute timeout and returns installation status plus combined stdout/stderr logs. Handles spawn errors gracefully.
+
+- **ensurePythonOnPath(env)** (L47-181): Main exported function that modifies the provided environment object's PATH to include a Python installation with debugpy. Windows-only operation (early return on other platforms).
+
+### Python Discovery Strategy
+
+The function implements a prioritized search pattern:
+
+1. **Priority 1** (L61-69): Checks `pythonLocation`/`PythonLocation` environment variables (typically set by GitHub Actions setup-python)
+
+2. **Priority 2** (L72-90): Scans `C:\hostedtoolcache\windows\Python` for all versions, sorted numerically (oldest first for stability)
+
+### PATH Management Logic
+
+- Normalizes PATH segments using case-insensitive comparison for Windows (L53-55)
+- Adds both Python root directory and `Scripts` subdirectory to PATH (L157-169) 
+- Uses `unshift()` to prioritize selected Python at PATH beginning (L165)
+- Updates both `PATH` and `Path` environment variables for Windows compatibility (L178-179)
+
+### Fallback Behavior
+
+- If no Python with debugpy found, attempts automatic installation via pip (L118-141)
+- If installation fails, falls back to first available Python with warning (L142-151)
+- Comprehensive diagnostic logging throughout the discovery process (L94, L119-120)
+
+### Dependencies
+
 - Node.js built-ins: `fs`, `path`, `child_process.spawnSync`
-- External processes: Python executable, pip package manager
-- Windows filesystem conventions: `C:\hostedtoolcache\windows\Python\{version}\x64`
+- Designed for Windows CI environments, particularly GitHub Actions hosted runners
 
-**Critical Logic Flow**:
-1. Parse existing PATH segments with case-insensitive deduplication (L53-55)
-2. Discover Python candidates in priority order (L57-90)
-3. Test each candidate for debugpy availability (L96-115)
-4. If no debugpy found, attempt installation on first available Python (L118-151)
-5. Prepend selected Python root and Scripts directory to PATH (L154-180)
+### Key Constraints
 
-**Environment Mutation**:
-- Modifies both `env.PATH` and `env.Path` for Windows compatibility (L178-179)
-- Uses unshift to prepend directories for precedence (L165)
-- Maintains case-insensitive duplicate prevention (L163-164)
-
-**Error Handling**:
-- Graceful degradation with diagnostic logging throughout
-- Timeouts: 5s for debugpy check, 120s for pip install
-- Comprehensive try-catch blocks prevent crashes during discovery/installation
-
-**Testing Context**: Specifically designed for MCP (Model Context Protocol) server spawning in CI environments where Python may be installed but not properly configured for debugging.
+- Windows-specific implementation (no-op on other platforms)
+- Synchronous operations with timeouts (5s for version check, 120s for installation)
+- Case-insensitive path handling for Windows filesystem semantics

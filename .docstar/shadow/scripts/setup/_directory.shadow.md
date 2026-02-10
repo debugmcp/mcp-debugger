@@ -1,65 +1,74 @@
 # scripts/setup/
-@generated: 2026-02-09T18:16:06Z
+@generated: 2026-02-10T01:19:42Z
 
-## Overall Purpose and Responsibility
+## Purpose and Responsibility
 
-The `scripts/setup` directory contains platform-specific setup scripts that prepare development environments for working with the mcp-debugger project. These scripts handle the complex task of ensuring all necessary toolchains, dependencies, and build tools are properly installed and configured for debugging Rust-based MCP (Model Context Protocol) servers.
+The `scripts/setup` directory provides platform-specific environment setup scripts for the mcp-debugger project. This module handles the complex task of configuring complete development and debugging environments, including Rust toolchain installation, cross-platform tooling setup, and validation of the debugging infrastructure.
 
-## Key Components and Architecture
+## Key Components and Organization
 
-### Platform-Specific Setup Scripts
-Currently contains `windows-rust-debug.ps1`, a comprehensive PowerShell script that handles Windows-specific Rust debugging setup. The architecture is designed to be extensible for additional platforms (Linux, macOS) following the same pattern.
+Currently contains one primary component:
 
-### Core Responsibilities
-- **Toolchain Management**: Installs and configures Rust toolchains (stable-gnu, stable-msvc) with proper precedence
-- **Build Tool Installation**: Ensures availability of MinGW-w64, MSYS2, and associated GNU toolchain components
-- **Environment Configuration**: Manages PATH variables and environment setup for optimal debugging experience
-- **Validation and Testing**: Builds example projects and runs smoke tests to verify setup integrity
-- **Graceful Degradation**: Provides fallback mechanisms when preferred tools are unavailable
+- **windows-rust-debug.ps1**: Comprehensive Windows PowerShell script that automates the entire Rust debugging environment setup for Windows platforms
 
 ## Public API Surface
 
 ### Main Entry Points
-- **windows-rust-debug.ps1**: Primary Windows setup script with configurable parameters:
-  - `-UpdateUserPath`: Permanently modifies system environment
-  - `-SkipBuild`: Bypasses example project compilation
-  - `-SkipTests`: Skips smoke test execution
 
-### Key Utilities
-- **Invoke-CommandChecked**: Robust command execution wrapper used throughout the project
-- **Environment Management Functions**: PATH manipulation, toolchain detection, and configuration utilities
-- **Build Orchestration**: Automated building of Rust examples with toolchain fallbacks
+**windows-rust-debug.ps1**:
+- **Parameters**:
+  - `UpdateUserPath`: Persists environment changes to user profile
+  - `SkipBuild`: Bypasses example project compilation for faster setup
+  - `SkipTests`: Skips smoke test execution
+- **Usage**: `.\windows-rust-debug.ps1 [-UpdateUserPath] [-SkipBuild] [-SkipTests]`
+
+### Core Functionality
+
+The setup scripts provide automated configuration of:
+- Rust toolchain installation and management via rustup
+- Platform-specific GNU/MSVC toolchain setup
+- Cross-compilation target configuration
+- Build tool validation and smoke testing
+- Environment variable and PATH management
 
 ## Internal Organization and Data Flow
 
-### Setup Pipeline
-1. **Prerequisites Validation** → Verify rustup, install required toolchains
-2. **Toolchain Configuration** → Prioritize GNU tools, configure environment variables
-3. **Dependency Installation** → Install MSYS2/MinGW-w64 if needed via winget
-4. **Environment Setup** → Configure PATH and DLLTOOL variables
-5. **Validation Phase** → Build examples and run smoke tests
+### Setup Workflow
+1. **Environment Validation**: Checks for required base tools and platform compatibility
+2. **Toolchain Installation**: Installs and configures Rust stable/GNU toolchains
+3. **System Tool Configuration**: Sets up platform-specific build tools (dlltool, MinGW, etc.)
+4. **Build Validation**: Compiles example projects to verify environment
+5. **Smoke Testing**: Runs integration tests to validate debugging capabilities
 
-### Tool Precedence Strategy
-- MSYS2 MinGW tools preferred over rustup bundled equivalents
-- GNU toolchain prioritized for debugging compatibility
-- MSVC toolchain as fallback when GNU builds fail
-- Automatic discovery of tool locations with multiple search paths
+### Key Utilities
+- **Command Execution**: Robust command runners with error handling and environment support
+- **Path Management**: Cross-session PATH manipulation with persistence options
+- **Tool Detection**: Automated discovery and installation of missing dependencies
+- **Build Orchestration**: Multi-target compilation with graceful fallbacks
 
 ## Important Patterns and Conventions
 
-### Error Handling
-- Error-first approach with `-Stop` error action preference
-- Graceful fallbacks with informative user messaging
-- Validation of tool availability before usage
-
-### Cross-Platform Preparation
-- Modular design allowing easy addition of platform-specific scripts
-- Consistent parameter patterns and behavior expectations
-- Standardized validation and testing approaches
+### Error Handling Strategy
+- **Graceful Degradation**: Non-critical failures (like MSYS2 installation) don't abort setup
+- **Fallback Mechanisms**: Multiple toolchain targets (GNU preferred, MSVC backup)
+- **Comprehensive Validation**: Each major component is tested after installation
 
 ### Environment Management
-- Case-insensitive PATH handling for Windows compatibility
-- Session vs. persistent environment variable management
-- User choice in permanent vs. temporary modifications
+- **Session Isolation**: Changes apply to current session by default
+- **Optional Persistence**: User can choose to persist changes to profile
+- **Tool Precedence**: Clear priority order for conflicting tools (rustup > system > MSYS2)
 
-This setup system ensures developers can quickly establish a working Rust debugging environment regardless of their existing system configuration, with intelligent defaults and robust error recovery.
+### Build Configuration
+- **Multi-Target Support**: Handles both GNU and MSVC Windows targets
+- **Example Validation**: Uses real Rust projects to verify debugging capabilities
+- **Incremental Setup**: Supports partial runs via skip flags for development workflows
+
+## Integration Points
+
+This module serves as the foundation for:
+- Development environment bootstrapping
+- CI/CD pipeline setup phases  
+- User onboarding automation
+- Cross-platform debugging infrastructure deployment
+
+The scripts ensure that developers and automated systems have consistent, validated environments for mcp-debugger development and testing across different platforms.

@@ -1,56 +1,66 @@
 # tests/e2e/npx/npx-smoke-python.test.ts
 @source-hash: 6097174585d3ed42
-@generated: 2026-02-09T18:14:42Z
+@generated: 2026-02-10T00:41:33Z
 
 ## Purpose
-End-to-end test suite for Python debugging functionality when the MCP debug server is distributed and executed via npx. Validates the complete debugging workflow including session management, breakpoint operations, variable inspection, and execution control in a real npm package distribution environment.
+End-to-end smoke test suite for Python debugging functionality when using the MCP debugger via `npx` (globally installed package). Validates complete debugging workflow including session management, breakpoints, variable inspection, and execution control.
 
-## Test Architecture
-**Sequential Test Suite (L18)**: Uses `describe.sequential` to ensure tests run in order, preventing interference between shared global package installation state.
+## Test Setup & Configuration
+- **Test Framework**: Vitest with sequential execution (L7, L18)
+- **Package Preparation**: Builds, packs, and globally installs npm package before tests (L24-44)
+- **Client Setup**: Creates NPX-based MCP client with debug logging (L36-43)
+- **Timeout Configuration**: 240s for setup, 120s for main test (L44, L241)
 
-**Global Setup/Teardown (L24-66)**: 
-- `beforeAll` (L24-44): Builds npm package, installs globally via tarball, creates MCP client connection
-- `afterAll` (L46-66): Cleans up debug sessions, MCP connections, and global npm installations
-- `afterEach` (L68-80): Per-test session cleanup to prevent state leakage
+## Key Test State Variables
+- `mcpClient`: MCP SDK client instance (L19)
+- `cleanup`: Cleanup function for process/connection teardown (L20)
+- `sessionId`: Active debug session identifier (L21)
+- `tarballPath`: Path to built npm package (L22)
 
-## Key Components
+## Test Structure
+### Setup Phase (L24-44)
+1. Builds and packs npm package using `buildAndPackNpmPackage()`
+2. Logs package size metrics
+3. Installs package globally via `installPackageGlobally()`
+4. Creates NPX MCP client connection
 
-**Test State Variables (L19-22)**:
-- `mcpClient`: MCP SDK client instance for tool invocations
-- `cleanup`: Async cleanup function from MCP client creation
-- `sessionId`: Active debug session identifier
-- `tarballPath`: Path to built npm package tarball
+### Cleanup Phase (L46-66, L68-80)
+- **afterAll**: Closes debug session, runs cleanup, removes global install
+- **afterEach**: Closes active debug session and resets sessionId
 
-**Language Support Test (L82-98)**: Validates Python language availability in the npx-distributed server by calling `list_supported_languages` tool and checking for Python language definition.
+## Core Test Cases
 
-**Full Debugging Cycle Test (L100-241)**: Comprehensive integration test covering:
-1. Debug session creation with Python language
-2. Breakpoint setting on line 11 of test script
-3. Debug execution start with DAP launch configuration
-4. Variable inspection before code execution
-5. Step-over execution control
-6. Variable validation after step execution (verifies variable swap)
-7. Execution continuation
-8. Session cleanup
+### Language Support Test (L82-98)
+- Calls `list_supported_languages` tool
+- Validates Python language is available in supported languages array
+- Verifies response structure and success status
+
+### Complete Debugging Workflow Test (L100-241)
+**Test Script**: `examples/python/simple_test.py` - variable swap operation (L101)
+
+**8-Step Debugging Sequence**:
+1. **Session Creation** (L104-117): Creates named debug session for Python
+2. **Breakpoint Setting** (L119-133): Sets breakpoint at line 11 of test script
+3. **Debug Start** (L135-153): Launches debugging with DAP configuration
+4. **Pre-execution Variables** (L158-180): Inspects variables before swap (a=1, b=2)
+5. **Step Over** (L182-191): Executes single step over breakpoint
+6. **Post-execution Variables** (L195-213): Verifies variable swap (a=2, b=1)
+7. **Continue Execution** (L215-224): Resumes program execution
+8. **Session Cleanup** (L228-238): Closes debug session
 
 ## Dependencies
-- **NPX Test Utilities (L10)**: `buildAndPackNpmPackage`, `installPackageGlobally`, `createNpxMcpClient`, `cleanupGlobalInstall`, `getPackageSize`
-- **Smoke Test Utilities (L11)**: `parseSdkToolResult` for MCP tool response parsing
-- **MCP SDK (L12)**: Client interface for MCP server communication
-- **Test Script Path (L101)**: `examples/python/simple_test.py` - Python script with variable swap logic
+- **Test Utilities**: `./npx-test-utils.js` for NPX package management (L10)
+- **Smoke Test Utils**: `../smoke-test-utils.js` for result parsing (L11)
+- **MCP SDK**: Client interface for tool communication (L12)
 
-## Test Patterns
-**Extended Timeouts**: 240s for setup (L44), 120s for main test (L241) - accounts for npm package building, global installation, and debugging operations
+## Architectural Patterns
+- **Sequential Test Execution**: Prevents race conditions in global package installation
+- **Comprehensive Cleanup**: Multiple cleanup layers (afterEach, afterAll) ensure no leaked resources
+- **Stabilization Delays**: Strategic timeouts (1-2s) allow debug state transitions to complete
+- **Error Resilience**: Try-catch blocks in cleanup prevent cascade failures
 
-**Deliberate Wait Periods**: Strategic delays (L156, L193, L226) to allow debug state stabilization between operations
-
-**Error Resilience**: Try-catch blocks in cleanup operations (L48-55, L69-77) to handle already-closed sessions gracefully
-
-**State Validation**: Each debugging operation validates both success status and expected state changes (variables, execution state)
-
-## Critical Test Data
-The test expects specific variable behavior in the Python test script:
-- Initial state: `a=1, b=2` (L177-178)
-- After step-over: `a=2, b=1` (L210-211)
-
-This validates that the debugger correctly steps through variable swap logic and variable inspection works properly.
+## Critical Constraints
+- **Global Installation Required**: Tests npm package distribution mechanism
+- **File System Dependencies**: Relies on specific example Python script location
+- **Debug State Management**: Careful session lifecycle to prevent resource leaks
+- **Timing Dependencies**: Synchronization delays for debug adapter protocol operations

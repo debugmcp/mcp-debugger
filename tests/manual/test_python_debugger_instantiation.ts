@@ -17,14 +17,6 @@ async function testInstantiation() {
     
     if (debuggerInstance) {
       console.log('[INSTANTIATION_TEST] debuggerInstance is not null.');
-      // We could try calling initialize here too, but let's start with just instantiation
-      // try {
-      //   console.log('[INSTANTIATION_TEST] About to call initialize...');
-      //   await debuggerInstance.initialize({ sessionId: dummySessionId });
-      //   console.log('[INSTANTIATION_TEST] initialize completed.');
-      // } catch (initError) {
-      //   console.error('[INSTANTIATION_TEST] Error during initialize:', initError);
-      // }
     } else {
       console.error('[INSTANTIATION_TEST] PythonDebugger instance is null after new call (this should not happen if no error thrown).');
     }

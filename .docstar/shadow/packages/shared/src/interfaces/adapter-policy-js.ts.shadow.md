@@ -1,87 +1,91 @@
 # packages/shared/src/interfaces/adapter-policy-js.ts
-@source-hash: c89e631271a9703f
-@generated: 2026-02-09T18:14:23Z
+@source-hash: 919cdc5f0dd8d595
+@generated: 2026-02-10T00:41:31Z
 
-## JavaScript Debug Adapter Policy (js-debug/pwa-node)
+**File Purpose**: JavaScript-specific adapter policy for VS Code's js-debug (pwa-node) debugger, implementing multi-session debugging behavior while preserving generic DAP flow compatibility.
 
-**Primary Purpose:** Implements adapter-specific policy for VS Code's js-debug (pwa-node) debugger, handling JavaScript/TypeScript debugging with multi-session support and complex initialization sequences.
+## Core Interfaces & State
 
-### Core Components
+**JsAdapterState** (L16-20): Extends AdapterSpecificState with JS-specific tracking:
+- `initializeResponded`: Tracks completion of initialize request/response cycle
+- `startSent`: Indicates if launch/attach has been sent  
+- `pendingCommands`: Queue of commands awaiting proper initialization sequence
 
-**JsAdapterState Interface (L16-20):** Extends base adapter state with JavaScript-specific flags:
-- `initializeResponded`: Tracks initialize response reception
-- `startSent`: Monitors launch/attach command execution
-- `pendingCommands`: Queues commands during initialization
+**JsDebugAdapterPolicy** (L22-728): Main policy object implementing AdapterPolicy interface with comprehensive JavaScript debugging support.
 
-**Main Policy Object (L22-727):** `JsDebugAdapterPolicy` implements comprehensive adapter behavior:
+## Multi-Session Architecture
 
-### Key Capabilities
+**Child Session Management** (L24-42):
+- `supportsReverseStartDebugging: true`: Enables multi-session child spawning
+- `childSessionStrategy: 'launchWithPendingTarget'`: Uses pending target mechanism
+- `buildChildStartArgs()` (L27-37): Creates attach configuration with `__pendingTargetId` and `continueOnAttach: true`
+- `isChildReadyEvent()` (L39-42): Detects child readiness via 'thread' or 'stopped' events
 
-**Multi-Session Support (L24-42):**
-- Enables reverse `startDebugging` requests for child process debugging
-- Uses `launchWithPendingTarget` strategy for spawning child sessions
-- Configures child sessions with `__pendingTargetId` for proper targeting
+## Stack Frame & Variable Handling
 
-**Stack Frame Management (L48-72):**
-- `isInternalFrame()`: Identifies Node.js internal frames by `<node_internals>` pattern
-- `filterStackFrames()`: Removes internal frames while preserving at least one frame
+**Frame Filtering** (L48-72):
+- `isInternalFrame()` (L48-52): Identifies Node.js internals by `<node_internals>` path marker
+- `filterStackFrames()` (L57-72): Removes internal frames with fallback to preserve at least one frame
 
-**Variable Extraction (L77-150):**
-- `extractLocalVariables()`: Extracts variables from local/script scopes
-- Handles various scope names: Local, Locals, Script, Module, Block
-- Filters out special variables (`this`, `__proto__`, V8 internals, debugger variables)
+**Variable Extraction** (L77-150):
+- `extractLocalVariables()` (L77-149): Extracts locals from top stack frame
+- Supports multiple scope patterns: 'Local', 'Local:', 'Block:', 'Script', 'Module', 'Global'
+- Filters out special variables: `this`, `__proto__`, `[[...]]` internals, `$` prefixed debugger vars
+- `includeSpecial` parameter controls filtering behavior
 
-**Command Queueing System (L441-524):**
-- `requiresCommandQueueing()`: Always returns true for strict ordering
-- `shouldQueueCommand()`: Gates commands until proper initialization state
-- `processQueuedCommands()`: Enforces JavaScript-specific command order
+## Strict Handshake Protocol
 
-### Complex Handshake Sequence (L192-436)
+**performHandshake()** (L192-436): Implements js-debug's required initialization sequence:
+1. **Initialize** (L208-224): Sends initialize with `supportsStartDebuggingRequest: true`
+2. **Wait for 'initialized'** (L227-248): 10-second timeout with event listener
+3. **Set Breakpoints** (L251-285): Groups breakpoints by file, sends `setExceptionBreakpoints` and `setBreakpoints`
+4. **Configuration Done** (L288-297): Sends `configurationDone`
+5. **Launch/Attach** (L299-432): Handles explicit attach (port-based) vs launch flows with comprehensive config merging
 
-**Strict Initialization Flow:**
-1. Send `initialize` with `supportsStartDebuggingRequest: true`
-2. Wait for `initialized` event (with 10s timeout)
-3. Configure breakpoints and exception handling
-4. Send `configurationDone`
-5. Launch/attach with comprehensive configuration
+## Command Queueing System
 
-**Launch Configuration (L344-431):**
-- Auto-configures program path, working directory, runtime executable
-- Handles sourcemap settings, output capture, smart stepping
-- Uses `process.execPath` for consistent Node.js runtime
+**Command Ordering Logic** (L441-524):
+- `requiresCommandQueueing()`: Always returns true for JS adapter
+- `shouldQueueCommand()` (L446-492): Gates commands based on initialization state:
+  - Allows 'initialize' immediately
+  - Queues all others until `initializeResponded`
+  - Queues config commands until 'initialized' event
+  - Defers launch/attach until `configurationDone`
+- `processQueuedCommands()` (L497-524): Enforces strict order: configs → configurationDone → launches → others
 
-### State Management (L529-590)
+## State Management
 
-**Lifecycle Tracking:**
-- `createInitialState()`: Initializes JavaScript-specific state
-- `updateStateOnCommand/Response/Event()`: Maintains initialization state
-- `isInitialized()`: Requires both `initialized` event and response
+**State Lifecycle** (L529-590):
+- `createInitialState()` (L529-536): Creates JsAdapterState with all flags false
+- `updateStateOnCommand()` (L542-552): Updates flags when commands are sent
+- `updateStateOnResponse()` (L557-562): Marks `initializeResponded` on initialize response
+- `updateStateOnEvent()` (L567-573): Sets `initialized` flag on 'initialized' event
 
-### DAP Client Behavior (L623-704)
+## DAP Client Behavior
 
-**Reverse Request Handling:**
-- Processes `startDebugging` for child session creation
-- Manages `__pendingTargetId` adoption tracking
-- Handles `runInTerminal` requests
+**getDapClientBehavior()** (L624-704): Returns comprehensive DapClientBehavior configuration:
+- **Reverse Request Handling** (L627-660): Processes `startDebugging` requests with `__pendingTargetId` adoption
+- **Child Routing**: 14 commands routed to child sessions (threads, pause, continue, etc.)
+- **Session Behaviors**: Mirrors breakpoints, defers parent configDone, requires stack trace from child
+- **Timeouts**: 12-second child init timeout
 
-**Child Session Routing:** Defines 23 commands that route to child sessions including debugging controls, stack inspection, and variable manipulation.
+## Adapter Configuration
 
-### Integration Points
+**Spawn Configuration** (L710-728):
+- `getAdapterSpawnConfig()`: Expects custom adapter command since js-debug isn't a simple executable
+- Warns if no adapter command provided as js-debug requires specific VS Code extension setup
 
-**Dependencies:**
-- `@vscode/debugprotocol` for DAP types
-- Base adapter policy interfaces
-- SessionState from shared package
-- Path utilities for dynamic imports
+## Architecture Dependencies
 
-**Adapter Detection (L595-606):** Matches commands containing js-debug, pwa-node, or vsDebugServer patterns.
+- Imports DebugProtocol from '@vscode/debugprotocol'
+- Integrates with core adapter-policy interfaces
+- Uses SessionState enum for readiness checks
+- Leverages shared models for StackFrame and Variable types
+- Coordinates with DapClientBehavior for multi-session orchestration
 
-**Spawn Configuration (L709-727):** Delegates to provided adapter command since js-debug requires specific setup rather than simple executable launching.
+## Critical Invariants
 
-### Critical Behaviors
-
-- **Strict Command Ordering:** Enforces initialize → configuration → launch sequence
-- **Multi-Session Architecture:** Handles parent-child debugging relationships
-- **Breakpoint Mirroring:** Synchronizes breakpoints across sessions
-- **Node.js Integration:** Optimized for Node.js runtime characteristics
-- **Source Map Support:** Comprehensive TypeScript/source map handling
+1. **Initialization Order**: initialize → initialized event → configs → configurationDone → launch/attach
+2. **Multi-session**: Parent handles breakpoints/config, child handles execution commands  
+3. **Frame Safety**: Always preserves at least one stack frame even when filtering internals
+4. **Command Gating**: Strict state-based command queueing prevents DAP protocol violations

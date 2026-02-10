@@ -1,106 +1,77 @@
 # packages/adapter-javascript/src/
-@generated: 2026-02-09T18:16:42Z
+@generated: 2026-02-10T01:19:55Z
 
-## Overall Purpose & Responsibility
+## Overall Purpose and Responsibility
 
-The `src` directory implements the complete JavaScript/TypeScript debugging adapter for the MCP (Model Context Protocol) ecosystem. This module provides intelligent debugging capabilities by bridging VS Code's Debug Adapter Protocol (DAP) with the underlying js-debug engine, handling automatic runtime detection, configuration transformation, and lifecycle management for JavaScript/TypeScript debugging sessions.
+The `packages/adapter-javascript/src` directory implements a complete JavaScript/TypeScript debug adapter for the DebugMCP framework. It provides intelligent debugging capabilities by wrapping VS Code's vendored js-debug adapter with environment detection, configuration transformation, and TypeScript runtime support.
 
-## Key Components & Architecture
+## Key Components and Architecture
 
-### Public API Layer (`index.ts`)
-Central barrel export providing clean public interface:
-- `JavascriptAdapterFactory` - Primary factory for creating adapter instances
-- `JavascriptDebugAdapter` - Core debug adapter implementation
-- `JsDebugConfig` - TypeScript configuration interface
-- Utility functions: `resolveNodeExecutable`, `detectTsRunners`, `transformConfig`
+### Core Adapter Infrastructure
+- **`index.ts`**: Public API barrel module that exposes the complete package interface
+- **`JavascriptAdapterFactory`**: Factory implementation that validates environment requirements (Node.js version ≥14, vendor dependencies, TypeScript runtimes) before creating adapter instances
+- **`JavascriptDebugAdapter`**: Main adapter class that manages debugging lifecycle, DAP protocol handling, and configuration transformation
 
-### Factory Pattern (`javascript-adapter-factory.ts`)
-Implements adapter creation with comprehensive environment validation:
-- Validates Node.js version ≥14 requirement
-- Checks for bundled js-debug adapter presence
-- Detects TypeScript runtime availability (tsx, ts-node)
-- Provides graceful degradation with warnings vs. errors distinction
+### Supporting Infrastructure
+- **`types/`**: Type definitions providing the foundational type system, currently centered around the flexible `JsDebugConfig` interface
+- **`utils/`**: Core utility suite providing environment detection, executable resolution, configuration analysis, and launch coordination
 
-### Core Adapter (`javascript-debug-adapter.ts`)
-Primary implementation handling complete debugging lifecycle:
-- **State Management**: Tracks adapter states (UNINITIALIZED → READY → CONNECTED/DISCONNECTED → DISPOSED)
-- **Configuration Transform**: Intelligent conversion of generic configs to js-debug specific format
-- **Runtime Detection**: Automatic TypeScript runner selection and Node.js executable resolution
-- **DAP Protocol**: Full Debug Adapter Protocol handling with event processing
-- **Feature Support**: Comprehensive debugging capabilities declaration
+## Public API Surface
 
-### Utility Ecosystem (`utils/`)
-Foundation layer providing environment intelligence:
-- **Executable Resolution**: Cross-platform Node.js and TypeScript runtime discovery
-- **Configuration Analysis**: ESM/CommonJS detection, TypeScript configuration parsing
-- **Launch Coordination**: Barrier pattern for js-debug adapter startup synchronization
-- **Filesystem Abstraction**: Injectable filesystem layer for testing and reliability
-
-### Type System (`types/`)
-Centralized type definitions for configuration contracts and debugging interfaces.
-
-## Component Integration & Data Flow
-
-### Initialization Flow
-1. **Factory Validation**: `JavascriptAdapterFactory` validates environment prerequisites
-2. **Adapter Creation**: Factory instantiates `JavascriptDebugAdapter` with validated environment
-3. **Runtime Discovery**: Utils detect Node.js executable and TypeScript runners
-4. **Configuration Transform**: Adapter converts generic debug config to js-debug format
-
-### Debugging Session Flow
-1. **Environment Setup**: Adapter resolves executable paths and builds launch command
-2. **Launch Coordination**: `JsDebugLaunchBarrier` manages js-debug adapter startup
-3. **Protocol Bridging**: Adapter handles DAP request/response/event flow
-4. **State Tracking**: Maintains session state and emits lifecycle events
-
-### Cross-Component Dependencies
-- **Factory → Adapter**: Creates and validates adapter instances
-- **Adapter → Utils**: Leverages utilities for environment detection and configuration
-- **Utils → Types**: Uses type definitions for configuration contracts
-- **All → FileSystem**: Shared filesystem abstraction for consistent behavior
-
-## Key Entry Points & Public Surface
-
-### Primary Factory
-- `JavascriptAdapterFactory`: Main entry point for creating debug adapters
-  - `validate()`: Environment validation with detailed error/warning reporting
-  - `createAdapter()`: Instantiates configured debug adapter
-
-### Core Debug Interface
-- `JavascriptDebugAdapter`: Implements `IDebugAdapter` interface
-  - `initialize()`: Adapter setup and validation
-  - `transformLaunchConfig()`: Configuration transformation for js-debug compatibility
-  - `sendDapRequest()`: DAP protocol request handling
-  - `connect()`/`disconnect()`: Session lifecycle management
+### Primary Entry Points
+- **`JavascriptAdapterFactory`**: Factory for creating validated adapter instances
+- **`JavascriptDebugAdapter`**: Main debugging session manager implementing IDebugAdapter interface
+- **`JsDebugConfig`**: TypeScript interface for debugging configurations
 
 ### Utility Functions
-- `resolveNodeExecutable()`: Node.js executable discovery
-- `detectTsRunners()`: TypeScript runtime detection with caching
-- `transformConfig()`: Configuration transformation utilities
+- **`resolveNodeExecutable()`**: Cross-platform Node.js executable discovery
+- **`detectTsRunners()`**: TypeScript runtime detection (tsx, ts-node)
+- **`transformConfig()`**: Intelligent configuration transformation for JavaScript/TypeScript projects
 
-## Architecture Patterns
+## Internal Organization and Data Flow
 
-### Factory Pattern
-Clean separation between adapter creation (factory) and operation (adapter) with comprehensive validation.
+### Adapter Lifecycle Flow
+```
+Factory validation → Environment setup → Adapter creation → Configuration transform → Debug session management
+```
 
-### State Machine
-Explicit state transitions with event emission for lifecycle tracking and debugging.
+### Configuration Intelligence
+The adapter employs sophisticated heuristics to automatically configure debugging sessions:
+1. **Project Type Detection**: Analyzes file extensions, package.json, and tsconfig.json to determine ESM/CommonJS and TypeScript requirements
+2. **Runtime Selection**: Prioritizes user configuration, then tsx, ts-node, and finally plain Node.js
+3. **Path Resolution**: Handles source maps, output files, and module loading automatically
 
-### Dependency Injection
-Filesystem abstraction enables hermetic testing and cross-platform reliability.
+### Transport and Protocol
+- **TCP-only transport**: Designed for proxy infrastructure integration
+- **DAP Protocol Wrapping**: Translates between DebugMCP interfaces and VS Code's js-debug adapter
+- **State Management**: Tracks adapter state transitions and debugging session lifecycle
 
-### Caching Strategy
-Intelligent memoization for expensive operations (executable discovery, TypeScript detection) with explicit cache management.
+## Important Patterns and Conventions
 
-### Error Resilience
-Comprehensive error handling with graceful degradation, user-friendly error messages, and no-throw utility design.
+### Defensive Programming
+- **No-throw utilities**: All functions use graceful fallbacks rather than exceptions
+- **Safe filesystem operations**: Wrapped in try-catch blocks with sensible defaults
+- **Environment validation**: Comprehensive checks before adapter instantiation
 
-## Critical Design Constraints
+### Intelligent Defaults
+- **Local-first resolution**: Searches project-local executables before system PATH
+- **Automatic TypeScript detection**: Uses file extensions and project configuration
+- **Cross-platform compatibility**: Handles Windows/Unix differences transparently
 
-- **TCP Mode Requirement**: Adapter must operate in TCP mode for MCP proxy compatibility
-- **Synchronous Transform**: Configuration transformation must be synchronous despite async dependencies
-- **ESM Compatibility**: Uses explicit `.js` extensions and `import.meta.url` for module resolution
-- **Cross-platform Support**: Handles Windows executable suffixes and PATH variations
-- **Container Awareness**: Detects MCP_CONTAINER environment for workspace handling
+### Dependency Management
+- **Vendored js-debug**: Wraps VS Code's proven JavaScript debugger
+- **Minimal external dependencies**: Relies primarily on Node.js built-ins
+- **Test-friendly design**: Dependency injection for filesystem operations
 
-This module serves as the complete JavaScript/TypeScript debugging solution within the MCP ecosystem, providing intelligent environment detection, robust error handling, and seamless integration with VS Code's debugging infrastructure.
+## Critical Capabilities
+
+The adapter provides comprehensive JavaScript/TypeScript debugging including:
+- Source map support and automatic path resolution
+- TypeScript runtime integration (tsx, ts-node)
+- ESM/CommonJS project handling
+- Conditional breakpoints and log points
+- Exception handling (caught/uncaught filtering)
+- Container and workspace environment support
+- Memory optimization and inspector flag normalization
+
+This implementation serves as the bridge between DebugMCP's standardized debugging interface and the rich JavaScript/TypeScript debugging ecosystem, providing intelligent configuration and robust error handling while maintaining compatibility with existing development workflows.

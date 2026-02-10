@@ -1,64 +1,56 @@
 # examples/visualizer/state.py
 @source-hash: b8053f81251b02e5
-@generated: 2026-02-09T18:15:00Z
+@generated: 2026-02-10T00:41:44Z
 
-## Primary Purpose
-Central state management module for a debugger visualizer, providing comprehensive tracking of debugging session state including execution location, breakpoints, variables, and tool activity history.
+## Purpose
+Application state management for a debugger visualizer, providing centralized storage and manipulation of debugging session data including tool activities, execution location, breakpoints, and variable states.
 
-## Core Classes
+## Key Classes
 
 ### ToolActivity (L16-23)
-Immutable dataclass representing a single MCP tool invocation with fields:
+Dataclass representing a single MCP tool invocation with fields:
 - `tool`: Tool name
 - `status`: Execution status ('calling', 'success', 'error')
 - `details`: Human-readable description
-- `timestamp`: Float timestamp of invocation
+- `timestamp`: Execution time
 
 ### CodeLocation (L25-35)
-Represents a specific location in source code with:
-- `file_path`: Full file path
-- `line`: Line number
-- `__str__()` method returns basename:line format for display
+Represents a code position with `file_path` and `line` number. Includes `__str__()` method (L31-34) that returns basename and line for display.
 
 ### DebugState (L37-157)
-Main state container managing all debugger session data:
+Central state manager with session, execution, and debugging data:
 
-**Session Management:**
-- `session_id`, `session_name`: Optional session identifiers
-- `reset_session()` (L124): Clears session state but preserves tool history
+**Session Fields:**
+- `session_id`, `session_name`: Session identification
+- `current_location`: Current execution position (CodeLocation)
+- `is_paused`: Execution state flag
 
-**Execution Tracking:**
-- `current_location`: CodeLocation of current execution point
-- `is_paused`: Boolean execution state
-- `update_location()` (L101): Updates current position
+**Data Structures:**
+- `breakpoints`: Dict[file_path, Set[line_numbers]] for breakpoint storage
+- `variables`: Dict[str, str] for current scope variables
+- `tool_activities`: List[ToolActivity] with max_activities limit (20)
 
-**Breakpoint Management:**
-- `breakpoints`: Dict[file_path, Set[line_numbers]] structure
-- `set_breakpoint()` (L75): Adds breakpoint, auto-creates file entry
-- `remove_breakpoint()` (L87): Removes breakpoint, cleans empty sets
-- `get_breakpoints_for_file()` (L134): Returns breakpoints for specific file
-- `has_breakpoint()` (L146): Checks if specific line has breakpoint
-
-**Variable Tracking:**
-- `variables`: Dict[name, value_string] of current scope variables
-- `update_variables()` (L115): Replaces all variables with new dict copy
-- `clear_variables()` (L111): Empties variable dict
-
-**Activity History:**
-- `tool_activities`: Limited list of ToolActivity objects
-- `max_activities`: Configurable limit (default 20)
-- `add_tool_activity()` (L59): Appends new activity with automatic pruning
-
-## Key Patterns
-
-**Memory Management:** Tool activity list implements automatic pruning to prevent unbounded growth, maintaining only the most recent N activities.
-
-**Breakpoint Storage:** Uses nested dict-set structure for efficient file-based breakpoint lookup and management.
-
-**Defensive Programming:** Breakpoint methods handle missing file entries gracefully, set operations use `discard()` for safe removal.
+**Key Methods:**
+- `add_tool_activity()` (L59-73): Appends activity with automatic history trimming
+- `set_breakpoint()`/`remove_breakpoint()` (L75-99): Breakpoint management with cleanup
+- `update_location()` (L101-109): Updates current execution position
+- `update_variables()` (L115-122): Replaces variable state
+- `reset_session()` (L124-132): Clears session data but preserves tool history
+- `get_breakpoints_for_file()`/`has_breakpoint()` (L134-157): Breakpoint queries
 
 ## Dependencies
-- `dataclasses`: For structured data classes
-- `typing`: For type annotations
-- `time`: For activity timestamps
-- `os` (imported inline): For path manipulation in display formatting
+- `dataclasses` for data structures
+- `typing` for type hints
+- `time` for timestamps
+- `os` (imported in `__str__`) for path operations
+
+## Architectural Patterns
+- Immutable dataclasses for activity and location records
+- Centralized state pattern with the DebugState class
+- Memory management through bounded tool activity history
+- Dict-based breakpoint storage using file paths as keys and line number sets as values
+
+## Constraints
+- Tool activities limited to 20 entries to prevent memory growth
+- Variables stored as string representations only
+- Breakpoints automatically cleaned up when file has no remaining breakpoints

@@ -1,48 +1,36 @@
 # packages/adapter-java/tests/unit/java-utils.test.ts
-@source-hash: 99a9ab21b21f040a
-@generated: 2026-02-09T18:13:59Z
+@source-hash: 86bbe63a3df90ba6
+@generated: 2026-02-10T01:19:01Z
 
 ## Purpose
-Unit test suite for Java utility functions in the Java adapter package. Tests Java version parsing, executable detection, environment handling, and command finding mechanisms.
+Unit test suite for Java utility functions in the adapter-java package. Tests Java version parsing, detection, and environment discovery capabilities.
 
 ## Test Structure
 
-### parseJavaMajorVersion Tests (L34-52)
-- **Old Format Parsing (L35-39)**: Tests legacy Java 1.x version format extraction (1.8.0_392 → 8)
-- **New Format Parsing (L41-45)**: Tests modern Java 9+ version format extraction (17.0.1 → 17)  
-- **Invalid Input Handling (L47-51)**: Verifies graceful handling of malformed version strings (returns 0)
+### Core Test Modules
+- **parseJavaMajorVersion tests (L34-52)**: Validates parsing of both legacy (1.x) and modern (9+) Java version formats, plus error handling for invalid inputs
+- **getJavaVersion tests (L54-135)**: Tests subprocess execution to retrieve Java version strings, including timeout and error scenarios
+- **findJavaHome tests (L137-162)**: Verifies JAVA_HOME environment variable detection and validation
+- **CommandNotFoundError tests (L164-171)**: Tests custom error class for missing Java commands
+- **CommandFinder tests (L173-189)**: Tests pluggable command discovery mechanism
 
-### getJavaVersion Tests (L54-133)
-- **simulateSpawn Helper (L55-74)**: Mock factory for child process behavior with configurable output/exit codes
-- **Version Extraction Tests (L76-92)**: Validates parsing from actual `java -version` stderr output across formats
-- **Error Handling (L94-111)**: Tests spawn failures and non-zero exit codes (returns null)
-- **Timeout Test (L113-132)**: Skipped test for hanging process scenarios
+### Key Testing Utilities
+- **simulateSpawn helper (L55-74)**: Mocks child_process.spawn with configurable output and exit codes, using EventEmitter to simulate async process behavior
+- **MockCommandFinder class (L174-178)**: Test implementation of CommandFinder interface for dependency injection testing
 
-### findJavaHome Tests (L135-167)
-- **Environment Setup (L136-144)**: Preserves and restores process.env for isolation
-- **JAVA_HOME Detection (L146-160)**: Tests environment variable validation with filesystem checks
-- **Missing JAVA_HOME (L162-166)**: Verifies null return when environment variable absent
+## Dependencies & Mocking
+- **Vitest framework**: Core testing utilities imported at L1-2
+- **child_process mock (L14-20)**: Intercepts spawn calls for subprocess testing
+- **which mock (L22-24)**: Mocks command path resolution
+- **Environment isolation (L138-146)**: Preserves and restores process.env for hermetic testing
 
-### CommandNotFoundError Tests (L169-176)
-- **Error Properties (L170-175)**: Validates custom error class with command property
+## Test Patterns
+- Comprehensive version format coverage: old format (1.8.x), new format (9+), and edge cases
+- Error simulation: spawn failures, non-zero exits, and malformed outputs
+- Environment manipulation: JAVA_HOME presence/absence testing
+- Dependency injection: Custom CommandFinder implementation testing
 
-### CommandFinder Tests (L178-194)
-- **MockCommandFinder (L179-183)**: Test implementation returning mock paths
-- **Custom Finder Registration (L185-193)**: Tests setDefaultCommandFinder with proper cleanup
-
-## Dependencies
-- **vitest**: Testing framework with mocking capabilities
-- **child_process.spawn**: Mocked for process execution simulation
-- **which**: Mocked for command path resolution
-- **node:fs**: Mocked for filesystem operations
-
-## Mock Strategy
-- **Partial Mock Pattern (L14-20)**: Preserves actual child_process exports while mocking spawn
-- **EventEmitter Simulation (L57-72)**: Complex mock recreating Node.js child process behavior
-- **Environment Isolation (L138-144)**: Ensures test independence via env restoration
-
-## Testing Patterns
-- Uses queueMicrotask for asynchronous event simulation
-- Implements proper mock cleanup in beforeEach/afterEach hooks
-- Employs type assertions for complex mock objects
-- Tests both success and failure paths comprehensively
+## Notable Implementation Details
+- **Async process simulation**: Uses queueMicrotask for proper event loop scheduling in mocks
+- **Timeout test skipped (L115)**: Acknowledged flaky behavior with fake timers in CI environments
+- **Flexible assertion pattern (L154)**: Accepts multiple valid outcomes where fs mocking limitations exist

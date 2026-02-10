@@ -43,17 +43,6 @@ const createFactory = (overrides: Partial<ReturnType<typeof getFactory>> = {}) =
   };
 };
 
-const getFactory = () => ({
-  validate: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-  getMetadata: vi.fn().mockReturnValue({ name: 'mock', version: '1.0.0' }),
-  createAdapter: vi.fn().mockReturnValue({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn(),
-    once: vi.fn(),
-    dispose: vi.fn().mockResolvedValue(undefined)
-  })
-});
-
 describe('AdapterRegistry', () => {
   const originalEnv = process.env.MCP_CONTAINER;
 

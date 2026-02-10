@@ -1,0 +1,6 @@
+{
+  "source": "src/cli/commands/check-rust-binary.ts",
+  "source_hash": "095b5ff80de469d3",
+  "generated": "2026-02-10T00:41:24Z",
+  "findings": []
+}

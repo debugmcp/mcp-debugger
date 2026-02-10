@@ -1,33 +1,36 @@
 # tests/unit/adapters/js-debug-launch-barrier.test.ts
 @source-hash: be7ac58af6a0a6cc
-@generated: 2026-02-09T18:14:40Z
+@generated: 2026-02-10T00:41:30Z
 
 ## Purpose
-Unit test suite for the `JsDebugLaunchBarrier` class, verifying its async readiness detection behavior during JavaScript debug adapter launches. Tests the barrier's ability to resolve via multiple pathways: DAP stopped events, proxy connection status, timeout fallback, and error handling.
+Unit test file for `JsDebugLaunchBarrier` utility that validates launch readiness detection for JavaScript debugging adapters.
 
 ## Test Structure
-- **Test suite**: `JsDebugLaunchBarrier` (L11-82)
-- **Mock logger factory**: `createLogger()` (L4-9) - Creates stub logger with vitest mocks for all log levels
-- **Setup/teardown**: Uses fake timers (L15, L20) and mock clearing (L21) for deterministic async testing
+- **Mock Logger Factory** (L4-9): Creates vitest mocks for logger methods (info, warn, error, debug)
+- **Test Suite Setup** (L11-22): Configures fake timers and fresh logger mocks per test
+- **Core Test Class**: `JsDebugLaunchBarrier` from `../../../packages/adapter-javascript/src/utils/js-debug-launch-barrier.js`
 
 ## Key Test Scenarios
 
-### Happy Path Tests
-- **Stopped event resolution** (L24-33): Verifies barrier resolves immediately when DAP 'stopped' event arrives, logs confirmation message
-- **Adapter connected resolution** (L35-45): Tests resolution 500ms after 'adapter_connected' proxy status, with appropriate logging
-- **Timeout fallback** (L47-56): Ensures barrier resolves gracefully after timeout (1500ms), logs warning message
+### Readiness Detection Tests
+- **Stopped Event Resolution** (L24-33): Verifies barrier resolves immediately when DAP 'stopped' event is received, logs successful launch confirmation
+- **Adapter Connected Resolution** (L35-45): Tests resolution after 'adapter_connected' proxy status with 500ms delay, logs adapter readiness
+- **Timeout Fallback** (L47-56): Validates timeout behavior (1500ms) when no events arrive, logs warning and proceeds
 
-### Error Handling
-- **Proxy exit rejection** (L58-66): Verifies barrier rejects with specific error when proxy exits before readiness
-- **Duplicate signal handling** (L68-81): Confirms barrier ignores additional readiness signals after initial settlement
+### Error Handling Tests  
+- **Proxy Exit Rejection** (L58-66): Ensures barrier rejects with error when proxy exits before launch completion
+- **Duplicate Signal Handling** (L68-81): Confirms barrier ignores subsequent readiness signals after initial settlement, preventing duplicate logging
+
+## Testing Patterns
+- Uses vitest fake timers for time-based testing
+- Mock logger validation for proper logging behavior
+- Promise-based assertions for async barrier operations
+- Proper cleanup with `barrier.dispose()` calls
+- Timer advancement with `vi.advanceTimersByTimeAsync()`
 
 ## Dependencies
-- **Vitest testing framework**: Mock functions, fake timers, async test utilities
-- **Target class**: `JsDebugLaunchBarrier` from `../../../packages/adapter-javascript/src/utils/js-debug-launch-barrier.js`
+- **vitest**: Testing framework with mocking and timer utilities
+- **JsDebugLaunchBarrier**: The class under test for launch barrier coordination
 
-## Test Patterns
-- Consistent barrier instantiation with logger and timeout parameters
-- Promise-based testing with `waitUntilReady()` method
-- Timer manipulation via `vi.advanceTimersByTimeAsync()` for timeout scenarios
-- Proper cleanup with `barrier.dispose()` in all tests
-- Mock verification for logging behavior validation
+## Test Coverage
+Covers all major barrier states: immediate resolution via events, delayed resolution via status, timeout fallback, error conditions, and duplicate signal handling.

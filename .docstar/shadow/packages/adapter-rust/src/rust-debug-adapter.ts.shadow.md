@@ -1,96 +1,100 @@
 # packages/adapter-rust/src/rust-debug-adapter.ts
 @source-hash: 7de3c3f11cfe8704
-@generated: 2026-02-09T18:14:44Z
+@generated: 2026-02-10T00:41:39Z
 
-## RustDebugAdapter - Rust Language Debug Adapter
+## Purpose
+Rust debug adapter implementation using CodeLLDB as the underlying debug engine. Provides language-specific debugging capabilities through a proxy-based architecture where ProxyManager handles process spawning and DAP communication.
 
-**Purpose**: Implements CodeLLDB-based Rust debugging support within the debug-mcp architecture. Acts as a proxy-managed adapter that validates Rust environments, manages toolchain compatibility (especially MSVC vs GNU), and translates generic debug configurations to CodeLLDB-specific launch parameters.
+## Architecture & Key Components
 
-### Core Architecture
-
-**Main Class**: `RustDebugAdapter` (L98-1170)
+**RustDebugAdapter Class (L98-1170)**
 - Extends EventEmitter, implements IDebugAdapter interface
-- Manages state transitions: UNINITIALIZED → INITIALIZING → READY → CONNECTED/DEBUGGING
-- Language: `DebugLanguage.RUST`, uses CodeLLDB as underlying debugger
+- Core state machine with AdapterState transitions
+- Manages lifecycle: UNINITIALIZED → INITIALIZING → READY → CONNECTED → DEBUGGING
+- Caches executable paths with 60-second TTL (L110-111)
 
-**Key Dependencies**:
-- CodeLLDB executable resolution via `resolveCodeLLDBExecutable()` (L41)
-- Rust toolchain utilities: `checkRustInstallation`, `checkCargoInstallation`, `getRustHostTriple` (L43-46)
-- Binary format detection for MSVC/GNU compatibility (L48)
+## Core Functionality
 
-### Critical Features
+**Environment Validation (L194-281)**
+- Validates CodeLLDB executable availability via `resolveCodeLLDBExecutable()`
+- Checks Rust/Cargo toolchain installation
+- Detects MSVC vs GNU toolchain configurations
+- Handles Windows-specific dlltool requirements for GNU builds
 
-**Toolchain Validation** (L582-634):
-- `validateToolchain()`: Detects MSVC vs GNU compiled binaries
-- MSVC toolchain warning system with configurable behavior (warn/error/continue)
-- Auto-suggests GNU toolchain for better debugging experience
-- Caches validation results via `lastToolchainValidation`
+**Executable Resolution (L308-394)**
+- Caches resolved paths with timestamp validation
+- Supports relaxed mode for containerized environments via `MCP_RUST_ALLOW_PREBUILT`
+- Fallback chain: user-specified → cargo → rustc → relaxed mode placeholder
 
-**Environment Validation** (L194-281):
-- Validates CodeLLDB, Rust, Cargo installations
-- Windows-specific dlltool detection for GNU builds
-- MSVC runtime checks for Windows debugging
+**Toolchain Compatibility (L582-652)**
+- Binary format detection via `detectBinaryFormat()` utility
+- MSVC toolchain validation with configurable behavior (warn/error/continue)
+- Stores validation results in `lastToolchainValidation` for consumption
 
-**Configuration Management**:
-- `transformLaunchConfig()` (L787-917): Converts generic configs to CodeLLDB format
-- Handles Cargo-based builds, source file resolution, binary path detection
-- `RustLaunchConfig` interface (L74-93): Extends with Rust-specific options
+**CodeLLDB Command Building (L656-725)**
+- Resolves CodeLLDB path synchronously using platform-specific detection
+- Builds TCP-mode command with `--port` argument
+- Configures embedded Python environment for LLDB visualizers
+- Sets LLDB_USE_NATIVE_PDB_READER=1 on Windows
 
-### State Management
+## Configuration & Launch
 
-**Caching System** (L110-111):
-- `executablePathCache`: Maps executable paths with timestamps
-- 60-second cache timeout for performance optimization
+**RustLaunchConfig Interface (L74-93)**
+- Extends LanguageSpecificLaunchConfig with Rust-specific options
+- Cargo build configuration (bin/example/test targets, features, release mode)
+- LLDB command customization (init/preRun/postRun commands)
+- Source mapping support for std library debugging
 
-**Connection Lifecycle** (L987-1006):
-- TCP-based connection to CodeLLDB adapter
-- State tracking: connected/disconnected status
-- Thread ID management for debugging sessions
+**Launch Config Transformation (L787-917)**
+- Resolves source files (.rs) to compiled binaries
+- Integrates with Cargo project detection and building
+- Sets `sourceLanguages: ['rust']` for proper CodeLLDB formatting
+- Validates toolchain compatibility before launch
 
-### Platform Adaptations
+## Dependencies & Utilities
 
-**Windows-Specific Handling**:
-- Path sanitization for spaces in CodeLLDB paths (L512-553)
-- Native PDB reader configuration (L694-708)
-- dlltool integration for GNU builds
-- Python environment configuration for CodeLLDB (L464-510)
+**External Modules**
+- `./utils/codelldb-resolver.js` - CodeLLDB executable location (L41)
+- `./utils/rust-utils.js` - Rust toolchain validation (L43-47)
+- `./utils/binary-detector.js` - Binary format analysis (L48)
+- `./utils/cargo-utils.js` - Dynamic import for project management (L826-827)
 
-**CodeLLDB Command Building** (L656-725):
-- TCP port configuration for proxy architecture
-- liblldb path resolution for Python visualizers
-- Environment variable management (RUST_BACKTRACE, LLDB_USE_NATIVE_PDB_READER)
+**Key Interfaces**
+- `ToolchainValidationResult` (L52-59) - MSVC/GNU compatibility status
+- `ExecutablePathCacheEntry` (L64-69) - Path caching with metadata
+- `MsvcBehavior` type (L50) - Configurable MSVC handling strategy
 
-### Error Handling & User Guidance
+## State Management
 
-**Error Translation** (L1052-1076):
-- Translates technical errors to user-actionable messages
-- Provides installation instructions and troubleshooting steps
+**Connection Lifecycle**
+- `connect()` (L987-995) - Sets connected state, transitions to CONNECTED
+- `disconnect()` (L997-1002) - Cleans up state, transitions to DISCONNECTED
+- Thread tracking via `currentThreadId` updated on DAP 'stopped' events (L959-961)
 
-**Installation Instructions** (L1010-1038):
-- Platform-specific Rust installation guidance
-- CodeLLDB setup instructions
-- System requirement verification
+**Error Handling**
+- Comprehensive error translation for common Rust/CodeLLDB issues (L1052-1076)
+- Installation guidance for platform-specific requirements (L1010-1038)
+- AdapterError wrapping with specific error codes
 
-### Feature Support Matrix
+## Debug Protocol Integration
 
-**Supported Features** (L1080-1096):
-- Conditional/function/data breakpoints
-- Variable inspection and modification
-- Log points, disassembly, step-in targets
-- Memory inspection (via LLDB capabilities)
+**DAP Operations (L930-984)**
+- Request validation for Rust/LLDB-specific commands
+- Exception breakpoint filtering (rust_panic, cpp_throw, cpp_catch)
+- Event handling for state transitions and thread management
 
-**Capabilities** (L1130-1169):
-- Comprehensive DAP feature support through CodeLLDB
-- Rust-specific adaptations (sourceLanguages: ['rust'])
-- Exception handling adapted for Rust panics vs C++ exceptions
+**Capabilities (L1130-1169)**
+- Full CodeLLDB feature support including conditional breakpoints, data breakpoints
+- LLDB-specific limitations (no reverse debugging, no exception info for panics)
+- Instruction-level debugging and disassembly support
 
-### Critical Patterns
+## Platform Considerations
 
-**Relaxed Toolchain Mode** (L366-390):
-- Container/prebuilt binary support via environment variables
-- Fallback mechanisms for environments without full Rust toolchain
+**Windows-Specific (L693-708)**
+- Native PDB reader configuration for MSVC binaries  
+- dlltool.exe path management for GNU toolchain
+- Path sanitization for CodeLLDB executables with spaces (L512-553)
 
-**Binary Resolution** (L816-870):
-- Smart resolution from .rs source files to compiled binaries
-- Cargo project detection and build management
-- Automatic rebuild detection and execution
+**Cross-Platform Path Resolution**
+- Platform-aware CodeLLDB executable detection (L727-775)
+- Rust toolchain path discovery with RUSTUP_HOME/CARGO_HOME support (L396-431)

@@ -1,30 +1,50 @@
 # packages/adapter-java/src/java-adapter-factory.ts
 @source-hash: 8e73bd89a5baa047
-@generated: 2026-02-09T18:14:30Z
+@generated: 2026-02-10T00:41:21Z
 
-## Primary Purpose
-Factory class for creating Java debug adapter instances that integrates with the debugMCP framework's dependency injection system. Validates Java/jdb environment prerequisites before adapter creation.
+## Java Adapter Factory
 
-## Core Architecture
+Factory implementation for creating and validating Java debug adapter instances within the MCP debugger ecosystem. Serves as the primary entry point for Java debugging support.
 
-**JavaAdapterFactory (L24-102)** - Main factory class implementing `IAdapterFactory` interface
-- **createAdapter (L28-30)** - Factory method that instantiates `JavaDebugAdapter` with provided dependencies
-- **getMetadata (L35-47)** - Returns static adapter metadata including language info, version, supported file extensions (.java, .class), and embedded SVG icon
-- **validate (L52-102)** - Comprehensive async environment validation checking Java executable, version compliance (≥8), and jdb debugger availability
+### Core Responsibility
+Implements the `IAdapterFactory` interface to provide dependency injection and environment validation for Java debugging capabilities using the Java Debugger (jdb).
 
-## Dependencies & Integration
-- **Core Interfaces**: `IDebugAdapter`, `IAdapterFactory`, `AdapterDependencies`, `AdapterMetadata` from `@debugmcp/shared`
-- **Adapter Implementation**: `JavaDebugAdapter` from local module
-- **Validation Utilities**: Java environment detection functions (`findJavaExecutable`, `getJavaVersion`, `parseJavaMajorVersion`, `findJdb`, `validateJdb`) from `./utils/java-utils.js`
+### Key Components
 
-## Key Behavior Patterns
-- **Environment Validation Strategy**: Multi-stage validation collecting errors/warnings rather than failing fast
-- **Version Requirement**: Enforces Java 8+ minimum version (L67-69)
-- **Graceful Degradation**: Continues validation even when Java version detection fails, recording as warning (L70-72)
-- **Detailed Diagnostics**: Returns comprehensive validation results including system environment details (L93-100)
+**JavaAdapterFactory class (L24-103)**
+- Main factory class implementing `IAdapterFactory`
+- Handles adapter creation, metadata provision, and environment validation
 
-## Critical Constraints
-- Requires Java executable in PATH or JAVA_HOME
-- jdb (Java Debugger) must be available and functional
-- Factory creation always succeeds, but validation may indicate unusable environment
-- Adapter metadata is static and version-locked to "1.0.0"
+**createAdapter() method (L28-30)**
+- Factory method returning new `JavaDebugAdapter` instances
+- Takes `AdapterDependencies` and delegates to adapter constructor
+
+**getMetadata() method (L35-47)**
+- Returns static adapter metadata including language type, version, and capabilities
+- Specifies Java file extensions (.java, .class) and embedded SVG icon
+- Documents jdb as the underlying debugging tool
+
+**validate() method (L52-102)**
+- Comprehensive environment validation for Java debugging prerequisites
+- Validates Java executable availability and version (requires Java 8+)
+- Verifies jdb (Java Debugger) presence and functionality
+- Returns detailed validation results with errors, warnings, and environment info
+
+### Dependencies
+- `@debugmcp/shared`: Core interfaces (`IDebugAdapter`, `IAdapterFactory`, `AdapterDependencies`, etc.)
+- `./java-debug-adapter.js`: The actual adapter implementation (L11)
+- `./utils/java-utils.js`: Java environment detection utilities (L13-19)
+
+### Validation Logic
+Environment validation performs sequential checks:
+1. Java executable discovery (L61)
+2. Java version parsing and minimum version check (L64-72)
+3. jdb availability and functionality validation (L75-83)
+
+Returns structured result with validation status, error/warning arrays, and environment details including Java paths, version, platform info, and timestamps.
+
+### Architecture Notes
+- Uses async validation for environment checks
+- Follows factory pattern with clear separation of concerns
+- Provides detailed error reporting for troubleshooting
+- Integrates with shared debugging infrastructure through well-defined interfaces

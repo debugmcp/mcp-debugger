@@ -1,58 +1,74 @@
 # src/implementations/process-launcher-impl.ts
 @source-hash: bc40915e7772577c
-@generated: 2026-02-09T18:15:12Z
+@generated: 2026-02-10T00:42:00Z
 
 ## Purpose
-Production implementations of process launcher interfaces that wrap the existing ProcessManager with additional abstraction layers for different process types.
 
-## Key Classes and Functions
+Production implementations of process launcher interfaces that delegate to existing ProcessManager for actual process operations. Provides adapters for wrapping child processes with cleaner interfaces and specialized functionality for debugging and proxy processes.
+
+## Key Classes
 
 ### ProcessAdapter (L24-132)
-Core adapter class that wraps `IChildProcess` as `IProcess`, providing event forwarding and enhanced kill functionality.
-- Constructor (L29-77): Sets up event handlers (exit, close, error, spawn, message) and tracks listeners for cleanup
-- Properties (L79-105): Delegates to underlying childProcess (pid, stdin, stdout, stderr, killed, exitCode, signalCode)
-- `kill()` (L111-131): Enhanced killing with process group support on Unix (but not in containers), with fallback mechanisms
+- **Purpose**: Wraps IChildProcess as IProcess with EventEmitter interface
+- **Key Features**:
+  - Event forwarding from child process (exit, close, error, spawn, message)
+  - Exit code and signal code tracking (L25-26, L99-105)
+  - Enhanced kill method with process group handling for non-Windows/non-container environments (L111-131)
+  - Automatic listener cleanup tracking (L27, L62-69)
+  - Default error handler to prevent unhandled errors (L73-76)
 
 ### ProcessLauncherImpl (L137-144)
-Simple launcher implementation that delegates to ProcessManager.
-- `launch()` (L140-143): Creates ProcessAdapter around ProcessManager.spawn() result
+- **Purpose**: Basic process launcher implementation
+- **Method**: `launch()` - spawns process via ProcessManager and wraps in ProcessAdapter
 
 ### DebugTargetLauncherImpl (L149-204)
-Specialized launcher for Python debug targets using debugpy.
-- Constructor (L150-153): Requires processLauncher and networkManager
-- `launchPythonDebugTarget()` (L155-202): Sets up debugpy with port allocation, wait-for-client mode, and graceful termination with timeout
+- **Purpose**: Specialized launcher for Python debugging with debugpy
+- **Key Method**: `launchPythonDebugTarget()` (L155-202)
+  - Finds free port via NetworkManager if not specified
+  - Launches Python with debugpy module and wait-for-client flag
+  - Returns IDebugTarget with process, debug port, and terminate method
+  - Terminate method includes 5-second timeout with SIGKILL fallback
 
 ### ProxyProcessAdapter (L210-579)
-Complex adapter for proxy processes with initialization tracking and IPC command support.
-- Constructor (L222-279): Similar event setup to ProcessAdapter but with initialization state tracking
-- Initialization Management (L295-430): Promise-based initialization with timeout, completion detection via status messages, and comprehensive cleanup
-- `waitForInitialization()` (L539-561): Creates initialization promise on first call, handles concurrent calls
-- `sendCommand()` (L470-537): Enhanced IPC sending with detailed debugging events and error handling
-- Disposal (L409-430): Comprehensive cleanup of listeners and initialization promises
+- **Purpose**: Enhanced process adapter for proxy processes with initialization tracking
+- **Critical Features**:
+  - **Initialization State Machine** (L214): 'none' | 'waiting' | 'completed' | 'failed'
+  - **Promise-based initialization** (L295-350) with timeout and cleanup
+  - **Message-based initialization detection** (L313-320): watches for 'adapter_configured_and_launched' or 'dry_run_complete'
+  - **IPC command sending** (L470-537) with detailed event emission for debugging
+  - **Resource cleanup and disposal** (L409-430) with listener removal
+  - **Early exit handling** (L399-407) for processes that exit before initialization
 
 ### ProxyProcessLauncherImpl (L584-656)
-Factory for creating proxy processes with specific environment and working directory setup.
-- `launchProxy()` (L590-654): Creates Node.js child processes with diagnostic flags, filtered environment (removes test vars), and project root working directory
+- **Purpose**: Launches proxy worker processes with specific environment setup
+- **Key Features**:
+  - Filters test-related environment variables (L607-618)
+  - Sets working directory to project root (L622)
+  - Uses diagnostic flags (--trace-uncaught, --trace-exit)
+  - Detailed environment logging for debugging (L625-634)
+  - IPC stdio configuration with proper detached: false setting
 
 ### ProcessLauncherFactoryImpl (L661-680)
-Main factory class providing all launcher types.
-- Creates ProcessLauncher, DebugTargetLauncher, and ProxyProcessLauncher instances
+- **Purpose**: Factory for creating launcher instances
+- **Methods**: Creates ProcessLauncher, DebugTargetLauncher, and ProxyProcessLauncher
 
 ## Dependencies
-- @debugmcp/shared: All interface definitions (IProcess, IProcessLauncher, etc.)
-- Node.js built-ins: events, path, url
-- ProcessManager and NetworkManager for actual process operations
+
+- EventEmitter from 'events'
+- path, fileURLToPath for file system operations
+- @debugmcp/shared interfaces for IProcess, IChildProcess, IProcessManager, INetworkManager
 
 ## Architecture Patterns
-- **Adapter Pattern**: ProcessAdapter and ProxyProcessAdapter wrap IChildProcess with enhanced interfaces
-- **Factory Pattern**: ProcessLauncherFactoryImpl creates configured launcher instances
-- **Event-driven**: Extensive use of EventEmitter for process lifecycle management
-- **Promise-based Initialization**: ProxyProcessAdapter uses promises for asynchronous initialization tracking
 
-## Critical Implementation Details
-- **Event Listener Tracking**: Both adapters track listeners for proper cleanup (L27, L218)
-- **Container Detection**: Process killing behavior changes in containers (L114)
-- **Environment Filtering**: Test-related env vars are filtered out for proxy processes (L604-618)
-- **Working Directory**: Proxy processes use project root, not current directory (L622)
-- **IPC Debugging**: Extensive debugging events for IPC operations (L483-536)
-- **Initialization State Machine**: ProxyProcessAdapter tracks initialization through states: none → waiting → completed/failed (L214)
+- **Adapter Pattern**: Wraps IChildProcess with enhanced IProcess interface
+- **Factory Pattern**: ProcessLauncherFactoryImpl creates configured instances
+- **State Machine**: ProxyProcessAdapter uses initialization states for lifecycle management
+- **Resource Management**: Automatic listener cleanup and disposal patterns
+
+## Critical Invariants
+
+- All event listeners must be tracked and cleaned up to prevent memory leaks
+- Proxy processes must complete initialization handshake before being considered ready
+- Process killing attempts process group termination on Unix systems (except containers)
+- IPC communication requires proper stdio configuration and working directory setup
+- Environment variable filtering prevents test contamination in proxy processes

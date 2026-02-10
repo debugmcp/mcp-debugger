@@ -1,36 +1,49 @@
 # tests/manual/test-sse-working.js
 @source-hash: 6639615c06932383
-@generated: 2026-02-09T18:15:09Z
+@generated: 2026-02-10T00:41:55Z
 
 ## Purpose
-Manual test script to validate SSE (Server-Sent Events) connection handling and session management with a local server on port 3001. Tests bidirectional communication flow: SSE for receiving messages and HTTP POST for sending JSON-RPC requests.
+Manual test script for validating Server-Sent Events (SSE) connection with session-based communication. Tests the complete SSE handshake flow including session ID extraction and subsequent authenticated API calls.
 
-## Key Functions
+## Key Components
 
-### parseSSEData(chunk) (L10-26)
-Parses raw SSE data chunks into structured messages. Splits by newlines, extracts `data:` prefixed lines, and attempts JSON parsing. Returns array of parsed message objects, silently ignoring non-JSON data.
+### SSE Parser (L10-26)
+- `parseSSEData(chunk)`: Parses raw SSE data chunks into structured messages
+- Extracts `data: ` prefixed lines and attempts JSON parsing
+- Returns array of parsed message objects
+- Silently ignores non-JSON data lines
 
-### testPostRequest(sessionId) (L70-122)  
-Sends JSON-RPC 2.0 request (`tools/list` method) via HTTP POST to `/sse` endpoint. Uses session ID from SSE connection in `X-Session-ID` header. Logs full request/response cycle including parsed JSON response.
+### Main SSE Connection (L29-63)
+- Establishes HTTP GET request to `http://localhost:3001/sse`
+- Sets proper SSE headers (`Accept: text/event-stream`, `Cache-Control: no-cache`)
+- Monitors for `connection/established` messages containing session ID
+- Triggers follow-up POST test after 1 second delay when session ID received
 
-## Main Flow (L29-67)
-1. Establishes SSE connection to `http://localhost:3001/sse` with event-stream headers
-2. Listens for `connection/established` message containing sessionId
-3. Triggers POST request test after 1-second delay once session is established
-4. Maintains connection to observe any subsequent SSE messages
+### POST Request Testing (L70-122)
+- `testPostRequest(sessionId)`: Tests JSON-RPC API call with session authentication
+- Sends `tools/list` request with `X-Session-ID` header
+- Handles both JSON and non-JSON responses
+- Keeps connection alive for 2 seconds to observe any SSE responses
 
-## Key Dependencies
-- `http` module for HTTP client operations
-- Expects server responding with JSON-RPC 2.0 messages over SSE
-- Hardcoded to localhost:3001 endpoint
+## Dependencies
+- Node.js `http` module for HTTP client operations
+- Node.js `https` module (imported but unused)
 
-## Architecture Notes
-- Session-based communication pattern: SSE establishes session, POST uses session ID
-- Graceful JSON parsing with fallback for non-JSON SSE data
-- Asynchronous flow with setTimeout coordination between SSE and POST phases
-- Script remains running via `process.stdin.resume()` to observe ongoing SSE messages
+## Execution Flow
+1. Establish SSE connection to localhost:3001
+2. Parse incoming SSE data for session establishment
+3. Extract session ID from `connection/established` message
+4. Wait 1 second, then send authenticated POST request
+5. Display all responses and keep script running for manual inspection
 
-## Critical Constraints
-- Requires server at localhost:3001 with `/sse` endpoint supporting both SSE and POST
-- Depends on specific message format: `{method: 'connection/established', params: {sessionId: string}}`
-- Uses JSON-RPC 2.0 protocol structure for POST requests
+## Test Configuration
+- Target server: `localhost:3001/sse`
+- Session timeout: 1 second before POST request
+- Response observation window: 2 seconds after POST completion
+- Manual termination required (Ctrl+C)
+
+## Error Handling
+- Connection errors logged to console
+- SSE parsing errors silently ignored
+- JSON parsing failures handled gracefully
+- POST request errors logged with context

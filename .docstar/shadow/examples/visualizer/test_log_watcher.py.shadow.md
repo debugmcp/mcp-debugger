@@ -1,50 +1,41 @@
 # examples/visualizer/test_log_watcher.py
-@source-hash: 60a2e6cc5c70d6d1
-@generated: 2026-02-09T18:15:02Z
+@source-hash: 1ff986d7f62d70cf
+@generated: 2026-02-10T01:18:59Z
 
-## Test Script for Log Watcher Functionality
+## Primary Purpose
+Test script that validates the LogWatcher functionality by creating a temporary log file, writing various debug events to it, and verifying that the watcher correctly detects, parses, and handles them. Serves as both a demonstration and integration test for the log watching system.
 
-**Primary Purpose:** Comprehensive test script that validates `LogWatcher` functionality through automated testing of event detection, parsing, error handling, and position persistence.
+## Key Components
 
-### Key Functions
+**create_test_event() (L22-31)**: Factory function that creates standardized test events with timestamp, level, namespace, and message fields. Accepts additional kwargs to customize event properties for different test scenarios.
 
-**`create_test_event(message_type, **kwargs)` (L22-32)**
-- Factory function for generating structured test events
-- Creates events with timestamp, level, namespace, and message fields
-- **Bug Alert:** Duplicate "timestamp" field assignment (L25 ISO format, L29 epoch millis)
+**main() (L34-186)**: Primary test orchestrator that:
+- Creates temporary log file `test_watcher.log` (L37-41)
+- Instantiates LogWatcher and registers event handlers (L49-62)
+- Tests core functionality with 5 predefined event types (L70-104)
+- Validates partial line handling and malformed JSON resilience (L119-145)
+- Tests position persistence across watcher restarts (L155-179)
+- Performs cleanup operations (L182-185)
 
-**`main()` (L35-187)**
-- Main test orchestrator that executes comprehensive test suite
-- Creates temporary log file `test_watcher.log` (L38)
-- Tests multiple scenarios: normal events, partial lines, malformed JSON, position persistence
+**event_handler() (L54-57)**: Local callback function that tracks received events and provides console output for test verification.
 
-**`event_handler()` (L55-58)**
-- Local callback function that captures received events for validation
-- Appends events to `received_events` list for counting and verification
+## Test Scenarios Covered
 
-### Test Scenarios Covered
+1. **Normal Event Processing**: Tests session creation, tool calls/responses, debug state changes, and variable updates
+2. **Partial Line Handling**: Writes incomplete JSON, then completes it to test buffering behavior
+3. **Error Resilience**: Writes malformed JSON to verify graceful error handling
+4. **Position Persistence**: Stops/restarts watcher to ensure file position is maintained across sessions
 
-1. **Normal Event Processing** (L71-118): Tests 5 event types (session:created, tool:call, tool:response, debug:state, debug:variables)
-2. **Partial Line Handling** (L119-136): Writes incomplete JSON line, then completes it
-3. **Malformed JSON Handling** (L138-146): Tests error resilience with non-JSON input
-4. **Position Persistence** (L155-180): Validates file position tracking across watcher restarts
-
-### Dependencies
+## Dependencies
 - `LogWatcher` from `examples.visualizer.log_watcher` (L19)
 - Standard library: `json`, `time`, `sys`, `pathlib`, `datetime`
-- Path manipulation for parent directory access (L17)
+- Uses sys.path modification for import resolution (L17)
 
-### Architecture Notes
-- Uses event-driven pattern with callback registration (L61-63)
-- Implements proper resource cleanup (L184-185)
-- File I/O with explicit flushing for reliable testing (L114, L125, L134)
-- Sleep delays for watcher processing synchronization
+## Key Event Types Tested
+- `session:created`: Debug session initialization
+- `tool:call`/`tool:response`: Tool invocation pairs  
+- `debug:state`: Debugger state transitions
+- `debug:variables`: Variable inspection data
 
-### Test Event Structure
-Events follow consistent schema with fields: timestamp, level, namespace, message, plus event-specific data like sessionId, tool names, debug state information.
-
-### Critical Constraints
-- Requires `LogWatcher` class to be functional and importable
-- Creates temporary files in current directory
-- Synchronization depends on fixed sleep intervals
-- Position persistence requires writable filesystem for state storage
+## Test Data Structure
+Events follow consistent schema with timestamp, level, namespace, message fields plus event-specific data. All timestamps use millisecond precision Unix time.

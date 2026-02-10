@@ -11,7 +11,6 @@ import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import { ensurePythonOnPath } from './env-utils.js';
 
 // --- SDK-based MCP Client for Testing ---
-// let serverProcess: ChildProcess | null = null; // SDK Transport will manage the process
 let client: Client | null = null;
 
 
@@ -52,11 +51,9 @@ async function startTestServer(): Promise<void> {
     }
 
     const transport = new StdioClientTransport({
-        command: 'node',
+        command: process.execPath,
         args: [serverScriptPath, '--log-level', 'debug', '--log-file', logFilePath],
         env: filteredEnv, // Pass filtered environment to the server process
-        // CWD might be needed if serverScriptPath is not absolute or if the server relies on a specific CWD
-        // cwd: path.resolve(currentDirName, '../../') // Example: project root
     });
 
     // StdioClientTransport will log its own stderr/stdout from the child process if configured.
@@ -85,11 +82,7 @@ async function stopTestServer(): Promise<void> {
     }
   }
   client = null;
-  // serverProcess is no longer managed directly here; StdioClientTransport handles it.
 }
-
-// processBufferedResponses and old callMcpTool are no longer needed.
-// The SDK Client's callTool method will be used directly.
 
 // Helper to introduce delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -146,10 +139,6 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
 
   it('should complete a full debug session and inspect local variables', async () => {
     if (!client) { // Check if client was initialized
-      throw new Error("MCP Client not initialized. Cannot run test.");
-    }
-
-    if (!client) { 
       throw new Error("MCP Client not initialized. Cannot run test.");
     }
 

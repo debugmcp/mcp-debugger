@@ -218,8 +218,6 @@ describe('ProxyManagerFactory', () => {
 
       // Verify it returns an instance of ProxyManager
       expect(manager).toBeInstanceOf(ProxyManager);
-      // Implementation uses "adapter || null" so it passes null when no adapter
-      // We can't directly verify the null was passed, but we can verify the manager works
       expect(manager.start).toBeTypeOf('function');
     });
 

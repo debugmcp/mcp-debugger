@@ -1,0 +1,6 @@
+{
+  "source": "tests/e2e/mcp-server-smoke-sse.test.ts",
+  "source_hash": "21a53b79b87f18c6",
+  "generated": "2026-02-10T00:42:02Z",
+  "findings": []
+}

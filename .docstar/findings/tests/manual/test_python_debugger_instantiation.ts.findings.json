@@ -1,0 +1,15 @@
+{
+  "source": "tests/manual/test_python_debugger_instantiation.ts",
+  "source_hash": "196c06e18deede90",
+  "generated": "2026-02-10T01:18:52Z",
+  "findings": [
+    {
+      "category": "dead_code",
+      "line_start": 2,
+      "line_end": 2,
+      "severity": "warning",
+      "description": "SessionConfig and DebugLanguage imports are unused in this test file",
+      "suggestion": "Remove unused imports to clean up dependencies"
+    }
+  ]
+}

@@ -1,64 +1,54 @@
 # packages/mcp-debugger/
-@generated: 2026-02-09T18:16:22Z
+@generated: 2026-02-10T01:19:48Z
 
-## Overall Purpose & Responsibility
+## Overall Purpose
 
-The `packages/mcp-debugger` directory contains a comprehensive, distributable CLI debugging tool for the Model Context Protocol (MCP) ecosystem. This module serves as a batteries-included debugger that provides multi-language debugging capabilities through a unified command-line interface, specifically designed for MCP transport protocol compatibility.
+The `packages/mcp-debugger` directory serves as the standalone CLI distribution package for the MCP debugger system. This module transforms the core debugger implementation into a self-contained, distributable tool that can be installed via npm and executed independently while maintaining full MCP protocol compliance and adapter ecosystem integration.
 
-## Key Components & Architecture
+## Key Components and Integration
 
-### Build Distribution System (`scripts/`)
-The build system orchestrates the creation of production-ready, self-contained debugger distributions. It handles JavaScript bundling, runtime asset management, and platform-specific vendor integration (js-debug, CodeLLDB) to produce npm-distributable packages with all necessary dependencies included.
+### Build System (`scripts/`)
+The build automation layer that orchestrates the complete packaging pipeline:
+- **Bundle Orchestration**: Compiles TypeScript sources to production-ready distributions with embedded dependencies
+- **Vendor Integration**: Packages platform-specific debug adapters (JavaScript via js-debug, Rust via CodeLLDB)
+- **Distribution Management**: Creates npm-ready packages with proper executable wrappers and cross-platform compatibility
 
-### CLI Runtime System (`src/`)
-The runtime system provides the executable entry point and adapter bootstrap infrastructure. It implements intelligent MCP protocol compatibility through transport-aware console management and maintains a global registry of supported language adapters.
-
-### Component Integration Flow
-1. **Build Time**: Scripts bundle all source code, copy runtime assets, and include platform-specific debugger binaries
-2. **Runtime Bootstrap**: CLI entry detects execution context and silences output for MCP compatibility
-3. **Adapter Registration**: All supported language adapters are registered in global registry
-4. **Core Delegation**: Execution is handed off to the main debugger implementation
+### CLI Runtime (`src/`)
+The runtime distribution layer providing protocol-compliant entry points:
+- **Adapter Bundle Management**: Pre-registers all supported adapters (JavaScript, Python, Mock) via global registry pattern
+- **Protocol Compliance**: Ensures MCP transport compatibility through careful console management and initialization ordering
+- **Entry Point Coordination**: Manages CLI bootstrap process with proper flag coordination and error handling
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **CLI Executable**: `cli-entry.ts` serves as the main command-line interface (npx compatible)
-- **Distribution Bundles**: Build system produces both development mirrors and npm tarballs
-- **Global Adapter Registry**: Centralized access to all bundled language debugging adapters
+- **CLI Executable**: `cli-entry.ts` - Main entry point for `npx @debugmcp/debugger` usage
+- **Distribution Package**: `debugmcp-*.tgz` - Standalone npm package with all runtime dependencies
 
-### Supported Debugging Capabilities
-- **JavaScript/Node.js**: Full debugging support via integrated js-debug
-- **Python**: Python-specific debugging capabilities  
-- **Mock/Testing**: Development and testing adapter for validation
-- **Multi-Platform**: Platform-aware binary inclusion for different execution environments
+### Key Interfaces
+- **Global Adapter Registry**: `__DEBUG_MCP_BUNDLED_ADAPTERS__` - Discoverable adapter collection for runtime
+- **Build Pipeline**: `bundleCLI()` function for packaging workflows
+- **Environment Coordination**: Protocol compliance flags and initialization control
 
-## Internal Organization & Data Flow
+## Internal Organization and Data Flow
 
-### MCP Protocol Integration
-The entire system is designed around MCP transport compatibility:
-- **Transport Detection**: Automatic identification of `stdio` and `sse` transport modes
-- **Output Management**: Intelligent console silencing to prevent stdout pollution during MCP communication
-- **Environment Coordination**: Uses environment variables to synchronize behavior between CLI and core systems
+1. **Build Phase**: Scripts directory transforms development artifacts into production bundles with selective dependency inclusion
+2. **Runtime Initialization**: CLI entry point manages console silencing and adapter loading before delegating to core implementation  
+3. **Adapter Discovery**: Global registry pattern enables loose coupling between bundled adapters and main debugger system
+4. **Protocol Enforcement**: Careful ordering ensures MCP transport compliance through stdout management
 
-### Distribution Architecture
-- **Self-Contained**: All runtime dependencies and debugger binaries included in distribution
-- **Platform-Aware**: Conditional inclusion of platform-specific debugging tools
-- **Graceful Degradation**: Missing vendor components generate warnings but don't prevent operation
+## Important Patterns and Conventions
 
-### Adapter System
-- **Factory Pattern**: All adapters implement consistent `IAdapterFactory` interface
-- **Global Registry**: Singleton pattern using `globalThis` for centralized adapter management
-- **Static Bundling**: esbuild-enforced static imports ensure all adapters are included in distribution
+### Protocol-First Architecture
+Prioritizes MCP protocol compliance over developer convenience, with mandatory console management for transport modes and strict initialization ordering.
 
-## Important Patterns & Conventions
+### Global Registry System
+Uses global namespace pattern for adapter discovery, enabling static bundling while maintaining runtime flexibility and preventing duplicate registrations.
 
-### Early Initialization Strategy
-Critical initialization occurs before module imports to ensure MCP protocol compatibility is established before any console output. This includes transport detection, console silencing setup, and environment variable coordination.
+### Defensive Distribution
+Employs platform-aware builds, graceful degradation for missing components, and cross-platform executable generation for robust distribution.
 
-### Build-Time Asset Management
-The build system follows a comprehensive asset inclusion strategy, systematically copying runtime directories, handling vendor binaries with platform awareness, and creating dual output formats for both development and production use.
+### Build-Runtime Separation
+Clean separation between build-time bundling concerns and runtime execution, allowing independent optimization of each phase.
 
-### Error Handling & Compatibility
-Implements dual-level error handling that respects console silencing requirements while maintaining proper exit codes and error visibility when appropriate, always prioritizing MCP protocol preservation over debug output.
-
-This module enables seamless debugging capabilities within MCP-based applications while providing a familiar CLI experience for developers, bridging the gap between traditional debugging workflows and modern protocol-based AI systems.
+This directory serves as the complete distribution solution for the MCP debugger, transforming the core implementation into a standalone, protocol-compliant CLI tool that can be easily distributed and executed across platforms while maintaining full adapter ecosystem support.

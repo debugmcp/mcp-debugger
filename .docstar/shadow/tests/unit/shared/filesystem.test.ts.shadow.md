@@ -1,41 +1,43 @@
 # tests/unit/shared/filesystem.test.ts
 @source-hash: 99d0b1e6662ee880
-@generated: 2026-02-09T18:14:42Z
+@generated: 2026-02-10T00:41:33Z
 
 ## Purpose
-Unit tests for the filesystem abstraction layer, validating NodeFileSystem implementation and the global filesystem instance management.
+Unit tests for the NodeFileSystem implementation and default filesystem management functionality. Tests filesystem abstraction layer that provides safe defaults when underlying Node.js fs operations fail.
 
 ## Test Structure
-- **Main Test Suite** (L10-53): Tests NodeFileSystem class functionality and global filesystem configuration
-- **Test Setup** (L11-13): Mock restoration after each test using vitest
+- **Main test suite** (L10-53): "NodeFileSystem" - Tests the NodeFileSystem class behavior
+- **Setup/Teardown** (L11-13): Restores all Vitest mocks after each test
 
 ## Key Test Cases
 
-### NodeFileSystem Delegation (L15-22)
-Tests that NodeFileSystem properly delegates `existsSync` and `readFileSync` to Node.js fs module:
+### Basic Delegation Test (L15-22)
+Tests that NodeFileSystem properly delegates to Node.js fs module:
 - Creates NodeFileSystem instance (L16)
 - Uses real package.json as test fixture (L17)
-- Validates file existence and content reading
+- Verifies existsSync returns true for existing file (L19)
+- Verifies readFileSync returns content containing expected JSON property (L20-21)
 
-### Error Handling (L24-38)
-Verifies safe fallback behavior when fs operations throw:
+### Error Handling Test (L24-38)
+Tests safe defaults when fs operations throw errors:
 - Mocks fs methods to throw errors (L27-34)
-- Confirms `existsSync` returns `false` on error (L36)
-- Confirms `readFileSync` returns empty string on error (L37)
+- Uses type assertion to access private fs property (L27)
+- Verifies existsSync returns false on error (L36)
+- Verifies readFileSync returns empty string on error (L37)
 
-### Global Filesystem Override (L40-52)
+### Default Filesystem Override Test (L40-52)
 Tests the global filesystem instance management:
-- Creates mock filesystem stub (L41-44)
-- Uses `setDefaultFileSystem` to override global instance (L46)
-- Validates `getDefaultFileSystem` returns the stub (L47-48)
-- Resets to real implementation for test isolation (L51)
+- Creates stub filesystem with mocked methods (L41-44)
+- Tests setDefaultFileSystem() and getDefaultFileSystem() functions (L46-48)
+- Resets to real implementation to prevent test pollution (L50-51)
 
 ## Dependencies
-- **vitest**: Test framework and mocking utilities
-- **fs, path**: Node.js standard modules for test fixtures
-- **filesystem.js**: Target module providing NodeFileSystem and global management functions
+- **Vitest**: Testing framework with mocking capabilities
+- **Node.js fs/path**: Standard filesystem modules
+- **../../../packages/shared/src/interfaces/filesystem.js**: Source module under test
 
-## Testing Patterns
-- Uses real files (package.json) for integration-style validation
-- Employs type casting for internal property access during mocking
-- Implements proper test cleanup to prevent cross-test interference
+## Key Patterns
+- Uses real filesystem operations for integration-style testing
+- Employs type assertions to access private members for error simulation
+- Includes explicit cleanup to prevent cross-test contamination
+- Tests both happy path and error scenarios for robust coverage

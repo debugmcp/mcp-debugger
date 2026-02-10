@@ -46,7 +46,7 @@ export interface EvaluateResult {
 /**
  * Debug operations functionality for session management
  */
-export class SessionManagerOperations extends SessionManagerData {
+export abstract class SessionManagerOperations extends SessionManagerData {
   protected async startProxyManager(
     session: ManagedSession,
     scriptPath: string,
@@ -61,17 +61,6 @@ export class SessionManagerOperations extends SessionManagerData {
     this.logger.info(
       `[SessionManager] Entering startProxyManager for session ${sessionId}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`
     );
-    if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-      console.error(`[SessionManager] Windows CI Debug - startProxyManager entrance:`, {
-        sessionId,
-        dryRunSpawn,
-        scriptPath,
-        language: session.language,
-        hasBreakpoints: session.breakpoints?.size > 0,
-        platform: process.platform,
-        cwd: process.cwd()
-      });
-    }
 
     // Create session log directory
     const sessionLogDir = path.join(this.logDirBase, sessionId, `run-${Date.now()}`);
@@ -239,6 +228,16 @@ export class SessionManagerOperations extends SessionManagerData {
       }
     }
 
+    // Let adapter policy override stopOnEntry default when user hasn't specified it.
+    // E.g., Go/Delve needs stopOnEntry=false to avoid "unknown goroutine" issues.
+    if (!stopOnEntryProvided) {
+      const adapterPolicy = this.selectPolicy(session.language);
+      const policyDefaults = adapterPolicy.getInitializationBehavior?.();
+      if (typeof policyDefaults?.defaultStopOnEntry === 'boolean') {
+        launchConfigData.stopOnEntry = policyDefaults.defaultStopOnEntry;
+      }
+    }
+
     this.logger.info(
       `[SessionManager] Launch config stopOnEntry adjustments for ${sessionId}: base=${String(
         launchConfigBase?.stopOnEntry
@@ -382,11 +381,6 @@ export class SessionManagerOperations extends SessionManagerData {
       `Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`,
       dapLaunchArgs
     );
-    
-    // CI Debug: Entry point
-    if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-      console.error(`[CI Debug] startDebugging entry - sessionId: ${sessionId}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`);
-    }
 
     if (session.proxyManager) {
       this.logger.warn(
@@ -407,37 +401,17 @@ export class SessionManagerOperations extends SessionManagerData {
     try {
       // For dry run, start the proxy and wait for completion
       if (dryRunSpawn) {
-        // CI Debug: Entering dry run branch
-        if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-          console.error(`[CI Debug] Entering dry run branch for session ${sessionId}`);
-        }
-        
         // Mark that we're setting up a dry run handler
         const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
         sessionWithSetup._dryRunHandlerSetup = true;
 
-        // CI Debug: Before startProxyManager
-        if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-          console.error(`[CI Debug] About to call startProxyManager for dry run`);
-        }
-        
         // Start the proxy manager
         await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig);
         this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
         
-        // CI Debug: After startProxyManager
-        if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-          console.error(`[CI Debug] startProxyManager completed, checking state`);
-        }
-
         // Check if already completed before waiting
         const refreshedSession = this._getSessionById(sessionId);
         this.logger.info(`[SessionManager] Checking state after start: ${refreshedSession.state}`);
-        
-        // CI Debug: State check
-        if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-          console.error(`[CI Debug] Session state after proxy start: ${refreshedSession.state}`);
-        }
         
         const initialDryRunSnapshot = refreshedSession.proxyManager?.getDryRunSnapshot?.();
         const dryRunAlreadyComplete =
@@ -449,12 +423,7 @@ export class SessionManagerOperations extends SessionManagerData {
             `[SessionManager] Dry run already completed for session ${sessionId}`
           );
           delete sessionWithSetup._dryRunHandlerSetup;
-          
-          // CI Debug: Early completion
-          if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-            console.error(`[CI Debug] Dry run completed immediately (state=STOPPED)`);
-          }
-          
+
           return {
             success: true,
             state: SessionState.STOPPED,
@@ -472,21 +441,11 @@ export class SessionManagerOperations extends SessionManagerData {
           `[SessionManager] Waiting for dry run completion with timeout ${this.dryRunTimeoutMs}ms`
         );
         
-        // CI Debug: Before wait
-        if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-          console.error(`[CI Debug] Waiting for dry run completion, timeout: ${this.dryRunTimeoutMs}ms`);
-        }
-        
         const dryRunCompleted = await this.waitForDryRunCompletion(
           refreshedSession,
           this.dryRunTimeoutMs
         );
         delete sessionWithSetup._dryRunHandlerSetup;
-        
-        // CI Debug: After wait
-        if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-          console.error(`[CI Debug] waitForDryRunCompletion returned: ${dryRunCompleted}`);
-        }
 
         const latestSessionState = this._getSessionById(sessionId);
         const latestSnapshot =
@@ -500,12 +459,7 @@ export class SessionManagerOperations extends SessionManagerData {
           this.logger.info(
             `[SessionManager] Dry run completed for session ${sessionId}, final state: ${latestSessionState.state}`
           );
-          
-          // CI Debug: Success path
-          if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-            console.error(`[CI Debug] Dry run success path - returning success`);
-          }
-          
+
           return {
             success: true,
             state: SessionState.STOPPED,
@@ -523,12 +477,7 @@ export class SessionManagerOperations extends SessionManagerData {
             `[SessionManager] Dry run timeout for session ${sessionId}. ` +
               `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`
           );
-          
-          // CI Debug: Timeout path
-          if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-            console.error(`[CI Debug] Dry run timeout! State: ${finalSession.state}, ProxyManager: ${!!finalSession.proxyManager}`);
-          }
-          
+
           return {
             success: false,
             error: `Dry run timed out after ${this.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`,
@@ -704,11 +653,6 @@ export class SessionManagerOperations extends SessionManagerData {
         errorDetails
       );
       
-      // Also log to console for CI visibility
-      if (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
-        console.error('[SessionManager] Windows CI Debug - Full error details:', errorDetails);
-      }
-
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       const toolchainValidation =

@@ -1,44 +1,45 @@
 # src/proxy/signal-debug.ts
 @source-hash: 9b855da7c44d10b8
-@generated: 2026-02-09T18:15:05Z
+@generated: 2026-02-10T00:41:53Z
 
-## Primary Purpose
-Signal debugging utility that provides comprehensive logging and diagnostics when the Node.js process receives termination signals, particularly SIGTERM. Designed for troubleshooting unexpected process termination in proxy/session management scenarios.
+## Purpose
+Signal debugging utilities for tracking SIGTERM source and process termination events in proxy applications. Provides comprehensive logging and diagnostic capabilities for debugging unexpected process terminations.
 
-## Key Functions
+## Key Components
 
-### setupSignalDebugging(sessionId: string) (L8-88)
-Main function that installs signal handlers and diagnostic logging. Takes a session identifier for log correlation.
+### setupSignalDebugging (L8-88)
+Main function that installs comprehensive signal handlers and diagnostic logging for a given session. Takes a `sessionId` parameter for file naming and logging correlation.
 
 **Initial Setup (L9-20):**
-- Logs process identifiers (PID, parent PID)
-- Captures initial process tree using `ps auxf` command
-- Saves process tree to `/tmp/process-tree-${sessionId}-start.log`
+- Logs process PID and parent PID information
+- Captures and saves initial process tree using `ps auxf` to `/tmp/process-tree-{sessionId}-start.log`
+- Provides error handling for process tree capture failures
 
 **SIGTERM Handler (L23-77):**
-- Comprehensive logging on SIGTERM receipt
-- Reads `/proc/self/status` for process metadata (PPid, TracerPid, SigQ)
-- Captures process tree at termination time
-- Filters and displays Node.js/proxy related processes
-- Checks `dmesg` for OOM killer activity
-- Graceful exit with 500ms delay and standard SIGTERM exit code (143)
+- Comprehensive termination signal handler with detailed diagnostics
+- Logs timestamp, PID information at termination
+- Reads `/proc/self/status` for process state details (L31-41)
+- Captures process tree at termination to `/tmp/process-tree-{sessionId}-sigterm.log` (L44-59)
+- Filters and logs node/proxy related processes for immediate visibility
+- Checks for OOM killer activity via `dmesg` output (L62-70)
+- Implements delayed exit with standard SIGTERM exit code (128+15) after 500ms logging window
 
 **Additional Signal Monitoring (L80-85):**
-- Tracks SIGHUP, SIGINT, SIGQUIT, SIGUSR1, SIGUSR2
-- Simple logging without termination logic
+- Installs handlers for SIGHUP, SIGINT, SIGQUIT, SIGUSR1, SIGUSR2
+- Provides basic logging for non-SIGTERM signals
 
 ## Dependencies
-- **fs**: File system operations for log writing and /proc reading
-- **child_process.execSync**: Shell command execution for `ps` and `dmesg`
+- `fs`: File system operations for log writing and `/proc` reading
+- `child_process.execSync`: System command execution for `ps` and `dmesg`
 
-## Architecture Notes
-- Uses synchronous operations during signal handling for reliability
-- Defensive error handling with try-catch blocks around system calls
-- Temporary file logging with session-based naming for correlation
-- Dual logging strategy: files for persistence, stderr for immediate visibility
+## Architecture Patterns
+- Defensive programming with extensive try-catch blocks
+- Structured logging with consistent prefixes `[Signal Debug]`
+- File-based persistence combined with stderr logging
+- Delayed process exit to ensure diagnostic completion
 
-## Critical Constraints
-- Linux-specific implementation (relies on /proc filesystem and Unix commands)
-- Signal handlers installed globally - single setup per process
-- File writes to /tmp directory require write permissions
-- 500ms termination delay may impact shutdown timing requirements
+## Critical Behaviors
+- Process tree snapshots at startup and termination for forensic analysis
+- Linux-specific `/proc/self/status` parsing for process state
+- OOM killer detection through system logs
+- Graceful exit with proper signal exit codes

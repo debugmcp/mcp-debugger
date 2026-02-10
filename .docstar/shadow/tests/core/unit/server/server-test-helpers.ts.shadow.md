@@ -1,46 +1,51 @@
 # tests/core/unit/server/server-test-helpers.ts
 @source-hash: d9b4a6fbcdee726f
-@generated: 2026-02-09T18:14:20Z
+@generated: 2026-02-10T00:41:13Z
 
 ## Purpose
-Test utility file providing mock factories for server-related unit tests. Creates comprehensive mock implementations of core server dependencies including file systems, process managers, and debugging components.
+Test utilities module providing comprehensive mock implementations for server-side testing in a debugging/development server application. Centralizes mock creation for all major server dependencies.
 
-## Key Functions
+## Core Functions
 
-### createMockDependencies() (L8-73)
-Main mock factory that returns a complete set of mocked server dependencies:
-- **logger**: Mock logger instance from test utilities
-- **fileSystem**: Comprehensive file system mock with all fs operations (existsSync, readFile, writeFile, etc.) - mostly returns success values
-- **processManager, networkManager, processLauncher, proxyProcessLauncher, debugTargetLauncher**: All mocked as vi.fn()
-- **environment**: Mock environment with access to real process.env and cwd
-- **pathUtils**: Platform-aware path manipulation mocks with simplified implementations (L43-70)
-- **adapterRegistry**: Mock adapter registry from test utilities
+### `createMockDependencies()` (L8-73)
+Primary factory function returning a complete mock dependency injection container. Creates mocked versions of:
+- **Logger**: Via external helper (L9-13)
+- **File System**: Comprehensive fs-extra-style API with 15+ methods (L14-30)
+- **Process/Network Managers**: Simple vi.fn() mocks for process and network handling (L31-36)  
+- **Environment**: Process environment wrapper with get/getAll/getCurrentWorkingDirectory (L38-42)
+- **Path Utils**: Cross-platform path manipulation utilities with Windows/Unix support (L43-70)
+- **Adapter Registry**: External mock for plugin/adapter system (L71)
 
-### createMockServer() (L75-82) 
-Creates mock server instance with connection lifecycle methods (setRequestHandler, connect, close)
+Key implementation details:
+- File system mocks default to optimistic responses (files exist, operations succeed)
+- Path utilities include platform-aware absolute path detection (L44-51)
+- Simple path manipulation with forward-slash normalization (L52-69)
 
-### createMockSessionManager() (L84-104)
-Creates comprehensive mock debugging session manager with all debug operations (breakpoints, stepping, variables, evaluation, etc.)
+### `createMockServer()` (L75-82)
+Creates mock server instance with core MCP (Model Context Protocol) server methods:
+- Request handler registration, connection lifecycle, error handling
 
-### createMockStdioTransport() (L106-108)
-Empty mock transport object
+### `createMockSessionManager(mockAdapterRegistry)` (L84-104)
+Comprehensive debugging session manager mock with:
+- Session lifecycle (create/get/close operations)
+- Debugging controls (breakpoints, stepping, continue)
+- Runtime inspection (variables, stack traces, scopes, expression evaluation)
+- Adapter registry integration
 
-### getToolHandlers() (L110-116)
-Utility to extract registered tool handlers from mock server, assumes specific handler order (listTools first, callTool second)
+### `createMockStdioTransport()` (L106-108)
+Minimal transport mock - currently returns empty object (likely placeholder)
+
+### `getToolHandlers(mockServer)` (L110-116)
+Test utility to extract registered request handlers from mock server, specifically:
+- List tools handler (first registered handler)
+- Call tool handler (second registered handler)
 
 ## Dependencies
-- `vitest` for mock functions
-- Test utilities for logger and adapter registry mocks
-- Assumes specific server architecture with tool-based request handling
+- **vitest**: Mock function creation (`vi.fn()`)
+- **External test utilities**: Logger and adapter registry mocks from test-utils
 
-## Notable Patterns
-- Platform-aware path utilities that handle Windows vs Unix paths (L44-51)
-- Comprehensive mocking strategy covering all file system operations
-- Mock implementations provide realistic behavior (path manipulation actually works)
-- Assumes two-handler registration pattern for tools
-
-## Key Mock Behaviors
-- File system operations default to success (files exist, operations complete)
-- Path utilities use simplified but functional implementations
-- Environment access delegates to real process environment
-- All complex dependencies (process/network managers) are simple vi.fn() mocks
+## Architecture Notes
+- Follows dependency injection pattern with centralized mock factory
+- Designed for MCP server testing with debugging capabilities
+- File system mocking assumes fs-extra-style async/sync API duality
+- Path utilities maintain cross-platform compatibility in test environment

@@ -1,3 +1,4 @@
+// Line references below refer to original TypeScript source, not this transpiled file
 /**
  * TypeScript debugging test for MCP debugger
  * Tests source map resolution, breakpoints, and variable inspection

@@ -1,43 +1,45 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.lifecycle.test.ts
 @source-hash: 3c1812ef94f04ab3
-@generated: 2026-02-09T18:14:01Z
+@generated: 2026-02-10T00:41:08Z
 
 ## Purpose
-Unit test suite for `JavascriptDebugAdapter` lifecycle state management, testing initialization, error handling, and disposal workflows using Vitest framework.
+Unit test suite for JavascriptDebugAdapter lifecycle management, validating state transitions and event emissions during initialization, failure scenarios, and disposal.
 
-## Key Test Components
+## Test Structure
+- **Test Suite** (L16): `JavascriptDebugAdapter.lifecycle` - covers adapter lifecycle operations
+- **Setup** (L19-23): Creates fresh adapter instance with mocked dependencies before each test
+- **Dependencies Mock** (L7-14): Minimal logger stub satisfying AdapterDependencies interface
 
-### Test Setup (L7-14, L19-23)
-- **Mock dependencies**: Minimal `AdapterDependencies` stub with mocked logger methods
-- **Test fixture**: Fresh `JavascriptDebugAdapter` instance created in `beforeEach` with mock cleanup
+## Key Test Cases
 
-### Core Test Cases
+### Initialize Success (L25-45)
+- **Purpose**: Validates successful initialization flow
+- **Key Assertions**:
+  - State transitions: UNINITIALIZED → INITIALIZING → READY (L41-43)
+  - Single 'initialized' event emission (L44)
+  - Mocks `validateEnvironment` to return valid state (L33-37)
 
-#### Initialize Success Test (L25-45)
-- Verifies successful initialization flow: `UNINITIALIZED` → `INITIALIZING` → `READY`
-- Mocks `validateEnvironment` to return valid result (L33-37)
-- Captures state transitions via `stateChanged` events (L26-29)
-- Asserts single `initialized` event emission (L30-31, L44)
+### Initialize Failure (L47-65)
+- **Purpose**: Tests initialization failure handling
+- **Key Behavior**:
+  - Mocks `validateEnvironment` to return invalid state with errors (L48-52)
+  - Verifies AdapterError thrown with ENVIRONMENT_INVALID code (L61-63)
+  - Confirms state transition to ERROR (L64)
 
-#### Initialize Failure Test (L47-65)
-- Tests initialization failure with invalid environment
-- Mocks `validateEnvironment` to return validation errors (L48-52)
-- Verifies `AdapterError` with `ENVIRONMENT_INVALID` code is thrown (L61-63)
-- Confirms state transitions to `ERROR` state (L64)
-
-#### Dispose Test (L67-90)
-- Tests cleanup workflow from connected state
-- Sets up fully initialized and connected adapter (L69-75)
-- Verifies event emission order: `disconnected` then `disposed` (L77-85)
-- Confirms complete state reset: `UNINITIALIZED`, disconnected, no current thread (L87-89)
+### Dispose Lifecycle (L67-90)
+- **Purpose**: Tests proper cleanup and event ordering
+- **Setup**: Initializes and connects adapter first (L69-75)
+- **Key Validations**:
+  - Event emission order: 'disconnected' then 'disposed' (L84-85)
+  - State reset to UNINITIALIZED (L87)
+  - Connection and thread state cleared (L88-89)
 
 ## Dependencies
-- `JavascriptDebugAdapter` from `../../src/index.js` (L3)
-- Shared types: `AdapterState`, `AdapterError`, `AdapterErrorCode` (L4)
-- Vitest testing framework with mocking utilities (L1)
+- **Vitest**: Testing framework with mocking capabilities
+- **@debugmcp/shared**: Core adapter types (AdapterState, AdapterError, AdapterErrorCode)
+- **JavascriptDebugAdapter**: Main adapter class being tested
 
-## Test Patterns
-- State transition verification through event listeners
-- Mock-based isolation of external dependencies
-- Comprehensive lifecycle coverage from initialization to disposal
-- Error path testing with specific error code validation
+## Testing Patterns
+- Event listener pattern for state change tracking (L27-28)
+- Mock-based environment validation testing
+- Lifecycle state verification through getters

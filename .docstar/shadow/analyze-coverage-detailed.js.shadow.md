@@ -1,48 +1,38 @@
 # analyze-coverage-detailed.js
 @source-hash: 5ec3112a272df397
-@generated: 2026-02-09T18:15:16Z
+@generated: 2026-02-10T00:42:03Z
 
-## analyze-coverage-detailed.js
+## Primary Purpose
+Coverage analysis tool for the mcp-debugger project that parses Istanbul/NYC coverage reports and provides detailed file-by-file impact analysis. Identifies which files contribute most to overall coverage gaps and prioritizes testing efforts.
 
-**Purpose**: Coverage analysis utility that reads Jest/Istanbul coverage data and generates detailed, human-readable reports with prioritized insights for improving test coverage in the mcp-debugger project.
+## Key Functionality
 
-**Architecture**: Standalone Node.js script executed via `npm run test:coverage:analyze` command. Processes coverage-summary.json file and outputs formatted console analysis.
+### Main Processing Logic (L13-100)
+- **Coverage Data Loading (L14-22)**: Reads `coverage/coverage-summary.json`, exits with error if missing
+- **File Analysis Loop (L28-45)**: Iterates through coverage data, calculates uncovered lines per file, normalizes file paths for display
+- **Impact Calculation (L48-50)**: Determines each file's contribution to overall coverage deficit as percentage points
+- **Sorting & Display (L52-75)**: Orders files by uncovered line count (descending), formats tabular output
 
-### Key Components
+### Output Sections
+- **Summary Header (L55-64)**: Overall stats with decorative separators
+- **File Table (L65-75)**: Shows uncovered lines, coverage percentage, and impact for each file
+- **Insights Generation (L85-94)**: Analyzes top 5 files, calculates potential coverage improvement, identifies priority files
 
-**Main Script Flow (L13-100)**:
-- Validates coverage data existence (L16-19)
-- Parses coverage-summary.json (L21)
-- Processes file-level coverage metrics (L28-45)
-- Calculates impact scores and generates insights (L47-96)
+## Key Data Structures
+- **files array (L26, L39-44)**: Objects containing `{path, coverage, uncovered, total, impact}`
+- **coverage object (L21-22)**: Parsed JSON with per-file line coverage statistics
 
-**Coverage Data Processing (L28-50)**:
-- Iterates through coverage entries, skipping 'total' aggregate
-- Calculates uncovered lines per file (L31)
-- Normalizes file paths for display (L36-37)
-- Computes impact percentage (percentage points overall coverage would gain if file reaches 100%)
+## Dependencies
+- Standard Node.js modules: `fs`, `path`, `url` (L6-8)
+- ES modules setup with `__dirname` polyfill (L10-11)
 
-**Report Generation (L55-96)**:
-- Displays tabular coverage data sorted by uncovered lines (descending)
-- Shows files with uncovered lines only (L66-75)
-- Generates actionable insights including top 5 files analysis (L85-94)
+## Notable Patterns
+- **Error-first design**: Graceful handling of missing coverage data (L16-19)
+- **Path normalization**: Cross-platform file path cleaning (L36-37)
+- **Formatted console output**: Uses Unicode box-drawing characters for professional reports
+- **Metric prioritization**: Focuses on uncovered line count rather than percentage for impact assessment
 
-### Dependencies
-- `fs`: File system operations for reading coverage data
-- `path`: Path manipulation utilities
-- `url`: ES module compatibility (__dirname equivalent)
-
-### Key Calculations
-- **Impact Score (L49)**: `(uncoveredLines / totalLines) * 100` - measures how much overall coverage would improve
-- **Coverage Percentage**: Uses `data.lines.pct` from Istanbul coverage format
-- **Priority Ranking**: Sorts by absolute uncovered lines count (L53)
-
-### Output Format
-Produces structured console output with:
-- Overall coverage statistics
-- File-by-file breakdown with impact scores
-- Strategic insights for coverage improvement priorities
-- Special highlighting for high-impact files (>50 uncovered lines)
-
-### Error Handling
-Basic try-catch wrapper (L98-100) with process.exit(1) for missing coverage data.
+## Critical Constraints
+- Requires Istanbul/NYC coverage format with `lines` property structure
+- Expects `coverage-summary.json` in relative `coverage/` directory
+- Designed for manual execution via npm script, not programmatic use

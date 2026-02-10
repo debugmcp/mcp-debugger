@@ -1,41 +1,42 @@
 # tests/test-utils/mocks/mock-command-finder.ts
 @source-hash: 8985139ac91c4714
-@generated: 2026-02-09T18:14:38Z
+@generated: 2026-02-10T00:41:29Z
 
-**Mock implementation of CommandFinder for testing command path resolution**
+## Purpose
+Mock implementation of CommandFinder interface for testing command resolution behavior without actual filesystem lookups. Provides controllable responses and call tracking for unit tests.
 
-This file provides a mock implementation of the `CommandFinder` interface from `@debugmcp/adapter-python`, designed for unit testing scenarios where command path resolution needs to be controlled and predictable.
-
-## Primary Class
-
-**MockCommandFinder (L10-72)** - Test double implementing the `CommandFinder` interface
-- **Purpose**: Provides controllable, deterministic command path resolution for testing
-- **State Management**: 
-  - `responses` Map (L11): Stores command→path/error mappings for mocking behavior
-  - `callHistory` array (L12): Tracks all command lookup attempts for verification
+## Core Class
+**MockCommandFinder (L10-72)** - Test double that implements CommandFinder interface
+- Maintains pre-configured command-to-path mappings via responses Map (L11)
+- Tracks command lookup history in callHistory array (L12)
+- Enables deterministic testing of command resolution scenarios
 
 ## Key Methods
+**setResponse(command, response) (L19-21)** - Configure mock behavior by mapping command names to either file paths (strings) or Error instances
 
-**setResponse(command, response) (L19-21)** - Configures mock behavior
-- Sets expected return value (string path) or error for a specific command
-- Enables test scenarios for both success and failure cases
+**find(command) (L29-43)** - Core interface method that:
+- Records command in call history (L30)
+- Returns pre-configured response if exists
+- Throws CommandNotFoundError if no response configured (L35)
+- Throws configured Error instance if response is Error type (L38-40)
 
-**find(command) (L29-43)** - Core mocked functionality
-- Records command in call history for test verification
-- Returns configured response or throws `CommandNotFoundError` if unmocked
-- Supports throwing custom Error instances for error testing scenarios
-
-**Test Utilities**:
-- `clearResponses()` (L48-50): Resets mock configurations
-- `getCallHistory()` (L55-57): Returns copy of command lookup history for assertions
-- `clearHistory()` (L62-64): Resets call tracking
-- `reset()` (L69-72): Full cleanup of both responses and history
+**Test Utilities:**
+- clearResponses() (L48-50) - Reset response mappings
+- getCallHistory() (L55-57) - Retrieve copy of command lookup history
+- clearHistory() (L62-64) - Reset call tracking
+- reset() (L69-72) - Complete cleanup of both responses and history
 
 ## Dependencies
-- Implements `CommandFinder` interface from `@debugmcp/adapter-python`
-- Uses `CommandNotFoundError` for consistent error handling
+- Imports CommandFinder interface and CommandNotFoundError from '@debugmcp/adapter-python' (L4-5)
+- Uses TypeScript strict typing throughout
 
-## Testing Patterns
-- **Behavior Verification**: Call history tracking enables verification of which commands were looked up
-- **Response Control**: Pre-configured responses allow testing both success and error paths
-- **Isolation**: Reset capabilities ensure test independence
+## Test Design Patterns
+- Follows test double pattern with configurable behavior
+- Provides both positive (return path) and negative (throw error) test scenarios
+- Includes verification capabilities via call history tracking
+- Immutable history access via array copy in getCallHistory()
+
+## Key Invariants
+- All find() calls are recorded regardless of success/failure
+- Unconfigured commands always throw CommandNotFoundError
+- Error responses are re-thrown as-is to preserve exception types

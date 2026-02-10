@@ -1,47 +1,51 @@
 # packages/adapter-rust/src/utils/codelldb-resolver.ts
-@source-hash: 3f62785e4fa6cab0
-@generated: 2026-02-09T18:14:08Z
+@source-hash: d3ce87d62d99b002
+@generated: 2026-02-10T01:19:01Z
 
-## CodeLLDB Executable Resolver
+**CodeLLDB Executable Resolver for Rust Debug Adapter**
 
-**Purpose**: Locates and validates CodeLLDB debugger executable across different platforms and deployment scenarios for Rust debugging support.
+This utility module resolves platform-specific CodeLLDB debugger executable paths and versions for the Rust debug adapter. CodeLLDB is a LLDB-based debugger frontend used for debugging Rust applications.
 
-### Core Functions
+## Core Functions
 
 **`resolveCodeLLDBExecutable()` (L15-63)**
-- Primary executable resolution with platform-aware path mapping
-- Maps `process.platform` and `process.arch` to platform directories (L21-29):
+- Asynchronously resolves the CodeLLDB executable path based on current platform and architecture
+- Returns `Promise<string | null>` - executable path or null if not found
+- Platform mapping logic (L21-29):
   - Windows: `win32-x64`
-  - macOS: `darwin-arm64` or `darwin-x64`
+  - macOS: `darwin-arm64` (Apple Silicon) or `darwin-x64` (Intel)
   - Linux: `linux-arm64` or `linux-x64`
-- Searches multiple candidate paths in priority order (L33-41):
-  1. Package root production install
-  2. Backward compatibility location under `dist/`
-  3. Monorepo source tree fallbacks
-  4. Current working directory relative paths
-- Fallback to `CODELLDB_PATH` environment variable (L53-60)
-- Returns first accessible path or `null` if none found
+  - Unsupported platforms return null
+- Search strategy with multiple fallback paths (L33-41):
+  1. Package root production install (`../../vendor/codelldb/...`)
+  2. Legacy dist directory (`../vendor/codelldb/...`) 
+  3. Monorepo source tree paths
+  4. Process CWD relative paths
+- Environment variable fallback: `CODELLDB_PATH` (L53-60)
 
-**`getCodeLLDBVersion()` (L68-106)**
-- Retrieves version information from accompanying `version.json` files
-- Uses same platform directory resolution logic as executable resolver
-- Searches corresponding version file candidates (L88-93)
-- Returns parsed version from JSON or defaults to `'1.11.0'`
-- Depends on `resolveCodeLLDBExecutable()` for initial validation
+**`getCodeLLDBVersion()` (L68-109)**
+- Retrieves CodeLLDB version information
+- Returns `Promise<string | null>` - version string or null if unavailable
+- First resolves executable path, then searches for `version.json` manifest
+- Uses same platform detection logic as resolver (L79-89)
+- Default fallback version: `'1.11.0'` (L108)
 
-### Key Dependencies
-- `fs/promises`: Asynchronous file system operations for access checks and file reading
+## Key Dependencies
+
+- `fs/promises`: Async file system operations for path validation and file reading
 - `path`: Cross-platform path manipulation
-- `url.fileURLToPath()`: ES module compatibility for `__dirname` equivalent
+- `url`: ES module URL utilities for `__dirname` resolution (L9-10)
 
-### Architecture Patterns
+## Architecture Patterns
+
 - **Multi-path resolution strategy**: Handles various deployment scenarios (production, development, monorepo)
-- **Platform abstraction**: Centralizes platform-specific executable naming and directory structure
-- **Graceful degradation**: Continues searching through candidates on access failures
-- **Environment variable override**: Provides escape hatch for custom installations
+- **Platform abstraction**: Encapsulates platform-specific executable naming and directory structure
+- **Graceful degradation**: Multiple fallback mechanisms ensure robustness
+- **Environment override**: Allows manual CodeLLDB path specification via env var
 
-### Critical Constraints
-- Assumes vendored CodeLLDB follows specific directory structure: `vendor/codelldb/{platform}/adapter/`
-- Windows executable must have `.exe` extension (L32)
-- Version file format must contain `version` property in JSON structure
-- All file system operations are asynchronous and may fail silently
+## Critical Constraints
+
+- Requires vendored CodeLLDB binaries in specific directory structure
+- Platform detection limited to Windows, macOS, and Linux
+- Version detection depends on manifest files; falls back to hardcoded version
+- All file system operations are async and use try-catch for error handling

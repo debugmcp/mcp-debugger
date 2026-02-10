@@ -1,83 +1,93 @@
 # src/cli/
-@generated: 2026-02-09T18:16:32Z
+@generated: 2026-02-10T01:19:55Z
 
-## Purpose and Responsibility
+## Purpose
+The `src/cli` directory provides the command-line interface layer for a Debug MCP (Model Context Protocol) server system. It implements a multi-transport server architecture with standardized CLI commands, centralized error handling, and binary analysis capabilities for debugging workflows.
 
-The `src/cli` directory provides a comprehensive command-line interface framework for Debug MCP (Model Context Protocol) applications. It establishes standardized CLI patterns for different transport modes (stdio and Server-Sent Events), implements global error handling, and provides debugging tools for binary analysis.
+## Core Architecture
 
-## Key Components and Architecture
+### Multi-Transport Server System
+The CLI supports three primary operational modes:
+- **stdio**: Default mode using stdin/stdout transport for direct process communication
+- **sse**: HTTP-based Server-Sent Events transport enabling web-based client connections
+- **check-rust-binary**: Binary analysis mode for examining Rust executable debugging information
 
-### Core CLI Framework
-- **setup.ts**: Central CLI configuration factory using Commander.js, defining consistent patterns for command setup across transport modes
-- **version.ts**: Cross-platform version resolution utility that works in both CommonJS and ESM environments
-- **error-handlers.ts**: Global error handling system that captures uncaught exceptions and unhandled promise rejections
+### Key Components and Relationships
 
-### Transport Command Handlers
-- **stdio-command.ts**: Handles MCP server startup in stdio mode with robust lifecycle management for containerized environments
-- **sse-command.ts**: Creates Express.js application for Server-Sent Events transport using a shared server model where all SSE connections use the same MCP server instance
+#### Command Setup and Configuration (`setup.ts`)
+Central CLI framework using Commander.js that:
+- Provides factory function `createCLI()` for program initialization
+- Implements consistent option patterns across all commands (logging, ports, output formats)
+- Manages environment-based console silencing for transport protection
+- Supports dependency injection for testable command handlers
 
-### Command Utilities
-- **commands/**: Contains specialized CLI command handlers for debugging tools, particularly binary analysis commands with dual output formatting (JSON and human-readable)
+#### Transport Commands
+- **`stdio-command.ts`**: Implements stdio transport with containerized environment handling, keep-alive mechanisms, and graceful shutdown
+- **`sse-command.ts`**: Provides HTTP/SSE transport with shared server model, session management, and CORS support
+
+#### Binary Analysis (`commands/`)
+Modular command handlers for development artifact analysis:
+- Lazy-loaded analysis modules for performance optimization
+- Standardized dual-format output (JSON/human-readable)
+- File system validation and error handling
+
+#### Infrastructure Components
+- **`error-handlers.ts`**: Global process-level error handling with structured logging and fail-fast behavior
+- **`version.ts`**: Cross-environment version resolution supporting both CommonJS and ESM
 
 ## Public API Surface
 
 ### Main Entry Points
-- `createCLI()`: Factory function for creating base Commander programs
-- `setupStdioCommand()`: Configures default stdio transport command
-- `setupSSECommand()`: Configures SSE transport command with port specification
-- `setupCheckRustBinaryCommand()`: Configures binary analysis command
-- `handleStdioCommand()`: Stdio server handler with lifecycle management
-- `handleSSECommand()`: SSE server handler with session management
-- `setupErrorHandlers()`: Global error handling setup
+- `createCLI()`: CLI program factory with metadata configuration
+- `setupStdioCommand(handler)`: Configures default stdio transport command
+- `setupSSECommand(handler)`: Configures HTTP/SSE transport command
+- `setupCheckRustBinaryCommand(handler)`: Configures binary analysis command
+- `setupErrorHandlers(dependencies)`: Global error handling setup
 
-### Configuration Interfaces
-- `StdioOptions`, `SSEOptions`, `CheckRustBinaryOptions`: Type-safe command configuration
-- Transport-specific handler types with consistent async signatures
+### Transport Handlers
+- `handleStdioCommand(options, command)`: Stdio mode server execution
+- `handleSSECommand(options, command)`: SSE mode server execution
+- Binary analysis handlers in `commands/` subdirectory
 
 ## Internal Organization and Data Flow
 
-### Command Setup Flow
-1. **CLI Creation**: `createCLI()` establishes base Commander program
-2. **Command Registration**: Setup functions configure specific transport commands with options
-3. **Handler Binding**: Command handlers are bound to process user requests
-4. **Error Handling**: Global error handlers provide safety nets
-
-### Transport Architecture
-- **Shared Server Model**: SSE mode uses single MCP server instance across all connections for state consistency
-- **Session Management**: Each transport maintains separate sessions with cleanup guards
-- **Environment Awareness**: Commands set `CONSOLE_OUTPUT_SILENCED=1` to prevent transport protocol interference
-
 ### Dependency Injection Pattern
-All command handlers use dependency injection for:
-- Winston logger instances
-- Server factory functions
-- Optional process exit function overrides (for testing)
+All components use dependency injection interfaces for testability:
+- Logger instances for structured logging
+- Server factory functions for Debug MCP server creation
+- Optional process exit handlers for testing scenarios
+
+### Server Lifecycle Management
+1. **Setup Phase**: CLI parsing, option validation, logger configuration
+2. **Transport Phase**: Protocol-specific transport creation and MCP server connection
+3. **Runtime Phase**: Keep-alive mechanisms, session management, signal handling
+4. **Shutdown Phase**: Graceful cleanup of transports, connections, and process exit
+
+### Shared Infrastructure
+- **Logging Strategy**: Winston-based structured logging with level control and optional file output
+- **Environment Coordination**: `CONSOLE_OUTPUT_SILENCED` environment variable prevents transport corruption
+- **Error Handling**: Centralized unhandled error processing with immediate process termination
 
 ## Important Patterns and Conventions
 
 ### Transport Protection
-Both stdio and SSE commands automatically silence console output to prevent corruption of MCP transport protocols.
+Commands that establish communication protocols (stdio/SSE) explicitly silence console output to prevent corruption of the transport layer.
 
-### Graceful Lifecycle Management
-- Keep-alive mechanisms for containerized deployments
-- Proper cleanup of transport sessions and server instances
-- Signal handling for graceful shutdown (SIGTERM/SIGINT)
-
-### Error Handling Strategy
-- Fail-fast approach with structured logging
-- Global exception capture with process termination
-- Contextual error enhancement with actionable user guidance
+### Graceful Shutdown
+Comprehensive shutdown handling supporting:
+- Signal-based termination (SIGINT/SIGTERM)
+- Transport-initiated shutdown
+- Container environment compatibility
+- Connection cleanup and resource disposal
 
 ### Cross-Platform Compatibility
-- Module directory resolution works in both CommonJS and ESM
-- Container-aware stdin handling for detached environments
-- Dynamic import patterns for optional dependencies
+- ESM/CommonJS module system support
+- Container-aware stdio handling
+- Cross-origin resource sharing for web-based clients
 
-## Key Dependencies
+### Performance Optimization
+- Lazy loading of heavyweight analysis modules
+- Shared server instances for multiple SSE connections
+- Efficient session management with cleanup protection
 
-- **Commander.js**: CLI framework and command parsing
-- **Express.js**: HTTP server for SSE transport mode
-- **MCP SDK**: Server-Sent Events and stdio transport implementations
-- **Winston**: Structured logging across all components
-
-The CLI module serves as the primary interface layer for Debug MCP applications, providing consistent, robust command-line experiences across different deployment scenarios while maintaining clean separation between transport protocols and core MCP functionality.
+This CLI layer abstracts the complexity of MCP server operation into user-friendly commands while maintaining robust error handling, transport isolation, and development workflow integration.

@@ -1,56 +1,66 @@
 # src/interfaces/process-interfaces.ts
 @source-hash: 154da350c07447ab
-@generated: 2026-02-09T18:15:04Z
+@generated: 2026-02-10T00:41:51Z
 
-## Process Management Interface Definitions
+## Purpose
+Provides high-level abstractions over Node.js child process operations for better testability and domain-specific process management. Defines interfaces for general process launching, Python debug targets, and proxy processes.
 
-This file defines high-level interfaces for process management, providing domain-specific abstractions over Node.js process operations for better testability and cleaner APIs.
+## Core Interfaces
 
-### Core Interfaces
+### IProcess (L12-25)
+Domain-focused abstraction over Node.js ChildProcess. Extends EventEmitter with:
+- Standard streams: stdin, stdout, stderr (L14-16)
+- Process control: send(), kill() methods (L18-19)
+- State tracking: killed, exitCode, signalCode properties (L22-24)
+- Optional PID (L13)
 
-**IProcess (L12-25)** - Primary process abstraction extending EventEmitter
-- Wraps Node.js ChildProcess with cleaner API surface
-- Properties: `pid`, stdio streams (`stdin`, `stdout`, `stderr`), lifecycle state (`killed`, `exitCode`, `signalCode`)
-- Methods: `send()` for IPC communication, `kill()` for termination
-- Focuses on essential process control rather than exposing full ChildProcess complexity
+### IProcessLauncher (L31-33)
+General-purpose process spawning interface with single `launch()` method accepting command, args, and options.
 
-**IProcessLauncher (L31-33)** - General-purpose process factory
-- Single method `launch()` accepting command, args, and options
-- Returns IProcess instances for spawned processes
+### IProcessOptions (L39-45)
+Simplified spawn options focusing on essential parameters:
+- Working directory, environment variables (L40-41)
+- Shell execution, stdio configuration, detached mode (L42-44)
+- Uses `any` type for stdio compatibility (L43)
 
-**IProcessOptions (L39-45)** - Simplified spawn configuration
-- Subset of Node.js SpawnOptions focusing on common use cases
-- Properties: `cwd`, `env`, `shell`, `stdio`, `detached`
-- Uses `any` type for stdio compatibility with Node.js StdioOptions
+## Specialized Launchers
 
-### Specialized Launchers
+### IDebugTargetLauncher (L51-58)
+Python debugging specialist with `launchPythonDebugTarget()` method supporting:
+- Script path, arguments, custom Python path (L53-55)
+- Optional debug port configuration (L56)
+- Returns Promise<IDebugTarget>
 
-**IDebugTargetLauncher (L51-58)** - Python debugging process launcher
-- `launchPythonDebugTarget()` method encapsulates debugpy setup complexity
-- Returns Promise<IDebugTarget> with process and debug connection details
+### IDebugTarget (L64-68)
+Encapsulates debug session state:
+- Wrapped IProcess instance (L65)
+- Debug port tracking (L66)
+- Cleanup via terminate() method (L67)
 
-**IDebugTarget (L64-68)** - Debug process wrapper
-- Combines IProcess with debug-specific properties (`debugPort`)
-- Provides unified `terminate()` method for cleanup
+### IProxyProcessLauncher (L74-80)
+Proxy process specialist with `launchProxy()` method requiring:
+- Proxy script path and session ID (L76-77)
+- Optional environment overrides (L78)
 
-**IProxyProcessLauncher (L74-80)** - Proxy process factory
-- `launchProxy()` method for session-aware proxy processes
-- Handles proxy script launching with session context
+### IProxyProcess (L86-90)
+Enhanced IProcess for proxy operations:
+- Session ID tracking (L87)
+- Command sending via sendCommand() (L88)
+- Initialization waiting with optional timeout (L89)
 
-**IProxyProcess (L86-90)** - Enhanced process for proxy operations
-- Extends IProcess with session management (`sessionId`)
-- Adds `sendCommand()` for structured communication and `waitForInitialization()` for startup synchronization
+## Factory Pattern
 
-### Factory Pattern
+### IProcessLauncherFactory (L96-100)
+Central factory for creating all launcher types:
+- createProcessLauncher() (L97)
+- createDebugTargetLauncher() (L98) 
+- createProxyProcessLauncher() (L99)
 
-**IProcessLauncherFactory (L96-100)** - Central factory interface
-- Creates instances of all launcher types
-- Enables dependency injection and easy swapping between production/test implementations
-- Methods: `createProcessLauncher()`, `createDebugTargetLauncher()`, `createProxyProcessLauncher()`
+## Dependencies
+- Node.js EventEmitter (L6)
+- Node.js stream types for stdio (L14-16)
 
-### Architecture Notes
-
-- Uses composition over inheritance with EventEmitter extension
-- Provides abstraction layer over Node.js process APIs for domain-specific use cases
-- Designed for dependency injection and testability
-- Separates general process management from specialized debugging/proxy concerns
+## Architectural Patterns
+- Interface segregation: Separate concerns for general, debug, and proxy processes
+- Factory pattern: Centralized creation with easy test substitution
+- Composition over inheritance: IDebugTarget wraps IProcess rather than extending it

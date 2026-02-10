@@ -1,39 +1,39 @@
 # src/implementations/network-manager-impl.ts
 @source-hash: c6db94993b8fa3f7
-@generated: 2026-02-09T18:14:59Z
+@generated: 2026-02-10T00:41:44Z
 
-## NetworkManagerImpl
+## NetworkManagerImpl - Node.js Network Abstraction Layer
 
-Concrete implementation of the `INetworkManager` interface using Node.js native `net` module for TCP server operations.
-
-### Primary Responsibility
-Provides platform-specific network server creation and port allocation functionality for the debugmcp system.
+**Purpose**: Concrete implementation of the `INetworkManager` interface providing Node.js-specific networking capabilities for the debugmcp system.
 
 ### Key Components
 
-**NetworkManagerImpl class (L7-29)**
-- Implements `INetworkManager` interface from `@debugmcp/shared`
-- Encapsulates Node.js-specific networking operations
+- **NetworkManagerImpl class (L7-29)**: Main implementation class that wraps Node.js `net` module functionality
+  - Implements `INetworkManager` interface from `@debugmcp/shared`
+  - Provides server creation and port allocation services
 
-**createServer() method (L8-11)**
-- Creates and returns a TCP server instance using `net.createServer()`
-- Uses type assertion to bridge Node.js `Server` type to `IServer` interface
-- Returns server immediately without configuration
+### Methods
 
-**findFreePort() method (L13-28)**
-- Asynchronously discovers available port by creating temporary server
-- Binds to port 0 to let OS assign free port automatically (L18)
-- Uses `server.unref()` to prevent process hanging (L16)
-- Extracts port from server address and performs type guards (L19-21)
-- Properly closes temporary server before resolving
-- Handles both successful port discovery and error cases
+- **createServer() (L8-11)**: Factory method returning a Node.js server instance
+  - Direct pass-through to `net.createServer()`
+  - Uses type assertion to cast to `IServer` interface
+  - Returns immediately without configuration
+
+- **findFreePort() (L13-28)**: Async utility for discovering available network ports
+  - Creates ephemeral server on port 0 (OS-assigned)
+  - Uses `unref()` to prevent process hanging
+  - Promise-based with comprehensive error handling
+  - Validates address object structure before extracting port
+  - Properly closes server after port discovery
 
 ### Dependencies
-- `net` - Node.js native networking module
-- `@debugmcp/shared` - Shared interfaces (`INetworkManager`, `IServer`)
+
+- **Node.js net module**: Core networking functionality
+- **@debugmcp/shared**: Interface definitions (`INetworkManager`, `IServer`)
 
 ### Architecture Notes
-- Clean adapter pattern implementation bridging Node.js APIs to debugmcp interfaces
-- Follows Promise-based async patterns for port discovery
-- Uses OS-level port allocation for reliability
-- Defensive programming with proper type checking and error handling
+
+- Clean adapter pattern implementation bridging Node.js APIs to domain interfaces
+- Type-safe port discovery with runtime validation
+- Proper resource cleanup in async operations
+- Error-first callback pattern wrapped in Promise for modern async/await usage

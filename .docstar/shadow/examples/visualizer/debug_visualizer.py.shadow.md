@@ -1,53 +1,56 @@
 # examples/visualizer/debug_visualizer.py
 @source-hash: cb80f5a47c5ece53
-@generated: 2026-02-09T18:15:00Z
+@generated: 2026-02-10T00:41:45Z
 
-## Purpose
-Main TUI application controller for MCP debugger visualizer. Orchestrates Rich-based terminal interface with live updates, manages debug session state, and provides API for external debug tool integration.
+## Primary Purpose
+Main TUI application for the MCP debugger visualizer that provides a live terminal interface for debugging sessions with real-time code viewing, tool activity monitoring, and state management.
 
-## Core Architecture
+## Core Components
 
-### Main Class: DebugVisualizer (L24-254)
-Primary application controller that coordinates all TUI components:
+**DebugVisualizer Class (L24-255)**
+- Main application orchestrating the TUI layout and state updates
+- Manages Rich console, layout, and live refresh loop
+- Coordinates three specialized panels: header, tools, and code view
+- Handles external debug session control through public API methods
 
-- **Initialization (L27-40)**: Sets up Rich console, debug state, panel instances, and layout
-- **Layout Management (L42-63)**: Creates 3-section layout (header + 2-column body) with tools:code ratio of 2:3
-- **Render Pipeline (L107-123)**: Updates all panels with error handling, returns complete layout
-- **Live Display Loop (L125-139)**: Runs at 4Hz refresh rate using Rich Live with alternate screen buffer
+**Key Dependencies**
+- `ToolActivityPanel`, `CodeViewPanel`, `HeaderPanel` from `.panels` - UI rendering components
+- `DebugState` from `.state` - centralized state management
+- Rich library for terminal UI (Console, Layout, Live, Panel, Text)
 
-### Panel Update Methods
-- **update_header() (L65-80)**: Renders session info and current location via HeaderPanel
-- **update_tools_panel() (L82-85)**: Displays tool activity feed via ToolActivityPanel  
-- **update_code_panel() (L87-105)**: Shows source code with current line, breakpoints, and variables via CodeViewPanel
+## Layout Architecture (L42-63)
+Three-region layout:
+- Header (L53): Fixed 3-row height for session info
+- Body split into two columns:
+  - Tools panel (L59): 2/5 width ratio for tool activity
+  - Code panel (L60): 3/5 width ratio for source code display
 
-## State Management API
+## Update Methods (L65-123)
+- `update_header()` (L65): Session info, location, pause state
+- `update_tools_panel()` (L82): Tool activity log
+- `update_code_panel()` (L87): Source code with breakpoints/variables
+- `render()` (L107): Orchestrates all updates with error handling
 
-### Session Control (L147-157, L246-254)
-- **create_session()**: Initializes new debug session with ID and optional name
-- **close_session()**: Resets session state and logs closure
+## Live Display Loop (L125-143)
+- 4 FPS refresh rate (L130, L136)
+- Uses Rich Live with alternate screen buffer
+- Graceful keyboard interrupt handling
 
-### Breakpoint Management (L159-176)
-- **set_breakpoint()**: Adds breakpoint and updates location if no current location exists
+## External Control API (L147-254)
+Session management:
+- `create_session()` (L147), `close_session()` (L246)
 
-### Execution Control (L178-244)
-- **start_debugging()**: Logs script start
-- **pause_at_breakpoint()**: Sets paused state and updates location
-- **step_to_line()**: Updates location for step operations (over/into/out)
-- **continue_execution()**: Clears paused state
-- **update_variables()**: Refreshes variable display
+Breakpoint control:
+- `set_breakpoint()` (L159)
 
-## Dependencies
-- **Rich Components**: Console, Layout, Live, Panel, Text for TUI rendering
-- **Internal Modules**: 
-  - `.panels` for ToolActivityPanel, CodeViewPanel, HeaderPanel
-  - `.state` for DebugState management
-- **Standard Library**: time, typing, os, sys
+Execution control:
+- `start_debugging()` (L178), `pause_at_breakpoint()` (L191)
+- `step_to_line()` (L221), `continue_execution()` (L237)
 
-## Key Patterns
-- **Error Isolation**: Render pipeline catches exceptions and displays errors in red panel
-- **State Synchronization**: All external API calls log activities to tool panel
-- **Graceful Shutdown**: KeyboardInterrupt handling with cleanup messages
-- **Live Updates**: Continuous 4Hz refresh cycle with manual update triggers
+State updates:
+- `update_variables()` (L207)
+
+All control methods update both state and tool activity log for visual feedback.
 
 ## Entry Point
-**main() (L257-268)**: Standalone runner with basic usage instructions and keyboard interrupt handling
+`main()` (L257) provides standalone execution with basic setup and keyboard interrupt handling.

@@ -1,74 +1,74 @@
 # mcp_debugger_launcher/mcp_debugger_launcher/
-@generated: 2026-02-09T18:16:14Z
+@generated: 2026-02-10T01:19:45Z
 
-## Overall Purpose
-The `mcp_debugger_launcher` package provides a comprehensive command-line tool for launching MCP (Model Context Protocol) debug servers with support for multiple runtime environments. It abstracts the complexity of deploying debug servers across Node.js/npm and Docker platforms, offering users a unified interface with automatic environment detection and intelligent runtime selection.
+## Overall Purpose and Responsibility
 
-## Key Components and Architecture
+The `mcp_debugger_launcher` module is a complete CLI tool and runtime orchestration system for launching the MCP (Model Context Protocol) debugging server. It provides automatic runtime detection, environment management, and unified launching capabilities across multiple execution environments (Node.js/npm and Docker).
 
-### Core Components
-- **`cli.py`** - Primary entry point providing Click-based command-line interface with comprehensive argument parsing, runtime status reporting, and user guidance
-- **`launcher.py`** - Core execution engine implementing `DebugMCPLauncher` class for subprocess management and graceful shutdown handling
-- **`detectors.py`** - Runtime environment detection via `RuntimeDetector` class, providing comprehensive availability checking for Node.js, npm, Docker, and associated packages/images
-- **`__init__.py`** - Standard package marker enabling Python import functionality
+## Key Components and Relationships
 
-### Component Integration
-The components form a layered architecture:
-1. **CLI Layer** (`cli.py`) handles user interaction and command parsing
-2. **Detection Layer** (`detectors.py`) analyzes runtime availability 
-3. **Execution Layer** (`launcher.py`) manages actual server launching
-4. **Package Layer** (`__init__.py`) enables module imports
+### Core Architecture Stack
+1. **CLI Layer** (`cli.py`): Click-based command-line interface serving as the primary user entry point
+2. **Detection Layer** (`detectors.py`): Runtime environment discovery and validation system
+3. **Execution Layer** (`launcher.py`): Process lifecycle management and server launching
+4. **Package Structure** (`__init__.py`): Standard Python package initialization
+
+### Component Interactions
+- **CLI → Detector → Launcher**: The CLI uses `RuntimeDetector` to discover available environments, then delegates to `DebugMCPLauncher` for execution
+- **Auto-Detection Flow**: CLI auto-selects optimal runtime (npx preferred over Docker) when no explicit choice is made
+- **Unified Process Management**: Both npx and Docker execution paths share identical process lifecycle patterns through the launcher
 
 ## Public API Surface
 
-### Main Entry Point
-- **`main()`** function in `cli.py` - Primary Click command supporting:
-  - Server modes: `stdio` and `sse` (with optional port configuration)
-  - Runtime selection: `--docker`, `--npm` flags or automatic detection
-  - Utility options: `--dry-run`, `--verbose`, version display
+### Primary Entry Points
+- **`main()` function in `cli.py`**: Main CLI command supporting:
+  - Mode selection: `stdio` (default) or `sse`
+  - Runtime forcing: `--docker`, `--npm` flags
+  - Diagnostic modes: `--status`, `--dry-run`
+  - Verbose output: `--verbose`
 
 ### Key Classes
-- **`DebugMCPLauncher`** - Core launcher with methods:
-  - `launch_with_npx()` - npm/npx execution path
-  - `launch_with_docker()` - Docker containerized execution
-  - Built-in signal handling and graceful shutdown
-- **`RuntimeDetector`** - Static detection utilities:
-  - `detect_available_runtimes()` - Comprehensive environment analysis
-  - `get_recommended_runtime()` - Intelligent runtime selection logic
+- **`RuntimeDetector`**: Static utility class for environment detection
+  - `detect_available_runtimes()`: Comprehensive environment status
+  - `get_recommended_runtime()`: Intelligent runtime selection
+- **`DebugMCPLauncher`**: Server process orchestrator
+  - `launch_with_npx()`: Node.js/npm execution path
+  - `launch_with_docker()`: Docker execution path
 
 ## Internal Organization and Data Flow
 
-### Execution Flow
-1. CLI parses arguments and validates options compatibility
-2. Runtime detection analyzes Node.js/Docker availability 
-3. Smart runtime selection (forced via flags or auto-detected)
-4. Command preparation with appropriate parameters
-5. Launcher execution with real-time output streaming
-6. Graceful shutdown handling with resource cleanup
+### Detection Phase
+1. **Node.js Ecosystem Check**: Validates Node.js, npx, and @debugmcp/mcp-debugger package availability
+2. **Docker Environment Check**: Verifies Docker installation, daemon status, and debugmcp/mcp-debugger:latest image
+3. **Runtime Recommendation**: Prioritizes npx over Docker based on availability and functionality
 
-### Data Structures
-- Standardized runtime information dictionaries from detection layer
-- Process management through subprocess.Popen instances
-- Signal-safe shutdown with timeout-based cleanup patterns
+### Execution Phase
+1. **Command Construction**: Builds runtime-specific command arrays with mode and port configuration
+2. **Process Lifecycle**: Manages subprocess execution with signal handling for graceful shutdown
+3. **Output Streaming**: Provides real-time stdout/stderr forwarding maintaining interactivity
+4. **Resource Cleanup**: Ensures proper process termination and handle release
 
-## Key Patterns and Conventions
+## Important Patterns and Conventions
 
-### Design Patterns
-- **Runtime Abstraction** - Unified interface across npm and Docker deployment methods
-- **Defensive Programming** - Comprehensive error handling with specific exception types and timeout protection
-- **Fail-Fast Validation** - Early detection of conflicting options and missing dependencies
-- **User Experience Focus** - Rich status reporting, installation guidance, and verbose logging
+### Runtime Environment Abstraction
+- **Unified Interface**: Both npx and Docker launchers expose identical APIs despite different underlying execution models
+- **Defensive Programming**: Extensive error handling with specific detection for missing runtimes
+- **Graceful Degradation**: Auto-detection with fallback chains and helpful error messages
 
-### Technical Conventions
-- Hardcoded constants for package names (`@debugmcp/mcp-debugger`) and Docker images (`debugmcp/mcp-debugger:latest`)
-- Consistent subprocess timeout patterns (5s for version checks, 10s for package validation)
-- Real-time output streaming for launched processes
-- Signal handler registration for graceful termination
+### Process Management Standards
+- **Signal Handling**: Consistent SIGINT/SIGTERM handling across execution paths
+- **Timeout Management**: 5-second graceful shutdown timeout before force termination
+- **Resource Safety**: Finally blocks ensure cleanup even on unexpected failures
 
-## Dependencies and Environment
-- **Click** framework for CLI functionality
-- **Standard library** modules (subprocess, signal, shutil) for process and system operations
-- **Runtime requirements**: Node.js/npm or Docker for actual server execution
-- **Optional**: debugpy for Python debugging backward compatibility
+### Configuration Constants
+- **NPM_PACKAGE**: "@debugmcp/mcp-debugger"
+- **DOCKER_IMAGE**: "debugmcp/mcp-debugger:latest"  
+- **DEFAULT_SSE_PORT**: 3001
+- **Version**: "0.11.1"
 
-This package serves as a developer tool that simplifies MCP server debugging by abstracting deployment complexity while maintaining flexibility across different runtime environments.
+### Error Handling Philosophy
+- **Runtime Validation**: Pre-flight checks prevent execution with missing dependencies
+- **User-Friendly Messages**: Clear installation instructions for missing runtimes
+- **Exit Code Semantics**: Returns 1 for errors, 0 for success, enabling shell integration
+
+This module serves as a comprehensive launcher ecosystem that abstracts away the complexity of multi-runtime MCP server deployment while providing diagnostic capabilities and intelligent environment selection.

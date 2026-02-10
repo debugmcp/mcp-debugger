@@ -6,10 +6,8 @@ import fsExtra from 'fs-extra';
 
 // Mock fs-extra before importing FileSystemImpl
 vi.mock('fs-extra', () => {
-  // const actualFsExtra = vi.importActual('fs-extra'); // In case some non-function properties are needed
   return {
     default: {
-      // ...actualFsExtra, // Spread actual if needed, but for full control, mock explicitly
       pathExists: vi.fn(),
       readFile: vi.fn(),
       writeFile: vi.fn(),

@@ -1,48 +1,47 @@
 # tests/e2e/docker/docker-test-utils.ts
 @source-hash: cf8b4f2f2f3de6bc
-@generated: 2026-02-09T18:14:36Z
+@generated: 2026-02-10T00:41:27Z
 
-## Primary Purpose
-Test utilities for running MCP (Model Context Protocol) debugger integration tests against Docker containers. Provides Docker image management, container lifecycle control, and MCP client creation for end-to-end testing scenarios.
+## Purpose
+Test utilities for running MCP debugger end-to-end tests against Docker containers. Provides Docker image building, container lifecycle management, and MCP client setup for containerized testing.
 
-## Key Functions and Classes
+## Key Components
 
-**buildDockerImage** (L34-65): Manages Docker image building with singleton pattern caching via `dockerBuildPromise` (L20). Supports force rebuild via config or environment variable. Delegates to external script `scripts/docker-build-if-needed.js` for conditional builds.
+### Configuration Interface
+- `DockerTestConfig` (L22-28): Configuration interface for Docker test parameters including image name, container name, workspace mount, log level, and force rebuild flag.
 
-**runDockerBuild** (L67-77): Internal helper that executes `docker build` command directly, bypassing conditional logic.
+### Docker Image Management
+- `buildDockerImage()` (L34-65): Main entry point for ensuring Docker image is built. Uses singleton pattern with `dockerBuildPromise` (L20) to prevent duplicate builds. Supports force rebuild via config or environment variable.
+- `runDockerBuild()` (L67-77): Internal function that executes raw `docker build` command with error handling.
 
-**isContainerRunning** (L82-89): Checks if named container exists in running state using `docker ps` filtering.
+### Container Lifecycle
+- `isContainerRunning()` (L82-89): Checks if named container is currently running using `docker ps` filter.
+- `cleanupContainer()` (L94-110): Stops and removes container with graceful error handling for non-existent containers.
 
-**cleanupContainer** (L94-110): Forcibly stops and removes containers with graceful error handling for non-existent containers.
+### MCP Client Integration
+- `createDockerMcpClient()` (L115-197): Creates MCP client connected to Docker container via stdio transport. Handles container setup, user permissions (Unix-specific), volume mounts, and returns client with cleanup function.
 
-**createDockerMcpClient** (L115-197): Core function that:
-- Creates unique container names with timestamps
-- Mounts workspace and logs directories 
-- Handles platform-specific user permissions (Unix vs Windows/CI)
-- Returns MCP client, transport, and cleanup function
-- Uses StdioClientTransport for communication
+### Path Utilities
+- `hostToContainerPath()` (L203-240): Converts host filesystem paths to container-relative paths. Handles workspace mapping from `/examples` to `/workspace` mount point with cross-platform path normalization.
+- `getDockerLogs()` (L245-252): Retrieves Docker container logs for debugging purposes.
 
-**hostToContainerPath** (L203-240): Path transformation utility converting host filesystem paths to container-relative paths. Handles multiple path formats and normalizes to relative workspace paths.
+## Dependencies
+- Node.js child_process for Docker command execution
+- MCP SDK client and stdio transport for protocol communication
+- Standard path/URL utilities for cross-platform compatibility
 
-**getDockerLogs** (L245-252): Retrieval utility for container logs with 100-line tail limit.
+## Architecture Patterns
+- Singleton build promise prevents duplicate Docker builds
+- Resource cleanup pattern with explicit cleanup functions
+- Cross-platform compatibility with Windows/Unix permission handling
+- Environment-aware configuration (CI vs local development)
 
-## Key Dependencies
-- `@modelcontextprotocol/sdk/client`: MCP client and stdio transport
-- Node.js `child_process`: Docker command execution
-- Path utilities for filesystem operations
+## Key Constants
+- `DEFAULT_IMAGE` (L19): Default Docker image name with environment override
+- `ROOT` (L18): Project root directory for relative path calculations
+- Volume mounts: `/workspace` (examples), `/tmp` (logs)
 
-## Configuration Interface
-**DockerTestConfig** (L22-28): Optional configuration object supporting image name, container name, workspace mount path, log level, and force rebuild flag.
-
-## Architectural Patterns
-- Singleton pattern for Docker build caching to prevent duplicate builds
-- Resource cleanup pattern with comprehensive error handling
-- Platform-aware user permission handling for local development vs CI environments
-- Path normalization for cross-platform compatibility
-
-## Critical Constraints
-- Default image name: `mcp-debugger:local` (L19)
-- Workspace mount point: `/workspace` in container
-- Containers use `--rm` flag for automatic cleanup
-- Unix platforms use current user UID/GID to prevent root-owned files
-- CI environments skip user mapping to avoid permission conflicts
+## Critical Behaviors
+- User ID mapping only applied on Unix systems outside CI to prevent permission issues
+- Containers use `--rm` flag for auto-cleanup but include manual cleanup as fallback
+- Path conversion strips absolute paths and workspace prefixes to create container-relative paths

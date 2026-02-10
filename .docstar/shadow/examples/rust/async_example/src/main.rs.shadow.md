@@ -1,37 +1,35 @@
 # examples/rust/async_example/src/main.rs
 @source-hash: 41f1cf23315cb999
-@generated: 2026-02-09T18:13:51Z
+@generated: 2026-02-10T00:41:06Z
 
-## Purpose
-Educational Rust example demonstrating async/await patterns with Tokio runtime for debugging and development learning. Shows concurrent task execution, future handling, and async control flow patterns.
+## Primary Purpose
+Demonstration program showcasing async/await patterns and concurrent task management in Rust using Tokio runtime. Designed specifically for debugging async code with examples of different concurrency patterns.
 
 ## Key Functions
-- **main** (L12-40): Tokio async entry point orchestrating sequential and concurrent async operations
-  - Sequential: fetch_data call with await
-  - Concurrent: spawns 3 tasks using tokio::spawn, waits with tokio::join!
-  - Loop: processes items sequentially in async loop
-- **fetch_data** (L42-47): Simple async function simulating data retrieval with 100ms delay
-- **async_task** (L49-58): Concurrent task function with variable delay based on task_id (task_id * 100ms), returns task_id * 10
-- **process_item** (L60-64): Sequential processing function with 50ms delay per item
+
+**main() (L11-40)** - Entry point decorated with `#[tokio::main]` that demonstrates:
+- Sequential async operations with `fetch_data().await` 
+- Concurrent task spawning using `tokio::spawn()` for 3 parallel tasks
+- Task synchronization with `tokio::join!()` macro
+- Sequential async loop processing
+
+**fetch_data(id: u32) -> String (L42-47)** - Simple async function that simulates data retrieval with 100ms delay using `tokio::time::sleep()`. Returns formatted string "Data_{id}". Contains explicit breakpoint comment for debugging.
+
+**async_task(task_id: u32) -> u32 (L49-58)** - Concurrent task worker that simulates variable-duration work based on task_id (task_id * 100ms delay). Returns task_id * 10 as result.
+
+**process_item(item: u32) (L60-64)** - Sequential processor with fixed 50ms delay, demonstrates async loops and item-by-item processing.
 
 ## Dependencies
-- **tokio**: Async runtime providing spawn, join!, main macro, and time utilities
-- **tokio::time**: Duration and sleep for async delays
+- `tokio::time::{sleep, Duration}` for async timing primitives
+- Tokio runtime (implied by `#[tokio::main]`)
 
-## Execution Flow
-1. Single async call to fetch_data (sequential)
-2. Spawn 3 concurrent tasks with different delays (100ms, 200ms, 300ms)
-3. Join all concurrent tasks, handle success/failure cases
-4. Sequential loop processing 3 items (50ms each)
+## Architectural Patterns
+- **Mixed Concurrency**: Demonstrates both sequential (`await`) and parallel (`spawn` + `join!`) async patterns
+- **Error Handling**: Basic pattern matching on `tokio::join!` results to handle task failures
+- **Debugging-Friendly**: Explicit print statements and breakpoint comments for runtime inspection
 
-## Debugging Features
-- Print statements at task boundaries for execution tracing
-- Strategic delay points for runtime inspection
-- Explicit breakpoint comment (L43) for async context debugging
-- Result handling patterns for concurrent task outcomes
-
-## Architectural Notes
-- Uses tokio::spawn for true concurrency vs sequential awaiting
-- Demonstrates both concurrent (tokio::join!) and sequential (for loop) async patterns
-- Error handling via pattern matching on join results
-- Task isolation through separate spawn contexts
+## Critical Characteristics
+- Uses variable delays to create realistic async scheduling scenarios
+- Task spawning creates true parallelism (not just concurrency)
+- Sequential processing in loop maintains order dependencies
+- All async functions are properly awaited, no dangling futures

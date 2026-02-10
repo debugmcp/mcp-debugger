@@ -47,8 +47,7 @@ describe('Rust Adapter Integration', () => {
   });
   
   it('should handle Cargo project debugging', async () => {
-    // This test would require a sample Rust project
-    // For now, we just verify the session can be created
+    // Verifies session creation; full Cargo debugging requires a compiled Rust project
     expect(sessionId).toBeDefined();
     
     const session = sessionManager.getSession(sessionId);
@@ -57,8 +56,7 @@ describe('Rust Adapter Integration', () => {
   });
   
   it('should set breakpoints in Rust files', async () => {
-    // This would require an actual Rust file
-    // For integration testing, we'd need to create a test project
+    // Uses example project; full verification requires a compiled binary
     const testFile = 'examples/rust/hello_world/src/main.rs';
     
     // Skip if test file doesn't exist

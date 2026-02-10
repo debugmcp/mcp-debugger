@@ -1,70 +1,78 @@
 # tests/unit/server-coverage.test.ts
 @source-hash: e616cf65d25fe01a
-@generated: 2026-02-09T18:15:17Z
+@generated: 2026-02-10T00:42:05Z
 
-## Purpose
-Comprehensive test suite for server.ts error handling and edge cases to improve test coverage. Focuses on testing failure paths, error conditions, and boundary scenarios that may not be covered by standard happy-path tests.
+## Test Coverage Suite for DebugMcpServer Error Paths and Edge Cases
 
-## Test Structure
-- **Main Test Suite (L11-478)**: "Server Coverage - Error Paths and Edge Cases" - orchestrates all coverage tests
-- **Setup/Teardown (L16-65)**: Creates mock DebugMcpServer with mocked dependencies (sessionManager, logger) before each test
-- **Mock Configuration (L32-60)**: Comprehensive mock setup for sessionManager with all required methods and adapterRegistry
+**Purpose**: Comprehensive unit test suite targeting error conditions, edge cases, and boundary scenarios in the DebugMcpServer to maximize test coverage beyond happy-path scenarios.
 
-## Key Test Categories
+**Test Structure**:
+- Uses Vitest testing framework with extensive mocking
+- Main test setup (L16-61) creates mock logger and session manager with full method stubs
+- Mock session manager provides controlled responses for all debugging operations
+- Test cleanup (L63-65) ensures mock isolation between tests
 
-### Session Validation Edge Cases (L67-84)
+**Key Test Categories**:
+
+### Session Validation Tests (L67-84)
 - Tests session not found scenarios (L68-73)
-- Tests terminated session handling (L75-83)
+- Tests operations on terminated sessions (L75-83)
 - Validates proper McpError throwing for invalid session states
 
-### Tool Operation Error Handling (L86-168)
-- **Step Operations (L87-130)**: Tests stepOver, stepInto, stepOut failure scenarios with specific error messages
-- **Continue Execution (L132-145)**: Tests process termination during continue operations
-- **Stack Trace Edge Cases (L147-167)**: Tests missing proxy manager and null current thread scenarios
+### Debugging Operation Error Paths (L86-168)
+- **Step Operations**: stepOver (L87-100), stepInto (L102-115), stepOut (L117-130)
+- **Continue Execution**: Tests process termination scenarios (L132-145)
+- **Stack Trace Edge Cases**: Missing proxy manager (L147-156), missing thread ID (L158-167)
+- All operations test failure responses from session manager with specific error messages
 
-### Debug Session Creation (L170-215)
-- Tests session creation failures (L171-178)
-- **Language Support Validation (L180-214)**: Tests unsupported language handling in non-container vs container modes
-- Environment variable manipulation for MCP_CONTAINER testing
+### Session Creation Edge Cases (L170-215)
+- Port allocation failures (L171-178)
+- Language support validation in different environments (L180-191)
+- Container mode behavior allowing Python even when not in adapter list (L193-214)
 
-### Debugging Lifecycle (L217-255)
-- **File Validation (L218-235)**: Tests file not found scenarios using mocked fileChecker
-- **Debugger Launch Failures (L237-254)**: Tests debugging start failures with proper error propagation
+### Debugging Start Scenarios (L217-255)
+- File existence validation with mocked fileChecker (L218-235)
+- Debugger launch failures (L237-254)
+- Tests both file not found and debugger startup errors
 
-### Breakpoint Management (L257-294)
-- File existence validation for breakpoint targets (L258-274)
-- Breakpoint setting failure handling (L276-293)
+### Breakpoint Setting Edge Cases (L257-294)
+- File validation for breakpoint locations (L258-274)
+- Invalid line number handling (L276-293)
+- Uses same fileChecker pattern as debugging start tests
 
-### Server Lifecycle (L296-316)
-- Server start/stop operations (L297-309)
-- Session cleanup failure handling during shutdown (L311-315)
+### Server Lifecycle Management (L296-323)
+- Server start/stop operations (L297-315)
+- Session cleanup during shutdown with failure scenarios
+- Adapter registry access (L318-322)
 
-### Language Discovery (L325-360)
-- Dynamic language discovery fallback mechanisms (L326-336)
-- Default language handling when registry unavailable (L338-345)
+### Language Discovery Fallback Logic (L325-360)
+- Dynamic language discovery failure handling (L326-336)
+- Missing registry fallback to defaults (L338-345)
 - Container mode Python injection (L347-359)
 
-### Success Path Coverage (L362-416)
-- Validates successful execution flows to ensure proper positive case handling
-- Session listing functionality (L388-409)
-- Pause operation standardized error response (L411-415)
+### Success Path Validation (L362-416)
+- Validates proper operation when session manager succeeds
+- Tests session listing functionality (L388-409)
+- Pause operation error surfacing (L411-415)
 
-## Key Dependencies
-- **vitest**: Testing framework with mocking capabilities
-- **DebugMcpServer**: Main server class under test from '../../src/server'
-- **@modelcontextprotocol/sdk**: McpError and ErrorCode types
-- **@debugmcp/shared**: SessionLifecycleState enum
+### Error Recovery Patterns (L418-477)
+- Session name retrieval with graceful degradation (L418-434)
+- Variables/scopes error propagation (L436-460)
+- Expression evaluation in terminated sessions (L462-477)
 
-## Testing Patterns
-- Extensive use of vi.fn() mocks for all external dependencies
-- Mock return value chaining for different test scenarios
-- Environment variable manipulation with proper cleanup
-- Error boundary testing with expect().rejects.toThrow()
-- Private method testing via (server as any) type assertion
+**Architecture Patterns**:
+- Extensive use of mock injection via `(server as any).sessionManager`
+- Environment variable manipulation for container mode testing
+- FileChecker abstraction for file system operations
+- Standardized error response patterns across all operations
 
-## Critical Test Coverage Areas
-- Session state validation and lifecycle management
-- File system interaction error handling
-- Debugger proxy manager edge cases
-- Language adapter registry fallback mechanisms
-- Server startup/shutdown cleanup procedures
+**Dependencies**:
+- `@modelcontextprotocol/sdk/types.js` for McpError and error codes
+- `@debugmcp/shared` for SessionLifecycleState enum
+- Vitest for mocking and test framework capabilities
+
+**Critical Test Behaviors**:
+- All async operations properly await and use expect().rejects.toThrow()
+- Mock setup ensures predictable failure scenarios
+- Environment restoration after container mode tests
+- Session state validation before operations

@@ -1,50 +1,28 @@
 # tests/vitest.setup.ts
 @source-hash: c4755b8703c17965
-@generated: 2026-02-09T18:15:15Z
+@generated: 2026-02-10T00:42:00Z
 
-## Purpose
-Global Vitest test setup file that configures the test environment, provides global utilities, and manages test lifecycle hooks across all test files.
+**Purpose:** Global Vitest test configuration and setup file that initializes test environments, manages global state, and provides cross-platform compatibility for ESM-based tests.
 
-## Key Components
+**Key Components:**
 
-### Global Error Handling (L13-18)
-- `unhandledRejection` listener: Surfaces promise rejections with concise error messages
-- `uncaughtException` listener: Captures and logs uncaught exceptions during test execution
+- **Error Handling Setup (L12-18):** Configures global unhandled rejection/exception handlers to surface test failures with concise error messages during test execution
+- **Console Output Configuration (L21):** Explicitly removes CONSOLE_OUTPUT_SILENCED environment variable to ensure test output visibility
+- **Global Type Declarations (L24-29):** TypeScript declarations for `__dirname` and `testPortManager` globals to support ESM context and port management
+- **ESM __dirname Polyfill (L32-39):** Cross-platform implementation that recreates `__dirname` functionality in ESM modules, with Windows-specific path normalization
+- **Global Port Manager (L42):** Exposes `testPortManager` globally for test port allocation and cleanup across test files
+- **Test Lifecycle Hooks:**
+  - `beforeAll` (L45-48): Resets port manager state before each test file
+  - `afterEach` (L51-54): Cleans up Vitest mocks after each individual test
+  - `afterAll` (L57-70): Comprehensive cleanup including port manager reset and optional test server cleanup
 
-### Environment Configuration (L21)
-- Removes `CONSOLE_OUTPUT_SILENCED` environment variable to ensure console output is visible in tests
+**Dependencies:**
+- `vitest` - Core testing framework and lifecycle hooks
+- `./test-utils/helpers/port-manager.js` - Port allocation management utility
+- `./test-utils/helpers/session-helpers.js` - Optional test server utilities (dynamically imported)
 
-### Global Type Declarations (L24-29)
-- `__dirname`: String type for directory path access in ESM context
-- `testPortManager`: Typed reference to the port management utility
-
-### ESM Compatibility Layer (L32-42)
-- `__dirname` polyfill (L32-34): Creates directory path from `import.meta.url` with Windows path normalization
-- Windows path formatting (L37-39): Converts forward slashes to backslashes on Windows platform
-- Global port manager injection (L42): Makes `portManager` available as `testPortManager` globally
-
-### Test Lifecycle Management
-
-#### beforeAll Hook (L45-48)
-- Resets port manager state before each test file execution
-- References timeout configuration in `vitest.config.ts`
-
-#### afterEach Hook (L51-54)
-- `vi.resetAllMocks()`: Clears mock implementation and call history
-- `vi.restoreAllMocks()`: Restores original function implementations
-
-#### afterAll Hook (L57-70)
-- Resets port manager state after test completion
-- Conditionally imports and executes `cleanupTestServer()` from session helpers (L62-63)
-- Graceful error handling for missing session helpers module (L66-68)
-
-## Dependencies
-- `vitest`: Testing framework utilities (vi, lifecycle hooks)
-- `./test-utils/helpers/port-manager.js`: Port allocation management
-- `./test-utils/helpers/session-helpers.js`: Optional session cleanup utilities (dynamic import)
-
-## Architectural Patterns
-- Global state management through `globalThis` injections
-- Conditional module loading with error suppression
-- Cross-platform path normalization for Windows/Unix compatibility
-- Defensive programming with optional cleanup routines
+**Architecture Notes:**
+- Uses dynamic import for session helpers to avoid hard dependencies
+- Implements graceful error handling for optional cleanup operations
+- Provides cross-platform path handling for Windows/Unix systems
+- Maintains clean test isolation through systematic mock and state resets

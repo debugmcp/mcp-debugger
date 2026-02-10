@@ -1,61 +1,52 @@
 # tests/e2e/smoke-test-utils.ts
 @source-hash: 5a038b28ee3f8330
-@generated: 2026-02-09T18:15:11Z
+@generated: 2026-02-10T00:42:04Z
 
-## Purpose & Scope
-Utility module for end-to-end smoke testing of an MCP (Model Context Protocol) debug server. Provides core infrastructure for testing debug sessions, Docker container management, and server health validation.
+## Purpose
+Utility module for end-to-end smoke tests of the Model Context Protocol (MCP) debug server. Provides abstractions for MCP client interactions, Docker container management, and debug session orchestration.
 
 ## Key Interfaces & Types
+- `ParsedToolResult` (L14-19): Standard result format with optional sessionId, success flag, state, and extensible properties
 
-### ParsedToolResult Interface (L14-19)
-Standardized structure for MCP tool responses with optional fields:
-- `sessionId?: string` - Debug session identifier
-- `success?: boolean` - Operation success flag
-- `state?: string` - Current debug state
-- Flexible key-value pairs for additional data
+## Core Functions
 
-## Core Utilities
-
-### MCP Tool Integration
-- **parseSdkToolResult** (L21-28): Extracts text content from ServerResult and parses as JSON, with error handling for malformed responses
-- **callToolSafely** (L33-68): Safe wrapper for MCP client tool calls with comprehensive error handling for various MCP error formats
+### MCP Client Utilities
+- `parseSdkToolResult()` (L21-28): Extracts JSON content from SDK ServerResult, assumes text content in first array element
+- `callToolSafely()` (L33-68): Wraps MCP tool calls with comprehensive error handling, normalizes various MCP error formats into consistent response structure
 
 ### Debug Session Management
-- **executeDebugSequence** (L73-148): Orchestrates complete debug workflow:
-  1. Creates debug session with language/name
-  2. Sets breakpoint at specified file/line
-  3. Starts debugging with DAP launch args
-  - Includes automatic cleanup on failure
-  - Returns session ID and success status
+- `executeDebugSequence()` (L73-148): Orchestrates complete debug workflow: creates session, sets breakpoint, starts debugging. Includes automatic cleanup on failure. Uses configurable options for language (default: python), breakpoint location, and DAP launch arguments.
 
-## Docker Infrastructure
+### System Environment Checks
+- `isDockerAvailable()` (L153-162): Validates Docker installation via version command with 5s timeout
+- `execWithTimeout()` (L167-174): Promise-based command execution with configurable timeout (default: 30s)
+- `waitForPort()` (L179-202): Polls health endpoint until server responds with `{status: 'ok'}`, 500ms intervals, configurable timeout
 
-### Docker Availability & Management
-- **isDockerAvailable** (L153-162): Checks Docker installation via version command
-- **cleanupDocker** (L207-225): Safe container cleanup with fallback force removal
-- **dockerImageExists** (L281-289): Verifies image presence locally
-- **ensureDockerImage** (L294-313): Conditional image building with force option
+### Docker Management
+- `cleanupDocker()` (L207-225): Graceful container shutdown with fallback to force removal
+- `getVolumeMount()` (L230-239): Cross-platform path normalization for Docker volumes, handles Windows backslash conversion
+- `generateContainerName()` (L244-248): Creates unique container names using timestamp + random suffix
+- `getContainerLogs()` (L253-261): Retrieves combined stdout/stderr from containers
+- `dockerImageExists()` (L281-289): Checks image presence via `docker images -q`
+- `ensureDockerImage()` (L294-313): Conditional image building with 2-minute timeout, skip if exists unless forced
 
-### Container Utilities
-- **generateContainerName** (L244-248): Creates unique container names with timestamp and random suffix
-- **getVolumeMount** (L230-239): Cross-platform volume mount string generation (Windows path normalization)
-- **getContainerLogs** (L253-261): Retrieves container logs for debugging
-
-## System Integration
-
-### Process & Network Management
-- **execWithTimeout** (L167-174): Promise-racing exec wrapper with configurable timeout
-- **waitForPort** (L179-202): Health endpoint polling with retry logic for SSE server readiness
-- **extractPortFromOutput** (L266-276): Regex-based port extraction from server output logs
+### Output Parsing
+- `extractPortFromOutput()` (L266-276): Regex-based port extraction from server startup logs, handles multiple output formats
 
 ## Dependencies
-- `@modelcontextprotocol/sdk/client` - MCP client interface
-- `@modelcontextprotocol/sdk/types` - ServerResult type definitions
-- Node.js `child_process` and `util` - Process execution utilities
+- `@modelcontextprotocol/sdk`: MCP client and types
+- `child_process`: Command execution via promisified exec
+- `util`: Promise utilities
 
-## Architecture Notes
-- Error-first design with extensive try-catch blocks
-- Defensive programming with type guards and null checks
-- Consistent logging with `[Smoke Test]` prefixes for traceability
-- Graceful degradation for Docker operations
-- Cross-platform compatibility (Windows path handling)
+## Architectural Patterns
+- Defensive error handling with fallback mechanisms
+- Consistent logging with `[Smoke Test]` prefix for test output identification  
+- Resource cleanup patterns (debug sessions, Docker containers)
+- Cross-platform compatibility considerations (Windows path handling)
+- Timeout-based operations to prevent hanging tests
+
+## Critical Constraints
+- Assumes MCP ServerResult contains text content in specific array structure
+- Docker commands executed without shell, requiring careful argument handling
+- Health check endpoint expects specific JSON response format
+- All timeouts are hardcoded but reasonable for CI environments

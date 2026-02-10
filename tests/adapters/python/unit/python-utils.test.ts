@@ -183,12 +183,6 @@ describe('python-utils', () => {
         }
       });
 
-      it('should try version-specific pythons if generic ones fail', async () => {
-        // This test is no longer applicable as the new implementation
-        // only tries ['py', 'python', 'python3'] on Windows and ['python3', 'python'] on Unix
-        // The version-specific commands were removed in the refactor
-      });
-
       it('should throw an error if no Python is found', async () => {
         // Configure all commands to fail
         const commands = platform === 'win32' 

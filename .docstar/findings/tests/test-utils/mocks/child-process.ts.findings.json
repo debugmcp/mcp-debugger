@@ -1,0 +1,15 @@
+{
+  "source": "tests/test-utils/mocks/child-process.ts",
+  "source_hash": "9f796df4dca4747d",
+  "generated": "2026-02-10T00:41:36Z",
+  "findings": [
+    {
+      "category": "misleading_docstring",
+      "line_start": 340,
+      "line_end": 342,
+      "severity": "warning",
+      "description": "Comment claims to return a 'getter function' but actually returns an object with a 'get' method",
+      "suggestion": "Update comment to accurately describe the return value as 'an object with a get() method'"
+    }
+  ]
+}

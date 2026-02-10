@@ -1,37 +1,36 @@
 # scripts/analyze_logo.py
 @source-hash: ae3197aec27142a2
-@generated: 2026-02-09T18:15:09Z
+@generated: 2026-02-10T00:41:56Z
 
 ## Purpose
-Script for analyzing logo image properties to assess marketplace suitability, particularly for resizing to 400x400px format.
+Command-line utility script for analyzing logo image properties to assess marketplace suitability, particularly for resizing to 400x400px format.
 
-## Key Function
-**analyze_logo(path) (L5-33)**: Core analysis function that:
-- Validates file existence (L7-9)
-- Opens image using PIL (L11)
-- Extracts basic properties: dimensions, color mode, format, transparency (L13-17)
-- Calculates file size in KB (L20-21)
-- Provides suitability assessment for 400x400px resizing (L24-33)
-  - Checks for square aspect ratio (L25-28)
-  - Validates resolution adequacy (L30-33)
+## Key Functions
+
+### `analyze_logo(path)` (L5-33)
+Core analysis function that examines image properties and provides suitability assessment:
+- **Input validation**: Checks file existence (L7-9)
+- **Image properties**: Extracts dimensions, color mode, format, transparency support (L11-17)
+- **File metrics**: Calculates file size in KB (L19-21)
+- **Resize assessment**: Evaluates aspect ratio and resolution suitability for 400x400px conversion (L24-33)
+
+### Main execution block (L35-38)
+- Accepts logo path from command line arguments or defaults to "logo.png"
+- Directly invokes `analyze_logo()` function
 
 ## Dependencies
-- **PIL (Pillow)**: Image processing library for opening and analyzing images (L2)
-- **os**: File system operations for existence checks and size calculation (L3)
-- **sys**: Command-line argument handling in main execution (L36)
+- **PIL (Pillow)**: Image processing and property extraction
+- **os**: File system operations (existence check, file size)
+- **sys**: Command-line argument parsing
 
-## Execution Flow
-**Main block (L35-38)**: 
-- Accepts logo path from command line arguments or defaults to "logo.png"
-- Calls analyze_logo() function directly
+## Key Assessment Criteria
+- **Aspect ratio**: Square (1:1) preferred for resizing without cropping
+- **Resolution**: Minimum 800px recommended for quality preservation
+- **Transparency**: Detection of RGBA/LA modes
+- **File size**: Reported in KB for optimization considerations
 
 ## Output Format
-Console-based analysis report including:
-- Image dimensions and technical properties
-- File size metrics
-- Visual suitability recommendations with checkmarks (✓) and warnings (⚠)
+Structured console output with checkmarks (✓) and warnings (⚠) for visual assessment of marketplace readiness.
 
-## Design Patterns
-- Simple command-line utility pattern
-- Defensive programming with file existence validation
-- User-friendly output with visual indicators for quick assessment
+## Usage Pattern
+Designed as standalone script: `python analyze_logo.py [path]` or `python analyze_logo.py` (uses default logo.png)

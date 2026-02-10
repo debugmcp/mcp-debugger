@@ -1,46 +1,50 @@
 # tests/unit/utils/logger.test.ts
 @source-hash: 7e305dcb98fe4ec6
-@generated: 2026-02-09T18:14:47Z
+@generated: 2026-02-10T00:41:38Z
 
 ## Purpose
-Unit test suite for the logger utility module, testing Winston logger configuration, transport setup, error handling, and environment-specific behavior.
+Unit test suite for the logger utility module, testing winston-based logger creation, transport configuration, error handling, and environment-specific behaviors.
 
-## Test Structure
-- **Main test suite** (L41-165): "logger utility" with comprehensive beforeEach/afterEach setup
-- **Setup hooks** (L42-53): Environment restoration, spy cleanup, and mock resets
+## Key Test Components
 
-## Key Mock Infrastructure
-- **Winston mocks** (L17-34): Complete Winston module mock with spies for transports, formatters, and logger creation
-- **Transport spies** (L4-11): `consoleTransportSpy` and `fileTransportSpy` track transport instantiation with type identification
-- **Logger creation spy** (L12-15): `createLoggerSpy` returns mock logger with `on` and `warn` methods
+### Mock Setup (L4-35)
+- **consoleTransportSpy** (L4-7): Mocks winston Console transport with type tracking
+- **fileTransportSpy** (L8-11): Mocks winston File transport with type tracking  
+- **createLoggerSpy** (L12-15): Mocks winston createLogger function
+- **Winston Mock** (L17-34): Complete winston module mock including transports and formatters
 
-## Test Coverage Areas
+### Test Environment Management (L38-53)
+- **Environment preservation** (L38, L43, L51): Saves/restores process.env
+- **Mock cleanup** (L44-47): Clears spies and sets up console.error spy before each test
+- **Mock restoration** (L52): Restores all mocks after each test
 
-### Transport Configuration (L55-71)
-Tests default behavior of adding both console and file transports, verifies transport types in logger config, and filesystem interaction for log directory creation.
+### Core Test Cases
 
-### Container Environment (L73-84) 
-Validates MCP container-specific logging path (`/app/logs/debug-mcp-server.log`) when `MCP_CONTAINER=true`.
+#### Default Logger Behavior (L55-71)
+Tests that `createLogger()` adds both console and file transports by default, verifies filesystem operations for log directory creation.
 
-### Error Handling (L86-111)
+#### Container Environment (L73-84) 
+Tests MCP_CONTAINER environment variable behavior, ensuring logs write to `/app/logs/debug-mcp-server.log`.
+
+#### Error Handling (L86-111)
 - **Directory creation failures** (L86-98): Tests error reporting when log directory creation fails
-- **Console silencing** (L100-111): Verifies error suppression when `CONSOLE_OUTPUT_SILENCED=1`
+- **Silenced console output** (L100-111): Tests CONSOLE_OUTPUT_SILENCED environment variable suppresses error output
 
-### Fallback Logger (L113-129)
-Tests `getLogger()` behavior before initialization, verifying fallback logger creation with default namespace and warning message.
+#### Fallback Logger (L113-129)
+Tests `getLogger()` behavior when called before logger initialization, verifies fallback logger creation with warning.
 
-### Transport Error Handling (L130-164)
-- **Error logging** (L130-147): Tests Winston transport error event handling with console output
-- **Error suppression** (L149-164): Verifies transport error silencing with `CONSOLE_OUTPUT_SILENCED`
+#### Transport Error Handling (L130-164)
+- **Error logging** (L130-147): Tests winston transport error handling and console output
+- **Silenced errors** (L149-164): Tests error suppression when console output is silenced
 
 ## Dependencies
-- **Vitest**: Test framework with mocking capabilities
-- **fs module**: File system operations (mocked)
-- **Winston**: Logging library (fully mocked)
-- **Target module**: `../../../src/utils/logger.js` (imported after mocks)
+- **vitest**: Test framework and mocking utilities
+- **fs**: File system operations (mocked)
+- **winston**: Logger library (fully mocked)
+- **../../../src/utils/logger.js**: The actual logger utility being tested
 
 ## Test Patterns
-- Environment variable manipulation with restoration
-- Comprehensive spy setup and cleanup
-- Mock chaining for complex object behavior
-- Error simulation through mock implementations
+- Comprehensive mocking of external dependencies
+- Environment variable manipulation for different scenarios
+- Error condition simulation and verification
+- Spy-based verification of function calls and arguments

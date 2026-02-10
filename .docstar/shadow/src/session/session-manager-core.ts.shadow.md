@@ -1,76 +1,73 @@
 # src/session/session-manager-core.ts
-@source-hash: caf851dfb0eddf00
-@generated: 2026-02-09T18:15:24Z
+@source-hash: 732cc4e6393abee5
+@generated: 2026-02-10T01:19:07Z
 
-## Purpose
-Core session management functionality for debug sessions, providing lifecycle management, state tracking, and event handling coordination between debug adapters and proxy managers.
+## Core Session Management Framework
 
-## Key Classes & Interfaces
+**Primary Purpose**: Abstract base class providing core session lifecycle management, event handling, and state synchronization for debug sessions. Orchestrates dependency injection and proxy management patterns.
 
-### SessionManagerCore (L69-401)
-Main class managing debug session lifecycle with dependency injection pattern. Handles session creation, state transitions, proxy event coordination, and cleanup.
+### Key Interfaces & Types
 
-**Key Methods:**
-- `constructor(config, dependencies)` (L90-113) - Full dependency injection setup with defaults
-- `createSession(params)` (L115-124) - Creates new debug session via session store
-- `closeSession(sessionId)` (L157-194) - Graceful session shutdown with proxy cleanup
-- `closeAllSessions()` (L196-203) - Bulk session termination
-- `_updateSessionState(session, newState)` (L134-147) - State transition with legacy mapping
-- `setupProxyEventHandlers(session, proxyManager, launchArgs)` (L205-355) - Event handler registration
-- `cleanupProxyEventHandlers(session, proxyManager)` (L357-387) - Safe event handler removal
+- **CustomLaunchRequestArguments** (L25-28): Extends VSCode debug protocol with `stopOnEntry` and `justMyCode` flags
+- **DebugResult** (L31-40): Standardized result interface with machine-readable error types and MCP error codes
+- **SessionManagerDependencies** (L45-54): Complete DI container defining all required services (filesystem, network, logging, factories, adapters)
+- **SessionManagerConfig** (L59-63): Configuration for logging directories, launch arguments, and timeout settings
 
-### Interface Definitions
-- `CustomLaunchRequestArguments` (L25-29) - Extends VSCode debug protocol with custom fields
-- `DebugResult` (L32-41) - Standardized operation result with error metadata
-- `SessionManagerDependencies` (L46-55) - Complete dependency injection interface
-- `SessionManagerConfig` (L60-64) - Configuration options with defaults
+### Core Class: SessionManagerCore (L68-400)
 
-## Key Dependencies
-- `@debugmcp/shared` - Session state types and utilities
-- `SessionStore` - Session persistence and retrieval
-- `IProxyManager` - Debug adapter proxy communication
-- VSCode Debug Protocol - Standard debug interface definitions
+**Abstract base class** implementing the foundation of session management with dependency injection pattern.
 
-## Architecture Patterns
+#### Key Dependencies (L69-84)
+- `sessionStore`: Central session registry and state management
+- `proxyManagerFactory`: Creates debug adapter proxies
+- `adapterRegistry`: Debug adapter discovery and configuration
+- `sessionEventHandlers`: WeakMap for memory-safe event handler cleanup
 
-### Dependency Injection (L90-113)
-Full constructor injection pattern enabling testing and modular design.
+#### Session Lifecycle Methods
 
-### Event-Driven State Management (L205-355)
-Proxy manager events drive session state transitions:
-- `stopped` → PAUSED (with auto-continue logic for stopOnEntry=false)
-- `continued` → RUNNING (with stale event guards)
-- `terminated/exited` → STOPPED + cleanup
-- `error` → ERROR state
+- **createSession()** (L114-123): Creates new debug session with language-specific configuration
+- **closeSession()** (L156-193): Graceful session termination with proxy cleanup and state transitions to STOPPED/TERMINATED
+- **closeAllSessions()** (L195-202): Bulk session cleanup for shutdown scenarios
 
-### WeakMap Event Tracking (L84-85)
-Uses WeakMap to associate event handlers with sessions for memory-safe cleanup.
+#### State Management
 
-### State Synchronization (L134-147)
-Maintains both legacy SessionState and new lifecycle/execution state models via `mapLegacyState`.
+- **_updateSessionState()** (L133-146): Core state transition logic mapping legacy states to new lifecycle/execution state model using `mapLegacyState()`
+- Supports dual state models: legacy `SessionState` and new `SessionLifecycleState`/execution states
 
-## Critical Invariants
+#### Event Handler System (L204-394)
 
-### Event Handler Lifecycle
-- Handlers registered in `setupProxyEventHandlers` must be cleaned up in `cleanupProxyEventHandlers`
-- Double cleanup protection via WeakMap existence check (L359-362)
-- Continue cleanup even if individual handler removal fails (L373-383)
+**setupProxyEventHandlers()** (L204-354): Establishes named event handlers for debug adapter lifecycle:
+- `stopped`: Handles breakpoints, implements auto-continue for `stopOnEntry=false`
+- `continued`: Updates to RUNNING state with stale event protection
+- `terminated/exited`: Cleanup and state transitions to STOPPED
+- `adapter-configured`: Initial adapter setup completion
+- `dry-run-complete`: Test execution completion handling
+- `error/exit`: Error state management with cleanup
 
-### Session State Consistency
-- State changes always logged and propagated to both legacy and new state models
-- Auto-continue only applies for `stopOnEntry=false` and `reason=entry` (L230-238)
-- Stale `continued` events ignored if session already PAUSED (L258-263)
+**cleanupProxyEventHandlers()** (L356-386): Memory-safe cleanup with double-cleanup protection and error resilience.
 
-### Proxy Manager Lifecycle
-- Proxy managers cleaned up before session closure
-- Event handlers removed before proxy termination
-- Proxy reference cleared after cleanup (`session.proxyManager = undefined`)
+### Architectural Patterns
 
-## Configuration Defaults
-- `logDirBase`: `${tmpdir}/debug-mcp-server/sessions`
-- `stopOnEntry`: true, `justMyCode`: true
-- `dryRunTimeoutMs`: 10000ms
+1. **Dependency Injection**: Constructor takes complete dependency interface, enabling testability
+2. **Factory Pattern**: Uses factories for session store and proxy manager creation
+3. **Event-Driven**: Proxy lifecycle managed through event handlers with structured logging
+4. **State Machine**: Dual state tracking (legacy + new model) with transition validation
+5. **WeakMap Cleanup**: Memory leak prevention for event handler management
 
-## Testing Hooks
-- `_testOnly_cleanupProxyEventHandlers` (L392-394) - Internal testing access
-- Abstract `handleAutoContinue` (L397-400) - To be implemented by subclasses
+### Critical Invariants
+
+- Sessions must transition through proper state sequences (CREATED → RUNNING → PAUSED/STOPPED)
+- Event handlers must be cleaned up before proxy termination to prevent memory leaks
+- `stopOnEntry=false` requires auto-continue implementation in subclasses
+- State transitions are logged with structured data for debugging
+
+### Extension Points
+
+- **handleAutoContinue()** (L399): Abstract method requiring subclass implementation for auto-continue behavior
+
+### Dependencies
+
+- `@debugmcp/shared`: Core types and state management utilities
+- `@vscode/debugprotocol`: Microsoft DAP protocol definitions
+- Factory interfaces for proxy and session store creation
+- Platform services: filesystem, network, logging, environment

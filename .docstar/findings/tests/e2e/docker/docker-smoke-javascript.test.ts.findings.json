@@ -1,0 +1,6 @@
+{
+  "source": "tests/e2e/docker/docker-smoke-javascript.test.ts",
+  "source_hash": "bd0a7da7c8f23345",
+  "generated": "2026-02-10T00:41:33Z",
+  "findings": []
+}

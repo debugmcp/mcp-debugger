@@ -1,49 +1,41 @@
 # tests/unit/container/
-@generated: 2026-02-09T18:16:04Z
+@generated: 2026-02-10T01:19:36Z
 
 ## Purpose
-This directory contains unit tests for the container module's dependency injection system. The tests validate the production dependency container's initialization, service wiring, and adapter management capabilities to ensure proper system bootstrap in production environments.
+This directory contains unit tests for the dependency injection container system, specifically focused on testing the `createProductionDependencies` factory function that wires together the application's core services and adapters.
 
-## Key Components and Testing Strategy
+## Key Components
+- **dependencies.test.ts**: Comprehensive test suite for dependency container initialization, service wiring, and adapter management
 
-### Production Dependency Container Testing
-The primary focus is testing `createProductionDependencies`, the main entry point for production system initialization. Tests verify:
-- **Service Instantiation**: Proper creation and wiring of core services (FileSystem, ProcessManager, NetworkManager, ProcessLauncher variants)
-- **Factory Integration**: Correct initialization of ProxyManagerFactory and SessionStoreFactory
-- **Configuration Propagation**: Proper passing of logger configuration (logLevel, logFile, loggerOptions)
-- **Registry Setup**: AdapterRegistry configuration with production settings (validateOnRegister: false, allowOverride: false, enableDynamicLoading: true)
+## Testing Scope
+The tests validate three critical aspects of the container system:
 
-### Adapter Management Testing
-Tests cover the container's adapter lifecycle management:
-- **Bundled Adapter Registration**: Async registration of adapters defined in global `__DEBUG_MCP_BUNDLED_ADAPTERS__` key
-- **Environment-based Filtering**: Container environment filtering using `MCP_CONTAINER=true` environment variable
-- **Language Configuration**: Integration with language disable/enable configuration through `isLanguageDisabled`
-- **Error Handling**: Graceful handling of adapter registration failures with logging
+1. **Core Service Wiring**: Ensures proper dependency injection creates a complete object graph with correctly configured services (FileSystem, ProcessManager, NetworkManager, Launcher) and supporting components (Logger, ProxyManagerFactory, SessionStoreFactory)
 
-### Mock Infrastructure
-Comprehensive mocking setup provides:
-- **Service Mocks**: Tagged mock objects for all core services and factories
-- **Registry Mock**: Full AdapterRegistry mock class with register/getSupportedLanguages methods
-- **Environment Management**: Test isolation through process.env backup/restore
-- **Logger Mocking**: Complete logger infrastructure mocking with info/warn methods
+2. **Adapter Registration**: Tests the async loading and registration of bundled adapters through a global registry mechanism, including error handling for failed adapter initialization
 
-## Testing Patterns and Organization
+3. **Environment-Aware Filtering**: Validates conditional adapter loading based on container environment settings and language configuration
 
-### Test Structure
-- **Setup Phase**: Extensive mock creation and environment preparation
-- **Isolation**: BeforeEach/afterEach hooks ensuring clean test state
-- **Scenario Coverage**: Three main test scenarios covering different aspects of dependency initialization
-- **Async Testing**: Proper handling of async adapter registration and error scenarios
+## Mock Infrastructure
+Extensive mock setup covering:
+- All core service implementations and their instances
+- Logger factory and methods
+- Adapter registry with registration and language support capabilities
+- Configuration utilities for language filtering
+- Global state management for bundled adapter testing
 
-### Key Test Scenarios
-1. **Core Wiring Test**: Validates basic dependency injection and service configuration
-2. **Async Registration Test**: Tests bundled adapter registration with error handling
-3. **Environment Filtering Test**: Verifies container-specific adapter filtering logic
+## Key Testing Patterns
+- **Environment Isolation**: Careful management of process.env and global state to prevent test interference
+- **Async Error Testing**: Proper testing of Promise-based adapter loading with error scenarios
+- **Mock Lifecycle Management**: Comprehensive setup/teardown ensuring clean test state
+- **Global State Testing**: Uses `__DEBUG_MCP_BUNDLED_ADAPTERS__` global key for bundled adapter configuration testing
 
-## Dependencies and Integration Points
-- **Core System**: Tests the integration between logger utils, implementations, and factory classes
-- **Configuration System**: Validates language configuration integration for adapter filtering
-- **Global State**: Tests interaction with global bundled adapter definitions
-- **Environment Variables**: Validates environment-based behavior modification
+## Public API Coverage
+Tests focus on the main entry point `createProductionDependencies()` function, validating its ability to:
+- Create properly wired service instances
+- Configure logging infrastructure
+- Initialize adapter registry with appropriate settings
+- Handle both successful and failed adapter registration scenarios
+- Respect environment-based adapter filtering
 
-This test suite serves as the validation layer for the container module's dependency injection system, ensuring reliable production initialization and proper service orchestration.
+This test suite ensures the dependency container correctly bootstraps the entire application service layer with proper error handling and environment awareness.

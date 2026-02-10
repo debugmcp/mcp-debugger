@@ -1,51 +1,61 @@
 # packages/adapter-java/src/utils/java-utils.ts
 @source-hash: 2e1296fe5ee9364d
-@generated: 2026-02-09T18:13:57Z
+@generated: 2026-02-10T00:41:12Z
 
-## Purpose
-Java executable detection and validation utilities for a Java adapter package. Provides cross-platform discovery of Java runtime and debugging tools using PATH resolution and environment variables.
+## Primary Purpose
+
+Java executable detection and validation utilities for a Java adapter package. Provides cross-platform discovery of Java and JDB executables using PATH-based lookup with Windows-specific handling (.exe extensions).
 
 ## Key Components
 
-### Core Classes & Interfaces
-- **Logger (L10-13)**: Simple logging interface with error/debug methods, kept local to avoid external dependencies
-- **CommandNotFoundError (L21-28)**: Custom error class for missing executable commands
-- **CommandFinder (L33-35)**: Interface for resolving executable commands to full paths
-- **WhichCommandFinder (L40-73)**: Production implementation using 'which' library with caching support and Windows .exe handling
+### Error Handling
+- **CommandNotFoundError** (L21-28): Custom error class for command resolution failures, stores the failed command name
 
 ### Command Resolution
-- **setDefaultCommandFinder (L82-86)**: Dependency injection for testing - allows swapping command finder implementation
-- **defaultCommandFinder (L76)**: Module-level singleton WhichCommandFinder instance
+- **CommandFinder interface** (L33-35): Abstraction for executable path resolution
+- **WhichCommandFinder** (L40-73): Implementation using 'which' library with caching support
+  - Handles Windows .exe extension logic (L49-62)
+  - Maintains internal cache for performance (L41, L65-66)
+- **setDefaultCommandFinder()** (L82-86): Test utility for dependency injection
 
-### Java Executable Discovery
-- **findJavaHome (L122-128)**: Locates JAVA_HOME environment variable and validates directory existence
-- **findJavaExecutable (L136-211)**: Main Java discovery function with 3-tier fallback:
-  1. User-specified preferred path
-  2. JAVA_HOME/bin/java (with Windows .exe variants)
-  3. PATH-based 'java' command resolution
-- **isValidJavaExecutable (L91-117)**: Validates Java executables by running `-version` and checking output patterns
+### Java Discovery
+- **findJavaHome()** (L122-128): Reads and validates JAVA_HOME environment variable
+- **findJavaExecutable()** (L136-211): Multi-strategy Java discovery:
+  1. User-specified preferred path (L147-162)
+  2. JAVA_HOME/bin/java candidates (L164-182) 
+  3. PATH-based lookup (L184-203)
+  - Returns first valid executable found or throws detailed error with tried paths
+- **isValidJavaExecutable()** (L91-117): Validates executable by running `java -version` with 5s timeout
 
-### Version Handling  
-- **getJavaVersion (L217-246)**: Extracts version string from `java -version` output with stderr capture
-- **parseJavaMajorVersion (L253-264)**: Parses major version numbers from both legacy (1.8.x) and modern (9+) Java version formats
+### Version Management
+- **getJavaVersion()** (L217-246): Extracts version string from `java -version` output
+- **parseJavaMajorVersion()** (L253-264): Parses major version from version strings, handles both old (1.8.x) and new (9+) format
 
-### Java Debugger Support
-- **findJdb (L272-338)**: Locates Java Debugger with same 3-tier fallback strategy as Java executable
-- **validateJdb (L343-368)**: Validates jdb functionality with version check and flexible exit code handling
+### JDB (Java Debugger) Support
+- **findJdb()** (L272-338): Multi-strategy JDB discovery similar to Java discovery:
+  1. Derive from provided Java path's bin directory (L282-298)
+  2. JAVA_HOME/bin/jdb candidates (L300-316)
+  3. PATH-based lookup (L318-330)
+- **validateJdb()** (L343-367): Validates JDB executable with version check and timeout
 
 ## Architecture Patterns
-- **Strategy Pattern**: CommandFinder interface with pluggable implementations for testing
-- **Caching**: WhichCommandFinder caches resolved paths to avoid repeated filesystem lookups  
-- **Cross-platform Handling**: Windows-specific .exe extension logic throughout
-- **Graceful Degradation**: Multiple fallback strategies for executable discovery
-- **Process Management**: Consistent 5-second timeouts and proper child process cleanup
+
+- **Strategy Pattern**: CommandFinder interface allows pluggable command resolution
+- **Cross-platform abstraction**: Windows .exe handling throughout discovery functions
+- **Defensive programming**: Comprehensive error handling with detailed failure reporting
+- **Timeout protection**: All subprocess calls protected with 5-second timeouts
+- **Caching**: CommandFinder implementation includes optional result caching
 
 ## Dependencies
-- Node.js built-ins: `child_process`, `fs`, `path`
-- External: `which` library for PATH-based executable resolution
 
-## Critical Invariants
-- All spawn operations include 5-second timeouts to prevent hanging
-- Java validation requires exit code 0 AND recognizable version output patterns
-- Windows compatibility requires trying both .exe and non-.exe variants
-- Error messages include detailed "tried paths" for debugging failed discoveries
+- `child_process.spawn`: For executable validation and version detection
+- `which`: Cross-platform PATH-based executable lookup
+- `node:fs`, `node:path`: File system and path operations
+- Local Logger interface (L10-13) with no-op default (L16-19)
+
+## Critical Constraints
+
+- All subprocess operations have 5-second timeouts to prevent hanging
+- Java validation requires specific output patterns ("java version", "openjdk version", "Java(TM)")
+- JDB validation is more lenient due to version support variations across JDB versions
+- Windows platform detection drives .exe extension handling throughout

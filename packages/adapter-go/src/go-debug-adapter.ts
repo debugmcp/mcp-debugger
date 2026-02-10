@@ -311,7 +311,9 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
       request: 'launch',
       // Preserve mode if specified (e.g., 'test'), otherwise default to 'debug'
       mode: (config as Record<string, unknown>).mode as GoLaunchConfig['mode'] || 'debug',
-      stopOnEntry: config.stopOnEntry ?? true,
+      // Default stopOnEntry to false: Delve returns "unknown goroutine" when
+      // stack traces are requested immediately after stopping on entry.
+      stopOnEntry: config.stopOnEntry ?? false,
     };
     
     // Transform common config to Go-specific
@@ -337,7 +339,7 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
     return {
-      stopOnEntry: true,
+      stopOnEntry: false,
       justMyCode: true
     };
   }
@@ -345,11 +347,9 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== DAP Protocol Operations =====
   
   async sendDapRequest<T extends DebugProtocol.Response>(
-    command: string, 
-    args?: unknown
+    _command: string,
+    _args?: unknown
   ): Promise<T> {
-    void command;
-    void args;
     throw new Error('DAP request forwarding not implemented - handled by DAP client');
   }
   
@@ -393,16 +393,13 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
   }
   
-  handleDapResponse(response: DebugProtocol.Response): void {
-    void response;
-    // Optional: process responses if needed
+  handleDapResponse(_response: DebugProtocol.Response): void {
+    // No-op: responses handled by ProxyManager
   }
   
   // ===== Connection Management =====
   
-  async connect(host: string, port: number): Promise<void> {
-    void host;
-    void port;
+  async connect(_host: string, _port: number): Promise<void> {
     this.connected = true;
     this.transitionTo(AdapterState.CONNECTED);
     this.emit('connected');

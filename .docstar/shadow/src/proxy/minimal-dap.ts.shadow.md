@@ -1,92 +1,82 @@
 # src/proxy/minimal-dap.ts
 @source-hash: e8ee3537abe0deea
-@generated: 2026-02-09T18:15:24Z
+@generated: 2026-02-10T00:42:01Z
 
-## Primary Purpose
-Implements a simplified DAP (Debug Adapter Protocol) client that manages communication with debug adapters, supporting both single-adapter debugging and complex multi-session scenarios with child process debugging. Built specifically for vscode-compatible message parsing with policy-driven behavior configuration.
+## MinimalDapClient - DAP Protocol Client with Multi-Session Support
 
-## Core Architecture
+**Purpose**: A sophisticated Debug Adapter Protocol (DAP) client implementation that manages debugging sessions with support for child session adoption, reverse request handling, and policy-driven behavior configuration.
 
-### Main Class: MinimalDapClient (L35-782)
-Event-driven DAP client extending EventEmitter, managing TCP socket communication to debug adapters using proper buffer management and message parsing compatible with vscode's ProtocolServer implementation.
+### Core Architecture
 
-**Key State Management:**
-- Socket connection (`socket`, L36)
-- Buffer management (`rawData`, `contentLength`, L37-38) 
-- Request tracking (`pendingRequests`, `nextSeq`, L39-44)
-- Child session orchestration (`childSessions`, `activeChild`, L50-51)
-- Policy-driven behavior (`policy`, `dapBehavior`, L56-57)
+**MinimalDapClient class (L35-782)** extends EventEmitter to provide:
+- TCP socket-based DAP protocol communication with proper buffer management
+- Multi-session debugging with child session adoption capabilities  
+- Policy-driven adapter behavior customization
+- Request/response correlation with timeout handling
+- Protocol message parsing compatible with VSCode's implementation
 
-### Message Processing Pipeline
+### Key Components
 
-**Buffer Management (L141-199)**
-- `handleData()`: Implements vscode-compatible message boundary detection
-- Parses Content-Length headers and extracts complete JSON messages
-- Handles partial messages and malformed headers gracefully
+**Connection Management (L395-439)**:
+- `connect()`: Establishes TCP connection using net.createConnection
+- Socket event handlers for data, error, and close events
+- Promise-based connection with proper error handling during connection phase
 
-**Protocol Message Dispatch (L201-338)**
-- `handleProtocolMessage()`: Routes responses, events, and reverse requests
-- Integrates policy-based reverse request handling for adapter-initiated commands
-- Manages child session creation through `ChildSessionManager`
+**Protocol Message Handling (L141-199, L201-338)**:
+- `handleData()`: Implements VSCode-compatible buffer management with Content-Length header parsing
+- `handleProtocolMessage()`: Routes responses, events, and reverse requests appropriately
+- Support for tracing via DAP_TRACE_FILE environment variable
 
-### Multi-Session Support
+**Request/Response System (L441-696)**:
+- `sendRequest<T>()`: Generic method for sending DAP requests with timeout and response correlation
+- Automatic request routing to child sessions based on policy configuration
+- Special handling for `configurationDone` deferral to prevent premature process resumption
+- Breakpoint mirroring to child sessions via ChildSessionManager
 
-**Child Session Management (L99-135)**
-- Integration with `ChildSessionManager` for policies supporting `supportsReverseStartDebugging`
-- Event forwarding from child sessions (`childCreated`, `childEvent`, `childError`, `childClosed`)
-- Active child tracking for request routing
-
-**Request Routing Logic (L489-603)**
-- Policy-driven routing decisions via `shouldRouteToChild()`
-- Special handling for `stackTrace` commands with child session waiting
-- Graceful fallback to parent session when child unavailable
+**Child Session Management (L100-134)**:
+- Integration with ChildSessionManager for handling spawned debugging sessions
+- Event forwarding from child sessions to parent client
+- Active child tracking and request routing logic
+- Policy-driven child session creation and adoption
 
 ### Policy Integration
 
-**Adapter Policies (L82-87, L273-318)**
-- `AdapterPolicy` configuration for adapter-specific behaviors
-- `DapClientBehavior` defines routing, normalization, and session management
-- Policy-driven reverse request handling with context passing
+**Adapter Policy System (L55-87)**:
+- `AdapterPolicy` configuration drives client behavior via `DapClientBehavior`
+- Configurable reverse request handling, child session routing, and adapter ID normalization
+- Support for `deferParentConfigDone`, `stackTraceRequiresChild`, and other policy flags
 
-**Configuration Deferral (L457-487)**
-- `deferParentConfigDoneActive`: Delays parent configuration to allow child setup
-- Prevents premature target resume in multi-session scenarios
-- Time-bounded deferral with automatic fallback (1.5s timeout)
+**Reverse Request Handling (L272-318)**:
+- Policy-driven handling of adapter-initiated requests (runInTerminal, etc.)
+- Fallback to default handling for unrecognized requests
+- Child session creation triggered by policy decisions
 
-## Key Methods
+### Request Routing Logic (L489-603)**:
+- Child session routing based on `childSessionManager.shouldRouteToChild()`
+- Special stackTrace handling with configurable child wait timeout
+- Graceful fallback to parent session when child unavailable
 
-**Connection Management**
-- `connect()` (L395-439): Establishes TCP connection with comprehensive error handling
-- `disconnect()`/`shutdown()` (L722-758): Graceful cleanup of resources and child sessions
-- `cleanup()` (L760-781): Cleans up pending requests, buffers, and event listeners
+### State Management
 
-**Request Processing**
-- `sendRequest<T>()` (L441-696): Main request dispatcher with routing, timeout, and policy integration
-- Handles breakpoint mirroring for child sessions
-- Implements adapter ID normalization for initialize requests
+**Connection State (L36-53)**:
+- Socket connection tracking with disconnect protection
+- Buffer management for partial message handling
+- Request sequence numbering and pending request correlation
 
-**Utility Methods**
-- `waitInitialized()` (L359-380): Waits for adapter initialization with timeout
-- `appendTrace()` (L340-351): Optional message tracing to file
-- `sendResponse()` (L710-720): Sends responses to adapter reverse requests
+**Session State (L49-74)**:
+- Child session tracking via Map<string, MinimalDapClient>
+- Breakpoint storage for child session mirroring
+- Deferred configuration state for multi-session coordination
 
-## Dependencies
-- `@vscode/debugprotocol`: DAP message types and interfaces
-- `@debugmcp/shared`: Policy system and configuration types
-- `ChildSessionManager`: Manages child debug session lifecycle
-- Network: `net.Socket` for TCP communication
-- Logging: Custom logger with structured output
+### Key Dependencies
+- `@vscode/debugprotocol`: DAP type definitions
+- `ChildSessionManager`: Child session lifecycle management
+- `AdapterPolicy` from `@debugmcp/shared`: Policy configuration system
+- Standard Node.js `net` and `events` modules
 
-## Critical Invariants
-- Buffer management must maintain message boundaries per DAP specification
-- Request sequence numbers must be unique and properly tracked
-- Child session routing decisions are policy-driven and context-aware
-- Configuration deferral prevents race conditions in multi-session scenarios
-- All pending requests must be cleaned up on disconnect to prevent memory leaks
-
-## Notable Patterns
-- Policy pattern for adapter-specific behavior configuration
-- Event forwarding between parent and child sessions
-- Graceful degradation when child sessions fail
-- Time-bounded operations with configurable timeouts
-- Comprehensive error handling with structured logging
+### Critical Behaviors
+- Compatible with VSCode's DAP implementation for message parsing
+- Thread-safe request correlation with automatic timeout cleanup
+- Policy-driven child session adoption with configurable wait timeouts
+- Graceful degradation when child sessions become unavailable
+- Comprehensive logging for debugging multi-session scenarios

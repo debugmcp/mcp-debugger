@@ -1,55 +1,48 @@
 # src/proxy/dap-proxy-connection-manager.ts
-@source-hash: 0da95555b2f9a012
-@generated: 2026-02-09T18:15:10Z
+@source-hash: 4ec7d3774abf368d
+@generated: 2026-02-10T01:19:01Z
 
-## DAP Connection Manager
+**Purpose:** DAP (Debug Adapter Protocol) connection lifecycle management utility that handles connection establishment, initialization, and graceful cleanup for debug adapters with robust retry logic.
 
-Core utility class for managing Debug Adapter Protocol (DAP) connections with robust retry logic and comprehensive session management.
+**Core Class:**
+- `DapConnectionManager` (L14-294): Main orchestrator for DAP client connections
 
-### Primary Responsibility
-Orchestrates DAP adapter connections, session initialization, event handling, and graceful disconnection with built-in resilience patterns for debugging environments.
+**Key Configuration Constants:**
+- `INITIAL_CONNECT_DELAY` (L17): 500ms startup delay for debugpy initialization
+- `MAX_CONNECT_ATTEMPTS` (L18): 60 retry attempts maximum
+- `CONNECT_RETRY_INTERVAL` (L19): 200ms between retry attempts
 
-### Key Classes & Functions
-
-**DapConnectionManager (L14-323)**
-- Main connection management class with configurable retry policies
-- Dependencies: `IDapClientFactory`, `ILogger` for abstracted client creation and logging
-- Optional `AdapterPolicy` support for client configuration customization
+**Primary Methods:**
 
 **Connection Management:**
-- `connectWithRetry()` (L37-80): Implements exponential backoff connection strategy with 60 attempts, 200ms intervals, and 500ms initial delay
-- `setAdapterPolicy()` (L30-32): Configures adapter-specific client creation policies
-- `disconnect()` (L184-215): Graceful disconnection with timeout protection and cleanup guarantees
+- `setAdapterPolicy()` (L30-32): Configures adapter policy for client creation
+- `connectWithRetry()` (L37-80): Core connection method with exponential backoff, temporary error handling, and comprehensive retry logic
+- `disconnect()` (L162-193): Graceful disconnection with timeout protection and dual cleanup (DAP disconnect + client cleanup)
 
 **Session Lifecycle:**
-- `initializeSession()` (L85-123): Handles DAP initialize handshake with comprehensive capability negotiation
-- `setupEventHandlers()` (L128-179): Event subscription manager for DAP protocol events (initialized, output, stopped, continued, thread, exited, terminated, error, close)
-- `sendConfigurationDone()` (L318-322): Completion signal for initialization phase
+- `initializeSession()` (L85-101): Sends DAP initialize request with standardized client configuration
+- `setupEventHandlers()` (L106-157): Registers event listeners for all DAP protocol events (initialized, output, stopped, continued, thread, exited, terminated, error, close)
+- `sendConfigurationDone()` (L289-293): Finalizes session setup
 
-**Launch/Attach Operations:**
-- `sendLaunchRequest()` (L220-273): Configures and sends launch requests with script path resolution, argument handling, and debugging flags
-- `sendAttachRequest()` (L278-285): Handles attach-to-process scenarios with custom configuration
+**Debugging Operations:**
+- `sendLaunchRequest()` (L198-244): Launches debuggee with configuration merging and default fallbacks
+- `sendAttachRequest()` (L249-256): Attaches to existing process
+- `setBreakpoints()` (L261-284): Configures source breakpoints with optional conditions
 
-**Debugging Tools:**
-- `setBreakpoints()` (L290-313): Manages source breakpoints with conditional support
-
-### Configuration Constants
-- `INITIAL_CONNECT_DELAY`: 500ms (L17) - CI/test environment accommodation
-- `MAX_CONNECT_ATTEMPTS`: 60 attempts (L18) 
-- `CONNECT_RETRY_INTERVAL`: 200ms (L19)
-
-### Dependencies
+**Dependencies:**
 - `@vscode/debugprotocol`: DAP type definitions
-- `./dap-proxy-interfaces.js`: Client factory and interface abstractions
-- `@debugmcp/shared`: Adapter policy configuration
+- Local interfaces: `IDapClient`, `IDapClientFactory`, `ILogger`, `ExtendedInitializeArgs`
+- `@debugmcp/shared`: `AdapterPolicy` type
 
-### Architectural Patterns
-- Factory pattern for client creation with policy injection
-- Retry pattern with exponential backoff for connection resilience
-- Event-driven architecture for DAP protocol handling
-- Graceful degradation with timeout protection on disconnect operations
+**Architectural Patterns:**
+- Factory pattern for DAP client creation with optional policy injection
+- Event-driven architecture with comprehensive handler registration
+- Robust error handling with temporary error suppression during connection phase
+- Configuration merging with sensible defaults (noDebug: false, console: 'internalConsole')
+- Promise racing for timeout protection on disconnect operations
 
-### Critical Invariants
-- Connection attempts always include temporary error handlers to prevent crashes during retry loops (L47-50)
-- Disconnect operations always call `client.disconnect()` regardless of DAP protocol success (L207-214)
-- Launch requests validate and resolve script paths with fallback logic (L235-242)
+**Key Invariants:**
+- Always removes temporary error handlers after successful connection
+- Performs dual cleanup on disconnect (protocol disconnect + client cleanup)
+- Maintains session state through policy injection
+- All operations include comprehensive logging for debugging

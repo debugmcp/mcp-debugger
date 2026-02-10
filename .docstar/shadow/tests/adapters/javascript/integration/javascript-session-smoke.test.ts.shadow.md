@@ -1,39 +1,54 @@
 # tests/adapters/javascript/integration/javascript-session-smoke.test.ts
 @source-hash: e4354114cdb6d289
-@generated: 2026-02-09T18:14:12Z
+@generated: 2026-02-10T00:41:10Z
 
-## Purpose
-Integration smoke test for JavaScript adapter session functionality, validating launch configuration transformation and adapter command building.
+## Purpose and Responsibility
 
-## Key Test Structure
-- **Test Suite (L11)**: `JavaScript adapter - session smoke (integration)` - Single integration test for basic JavaScript adapter functionality
-- **Main Test (L37)**: Validates tsx runtime override and adapter command generation with path assertions
+Integration smoke test for JavaScript adapter session functionality, validating TypeScript configuration handling and adapter command generation with tsx runtime.
 
-## Test Configuration (L12-17)
-- **Platform Detection (L12)**: Cross-platform support with Windows-specific path handling
-- **Session Parameters**: Fixed session ID `session-js-3`, localhost adapter on port 56789
-- **Test Paths**: Platform-specific TypeScript file paths for testing
+## Key Components
 
-## Utility Functions
-- **norm() (L7-9)**: Path normalization helper converting backslashes to forward slashes for consistent assertions
+### Test Configuration (L11-17)
+- Platform detection for Windows vs Unix path handling
+- Session ID `session-js-3` for test isolation
+- Dummy TypeScript file paths with platform-specific separators
+- Log directory and adapter host/port configuration
 
-## Test Setup/Teardown (L19-35)
+### Helper Functions
+
+#### `norm(p: unknown)` (L7-9)
+Normalizes paths by converting backslashes to forward slashes for cross-platform assertions.
+
+### Test Lifecycle (L19-35)
 - **beforeEach (L21-25)**: Preserves NODE_OPTIONS environment, resets adapter registry, clears mocks
-- **afterEach (L27-35)**: Restores NODE_OPTIONS environment variable, resets registry, restores mocks
+- **afterEach (L27-35)**: Restores NODE_OPTIONS state, resets registry, restores mocks
 
-## Core Test Logic (L37-82)
-1. **Registry Setup (L39-40)**: Creates adapter registry with validation disabled, registers JavaScript adapter
-2. **Adapter Configuration (L42-51)**: Builds adapter config with session parameters and dummy TypeScript script
-3. **Launch Config Transformation (L56-71)**: Tests transformLaunchConfig with tsx runtime override, validates empty runtime args
-4. **Command Building (L74-82)**: Validates buildAdapterCommand output structure and js-debug vendor path
+### Main Test Case (L37-82)
+**"provides js-debug launch config and adapter command"**
 
-## Key Dependencies
-- **Vitest**: Test framework with mocking capabilities
-- **JavascriptAdapterFactory**: Main adapter implementation being tested
-- **Adapter Registry**: Central registry system for adapter management
+#### Adapter Setup (L38-53)
+- Creates registry with validation disabled
+- Registers JavascriptAdapterFactory
+- Configures adapter with session parameters including TypeScript script path
 
-## Test Assertions
-- Validates tsx runtime executable configuration
-- Ensures adapter command uses absolute paths
-- Confirms js-debug vendor script path structure
-- Verifies port configuration propagation
+#### Launch Configuration Testing (L55-71)
+- Tests `transformLaunchConfig` with explicit tsx runtime override
+- Validates runtimeExecutable is set to 'tsx'
+- Verifies runtimeArgs are empty or undefined
+
+#### Command Building Assertions (L73-82)
+- Tests `buildAdapterCommand` output structure
+- Validates command path is absolute
+- Asserts adapter path ends with `/vendor/js-debug/vsDebugServer.cjs`
+- Verifies port argument matches expected value (56789)
+
+## Dependencies
+- **vitest**: Testing framework
+- **adapter-registry**: Core adapter registration system
+- **JavascriptAdapterFactory**: JavaScript/TypeScript adapter implementation
+
+## Architectural Notes
+- Uses type assertions (`as any`) for flexibility with adapter interfaces
+- Cross-platform path handling via platform detection and normalization
+- Environment variable preservation pattern for test isolation
+- Smoke testing approach focusing on key integration points rather than exhaustive coverage
