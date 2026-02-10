@@ -1,32 +1,33 @@
 # tests/unit/implementations/__mocks__/
-@generated: 2026-02-10T01:19:29Z
+@generated: 2026-02-10T21:26:10Z
 
 ## Purpose
-Mock implementations directory for Node.js built-in and external modules used in unit testing. Provides Jest/Vitest-compatible mocks that replace actual system interactions with controllable test doubles, enabling isolated unit testing without side effects.
+Mock implementations directory for Node.js built-in modules and external libraries used in unit testing. Provides controlled test doubles that isolate unit tests from external dependencies and system interactions.
 
-## Architecture
-Following Jest/Vitest `__mocks__` convention for automatic mock resolution. When tests import mocked modules, the testing framework automatically substitutes these implementations instead of the actual libraries.
+## Components
+- **child_process.js**: Jest mock for Node.js `child_process` module, replacing `spawn` and `exec` functions
+- **fs-extra.js**: Vitest mock for `fs-extra` library with comprehensive filesystem operation mocking
 
-### Mock Strategy
-- **System Process Isolation**: `child_process.js` mocks subprocess execution to prevent actual process spawning during tests
-- **Filesystem Isolation**: `fs-extra.js` provides comprehensive filesystem operation mocking to eliminate file system dependencies
+## Architecture & Integration
+Follows standard testing framework conventions for automatic mock resolution:
+- Located in `__mocks__` directory for automatic Jest/Vitest discovery
+- Provides drop-in replacements for real modules during test execution
+- Exports maintain API compatibility with original modules
 
-## Key Components
-
-### child_process.js
-- **Purpose**: Jest mock for Node.js `child_process` module
-- **Exports**: `spawn`, `exec` as Jest mock functions
-- **Coverage**: Core subprocess execution methods
-
-### fs-extra.js  
-- **Purpose**: Vitest mock for `fs-extra` library
-- **Exports**: Comprehensive filesystem API including file operations (`readFile`, `writeFile`), directory operations (`ensureDir`, `mkdir`), path utilities (`pathExists`, `access`), and JSON operations (`readJson`, `outputJson`)
-- **Import Compatibility**: Supports both named and default import patterns
-
-## Testing Integration
-- **Automatic Resolution**: Testing frameworks automatically use these mocks when the corresponding modules are imported in test files
-- **Framework Support**: Mixed Jest (`child_process.js`) and Vitest (`fs-extra.js`) mock implementations
-- **Isolation Benefits**: Prevents actual system calls, filesystem modifications, and subprocess execution during unit testing
+## Mock Capabilities
+**Process Management**: Child process spawning and execution without creating actual subprocesses
+**Filesystem Operations**: Complete filesystem API mocking including:
+- File operations (read, write, output)
+- Directory management (create, remove, ensure)
+- Path utilities (access, exists, stat)
+- Stream operations and JSON handling
 
 ## Usage Pattern
-Test files import modules normally (`import { readFile } from 'fs-extra'` or `const { spawn } = require('child_process')`), and the testing framework transparently substitutes these mock implementations, allowing tests to verify behavior without system-level side effects.
+Automatically activated when corresponding modules are imported in test files. Tests can control mock behavior using Jest (`jest.fn()`) or Vitest (`vi.fn()`) mock utilities to verify calls and define return values.
+
+## Testing Framework Support
+- **Jest**: Native integration via manual mock pattern (child_process.js)
+- **Vitest**: Full compatibility with vi.fn() mock functions (fs-extra.js)
+
+## Data Flow
+Import statements in test files → Framework mock resolution → Mock module loading → Controlled test execution without external dependencies

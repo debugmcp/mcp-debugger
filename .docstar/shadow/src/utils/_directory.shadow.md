@@ -1,76 +1,82 @@
 # src/utils/
-@generated: 2026-02-10T01:19:42Z
+@generated: 2026-02-10T21:26:30Z
 
-## Purpose
+## Overall Purpose
 
-The `src/utils` directory provides foundational utilities for the Debug MCP Server, offering core infrastructure for path resolution, file operations, logging, process detection, configuration management, error handling, and type safety. This module serves as the shared foundation layer supporting debugging operations across container and host environments.
+The `src/utils` directory provides foundational utility modules that support the Debug MCP Server's core operations across containerized and host environments. These utilities handle path resolution, error messaging, process detection, language configuration, file operations, logging, and type safety - forming the infrastructure layer that enables reliable debugging operations.
 
-## Key Components & Integration
+## Key Components and Integration
 
-### Path & Environment Management
-- **container-path-utils.ts**: Central path resolution engine handling container vs host deployment modes through `MCP_CONTAINER` environment detection
-- **language-config.ts**: Runtime language adapter control via `DEBUG_MCP_DISABLE_LANGUAGES` environment variable
-- Both components provide environment-aware configuration that adapts behavior based on deployment context
+### Core Infrastructure
+- **container-path-utils.ts**: Central path resolution authority that provides deterministic path handling for both container (`MCP_CONTAINER=true`) and host deployment modes. All file operations throughout the system flow through this module's `resolvePathForRuntime()` function.
+- **logger.ts**: Winston-based logging infrastructure with environment-aware configuration, console output silencing for transport integrity, and container-specific log paths. Provides the logging foundation used across all components.
 
 ### File System Operations
-- **simple-file-checker.ts**: High-level file existence checking with path resolution integration
-- **line-reader.ts**: Optimized source code reader with LRU caching for breakpoint context and stack trace visualization
-- Both leverage container-path-utils for consistent path handling across deployment modes
+- **line-reader.ts**: Performance-optimized file reader with LRU caching for source code context extraction. Used extensively for breakpoint context and stack trace visualization, with binary file detection and size constraints.
+- **simple-file-checker.ts**: Centralized file existence checking that integrates with container-path-utils for proper path resolution and provides structured results with error isolation.
 
-### Process & System Detection
-- **jdwp-detector.ts**: Java Debug Wire Protocol configuration extraction from running processes on Linux systems
-- Provides runtime introspection capabilities for Java debugging scenarios
+### Process and Runtime Detection
+- **jdwp-detector.ts**: Linux-specific Java Debug Wire Protocol detector that extracts debug configuration from running Java processes using `/proc` filesystem and `lsof`. Critical for automatic debug session attachment.
+- **language-config.ts**: Runtime language adapter control through `DEBUG_MCP_DISABLE_LANGUAGES` environment variable, enabling selective debugging scenarios without code changes.
 
-### Infrastructure Services
-- **logger.ts**: Winston-based logging framework with environment-specific behavior and console output management
-- **error-messages.ts**: Centralized error message factory for timeout scenarios across DAP operations
-- **type-guards.ts**: Runtime type safety enforcement for IPC communication and data serialization
+### Error Handling and Validation
+- **error-messages.ts**: Centralized factory for timeout-related error messages across DAP requests, proxy initialization, step operations, and adapter readiness. Provides consistent diagnostic messaging with recovery suggestions.
+- **type-guards.ts**: Runtime type safety validation for critical data structures like `AdapterCommand` and `ProxyInitPayload`. Ensures data integrity at IPC boundaries with comprehensive error context.
 
 ## Public API Surface
 
-### Core Entry Points
-- `createLogger(namespace, options)` - Logger factory with environment-aware configuration
-- `resolvePathForRuntime(inputPath, environment)` - Universal path resolution for container/host modes
-- `LineReader` class - Cached file reading for source code context extraction
-- `validateProxyInitPayload(payload)` / `validateAdapterCommand(cmd)` - Type safety for IPC boundaries
+### Primary Entry Points
+- `resolvePathForRuntime(inputPath, environment)` - Core path resolution for all file operations
+- `createLogger(namespace, options)` / `getLogger()` - Logging infrastructure access
+- `getLineContext(filePath, lineNumber, options)` - Source code context extraction
+- `checkExists(path)` - File existence checking with path resolution
 - `detectSuspendByPort(port)` / `detectSuspendByPid(pid)` - JDWP configuration detection
 - `isLanguageDisabled(language)` - Runtime language adapter control
+- `validateAdapterCommand(obj, source)` - Type safety validation
 
 ### Factory Functions
-- `createSimpleFileChecker(filesystem, environment, logger)` - File checking with dependency injection
-- `createAdapterCommand(command, args, env)` - Type-safe command construction
+- `createSimpleFileChecker(filesystem, environment, logger)` - File checker instantiation
+- `ErrorMessages.*` - Timeout error message factories
+- `createAdapterCommand(command, args, env)` - Safe command creation
 
-## Internal Organization & Data Flow
+## Internal Organization and Data Flow
 
-The utilities follow a layered architecture:
+### Dependency Flow
+1. **Foundation Layer**: container-path-utils and logger provide base services
+2. **File Operations Layer**: line-reader and simple-file-checker build on path resolution
+3. **Validation Layer**: type-guards and error-messages ensure data integrity
+4. **Detection Layer**: jdwp-detector and language-config provide runtime intelligence
 
-1. **Foundation Layer**: container-path-utils provides path resolution that all file operations depend on
-2. **Service Layer**: logger, error-messages, and type-guards provide infrastructure services
-3. **Operation Layer**: line-reader, simple-file-checker, and jdwp-detector provide specialized operations
-4. **Configuration Layer**: language-config provides runtime behavior control
+### Cross-Module Integration
+- All file operations flow through container-path-utils for consistent path handling
+- All modules use the logger utility for consistent error reporting and debugging
+- Type guards validate data at module boundaries, especially for IPC communication
+- Error messages provide consistent user-facing diagnostics across timeout scenarios
 
-Data flows through dependency injection patterns, with most utilities accepting environment and filesystem abstractions for testability. The container-path-utils module serves as the single source of truth for path transformations across the entire system.
-
-## Important Patterns & Conventions
+## Important Patterns and Conventions
 
 ### Environment-Driven Configuration
-- All utilities respect `MCP_CONTAINER` for deployment mode detection
-- Environment variables control runtime behavior without code changes
-- Graceful fallbacks when environment configuration is missing
+- Container mode detection via `MCP_CONTAINER` environment variable
+- Console output silencing via `CONSOLE_OUTPUT_SILENCED` for transport integrity
+- Language disabling via `DEBUG_MCP_DISABLE_LANGUAGES` for debugging control
+- Log level configuration via `DEBUG_MCP_LOG_LEVEL`
 
-### Error Handling Philosophy
-- Structured error results rather than exceptions for operational failures
-- Rich error context with troubleshooting guidance
-- Defensive programming with validation at system boundaries
+### Error Handling Strategy
+- Graceful degradation: utilities return null/false rather than throwing on expected failures
+- Structured error results with original/effective path tracking
+- Comprehensive error context including source location and expected formats
+- Centralized error message factories for consistent diagnostics
 
 ### Performance Optimization
 - LRU caching in line-reader for repeated file access
-- Lazy initialization patterns in logger and file operations
 - Binary file detection to avoid processing non-text content
+- Timeout controls for external process interactions (lsof)
+- Lazy initialization patterns for expensive resources
 
-### Type Safety
-- Runtime validation at IPC boundaries
-- Comprehensive type guards for external data
-- Factory functions ensuring valid object construction
+### Type Safety and Validation
+- Runtime type guards at critical boundaries (IPC, serialization)
+- Factory functions that enforce invariants during object creation
+- Comprehensive validation with detailed error messages
+- Safe serialization/deserialization with validation hooks
 
-The directory provides the essential infrastructure that enables the Debug MCP Server to operate reliably across different deployment environments while maintaining performance and type safety.
+This utilities directory serves as the reliable foundation enabling the Debug MCP Server's cross-environment debugging capabilities while maintaining performance, type safety, and operational consistency.

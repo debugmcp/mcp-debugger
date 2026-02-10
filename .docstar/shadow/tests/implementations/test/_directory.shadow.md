@@ -1,65 +1,72 @@
 # tests/implementations/test/
-@generated: 2026-02-10T01:19:36Z
+@generated: 2026-02-10T21:26:18Z
 
-## Overall Purpose and Responsibility
+## Overview
 
-This test implementation module provides a comprehensive suite of fake/mock implementations for all process-related interfaces in the system. It enables deterministic unit testing of process management code without spawning real processes, offering controllable simulation of process lifecycles, debugging scenarios, and proxy communications.
+The `tests/implementations/test` directory provides a comprehensive suite of fake/mock implementations for all process-related interfaces, enabling deterministic unit testing of process management functionality without spawning real system processes.
 
-## Key Components and Relationships
+## Core Purpose
 
-The module follows a layered architecture mirroring the production process interfaces:
+This module serves as the testing backbone for process-related operations by providing controllable test doubles that simulate real process behavior. It enables unit tests to:
+- Execute process-launching code deterministically
+- Control process lifecycle events (spawn, output, error, exit)
+- Verify process interactions without system dependencies
+- Test error scenarios and edge cases reliably
 
-**Core Process Layer**
-- `FakeProcess` - Base process mock implementing `IProcess` with controllable lifecycle events
-- `FakeProcessLauncher` - Creates and tracks FakeProcess instances
+## Key Components and Architecture
 
-**Debug Target Layer** 
-- `FakeDebugTargetLauncher` - Specialized launcher for Python debugging scenarios with auto-incrementing debug ports
+The module implements a layered fake system mirroring the real process architecture:
 
-**Proxy Process Layer**
-- `FakeProxyProcess` - Extended process mock with command tracking and initialization simulation
-- `FakeProxyProcessLauncher` - Launches proxy processes with automatic 'init' command responses
+**Base Process Layer**
+- `FakeProcess` - Core EventEmitter-based process mock with controllable stdin/stdout/stderr streams
+- `FakeProxyProcess` - Extended process mock for proxy command scenarios
+
+**Launcher Layer** 
+- `FakeProcessLauncher` - Basic process launching with command/args tracking
+- `FakeDebugTargetLauncher` - Python debug target launching with port management
+- `FakeProxyProcessLauncher` - Proxy process launching with automatic initialization
 
 **Factory Layer**
-- `FakeProcessLauncherFactory` - Centralized factory providing singleton access to all fake launchers
+- `FakeProcessLauncherFactory` - Centralized factory providing singleton fake instances
 
 ## Public API Surface
 
-**Primary Entry Points:**
-- `FakeProcessLauncherFactory` - Main factory for obtaining all launcher instances
-- Individual launcher classes can be instantiated directly for isolated testing
+**Primary Entry Point:**
+- `FakeProcessLauncherFactory` - Main factory for accessing all fake launchers
 
-**Key Methods:**
-- `launch()` / `launchPythonDebugTarget()` / `launchProxy()` - Process creation methods
-- `simulate*()` methods on FakeProcess - Control process behavior (output, errors, exit, etc.)
-- `prepare*()` methods - Pre-configure next process/target behavior
-- `reset()` methods - Clean state for test isolation
+**Core Launcher Interfaces:**
+- `IProcessLauncher.launch()` - Launch basic processes
+- `IDebugTargetLauncher.launchPythonDebugTarget()` - Launch debug targets with ports
+- `IProxyProcessLauncher.launchProxy()` - Launch proxy processes with session management
+
+**Test Control Methods:**
+- `prepare*()` methods - Pre-configure next launch behavior
+- `simulate*()` methods - Control process lifecycle events
+- `reset()` methods - Clean up state between tests
+- `getLastLaunched*()` methods - Retrieve launch history for verification
 
 ## Internal Organization and Data Flow
 
+1. **Launch Request** → Appropriate fake launcher captures parameters
+2. **Process Creation** → Returns pre-configured fake process instance
+3. **Lifecycle Simulation** → Test code controls process events via simulate methods
+4. **State Tracking** → All interactions logged for test verification
+5. **Cleanup** → Reset methods restore clean state
+
+## Key Testing Patterns
+
+**Deterministic Behavior:**
+- Fixed PIDs (12345), incremental debug ports (starting at 5678)
+- Controllable async event timing via `process.nextTick()`
+
+**Command Interception:**
+- Automatic responses to initialization commands in proxy scenarios
+- Complete command history tracking for verification
+
 **State Management:**
-- Each fake maintains internal arrays tracking launched processes/targets
-- Process state managed through private fields (`_killed`, `_exitCode`, `_signalCode`)
-- Automatic ID generation (process IDs, debug ports) for realistic simulation
+- Comprehensive launch history tracking (commands, args, options, environments)
+- Centralized reset functionality across all fakes
 
-**Event Flow:**
-- EventEmitter-based async simulation using `process.nextTick()` for realistic timing
-- Automatic response interception in proxy launchers for 'init' commands
-- Stream-based I/O simulation using PassThrough streams
+## Integration Points
 
-**Test Orchestration:**
-- Centralized reset capability across all fakes via factory
-- Launch history tracking for test verification
-- Pre-configuration support for deterministic test scenarios
-
-## Important Patterns and Conventions
-
-**Test Double Pattern:** All implementations are controllable fakes rather than stubs, providing rich simulation capabilities while maintaining deterministic behavior.
-
-**Factory Pattern:** Centralized access to all fakes with singleton management for consistent test state.
-
-**Event Simulation:** Realistic async behavior through EventEmitter patterns matching Node.js process APIs.
-
-**Command Interception:** Automatic response generation for common initialization patterns, reducing test setup complexity.
-
-**Deterministic Defaults:** Fixed process IDs (12345) and predictable port allocation for consistent test execution.
+This module provides fake implementations for all interfaces defined in `process-interfaces.js`, ensuring complete test coverage of process-related functionality while maintaining behavioral fidelity to real process operations.

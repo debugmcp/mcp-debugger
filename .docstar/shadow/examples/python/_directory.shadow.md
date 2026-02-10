@@ -1,59 +1,64 @@
 # examples/python/
-@generated: 2026-02-10T01:19:38Z
+@generated: 2026-02-10T21:26:19Z
 
 ## Overall Purpose
-
-The `examples/python` directory serves as a comprehensive test suite for MCP (Message Control Protocol) Server debugging functionality. This collection of Python scripts provides controlled debugging scenarios with varying complexity levels, from simple variable operations to recursive algorithms, designed to exercise and validate debugger capabilities.
+This directory contains a collection of Python test scripts specifically designed for MCP (Message Control Protocol) debugger testing and development. The module serves as a comprehensive test suite providing various debugging scenarios, from simple variable operations to complex algorithmic implementations, enabling thorough validation of debugging capabilities.
 
 ## Key Components and Organization
 
-### Core Test Scripts
-- **`simple_test.py`** - Minimal debugging target with basic variable swap operation, ideal for initial breakpoint testing
-- **`test_python_debug.py`** - Intermediate complexity with mathematical functions (factorial, list processing) for step-through debugging
-- **`python_test_comprehensive.py`** - Full-featured test suite with 6 distinct debugging scenarios covering all major Python constructs
-- **`fibonacci.py`** - Specialized debugging exercise with intentional bugs and algorithm comparison scenarios
+### Test Script Categories
+- **Simple Debugging Scripts**: `simple_test.py` - minimal variable swap operations for basic breakpoint testing
+- **Algorithmic Test Scripts**: `fibonacci.py`, `test_python_debug.py` - mathematical functions (factorial, Fibonacci) for step-through debugging
+- **Comprehensive Test Suite**: `python_test_comprehensive.py` - extensive debugging scenario coverage with 6 distinct test cases
 
-### Complexity Progression
-The directory follows a graduated complexity approach:
-1. **Simple** → Basic variable operations and control flow
-2. **Intermediate** → Mathematical algorithms and data processing
-3. **Comprehensive** → Multi-scenario testing with diverse Python features
-4. **Advanced** → Bug injection and comparative algorithm analysis
+### Core Algorithmic Implementations
+- **Fibonacci Calculations**: Both recursive O(2^n) and iterative O(n) implementations across multiple files
+- **Factorial Functions**: Recursive and iterative variants for call stack debugging
+- **List Processing**: Summation, doubling, and basic data manipulation operations
+- **Control Flow Testing**: Conditional branches, loops, and variable state changes
 
 ## Public API Surface
 
-### Main Entry Points
-Each script follows the standard Python execution pattern:
-```python
-if __name__ == "__main__":
-    main()  # or direct execution
-```
+### Primary Entry Points
+Each script functions as an independent executable with standard Python main guards:
+- `simple_test.main()` - Basic variable swap demonstration
+- `fibonacci.main()` - Dual-approach Fibonacci with intentional bug injection
+- `python_test_comprehensive.main()` - Six-scenario comprehensive debugging test
+- `test_python_debug.main()` - Mathematical operations debugging workflow
 
-### Key Debugging Functions
-- **Mathematical algorithms**: `factorial()`, `fibonacci_recursive()`, `fibonacci_iterative()`
-- **Data processing**: `sum_list()`, `calculate_sum()`, `process_data()`
-- **Test orchestration**: `main()` functions in each script
+### Common Function Patterns
+- **fibonacci(n)** - Available in multiple implementations across files
+- **factorial(n)** - Recursive mathematical computation in several variants  
+- **sum_list(numbers)** - List processing operations
+- **process_data(data)** - Data transformation utilities
 
-## Internal Data Flow
+## Internal Organization and Data Flow
 
-1. **Script Selection**: Choose appropriate test script based on debugging complexity needs
-2. **Function Execution**: Each script demonstrates specific programming patterns (recursion, iteration, data manipulation)
-3. **Breakpoint Placement**: Strategic locations marked for debugger interaction
-4. **State Inspection**: Variable changes and algorithm behavior observable at each step
+### Execution Pattern
+All scripts follow consistent structure:
+1. Function definitions with single-responsibility design
+2. main() orchestration function containing test scenarios
+3. Standard `if __name__ == "__main__"` execution guard
+4. Print-based output for debugging observation
+
+### Debugging Architecture
+- **Breakpoint Targets**: Strategic comment markers and simple operations ideal for breakpoint placement
+- **State Observation**: Clear variable mutations and transformations for inspection
+- **Algorithm Variety**: Different computational approaches (recursive vs iterative) for diverse debugging scenarios
+- **Error Injection**: Intentional bugs in fibonacci.py for debugging practice
 
 ## Important Patterns and Conventions
 
-### Debugging-Optimized Design
-- **Self-contained**: No external dependencies beyond Python standard library
-- **Predictable outputs**: Deterministic behavior for consistent debugging sessions  
-- **Clear variable naming**: Optimized for inspection rather than brevity
-- **Strategic comments**: Explicit breakpoint location indicators
+### Testing Philosophy
+- **Self-Contained**: No external dependencies beyond Python standard library
+- **Deterministic**: Predictable outputs for consistent debugging validation  
+- **Educational**: Clear, readable code optimized for learning rather than performance
+- **Incremental Complexity**: From simple variable operations to multi-step algorithmic processes
 
-### Algorithm Coverage
-- **Recursive patterns**: Fibonacci and factorial implementations for call stack debugging
-- **Iterative patterns**: Loop-based algorithms for step-through analysis
-- **Data structure operations**: Lists, dictionaries, and basic collections
-- **Control flow**: Conditionals, loops, and function calls
+### Debugging-Specific Design
+- **Explicit Breakpoint Hints**: Comments indicating optimal debugging locations
+- **Variable Naming**: Clear, descriptive identifiers for easy inspection
+- **State Transitions**: Obvious before/after states for debugging verification
+- **Error Scenarios**: Both correct implementations and intentional bugs for comprehensive testing
 
-### Educational Structure
-Each script balances simplicity with instructional value, providing graduated learning experiences for debugging techniques while serving as comprehensive test cases for MCP Server validation.
+This module serves as a complete debugging test harness for MCP server development, providing graduated complexity levels from basic variable manipulation to sophisticated algorithmic debugging scenarios.

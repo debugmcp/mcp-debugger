@@ -1,49 +1,49 @@
 # tests/e2e/mcp-server-smoke-javascript.test.ts
-@source-hash: 0692a51e836a4311
-@generated: 2026-02-10T00:42:02Z
+@source-hash: c338a93197059f73
+@generated: 2026-02-10T21:25:38Z
 
-## Purpose
-End-to-end smoke test suite for JavaScript debugging functionality via MCP (Model Context Protocol) server. Validates core debugging operations without implementation coupling to ensure functionality survives refactoring.
+**Purpose**: End-to-end smoke tests for JavaScript debugging functionality via MCP (Model Context Protocol) server integration. Validates core debugging workflow without implementation coupling.
 
-## Test Environment Setup
-- **Test Framework**: Vitest with async beforeAll/afterAll/afterEach hooks (L9, L26-90)
-- **MCP Client Setup**: Uses StdioClientTransport to communicate with mcp-debugger CLI (L36-53)
-- **Target Script**: Tests against `examples/javascript/simple_test.js` (L92)
-- **Session Management**: Tracks sessionId for proper cleanup between tests (L24, L78-90)
+## Test Architecture
 
-## Key Test Cases
+**Test Suite**: `JavaScript Debugging - Simple Smoke Tests` (L21)
+- **Client Setup**: MCP client with StdioClientTransport (L22-24, L36-53)
+- **Server Target**: `@debugmcp/mcp-debugger` CLI via Node.js subprocess (L29, L37-38)
+- **Test Script**: Uses `examples/javascript/simple_test.js` (L92)
 
-### Full Debugging Cycle Test (L94-256)
-Comprehensive workflow validation covering:
-1. **Session Creation** (L98-109): Creates debug session and validates sessionId
-2. **Breakpoint Setting** (L114-125): Sets breakpoint at line 14 and verifies acceptance
-3. **Debug Start** (L129-146): Launches debugging with DAP args, expects paused state
-4. **Stack Trace** (L153-165): Retrieves and validates stack frame structure
-5. **Variable Access** (L169-181): Gets local variables (may be empty but mechanism works)
-6. **Step Execution** (L185-210): Steps over and validates location/context response
-7. **Expression Evaluation** (L214-227): Evaluates "1 + 2", expects result containing "3"
-8. **Execution Control** (L231-238): Continues execution to completion
-9. **Session Cleanup** (L244-253): Properly closes debug session
+## Key Test Components
 
-### Multiple Breakpoints Test (L258-295)
-Validates setting multiple breakpoints (lines 11 and 14) in single session.
+**Setup/Teardown** (L26-90):
+- `beforeAll` (L26-54): Validates CLI bundle exists, starts MCP server with stdio transport
+- `afterAll` (L56-76): Cleanup debug session and close connections
+- `afterEach` (L78-90): Per-test session cleanup
 
-### Source Context Test (L297-340)
-Tests source code retrieval with context lines around target line 14.
+**Core Integration Test** (L94-256):
+Complete debugging workflow validation:
+1. **Session Creation** (L97-110): Creates JavaScript debug session
+2. **Breakpoint Setting** (L113-125): Sets breakpoint at line 14
+3. **Debug Start** (L128-146): Launches script, expects paused state
+4. **Stack Inspection** (L152-165): Retrieves and validates stack frames
+5. **Variable Access** (L168-181): Gets local variables (allows empty arrays)
+6. **Step Control** (L184-210): Step over execution, validates location/context response
+7. **Expression Evaluation** (L213-227): Evaluates `1 + 2`, expects result containing "3"
+8. **Continue Execution** (L230-238): Resumes program execution
+9. **Session Cleanup** (L244-253): Closes debug session
 
-## Dependencies
-- **MCP SDK**: Client and StdioClientTransport for server communication (L13-14)
-- **Smoke Test Utils**: parseSdkToolResult helper for response parsing (L15)
-- **Node.js**: File system and path utilities for script location (L10-12)
+**Additional Tests**:
+- **Multi-breakpoint Test** (L258-295): Sets breakpoints at lines 11 and 14
+- **Source Context Test** (L297-340): Retrieves source code context around line 14
 
-## Architecture Patterns
-- **Resilient Testing**: Focuses on behavioral validation rather than implementation details
-- **Resource Management**: Proper cleanup in afterEach/afterAll with error handling (L78-90)
-- **CLI Validation**: Ensures mcp-debugger CLI bundle exists before testing (L29-34)
-- **Timeout Handling**: 30s setup timeout, 60s test timeout for stability (L54, L256)
+## Critical Dependencies
 
-## Critical Invariants
-- Sessions must be properly closed to prevent resource leaks
-- Test waits (1-2s) allow async operations to stabilize
-- All tool calls go through parseSdkToolResult for consistent response handling
-- Tests expect specific tool response formats (success flags, sessionId, etc.)
+- **MCP SDK**: `@modelcontextprotocol/sdk` for client/transport (L13-14)
+- **Utility**: `parseSdkToolResult` from `./smoke-test-utils.js` (L15)
+- **Test Framework**: Vitest with 30s/60s timeouts (L9, L54, L256)
+
+## Architecture Notes
+
+- **Transport**: Uses stdio-based communication with Node.js subprocess
+- **Error Handling**: Graceful cleanup on session close failures (L63-65, L85-87)
+- **Timing**: Strategic delays for session stabilization (L149, L210, L241)
+- **Validation Strategy**: Focuses on successful operation rather than exact response formats
+- **Environment**: Sets `NODE_ENV=test` for server process (L41)

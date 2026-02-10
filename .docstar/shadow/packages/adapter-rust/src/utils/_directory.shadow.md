@@ -1,78 +1,75 @@
 # packages/adapter-rust/src/utils/
-@generated: 2026-02-10T01:19:45Z
+@generated: 2026-02-10T21:26:24Z
 
-## Rust Development Toolchain Utilities
+## Purpose
 
-This directory provides comprehensive utilities for Rust development environment management within the adapter-rust package. It serves as the foundation layer for Rust project discovery, toolchain validation, binary analysis, and debugging infrastructure setup.
+The `packages/adapter-rust/src/utils` directory provides comprehensive Rust development environment management utilities for a debug adapter. It serves as the foundational layer for Rust/Cargo project detection, binary analysis, toolchain verification, and debugger integration, enabling the adapter to work seamlessly across different platforms and Rust development configurations.
 
-## Core Purpose and Responsibility
+## Key Components and Architecture
 
-The utils module abstracts the complexity of interacting with the Rust/Cargo ecosystem, providing high-level APIs for:
-- Rust toolchain detection and validation (rustc, cargo, dlltool)
-- Cargo project management (discovery, building, testing, metadata extraction)
-- Binary format analysis and debug information detection
-- CodeLLDB debugger integration and path resolution
+The directory contains four specialized utility modules that work together to provide complete Rust project lifecycle support:
 
-## Key Components and Relationships
+### Core Project Management (`cargo-utils.ts`)
+- **Primary Entry Points**: `resolveCargoProject()`, `buildCargoProject()`, `findCargoProjectRoot()`
+- **Responsibilities**: Cargo project discovery, metadata extraction, compilation target management, and intelligent rebuild detection
+- **Key Features**: Cargo.toml parsing, target enumeration via `cargo metadata`, build orchestration, and change detection
 
-**Toolchain Management (`rust-utils.ts`)**
-- Primary entry point for Rust environment validation
-- Provides installation checks, version detection, and binary path resolution
-- Serves as the foundation layer that other components depend on
-- Re-exports CodeLLDB resolver for unified access
+### Environment Verification (`rust-utils.ts`)  
+- **Primary Entry Points**: `checkCargoInstallation()`, `checkRustInstallation()`, `getRustHostTriple()`
+- **Responsibilities**: Rust toolchain availability verification, version detection, and platform-specific tool resolution
+- **Key Features**: Cargo/rustc presence validation, host triple detection, and Windows dlltool resolution
 
-**Project Operations (`cargo-utils.ts`)**
-- Builds on rust-utils foundation for project-specific operations
-- Handles Cargo.toml parsing, target enumeration, and build orchestration
-- Implements intelligent rebuild detection using file modification times
-- Provides both low-level cargo command wrappers and high-level project management
+### Binary Analysis (`binary-detector.ts`)
+- **Primary Entry Points**: `detectBinaryFormat()`
+- **Responsibilities**: Executable format analysis for Rust binaries, determining compiler toolchain and debug information
+- **Key Features**: MSVC vs GNU detection, PDB/DWARF debug format identification, and import dependency analysis
 
-**Binary Analysis (`binary-detector.ts`)**
-- Analyzes compiled Rust binaries for toolchain classification (MSVC vs GNU)
-- Detects debug information format (PDB vs DWARF) for debugging setup
-- Scans import dependencies to determine runtime requirements
-- Works in conjunction with cargo-utils build outputs
-
-**Debug Infrastructure (`codelldb-resolver.ts`)**
-- Resolves platform-specific CodeLLDB debugger paths across deployment scenarios
-- Handles version detection and fallback mechanisms
-- Supports both production installs and development environments
+### Debugger Integration (`codelldb-resolver.ts`)
+- **Primary Entry Points**: `resolveCodeLLDBExecutable()`, `getCodeLLDBVersion()`
+- **Responsibilities**: Platform-specific CodeLLDB debugger resolution and version management
+- **Key Features**: Multi-platform executable discovery, version detection, and fallback path resolution
 
 ## Public API Surface
 
-**Primary Entry Points:**
-- `checkRustInstallation()` / `checkCargoInstallation()` - Environment validation
-- `resolveCargoProject(projectPath)` - Project discovery and metadata
-- `buildCargoProject(projectRoot, logger?, buildMode?)` - High-level build operations
-- `detectBinaryFormat(binaryPath)` - Binary analysis and classification
-- `resolveCodeLLDBExecutable()` - Debugger setup and integration
+The module provides these primary interfaces for adapter consumption:
 
-**Supporting Functions:**
-- `findCargoProjectRoot(startPath)` - Project root discovery
-- `needsRebuild()` - Intelligent build optimization
-- `runCargoTest()` - Test execution wrapper
-- `getRustBinaryPath()` - Binary location resolution with platform handling
+**Project Management:**
+- `resolveCargoProject(projectPath)` - Complete project analysis and metadata extraction
+- `buildCargoProject(projectRoot, logger?, buildMode?)` - High-level build orchestration
+- `findCargoProjectRoot(filePath)` - Project root discovery from any file path
+
+**Environment Validation:**
+- `checkCargoInstallation()` / `checkRustInstallation()` - Toolchain availability checks
+- `getRustHostTriple()` - Platform identification for target-specific operations
+
+**Binary Analysis:**
+- `detectBinaryFormat(filePath)` - Comprehensive executable format detection
+
+**Debugger Support:**
+- `resolveCodeLLDBExecutable()` - Debugger executable resolution across platforms
 
 ## Internal Organization and Data Flow
 
-1. **Environment Setup**: rust-utils validates Rust/Cargo availability
-2. **Project Discovery**: cargo-utils locates and parses project structure
-3. **Build Operations**: Coordinated cargo command execution with progress tracking
-4. **Binary Analysis**: Post-build analysis determines debug configuration
-5. **Debug Setup**: CodeLLDB resolution enables debugging capabilities
+The utilities follow a layered architecture with clear separation of concerns:
+
+1. **Detection Layer**: `rust-utils.ts` validates environment prerequisites
+2. **Project Layer**: `cargo-utils.ts` handles project structure and build operations  
+3. **Analysis Layer**: `binary-detector.ts` examines compiled artifacts
+4. **Debug Layer**: `codelldb-resolver.ts` provides debugger integration
+
+**Typical Data Flow:**
+1. Environment validation (rust-utils) → 2. Project discovery (cargo-utils) → 3. Build execution (cargo-utils) → 4. Binary analysis (binary-detector) → 5. Debug setup (codelldb-resolver)
 
 ## Important Patterns and Conventions
 
-**Error Handling Strategy**: Graceful degradation with null/false returns rather than exceptions, enabling robust fallback chains across the adapter.
+**Error Handling**: All modules use graceful error handling, returning null/false/empty arrays rather than throwing exceptions, ensuring adapter stability.
 
-**Cross-Platform Compatibility**: Consistent handling of Windows executable extensions, path separators, and platform-specific toolchain locations.
+**Cross-Platform Compatibility**: Extensive platform-aware logic handles Windows executable extensions, macOS architectures, and Linux variations transparently.
 
-**Command Execution Pattern**: Promise-wrapped child_process.spawn operations with shell:true for reliability, capturing both stdout/stderr for comprehensive output.
+**Process Spawning**: Consistent use of `child_process.spawn` with `shell: true` for reliable cross-platform command execution.
 
-**File System Monitoring**: Modification time-based rebuild detection minimizes unnecessary compilation cycles.
+**Filesystem-First Approach**: Prioritizes filesystem checks and metadata parsing over command execution for performance and reliability.
 
-**Multi-Path Resolution**: Robust search strategies with fallbacks handle various deployment scenarios (development, production, monorepo).
+**Multi-Path Resolution**: Robust fallback mechanisms for tool and binary discovery across different deployment scenarios (production, development, monorepo).
 
-**Platform Abstraction**: Encapsulates platform-specific differences in toolchain layout and executable naming conventions.
-
-This module serves as the critical infrastructure layer that enables the rust-adapter to seamlessly integrate with the Rust development ecosystem across different platforms and deployment configurations.
+**Async-First Design**: All operations are Promise-based with proper async/await patterns for non-blocking adapter operation.

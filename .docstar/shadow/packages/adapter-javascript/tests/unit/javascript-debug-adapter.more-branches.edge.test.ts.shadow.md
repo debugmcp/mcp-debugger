@@ -1,35 +1,55 @@
 # packages/adapter-javascript/tests/unit/javascript-debug-adapter.more-branches.edge.test.ts
-@source-hash: 70781ae99304dcf1
-@generated: 2026-02-10T00:41:07Z
+@source-hash: c9696b081a8778bd
+@generated: 2026-02-10T21:25:33Z
 
-**Purpose**: Edge case and branch coverage test suite for `JavascriptDebugAdapter`, targeting specific code paths and error conditions not covered by main unit tests.
+## Purpose
+Unit test file providing additional branch coverage for the `JavascriptDebugAdapter` class, focusing on edge cases and less common code paths to improve test coverage.
 
-**Test Structure**:
-- Setup with mock dependencies (L8-19): `depsWithLogger` with mock logger, `depsNoLogger` without logger
-- Standard vitest lifecycle hooks (L22-29) for mock management
+## Test Structure
+- **Main Test Suite** (L21-104): "JavascriptDebugAdapter additional branch coverage"
+- **Setup/Teardown** (L22-29): Mock restoration and cleanup using Vitest
+- **Test Dependencies** (L8-19): Two mock AdapterDependencies variants - one with logger, one without
 
-**Key Test Cases**:
+## Key Test Cases
 
-1. **Runtime Executable Fallback (L31-41)**: Tests `determineRuntimeExecutable` when no TypeScript runners are detected and no dependency logger exists. Verifies fallback to console.warn and returns 'node' executable.
+### Disposal Without Connection Test (L31-49)
+Tests adapter disposal behavior when no prior connection was established:
+- Verifies only 'disposed' event is emitted (not 'disconnected')
+- Confirms state resets to UNINITIALIZED
+- Ensures connection status returns false
 
-2. **Disposal Without Connection (L43-61)**: Tests adapter disposal without prior connection, ensuring only 'disposed' event is emitted (not 'disconnected'), and state resets to `UNINITIALIZED`.
+### Configuration Transformation Test (L51-61)
+Tests `transformLaunchConfig` method:
+- Verifies user-provided `NODE_ENV` is preserved
+- Confirms custom environment variables are merged
+- Tests environment variable handling in launch configuration
 
-3. **Launch Config Environment Handling (L63-73)**: Tests `transformLaunchConfig` respects user-provided `NODE_ENV` and merges with `process.env`, ensuring environment variable precedence.
+### DAP Event Handling Tests (L63-94)
+Two tests covering Debug Adapter Protocol event handling:
 
-4. **DAP Event Handling - Continued (L75-88)**: Tests `handleDapEvent` with 'continued' event leaves adapter state unchanged.
+#### Continued Event Test (L63-76)
+- Tests 'continued' event handling leaves adapter state unchanged
+- Uses mock DebugProtocol.Event structure
 
-5. **DAP Event Handling - Unknown Events (L90-106)**: Tests default branch in `handleDapEvent` for unknown events, verifying custom events are emitted with their body objects intact.
+#### Unknown Event Test (L78-94)
+- Tests default branch for unrecognized DAP events
+- Verifies custom events are properly emitted with body data
+- Uses event listener to capture emitted events
 
-6. **Dependency Requirements (L108-115)**: Tests `getRequiredDependencies` returns Node.js dependency information with version and installation URL.
+### Dependencies Query Test (L96-103)
+Tests `getRequiredDependencies` method:
+- Verifies returns array of dependency objects
+- Confirms Node.js dependency is included with version and install URL
+- Validates dependency metadata structure
 
-**Dependencies**:
-- `JavascriptDebugAdapter` from main source
-- `AdapterState` enum from `@debugmcp/shared`
-- `DebugProtocol` types from `@vscode/debugprotocol`
-- Vitest testing framework
+## Dependencies
+- **Vitest**: Testing framework (describe, it, expect, vi mocks)
+- **JavascriptDebugAdapter**: Main class under test from `../../src/index.js`
+- **@debugmcp/shared**: AdapterState enum and AdapterDependencies type
+- **@vscode/debugprotocol**: DebugProtocol types for DAP events
 
-**Testing Patterns**:
-- Heavy use of method mocking with `vi.spyOn()` and `mockImplementation()`
-- Event emission verification
-- State transition validation
-- Type casting with `as any` for accessing private methods
+## Testing Patterns
+- Mock-based testing using Vitest spies and mocks
+- Event-driven testing with custom event listeners
+- State verification through adapter getState() calls
+- Configuration transformation testing with type assertions

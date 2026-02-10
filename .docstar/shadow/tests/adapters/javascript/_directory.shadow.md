@@ -1,54 +1,60 @@
 # tests/adapters/javascript/
-@generated: 2026-02-10T01:19:47Z
+@generated: 2026-02-10T21:26:27Z
 
 ## Purpose and Responsibility
 
-The `tests/adapters/javascript` directory serves as the integration testing module for JavaScript/TypeScript debugging adapter functionality. It validates the end-to-end behavior of the JavaScript adapter within the broader adapter system, ensuring proper session management, configuration transformation, and debug server command generation for TypeScript execution environments.
+Integration testing suite for the JavaScript adapter module, providing comprehensive validation of JavaScript/TypeScript debugging capabilities within the broader adapter system. This directory serves as the quality assurance layer ensuring the JavaScript adapter integrates correctly with the debugging infrastructure and can handle real-world debugging scenarios.
 
-## Key Components and Architecture
+## Key Components and Integration
 
-### Integration Test Framework
-- **Cross-platform Testing Infrastructure**: Handles platform detection and path normalization to ensure tests work consistently across Windows and Unix-based systems
-- **Environment Management**: Systematic preservation and restoration of NODE_OPTIONS and adapter registry state to maintain test isolation
-- **Mock Lifecycle Management**: Clean setup and teardown procedures to prevent test interference and ensure reliable results
+### Core Integration Layer
+- **JavaScript Adapter Factory Testing**: Validates registration, configuration, and integration with the adapter registry system
+- **Session Management Validation**: Tests end-to-end session lifecycle for JavaScript/TypeScript debugging
+- **Launch Configuration Pipeline**: Verifies transformation of debug configurations with tsx runtime support
+- **Command Generation Testing**: Ensures proper adapter command building and path resolution across platforms
 
-### Core Integration Validation Points
-- **Adapter Registration Flow**: Tests the complete registration process of JavascriptAdapterFactory within the adapter registry system
-- **Configuration Transformation Pipeline**: Validates launch configuration processing, particularly tsx runtime executable handling and parameter transformation
-- **Debug Server Command Generation**: Verifies the construction of adapter commands with correct file paths, port configurations, and runtime parameters
+### Test Infrastructure Components
+- **Environment Management**: Preserves NODE_OPTIONS and other environment state during test execution
+- **Registry Integration**: Configures and manages adapter registry with proper validation controls
+- **Cross-Platform Compatibility**: Handles Windows vs Unix path differences and platform-specific behaviors
 
 ## Public API Surface
 
-The integration tests exercise these critical adapter system entry points:
-
-- **`AdapterRegistry.register()`** - Validates adapter registration with proper validation controls and factory instantiation
-- **`adapter.transformLaunchConfig()`** - Tests launch configuration transformation including runtime overrides and TypeScript-specific settings
-- **`adapter.buildAdapterCommand()`** - Verifies command generation for debug server execution with correct path resolution and port allocation
+This directory validates the integration points of:
+- **JavascriptAdapterFactory**: Primary entry point for JavaScript debugging adapter creation
+- **Session Configuration**: Launch config transformation and validation for TypeScript debugging
+- **Adapter Command Interface**: Command building and execution path resolution
+- **Registry Integration**: Adapter registration and lifecycle management within the broader system
 
 ## Internal Organization and Data Flow
 
-The testing workflow follows a structured four-phase approach:
+### Integration Test Flow
+1. **Setup Phase**: Register JavaScript adapter factory with session-specific parameters
+2. **Configuration Validation**: Test launch config transformation with tsx runtime integration
+3. **Command Generation**: Validate adapter command building with js-debug VSCode extension
+4. **Cross-Platform Testing**: Verify path handling and platform-specific adaptations
+5. **Integration Verification**: Ensure proper communication with debugging backend
 
-1. **Initialization Phase**: Environment state preservation → Registry reset → Mock cleanup → Adapter factory registration
-2. **Configuration Phase**: Session parameter setup → TypeScript file path configuration → Launch configuration transformation with tsx runtime
-3. **Validation Phase**: Debug command building → Cross-platform path validation → Port configuration verification → Runtime parameter assertion
-4. **Cleanup Phase**: Global state restoration → Registry cleanup → Mock state restoration
+### Test Isolation Strategy
+- Session-specific identifiers prevent test interference and enable parallel execution
+- Environment variable preservation maintains clean test boundaries
+- Registry state management ensures consistent test conditions
 
 ## Important Patterns and Conventions
 
-- **Test Isolation Strategy**: Each test maintains strict isolation through global state preservation and restoration, preventing cross-test pollution
-- **Platform Agnostic Design**: Consistent use of path normalization utilities ensures reliable operation across different operating systems
-- **Smoke Testing Methodology**: Focus on critical integration points and end-to-end workflows rather than exhaustive unit testing coverage
-- **Session-based Testing**: Unique session identifiers (e.g., `session-js-3`) provide clear test boundaries and traceability
-- **Flexible Type Handling**: Strategic use of type assertions to accommodate adapter interface variations while maintaining type safety where possible
+### Integration Testing Philosophy
+- **Smoke Testing Approach**: Focuses on critical integration points and real-world usage scenarios
+- **Real Component Testing**: Uses actual adapter factories and command builders rather than mocks
+- **End-to-End Validation**: Tests complete debugging session lifecycle from configuration to execution
 
-## Integration Context
+### Dependency Integration
+- **js-debug VSCode Extension**: Primary JavaScript debugging backend via vendored debug server
+- **tsx Runtime**: TypeScript execution environment for Node.js debugging scenarios  
+- **Adapter Registry System**: Core infrastructure providing adapter management and session coordination
 
-This testing module ensures the JavaScript adapter correctly integrates with multiple system components:
+### Cross-Platform Considerations
+- Normalized path handling for Windows and Unix environments
+- Platform-aware command generation and execution
+- Consistent behavior across different operating system environments
 
-- **Adapter Registry System**: Validates dynamic adapter loading and factory registration mechanisms
-- **Debug Server Infrastructure**: Confirms proper interaction with `js-debug/vsDebugServer.cjs` for TypeScript debugging
-- **TypeScript Execution Environment**: Tests tsx runtime configuration and command generation for TypeScript file execution
-- **Cross-platform Development Workflow**: Ensures consistent behavior across different development environments and file systems
-
-The module serves as a critical validation layer that confirms the JavaScript adapter's reliability within the larger debugging infrastructure ecosystem.
+This directory ensures the JavaScript adapter can successfully integrate with the debugging infrastructure, handle TypeScript debugging scenarios, and maintain compatibility across different platforms and environments.

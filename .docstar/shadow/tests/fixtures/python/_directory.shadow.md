@@ -1,66 +1,57 @@
 # tests/fixtures/python/
-@generated: 2026-02-10T01:19:39Z
+@generated: 2026-02-10T21:26:32Z
 
-## Purpose and Responsibility
+## Python Test Fixtures Directory
 
-The `tests/fixtures/python` directory provides test fixtures specifically designed to support debugging workflow validation. This module contains both debuggable Python scripts and debug protocol infrastructure needed to test MCP Server debugpy integration and debugging capabilities.
+This directory contains Python test fixtures specifically designed for validating debugging workflows and debugger protocol implementations in the MCP Server ecosystem.
 
-## Key Components and Relationships
+### Overall Purpose
 
-### Test Target (`debug_test_simple.py`)
-- **Debuggable Python Script**: Simple, predictable execution flow designed for debugger testing
-- **Breakpoint Targets**: Strategic line placements (L13) for breakpoint validation
-- **Variable Inspection Support**: Multiple local variables at different scopes for testing variable inspection functionality
-- **Execution Patterns**: Both synchronous computation and timed operations for comprehensive debugging scenarios
+The `tests/fixtures/python` directory provides controlled test environments for debugging functionality, containing both debuggee targets and mock debugging infrastructure. These fixtures enable comprehensive testing of debugging capabilities without requiring complex real-world applications.
 
-### Debug Protocol Infrastructure (`debugpy_server.py`)
-- **DAP Server Simulation**: Minimal Debug Adapter Protocol server for testing debugpy connections
-- **Protocol Compliance**: Implements standard DAP message framing and basic command handling
-- **Connection Testing**: Provides realistic debugging protocol interaction without full debugpy complexity
+### Key Components
 
-## Public API and Entry Points
+**Test Target (`debug_test_simple.py`)**
+- Simple Python script with predictable execution flow designed as a debuggee target
+- Contains strategically placed breakpoint locations and variable scopes for testing debugger inspection capabilities
+- Provides both synchronous computation and timed operations to test different debugging scenarios
+- Minimal dependencies and linear execution flow to reduce test complexity
 
-### Primary Test Execution
-- `debug_test_simple.py`: Standalone executable via `if __name__ == "__main__"` pattern
-  - Entry point: `main()` function
-  - Core test logic: `sample_function()` with documented breakpoint locations
+**Mock Debug Server (`debugpy_server.py`)**
+- Lightweight DAP (Debug Adapter Protocol) server implementation for testing MCP Server debugpy connections
+- Handles standard debugging protocol messages without actual debugging capabilities
+- Socket-based server with proper DAP message framing and basic capability negotiation
+- Supports essential DAP commands: initialize, launch, configurationDone, threads, disconnect
 
-### Debug Server Simulation
-- `debugpy_server.py`: Command-line debug server
-  - Entry point: `main()` with argument parsing
-  - Default configuration: localhost:5678 (standard debugpy port)
-  - Supports `--no-wait` compatibility flag
+### Public API & Entry Points
 
-## Internal Organization and Data Flow
+**For Debuggee Testing:**
+- `debug_test_simple.py` - Execute directly as standalone script or target for external debuggers
+- Primary breakpoint target at line 13 (`c = a + b` calculation)
+- Predictable output and execution flow for verification
 
-### Test Script Architecture
-1. **Setup Phase**: Variable initialization and function calls
-2. **Computation Phase**: Strategic calculations with breakpoint opportunities
-3. **Iteration Phase**: Timed loops for step debugging scenarios
-4. **Output Verification**: Clear result printing for test validation
+**For Protocol Testing:**
+- `debugpy_server.py` - Run as mock DAP server on localhost:5678 (standard debugpy port)
+- Command-line interface with `--port` and `--no-wait` options
+- Graceful shutdown handling via signal handlers
 
-### Debug Protocol Flow
-1. **Connection Establishment**: Socket-based server listening
-2. **Message Processing**: DAP header parsing and JSON payload extraction
-3. **Command Handling**: Basic DAP commands (initialize, launch, threads, disconnect)
-4. **Response Generation**: Proper DAP-compliant message formatting
+### Internal Organization
 
-## Important Patterns and Conventions
+The fixtures follow a complementary design pattern:
+- **Target-side testing**: `debug_test_simple.py` provides a controlled debuggee with known execution patterns
+- **Server-side testing**: `debugpy_server.py` provides a mock debugging infrastructure for protocol validation
 
-### Testing Patterns
-- **Minimal Dependencies**: Both fixtures use only standard library components
-- **Clear Execution Flow**: Linear, predictable execution paths for reliable testing
-- **Strategic Instrumentation**: Explicit breakpoint locations and variable placements
-- **Graceful Termination**: Signal handling and clean shutdown procedures
+### Data Flow & Integration
 
-### Protocol Compliance
-- **DAP Standards**: Proper Content-Length headers and JSON message formatting
-- **Capability Negotiation**: Standard debugpy protocol handshake implementation
-- **Mock Responses**: Realistic but simplified responses for testing purposes
+1. **Debugging Workflow Tests**: Use `debug_test_simple.py` as target application while testing debugger attachment, breakpoint setting, and variable inspection
+2. **Protocol Compliance Tests**: Use `debugpy_server.py` to validate DAP message handling, connection management, and command processing
+3. **End-to-End Scenarios**: Combine both fixtures to test complete debugging pipelines from client connection through target execution
 
-### Integration Considerations
-- **Port Standardization**: Uses conventional debugpy port (5678) for realistic testing
-- **Localhost Binding**: Security-conscious local-only access
-- **Synchronous Design**: Simplified threading model for predictable test behavior
+### Design Patterns
 
-This fixture directory enables comprehensive testing of debugging workflows by providing both the target code to be debugged and the infrastructure to simulate debugging protocol interactions.
+- **Minimal Dependencies**: Both fixtures use only standard library components to reduce test environment requirements
+- **Predictable Behavior**: Deterministic execution flows and responses for reliable test outcomes
+- **Protocol Compliance**: Proper DAP message framing and standard debugging port usage
+- **Isolation**: Self-contained fixtures that don't interfere with production debugging infrastructure
+
+This directory enables comprehensive validation of debugging features by providing both the target applications to debug and the infrastructure to test debugging protocol implementations.

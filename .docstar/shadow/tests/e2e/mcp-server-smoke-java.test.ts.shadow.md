@@ -1,78 +1,54 @@
 # tests/e2e/mcp-server-smoke-java.test.ts
-@source-hash: d798c7e885f25277
-@generated: 2026-02-10T00:42:07Z
+@source-hash: 7c021c233c66b47e
+@generated: 2026-02-10T21:25:52Z
 
-## Primary Purpose
-End-to-end smoke tests for Java debugging functionality via MCP (Model Context Protocol) interface. Tests the complete Java debugging workflow using jdb as the underlying debug engine through MCP tools.
+**Primary Purpose**: End-to-end smoke tests for Java debugging functionality through MCP (Model Context Protocol) interface using jdb as the underlying debug engine.
 
-## Key Functions and Components
+**Key Functions and Classes**:
 
-### Setup and Compilation
-- `ensureCompiled(javaFile)` (L31-60): Checks for existing .class files and compiles .java sources using javac if needed. Handles compilation errors gracefully.
+- `ensureCompiled(javaFile: string)` (L31-60): Utility function that checks for compiled .class files and auto-compiles Java source files using javac if needed. Uses Promise-based spawn for compilation.
 
-### Test Infrastructure
-- **beforeAll** (L67-98): Initializes MCP client, connects to debug server, and ensures test Java file is compiled. Sets 30s timeout for setup.
-- **afterAll** (L100-119): Cleanup routine that closes debug sessions, MCP client, and transport connections.
-- **afterEach** (L121-131): Per-test cleanup to ensure debug sessions are properly closed.
+- Main test suite `"MCP Server Java Debugging Smoke Test"` (L62-477): Comprehensive integration tests covering full Java debugging workflow through MCP tools.
 
-### Core Test Cases
+**Test Structure**:
+- `beforeAll` (L67-98): Sets up MCP client connection, compiles test Java file, configures stdio transport with 30s timeout
+- `afterAll` (L100-119): Cleanup including session closure and transport termination  
+- `afterEach` (L121-131): Per-test session cleanup to prevent state leakage
 
-#### Complete Debugging Flow (L133-283)
-- Creates Java debug session for `examples/java/TestJavaDebug.java`
-- Sets breakpoint at line 48 (factorial call)
-- Starts debugging with absolute file paths (Java requirement)
-- Validates stack traces, scopes, and variables
-- Tests step_over operation with tolerant success checking
-- Continues execution and closes session cleanly
-- 60s timeout for complete workflow
+**Core Test Cases**:
 
-#### Multiple Breakpoints Test (L285-322)
-- Tests setting multiple breakpoints in the same Java file
-- Validates breakpoint acceptance without requiring verification
+1. `"should complete Java debugging flow cleanly"` (L133-283): Primary integration test covering:
+   - Session creation with Java language adapter
+   - Breakpoint setting at line 48 (factorial call)
+   - Debug execution start with configurable launch args
+   - Stack trace inspection with frame validation
+   - Variable scope enumeration and inspection
+   - Step over operation with location/context verification
+   - Execution continuation and session cleanup
 
-#### Expression Evaluation Test (L324-374)
-- Tests runtime expression evaluation (`1 + 2`)
-- Uses `stopOnEntry: true` to pause immediately
-- Validates evaluation results contain expected values
+2. `"should handle multiple breakpoints in Java"` (L285-322): Tests concurrent breakpoint management at lines 48 and 69
 
-#### Source Context Test (L376-410)
-- Tests retrieval of source code context around specific lines
-- Validates source content includes expected method names
+3. `"should evaluate expressions in Java context"` (L324-374): Expression evaluation testing with stopOnEntry mode, validates arithmetic expressions
 
-#### Step Into Test (L412-476)
-- Tests stepping into method calls (factorial function)
-- Validates increased stack depth after step operation
-- Uses tolerant success checking for debugging operations
+4. `"should get source context for Java files"` (L376-410): Source code retrieval with configurable line context window
 
-## Key Dependencies
-- **Vitest** (L12): Test framework
-- **@modelcontextprotocol/sdk** (L15-16): MCP client and transport
-- **smoke-test-utils** (L17): Utilities for tool result parsing and safe tool calls
-- **Node.js modules**: path, url, child_process, fs for file operations and process spawning
+5. `"should handle step into for Java"` (L412-476): Step-into debugging with stack depth validation for function entry
 
-## Architecture and Patterns
+**Key Dependencies**:
+- MCP SDK client components for protocol communication
+- Vitest testing framework with async/await patterns
+- Node.js child_process for Java compilation
+- Custom utilities: `parseSdkToolResult`, `callToolSafely` from smoke-test-utils
 
-### Java-Specific Characteristics
-- Requires absolute paths for file references (noted in comments L4-10)
-- Auto-compiles .java to .class files if needed
-- Uses jdb (Java Debugger) as underlying engine
-- Stack traces include Java internal frames
+**Critical Architecture Notes**:
+- Requires absolute paths for Java file references (jdb limitation)
+- Auto-compilation workflow checks for .class files before .java compilation
+- Tolerant error handling for debugging operations (accepts partial success states)
+- 60-second test timeouts for long-running debug operations
+- Uses TestJavaDebug.java as the target debugging artifact
 
-### Error Handling Strategy
-- Tolerant testing approach: accepts partial success for debugging operations
-- Graceful handling of compilation failures
-- Safe cleanup in all teardown phases
-- Uses `callToolSafely()` utility for MCP tool calls
-
-### Test Structure
-- Each test creates isolated debug sessions
-- Consistent session lifecycle: create → configure → execute → cleanup
-- 4-second waits for breakpoint hits, 2-second waits for step operations
-- Uses `sessionId` tracking for proper cleanup
-
-## Critical Constraints
-- Java files must be compiled to .class files before debugging
-- Absolute file paths required for Java debugging
-- Tests depend on `examples/java/TestJavaDebug.java` existing
-- MCP server must be built and available at `dist/index.js`
-- Requires javac compiler in system PATH
+**Important Constraints**:
+- Java debugger integration depends on jdb availability
+- Compiled bytecode required for debugging (not source-only)
+- Stack traces include Java internal frames (expected behavior)
+- Session state must be properly cleaned up to prevent interference between tests

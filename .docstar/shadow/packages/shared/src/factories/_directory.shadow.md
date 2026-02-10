@@ -1,56 +1,53 @@
 # packages/shared/src/factories/
-@generated: 2026-02-10T01:19:34Z
+@generated: 2026-02-10T21:26:13Z
 
-## Module Purpose
-The `factories` directory provides the foundational factory architecture for creating debug adapters across different programming languages. It establishes a standardized framework that ensures consistent adapter instantiation, validation, and compatibility management throughout the debug system.
+## Purpose
+The `factories` directory provides the core infrastructure for creating and managing debug adapters across different programming languages. It establishes a standardized factory pattern that ensures consistent adapter creation, validation, and compatibility checking throughout the debugging system.
 
 ## Core Architecture
 
 ### Factory Pattern Implementation
-The module centers around the **AdapterFactory** abstract base class, which serves as the template for all language-specific adapter factories. This design enforces uniform creation patterns while allowing customization for different debugging environments.
+The directory centers around the **AdapterFactory** abstract base class, which serves as the foundational template for all language-specific debug adapter factories. This design enforces a consistent creation pattern while allowing customization for different debugging environments.
 
 ### Key Components
-- **AdapterFactory**: Abstract base class defining the factory contract
-- **Metadata Management**: Standardized adapter metadata handling with immutability guarantees
-- **Validation Framework**: Extensible validation system with sensible defaults
-- **Version Compatibility**: Built-in semantic version comparison for core debugger compatibility
-- **Factory Interfaces**: Type definitions ensuring consistent factory implementations
 
-## Public API Surface
+#### AdapterFactory Base Class
+- **Central abstraction** implementing the `IAdapterFactory` interface
+- **Template method pattern** with extensible validation and compatibility hooks
+- **Metadata management** with defensive copying for immutability
+- **Version compatibility** system with semantic version comparison utilities
 
-### Primary Entry Points
-- **AdapterFactory constructor**: Initializes factory with adapter metadata
-- **createAdapter()**: Abstract method requiring implementation by concrete factories
-- **validate()**: Async validation hook with default "always valid" behavior
-- **isCompatibleWithCore()**: Version compatibility checking with graceful fallbacks
-- **getMetadata()**: Defensive metadata access preventing external mutations
-
-### Factory Contract
-Concrete implementations must:
-1. Extend AdapterFactory base class
-2. Implement the abstract `createAdapter()` method
-3. Optionally override validation and compatibility logic
-4. Provide appropriate AdapterMetadata during construction
+#### Public API Surface
+- `getMetadata()`: Retrieve adapter metadata safely
+- `validate()`: Async validation with customizable override points
+- `isCompatibleWithCore()`: Version compatibility verification
+- `createAdapter()`: Abstract factory method requiring concrete implementation
 
 ## Internal Organization
 
-### Data Flow Pattern
-1. Factory instantiation with metadata
-2. Optional validation and compatibility checks
-3. Adapter creation through implemented `createAdapter()` method
-4. Metadata access through defensive copying
+### Data Flow
+1. **Factory instantiation** with required `AdapterMetadata`
+2. **Validation phase** through extensible `validate()` method
+3. **Compatibility checking** against core debugger version requirements
+4. **Adapter creation** via concrete `createAdapter()` implementation
 
-### Design Principles
-- **Permissive Defaults**: Validation and compatibility favor allowing operations
-- **Extensibility**: Protected methods enable subclass customization
-- **Immutability**: Metadata protection through defensive copying
-- **Graceful Degradation**: Version checking with fallbacks for missing requirements
+### Design Patterns
+- **Abstract Factory**: Enforces consistent adapter creation interface
+- **Template Method**: Provides default behavior with customization points
+- **Defensive Programming**: Metadata immutability and version fallback handling
+- **Extensibility First**: Protected methods and validation hooks for inheritance
 
 ## Integration Points
-This factory system integrates with the broader debug infrastructure by:
-- Providing consistent adapter creation across language implementations
-- Ensuring version compatibility between adapters and core debugger
-- Offering standardized validation hooks for deployment safety
-- Maintaining metadata integrity throughout the adapter lifecycle
+The factory system integrates with the broader debugging infrastructure through:
+- **Interface contracts** with `IDebugAdapter` and related types
+- **Metadata system** for adapter capability declaration
+- **Dependency injection** through `AdapterDependencies`
+- **Validation framework** via `FactoryValidationResult`
 
-The module serves as the foundational layer that other debug components depend on for reliable, type-safe adapter instantiation.
+## Key Conventions
+- Default implementations favor permissive behavior (always valid/compatible)
+- Version checking only activates when `minimumDebuggerVersion` is specified
+- Clean separation between factory orchestration and actual adapter instantiation
+- Consistent error handling and validation patterns across all factory implementations
+
+This directory serves as the **foundational layer** for the entire debug adapter ecosystem, providing the structural guarantees and patterns that enable reliable, extensible debugging capabilities across multiple programming languages.

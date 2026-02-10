@@ -1,39 +1,58 @@
 # examples/demo/
-@generated: 2026-02-10T01:19:38Z
+@generated: 2026-02-10T21:26:17Z
 
-## Purpose
-The `examples/demo` directory provides demonstration and recording infrastructure for the MCP Debugger tool. It contains a theatrical demo script that simulates an AI-powered debugging session and tooling for recording professional documentation assets.
+## Overall Purpose
+The `examples/demo` directory provides a complete demonstration system for the MCP Debugger tool, designed to create compelling visual documentation and marketing materials. It combines a theatrical debugging simulation with professional recording capabilities to showcase the debugger's value proposition.
 
-## Key Components
+## Key Components and Integration
 
-### Demo Simulation (`mcp_debugger_demo.py`)
-- **Interactive Demo Engine**: Creates a realistic simulation of an LLM debugging a variable swap bug using theatrical presentation with color-coded output and timing delays
-- **Visual Components**: ANSI color formatting, emoji-enhanced output, code highlighting, and variable inspection displays
-- **11-Stage Debugging Narrative**: Complete walkthrough from task identification through bug discovery to solution verification
-- **Educational Content**: Demonstrates classic swap bug pattern and Python tuple unpacking solution
+### Core Demo Components
+- **mcp_debugger_demo.py**: A theatrical simulation script that presents an AI agent debugging session
+  - Creates a step-by-step narrative showing bug discovery and resolution
+  - Uses color-coded terminal output and strategic delays for visual appeal
+  - Demonstrates a classic variable swap bug and its solution
+  - No actual debugging functionality - purely presentational
 
-### Recording Infrastructure (`record_demo.sh`)
-- **Automated Recording Pipeline**: Handles terminal session capture using asciinema with optimized settings for documentation
-- **Format Conversion Chain**: Converts recordings to SVG animations and provides GIF conversion guidance
-- **Dependency Management**: Validates and auto-installs required tools (asciinema, svg-term-cli)
-- **Documentation Integration**: Provides clear instructions for incorporating generated assets into project README
+- **record_demo.sh**: Professional recording and conversion pipeline
+  - Handles asciinema terminal recording with optimized settings
+  - Converts recordings to SVG format for web integration
+  - Provides guidance for GIF conversion and README integration
+  - Includes dependency management and validation
 
-## Component Integration
-The two components form a complete demo-to-documentation pipeline:
-1. `mcp_debugger_demo.py` provides the engaging content to be recorded
-2. `record_demo.sh` captures and processes this content into shareable formats
-3. Generated assets (GIF/SVG) integrate into project documentation for visual learning
+### Workflow Integration
+The components work together in a sequential workflow:
+1. `mcp_debugger_demo.py` provides the content to be recorded
+2. `record_demo.sh` captures this content as a professional terminal recording
+3. The recording is converted through multiple formats (cast → SVG → GIF) for documentation use
 
 ## Public API / Entry Points
-- **`python mcp_debugger_demo.py`**: Runs the interactive debugging simulation
-- **`./record_demo.sh`**: Records demo session and generates documentation assets
-- **Output Artifacts**: `demo.cast`, `demo.svg`, and guidance for `demo.gif` creation
+- **Demo Execution**: `python mcp_debugger_demo.py` - Runs the theatrical debugging simulation
+- **Recording Pipeline**: `./record_demo.sh` - Captures and processes demo recordings
+- **Output Artifacts**: 
+  - `demo.cast` (asciinema recording)
+  - `demo.svg` (web-ready animation)
+  - Final GIF for README integration
 
-## Architecture Pattern
-**Demo-as-Code**: The directory implements a documentation-driven approach where demonstrations are scripted, recordable, and reproducible. This ensures consistent presentation quality and enables easy updates to demo content while maintaining professional documentation standards.
+## Internal Organization
+### Data Flow
+```
+Demo Script → Terminal Output → asciinema Recording → SVG Animation → GIF → Documentation
+```
 
-## Use Cases
-- Creating visual documentation for README files
-- Recording product demonstrations for presentations  
-- Providing interactive learning materials for debugging concepts
-- Generating consistent, professional demo assets for marketing/educational purposes
+### Architecture Patterns
+- **Separation of Concerns**: Demo content separated from recording infrastructure
+- **Multi-format Pipeline**: Progressive conversion through different media formats
+- **Dependency Management**: Automated validation and installation of required tools
+- **Graceful Degradation**: Fail-fast for critical dependencies, auto-install for secondary ones
+
+## Key Conventions
+- **Visual Design**: Consistent color coding (blue for LLM, green for debugger, yellow for highlights)
+- **Timing Control**: Strategic delays for natural pacing in recordings
+- **Terminal Optimization**: Fixed dimensions (80×30) and idle limits for consistent output
+- **Error Handling**: Keyboard interrupt support and dependency validation
+
+## Target Use Cases
+- **Documentation**: README.md integration with visual demonstrations
+- **Marketing Materials**: Professional-quality terminal recordings for presentations
+- **Educational Content**: Step-by-step debugging workflow illustration
+- **Development Workflow**: Reproducible demo recording for version updates

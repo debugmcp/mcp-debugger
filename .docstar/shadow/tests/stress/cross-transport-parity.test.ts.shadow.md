@@ -1,62 +1,57 @@
 # tests/stress/cross-transport-parity.test.ts
-@source-hash: 6c9e2869fe8bf7dd
-@generated: 2026-02-10T00:42:05Z
+@source-hash: d4430b9ff56b6350
+@generated: 2026-02-10T21:25:36Z
 
-## Primary Purpose
-Cross-transport integration test that validates debug operations produce identical results across different MCP transport protocols (STDIO, SSE). Ensures transport layer doesn't affect debug functionality behavior or data integrity.
+## Cross-Transport Debug Parity Test
 
-## Key Interfaces & Types
+Stress test module that validates identical debug operations across different MCP transport layers (STDIO, SSE, Docker). Conditionally runs based on `RUN_STRESS_TESTS` environment variable (L18-19).
 
-**DebugSequenceResult (L24-34)**: Captures complete debug session state including session creation status, breakpoint configuration, execution state, stack frame data, variable information, and error collection.
+### Core Interfaces
 
-**TransportTestResult (L36-41)**: Wraps test execution results per transport with success status, debug sequence results, and error information.
+**DebugSequenceResult (L24-34)**: Captures debug session state including session creation, breakpoints, stack frames, variables, and errors.
 
-## Core Class: TransportTester (L43-314)
+**TransportTestResult (L36-41)**: Wraps transport type, success status, debug results, and error information.
 
-**Server Management (L47-95)**:
-- `setupSSETransport(port)` (L47-84): Spawns SSE server process, implements health check polling with 15s timeout
-- `teardownSSE()` (L86-95): Graceful shutdown with SIGTERM fallback to SIGKILL
+### TransportTester Class (L43-314)
 
-**Debug Sequence Orchestration (L97-220)**:
-- `runDebugSequence(client)` (L97-220): Executes complete debug workflow:
-  1. Creates debug session with JavaScript language config
-  2. Sets breakpoint on `simple_test.js:11`
-  3. Starts debugging with script execution
-  4. Retrieves stack trace and local variables after 2s delay
-  5. Closes session and cleans up resources
+Primary orchestrator for cross-transport validation with lifecycle management:
 
-**Transport Testing Methods**:
-- `testStdioTransport()` (L222-268): Creates STDIO client transport, executes debug sequence
-- `testSSETransport()` (L270-301): Sets up SSE server, creates SSE client transport, executes debug sequence
-- `parseToolResponse(response)` (L303-313): Extracts JSON from MCP tool response format
+**SSE Transport Management**:
+- `setupSSETransport()` (L47-84): Spawns SSE server process, polls health endpoint for readiness
+- `teardownSSE()` (L86-95): Graceful shutdown with SIGTERM/SIGKILL fallback
 
-## Test Structure (L316-383)
+**Debug Sequence Execution**:
+- `runDebugSequence()` (L97-220): Core test flow executing 6 debug operations:
+  1. Create debug session with JavaScript language
+  2. Set breakpoint on `examples/javascript/simple_test.js:11`
+  3. Start debugging with script execution
+  4. Retrieve stack trace after 2-second delay
+  5. Get local variables from current frame
+  6. Clean up session
 
-**Environment Control**: Uses `RUN_STRESS_TESTS` environment variable to conditionally skip tests (L18-19).
+**Transport Testing**:
+- `testStdioTransport()` (L222-268): Tests via StdioClientTransport with spawned server process
+- `testSSETransport()` (L270-301): Tests via SSEClientTransport on random port (4500-4999)
+- `parseToolResponse()` (L303-313): Extracts JSON from MCP tool response format
 
-**Main Test Case (L327-382)**: 
-- Executes debug sequences on both STDIO and SSE transports
-- Validates all transports succeed
-- Performs parity comparison ensuring:
-  - Boolean flags (session creation, breakpoint setting, debug start) match exactly
-  - Stack frame counts differ by at most 1 frame
-  - Variable counts match exactly
-  - Both transports report >0 stack frames
+### Test Suite (L316-383)
 
-## Dependencies
+Single comprehensive test that:
+1. Executes debug sequence on both STDIO and SSE transports
+2. Validates all transports succeed
+3. Compares key metrics for parity (session state, stack frame counts, variable counts)
+4. Allows ±1 difference in stack frame counts for minor transport variations
+5. Provides detailed console output for debugging
+
+### Dependencies
+
 - **MCP SDK**: Client, SSEClientTransport, StdioClientTransport for protocol implementation
 - **Node.js**: child_process for server spawning, fs/promises for file validation
-- **Vitest**: Test framework with 60s timeout configuration
+- **Vitest**: Test framework with conditional execution support
 
-## Key Assumptions
-- Test script exists at `examples/javascript/simple_test.js`
-- Debug server binary available at `dist/index.js`
-- SSE server provides `/health` endpoint for readiness checks
-- Breakpoint at line 11 of test script is meaningful
-- Debug session hits breakpoint within 2 seconds
+### Critical Constraints
 
-## Architectural Patterns
-- **Transport Abstraction**: Tests debug functionality independent of transport mechanism
-- **Result Normalization**: Standardizes debug data for cross-transport comparison
-- **Resource Management**: Explicit cleanup for spawned processes and client connections
-- **Fault Tolerance**: Error collection without test abortion, graceful server shutdown
+- Test script dependency: `examples/javascript/simple_test.js` must exist (L128-134)
+- 60-second timeout for complex debug operations (L21)
+- Health check polling for SSE server readiness (L65-76)
+- Breakpoint hardcoded to line 11 of test script (L142)

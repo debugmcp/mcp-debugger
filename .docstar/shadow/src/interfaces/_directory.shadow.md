@@ -1,70 +1,63 @@
 # src/interfaces/
-@generated: 2026-02-10T01:19:37Z
+@generated: 2026-02-10T21:26:21Z
 
-## Overall Purpose
-
-The `src/interfaces` directory defines the core abstraction layer for the system, providing TypeScript interfaces that enable dependency injection, testability, and loose coupling throughout the application. This module serves as the contract definition layer, abstracting Node.js built-ins, external dependencies, and domain-specific operations to support clean architecture principles.
+## Purpose
+The `src/interfaces` directory provides a comprehensive set of TypeScript interfaces that define contracts for system-level operations, dependency injection, and process management. This module serves as the foundational abstraction layer for the entire application, enabling testability, modularity, and clean architecture through interface-based design.
 
 ## Key Components and Relationships
 
-### System Abstractions (`external-dependencies.ts`)
-The foundation layer providing interfaces that mirror Node.js built-ins and third-party libraries:
-- **Core System**: IFileSystem, IChildProcess, IProcessManager, INetworkManager, IServer
-- **Application Services**: ILogger, IProxyManagerFactory, IEnvironment
-- **Dependency Container**: IDependencies aggregates all interfaces for injection
+### System Abstraction Layer
+- **command-finder.ts**: Provides `CommandFinder` interface for system command resolution with specialized `CommandNotFoundError` handling
+- **external-dependencies.ts**: Comprehensive abstractions over Node.js built-ins (filesystem, child processes, networking) and application services (logging, environment)
 
-### Process Management (`process-interfaces.ts`)
-Domain-specific abstractions built on top of system interfaces:
-- **IProcess**: High-level process wrapper extending EventEmitter
-- **Specialized Launchers**: IDebugTargetLauncher, IProxyProcessLauncher for specific use cases
-- **Factory Pattern**: IProcessLauncherFactory centralizes creation of all launcher types
-
-### Command Resolution (`command-finder.ts`)
-Utility interface for system command discovery:
-- **CommandFinder**: Contract for resolving command names to executable paths
-- **CommandNotFoundError**: Specialized error handling for resolution failures
+### Process Management Hierarchy
+- **process-interfaces.ts**: Specialized process abstractions building on the foundation from external-dependencies
+  - `IProcess`: Domain-focused child process wrapper
+  - `IDebugTargetLauncher`/`IDebugTarget`: Python debugging specialists
+  - `IProxyProcessLauncher`/`IProxyProcess`: Proxy process management
+  - `IProcessLauncherFactory`: Centralized creation factory
 
 ## Public API Surface
 
-### Main Entry Points
-- **IDependencies**: Primary dependency injection container
-- **IProcessLauncherFactory**: Central factory for all process operations
+### Core Entry Points
+- **IDependencies**: Primary dependency injection container aggregating all system abstractions
+- **IProcessLauncherFactory**: Main factory for creating process launchers
 - **CommandFinder**: System command resolution interface
+- **ILogger**: Standard logging contract
 
-### Domain-Specific Interfaces
-- **IDebugTarget / IDebugTargetLauncher**: Python debugging workflow
-- **IProxyProcess / IProxyProcessLauncher**: Proxy process management
-- **ILogger**: Application logging abstraction
+### Specialized Interfaces
+- **IDebugTargetLauncher**: For Python debugging workflows
+- **IProxyProcessLauncher**: For proxy process management
+- **IFileSystem**, **IProcessManager**, **INetworkManager**: System operation abstractions
 
 ## Internal Organization and Data Flow
 
-### Layered Architecture
-1. **System Layer**: External dependencies abstraction (Node.js, fs-extra, etc.)
-2. **Domain Layer**: Process management and specialized operations
-3. **Utility Layer**: Command resolution and error handling
+### Dependency Injection Pattern
+1. **Base Layer**: System abstractions (filesystem, processes, networking) in `external-dependencies.ts`
+2. **Domain Layer**: Specialized process interfaces in `process-interfaces.ts` building on base abstractions
+3. **Utility Layer**: Command resolution in `command-finder.ts`
+4. **Integration Layer**: `IDependencies` container unifying all interfaces
 
-### Dependency Flow
-- `external-dependencies.ts` provides base abstractions
-- `process-interfaces.ts` builds domain-specific interfaces on top of system abstractions
-- `command-finder.ts` provides utility interfaces used by process management
-- All interfaces designed for constructor injection via IDependencies
+### Factory Pattern Implementation
+- Separate factory interfaces enable complex object creation while maintaining testability
+- `IProcessLauncherFactory` creates specialized launchers that return domain-specific process wrappers
+- Factory methods abstract away implementation details from consumers
 
 ## Important Patterns and Conventions
 
-### Design Patterns
-- **Dependency Injection**: All interfaces designed for easy testing and mocking
-- **Factory Pattern**: Centralized object creation with IProcessLauncherFactory
+### Interface Design Principles
 - **Interface Segregation**: Fine-grained interfaces matching specific responsibilities
-- **Gradual Migration**: PartialDependencies supports incremental adoption
+- **Dependency Inversion**: All dependencies accessed through interfaces, not concrete implementations
+- **Async-First**: All I/O operations return Promises for consistent async handling
+- **EventEmitter Extension**: Stateful objects extend EventEmitter for event-driven architecture
 
-### Architectural Constraints
-- All async operations return Promises for consistent async patterns
-- Maintains API compatibility with Node.js built-ins where applicable
-- EventEmitter extension pattern for stateful objects
-- Readonly properties for immutable data (e.g., CommandNotFoundError.command)
+### Testing and Mocking Support
+- **PartialDependencies**: Supports gradual migration and selective mocking
+- **Interface-based**: All system dependencies mockable through interface substitution
+- **Factory Abstraction**: Easy test double injection through factory interfaces
 
-### Testing Support
-- Clean separation between interfaces and implementations
-- Factory interfaces enable easy mock injection
-- Specialized error classes for precise error testing
-- PartialDependencies type allows selective mocking in tests
+### Error Handling
+- Specialized error classes (`CommandNotFoundError`) with proper inheritance and metadata
+- Consistent error propagation through Promise rejection patterns
+
+This interfaces directory serves as the architectural backbone, defining contracts that enable loose coupling, testability, and clean separation of concerns throughout the application.

@@ -1,82 +1,84 @@
 # tests/test-utils/helpers/
-@generated: 2026-02-10T01:19:47Z
+@generated: 2026-02-10T21:26:24Z
 
 ## Purpose
-Test helper utilities module providing comprehensive support for isolated testing of the Debug MCP Server. Contains specialized utilities for process management, port allocation, session debugging, result analysis, and mock object creation to ensure reliable test execution without conflicts or resource leaks.
+Test utilities directory providing comprehensive testing infrastructure for the Debug MCP Server. Contains specialized helpers for process management, session debugging, resource allocation, result analysis, and test environment setup. Designed to support unit, integration, and end-to-end testing with proper isolation and cleanup.
 
 ## Key Components and Organization
 
-### Resource Management
-- **PortManager** (`port-manager.ts`) - Centralized port allocation with range-based assignment (unit/integration/e2e tests) to prevent port conflicts between concurrent test runs
-- **ProcessTracker** (`process-tracker.js/.d.ts`) - Global process lifecycle management with auto-cleanup to prevent orphaned child processes during test execution
+### Process & Resource Management
+- **port-manager.ts**: Centralized port allocation preventing test conflicts with range-based assignment (unit/integration/e2e)
+- **process-tracker.js/.d.ts**: Global process lifecycle tracking with automatic cleanup to prevent orphaned processes
+- **test-dependencies.ts**: Dependency injection factories providing both fake implementations and vitest mocks
 
-### Test Infrastructure  
-- **TestDependencies** (`test-dependencies.ts`) - Factory functions for creating complete dependency containers with either fake implementations or vitest mocks
-- **TestSetup** (`test-setup.ts`) - Specialized factories for SessionManager and related components with configurable mock dependencies
-- **TestUtils** (`test-utils.ts`) - Core utilities for mock creation, event handling, timing, and proxy process testing
+### Session & Debugging Utilities  
+- **session-helpers.ts**: Wrapper utilities around DebugMcpServer for integration testing with lazy singleton pattern
+- **test-setup.ts**: SessionManager factory functions with configurable mock dependencies and lifecycle simulation
+- **test-utils.ts**: Core testing primitives including mock creation, event handling, timing utilities, and temp file management
 
-### Debugging Support
-- **SessionHelpers** (`session-helpers.ts`) - Singleton DebugMcpServer wrapper with debugging operations (breakpoints, variables, stack traces) for integration testing
-
-### Test Execution and Analysis
-- **TestSummary** (`test-summary.js`) - Vitest execution wrapper with clean, formatted result output for CI/CD environments
-- **TestCoverageSummary** (`test-coverage-summary.js`) - Coverage-enabled test runner with minimal summary reporting
-- **TestResultsAnalyzer** (`test-results-analyzer.js`) - Multi-level JSON result parsing with failure analysis and performance metrics
-- **ShowFailures** (`show-failures.js`) - Focused failure reporting utility that filters verbose output to show only test failures
+### Test Execution & Analysis
+- **show-failures.js**: Vitest runner with clean failure-only reporting and stack trace filtering
+- **test-coverage-summary.js**: Coverage-enabled test execution with minimal formatted output
+- **test-summary.js**: Standard test execution with pass/fail statistics and error details  
+- **test-results-analyzer.js**: Comprehensive JSON test result parser with multiple detail levels and performance analysis
 
 ## Public API Surface
 
-### Entry Points
-- `portManager` - Singleton for port allocation across test types
-- `processTracker` - Singleton for process lifecycle management  
-- `createTestDependencies()` - Main factory for complete test environments
-- `createTestSessionManager()` - Primary SessionManager factory with mocks
-- Debug session helpers: `createDebugSession()`, `setBreakpoint()`, `getVariables()`, etc.
+### Primary Entry Points
+- **portManager** (singleton): `getPort()`, `releasePort()`, `reset()` for test port coordination
+- **processTracker** (singleton): `register()`, `cleanupAll()`, `reset()` for process lifecycle management
+- **createTestDependencies()**: Complete dependency container with fake implementations
+- **createMockDependencies()**: Vitest-mocked dependency container for unit tests
+- **createTestSessionManager()**: SessionManager with configurable mock dependencies
 
-### Core Utilities
-- Event handling: `waitForEvent()`, `waitForCondition()`, `waitForEvents()`
-- Mock creation: `createMockSession()`, `createMockLogger()`, `createMockFileSystem()`
-- File operations: `createTempTestFile()`, `cleanupTempTestFiles()`
-- Timing: `delay()`, `withTimeout()`
+### Specialized Factories
+- **getDebugServer()**: Singleton DebugMcpServer for integration testing
+- **createTestServer()**: DebugMcpServer with test-safe configuration
+- **createMockProxyManager()**: Pre-configured proxy manager for testing
+- **waitForEvent()**, **waitForCondition()**: Promise-based async test utilities
 
 ## Internal Organization and Data Flow
 
-### Dependency Injection Pattern
-Test factories create complete dependency containers with either:
-1. **Fake implementations** - Functional test doubles from `tests/implementations/test/`
-2. **Vitest mocks** - Spy functions for behavior verification
+### Test Environment Setup
+1. **Resource Allocation**: Port manager assigns non-conflicting ports by test type
+2. **Dependency Injection**: Factory functions create isolated test environments
+3. **Process Tracking**: Automatic registration and cleanup of spawned processes
+4. **Session Management**: Debug session creation with mock or fake implementations
 
-### Resource Coordination
-- PortManager allocates from dedicated ranges (5679-5979) with fallback logic
-- ProcessTracker maintains global registry with auto-cleanup on process exit
-- Temporary files isolated under OS temp directory with structured cleanup
+### Test Execution Flow  
+1. **Setup Phase**: Factories create test instances with appropriate mocks/fakes
+2. **Execution Phase**: Tests run with isolated resources and tracked processes
+3. **Analysis Phase**: Result parsers extract failure details and coverage metrics
+4. **Cleanup Phase**: Port release, process termination, temp file removal
 
-### Test Execution Flow
-1. **Setup**: Factories create isolated environments with controlled dependencies
-2. **Execution**: Resource managers prevent conflicts and track allocations  
-3. **Analysis**: Result analyzers parse outputs and provide formatted summaries
-4. **Cleanup**: Automatic resource deallocation and process termination
+### Mock vs Fake Strategy
+- **Mocks** (vitest spies): For unit tests requiring behavior verification
+- **Fakes** (working implementations): For integration tests needing realistic behavior
+- **Factories**: Support both patterns through different entry points
 
 ## Important Patterns and Conventions
 
-### Singleton Management
-- PortManager and ProcessTracker use singleton pattern for global coordination
-- SessionHelpers provides lazy-initialized DebugMcpServer singleton
-- All singletons support reset() for test isolation
+### Singleton Pattern
+- Port manager and process tracker use singletons for global coordination
+- Debug server uses lazy singleton with proper cleanup for test isolation
 
-### Factory Composition
-- Hierarchical factory system: base dependencies → specialized components → complete systems
-- Override pattern: merge custom configuration with sensible defaults
-- Type-safe mock creation with interface compliance
+### Resource Management
+- Automatic cleanup on process exit via event handlers
+- Defensive programming with existence checks and graceful failures
+- Temporary file operations scoped to isolated test directories
 
 ### Error Handling
-- Defensive programming with file existence checks and JSON parsing validation
-- Graceful degradation in resource allocation with fallback strategies
+- Multi-layer error handling with fallback behaviors
+- Process exit codes (0 success, 1 failure) for CI/CD integration
 - Comprehensive logging for debugging test infrastructure issues
 
-### CLI Integration
-- Multiple standalone scripts for different testing workflows
-- Consistent JSON output parsing across analysis tools
-- Process exit codes for CI/CD integration
+### Test Isolation
+- Port ranges prevent conflicts between concurrent test suites
+- Reset methods clear state between test runs
+- Temp directories and cleanup prevent test pollution
 
-This module serves as the foundation for reliable, isolated testing of the Debug MCP Server by providing coordinated resource management, comprehensive mocking capabilities, and analysis tools for test results.
+## Dependencies
+- **Node.js Built-ins**: child_process, fs, path, events for core functionality
+- **Vitest**: Mock framework and test runner integration
+- **@debugmcp/shared**: Type definitions and shared interfaces
+- **Internal**: Production code interfaces and implementations for dependency injection

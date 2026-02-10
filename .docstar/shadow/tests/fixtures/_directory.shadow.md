@@ -1,72 +1,60 @@
 # tests/fixtures/
-@generated: 2026-02-10T01:19:58Z
+@generated: 2026-02-10T21:26:50Z
 
 ## Overall Purpose
-The `tests/fixtures` directory serves as a comprehensive test fixture collection for debugging tool validation and end-to-end testing across multiple programming environments. This module provides minimal, controlled execution environments designed to test debugger functionality, debug adapter protocols, breakpoint management, and debugging workflow integration without the complexity of real-world applications.
 
-## Key Components and Integration
+The `tests/fixtures` directory serves as a comprehensive test fixture ecosystem for validating debugging tools, development workflows, and MCP Server functionality across multiple programming languages and debugging scenarios. This collection provides controlled, predictable test environments that enable automated testing of debugging capabilities, protocol implementations, and tool integrations.
 
-### Multi-Language Debug Target Coverage
-- **JavaScript/TypeScript**: `javascript-e2e/app.ts` for TypeScript debugging and source map testing
-- **Python**: Multiple debug scenarios from simple execution to error handling and variable inspection
-- **Cross-Platform Testing**: Consistent patterns across language environments for unified debugging tool validation
+## Key Components & Integration
 
-### Debug Protocol Infrastructure
-- **Mock Adapters**: JavaScript mock testing environment (`debug-scripts/simple-mock.js`)
-- **DAP Server Simulation**: Python-based Debug Adapter Protocol server (`python/debugpy_server.py`)
-- **Protocol Compliance Testing**: Realistic debugging protocol interactions for MCP Server integration
+The directory is organized into three specialized subdirectories that work together to provide comprehensive debugging test coverage:
 
-### Comprehensive Debugging Scenarios
-- **Normal Execution Flow**: Basic breakpoint and step-through testing
-- **Exception Handling**: Intentional error generation for error handling validation
-- **Variable Inspection**: Multi-scope variable testing across different data types
-- **Source Map Support**: TypeScript compilation boundary debugging
+**Debug Scripts (`debug-scripts/`)**
+- Minimal, focused test fixtures for basic debugging scenarios
+- Provides both JavaScript (`simple-mock.js`) and Python (`simple.py`, `with-variables.py`, `with-errors.py`) fixtures
+- Supports testing of step-through debugging, variable inspection, exception handling, and mock adapter implementations
 
-## Public API Surface
+**JavaScript E2E Testing (`javascript-e2e/`)**  
+- TypeScript-based fixtures for end-to-end debugging workflows
+- Contains `app.ts` with source map support and strategic breakpoint markers
+- Enables validation of JavaScript/TypeScript debugging tools and development environments
 
-### Primary Entry Points
-- **`debug-scripts/`**: Language-specific minimal debugging fixtures
-  - `simple.py`, `with-errors.py`, `with-variables.py`: Python debugging scenarios
-  - `simple-mock.js`: JavaScript mock adapter testing
-- **`javascript-e2e/app.ts`**: TypeScript end-to-end debugging validation
-- **`python/debug_test_simple.py`**: Comprehensive Python debugging target
-- **`python/debugpy_server.py`**: DAP protocol testing server
+**Python Testing Infrastructure (`python/`)**
+- Comprehensive Python debugging test suite combining debuggee targets and mock infrastructure
+- `debug_test_simple.py` serves as a controlled debugging target with predictable execution flow
+- `debugpy_server.py` provides mock DAP (Debug Adapter Protocol) server for protocol testing
 
-### Standard Execution Patterns
-- **JavaScript**: Direct function execution via `main()` calls
-- **Python**: Standard `if __name__ == "__main__"` pattern with documented entry points
-- **Breakpoint Markers**: Consistent `// BREAK_HERE` and line number documentation for automated testing
+## Public API Surface & Entry Points
 
-## Internal Organization and Data Flow
+**For Basic Debugging Tests:**
+- All fixtures provide standalone execution with `main()` functions or direct execution patterns
+- Comment-based breakpoint markers (`// BREAK_HERE`, strategic line positions) for automated testing
+- Predictable console outputs for verification and assertion testing
 
-### Test Isolation Design
-Each fixture operates independently with no inter-dependencies, enabling:
-- Isolated testing of specific debugging scenarios
-- Predictable, deterministic execution for automated test harnesses
-- Minimal external dependencies to reduce test environment complexity
+**For Advanced Debugging Workflows:**
+- TypeScript compilation and source map generation through `javascript-e2e/app.ts`
+- DAP server mock at `python/debugpy_server.py` (standard port 5678) with command-line interface
+- Controlled debuggee target at `python/debug_test_simple.py` with known variable scopes
 
-### Debugging Workflow Support
-1. **Target Preparation**: Fixtures provide controlled execution environments
-2. **Breakpoint Validation**: Strategic pause points for debugger attachment testing
-3. **Protocol Testing**: DAP server simulation for debugging protocol validation
-4. **Output Verification**: Consistent, testable output for assertion validation
+**For Protocol and Integration Testing:**
+- Socket-based DAP message handling and capability negotiation
+- Cross-language debugging scenario support (Python and JavaScript/TypeScript)
+- Mock adapter interfaces for testing without production dependencies
 
-### Cross-Language Consistency
-- **Uniform Output Patterns**: Arithmetic operations (10 + 20 = 30) across multiple fixtures
-- **Standardized Breakpoint Locations**: Documented line numbers and comment markers
-- **Common Testing Patterns**: Exception scenarios, variable inspection, and normal execution flow
+## Internal Organization & Data Flow
 
-## Important Patterns and Conventions
+The fixtures follow a layered testing approach:
 
-### Fixture Design Principles
-- **Minimal Complexity**: Simple programs focus testing on debugging infrastructure rather than application logic
-- **Predictable Behavior**: Consistent outputs enable reliable automated testing
-- **Clear Instrumentation**: Explicit breakpoint markers and variable placements for test automation
-- **Protocol Compliance**: Proper DAP message formatting and standard port usage (5678)
+1. **Unit-Level Testing**: `debug-scripts/` provides isolated, minimal test cases for specific debugging features
+2. **Integration Testing**: `javascript-e2e/` enables end-to-end workflow validation with real toolchain integration
+3. **Protocol Testing**: `python/` combines mock infrastructure with real debuggee targets for comprehensive debugging protocol validation
 
-### Testing Integration
-- **Mock Environment Support**: Validates debugging tools without complex execution overhead
-- **End-to-End Coverage**: Complete debugging workflow testing from attachment to variable inspection
-- **Multi-Platform Validation**: JavaScript and Python fixtures support cross-platform debugging tool development
+## Testing Patterns & Conventions
 
-This fixture collection enables comprehensive testing of debugging capabilities across different programming languages and debugging protocols, providing the foundation for validating MCP Server debugging functionality and ensuring robust debugging tool integration.
+- **Minimal Complexity**: All fixtures avoid unnecessary dependencies and complexity to prevent test environment interference
+- **Predictable Behavior**: Deterministic execution flows and known outputs enable reliable automated testing
+- **Language Coverage**: Supports both Python and JavaScript/TypeScript debugging ecosystems
+- **Protocol Compliance**: Proper DAP message framing and standard debugging conventions
+- **Isolation**: Self-contained fixtures that don't interfere with production systems
+
+This fixture collection enables comprehensive validation of debugging tools, MCP Server implementations, and development workflows by providing the complete testing infrastructure needed from basic breakpoint testing to full protocol compliance validation.

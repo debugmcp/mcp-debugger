@@ -1,79 +1,91 @@
 # tests/e2e/docker/
-@generated: 2026-02-10T01:19:40Z
+@generated: 2026-02-10T21:26:25Z
 
 ## Purpose
-End-to-end test suite for validating MCP (Model Context Protocol) debugger functionality when running inside Docker containers. This directory contains comprehensive smoke tests that verify debugging workflows across multiple programming languages (JavaScript, Python, Rust) in containerized environments.
+Docker-based end-to-end test suite for the MCP debugger, validating debugging functionality across multiple language runtimes (JavaScript, Python, Rust) when the debugger server runs inside Docker containers. Ensures the debugger protocol works correctly in containerized environments with proper path resolution, session management, and debugging workflow support.
 
 ## Key Components
 
-### Core Test Files
-- **docker-smoke-javascript.test.ts**: E2E tests for JavaScript debugging in containers, covering full debugging cycles, breakpoint management, stack inspection, and expression evaluation
-- **docker-smoke-python.test.ts**: Comprehensive Python debugging tests validating DAP (Debug Adapter Protocol) integration and variable inspection
-- **docker-smoke-rust.test.ts**: Rust debugging validation including async debugging scenarios and variable inspection
+### Test Infrastructure (`docker-test-utils.ts`)
+Core Docker integration utilities providing:
+- **Docker Image Management**: Singleton build system with `buildDockerImage()` preventing duplicate builds
+- **Container Lifecycle**: Setup, cleanup, and health checking with `createDockerMcpClient()` and `cleanupContainer()`
+- **Path Translation**: Host-to-container path mapping via `hostToContainerPath()` handling workspace mount points
+- **MCP Client Factory**: Creates containerized MCP clients with stdio transport and proper resource cleanup
 
-### Infrastructure Utilities
-- **docker-test-utils.ts**: Shared utility module providing Docker image building, container lifecycle management, MCP client setup, and path translation between host and container filesystems
+### Language-Specific Test Suites
+Three comprehensive test files implementing identical debugging workflow patterns:
+
+**JavaScript Tests (`docker-smoke-javascript.test.ts`)**
+- Tests Node.js debugging with extensive breakpoint, stepping, and evaluation scenarios
+- 6 test cases covering full debugging cycle, step operations, multiple breakpoints, and source context
+
+**Python Tests (`docker-smoke-python.test.ts`)**
+- Validates Python DAP debugging with variable inspection and execution control
+- 3 test cases focusing on complete debugging workflow and concurrent breakpoint management
+
+**Rust Tests (`docker-smoke-rust.test.ts`)**
+- Tests Rust debugging including async code support with conditional execution based on environment
+- 2 test cases for basic and async debugging scenarios with stack frame polling
 
 ## Public API Surface
 
-### Main Entry Points
-- Each test file exports Jest test suites that can be run independently or as part of the full test suite
-- Tests are conditionally executed based on environment flags (`SKIP_DOCKER`, `DOCKER_RUST_ENABLED`)
-- All tests follow the same pattern: setup → debug session → operations → cleanup
+### Primary Entry Points
+- **Test Utilities**: `buildDockerImage()`, `createDockerMcpClient()`, `hostToContainerPath()`, `getDockerLogs()`
+- **Test Suites**: Language-specific describe blocks with comprehensive debugging workflow validation
+- **Configuration**: Environment-based test skipping (`SKIP_DOCKER`, `DOCKER_RUST_ENABLED`)
 
-### Key Utilities (docker-test-utils.ts)
-- `buildDockerImage(config?)`: Ensures Docker image is built with singleton pattern
-- `createDockerMcpClient(config?)`: Creates MCP client connected to containerized debugger
-- `hostToContainerPath(path)`: Converts host paths to container-relative paths
-- `cleanupContainer(containerName)`: Manages container lifecycle cleanup
+### Common Test Patterns
+All test suites implement standardized debugging workflow:
+1. Session creation with container-specific naming
+2. Breakpoint setting using container paths
+3. Debug launch with DAP configuration
+4. Stack trace and variable inspection
+5. Execution control (step, continue)
+6. Expression evaluation
+7. Session cleanup
 
-## Internal Organization and Data Flow
+## Internal Organization
 
-### Test Lifecycle Pattern
-1. **Setup Phase**: Build Docker image, create containerized MCP client with proper volume mounts
-2. **Test Execution**: Create debug sessions, set breakpoints, execute debugging operations
-3. **Cleanup Phase**: Close debug sessions, stop containers, extract logs on failure
-
-### Path Translation System
-- Host paths are translated to container paths via `/workspace` mount point
-- Examples directory (`/examples`) maps to container `/workspace/`
-- Cross-platform path normalization handles Windows/Unix differences
+### Data Flow
+1. **Setup Phase**: Docker image built, containers launched with MCP server
+2. **Test Execution**: MCP client sends debugging commands via stdio transport
+3. **Path Resolution**: Host paths converted to container workspace paths (`/workspace/`)
+4. **Protocol Communication**: DAP/MCP debugging protocol operations
+5. **Cleanup Phase**: Sessions closed, containers terminated, resources released
 
 ### Resource Management
-- Singleton Docker build promise prevents duplicate image builds
-- Comprehensive cleanup handlers in afterAll/afterEach hooks
-- Extended timeouts (60-240s) accommodate Docker operation overhead
-- Graceful error handling with Docker log extraction for debugging
+- **Lifecycle Hooks**: `beforeAll`/`afterAll` for Docker setup/teardown
+- **Session Tracking**: Per-test session IDs with explicit cleanup in `afterEach`
+- **Error Handling**: Docker log extraction on test failures for debugging
+- **Timeout Management**: Extended timeouts (60-240s) accommodating Docker overhead
 
-## Key Patterns and Conventions
+## Important Patterns
 
-### Container Configuration
-- Uses `mcp-debugger:test` as default image name
-- Containers run with `--rm` flag for auto-cleanup
-- Unix systems apply user ID mapping to prevent permission issues
-- Volume mounts: `/workspace` (examples), `/tmp` (logs)
+### Container Isolation
+- Each test run uses timestamped container names preventing conflicts
+- Workspace mounted at `/workspace/` with examples directory mapping
+- User ID mapping on Unix systems for permission compatibility
 
-### MCP Protocol Integration
-- All interactions use `callTool` pattern with structured arguments
-- Responses parsed via `parseSdkToolResult` utility
-- Session management with explicit session IDs for tracking
-- Container-specific naming conventions for debug sessions
+### Environment Awareness
+- Conditional test execution based on Docker availability
+- CI-specific configuration adjustments
+- Force rebuild capabilities for development workflows
 
-### Error Handling Strategy
-- Docker log retrieval on test failures for debugging
-- Tolerant cleanup that handles non-existent resources
-- Try-catch blocks around critical Docker operations
-- Conditional test execution based on environment capabilities
+### Path Resolution Strategy
+- Host paths: `/path/to/examples/lang/file.ext`
+- Container paths: `/workspace/lang/file.ext`
+- Automatic workspace prefix stripping and container mount mapping
 
-### Cross-Language Testing
-- Consistent debugging workflow patterns across JavaScript, Python, and Rust
-- Language-specific file targets and compilation requirements
-- Unified breakpoint, variable inspection, and execution control testing
+### Error Resilience
+- Graceful handling of container cleanup failures
+- Docker log capture for debugging test failures
+- Retry mechanisms for async operations (stack frame polling)
 
 ## Dependencies
-- MCP SDK for debugger protocol communication
-- Docker engine for containerization
-- Language-specific runtime environments (Node.js, Python, Rust)
-- Jest testing framework with extended timeout configurations
+- **MCP SDK**: Core protocol client and transport
+- **Docker Engine**: Container runtime for test isolation
+- **Language Examples**: Target debugging files in `/examples/` directory
+- **Node.js Process**: Child process spawning for Docker command execution
 
-This module serves as the primary validation layer for Docker-based MCP debugger deployments, ensuring debugging functionality works reliably across containerized environments and multiple programming languages.
+This directory provides comprehensive validation that the MCP debugger works correctly in containerized deployments across multiple programming languages, ensuring production readiness for Docker-based development environments.

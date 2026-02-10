@@ -1,77 +1,101 @@
 # tests/e2e/npx/
-@generated: 2026-02-10T01:19:42Z
+@generated: 2026-02-10T21:26:27Z
 
-## NPX E2E Test Suite - MCP Debugger Distribution Validation
+## NPX End-to-End Test Suite for MCP Debugger
 
-### Overall Purpose
-This directory contains a comprehensive end-to-end test suite that validates the MCP debugger's distribution and functionality when installed and executed via `npx`. The tests ensure that the npm package distribution mechanism works correctly and that core debugging features function properly across multiple programming languages (JavaScript and Python) when accessed through the global npm installation pathway.
+**Overall Purpose**: Complete end-to-end testing infrastructure for validating the MCP (Model Context Protocol) debugger when distributed and consumed via npm package. This test suite ensures the debugger works correctly in production scenarios where users install and run it using `npx mcp-debugger`.
 
-### Key Components and Organization
+**Key Value Proposition**: Tests the critical last-mile distribution mechanism - the gap between development/build artifacts and actual user consumption. Validates that JavaScript adapter inclusion, package structure, and runtime dependencies work correctly in npm-distributed packages.
 
-**Test Orchestration Layer**:
-- `npx-test-utils.ts`: Core infrastructure providing build automation, package management, and MCP client creation
-- Handles npm package building, caching, global installation, and cleanup operations
-- Implements process-safe concurrency controls and error-resilient cleanup patterns
+## Architecture Overview
 
-**Language-Specific Test Suites**:
-- `npx-smoke-javascript.test.ts`: Validates JavaScript debugging workflow via npx
-- `npx-smoke-python.test.ts`: Validates Python debugging workflow via npx
-- Both follow identical test patterns: language support verification + complete debugging cycle validation
+The directory implements a three-layer testing architecture:
 
-### Public API Surface
+1. **Test Utilities Layer** (`npx-test-utils.ts`): Core infrastructure for package building, distribution, and client connection management
+2. **Language-Specific Test Suites** (`npx-smoke-*.test.ts`): End-to-end validation for JavaScript and Python debugging workflows  
+3. **Global Installation Simulation**: Tests against globally-installed npm packages rather than local development artifacts
 
-**Primary Entry Points**:
-- `buildAndPackNpmPackage()`: Builds and caches npm package tarball with fingerprint-based optimization
-- `installPackageGlobally()` / `cleanupGlobalInstall()`: Global npm package lifecycle management
-- `createNpxMcpClient()`: Creates MCP SDK client instances that execute via npx with transport logging
-- `getPackageSize()` / `verifyPackageContents()`: Package validation and metrics utilities
+## Key Components & Integration
 
-**Test Configuration**:
-- `NpxTestConfig`: Optional configuration for package paths, global installation flags, and logging levels
-- Configurable timeouts (240s setup, 120s execution) for CI/CD environments
+### Core Infrastructure (`npx-test-utils.ts`)
+**Public API**:
+- `buildAndPackNpmPackage()`: Builds, packs, and caches npm tarballs with content fingerprinting
+- `installPackageGlobally()`: Manages global npm installation for realistic distribution testing
+- `createNpxMcpClient()`: Creates MCP SDK clients connected to globally-installed packages
+- `getPackageSize()`, `verifyPackageContents()`: Package analysis utilities
 
-### Internal Data Flow
+**Key Features**:
+- **Content-based caching**: SHA-256 fingerprinting of package.json + dist directory prevents redundant rebuilds
+- **File-based locking**: Mutex system prevents concurrent packaging operations
+- **Comprehensive logging**: Bidirectional message logging for debugging test failures
+- **Clean state management**: Automatic cleanup of global installations and resources
 
-1. **Package Preparation Phase**: 
-   - Acquire process lock → Build workspace → Create package backup → Generate npm tarball → Cache by fingerprint
-   
-2. **Global Installation Phase**:
-   - Install tarball globally → Verify installation → Create npx-based MCP client with transport logging
+### Test Execution Pattern
 
-3. **Test Execution Phase**:
-   - Validate language support → Execute complete debugging workflow (session creation, breakpoints, variable inspection, stepping, cleanup)
+Both language test suites follow identical 8-step debugging workflows:
 
-4. **Cleanup Phase**:
-   - Close debug sessions → Cleanup MCP connections → Remove global installations → Release locks
+1. **Environment Setup**: Build → Pack → Global Install → MCP Client Connection
+2. **Language Availability**: Validate target language in `list_supported_languages`
+3. **Session Lifecycle**: Create → Configure → Execute → Cleanup debug sessions
+4. **Breakpoint Management**: Set breakpoints and verify execution pausing
+5. **Variable Inspection**: Pre/post-execution variable state validation
+6. **Execution Control**: Step-over operations and program continuation
+7. **State Verification**: Confirm expected program behavior (variable swaps, etc.)
+8. **Resource Cleanup**: Session closure and global package removal
 
-### Important Patterns and Conventions
+## Internal Organization & Data Flow
 
-**Concurrency Safety**:
-- Process-safe locking mechanism prevents parallel npm pack operations
-- Fingerprint-based caching avoids redundant package builds across test runs
-- Sequential test execution prevents npm package conflicts
+```
+User Test Execution
+    ↓
+Language Test Suite (JS/Python)
+    ↓ (uses)
+NPX Test Utils
+    ↓ (manages)
+Build Pipeline → Package Cache → Global Installation → MCP Client
+    ↓ (connects to)
+Globally Installed MCP Debugger Package
+    ↓ (executes)
+Debug Workflows on Real Scripts
+```
 
-**Error Resilience**:
-- All cleanup operations are error-tolerant to prevent cascade failures
-- Multiple cleanup layers (afterEach, afterAll) ensure no leaked resources
-- Defensive error handling with graceful degradation
+**State Management Flow**:
+1. Content fingerprint computed from source changes
+2. Cached tarball used if fingerprint matches, otherwise rebuild
+3. Global installation provides realistic runtime environment
+4. MCP client connects via resolved global package entry points
+5. Debug sessions operate on actual JavaScript/Python example files
 
-**Real-world Simulation**:
-- Tests actual npm package distribution mechanism rather than mocks
-- Uses global installation to simulate authentic npx usage scenarios
-- Validates against real JavaScript/Python example files with actual debugging workflows
+## Important Patterns & Conventions
 
-**Instrumentation and Observability**:
-- Comprehensive logging of MCP tool calls with request/response capture
-- Package size metrics and content verification
-- Bidirectional transport message logging for debugging test issues
+### Defensive Programming
+- **Multi-layer cleanup**: afterEach, afterAll, and explicit cleanup functions prevent resource leaks
+- **Stale lock detection**: 5-minute timeout prevents deadlocks from crashed test runs
+- **Error tolerance**: Cleanup operations continue despite individual failures
 
-### Integration with Larger System
+### Performance Optimization  
+- **Content-based caching**: Avoids unnecessary rebuilds when source unchanged
+- **Sequential test execution**: Prevents npm global installation conflicts
+- **Stabilization delays**: Strategic timeouts allow debug state transitions
 
-This test suite serves as the final validation layer for the MCP debugger's npm distribution pipeline, ensuring that:
-- The npm package correctly includes all required language adapters (critical fix validation)
-- The npx execution pathway functions properly in production-like environments
-- End-to-end debugging workflows operate correctly across supported languages
-- Package distribution mechanics (build, pack, install, execute) work reliably
+### Testing Philosophy
+- **Real distribution testing**: Uses actual npm global installation rather than mocks
+- **Complete workflow validation**: Tests full debugging cycles, not isolated operations
+- **Critical fix validation**: Specifically validates JavaScript adapter inclusion (the original packaging bug)
 
-The module acts as a bridge between the core MCP debugger functionality and real-world npm distribution, providing confidence that users can successfully install and use the debugger via standard npm/npx commands.
+## Entry Points & Usage
+
+**Primary Entry Point**: Test suites are executed via vitest, typically in CI/CD pipelines or development validation:
+
+```bash
+# Run all NPX tests
+vitest tests/e2e/npx/
+
+# Run specific language tests  
+vitest tests/e2e/npx/npx-smoke-javascript.test.ts
+vitest tests/e2e/npx/npx-smoke-python.test.ts
+```
+
+**Configuration**: Tests use standard vitest configuration with extended timeouts (240s setup, 120s execution) to accommodate packaging and global installation delays.
+
+**Dependencies**: Requires pnpm workspace environment, npm global installation capabilities, and example debugging scripts in `examples/` directory.

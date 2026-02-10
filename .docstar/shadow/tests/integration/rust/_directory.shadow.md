@@ -1,33 +1,35 @@
 # tests/integration/rust/
-@generated: 2026-02-10T01:19:34Z
+@generated: 2026-02-10T21:26:19Z
 
 ## Purpose
-Integration testing directory specifically for validating Rust debugging adapter functionality within the larger debugging system. Provides comprehensive end-to-end testing of Rust debug session lifecycle, breakpoint management, and Cargo project integration.
+Integration testing directory for Rust debugging capabilities, providing end-to-end validation of the Rust debugging adapter's core functionality including session management, breakpoint handling, and Cargo project integration.
 
 ## Key Components
-- **rust-integration.test.ts**: Complete integration test suite covering the full Rust debugging workflow from session creation through cleanup
+- **rust-integration.test.ts**: Comprehensive test suite that validates the complete Rust debugging workflow from session creation through cleanup
 
 ## Test Coverage Areas
-- **Session Management**: Creation, retrieval, and proper lifecycle management of Rust debug sessions
-- **Language Integration**: Validation of Rust-specific debugging capabilities and language detection
-- **Breakpoint Operations**: Setting and managing breakpoints in Rust source files with error handling
-- **Cargo Project Support**: Testing integration with Cargo-based Rust projects and workspace handling
-- **Resource Management**: Proper cleanup and teardown of test resources and temporary files
+The integration tests validate:
+- **Session Lifecycle Management**: Creation, validation, and proper cleanup of Rust debug sessions
+- **Language-Specific Handling**: Rust/Cargo project detection and configuration
+- **Breakpoint Operations**: Setting breakpoints in Rust source files with graceful failure handling
+- **DAP Integration**: Debug Adapter Protocol compliance for Rust debugging scenarios
 
-## Testing Architecture
-- **Framework**: Built on vitest testing framework for modern async test execution
-- **Dependencies**: Integrates with production dependency injection container and SessionManager
-- **Isolation**: Uses temporary directories and log files for test data separation
-- **Configuration**: Employs realistic DAP settings (stop on entry, just-my-code debugging)
+## Dependencies and Configuration
+- Integrates with the core `SessionManager` and dependency injection system
+- Uses production-level dependencies with test-specific logging configuration
+- Requires example Rust project structure (`examples/rust/hello_world/`) for realistic testing
+- Configured with debug-level logging to temporary files for test isolation
 
-## Integration Points
-- **SessionManager**: Core integration point for debugging session orchestration
-- **Production Dependencies**: Uses actual production dependency container for realistic testing
-- **File System**: References example Rust projects (`examples/rust/hello_world/src/main.rs`)
-- **Logging System**: Temporary debug-level logging for test observation
+## Test Architecture
+- **Isolated Environment**: Uses temporary directories and logging to avoid test interference
+- **Sequential Testing**: Maintains session state across test cases to validate complete workflows
+- **Graceful Degradation**: Handles missing test files and optional scenarios without failing the suite
+- **Resource Management**: Proper setup/teardown with afterAll hooks for cleanup
 
-## Test Flow Pattern
-Maintains sequential state through shared `sessionId`, creating a realistic debugging session workflow that mirrors actual user interactions with the Rust debugging adapter.
+## Entry Points
+- Primary test execution through vitest framework
+- Test data sourced from `examples/rust/` directory structure
+- Integration with shared debugging constants and session management APIs
 
 ## Error Handling Strategy
-Implements graceful degradation for missing test files and optional scenarios, ensuring tests remain stable even when example projects are unavailable while still validating core functionality.
+Implements robust error handling patterns including try-catch blocks for optional scenarios, graceful handling of missing test files, and proper async/await usage throughout the test suite.

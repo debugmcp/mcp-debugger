@@ -1,69 +1,74 @@
 # examples/javascript/
-@generated: 2026-02-10T01:19:44Z
+@generated: 2026-02-10T21:26:24Z
 
-## Overall Purpose and Responsibility
+## Purpose
 
-The `examples/javascript` directory serves as a comprehensive test suite for JavaScript/TypeScript debugging capabilities in the MCP (Model Context Protocol) system. It provides a collection of carefully crafted test scripts designed to validate debugger functionality across various JavaScript/TypeScript scenarios including breakpoints, stack traces, variable inspection, expression evaluation, and source map handling.
+The `examples/javascript` directory serves as a comprehensive test suite for JavaScript/TypeScript debugging capabilities in the Model Context Protocol (MCP) debugger. It provides a collection of carefully crafted test scripts that exercise various debugging features including breakpoints, stack traces, variable inspection, expression evaluation, and source map resolution.
 
-## Key Components and Organization
+## Key Components
 
-The directory contains two primary categories of test files:
+### Core Test Scripts
+- **`simple_test.js`** & **`test-simple.js`**: Minimal debugging examples with basic variable operations and arithmetic for smoke testing
+- **`pause_test.js`**: Focused on control flow and computation patterns with explicit breakpoint markers
+- **`javascript_test_comprehensive.js`**: Extensive test scenarios covering recursive functions, loops, objects, and conditional logic
+- **`mcp_target.js`** & **`test_complete_js_debug.js`**: Deep debugging demonstrations with stack traces and variable inspection
+- **`test_javascript_debug.js`**: Comprehensive computational operations testing with mixed iteration patterns
 
-### Core JavaScript Test Files
-- **`simple_test.js`** & **`test-simple.js`**: Basic smoke tests with minimal operations (variable swaps, arithmetic)
-- **`pause_test.js`**: Breakpoint-focused testing with computed operations and control flow
-- **`javascript_test_comprehensive.js`**: Full-featured test covering recursive functions, loops, arrays, and conditional logic
-- **`mcp_target.js`**: Specialized target for stack trace depth and variable inspection testing
-- **`test_javascript_debug.js`**: Comprehensive debugging scenarios with factorial, array processing, and nested function calls
-- **`test_complete_js_debug.js`**: Advanced debugging demonstration with async patterns and complex data structures
+### TypeScript Testing
+- **`typescript_test.ts`**: Source TypeScript file with type interfaces, generics, async operations, and complex data structures
+- **`typescript_test.js`**: Transpiled output with source map references for testing TypeScript debugging workflows
 
-### TypeScript Integration
-- **`typescript_test.ts`**: Source TypeScript file with comprehensive type system testing (interfaces, generics, classes, async operations)
-- **`typescript_test.js`**: Transpiled output with source map references for TypeScript debugging validation
+## Public API Surface
 
-## Public API Surface and Entry Points
+### Primary Entry Points
+Each test script is self-executing with a `main()` function as the orchestrator:
+- All scripts are directly executable via Node.js (shebang headers)
+- `main()` functions serve as test harnesses for different debugging scenarios
+- Scripts can be run individually or as part of a comprehensive test suite
 
-All test files are self-executing Node.js scripts with consistent entry patterns:
+### Test Categories
+1. **Basic Operations**: Variable swapping, arithmetic, simple breakpoints
+2. **Control Flow**: Loops, conditionals, recursive functions
+3. **Data Structures**: Arrays, objects, nested data manipulation
+4. **Async Operations**: Promise-based testing, await patterns
+5. **Error Handling**: Exception throwing, stack trace validation
+6. **Type System**: TypeScript generics, interfaces, union types
 
-- **Direct execution**: Files use Node.js shebang (`#!/usr/bin/env node`) for command-line execution
-- **Main function pattern**: Most files implement a `main()` function as the primary orchestrator
-- **Error handling**: Scripts include proper error handling with `process.exit(1)` on failures
-- **Console output**: Extensive logging throughout for debugging visibility and test progress tracking
+## Internal Organization
 
-## Internal Organization and Data Flow
+### Common Patterns
+- **Breakpoint Markers**: Strategic console.log statements and comments marking optimal breakpoint locations
+- **Progressive Complexity**: Tests range from simple arithmetic to complex nested data structures
+- **Variable Diversity**: Each script includes multiple variable types (primitives, arrays, objects) for inspection testing
+- **Function Decomposition**: Utility functions (factorial, fibonacci, sum calculations) for step-through debugging
 
-### Test Complexity Progression
-The files are organized by increasing complexity:
-1. **Basic operations**: Simple arithmetic and variable manipulation
-2. **Control flow**: Loops, conditionals, and function calls
-3. **Advanced patterns**: Recursion, async operations, and object-oriented programming
-4. **TypeScript features**: Type system, generics, interfaces, and source map debugging
+### Data Flow
+1. **Initialization**: Scripts set up test variables and data structures
+2. **Execution**: Sequential test scenarios with clear console output separation
+3. **Validation**: Results logged for verification of debugger accuracy
+4. **Error Handling**: Process exit patterns and exception catching for failure scenarios
 
-### Common Test Patterns
-- **Breakpoint markers**: Strategic console.log statements and comments marking intended breakpoint locations
-- **Variable diversity**: Mixed data types (primitives, arrays, objects, nested structures) for inspection testing
-- **Stack trace generation**: Recursive functions and nested calls for call stack examination
-- **Expression evaluation**: Arithmetic operations and object property access for evaluator testing
+## Testing Architecture
 
-## Important Patterns and Conventions
+### JavaScript Debugging Features
+- **Stack Traces**: Recursive functions creating predictable call depths
+- **Variable Inspection**: Mixed primitive and complex object types
+- **Expression Evaluation**: Runtime arithmetic and object property access
+- **Breakpoint Placement**: Strategic locations for step-through debugging
 
-### Debugging-Specific Design
-- **Predictable execution flow**: Linear progression through test scenarios for consistent debugging experiences
-- **Strategic breakpoint placement**: Explicit comments marking "good for breakpoint" locations
-- **Progressive data complexity**: Tests start simple and build to complex nested structures
-- **Cross-language compatibility**: JavaScript tests mirror TypeScript functionality for comparative debugging
+### TypeScript-Specific Testing
+- **Source Maps**: Transpiled code with original line number references
+- **Type System**: Generics, interfaces, union types for type inspection
+- **Modern Features**: Async/await, destructuring, template literals
+- **Compilation Artifacts**: Transpilation helpers (__awaiter, __generator) for tooling validation
 
-### Test Isolation
-- Each file represents a self-contained debugging scenario
-- No external dependencies beyond Node.js built-ins
-- Clear separation of concerns with distinct computational functions
-- Consistent error handling and output patterns
+## Integration Points
 
-### Source Map Integration
-The TypeScript components demonstrate source map debugging with:
-- Original TypeScript source preservation
-- Transpiled JavaScript with line number mappings
-- Source map references for debugger resolution
-- Breakpoint comments referencing original TypeScript line numbers
+The directory serves as a comprehensive validation suite for MCP debugger implementations, ensuring compatibility across:
+- Pure JavaScript debugging scenarios
+- TypeScript source map resolution
+- Async operation debugging
+- Complex data structure inspection
+- Error handling and stack trace generation
 
-This directory serves as the definitive test suite for validating MCP debugger capabilities across the JavaScript/TypeScript ecosystem, providing both simple smoke tests and comprehensive debugging scenarios for thorough validation.
+Each test script is designed to be both standalone and part of a larger debugging validation workflow, making this directory essential for verifying MCP debugger functionality across diverse JavaScript/TypeScript development scenarios.

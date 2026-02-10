@@ -1,45 +1,75 @@
 # packages/mcp-debugger/scripts/
-@generated: 2026-02-10T01:19:33Z
+@generated: 2026-02-10T21:26:18Z
 
-## Overview
+## MCP Debugger Scripts Module
 
-This directory contains build automation scripts for packaging and distributing the MCP debugger CLI tool. It orchestrates the complete build pipeline from TypeScript source to distributable npm packages with embedded runtime dependencies.
+**Purpose:** Build automation and distribution pipeline for the MCP debugger CLI tool. This directory contains production build scripts that transform TypeScript source code into distributable artifacts with all necessary runtime dependencies.
 
-## Key Components
+### Key Components
 
-### bundle-cli.js
-The primary build orchestrator that handles the complete packaging workflow:
+**bundle-cli.js** - Primary build orchestrator that handles:
+- CLI tool bundling and packaging
+- Debug adapter proxy creation
+- Vendor dependency management
+- Distribution artifact generation
 
-- **Proxy Bundling**: Creates CommonJS bundles for DAP (Debug Adapter Protocol) proxy components
-- **CLI Bundling**: Compiles TypeScript CLI to ESM format with Node 18 compatibility
-- **Asset Management**: Copies selective runtime dependencies from repo-level builds
-- **Vendor Integration**: Handles platform-specific debug adapter payloads (JavaScript via js-debug, Rust via CodeLLDB)
-- **Distribution Packaging**: Creates npm-ready packages with tarballs for distribution
+### Public API Surface
 
-## Public API Surface
+**Main Entry Points:**
+- `bundleCLI()` - Complete build pipeline for CLI distribution
+- `bundleProxy()` - DAP proxy bundle creation
+- Direct execution via Node.js (`node bundle-cli.js`)
 
-### Main Entry Points
-- **`bundleProxy()`**: Builds proxy transport bundles for SSE/stdio communication
-- **`bundleCLI()`**: Primary orchestration function managing the complete build pipeline
+### Build Pipeline Architecture
 
-### Build Outputs
-- `packages/mcp-debugger/dist/`: Runtime bundle for local execution
-- `packages/mcp-debugger/package/dist/`: Mirrored artifacts for npm packaging
-- `packages/mcp-debugger/package/debugmcp-*.tgz`: Distribution-ready npm tarball
+The module orchestrates a multi-stage build process:
 
-## Internal Organization & Data Flow
+1. **Source Compilation** - Bundles TypeScript CLI entry point into ESM format
+2. **Proxy Generation** - Creates CommonJS DAP proxy bundle for debugging protocol
+3. **Asset Aggregation** - Copies runtime dependencies from repo-wide distribution
+4. **Vendor Integration** - Handles platform-specific debug adapter assets
+5. **Package Creation** - Generates final distribution artifacts and npm tarballs
 
-1. **Bundling Phase**: TypeScript compilation using tsup with aggressive dependency inlining
-2. **Asset Collection**: Selective copying of runtime components (proxy, errors, adapters, session, utils)
-3. **Vendor Integration**: Platform-aware inclusion of debug adapter binaries with environment-based filtering
-4. **Distribution Preparation**: File mirroring and npm pack generation for publishing
+### Internal Organization
 
-## Important Patterns
+**Build Tools Integration:**
+- Uses `tsup` for TypeScript bundling with Node.js 18+ targeting
+- Leverages Node.js built-ins for filesystem operations and process management
+- Configured for both ESM (.mjs) and CommonJS (.cjs) output formats
 
-- **Platform Awareness**: Uses CODELLDB_PACKAGE_PLATFORMS environment variable for cross-platform builds
-- **Defensive File Operations**: Employs shell commands over Node.js fs APIs for better permission handling
-- **Graceful Degradation**: Warns about missing vendor directories rather than failing builds
-- **Executable Generation**: Creates proper shebang wrappers for cross-platform CLI execution
-- **Error Handling**: Process-level error management with appropriate exit codes
+**Directory Structure Management:**
+- Sources from `packages/mcp-debugger/src/cli-entry.ts`
+- Outputs to `packages/mcp-debugger/dist/` for runtime
+- Mirrors to `packages/mcp-debugger/package/dist/` for npm packaging
+- Pulls shared assets from repo root `dist/` directory
 
-The scripts directory serves as the build system foundation, transforming development artifacts into production-ready distribution packages with all necessary runtime dependencies embedded.
+**Vendor Asset Handling:**
+- JavaScript debug adapter: Copies `js-debug` vendor assets
+- Rust debug adapter: Manages CodeLLDB platform-specific binaries
+- Platform awareness via `CODELLDB_PACKAGE_PLATFORMS` environment variable
+- Fallback warnings for missing dependencies
+
+### Data Flow
+
+```
+TypeScript Source → tsup Bundle → Asset Copy → Vendor Integration → Distribution Artifacts
+```
+
+The pipeline transforms source code through multiple stages:
+- CLI source bundled as ESM with Node.js compatibility shims
+- Proxy components bundled as CommonJS for maximum compatibility
+- Runtime assets copied from shared repository locations
+- Platform-specific debug adapters integrated based on environment
+- Final artifacts packaged for npm distribution
+
+### Important Patterns
+
+**Multi-Format Support:** Generates both ESM and CommonJS bundles to support different Node.js environments
+
+**Platform Flexibility:** Debug adapter integration respects platform constraints while providing sensible defaults
+
+**Error Resilience:** Comprehensive error handling with graceful degradation for missing vendor assets
+
+**Clean Build Process:** Always rebuilds from scratch to ensure consistent output state
+
+The scripts module serves as the critical bridge between development source code and production distribution, handling the complexity of multi-platform debug adapter integration while maintaining a simple build interface.

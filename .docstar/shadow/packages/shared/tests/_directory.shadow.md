@@ -1,74 +1,49 @@
 # packages/shared/tests/
-@generated: 2026-02-10T01:19:52Z
+@generated: 2026-02-10T21:26:26Z
 
 ## Purpose
+This directory provides comprehensive unit test coverage for the shared debugging infrastructure's language-specific debug adapter policies. It validates Debug Adapter Protocol (DAP) compliance and ensures robust cross-platform debugging capabilities for JavaScript/Node.js and Rust development environments.
 
-This directory contains the comprehensive test suite for the shared debugging infrastructure, validating language-specific debug adapter policies and their integration with the Debug Adapter Protocol (DAP). The tests ensure robust, cross-platform debugging capabilities for JavaScript/Node.js and Rust development environments.
+## Key Components and Integration
 
-## Key Components and Organization
+### Test Structure
+- **`unit/`** subdirectory containing focused unit tests for debug adapter policy implementations
+- Language-specific test suites for JavaScript (`adapter-policy-js.spec.ts`) and Rust (`adapter-policy-rust.test.ts`) debug adapters
+- Comprehensive DAP protocol compliance validation across multiple debugging scenarios
 
-### Language-Specific Adapter Policy Tests
-- **JavaScript Tests** (`unit/adapter-policy-js.spec.ts`): Validates `JsDebugAdapterPolicy` with Node.js debugging workflows
-- **Rust Tests** (`unit/adapter-policy-rust.test.ts`): Validates `RustAdapterPolicy` with CodeLLDB adapter integration
+### Component Relationships
+The test suite validates the integration between:
+- Debug adapter policy classes and the DAP command queue management system
+- Language-specific debugging features with the shared session state infrastructure
+- Platform abstraction layers with actual debugger binaries and toolchains
+- External dependencies (`@vscode/debugprotocol`, `@debugmcp/shared`) with internal implementations
 
-Both test suites follow consistent patterns while addressing language-specific debugging requirements and toolchain integration.
+## Testing Architecture
 
-## Core Testing Domains
+### Common Testing Patterns
+- **Mock-First Strategy**: Extensive vitest mocking of file system operations, child processes, and external dependencies
+- **Cross-Platform Validation**: Platform simulation and temporary environment overrides for comprehensive compatibility testing
+- **Event-Driven Testing**: Asynchronous operation validation through event-driven patterns
+- **State Lifecycle Testing**: Full debug session lifecycle validation from initialization through termination
 
-### Debug Adapter Protocol (DAP) Compliance
-- Command queueing and proper initialization flow (initialize → configure → launch)
-- Stack frame processing with internal frame filtering
-- Variable extraction from debug scopes with special handling
-- Session lifecycle and state management validation
+### Quality Assurance Coverage
+- **DAP Protocol Compliance**: Command queueing, state transitions, and reverse debugging request handling
+- **Language Integration**: JavaScript Node.js internal filtering and Rust Cargo toolchain integration
+- **Infrastructure Robustness**: Adapter spawning, environment configuration, and error recovery mechanisms
+- **Cross-Platform Compatibility**: Platform-specific path resolution and process management
 
-### Cross-Platform Adapter Management
-- Executable resolution and validation across platforms
-- Environment-specific configuration (CARGO_PATH, vendored adapters)
-- Process spawning strategies with platform detection
-- Adapter process detection and matching logic
+## Public API Validation
+Tests validate the public interfaces of:
+- `JsDebugAdapterPolicy` for JavaScript/Node.js debugging sessions
+- `RustAdapterPolicy` for Rust debugging via CodeLLDB
+- Debug session management and DAP command queue coordination
+- Variable extraction and stack frame filtering capabilities
 
-### Data Processing and Filtering
-- Stack frame filtering to surface user code over internal frames
-- Local variable extraction with debugger internal exclusion
-- Fallback behaviors for edge cases (empty stacks, missing data)
-- Language-specific frame normalization
+## System Integration Points
+Ensures proper integration with:
+- VSCode Debug Adapter Protocol specifications
+- Platform-specific debugger binaries (Node.js debugger, CodeLLDB)
+- External build systems (Cargo for Rust projects)
+- Cross-platform file system and process APIs
 
-## Public API Surface
-
-The tests validate the core adapter policy interface that all language implementations must support:
-
-### Primary Entry Points
-- `matchesAdapter()`: Adapter process detection and identification
-- `extractLocalVariables()`: Variable scope processing from debug contexts
-- `validateExecutable()`: Binary validation and resolution workflows
-- `getAdapterSpawnConfig()`: Process configuration generation for adapter launching
-
-### State Management Interface
-- Session initialization tracking and validation
-- Configuration completion detection
-- Connection status monitoring
-- Command queue state transitions
-
-## Internal Organization and Testing Strategy
-
-### Mock Infrastructure
-- Comprehensive mocking of file system, child processes, and platform detection
-- DAP protocol object mocking with realistic data structures
-- Event simulation for debugging session workflows
-- Proper cleanup and teardown between test cases
-
-### Test Utilities and Patterns
-- Shared mock factories (`createStackFrame`, `createChild`, `setPlatform`)
-- Consistent edge case testing across all implementations
-- Language-agnostic test patterns with specific customization
-- Integration point validation ensuring consistent behavior
-
-## Integration with Larger System
-
-This test suite validates the debugging infrastructure's ability to:
-- Support multiple programming languages through unified interfaces
-- Maintain DAP compliance across different adapter implementations
-- Handle cross-platform deployment scenarios reliably
-- Process debugging data consistently regardless of language runtime
-
-The tests ensure that language-specific adapter policies integrate seamlessly into the broader debugging system while maintaining their specialized capabilities for their respective development environments.
+This test directory serves as the quality gate ensuring the shared debugging infrastructure maintains protocol compliance, cross-platform compatibility, and robust error handling across all supported programming languages.

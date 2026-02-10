@@ -1,84 +1,91 @@
 # tests/test-utils/mocks/
-@generated: 2026-02-10T01:19:45Z
+@generated: 2026-02-10T21:26:25Z
 
-## Test Utilities Mocking Module
+## Test Mocks Directory
 
-**Overall Purpose**: Comprehensive mocking infrastructure for the MCP debugger project, providing test doubles for external dependencies, system services, and internal components. Enables isolated unit testing by replacing real implementations with controllable, deterministic mock objects.
+**Overall Purpose**: Comprehensive mock implementations of external dependencies and system interfaces for the debugmcp test suite. Provides controlled, deterministic testing environment by replacing real external services, system calls, and I/O operations with configurable mock implementations.
 
-## Core Components & Architecture
+## Key Component Categories
 
-### System-Level Mocks
-- **child-process.ts**: Mock Node.js child_process module with `MockChildProcess` class and specialized configurations for Python/proxy process simulation
-- **fs-extra.ts**: Mock filesystem operations with optimistic defaults (`pathExists` always true, `ensureDir` always succeeds)
-- **net.ts**: Mock TCP server implementation for testing network operations without actual ports
-- **environment.ts**: Environment variable mocking specifically tailored for container path testing
+### System & Process Mocking
+- **child-process.ts**: Mock Node.js child_process module with full process lifecycle simulation (spawn, exec, fork) and specialized configurations for Python/proxy processes
+- **net.ts**: Mock TCP server implementation for network operation testing without actual port binding
+- **fs-extra.ts**: Mock filesystem operations preventing actual file system interactions during tests
 
-### Debug Protocol Mocks  
-- **dap-client.ts**: Mock Debug Adapter Protocol client with comprehensive event simulation and request/response pattern testing
-- **mock-proxy-manager.ts**: Mock proxy manager implementing full DAP protocol simulation with configurable failures and event emission
-- **mock-adapter-registry.ts**: Mock debug adapter registry with pre-configured language support and error simulation variants
+### Debug Adapter Protocol (DAP) Mocking
+- **dap-client.ts**: Complete DAP client mock with event simulation, request/response handling, and error injection capabilities
+- **mock-proxy-manager.ts**: Full ProxyManager implementation mock with DAP command simulation, event emission, and configurable failure modes
+- **mock-adapter-registry.ts**: Debug adapter registry mocks with pre-configured language support and error scenario simulation
 
-### Utility Mocks
-- **mock-command-finder.ts**: Mock command resolution with configurable responses and call history tracking
-- **mock-logger.ts**: Two-variant logger mocking (silent vs. observable) for different testing needs
-
-## Key Design Patterns
-
-### Factory Pattern
-Most mocks use factory functions (`createMockLogger`, `createEnvironmentMock`, `createMockAdapterRegistry`) enabling test-specific configuration while maintaining consistent interfaces.
-
-### State Management & Reset
-All mocks provide `reset()` methods for test isolation, clearing call histories, event listeners, and restoring default behaviors.
-
-### Configurable Behavior
-Mocks support both optimistic defaults for basic testing and configurable failure modes for error condition testing:
-- `setupPythonSpawnMock()` for process simulation scenarios
-- Error simulation variants like `createMockAdapterRegistryWithErrors()`
-- Delay and failure flags in proxy manager for timing-sensitive tests
-
-### Event Simulation
-Complex mocks extend EventEmitter and use `process.nextTick()` for asynchronous event emission, providing realistic timing while remaining deterministic.
+### Utility & Environment Mocking
+- **environment.ts**: Environment variable mocking specifically for container path utilities testing
+- **mock-command-finder.ts**: Command resolution mock for testing executable discovery without filesystem lookups
+- **mock-logger.ts**: Logger implementations with both silent and spy variants for different testing needs
 
 ## Public API Surface
 
-### Direct Mock Exports
-- `childProcessMock` - Singleton instance with spawn/exec/fork mocking
-- `mockDapClient` - DAP client singleton with event simulation
-- `fsExtraMock` - Default filesystem mock object
-- `netMock` - Network module replacement
+### Primary Mock Factories
+- `createMockAdapterRegistry()` - Creates fully functional adapter registry mock
+- `createMockLogger()` / `createSpyLogger()` - Logger mock variants for different test scenarios
+- `createEnvironmentMock()` - Environment variable mock factory
+- `MockProxyManager` - Complete proxy manager simulation
+- `mockDapClient` - Singleton DAP client mock instance
 
-### Factory Functions  
-- `createMockLogger(logLevel?)` - Configurable logger creation
-- `createEnvironmentMock(overrides?)` - Environment variable mocking
-- `createMockAdapterRegistry()` - Adapter registry with language support
-- `createMockAdapterRegistryWithErrors()` - Error simulation variant
+### System Mock Exports
+- `childProcessMock` - Central orchestrator for process spawning mocks
+- `netMock` - TCP server mock for network testing
+- `fsExtraMock` - Filesystem operation stubs
 
-### Test Utilities
-- Reset helpers: `resetMockDapClient()`, `resetAdapterRegistryMock()`
-- Assertion helpers: `expectAdapterRegistryLanguageCheck()`, `expectAdapterCreation()`
-- Event simulation: `simulateEvent()`, `simulateError()`, `simulateExit()`
+## Internal Organization & Data Flow
 
-## Internal Organization
+### Mock Lifecycle Pattern
+1. **Creation**: Factory functions create mock instances with sensible defaults
+2. **Configuration**: Test-specific behavior setup via setter methods
+3. **Execution**: Mock methods track calls and return configured responses
+4. **Reset**: Comprehensive cleanup methods for test isolation
 
-### Mock Hierarchy
-1. **System mocks**: Low-level OS/Node.js API replacements (child_process, fs, net, env)
-2. **Protocol mocks**: Debug adapter protocol and communication layer mocks
-3. **Application mocks**: High-level component mocks for domain-specific functionality
+### State Management Architecture
+- **Call Tracking**: All mocks maintain call history for verification
+- **Behavior Configuration**: Configurable responses, delays, and error conditions
+- **Event Simulation**: EventEmitter-based mocks for asynchronous behavior testing
+- **Reset Mechanisms**: Complete state cleanup for test isolation
 
-### Data Flow
-Mocks track method calls and state changes through:
-- Call history arrays for verification
-- Event emission for asynchronous behavior simulation  
-- Configurable responses for deterministic test outcomes
+## Key Design Patterns
 
-## Dependencies
-- **vitest**: Core testing framework providing `vi.fn()` mock capabilities
-- **events.EventEmitter**: Foundation for event-driven mock behavior
-- **@debugmcp/shared**: Interface contracts and type definitions
-- **@vscode/debugprotocol**: DAP type definitions for protocol mocking
+### Test Double Strategies
+- **Stub Pattern**: Simple return value mocking (fs-extra, net)
+- **Spy Pattern**: Call tracking with optional real behavior (mock-logger)
+- **Mock Pattern**: Full behavioral simulation (proxy-manager, dap-client)
+- **Factory Pattern**: Consistent mock creation with customization options
 
-## Critical Integration Points
-- All mocks designed for vitest module replacement (`vi.mock()` compatibility)
-- Consistent reset patterns enable proper test isolation
-- Event simulation uses Node.js timing primitives for realistic async behavior
-- Mock responses mirror real API contracts while providing test control
+### Asynchronous Simulation
+- Uses `process.nextTick()` and setTimeout for realistic timing simulation
+- Promise-based async operation mocking with configurable delays/failures
+- Event-driven architecture simulation through EventEmitter inheritance
+
+### Error Testing Support
+- Configurable failure modes for testing error handling paths
+- Exception injection capabilities for negative test scenarios
+- Network and process failure simulation
+
+## Integration Points
+
+### Cross-Mock Dependencies
+- Child process mocks integrate with proxy manager for IPC simulation
+- DAP client and proxy manager mocks work together for end-to-end protocol testing
+- Environment mocks support container path utilities across multiple test scenarios
+
+### Test Framework Integration
+- Full Vitest compatibility with `vi.fn()` mock system
+- Module replacement support through default exports
+- Comprehensive reset capabilities for test isolation
+
+## Critical Testing Capabilities
+
+- **End-to-End DAP Protocol Simulation**: Complete debugging session lifecycle testing
+- **System Process Isolation**: Testing process spawning without actual system calls
+- **Network Operation Mocking**: TCP server testing without port conflicts
+- **Error Condition Simulation**: Comprehensive failure scenario coverage
+- **Container Environment Testing**: Support for both host and container execution modes
+
+The directory provides a complete testing infrastructure that isolates the debugmcp system from external dependencies while maintaining realistic behavior simulation for comprehensive test coverage.

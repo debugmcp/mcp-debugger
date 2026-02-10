@@ -1,47 +1,58 @@
 # tests/unit/session-manager-operations-coverage.test.ts
-@source-hash: 93bef29951beaa83
-@generated: 2026-02-10T00:42:01Z
+@source-hash: b28c3e685d29da85
+@generated: 2026-02-10T21:25:43Z
 
-## Purpose
-Comprehensive unit test suite for `SessionManagerOperations` focused on edge cases, error paths, and coverage gaps. Tests error scenarios, timeout handling, proxy manager failures, and various debugging operation edge cases.
+## Primary Purpose
+Comprehensive test coverage for `SessionManagerOperations` error paths and edge cases, focusing on proxy failures, network errors, timeout scenarios, and MSVC toolchain detection for Rust debugging. Uses a concrete test subclass (L12-16) to test the abstract base class.
 
 ## Test Structure
-- **Setup (L28-122)**: Extensive mock infrastructure including session store, proxy manager, logger, and all dependencies
-- **Main Test Groups**:
-  - `startProxyManager` edge cases (L128-281) - Error handling during proxy initialization
-  - Toolchain handling (L283-330) - MSVC toolchain detection and warnings
-  - Operation failures (L332-409) - DAP request failures and timeouts
-  - Breakpoint operations (L411-463) - Breakpoint setting edge cases
-  - Variable/stack operations (L465-592) - Debug data retrieval errors
-  - Expression evaluation (L594-732) - Expression evaluation scenarios
-  - Start debugging flows (L734-1177) - Complex initialization patterns
-  - Internal utilities (L1179-1355) - Helper method behaviors
+- **TestableSessionManagerOperations** (L12-16): Concrete subclass with no-op `handleAutoContinue()` for testing
+- **Mock Setup** (L35-133): Extensive mocks for all dependencies including SessionStore, ProxyManager, FileSystem, NetworkManager, AdapterRegistry
+- **Test Organization**: 15 describe blocks covering specific error scenarios and edge cases
 
-## Key Mock Objects
-- **mockProxyManager (L38-52)**: IProxyManager interface with event handling
-- **mockSession (L55-66)**: Session model with state management
-- **mockSessionStore (L69-84)**: Session persistence layer
-- **mockDependencies (L87-115)**: All external dependencies including filesystem, network, adapters
+## Key Test Areas
 
-## Critical Test Patterns
-- **Environment Management**: Proper CI/GitHub Actions environment variable handling
-- **Timer Mocking**: Extensive use of `vi.useFakeTimers()` for timeout testing
-- **Error Propagation**: Tests that specific errors (PythonNotFoundError, SessionTerminatedError) bubble correctly
-- **State Transitions**: Validates session state changes during operations
-- **Event Handling**: Tests proxy manager event listener setup/teardown
+### Proxy Manager Startup Errors (L135-288)
+- Log directory creation failures (L136-142)
+- Python interpreter resolution failures - throws `PythonNotFoundError` (L144-154)
+- Non-Python executable resolution - throws `DebugSessionCreationError` (L164-175)
+- MSVC toolchain validation for Rust (L254-287) - captures structured error with `MSVC_TOOLCHAIN_DETECTED` message
 
-## Edge Cases Covered
-- Log directory creation failures (L129-135)
-- Python interpreter resolution errors (L137-147)
-- MSVC toolchain compatibility warnings (L247-280)
-- Concurrent step operations (L1400-1430)
-- Network timeouts and connection failures
-- Malformed DAP responses
-- Missing proxy managers during operations
+### Debug Session Operations Failures (L339-416)
+- Continue operations without proxy or when proxy not running - throws `ProxyNotRunningError` (L340-352)
+- Step operations (stepOver, stepInto, stepOut) with DAP protocol errors and timeouts (L362-415)
+- Timeout handling using fake timers for 5-second step operation timeouts (L382-403)
 
-## Notable Implementation Details
-- Uses spy methods to mock internal operations like `startProxyManager` and `_executeStepOperation`
-- Tests both success and failure paths for each operation
-- Validates logging output for error conditions
-- Ensures proper cleanup of event listeners and timers
-- Tests dry-run completion detection and timeout handling
+### Breakpoint Operations (L418-470)
+- Breakpoint setting without active proxy - queues unverified breakpoint (L419-428)
+- DAP response failures and network errors - logs errors but creates unverified breakpoint (L430-469)
+
+### Variable/Stack Inspection (L472-599)
+- `getVariables`, `getStackTrace`, `getScopes` - return empty arrays on errors or missing proxy (L472-599)
+- Malformed DAP responses handled gracefully
+
+### Expression Evaluation (L601-739)
+- Network failures and syntax error mapping (L649-663)
+- Success path with stack trace resolution and frame ID usage (L695-739)
+- Timeout scenarios with fake timers
+
+### Debug Session Lifecycle (L741-1184)
+- Dry run completion detection and timeout handling (L742-782, L1186-1256)
+- Proxy startup failures with log tail capture (L885-924)
+- Handshake failures and adapter readiness timeouts (L1103-1183)
+- MSVC toolchain structured responses (L291-337)
+
+## Test Utilities & Patterns
+- **Fake Timers**: Extensive use of `vi.useFakeTimers()` for timeout testing
+- **Environment Mocking**: CI/GitHub Actions environment variable manipulation
+- **Mock Chaining**: Fluent interfaces on proxy manager mocks
+- **Error Assertion Patterns**: Mix of `expect().rejects.toThrow()` and result object validation
+
+## Key Dependencies
+- **Vitest**: Primary testing framework with mocking capabilities
+- **@debugmcp/shared**: Session state enums and types
+- **@vscode/debugprotocol**: DAP protocol types
+- **Custom Errors**: SessionNotFoundError, ProxyNotRunningError, PythonNotFoundError, DebugSessionCreationError
+
+## Coverage Focus
+Specifically targets error paths, timeout scenarios, and edge cases that are difficult to trigger in normal operation, ensuring robust error handling in the SessionManagerOperations implementation.

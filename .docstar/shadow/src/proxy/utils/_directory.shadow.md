@@ -1,41 +1,58 @@
 # src/proxy/utils/
-@generated: 2026-02-10T01:19:28Z
+@generated: 2026-02-10T21:26:16Z
 
-## Purpose
+## Purpose and Responsibility
 
-The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on detecting and handling orphaned processes in various deployment environments.
+The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on orphan detection and container-aware process management. This module serves as a critical component for maintaining proxy process health and preventing zombie processes in both traditional host environments and containerized deployments.
 
-## Key Components
+## Key Components and Relationships
 
-**orphan-check.ts** - Core orphan detection module containing:
-- `shouldExitAsOrphan(ppid, inContainer)` - Primary decision logic for orphan detection
-- `shouldExitAsOrphanFromEnv(ppid, env?)` - Environment-aware convenience wrapper
+Currently contains a single specialized utility module:
+
+- **orphan-check.ts**: Core orphan detection logic with container-aware behavior
+
+The module implements a layered approach where the core decision logic is separated from environment detection, allowing for both explicit control and automatic environment-based decisions.
 
 ## Public API Surface
 
-**Primary Entry Points:**
-- `shouldExitAsOrphanFromEnv(ppid, env?)` - Recommended high-level interface that automatically detects container environments
-- `shouldExitAsOrphan(ppid, inContainer)` - Lower-level interface for explicit container state control
+### Main Entry Points
 
-## Internal Organization
+- `shouldExitAsOrphan(ppid: number, inContainer: boolean): boolean` - Core decision function for orphan detection
+- `shouldExitAsOrphanFromEnv(ppid: number, env?: NodeJS.ProcessEnv): boolean` - Environment-aware wrapper that automatically detects container status
 
-The module follows a layered approach:
-1. **Core Logic Layer**: Pure function implementing the orphan detection algorithm
-2. **Environment Abstraction Layer**: Wrapper that handles environment variable detection and defaults
+### Key Parameters
 
-## Data Flow
+- **ppid**: Process parent ID to evaluate
+- **inContainer**: Boolean flag indicating container environment
+- **env**: Optional environment variables object (defaults to process.env)
 
-1. Process PPID and environment variables flow into detection functions
-2. Container status is determined from `MCP_CONTAINER` environment variable
-3. Decision logic evaluates PPID=1 condition against container context
-4. Boolean result indicates whether process should exit as orphaned
+## Internal Organization and Data Flow
 
-## Key Patterns & Conventions
+The module follows a simple but effective pattern:
 
-**Container-Aware Design**: The module explicitly handles the containerization paradigm where PPID=1 is normal behavior rather than indicating orphaned status.
+1. **Environment Detection**: Uses `MCP_CONTAINER` environment variable to determine deployment context
+2. **Core Logic Evaluation**: Applies container-aware rules to PPID analysis
+3. **Decision Output**: Returns boolean indication of whether process should exit
 
-**Environment Variable Convention**: Uses `MCP_CONTAINER` as the standard indicator for container deployment context.
+Data flows from environment → container detection → PPID evaluation → exit decision.
 
-**Pure Function Architecture**: All functions are stateless and side-effect free, making them easily testable and predictable.
+## Important Patterns and Conventions
 
-**Defensive Defaults**: The environment-aware wrapper uses `process.env` as default, providing convenient usage while maintaining flexibility.
+### Container-Aware Architecture
+
+The module implements a crucial pattern for modern cloud-native deployments:
+- **Host Environment**: PPID=1 indicates orphaned process (should exit)
+- **Container Environment**: PPID=1 is expected behavior due to PID namespaces (should NOT exit)
+- **Active Parent**: PPID≠1 indicates healthy parent process (should NOT exit)
+
+### Pure Function Design
+
+All functions are pure with no side effects, making them:
+- Easily testable
+- Predictable in behavior  
+- Safe for concurrent usage
+- Simple to reason about
+
+### Environment Variable Convention
+
+Uses `MCP_CONTAINER` environment variable as the standard mechanism for container detection, providing a consistent way to signal containerized deployments across the MCP ecosystem.

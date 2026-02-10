@@ -1,51 +1,80 @@
 # packages/adapter-rust/tests/rust-debug-adapter.toolchain.test.ts
-@source-hash: 1188b2e27e752851
-@generated: 2026-02-10T00:41:31Z
+@source-hash: 88d9f2bcff1c183f
+@generated: 2026-02-10T21:25:42Z
 
 ## Purpose
+Comprehensive test suite for `RustDebugAdapter` toolchain logic, covering environment validation, executable resolution, DAP operations, and platform-specific behavior. Tests the adapter's ability to handle Rust compilation, debugging setup, and CodeLLDB integration across different platforms and configurations.
 
-Comprehensive test suite for the RustDebugAdapter class, focusing on toolchain validation, environment setup, binary detection, DAP communication, and platform-specific behavior. Tests the complete lifecycle from toolchain discovery to debug session management.
+## Test Structure
+The test suite is organized around the `RustDebugAdapter` class with mocked dependencies, focusing on toolchain detection and debugging workflow validation.
 
-## Key Test Structures
+### Main Test Setup
+- **createDependencies** (L47-79): Factory function creating mock `AdapterDependencies` with file system, logger, environment, and process launcher mocks
+- **setPlatform** (L81-87): Utility to temporarily mock `process.platform` for cross-platform testing
+- **beforeEach** (L93-111): Resets all mocks and environment variables, creates fresh adapter instance
 
-**Mock Setup (L10-46)**: Extensive mocking of utility modules including rust-utils, codelldb-resolver, binary-detector, and cargo-utils. All external dependencies are mocked to ensure isolated testing.
+### Key Test Categories
 
-**Dependencies Factory (L47-79)**: `createDependencies()` creates mock AdapterDependencies with file system, logger, environment, and process launcher mocks.
+#### Executable Resolution Tests (L113-157)
+- **resolveExecutablePath**: Tests caching behavior, preferred executable handling, cargo/rustc fallback logic
+- Validates environment variable handling (`MCP_RUST_ALLOW_PREBUILT`, `MCP_RUST_EXECUTABLE_PLACEHOLDER`)
+- Tests error handling for missing executables
 
-**Platform Utility (L81-87)**: `setPlatform()` helper for testing platform-specific behavior by temporarily overriding `process.platform`.
+#### Environment Validation Tests (L159-190)
+- **validateEnvironment**: Tests CodeLLDB detection, MSVC toolchain warnings
+- Platform-specific validation (Windows GNU toolchain with dlltool checks)
+- Integration with utility modules for toolchain detection
 
-## Test Categories
+#### Build Command Environment Tests (L192-239)
+- **buildAdapterCommand**: Tests environment variable injection (LLDB_USE_NATIVE_PDB_READER, DLLTOOL, PATH)
+- Windows-specific dlltool path handling
+- CodeLLDB executable resolution integration
 
-**Executable Resolution (L113-157)**: Tests `resolveExecutablePath()` behavior including caching, fallback logic (cargo → rustc → placeholder), and environment variable handling (`MCP_RUST_ALLOW_PREBUILT`, `MCP_RUST_EXECUTABLE_PLACEHOLDER`).
+#### Launch Configuration Tests (L241-313)
+- **transformLaunchConfig**: Tests Rust source file to binary resolution
+- Cargo project detection and build pipeline integration
+- Binary up-to-date checking and rebuild logic
+- Build failure error handling
 
-**Environment Validation (L159-190)**: Tests `validateEnvironment()` including CodeLLDB detection, MSVC toolchain warnings, and GNU toolchain dlltool validation on Windows.
+#### Toolchain Validation Tests (L315-356)
+- **validateToolchain**: Tests MSVC compatibility detection
+- Binary format analysis integration
+- Environment variable behavior control (`RUST_MSVC_BEHAVIOR`)
+- Toolchain validation result caching and consumption
 
-**Command Building (L192-232)**: Tests `buildAdapterCommand()` focusing on environment variable injection (LLDB_USE_NATIVE_PDB_READER, DLLTOOL, PATH modification) and Windows-specific path handling.
+#### DAP Operations Tests (L358-424)
+- Event handling for stopped/terminated debug states
+- Exception filter validation and warnings
+- Connection lifecycle management
+- State transition validation (`AdapterState` enum usage)
 
-**Launch Configuration (L234-306)**: Tests `transformLaunchConfig()` with Cargo project handling including source-to-binary resolution, rebuild detection, and build failure scenarios.
+#### Utility and Path Tests (L426-533)
+- Dependency listing and install command generation
+- Platform-specific executable search path generation
+- Python environment configuration for embedded CodeLLDB
+- Path sanitization for CodeLLDB on Windows (spaces handling)
 
-**Toolchain Validation (L308-349)**: Tests binary format detection, MSVC incompatibility handling, and `RUST_MSVC_BEHAVIOR` environment variable effects.
+#### Messaging and Capabilities Tests (L535-581)
+- Feature support queries (`DebugFeature` enum)
+- Error message translation
+- Default configuration and capability reporting
 
-**DAP Operations (L351-417)**: Tests Debug Adapter Protocol communication including event handling, state transitions (DEBUGGING, CONNECTED, DISCONNECTED), error logging, and connection lifecycle.
+## Key Dependencies
+- **Vitest**: Testing framework with mocking capabilities
+- **@debugmcp/shared**: Core types (`AdapterError`, `DebugFeature`, `AdapterState`, interfaces)
+- **Mocked utilities**: rust-utils, codelldb-resolver, binary-detector, cargo-utils modules
+- **Node.js APIs**: fs, path, os for file system operations
 
-**Utility Functions (L419-526)**: Tests dependency listing, executable search paths (platform-specific), Python environment configuration, and CodeLLDB path sanitization.
-
-**Capabilities & Messaging (L528-574)**: Tests feature support detection, error message translation, installation guidance, and default configuration provision.
-
-## Key Patterns
-
-- Heavy use of Vitest mocking for external dependencies
-- Platform-specific testing with temporary `process.platform` overrides
-- Temporary file/directory creation for filesystem tests
+## Testing Patterns
+- Extensive use of vi.mock() for dependency isolation
+- Platform-specific test isolation using setPlatform utility
 - Environment variable manipulation with cleanup
-- State transition verification for adapter lifecycle
-- Mock function call verification for dependency interaction
+- Temporary directory creation for file system tests
+- Mock restoration in finally blocks for cleanup
 
-## Critical Test Behaviors
-
-- Caching behavior in executable resolution prevents redundant toolchain checks
-- Fallback chains ensure graceful degradation when preferred tools unavailable
-- Platform-specific path handling for Windows vs. Unix systems
-- MSVC toolchain detection and compatibility warnings
-- DAP state management and event forwarding
-- Python environment isolation for embedded CodeLLDB
+## Platform Considerations
+Tests explicitly handle Windows (`win32`) vs Unix platforms for:
+- Executable extensions (.exe)
+- Path separators and environment variables
+- Toolchain-specific behavior (MSVC vs GNU)
+- CodeLLDB path handling with spaces

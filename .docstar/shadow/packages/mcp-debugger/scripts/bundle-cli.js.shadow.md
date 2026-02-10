@@ -1,36 +1,72 @@
 # packages/mcp-debugger/scripts/bundle-cli.js
-@source-hash: bcf04facb9fd8345
-@generated: 2026-02-10T00:41:23Z
+@source-hash: c0db340943686f1e
+@generated: 2026-02-10T21:25:36Z
 
-**Purpose**: Node.js build script that bundles the MCP debugger CLI and its dependencies for distribution using tsup bundler.
+## MCP Debugger CLI Bundle Script
 
-**Key Functions**:
-- `bundleProxy()` (L23-45): Builds proxy bundle from DAP proxy entry point
-  - Creates `dist/proxy/proxy-bundle.cjs` as CommonJS bundle for SSE/stdio transports
-  - Uses tsup with aggressive bundling (noExternal for all modules)
-- `bundleCLI()` (L47-213): Main CLI bundling function orchestrating the complete build process
-  - Bundles TypeScript CLI to ESM format with Node 18 target
-  - Creates executable wrapper script with shebang (L81-93)
-  - Copies runtime assets from repo-level dist directories (L98-118)
-  - Handles vendor directory copying for debug adapters (L123-190)
-  - Mirrors build artifacts to package directory for npm distribution (L192-203)
-  - Generates npm pack tarball (L205-210)
+**Purpose:** Production build script that creates distributable artifacts for the MCP debugger CLI tool, including proxy bundles and vendor dependencies.
 
-**Build Outputs**:
-- `packages/mcp-debugger/dist/`: Primary runtime bundle
-- `packages/mcp-debugger/package/dist/`: Mirror for npm packaging
-- `packages/mcp-debugger/package/debugmcp-*.tgz`: npm pack tarball
+### Core Functions
 
-**Dependencies & Architecture**:
-- Uses tsup for TypeScript bundling with ESM output and require() shimming
-- Copies selective runtime assets: proxy, errors, adapters, session, utils (L100)
-- Handles platform-specific debug adapter payloads:
-  - JavaScript: js-debug vendor directory (L123-146)
-  - Rust: CodeLLDB with platform filtering via CODELLDB_PACKAGE_PLATFORMS env var (L148-190)
-- Uses shell commands (`cp`, `rm`) instead of fs.cpSync for better permission handling
+**bundleProxy() (L23-45)**
+- Bundles the DAP proxy entry point using tsup
+- Creates CommonJS bundle at `dist/proxy/proxy-bundle.cjs`
+- Configured for Node.js 18+ with all external dependencies bundled
+- Sources from `dist/proxy/dap-proxy-entry.js` in repo root
 
-**Key Patterns**:
-- Defensive copying with cleanup of existing destinations to avoid permission issues
-- Platform-aware bundling with environment variable configuration
-- Graceful degradation with warnings when vendor directories are missing
-- Error handling with process.exit(1) on build failure (L215-220)
+**bundleCLI() (L47-196)**
+- Main bundling orchestrator that creates three distribution artifacts
+- Cleans and rebuilds `packages/mcp-debugger/dist/`
+- Creates ESM bundle with `.mjs` extension and Node.js shim banner
+- Generates executable wrapper script `cli` that imports `cli.mjs`
+- Copies runtime assets from repo-wide dist (proxy, errors, adapters, session, utils)
+- Handles vendor dependencies for JavaScript and Rust debugging adapters
+- Mirrors bundle to `package/dist/` and generates npm pack tarball
+
+### Key Dependencies & Architecture
+
+**Build Tools:**
+- `tsup` for TypeScript bundling (L12)
+- Node.js built-ins for filesystem operations and child processes (L13-16)
+
+**Directory Structure:**
+- `packageRoot`: Current package directory (L20)
+- `repoRoot`: Monorepo root for shared assets (L21)
+- Sources CLI from `src/cli-entry.ts` (L56)
+
+### Vendor Asset Handling
+
+**JavaScript Debug Adapter (L123-137)**
+- Copies `js-debug` vendor directory from `packages/adapter-javascript/vendor/`
+- Provides fallback warnings if vendor assets missing
+
+**Rust Debug Adapter (L139-178)**
+- Handles CodeLLDB vendor assets with platform-specific copying
+- Respects `CODELLDB_PACKAGE_PLATFORMS` environment variable (L141)
+- Supports multiple platforms (defaults to `linux-x64`)
+- Includes platform validation and error handling
+
+### Build Configuration Details
+
+**CLI Bundle Config (L54-77)**
+- ESM format targeting Node.js 18
+- No code splitting, sourcemaps, or external dependencies
+- Custom banner adds CommonJS `require` compatibility
+- Output extension forced to `.mjs`
+
+**Proxy Bundle Config (L26-42)**
+- CommonJS format for maximum compatibility
+- All dependencies bundled internally (`noExternal: [/./]`)
+- Node.js platform with shims enabled
+
+### Output Artifacts
+
+1. `packages/mcp-debugger/dist/` - Runtime bundle used by CLI
+2. `packages/mcp-debugger/package/dist/` - Mirror for npm packaging  
+3. `packages/mcp-debugger/package/debugmcp-*.tgz` - Fresh npm pack tarball
+
+### Error Handling
+
+- Top-level try-catch with process exit on failure (L198-203)
+- Individual vendor copy operations wrapped in try-catch blocks
+- Comprehensive warning messages for missing dependencies

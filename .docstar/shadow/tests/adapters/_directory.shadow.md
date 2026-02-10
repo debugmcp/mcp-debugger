@@ -1,78 +1,98 @@
 # tests/adapters/
-@generated: 2026-02-10T01:20:22Z
+@generated: 2026-02-10T21:27:14Z
 
-## Purpose & Overall Responsibility
+## Overall Purpose and Responsibility
 
-The `tests/adapters` directory provides comprehensive validation infrastructure for the debugmcp system's language-specific debugging adapters. This module ensures that all supported debugging adapters (Go, JavaScript/TypeScript, Python, Rust) correctly integrate with the Debug Adapter Protocol (DAP) and maintain reliable functionality across different platforms and environments.
+This directory contains the comprehensive test suite for all debugger adapters within the debugmcp ecosystem. It provides a multi-layered testing infrastructure that validates adapter implementations for Go, JavaScript/TypeScript, Python, and Rust debugging scenarios. The test suite ensures reliable integration with the Debug Adapter Protocol (DAP), proper environment discovery, cross-platform compatibility, and seamless integration within the broader debugmcp system architecture.
 
-## Module Architecture & Component Integration
+## Key Components and Their Integration
 
-The testing architecture follows a consistent multi-layered validation approach across all language adapters:
+### Language-Specific Adapter Test Suites
+The directory is organized by programming language, with each subdirectory providing comprehensive validation for its respective debugger adapter:
 
-### Language-Specific Test Suites
-- **Go (`go/`)**: Validates Delve debugger integration with comprehensive unit and integration testing
-- **JavaScript (`javascript/`)**: Tests TypeScript debugging through tsx runtime and js-debug server integration  
-- **Python (`python/`)**: Covers Python environment discovery, debugpy integration, and MCP protocol communication
-- **Rust (`rust/`)**: Validates CodeLLDB integration through sophisticated mock-based testing
+- **go/**: Dual-layer testing (unit + integration) for Go/Delve debugger integration with comprehensive mocking infrastructure
+- **javascript/**: Integration-focused testing for JavaScript/TypeScript debugging with tsx runtime and js-debug VSCode extension support  
+- **python/**: Cross-platform testing spanning unit validation and real-world integration for Python/debugpy environments
+- **rust/**: Smoke testing approach for Rust/CodeLLDB integration using sophisticated dependency injection patterns
 
-### Common Testing Patterns
-Each adapter test suite implements a standardized testing strategy:
-- **Unit Testing Layer**: Fast, isolated validation with comprehensive mocking of system dependencies
-- **Integration Testing Layer**: End-to-end workflow validation using controlled environments
-- **Cross-Platform Support**: Consistent behavior validation across Windows, Linux, and macOS
-- **Mock Infrastructure**: Sophisticated dependency injection preventing external process execution during testing
+### Unified Testing Architecture
+All adapter test suites share common architectural patterns:
 
-## Public API Surface & Key Entry Points
+**Multi-Layer Validation Strategy:**
+- Unit tests provide isolated component validation with comprehensive mocking
+- Integration tests validate end-to-end workflows with realistic or actual implementations
+- Smoke tests verify critical integration points without external process dependencies
 
-### Adapter Factory Interface (Common Across Languages)
-- **`createAdapter()`**: Adapter instance creation and language assignment
-- **`getMetadata()`**: Metadata retrieval including version and supported file extensions
-- **`validate()`**: Environment prerequisite validation
+**Cross-Platform Infrastructure:**
+- Systematic testing across Windows, Linux, and macOS environments
+- Platform-specific executable discovery and command generation validation
+- Environment variable management with proper isolation and cleanup
 
-### Adapter Lifecycle Interface (Standardized)
-- **State Management**: Event-driven lifecycle (IDLE → READY → CONNECTED → DISPOSED)
-- **Configuration Transformation**: Launch config processing for language-specific runtimes
-- **Command Generation**: Debug server command construction with proper parameters
-- **DAP Capabilities**: Breakpoint support, exception handling, and logging configuration
+**Mock and Dependency Management:**
+- Sophisticated dependency injection frameworks for controlled testing
+- Child process simulation with EventEmitter-based async behavior
+- File system abstraction and environment state preservation
 
-### Environment Discovery & Validation
-- **Runtime Detection**: Language toolchain discovery and version validation
-- **Platform Adaptation**: Cross-platform executable finding and path resolution
-- **Dependency Checking**: Debugger availability verification (Delve, debugpy, CodeLLDB)
+## Public API Surface and Entry Points
 
-## Internal Organization & Data Flow
+### Adapter Factory Validation
+Each test suite validates the primary factory interfaces:
+- **createAdapter()**: Adapter instantiation with proper dependency injection
+- **getMetadata()**: Adapter capabilities and version information exposure
+- **validate()**: Environment prerequisite validation and toolchain verification
 
-### Standardized Test Workflow
-All adapter tests follow a consistent four-phase validation pattern:
+### Core Adapter Interface Testing
+- **Lifecycle Management**: init(), dispose(), connect(), disconnect() state transitions
+- **Configuration Processing**: Launch configuration transformation for language-specific debugging scenarios
+- **DAP Implementation**: Debug Adapter Protocol compliance and language-specific feature support
 
-1. **Environment Setup**: Platform detection, dependency mocking, registry initialization
-2. **Adapter Registration**: Factory registration and adapter instantiation validation
-3. **Configuration Processing**: Launch config transformation and command generation testing
-4. **Cleanup & Isolation**: State restoration and mock cleanup for test independence
+### Utility Function Coverage
+- **Tool Discovery**: Language-specific debugger and runtime discovery across platforms
+- **Version Management**: Toolchain version detection, parsing, and compatibility validation
+- **Environment Handling**: Cross-platform executable resolution and environment variable management
 
-### Integration Points Validation
-- **Adapter Registry System**: Dynamic adapter loading and factory registration
-- **Debug Protocol Compliance**: DAP message handling and capability negotiation
-- **Runtime Environment**: Language-specific debugger integration and configuration
-- **Cross-Platform Compatibility**: Consistent behavior across operating systems
+## Internal Organization and Data Flow
 
-## Critical Validation Areas
+### Testing Strategy Synthesis
+```
+Environment Setup → Unit Validation → Integration Testing → Cross-Platform Verification → Cleanup
+       ↓                   ↓                ↓                    ↓                    ↓
+   Mock config      Component tests    End-to-end flows    Platform coverage    State restore
+```
 
-### Environment Prerequisites
-- Toolchain availability and minimum version requirements
-- Debugger installation and capability validation
-- Platform-specific configuration and path handling
+### Validation Pipeline
+1. **Unit Phase**: Isolated component testing with precise mock control for individual adapter utilities
+2. **Integration Phase**: End-to-end workflow validation using realistic environments or sophisticated mocking
+3. **Platform Phase**: Cross-platform compatibility verification with environment-specific adaptations
+4. **System Phase**: Validation of adapter integration within the broader debugmcp ecosystem
 
-### Protocol Integration
-- Debug Adapter Protocol compliance and message handling
-- Session management and state transition validation
-- Breakpoint and exception handling capabilities
-- Configuration transformation for different debugging scenarios
+### Quality Assurance Framework
+- **Test Isolation**: Comprehensive environment management preventing test pollution and ensuring reproducible results
+- **Error Coverage**: Systematic validation of both success paths and failure conditions
+- **Realistic Simulation**: Mock implementations that closely mirror actual debugger and runtime behavior
+- **CI/CD Integration**: Extensive diagnostic logging and failure artifact collection for continuous integration environments
 
-### Reliability & Safety
-- Comprehensive error boundary testing and failure mode validation
-- Test isolation preventing actual debugger process execution
-- Platform-agnostic testing with controlled dependency injection
-- CI/CD optimization for automated validation workflows
+## Important Patterns and Conventions
 
-This directory ensures that all debugmcp language adapters maintain consistent, reliable debugging capabilities while providing comprehensive validation coverage that prevents regressions and ensures cross-platform compatibility. The standardized testing patterns enable maintainable test suites that can evolve with the debugging infrastructure while maintaining high confidence in adapter reliability.
+### Universal Testing Patterns
+- **Dependency Injection**: Controlled testing environments through factory-based mock management
+- **State Transition Testing**: Systematic validation of adapter lifecycles with proper event emission
+- **Configuration Transformation**: Testing of generic to language-specific parameter conversion
+- **Platform Abstraction**: Normalized testing across different operating systems with environment-aware mocking
+
+### Adapter Integration Validation
+- **Factory Registration**: Ensuring proper adapter registration within the debugmcp adapter registry
+- **DAP Compliance**: Validation of Debug Adapter Protocol implementation for language-specific debugging features
+- **Session Management**: Testing of debugging session lifecycle from configuration through termination
+- **Error Translation**: Proper error message handling and debugging workflow issue reporting
+
+## System Integration Role
+
+This test directory serves as the quality assurance foundation for the entire debugmcp adapter ecosystem. It ensures that all supported debugger adapters (Go, JavaScript/TypeScript, Python, Rust) can reliably integrate with the system architecture while maintaining:
+
+- **Protocol Compliance**: Consistent Debug Adapter Protocol implementation across all language adapters
+- **Cross-Platform Reliability**: Dependable operation across Windows, Linux, and macOS environments
+- **Environment Robustness**: Proper handling of diverse development environment configurations
+- **System Cohesion**: Seamless integration with the broader debugmcp infrastructure and adapter registry
+
+The comprehensive test coverage provides confidence that the debugmcp system can deliver consistent, reliable debugging capabilities across multiple programming languages and deployment environments.

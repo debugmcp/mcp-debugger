@@ -1,62 +1,44 @@
 # packages/adapter-mock/tests/unit/
-@generated: 2026-02-10T01:19:36Z
+@generated: 2026-02-10T21:26:15Z
 
-## Mock Debug Adapter Unit Test Suite
+## Unit Test Suite for Mock Debug Adapter
 
-**Purpose:** Comprehensive unit testing module for the MockDebugAdapter implementation and its factory. This directory contains thorough test coverage validating the mock debug adapter's lifecycle management, error simulation capabilities, and configuration validation.
+**Overall Purpose:**
+This directory contains comprehensive unit tests for the MockDebugAdapter system, providing complete test coverage for both the adapter implementation and its factory. The tests validate the mock debugging infrastructure used for development, testing, and demonstration purposes within the debug adapter ecosystem.
 
 **Key Components & Organization:**
 
-### Test Files Structure
-- **`mock-adapter-factory.test.ts`:** Tests for MockAdapterFactory class and helper functions, focusing on adapter creation, configuration validation, and metadata handling
-- **`mock-debug-adapter.spec.ts`:** Core adapter implementation tests covering initialization, connection management, DAP event handling, and error scenarios
+- **`mock-debug-adapter.spec.ts`:** Core adapter functionality tests covering the complete adapter lifecycle including initialization, connection management, DAP event handling, feature support, and error scenarios. Tests state transitions, thread tracking, and configurable error simulation.
 
-### Shared Test Utilities
-- **`createDependencies()` Helper:** Common utility function appearing in both test files that creates mock AdapterDependencies with stubbed file system, process launcher, environment, and logger interfaces
-- **Mock Spy Integration:** Uses Vitest spy functions for logger mocking and dependency injection
+- **`mock-adapter-factory.test.ts`:** Factory pattern tests validating adapter creation, metadata exposure, configuration validation, and warning systems. Tests both direct factory usage and convenience helper functions.
 
-### Testing Scope & Coverage
+**Test Infrastructure:**
+Both test files utilize a shared `createDependencies()` pattern that creates mock AdapterDependencies objects with stubbed file system, process launcher, environment, and logger interfaces. This provides consistent dependency injection for isolated testing.
 
-**Factory Testing:**
-- Adapter instantiation with custom configurations (supportedFeatures, defaultDelay)
-- Metadata validation (language type, display name, version, file extensions)
-- Configuration validation warnings for high error probability and excessive delays
-- Convenience factory function validation
+**Public API Coverage:**
 
-**Adapter Lifecycle Testing:**
-- State transition validation: INITIALIZING → READY → CONNECTED → DEBUGGING → DISCONNECTED
-- Connection management with timeout handling
-- Thread ID tracking and cleanup
-- Event emission and listener validation
+**MockDebugAdapter Interface:**
+- Lifecycle methods: `initialize()`, `connect()`, `disconnect()`
+- Event handling: `handleDapEvent()` for DAP protocol events
+- Feature support: `supportsFeature()`, `getFeatureRequirements()`
+- Error translation: Installation instructions and filesystem error mapping
+- State management: INITIALIZING → READY → CONNECTED → DEBUGGING transitions
 
-**Error Scenario Simulation:**
-- MockErrorScenario integration for testing failure modes
-- Connection timeout errors with proper error code matching
-- Executable not found scenarios
-- Error message translation and formatting
+**MockAdapterFactory Interface:**
+- Adapter creation with custom configuration (supportedFeatures, defaultDelay, errorProbability)
+- Metadata retrieval: language type, display name, version, extensions
+- Configuration validation with warning system for performance thresholds
+- Helper function: `createMockAdapterFactory()` convenience method
 
-### Data Flow Patterns
+**Test Patterns & Conventions:**
+- State transition validation through event listeners and async/await patterns
+- Error scenario simulation using MockErrorScenario enumeration
+- Mock dependency injection with Vitest spy functions for logging verification
+- Configuration boundary testing for validation warnings (errorProbability > 0.8, defaultDelay > 2500ms)
+- Interface compliance testing ensuring proper type satisfaction
 
-1. **Test Setup:** Each test creates mock dependencies using shared utility functions
-2. **Adapter Creation:** Factory or direct instantiation with test-specific configurations
-3. **State Monitoring:** Event listeners track state transitions and validate expected behavior
-4. **Error Injection:** MockErrorScenario enum values simulate specific failure conditions
-5. **Assertion Validation:** Tests verify correct state, event emission, and error handling
+**Integration Points:**
+The tests validate integration with the broader debug adapter system through shared types from `@debugmcp/shared` including AdapterDependencies, DebugFeature, DebugLanguage, AdapterState, and AdapterErrorCode. This ensures the mock adapter properly implements the standard debug adapter interface while providing configurable behavior for testing scenarios.
 
-### Public API Testing Surface
-
-- **MockAdapterFactory:** Constructor validation, metadata retrieval, configuration validation
-- **createMockAdapterFactory:** Helper function for simplified factory creation
-- **MockDebugAdapter:** Core lifecycle methods (initialize, connect, disconnect, handleDapEvent)
-- **Feature Support:** supportsFeature() and getFeatureRequirements() method validation
-- **Error Handling:** Installation instructions, missing executable, and filesystem error translation
-
-### Testing Conventions
-
-- Async/await patterns for adapter lifecycle method testing
-- Object type casting for dependency mocking isolation
-- State transition validation through event listeners
-- Configuration-driven test scenarios (error probabilities, delays, feature flags)
-- Mock dependency injection for isolated unit testing
-
-This test suite ensures the MockDebugAdapter provides reliable debugging simulation capabilities while maintaining proper adapter interface compliance and error handling patterns.
+**Quality Assurance:**
+Tests cover both positive functionality and error conditions, including connection timeouts, executable not found scenarios, and configuration validation warnings. The comprehensive coverage ensures the mock adapter can reliably simulate various debugging scenarios for development and testing purposes.

@@ -1,110 +1,106 @@
 # examples/visualizer/
-@generated: 2026-02-10T01:19:49Z
+@generated: 2026-02-10T21:26:28Z
 
-## Purpose
+## MCP Debugger TUI Visualizer
 
-The `examples/visualizer` directory provides a comprehensive terminal-based user interface (TUI) system for visualizing and debugging MCP (Model Context Protocol) sessions in real-time. It serves as both a demonstration tool and a practical debugging aid that processes MCP server logs to create interactive visual representations of debugging sessions.
+This directory provides a terminal-based user interface (TUI) for visualizing debugging sessions from MCP (Model Context Protocol) debugger server logs. It transforms structured debug logs into a real-time, interactive terminal visualization showing code execution, tool activity, and debugging state.
 
-## Core Architecture
+## Overall Architecture
 
-The visualizer follows a **modular event-driven architecture** with clear separation of concerns:
+The visualizer follows a modular, event-driven architecture with three main layers:
 
-### UI Layer (`panels.py`, `debug_visualizer.py`)
-- **DebugVisualizer**: Main TUI orchestrator managing Rich console layout and live refresh
-- **Panel Components**: Three specialized panels for tool activity, code view, and session status
-- **CodeWindow**: Dynamic sliding window manager for source code display with syntax highlighting
+1. **Log Processing Layer**: Monitors and parses MCP server debug logs
+2. **State Management Layer**: Centralizes debugging session state
+3. **UI Rendering Layer**: Rich-based terminal interface components
 
-### Data Processing Layer (`log_watcher.py`, `log_parser.py`, `state.py`)
-- **LogWatcher**: Real-time log file monitoring with position persistence and file rotation handling
-- **LogEventParser**: Structured event processor that translates MCP log events into state updates
-- **DebugState**: Centralized state management for sessions, breakpoints, variables, and tool activities
+## Core Components
 
-### Integration Layer (`live_visualizer.py`)
-- Bridges file monitoring with UI visualization
-- Registers event handlers and coordinates component lifecycle
-- Provides the main entry point for live debugging sessions
+### Primary Entry Points
+- **`live_visualizer.py`**: Main entry point for live debugging sessions - monitors log files and renders real-time TUI
+- **`demo_mock.py`**: Standalone mock demo showcasing visualizer capabilities without live server
+- **`demo_runner.py`**: Complete demo orchestration managing both MCP server and visualizer processes
 
-## Key Entry Points
+### Data Flow Pipeline
+1. **`log_watcher.py`** (LogWatcher): Tails MCP server logs with file rotation handling and event dispatching
+2. **`log_parser.py`** (LogEventParser): Parses structured JSON debug events and updates state
+3. **`state.py`** (DebugState): Centralized state management for sessions, breakpoints, variables, and tool activity
+4. **`debug_visualizer.py`** (DebugVisualizer): Main TUI orchestrator coordinating all UI components
 
-### Primary Interfaces
-- **`live_visualizer.py`**: Main entry point for live MCP debugging sessions
-- **`demo_mock.py`**: Standalone mock demonstration without MCP server dependency
-- **`demo_runner.py`**: Complete end-to-end demo orchestrating both MCP server and visualizer
-
-### Utility Scripts
-- **`record_session.py`**: Creates asciinema recordings for documentation
-- **`convert_to_gif.py`**: Converts recordings to optimized GIFs
-- **`optimize_*.py`**: File optimization utilities for web delivery
-
-## Component Relationships
-
-```
-MCP Server Logs → LogWatcher → LogEventParser → DebugState → DebugVisualizer
-                                                     ↓
-                                            Panel Components
-                                                     ↓
-                                              Rich TUI Output
-```
-
-### Data Flow
-1. **LogWatcher** monitors MCP server debug logs for new structured events
-2. **LogEventParser** processes events and updates **DebugState** with session info, breakpoints, variables
-3. **DebugVisualizer** orchestrates three panels using current state:
-   - **ToolActivityPanel**: Shows MCP tool execution history with status indicators
-   - **CodeViewPanel**: Displays source code with breakpoints, execution markers, and variables
-   - **HeaderPanel**: Shows session information and execution status
-4. **CodeWindow** provides sliding window logic for efficient code display
-
-## Public API Surface
-
-### DebugVisualizer Control Methods
-- Session management: `create_session()`, `close_session()`
-- Breakpoint control: `set_breakpoint()`
-- Execution control: `start_debugging()`, `pause_at_breakpoint()`, `step_to_line()`, `continue_execution()`
-- State updates: `update_variables()`
-
-### LogWatcher Interface
-- Event registration: `on_event(event_type, callback)`
-- Lifecycle: `start()`, `stop()`
-- Position management: automatic persistence for session resume
+### UI Components
+- **`panels.py`**: Three Rich-based panels:
+  - **ToolActivityPanel**: MCP tool execution history with status indicators
+  - **CodeViewPanel**: Syntax-highlighted code with breakpoints and execution markers
+  - **HeaderPanel**: Session information and execution status
+- **`code_window.py`** (CodeWindow): Sliding window manager for code display with caching and smooth scrolling
 
 ## Key Features
 
-### Visual Capabilities
-- **Real-time code visualization**: 20-line sliding windows with syntax highlighting
-- **Execution tracking**: Visual markers for breakpoints (●) and current line (→)
-- **Variable inspection**: Live display of scope variables with type information
-- **Tool activity monitoring**: Status-coded tool execution history
-- **Multi-file support**: Per-file window state and caching
-
-### Technical Features
-- **File rotation handling**: Robust log monitoring across server restarts
-- **Position persistence**: Resume capability without reprocessing old events
-- **Smooth scrolling**: Edge-triggered window updates for stable UX
-- **Error resilience**: Graceful handling of file encoding issues and malformed events
-- **Thread safety**: Non-blocking background monitoring with proper cleanup
-
-## Development Patterns
+### Real-time Visualization
+- Live log monitoring with 4 FPS refresh rate
+- Syntax-highlighted code display with ~20 line sliding window
+- Visual markers for breakpoints (●) and current execution (→)
+- Tool activity tracking with status indicators (⟳, ✓, ✗)
 
 ### State Management
-- Immutable dataclasses for events and locations
-- Centralized state with bounded memory (20 tool activities max)
-- Dict-based breakpoint storage with automatic cleanup
+- Session lifecycle tracking (created/closed)
+- Breakpoint management per file with automatic cleanup
+- Variable inspection with truncation (60 chars, max 20 vars)
+- Tool activity history with bounded storage (20 entries)
 
-### Error Handling
-- Multi-encoding fallback for source files (UTF-8 → Latin-1 → CP1252 → binary)
-- Silent error handling in simulation threads to prevent TUI corruption
-- Graceful degradation for missing files or malformed events
+### File Handling
+- Multi-encoding file loading (UTF-8, Latin-1, CP1252) with fallbacks
+- Robust path normalization across platforms
+- File caching for performance optimization
+- Graceful handling of file rotation and deletion
 
-### Performance Optimization
-- File caching to minimize I/O operations
-- 4 FPS refresh rate for responsive UI without excessive CPU usage
-- Sliding window algorithm reduces memory footprint for large files
+## Public API (DebugVisualizer)
+
+### Session Control
+- `create_session(session_id, name)`: Initialize debugging session
+- `close_session()`: End current session
+- `start_debugging(file_path, line)`: Begin debug execution
+- `pause_at_breakpoint(file_path, line)`: Handle breakpoint hits
+
+### Execution Control  
+- `step_to_line(file_path, line)`: Step execution to specific location
+- `continue_execution()`: Resume from breakpoint
+- `set_breakpoint(file_path, line)`: Add breakpoint
+- `update_variables(variables_dict)`: Update variable state
+
+## Utility Scripts
+
+### Demo and Recording
+- **`prepare_demo_recording.py`**: Environment cleanup for demo recordings
+- **`record_session.py`**: Asciinema recording configuration for demos
+- **`convert_to_gif.py`**: Convert terminal recordings to optimized GIF format
+- **`optimize_gif.py`**: Progressive GIF compression with gifsicle
+- **`optimize_screenshots.py`**: PNG/WebP optimization for documentation
+
+### Testing and Development
+- **`test_log_watcher.py`**: Integration tests for log monitoring functionality
+- **`test_panels.py`**: Visual debugging for UI panel components  
+- **`test_path_issue.py`**: Path normalization debugging utilities
 
 ## Dependencies
 
-**Core Libraries**: Rich (TUI framework), pathlib (cross-platform paths), subprocess (external tool integration)
+### External
+- **Rich**: Terminal UI framework for panels, syntax highlighting, and layout
+- **PIL/Pillow**: Image optimization for screenshots
+- **asciinema**: Terminal recording (demo utilities)
+- **gifsicle**: GIF optimization (demo utilities)
 
-**External Tools**: Node.js (MCP server), asciinema (recording), agg/gifsicle (media optimization)
+### Internal Architecture Patterns
+- **Event-driven design**: Callback registration for decoupled log event handling
+- **Producer-consumer model**: Log watcher feeds events to UI visualizer
+- **Immutable state updates**: Clean state transitions with dataclass records
+- **Resource pooling**: File caching and bounded activity history
+- **Graceful degradation**: Comprehensive error handling throughout pipeline
 
-The visualizer is designed to be both a practical debugging tool for MCP development and a comprehensive demonstration of real-time log visualization techniques in terminal environments.
+## Usage Patterns
+
+1. **Live Debugging**: Run `live_visualizer.py` with MCP server log path
+2. **Demo Mode**: Execute `demo_mock.py` for self-contained demonstration
+3. **Full Demo**: Use `demo_runner.py` to orchestrate server + visualizer
+4. **Recording**: Chain `prepare_demo_recording.py` → `record_session.py` → `convert_to_gif.py`
+
+The visualizer provides a complete debugging experience by transforming structured MCP server logs into an intuitive, real-time terminal interface showing code execution flow, variable states, and tool interactions.

@@ -1,74 +1,71 @@
 # packages/adapter-python/tests/
-@generated: 2026-02-10T01:19:52Z
+@generated: 2026-02-10T21:26:37Z
 
-## Overall Purpose
+## Overall Purpose and Responsibility
 
-This directory contains the complete test suite for the `@debugmcp/adapter-python` package, providing comprehensive validation of Python debug adapter functionality. The tests ensure reliable creation, initialization, and operation of Python debug adapters across diverse development environments with robust error handling.
+This test directory provides comprehensive validation for the `@debugmcp/adapter-python` package, ensuring the Python debug adapter functions correctly across different platforms and environments. The test suite covers the complete lifecycle from Python environment discovery through adapter initialization and state management.
 
-## Test Architecture & Organization
+## Key Components and Relationships
 
-The test suite is organized into two complementary layers:
+The test suite is organized into three complementary layers:
 
-### Smoke Tests (`python-adapter.test.ts`)
-- **Package-level validation**: Verifies all public exports are properly exposed
-- **Minimal dependency testing**: Confirms classes can be imported and instantiated without complex setup
-- **Integration checkpoint**: Catches basic packaging and export issues early in the development cycle
+**Package Integration Tests (`python-adapter.test.ts`)**
+- Smoke tests validating the package's public API exports
+- Ensures `PythonAdapterFactory`, `PythonDebugAdapter`, and `findPythonExecutable` are properly accessible
+- Lightweight verification without complex setup requirements
 
-### Comprehensive Unit Tests (`unit/` directory)
-- **Factory pattern testing**: Validates `PythonAdapterFactory` creation and configuration logic
-- **Adapter lifecycle testing**: Tests `PythonDebugAdapter` initialization, state management, and cleanup
-- **Platform utilities testing**: Comprehensive validation of Python environment discovery across Windows, Linux, and macOS
+**Unit Test Suite (`unit/` directory)**
+- **Python Discovery Layer** (`python-utils.*.test.ts`) - Tests cross-platform Python executable discovery, version validation, and debugpy availability
+- **Factory Layer** (`python-adapter-factory.test.ts`) - Tests factory pattern implementation, environment validation, and adapter creation
+- **Adapter Layer** (`python-debug-adapter.spec.ts`) - Tests adapter lifecycle, state management, and event handling
 
-## Key Components & Integration Flow
+## Test Architecture and Data Flow
 
-### Public API Surface Testing
-The tests validate the complete public interface:
-- `PythonAdapterFactory`: Entry point for adapter creation with metadata and environment validation
-- `PythonDebugAdapter`: Core adapter managing initialization state and lifecycle events
-- `findPythonExecutable`: Utility function for cross-platform Python discovery
+The testing strategy follows a bottom-up validation approach:
 
-### Integration Validation Pattern
-Tests follow a complete integration flow:
-1. **Factory Layer**: Creates adapter instances with proper metadata (language support, version requirements, file extensions)
-2. **Adapter Layer**: Manages state transitions (UNINITIALIZED → READY/ERROR) and event emission
-3. **Utilities Layer**: Handles platform-specific Python discovery and environment validation
-4. **Error Propagation**: Ensures consistent error reporting across all architectural layers
+1. **Foundation**: Python discovery utilities ensure reliable Python environment detection
+2. **Factory**: Environment validation feeds into adapter factory creation logic  
+3. **Adapter**: Factory-created adapters are tested for proper initialization and lifecycle management
+4. **Integration**: Package-level smoke tests verify the complete export surface
 
-## Critical Validation Coverage
+## Key Testing Patterns
 
-### Environment Requirements Testing
-- Python version compatibility (>= 3.7 required)
-- debugpy package availability verification
-- Platform-specific executable discovery and PATH resolution
-- Virtual environment detection with appropriate warnings
+**Mock-Driven Testing Infrastructure:**
+- Comprehensive subprocess mocking via `child_process.spawn` simulation
+- File system and platform-specific behavior mocking
+- Shared helper functions (`createDependencies()`, `simulateSpawn()`) for consistent test setup
 
-### Cross-Platform Reliability
-- Windows-specific handling (.exe extensions, Windows Store alias filtering)
-- Unix-like system PATH resolution
-- Environment variable precedence (`PYTHON_EXECUTABLE`, `pythonLocation`, `PythonLocation`)
-- CI environment specific error reporting and logging
+**Cross-Platform Validation:**
+- Windows Store Python handling and `.exe` extension logic
+- Unix-like system PATH resolution and `python3` vs `python` preference
+- Environment variable precedence testing (`PYTHON_EXECUTABLE`, `PythonLocation`, etc.)
 
-## Testing Infrastructure & Patterns
+**Error Boundary Coverage:**
+- Python version requirement validation (≥3.7)
+- Missing debugpy package scenarios
+- Command execution failures and timeout handling
+- CI environment compatibility testing
 
-### Mock Architecture
-- Standardized mock factory functions for consistent test setup
-- Comprehensive child process and file system mocking
-- Platform behavior simulation with configurable responses
-- Environment variable manipulation with proper cleanup
+## Public API Validation
 
-### Error Boundary Testing
-- Missing Python installation scenarios
-- Incompatible Python version handling
-- Missing debugpy dependency failures
-- File system and subprocess error conditions
-- Graceful degradation and user-friendly error messages
+The tests ensure these key entry points function correctly:
+
+- **`PythonAdapterFactory`**: Factory class for creating Python debug adapters with environment validation
+- **`PythonDebugAdapter`**: Main adapter class managing debug session lifecycle and state transitions
+- **`findPythonExecutable`**: Utility function for cross-platform Python discovery
 
 ## Internal Organization
 
-The test suite maintains clear separation of concerns while validating end-to-end functionality:
-- **Smoke tests** provide rapid feedback on basic functionality
-- **Unit tests** ensure comprehensive coverage of all code paths
-- **Integration patterns** validate component interaction
-- **Platform-specific suites** handle OS-dependent behavior
+**Test Isolation Strategy:**
+- Each test file maintains independent mock setups with consistent beforeEach/afterEach cleanup
+- Platform-specific test cases ensure behavior consistency across Windows, macOS, and Linux
+- Subprocess simulation enables deterministic testing of external Python environment interactions
 
-This comprehensive test coverage ensures the Python debug adapter can reliably initialize and operate across diverse Python environments while providing clear error messaging for common setup issues.
+**Integration Points:**
+- Tests validate integration with `@debugmcp/shared` types and enums
+- Node.js built-in module integration (child_process, fs, path, events)
+- Logger integration for debugging and error reporting validation
+
+## Critical Validation Areas
+
+The test suite ensures robust Python environment detection with graceful degradation, proper error reporting for development environment issues, and reliable adapter state management for debugging sessions. Special emphasis on CI environment compatibility and comprehensive error scenario coverage ensures the adapter works reliably in diverse deployment environments.

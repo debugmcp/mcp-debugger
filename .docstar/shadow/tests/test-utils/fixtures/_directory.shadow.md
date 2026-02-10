@@ -1,53 +1,64 @@
 # tests/test-utils/fixtures/
-@generated: 2026-02-10T01:19:50Z
+@generated: 2026-02-10T21:26:29Z
 
-## Test Fixtures for Python Debugging and Process Testing
+## Test Fixtures for Debugger and Python Process Testing
 
-**Overall Purpose:**
-This directory provides comprehensive test fixtures for validating Python debugging capabilities within the MCP ecosystem. The module contains both TypeScript-based script templates and actual Python test programs designed to support automated testing of debugger functionality, process monitoring, and debug server/client communication patterns.
+This directory provides comprehensive test fixtures for validating debugger functionality, process monitoring, and MCP (Model Context Protocol) server debugging capabilities. It contains both TypeScript-defined Python script templates and actual Python executables designed to support automated testing of debugging workflows.
 
-**Key Components:**
+### Overall Purpose
+
+The fixtures enable testing of:
+- Python debugger features (breakpoints, stepping, variable inspection)
+- Debug Adapter Protocol (DAP) server implementations
+- Long-running process monitoring and attachment
+- Cross-module debugging scenarios
+- Exception handling and error debugging workflows
+- MCP server debugging infrastructure
+
+### Key Components
 
 **TypeScript Script Templates (`python-scripts.ts`)**
-- Collection of Python script templates as string exports covering debugging scenarios from basic to complex
-- Includes loops, function calls, recursion, exception handling, multi-module imports, and intentional bugs
-- Serves as a source of truth for generating test Python files dynamically during test execution
+- Collection of Python script fixtures as string templates
+- Covers debugging scenarios from simple loops to complex multi-module applications
+- Includes intentionally buggy code for debugging exercise testing
+- Provides self-contained scripts with meaningful test data
 
 **Python Debug Targets (`python/` directory)**
-- `debug_test_simple.py` - Lightweight debug target for basic attachment testing with 60-second execution window
-- `debugpy_server.py` - Full-featured debugpy server with configurable networking and built-in test scenarios
+- `debug_test_simple.py`: Basic long-running process for external debugger attachment
+- `debugpy_server.py`: Full DAP debug server implementation with configurable test scenarios
 
-**Public API Surface:**
+### Public API Surface
 
-**Script Template Access:**
-- `simpleLoopScript`, `functionCallScript`, `fibonacciScript` - Progressive complexity debugging scenarios
-- `exceptionHandlingScript` - Error condition testing
-- `multiModuleMainScript`, `multiModuleHelperScript` - Cross-module debugging
-- `buggyScript` - Intentional defects for debugging practice
+**Entry Points:**
+- **TypeScript Exports**: `simpleLoopScript`, `functionCallScript`, `fibonacciScript`, `exceptionHandlingScript`, `multiModuleMainScript`, `multiModuleHelperScript`, `buggyScript`
+- **Python Executables**: Direct script execution for `debug_test_simple.py`, CLI-driven `debugpy_server.py` with server/test modes
 
-**Runtime Debug Targets:**
-- `python debug_test_simple.py` - Basic process monitoring target
-- `python debugpy_server.py [options]` - Configurable debug server (default: 127.0.0.1:5679)
-- `start_debugpy_server()`, `run_fibonacci_test()` - Programmatic debugging infrastructure
+**Key Capabilities:**
+- Progressive complexity testing (loops → functions → recursion → exceptions → modules)
+- Real-time debugging server with breakpoint scenarios
+- Extended execution windows for external tool integration
+- Configurable debug server (host/port customization, client connection handling)
 
-**Internal Organization and Data Flow:**
+### Internal Organization and Data Flow
 
-The directory supports a two-tier testing approach:
-1. **Template-Based Testing**: TypeScript exports provide script content for dynamic test generation and execution
-2. **Direct Process Testing**: Python files serve as live debugging targets for external tool attachment
+**Testing Workflow:**
+1. **Template-based Testing**: TypeScript exports provide Python code strings for dynamic test generation
+2. **Live Process Testing**: Python executables offer real debugging targets with predictable behavior
+3. **Multi-layer Coverage**: From simple computation flows to complex multi-module debugging scenarios
 
-**Testing Workflow Pattern:**
-- Setup: Initialize debug targets using either template-generated scripts or direct Python processes
-- Connection: External MCP servers or debugging tools attach as DAP clients
-- Execution: Run controlled scenarios with predictable breakpoints and variable states
-- Validation: Verify debugger protocol compliance and interaction correctness
+**Integration Patterns:**
+- TypeScript fixtures support automated test generation and execution
+- Python executables enable manual and automated debugger attachment testing
+- Both layers provide controlled, predictable environments for validation
+- Proper debugpy server architecture (server listens, clients connect as DAP clients)
 
-**Important Patterns and Conventions:**
+### Important Conventions
 
-**Architectural Consistency**: All fixtures follow the debugpy server pattern where test scripts act as debug servers and external tools connect as clients, maintaining proper DAP role separation.
+**Fixture Design:**
+- Self-contained scripts with `if __name__ == "__main__"` guards
+- Meaningful test data and predictable execution flows
+- Extended timing windows for external tool attachment
+- Progressive complexity from basic loops to advanced debugging scenarios
+- Intentional bugs and error conditions for comprehensive testing
 
-**Progressive Complexity**: Templates are organized from simple loops to complex multi-module scenarios, supporting incremental testing of debugging features.
-
-**Isolation and Reliability**: Each fixture is self-contained with minimal dependencies, using non-standard ports (5679) and localhost-only binding to prevent conflicts with development environments.
-
-**Dual Format Support**: Maintains both TypeScript string templates for programmatic generation and standalone Python files for direct execution, providing flexibility for different testing architectures.
+This fixture collection provides a complete testing foundation for Python debugging infrastructure, supporting both unit testing of debugger features and integration testing of debugging workflows in MCP environments.

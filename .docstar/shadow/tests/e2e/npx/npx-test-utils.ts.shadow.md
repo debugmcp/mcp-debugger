@@ -1,52 +1,88 @@
 # tests/e2e/npx/npx-test-utils.ts
-@source-hash: 6a31ebd1eba3ae67
-@generated: 2026-02-10T00:41:31Z
+@source-hash: f6267692df346a86
+@generated: 2026-02-10T21:25:42Z
 
-## Purpose
-Comprehensive testing utilities for validating MCP debugger distribution via npm/npx. Provides build orchestration, package caching, global installation management, and MCP client creation for end-to-end testing scenarios.
+## NPX Test Utilities for MCP Debugger
 
-## Key Components
+Test utilities module for end-to-end testing of the MCP (Model Context Protocol) debugger through npm packaging and distribution. Manages workspace building, package creation, caching, and client connections for automated testing.
 
-### Path Configuration (L19-32)
+### Core Architecture
+
+The module implements a sophisticated build and packaging pipeline with file-based locking, content fingerprinting, and caching to optimize test execution:
+
+- **Lock-based coordination**: Prevents concurrent packaging operations via file-based locking mechanism
+- **Content fingerprinting**: Uses SHA-256 hashing of package.json and dist directory to enable intelligent caching
+- **Global installation testing**: Installs and tests packages via npm global installation rather than npx direct execution
+
+### Key Components
+
+#### Path Configuration (L19-31)
+Critical path constants defining workspace structure:
 - `ROOT`: Repository root directory
 - `PACKAGE_DIR`: mcp-debugger package location
 - `PACK_CACHE_DIR`: Cached tarball storage
-- `PACK_LOCK_PATH`: Lock file for concurrent build protection
+- `ROOT_BUNDLE_ENTRY` & `PACKAGE_DIST_ENTRY`: Built artifact locations
 
-### Build Coordination
-- `acquirePackLock()` (L33-64): Process-safe lock acquisition with stale detection (5min timeout)
+#### Locking System (L33-75)
+- `acquirePackLock()` (L33-64): File-based mutex with stale lock detection (5min timeout)
 - `releasePackLock()` (L66-75): Lock cleanup with error tolerance
-- `ensureWorkspaceBuilt()` (L86-99): Conditional builds for root and package dist
-- `ensurePackageBackupRestored()` (L101-106): Restores package.json from backup state
 
-### Package Caching System
-- `computePackFingerprint()` (L134-139): SHA256 hash of package.json + dist directory
-- `hashDirectoryContents()` (L108-132): Recursive directory hashing for cache invalidation
-- `getCachedTarballPath()` (L145-148): Cache lookup by fingerprint
+#### Build Pipeline (L86-99)
+- `ensureWorkspaceBuilt()` (L86-99): Conditional building of root bundle and package dist
+- Uses pnpm workspace commands for selective rebuilding
 
-### Core Export Functions
-- `buildAndPackNpmPackage()` (L159-220): Main orchestration - builds, packs, caches npm tarball with lock management
-- `installPackageGlobally()` (L225-247): Global npm installation from tarball with verification
-- `cleanupGlobalInstall()` (L252-261): Global package removal (error-tolerant)
-- `createNpxMcpClient()` (L266-373): Creates MCP client via npx with transport logging
-- `getPackageSize()` (L378-387): Tarball size metrics
-- `verifyPackageContents()` (L392-430): Validates adapter presence in package
+#### Content Fingerprinting (L108-139)
+- `hashDirectoryContents()` (L108-132): Recursive directory hashing for cache keys
+- `computePackFingerprint()` (L134-139): Combines package.json and dist directory hash
 
-### Transport Integration
-- Wraps StdioClientTransport with bidirectional message logging (L294-346)
-- Configurable log levels and file outputs
-- Random request ID offset to prevent conflicts (L323-324)
+### Main Export Functions
 
-## Dependencies
-- MCP SDK client components for transport and protocol
-- Node.js fs/crypto/child_process for system operations
-- External scripts: `scripts/prepare-pack.js` for package.json manipulation
+#### `buildAndPackNpmPackage()` (L159-220)
+Primary function orchestrating the complete build-and-pack workflow:
+1. Ensures clean state and workspace build
+2. Computes content fingerprint for caching
+3. Acquires exclusive lock for packaging
+4. Runs npm pack with destination control
+5. Renames output to fingerprint-based cache file
+6. Handles cleanup and lock release
 
-## Critical Patterns
-- **Lock-based concurrency**: Prevents parallel npm pack operations
-- **Fingerprint-based caching**: Avoids redundant package builds
-- **Graceful error handling**: All cleanup operations are error-tolerant
-- **Backup/restore cycle**: Package.json modifications are reversible
+Returns path to created/cached tarball.
 
-## Configuration Interface
-`NpxTestConfig` (L150-154): Optional packagePath, useGlobal flag, logLevel setting
+#### `installPackageGlobally()` (L225-247) 
+Installs tarball globally with verification:
+- Uninstalls existing version first
+- Installs from local tarball path
+- Verifies installation via `npm list`
+
+#### `createNpxMcpClient()` (L276-385)
+Creates MCP client connected to globally-installed package:
+- Resolves global CLI entry point via `npm root -g`
+- Uses direct Node.js execution (bypasses npx.cmd on Windows)
+- Implements bidirectional message logging to raw log files
+- Returns client, transport, and cleanup function
+
+#### Package Analysis Functions
+- `getPackageSize()` (L390-399): Returns tarball size metrics
+- `verifyPackageContents()` (L404-442): Analyzes tarball contents for required adapters (JavaScript, Python, Mock)
+
+### Dependencies & Integrations
+
+- **MCP SDK**: `@modelcontextprotocol/sdk` for client/transport functionality
+- **Build Scripts**: Integrates with `scripts/prepare-pack.js` for package.json manipulation
+- **Workspace Tools**: Uses pnpm for monorepo build coordination
+- **File System**: Extensive fs/promises usage for file operations
+
+### Configuration Interface
+
+`NpxTestConfig` (L150-154) supports:
+- `packagePath`: Custom package location
+- `useGlobal`: Global vs local installation mode  
+- `logLevel`: Debug output control
+
+### Testing Patterns
+
+Designed for integration testing scenarios where:
+1. Package is built and cached based on content fingerprint
+2. Package is installed globally for realistic distribution testing  
+3. MCP client connects via resolved global installation
+4. All operations include comprehensive logging and cleanup

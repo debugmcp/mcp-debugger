@@ -1,55 +1,43 @@
 # tests/e2e/mcp-server-smoke-go.test.ts
-@source-hash: e5ecef5a125da1e7
-@generated: 2026-02-10T00:41:58Z
+@source-hash: ee36166d2448fae7
+@generated: 2026-02-10T21:25:35Z
 
-## Purpose
-E2E smoke test for Go debugging adapter integration through MCP (Model Context Protocol) interface. Validates that the Go adapter can be loaded, sessions created, and core debugging operations performed via MCP tools.
+## Primary Purpose
+End-to-end smoke test for Go debugging functionality through MCP (Model Context Protocol) interface. Tests the complete integration chain from adapter registration to actual debugging operations using Delve.
 
 ## Key Test Structure
-- **Test Suite (L26)**: `@requires-go` tagged test suite for Go debugging functionality
-- **Setup/Teardown (L31-87)**: MCP client lifecycle management with proper cleanup
-- **Three Core Tests (L89-253)**: Session creation, adapter listing, and full debugging flow
+- **Main test suite** (L26-254): `'MCP Server Go Debugging Smoke Test @requires-go'` - comprehensive Go adapter validation
+- **Setup/teardown** (L31-87): MCP client lifecycle management with proper session cleanup
+- **Test fixtures** (L27-29): Client state management with `mcpClient`, `transport`, and `sessionId`
 
-## MCP Client Management
-- **Client Creation (L44-53)**: Creates MCP client connecting to `dist/index.js` with stdio transport
-- **Session Tracking (L27-29)**: Maintains `mcpClient`, `transport`, and `sessionId` state
-- **Cleanup Strategy (L56-87)**: Proper teardown in `afterAll` and `afterEach` hooks
+## Core Test Cases
+1. **Adapter Registration Test** (L89-107): Validates Go adapter can be loaded through AdapterLoader with `language: 'go'` parameter
+2. **Adapter Listing Test** (L109-132): Optional verification that Go adapter appears in available adapters list
+3. **Complete Debugging Flow Test** (L134-253): Full integration test including compilation, breakpoints, and execution
 
-## Test Cases
+## Key Dependencies
+- **MCP SDK** (L18-19): `@modelcontextprotocol/sdk` for client/transport communication
+- **Vitest framework** (L15): Testing infrastructure with async setup/teardown
+- **External tools**: Requires Go compiler and Delve debugger for full flow test
+- **Smoke test utilities** (L20): `parseSdkToolResult` and `callToolSafely` helpers
 
-### Session Creation Test (L89-107)
-- Validates Go adapter registration through `create_debug_session` MCP tool
-- Uses `language: 'go'` parameter to trigger adapter loading
-- Confirms integration with AdapterLoader system
+## Critical Integration Points
+- **MCP Server startup** (L35-42): Spawns server process via `dist/index.js` with stdio transport
+- **Session lifecycle** (L58-86): Proper cleanup in both `afterAll` and `afterEach` hooks
+- **Binary compilation** (L164-168): Compiles test Go program with debug symbols (`-gcflags="all=-N -l"`)
 
-### Adapter Listing Test (L109-132)
-- Optional test for `list_adapters` MCP tool (gracefully handles missing tool)
-- Verifies Go adapter appears in available adapters list
-- Tests adapter-loader.ts integration points
+## Test Flow Architecture
+1. **Environment validation** (L140-157): Checks for Go/Delve availability before attempting full flow
+2. **MCP tool calls** (L92-98, L177-221): Direct invocation of debug session tools through MCP interface
+3. **Timing coordination** (L224, L240): Strategic delays for debugging operations to complete
 
-### Full Debugging Flow Test (L134-253)
-- **Environment Check (L136-157)**: Validates Go and Delve availability
-- **Binary Compilation (L159-172)**: Compiles test Go program with debug symbols
-- **Debug Operations (L174-241)**:
-  - Creates debug session
-  - Sets breakpoint at line 12
-  - Starts debugging in `exec` mode with pre-compiled binary
-  - Retrieves stack trace
-  - Continues execution
-- **Cleanup (L242-253)**: Removes test binary
+## Notable Patterns
+- **Graceful degradation**: Tests skip gracefully if Go/Delve not installed rather than failing
+- **Resource cleanup**: Comprehensive cleanup of sessions, connections, and temporary binaries
+- **Error tolerance**: Uses `callToolSafely` wrapper for operations that may legitimately fail
 
-## Dependencies
-- **MCP SDK (L18-19)**: Client and StdioClientTransport for MCP communication
-- **Test Utilities (L20)**: `parseSdkToolResult` and `callToolSafely` helpers
-- **Go Toolchain**: Runtime dependency on `go` and `dlv` commands
-
-## Key Integration Points
-- Tests actual MCP tool calls: `create_debug_session`, `set_breakpoint`, `start_debugging`, `get_stack_trace`, `continue_execution`
-- Validates Go adapter can be loaded through `AdapterLoader.loadAdapter('go')`
-- Uses compiled binary debugging approach with Delve's exec mode
-
-## Test Configuration
-- 30-second timeout for setup (L54)
-- 2-second waits for debugging operations (L224, L240)
-- Graceful degradation when Go/Delve unavailable
-- Test binary path: `examples/go/hello_world.go` → `hello_world_test`
+## Test Validation Points
+- Adapter registration through `AdapterLoader.loadAdapter('go')` 
+- MCP tool integration (`create_debug_session`, `set_breakpoint`, `start_debugging`)
+- Delve integration for stack traces and execution control
+- Binary execution mode with pre-compiled Go programs

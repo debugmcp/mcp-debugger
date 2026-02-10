@@ -1,59 +1,52 @@
 # packages/adapter-go/src/utils/
-@generated: 2026-02-10T01:19:37Z
+@generated: 2026-02-10T21:26:17Z
 
-## Overall Purpose
-The `utils` directory provides essential tooling discovery and validation functionality for the Go language adapter. It serves as the foundation layer that enables the debugger adapter to locate, verify, and interact with Go toolchain executables (Go compiler and Delve debugger) across different operating systems and installation configurations.
+## Purpose
+The `utils` directory provides core infrastructure for the Go adapter, specifically handling the discovery, validation, and integration of external Go toolchain components. This module serves as the foundation for locating and verifying Go and Delve debugger executables across different platforms, enabling the adapter to interface with the Go development environment.
 
-## Key Components and Architecture
+## Architecture
+The module implements a comprehensive executable discovery system with multiple fallback strategies:
 
-### Executable Discovery Engine
-The module implements a robust multi-tiered search strategy for locating critical Go development tools:
-- **Go Compiler Discovery**: Hierarchical search through preferred paths, PATH environment, and platform-specific installation directories
-- **Delve Debugger Discovery**: Extended search including GOPATH/bin locations and support for multiple Delve variants (dlv, dlv-dap)
-- **Cross-Platform Support**: Handles Windows executable suffixes (.exe) and platform-specific installation paths
+1. **Preferred Path Resolution**: Accepts user-specified executable paths as first priority
+2. **Environment-Based Search**: Leverages PATH, GOBIN, and GOPATH environment variables
+3. **Platform-Specific Defaults**: Falls back to common installation directories per OS
+4. **Version Validation**: Ensures discovered tools meet compatibility requirements
 
-### Version Validation System
-Comprehensive version checking and compatibility verification:
-- **Go Version Extraction**: Spawns `go version` and parses semantic versioning
-- **Delve Version Detection**: Extracts version information from `dlv version` output
-- **DAP Protocol Support**: Validates Delve's Debug Adapter Protocol capabilities
+## Key Components
 
-### Path Resolution Framework
-Intelligent path discovery using environment variable hierarchy:
-- **GOBIN/GOPATH Integration**: Respects Go workspace conventions
-- **Platform-Specific Defaults**: Includes Homebrew, Windows Program Files, Linux standard paths
-- **Environment Variable Precedence**: GOBIN → GOPATH/bin → default locations
+### Primary Discovery Functions
+- `findGoExecutable()`: Multi-tiered Go compiler discovery with error handling for missing installations
+- `findDelveExecutable()`: Delve debugger location with support for multiple variants (dlv, dlv-dap)
+- Both functions follow the same search hierarchy: preferred → environment → platform defaults
 
-## Public API Surface
+### Version Management
+- `getGoVersion()` and `getDelveVersion()`: Extract semantic versions from tool output
+- `checkDelveDapSupport()`: Validates DAP protocol compatibility for debugging features
+- Regex-based parsing ensures reliable version extraction across tool updates
 
-### Primary Entry Points
-- `findGoExecutable(preferredPath?, logger?)`: Main Go compiler discovery function
-- `findDelveExecutable(preferredPath?, logger?)`: Primary Delve debugger location function
-- `getGoVersion(goPath)`: Go toolchain version verification
-- `getDelveVersion(dlvPath)`: Delve debugger version checking
-- `checkDelveDapSupport(dlvPath)`: DAP protocol compatibility validation
-
-### Supporting Utilities
+### Path Resolution Utilities
 - `getGoSearchPaths()`: Platform-aware search path generation
 - `getGopathBin()`: Go workspace binary directory resolution
-- `fileExists(filePath)`: Executable permission-aware file validation
+- `findInPath()` and `fileExists()`: Low-level path and file system utilities
 
-## Internal Organization and Data Flow
+## Public API
+The module exposes two main entry points for the Go adapter:
+- **`findGoExecutable(preferredPath?, logger?)`**: Locates Go compiler
+- **`findDelveExecutable(preferredPath?, logger?)`**: Locates Delve debugger
 
-The module follows a layered architecture:
-1. **Discovery Layer**: High-level executable location functions that orchestrate search strategies
-2. **Path Resolution Layer**: Environment-aware path generation and workspace integration
-3. **Validation Layer**: File existence, permission checking, and version verification
-4. **Platform Abstraction Layer**: Cross-platform executable naming and path handling
+Both functions accept optional preferred paths and logger instances, returning absolute paths to validated executables or throwing descriptive errors.
 
-Data flows from discovery requests through path resolution, file system validation, and finally version verification to ensure complete toolchain readiness.
+## Cross-Platform Support
+Handles platform differences through:
+- Windows executable suffix handling (.exe)
+- OS-specific installation path collections
+- Environment variable precedence systems
+- File permission validation appropriate to each platform
 
-## Important Patterns and Conventions
+## Integration Patterns
+- Optional logger interface for debugging and user feedback
+- Promise-based async API for non-blocking operations
+- Graceful error handling with null returns vs exceptions
+- Environment variable priority systems respecting Go toolchain conventions
 
-- **Graceful Degradation**: Version checks return null on failure rather than throwing exceptions
-- **Optional Logging**: Consistent logger interface with safe navigation patterns
-- **Promise-Based API**: Fully async operations using modern Promise patterns
-- **Environment Respect**: Honors user preferences through environment variables and preferred paths
-- **Platform Agnostic**: Transparent handling of OS differences in executable discovery
-
-This utility module acts as the critical infrastructure layer that enables the Go adapter to reliably discover and validate the Go development environment across diverse installation scenarios and operating systems.
+This utilities module abstracts away the complexity of Go toolchain discovery, providing the adapter with reliable access to required development tools regardless of installation method or platform.
