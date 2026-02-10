@@ -33,7 +33,7 @@ Status snapshot as of **2025‑11‑22**:
 
 ## ✅ Recently Delivered
 
-- **v0.17.0** – Rust adapter backed by CodeLLDB plus richer stepping responses with inline source context
+- **v0.17.0** – Rust adapter backed by CodeLLDB plus richer stepping responses with inline source context; Go adapter with Delve support; Java adapter (Phase 3 with DAP translation server)
 - **v0.16.0** – First-class JavaScript adapter with TypeScript detection, js‑debug vendoring, and adapter policy orchestration
 - **v0.15.x** – Self-contained CLI bundle (npx-friendly), proxy diagnostics, Windows CI resiliency
 - Earlier releases – Core debugging primitives (session lifecycle, stepping, stack/variable inspection)
@@ -56,7 +56,9 @@ Status snapshot as of **2025‑11‑22**:
 - Publish adapter SDK / authoring guide
 
 ### Beyond 2026
-- Additional language adapters (Java, C++, Go)
+- Additional language adapters (C++, Ruby)
+- Java adapter GA release (currently Phase 3)
+- Go adapter polish and GA release
 - Advanced breakpoint types (data / function)
 - Time-travel debugging exploration
 - IDE integrations (VS Code extension, JetBrains Gateway)
@@ -77,7 +79,7 @@ Want to help? Start by:
 
 ## 🗓 Version History (high level)
 
-- **v0.17.0** – Rust adapter (Alpha), inline source context in stepping tools
+- **v0.17.0** – Rust adapter (Alpha), Go adapter (Delve), Java adapter (Phase 3), inline source context in stepping tools
 - **v0.16.0** – JavaScript adapter, session policy orchestration, handshake instrumentation
 - **v0.15.0** – Bundled CLI distribution, Windows CI diagnostics, proxy log capture
 - **v0.9.0** – Initial GA with core Python debugging

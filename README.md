@@ -203,12 +203,12 @@ Version 0.10.0 introduces a clean adapter pattern that separates language-agnost
                     │ ProxyManager │◀─────│ Language Adapter│
                     └──────────────┘      └─────────────────┘
                                                    │
-                                    ┌──────────────┴───────────────┐
-                                    │                               │
-                              ┌─────▼──────┐   ┌──────▼──────┐   ┌─────▼──────┐
-                              │Python      │   │JavaScript   │   │Mock        │
-                              │Adapter     │   │Adapter      │   │Adapter     │
-                              └────────────┘   └─────────────┘   └────────────┘
+                    ┌──────────────────────────────┼──────────────────────────────┐
+                    │              │               │              │               │
+              ┌─────▼──────┐ ┌─────▼──────┐ ┌─────▼──────┐ ┌─────▼──────┐ ┌─────▼──────┐
+              │  Python    │ │ JavaScript │ │   Rust     │ │    Go      │ │   Java     │
+              │  Adapter   │ │  Adapter   │ │  Adapter   │ │  Adapter   │ │  Adapter   │
+              └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘
 ```
 
 ### Adding Language Support

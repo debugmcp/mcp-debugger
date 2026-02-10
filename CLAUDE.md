@@ -16,6 +16,9 @@ mcp-debugger/
 │   ├── shared/             # Shared interfaces, types, and utilities
 │   ├── adapter-python/     # Python debug adapter using debugpy
 │   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug (v0.16.0+)
+│   ├── adapter-rust/       # Rust debug adapter using CodeLLDB (v0.17.0+)
+│   ├── adapter-go/         # Go debug adapter using Delve (dlv)
+│   ├── adapter-java/       # Java debug adapter using jdb
 │   ├── adapter-mock/       # Mock adapter for testing
 │   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
@@ -31,6 +34,9 @@ mcp-debugger/
 - **@debugmcp/shared**: Core interfaces and types used across all packages
 - **@debugmcp/adapter-python**: Python debugging support via debugpy
 - **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug (Alpha in v0.16.0)
+- **@debugmcp/adapter-rust**: Rust debugging support via CodeLLDB (Alpha in v0.17.0)
+- **@debugmcp/adapter-go**: Go debugging support via Delve (dlv)
+- **@debugmcp/adapter-java**: Java debugging support via jdb (Phase 3 complete)
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
 - **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
@@ -229,6 +235,9 @@ Sessions progress through states: IDLE → INITIALIZING → READY → RUNNING �
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter
 - `packages/adapter-javascript/` - JavaScript/Node.js debug adapter
+- `packages/adapter-rust/` - Rust debug adapter (CodeLLDB)
+- `packages/adapter-go/` - Go debug adapter (Delve)
+- `packages/adapter-java/` - Java debug adapter (jdb)
 - `packages/adapter-mock/` - Mock adapter for testing
 
 ### Distribution
@@ -302,6 +311,22 @@ packages/adapter-nodejs/
 - Uses bundled js-debug adapter (VSCode's debugger)
 - Supports JavaScript and TypeScript debugging
 - Auto-detects TypeScript configuration
+
+### Rust (Alpha)
+- Rust toolchain must be installed via rustup
+- CodeLLDB debug adapter (bundled or via `CODELLDB_PATH` env var)
+- On Windows, use GNU toolchain for full variable inspection
+- Run `mcp-debugger check-rust-binary <path>` to verify build compatibility
+
+### Go
+- Go 1.18+ must be installed
+- Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`
+- The system will auto-detect Go and Delve paths
+
+### Java (Phase 3)
+- JDK 11+ must be installed
+- Uses built-in jdb (Java Debugger)
+- The system will auto-detect Java paths or use `JAVA_HOME` env var
 
 ### Mock (Testing)
 - No external requirements
