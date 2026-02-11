@@ -33,7 +33,7 @@ Status snapshot as of **2025‑11‑22**:
 
 ## ✅ Recently Delivered
 
-- **v0.18.0** – Go debugging via Delve DAP; Java debugging via jdb bridge (experimental)
+- **v0.18.0** – Go debugging via Delve DAP
 - **v0.17.0** – Rust adapter backed by CodeLLDB plus richer stepping responses with inline source context
 - **v0.16.0** – First-class JavaScript adapter with TypeScript detection, js‑debug vendoring, and adapter policy orchestration
 - **v0.15.x** – Self-contained CLI bundle (npx-friendly), proxy diagnostics, Windows CI resiliency
@@ -78,7 +78,7 @@ Want to help? Start by:
 
 ## 🗓 Version History (high level)
 
-- **v0.18.0** – Go adapter (Delve DAP), Java adapter (Experimental, jdb bridge)
+- **v0.18.0** – Go adapter (Delve DAP); Java adapter removed ([tracking issue](https://github.com/debugmcp/mcp-debugger/issues/14))
 - **v0.17.0** – Rust adapter (Alpha), inline source context in stepping tools
 - **v0.16.0** – JavaScript adapter, session policy orchestration, handshake instrumentation
 - **v0.15.0** – Bundled CLI distribution, Windows CI diagnostics, proxy log capture

@@ -179,14 +179,6 @@ export class DebugMcpServer {
             requiresExecutable: true,
             defaultExecutable: 'node'
           };
-        case 'java':
-          return {
-            id: 'java',
-            displayName: 'Java',
-            version: '1.0.0',
-            requiresExecutable: true,
-            defaultExecutable: 'java'
-          };
         default:
           return {
             id: lang,

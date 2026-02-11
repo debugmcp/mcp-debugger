@@ -79,7 +79,6 @@ export type LanguageSpecificAttachConfig = Record<string, unknown>;
 export enum DebugLanguage {
   PYTHON = 'python',
   JAVASCRIPT = 'javascript',
-  JAVA = 'java',
   RUST = 'rust',
   GO = 'go',
   MOCK = 'mock',  // Mock adapter for testing

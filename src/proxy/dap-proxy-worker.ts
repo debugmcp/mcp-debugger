@@ -32,7 +32,6 @@ import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,
-  JavaAdapterPolicy,
   RustAdapterPolicy,
   GoAdapterPolicy,
   MockAdapterPolicy
@@ -111,8 +110,6 @@ export class DapProxyWorker {
       return JsDebugAdapterPolicy;
     } else if (PythonAdapterPolicy.matchesAdapter(adapterCommand)) {
       return PythonAdapterPolicy;
-    } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
-      return JavaAdapterPolicy;
     } else if (RustAdapterPolicy.matchesAdapter(adapterCommand)) {
       return RustAdapterPolicy;
     } else if (GoAdapterPolicy.matchesAdapter(adapterCommand)) {

@@ -1346,35 +1346,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         false
       );
 
-      // Auto-detect stopOnEntry from process if not explicitly provided (Java with JDWP)
-      if (attachConfig.stopOnEntry === undefined && attachConfig.port) {
-        try {
-          const { detectSuspendByPort } = await import('../utils/jdwp-detector.js');
-          const detected = detectSuspendByPort(attachConfig.port);
-          if (detected !== null) {
-            attachConfig.stopOnEntry = detected;
-            this.logger.info(`[SessionManager] Auto-detected stopOnEntry=${detected} from process on port ${attachConfig.port}`);
-          } else {
-            attachConfig.stopOnEntry = true; // Default to true (safe for suspend=y)
-            this.logger.info(`[SessionManager] Could not auto-detect suspend mode, defaulting to stopOnEntry=true`);
-          }
-        } catch (error) {
-          this.logger.warn(`[SessionManager] Auto-detect failed:`, error);
-          attachConfig.stopOnEntry = true; // Default to true
-        }
-      }
-
       // Set session state based on stopOnEntry
-      // For attach mode: suspend=y (stopOnEntry=true) → PAUSED, suspend=n (stopOnEntry=false) → RUNNING
       let finalState = session.state;
 
       if (attachConfig.stopOnEntry !== false) {
-        // JVM is suspended (suspend=y), set to PAUSED
         this._updateSessionState(session, SessionState.PAUSED);
         finalState = SessionState.PAUSED;
 
-        // Set a default thread ID so continue command works
-        // Thread ID 1 is typically the main thread in Java
         if (session.proxyManager) {
           session.proxyManager.setCurrentThreadId(1);
           this.logger.info(`[SessionManager] Set default threadId=1 for attach mode`);

@@ -18,7 +18,6 @@ mcp-debugger/
 │   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug
 │   ├── adapter-rust/       # Rust debug adapter using CodeLLDB
 │   ├── adapter-go/         # Go debug adapter using Delve
-│   ├── adapter-java/       # Java debug adapter using jdb
 │   ├── adapter-mock/       # Mock adapter for testing
 │   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
@@ -36,7 +35,6 @@ mcp-debugger/
 - **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug
 - **@debugmcp/adapter-rust**: Rust debugging support via CodeLLDB
 - **@debugmcp/adapter-go**: Go debugging support via Delve
-- **@debugmcp/adapter-java**: Java debugging support via jdb
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
 - **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
@@ -233,13 +231,12 @@ Sessions progress through states: IDLE → INITIALIZING → READY → RUNNING �
 
 ### Adapter System
 - `src/adapters/adapter-registry.ts` - Adapter lifecycle management
-- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (6 known adapters)
+- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (5 known adapters)
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter (debugpy)
 - `packages/adapter-javascript/` - JavaScript/Node.js debug adapter (js-debug)
 - `packages/adapter-rust/` - Rust debug adapter (CodeLLDB)
 - `packages/adapter-go/` - Go debug adapter (Delve)
-- `packages/adapter-java/` - Java debug adapter (jdb)
 - `packages/adapter-mock/` - Mock adapter for testing
 
 ### Distribution
@@ -328,11 +325,6 @@ packages/adapter-{language}/
 - Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`
 - Uses Delve's native DAP protocol support
 
-### Java
-- JDK 11+ must be installed (javac, java, jdb)
-- Uses jdb (Java Debugger) with a DAP protocol bridge
-- Supports both launch and attach modes
-
 ### Mock (Testing)
 - No external requirements
 - Used for testing the debug infrastructure
@@ -385,7 +377,7 @@ claude mcp add-json mcp-debugger \
 
 The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that sits between Claude Code and mcp-debugger. It maintains a stable stdio connection to Claude Code while managing the backend as a restartable SSE child process. This means you can rebuild and restart mcp-debugger **without restarting Claude Code** (which would lose conversation context).
 
-**When to use**: Whenever you are actively developing mcp-debugger — making code changes, adding adapters, or installing new toolchains (Go, Java, etc.) that need to be picked up by the running server.
+**When to use**: Whenever you are actively developing mcp-debugger — making code changes, adding adapters, or installing new toolchains (Go, etc.) that need to be picked up by the running server.
 
 **How it works**: After code changes, call the `dev_rebuild_and_restart` tool. The proxy kills the backend, runs `npm run build`, spawns a fresh process, and reconnects — all transparently. If the backend crashes, dev tools remain available to bring it back.
 

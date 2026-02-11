@@ -154,7 +154,6 @@ export default defineConfig({
       { find: '@debugmcp/adapter-python', replacement: path.resolve(__dirname, './packages/adapter-python/src/index.ts') },
       { find: '@debugmcp/adapter-javascript', replacement: path.resolve(__dirname, './packages/adapter-javascript/src/index.ts') },
       { find: '@debugmcp/adapter-go', replacement: path.resolve(__dirname, './packages/adapter-go/src/index.ts') },
-      { find: '@debugmcp/adapter-java', replacement: path.resolve(__dirname, './packages/adapter-java/src/index.ts') },
       { find: '@debugmcp/adapter-rust', replacement: path.resolve(__dirname, './packages/adapter-rust/src/index.ts') }
     ]
   },

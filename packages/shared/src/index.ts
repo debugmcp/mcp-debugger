@@ -181,7 +181,6 @@ export type {
 export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
-export { JavaAdapterPolicy } from './interfaces/adapter-policy-java.js';
 export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
 export type { RustAdapterPolicyInterface } from './interfaces/adapter-policy-rust.js';
 export { GoAdapterPolicy } from './interfaces/adapter-policy-go.js';

@@ -16,7 +16,7 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.18.0: Go and Java debugging support! Debug Go programs with Delve and Java programs via jdb (Experimental).
+> 🆕 Version 0.18.0: Go debugging support! Debug Go programs with Delve.
 
 > 🆕 Version 0.17.0: Rust debugging support (Alpha)! Debug Rust programs with CodeLLDB, including Cargo projects, async code, and full variable inspection—plus step commands now return the active source context so agents keep their place automatically.
 
@@ -42,7 +42,6 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger (Alpha)
 - 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Alpha)
 - 🐹 **Go debugging via Delve** – Full DAP support for Go programs
-- ☕ **Java debugging via jdb** – Debug Java programs (Experimental)
 > WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
 > NOTE: The published npm bundle ships the Linux x64 CodeLLDB runtime to stay under registry size limits. On macOS or Windows, point the `CODELLDB_PATH` environment variable at an existing CodeLLDB installation (for example from the VSCode extension) or clone the repo and run `pnpm --filter @debugmcp/adapter-rust run build:adapter` to vendor your platform binaries locally.
 
@@ -142,7 +141,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",  // or "javascript", "rust", "go", "java", or "mock" for testing
+  "language": "python",  // or "javascript", "rust", "go", or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -207,14 +206,14 @@ Version 0.10.0 introduces a clean adapter pattern that separates language-agnost
                     │ ProxyManager │◀─────│ Language Adapter│
                     └──────────────┘      └─────────────────┘
                                                    │
-                          ┌──────────────┴──────────────────────────────────────────┐
-                          │                                                          │
-              ┌───────────┼───────────┬───────────┬───────────┬───────────┐          │
-              │           │           │           │           │           │          │
-        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
-        │Python    ││JavaScript││Rust      ││Go        ││Java      ││Mock      │
-        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
-        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
+                          ┌──────────────┴──────────────────────────────────┐
+                          │                                                  │
+              ┌───────────┼───────────┬───────────┬───────────┐              │
+              │           │           │           │           │              │
+        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
+        │Python    ││JavaScript││Rust      ││Go        ││Mock      │
+        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
+        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
 ```
 
 ### Adding Language Support
@@ -440,8 +439,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 - ✅ **Clean architecture** with adapter pattern
 - 🟨 **JavaScript/Node.js**: Alpha support with full debugging loop
 - ✅ **Go**: Full debugging support via Delve DAP
-- ☕ **Java**: Experimental support via jdb bridge
-- 🚧 **Coming Soon**: Ruby, C/C++, and more language adapters
+- 🚧 **Coming Soon**: Java, Ruby, C/C++, and more language adapters ([Java tracking issue](https://github.com/debugmcp/mcp-debugger/issues/14))
 - 📈 **Active Development**: Regular updates and improvements
 
 See [Roadmap.md](./Roadmap.md) for planned features.
