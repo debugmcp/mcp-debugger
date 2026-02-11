@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { resolvePathForRuntimeMock, getPathDescriptionMock } = vi.hoisted(() => ({
+const { resolvePathForRuntimeMock, getPathDescriptionMock, isContainerModeMock } = vi.hoisted(() => ({
   resolvePathForRuntimeMock: vi.fn<(path: string) => string>(),
-  getPathDescriptionMock: vi.fn<(original: string, resolved: string) => string>()
+  getPathDescriptionMock: vi.fn<(original: string, resolved: string) => string>(),
+  isContainerModeMock: vi.fn<() => boolean>()
 }));
 
 vi.mock('../../../src/utils/container-path-utils.js', () => ({
   resolvePathForRuntime: resolvePathForRuntimeMock,
-  getPathDescription: getPathDescriptionMock
+  getPathDescription: getPathDescriptionMock,
+  isContainerMode: isContainerModeMock
 }));
 
 import {
@@ -25,6 +27,8 @@ describe('SimpleFileChecker', () => {
   beforeEach(() => {
     resolvePathForRuntimeMock.mockClear();
     getPathDescriptionMock.mockClear();
+    isContainerModeMock.mockClear();
+    isContainerModeMock.mockReturnValue(false); // Default: host mode
     fileSystem.pathExists.mockReset();
     logger.debug.mockClear();
   });

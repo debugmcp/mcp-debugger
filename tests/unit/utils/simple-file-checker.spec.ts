@@ -54,7 +54,7 @@ describe('SimpleFileChecker', () => {
     });
 
     it('should check file existence without path manipulation', async () => {
-      const testPath = 'src/file.ts';
+      const testPath = '/home/user/src/file.ts';
       (mockFileSystem.pathExists as MockedFunction<(path: string) => Promise<boolean>>)
         .mockResolvedValue(true);
 
@@ -69,7 +69,7 @@ describe('SimpleFileChecker', () => {
     });
 
     it('should handle non-existent files', async () => {
-      const testPath = 'missing.ts';
+      const testPath = '/home/user/missing.ts';
       (mockFileSystem.pathExists as MockedFunction<(path: string) => Promise<boolean>>)
         .mockResolvedValue(false);
 
@@ -83,7 +83,7 @@ describe('SimpleFileChecker', () => {
     });
 
     it('should handle system errors', async () => {
-      const testPath = 'error.ts';
+      const testPath = '/home/user/error.ts';
       const error = new Error('Permission denied');
       (mockFileSystem.pathExists as MockedFunction<(path: string) => Promise<boolean>>)
         .mockRejectedValue(error);
@@ -96,6 +96,21 @@ describe('SimpleFileChecker', () => {
         effectivePath: testPath,
         errorMessage: 'Cannot check file existence: Permission denied'
       });
+    });
+
+    it('should reject relative paths with helpful error message', async () => {
+      const testPath = 'src/file.ts';
+
+      const result = await checker.checkExists(testPath);
+
+      expect(result).toEqual({
+        exists: false,
+        originalPath: testPath,
+        effectivePath: testPath,
+        errorMessage: 'Path must be absolute. Received: "src/file.ts"'
+      });
+      // Should NOT call pathExists for relative paths
+      expect(mockFileSystem.pathExists).not.toHaveBeenCalled();
     });
   });
 

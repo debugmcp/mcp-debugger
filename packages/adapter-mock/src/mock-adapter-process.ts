@@ -243,6 +243,10 @@ class MockDebugAdapterProcess {
         this.handlePause(request as DebugProtocol.PauseRequest);
         break;
         
+      case 'evaluate':
+        this.handleEvaluate(request);
+        break;
+
       case 'disconnect':
         this.handleDisconnect(request as DebugProtocol.DisconnectRequest);
         break;
@@ -538,6 +542,21 @@ class MockDebugAdapterProcess {
     });
   }
   
+  private handleEvaluate(request: DebugProtocol.Request): void {
+    this.sendResponse({
+      seq: 0,
+      type: 'response',
+      request_seq: request.seq,
+      command: request.command,
+      success: true,
+      body: {
+        result: 'mock_value',
+        type: 'string',
+        variablesReference: 0
+      }
+    });
+  }
+
   private handleContinue(request: DebugProtocol.ContinueRequest): void {
     this.isRunning = true;
     

@@ -213,20 +213,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       transformedLaunchConfig ?? (genericLaunchConfig as LanguageSpecificLaunchConfig);
     const launchConfigData: LanguageSpecificLaunchConfig = { ...launchConfigBase };
 
-    const languageId = typeof session.language === 'string'
-      ? session.language.toLowerCase()
-      : String(session.language).toLowerCase();
-    const isJavascriptSession = languageId === 'javascript';
     const stopOnEntryProvided = typeof dapLaunchArgs?.stopOnEntry === 'boolean';
-
-    if (isJavascriptSession && !stopOnEntryProvided) {
-      launchConfigData.stopOnEntry = false;
-      if (Array.isArray(launchConfigData.runtimeArgs)) {
-        launchConfigData.runtimeArgs = (launchConfigData.runtimeArgs as string[]).filter(
-          arg => !/^--inspect(?:-brk)?(?:=|$)/.test(arg)
-        );
-      }
-    }
 
     // Let adapter policy override stopOnEntry default when user hasn't specified it.
     // E.g., Go/Delve needs stopOnEntry=false to avoid "unknown goroutine" issues.

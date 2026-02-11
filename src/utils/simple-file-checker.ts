@@ -8,8 +8,9 @@
  * 4. Clear error messages for path issues
  */
 
+import * as nodePath from 'node:path';
 import { IFileSystem, IEnvironment } from '@debugmcp/shared';
-import { resolvePathForRuntime, getPathDescription } from './container-path-utils.js';
+import { resolvePathForRuntime, getPathDescription, isContainerMode } from './container-path-utils.js';
 
 /**
  * Result of simple file existence check
@@ -40,7 +41,21 @@ export class SimpleFileChecker {
     try {
       // Use centralized path resolution
       effectivePath = resolvePathForRuntime(path, this.environment);
-      
+
+      // In host mode, reject non-absolute paths early.
+      // Node's fs.pathExists() resolves relative paths via process.cwd(),
+      // which can pass the existence check but fail downstream in debug adapters.
+      // Docker mode is unaffected (workspace prefix makes paths absolute).
+      if (!isContainerMode(this.environment) && !nodePath.isAbsolute(effectivePath)) {
+        this.logger?.debug(`[SimpleFileChecker] Relative path rejected in host mode: ${effectivePath}`);
+        return {
+          exists: false,
+          originalPath: path,
+          effectivePath,
+          errorMessage: `Path must be absolute. Received: "${path}"`
+        };
+      }
+
       const pathDesc = getPathDescription(path, effectivePath, this.environment);
       this.logger?.debug(`[SimpleFileChecker] Checking existence: ${pathDesc}`);
     } catch (error) {

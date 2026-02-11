@@ -102,7 +102,7 @@ export abstract class SessionManagerCore {
     this.sessionStore = this.sessionStoreFactory.create();
     this.logDirBase = config.logDirBase || path.join(os.tmpdir(), 'debug-mcp-server', 'sessions');
     this.defaultDapLaunchArgs = config.defaultDapLaunchArgs || {
-      stopOnEntry: true,
+      stopOnEntry: false,
       justMyCode: true
     };
     this.dryRunTimeoutMs = config.dryRunTimeoutMs || 10000;

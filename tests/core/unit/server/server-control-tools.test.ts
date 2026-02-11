@@ -55,7 +55,7 @@ describe('Server Control Tools Tests', () => {
     it('should set breakpoint successfully', async () => {
       const mockBreakpoint: Breakpoint = {
         id: 'bp-1',
-        file: 'test.py',
+        file: '/path/to/test.py',
         line: 10,
         verified: true
       };
@@ -73,7 +73,7 @@ describe('Server Control Tools Tests', () => {
           name: 'set_breakpoint',
           arguments: {
             sessionId: 'test-session',
-            file: 'test.py',
+            file: '/path/to/test.py',
             line: 10
           }
         }
@@ -81,7 +81,7 @@ describe('Server Control Tools Tests', () => {
       
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
         'test-session',
-        expect.stringContaining('test.py'),
+        expect.stringContaining('/path/to/test.py'),
         10,
         undefined
       );
@@ -89,13 +89,13 @@ describe('Server Control Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);
       expect(content.breakpointId).toBe('bp-1');
-      expect(content.message).toContain('Breakpoint set at test.py:10');
+      expect(content.message).toContain('Breakpoint set at /path/to/test.py:10');
     });
 
     it('should handle conditional breakpoints', async () => {
       const mockBreakpoint: Breakpoint = {
         id: 'bp-2',
-        file: 'test.py',
+        file: '/path/to/test.py',
         line: 20,
         condition: 'x > 10',
         verified: true
@@ -114,7 +114,7 @@ describe('Server Control Tools Tests', () => {
           name: 'set_breakpoint',
           arguments: {
             sessionId: 'test-session',
-            file: 'test.py',
+            file: '/path/to/test.py',
             line: 20,
             condition: 'x > 10'
           }
@@ -123,7 +123,7 @@ describe('Server Control Tools Tests', () => {
       
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
         'test-session',
-        expect.stringContaining('test.py'),
+        expect.stringContaining('/path/to/test.py'),
         20,
         'x > 10'
       );
@@ -139,7 +139,7 @@ describe('Server Control Tools Tests', () => {
           name: 'set_breakpoint',
           arguments: {
             sessionId: 'test-session',
-            file: 'test.py',
+            file: '/path/to/test.py',
             line: 10
           }
         }
@@ -171,7 +171,7 @@ describe('Server Control Tools Tests', () => {
           name: 'start_debugging',
           arguments: {
             sessionId: 'test-session',
-            scriptPath: 'test.py',
+            scriptPath: '/path/to/test.py',
             args: ['--debug'],
             dapLaunchArgs: {
               stopOnEntry: true,
@@ -183,7 +183,7 @@ describe('Server Control Tools Tests', () => {
       
       expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
         'test-session',
-        expect.stringContaining('test.py'),
+        expect.stringContaining('/path/to/test.py'),
         ['--debug'],
         { stopOnEntry: true, justMyCode: false },
         undefined,
@@ -204,7 +204,7 @@ describe('Server Control Tools Tests', () => {
       mockSessionManager.startDebugging.mockResolvedValue({
         success: true,
         state: 'stopped',
-        data: { dryRun: true, command: 'python test.py' }
+        data: { dryRun: true, command: 'python /path/to/test.py' }
       });
       
       const result = await callToolHandler({
@@ -213,7 +213,7 @@ describe('Server Control Tools Tests', () => {
           name: 'start_debugging',
           arguments: {
             sessionId: 'test-session',
-            scriptPath: 'test.py',
+            scriptPath: '/path/to/test.py',
             dryRunSpawn: true
           }
         }
@@ -221,7 +221,7 @@ describe('Server Control Tools Tests', () => {
       
       expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
         'test-session',
-        expect.stringContaining('test.py'),
+        expect.stringContaining('/path/to/test.py'),
         undefined,
         undefined,
         true,
@@ -242,7 +242,7 @@ describe('Server Control Tools Tests', () => {
           name: 'start_debugging',
           arguments: {
             sessionId: 'test-session',
-            scriptPath: 'test.py'
+            scriptPath: '/path/to/test.py'
           }
         }
       });
