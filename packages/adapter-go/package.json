@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:ci": "tsc -p tsconfig.json",
     "clean": "rimraf dist",
     "lint": "eslint src/**/*.ts",
     "test": "vitest run"

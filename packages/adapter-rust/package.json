@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:ci": "tsc -p tsconfig.json",
     "build:adapter": "node scripts/vendor-codelldb.js",
     "clean": "rimraf dist vendor",
     "clean:vendor": "rimraf vendor",

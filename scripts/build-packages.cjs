@@ -19,6 +19,7 @@ const packages = [
   '@debugmcp/adapter-python',
   '@debugmcp/adapter-javascript',
   ...(!disabledLanguages.has('rust') ? ['@debugmcp/adapter-rust'] : []),
+  ...(!disabledLanguages.has('go') ? ['@debugmcp/adapter-go'] : []),
 ];
 
 for (const pkg of packages) {

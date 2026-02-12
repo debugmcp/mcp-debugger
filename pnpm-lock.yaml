@@ -291,6 +291,9 @@ importers:
 
   packages/mcp-debugger:
     devDependencies:
+      '@debugmcp/adapter-go':
+        specifier: workspace:*
+        version: link:../adapter-go
       '@debugmcp/adapter-javascript':
         specifier: workspace:*
         version: link:../adapter-javascript
