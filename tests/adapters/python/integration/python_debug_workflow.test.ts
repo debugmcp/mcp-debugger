@@ -169,7 +169,7 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
     console.log(`[Test] Set breakpoint at ${scriptPath}:${breakpointLine}`);
 
     // 4. Start Debugging
-    const startRawResult = await client.callTool({ name: 'start_debugging', arguments: { sessionId, scriptPath } });
+    const startRawResult = await client.callTool({ name: 'start_debugging', arguments: { sessionId, scriptPath, dapLaunchArgs: { stopOnEntry: true } } });
     const startResult = parseToolResult(startRawResult);
     console.log('[Test] Start debugging result:', JSON.stringify(startResult, null, 2));
     expect(startResult.success).toBe(true);

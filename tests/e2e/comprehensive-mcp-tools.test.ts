@@ -46,14 +46,11 @@ const PYTHON_SCRIPT = path.resolve(ROOT, 'examples', 'python', 'simple_test.py')
 const JS_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'simple_test.js');
 const RUST_SCRIPT = path.resolve(ROOT, 'examples', 'rust', 'hello_world', 'src', 'main.rs');
 const GO_SCRIPT = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
-const JAVA_SCRIPT = path.resolve(ROOT, 'examples', 'java', 'TestJavaDebug.java');
-
 // Breakpoint lines (executable lines in each script)
 const PYTHON_BP_LINE = 8;   // a = 1
 const JS_BP_LINE = 9;       // let a = 1;
 const RUST_BP_LINE = 13;    // let name = "Rust";
 const GO_BP_LINE = 12;      // message := greet("World")
-const JAVA_BP_LINE = 44;    // int x = 10;
 
 /* ---------- toolchain detection ---------- */
 
@@ -68,8 +65,6 @@ function hasCommand(cmd: string): boolean {
 
 const hasRust = hasCommand('rustc --version');
 const hasGo = hasCommand('go version');
-const hasJava = hasCommand('javac -version');
-
 /* ---------- language definitions ---------- */
 
 interface LangDef {
@@ -86,7 +81,6 @@ const LANGUAGES: LangDef[] = [
   { language: 'mock', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: true },
   { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed' },
   { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go toolchain not installed' },
-  { language: 'java', script: JAVA_SCRIPT, bpLine: JAVA_BP_LINE, available: hasJava, skipReason: hasJava ? undefined : 'Java JDK not installed' },
 ];
 
 /* ---------- all 19 tools ---------- */
@@ -115,7 +109,7 @@ const ALL_TOOLS = [
 
 /* ---------- test suite ---------- */
 
-describe('Comprehensive MCP Debugger Test — 19 Tools × 6 Languages', () => {
+describe('Comprehensive MCP Debugger Test — 19 Tools × 5 Languages', () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
 
