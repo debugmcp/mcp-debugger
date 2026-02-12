@@ -1,55 +1,52 @@
 # src\errors/
-@generated: 2026-02-12T21:00:53Z
+@generated: 2026-02-12T21:05:40Z
 
 ## Purpose
-The errors module provides a comprehensive typed error hierarchy for MCP (Model Context Protocol) debugger operations. It extends the base MCP error system with domain-specific error classes that enable structured error handling, semantic error detection, and recovery strategies throughout the debugger system.
+The `src/errors` directory provides a comprehensive typed error hierarchy for the MCP (Model Context Protocol) debugger. It defines semantic error classes that extend the base `McpError` to provide structured, type-safe error handling with specific error codes, avoiding string-based error detection and enabling more robust error recovery strategies.
 
-## Architecture & Design Patterns
-The module follows a hierarchical error design pattern where all errors extend the base `McpError` class from the MCP SDK. Each error class is designed with:
-- **Structured Data**: Typed properties containing contextual information about the error
-- **Semantic Error Codes**: Appropriate `McpErrorCode` values for standardized error classification
-- **Consistent Naming**: `[Context][Condition]Error` convention for clear error identification
-- **Recovery Semantics**: Clear distinction between recoverable and non-recoverable errors
+## Key Components
 
-## Core Error Categories
+### Core Error Hierarchy
+All error classes extend `McpError` from the MCP SDK and are organized into functional categories:
 
-### Runtime Environment Errors
-- **LanguageRuntimeNotFoundError**: Base class for missing language runtime executables
-- **PythonNotFoundError** & **NodeNotFoundError**: Language-specific runtime errors
-- These errors are recoverable and indicate environment setup issues
+- **Runtime Errors**: `LanguageRuntimeNotFoundError`, `PythonNotFoundError`, `NodeNotFoundError` - Handle missing language runtime executables
+- **Session Management**: `SessionNotFoundError`, `SessionTerminatedError` - Manage debug session lifecycle errors
+- **Language Support**: `UnsupportedLanguageError` - Handle unsupported programming language scenarios
+- **Operational Errors**: `ProxyNotRunningError`, `DebugSessionCreationError`, `FileValidationError`, `PortAllocationError`, `ProxyInitializationError` - Cover various operational failure modes
 
-### Session Management Errors
-- **SessionNotFoundError**: Invalid session ID references
-- **SessionTerminatedError**: Operations attempted on terminated sessions
-- **DebugSessionCreationError**: Failures during session initialization
-- Critical for session lifecycle management and state validation
-
-### Operational Errors
-- **ProxyNotRunningError**: Missing active debug proxy for operations
-- **ProxyInitializationError**: Debug proxy setup and configuration failures
-- **PortAllocationError**: Network resource allocation failures
-- **FileValidationError**: File access and validation issues
-- **UnsupportedLanguageError**: Unsupported programming language requests
+### Error Utilities
+- **Type Guards**: `isMcpError<T>` for runtime type checking
+- **Message Extraction**: `getErrorMessage` for safe error message retrieval
+- **Recovery Classification**: `isRecoverableError` to distinguish between recoverable and fatal errors
 
 ## Public API Surface
 
-### Error Classes
-All error classes are exported and provide structured error data with appropriate MCP error codes. Key constructors accept contextual parameters (sessionId, language, reason, etc.) for detailed error reporting.
+### Main Entry Points
+- **Error Classes**: All error constructors accept structured data relevant to their specific failure context
+- **Utility Functions**: 
+  - `isMcpError<T>(error: unknown): error is T` - Type-safe error instance checking
+  - `getErrorMessage(error: unknown): string` - Safe message extraction
+  - `isRecoverableError(error: McpError): boolean` - Recovery strategy determination
 
-### Utility Functions
-- **`isMcpError<T>(error): error is T`**: Generic type guard for MCP error instance checking
-- **`getErrorMessage(error): string`**: Safe error message extraction from any error type
-- **`isRecoverableError(error): boolean`**: Determines if an error condition can be recovered from
+## Internal Organization
 
-## Error Recovery Strategy
-The module implements a clear recovery classification:
-- **Recoverable Errors**: `ProxyNotRunningError`, `LanguageRuntimeNotFoundError` - can be retried after remediation
-- **Non-Recoverable Errors**: `SessionTerminatedError`, `SessionNotFoundError` - require session restart or cleanup
+### Data Flow Pattern
+1. Errors are created with context-specific structured data (sessionId, language, reason, etc.)
+2. All errors use appropriate MCP error codes (`InvalidParams`, `InvalidRequest`, `InternalError`)
+3. Error utilities provide type-safe handling and recovery decision support
+4. Original error context is preserved through stack traces and nested error properties
 
-## Integration Points
-- Integrates with MCP SDK error handling infrastructure via `McpError` base class
-- Provides type-safe error detection throughout the debugger system
-- Enables structured error reporting and logging with contextual data
-- Supports error recovery strategies in session management and proxy operations
+### Design Conventions
+- **Consistent Naming**: `[Context][Condition]Error` pattern
+- **Structured Data**: Each error class includes relevant properties for debugging context
+- **Error Code Mapping**: Semantic mapping to MCP standard error codes
+- **Recovery Classification**: Clear distinction between recoverable and non-recoverable errors
 
-This error system serves as the foundation for robust error handling across the MCP debugger, enabling both programmatic error detection and human-readable error reporting.
+## Integration Patterns
+This error system integrates with the broader MCP debugger by providing:
+- Type-safe error handling throughout the debugger components
+- Structured error context for logging and debugging
+- Recovery strategy guidance for error handling middleware
+- Consistent error reporting to MCP clients
+
+The module serves as the foundation for robust error handling across session management, language runtime discovery, debug proxy operations, and file system interactions.

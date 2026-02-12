@@ -1,75 +1,64 @@
 # tests\core\unit\factories/
-@generated: 2026-02-12T21:00:54Z
+@generated: 2026-02-12T21:05:45Z
 
-## Purpose
+## Directory Overview
+This directory contains comprehensive unit tests for the factory pattern implementations in the debug proxy system's core architecture. It validates factory behavior for creating both production instances and mock implementations used in testing scenarios.
 
-Unit test directory for factory pattern implementations in the core debug proxy system. Contains comprehensive test suites validating factory behavior, dependency injection, and mock testing utilities for creating proxy managers and session stores.
+## Purpose and Scope
+The test suite ensures proper factory pattern implementation for two critical components:
+- **ProxyManager factories**: Handle creation of debug proxy managers with optional debug adapter dependencies
+- **SessionStore factories**: Manage creation of session storage instances for debug session management
 
-## Key Components
-
-### Factory Test Suites
-- **`proxy-manager-factory.test.ts`**: Tests for `ProxyManagerFactory` and `MockProxyManagerFactory` classes
-- **`session-store-factory.test.ts`**: Tests for `SessionStoreFactory` and `MockSessionStoreFactory` classes
-
-Both test suites follow identical patterns for validating factory implementations and their corresponding mock counterparts.
+Both factory types follow a consistent pattern with production implementations for runtime use and mock implementations for testing introspection.
 
 ## Test Architecture
 
-### Factory Pattern Testing
-- **Production Factories**: Stateless factory implementations that create instances through dependency injection
-  - `ProxyManagerFactory`: Creates `ProxyManager` instances with optional `IDebugAdapter` dependencies
-  - `SessionStoreFactory`: Creates `SessionStore` instances for session management
-- **Mock Factories**: Test-focused factories with state tracking capabilities
-  - `MockProxyManagerFactory`: Tracks created managers and adapter parameters
-  - `MockSessionStoreFactory`: Maintains arrays of created store instances
+### Core Components
+- **ProxyManagerFactory tests**: Validates stateless factory creating ProxyManager instances with dependency injection
+- **MockProxyManagerFactory tests**: Tests mock factory with state tracking capabilities for test verification
+- **SessionStoreFactory tests**: Ensures proper SessionStore instance creation with language-specific configurations
+- **MockSessionStoreFactory/MockSessionStore tests**: Validates mock implementations with call tracking and parameter capture
 
-### Common Test Patterns
+### Factory Pattern Validation
+All tests verify essential factory behaviors:
+- **Instance Creation**: Factories produce correct types with complete interface implementations
+- **Independence**: Each factory call returns separate, isolated instances
+- **Statelessness**: Production factories maintain no internal state between calls
+- **Dependency Injection**: Parameters are properly passed through to created instances
 
-**Instance Creation & Validation**:
-- Verifies factories create correct instance types
-- Confirms all required interface methods exist
-- Validates method signatures and type compliance
+### Mock Testing Infrastructure
+Mock factories provide enhanced testing capabilities:
+- **State Tracking**: `createdManagers`/`createdStores` arrays maintain creation history
+- **Parameter Capture**: `lastAdapter` and `createSessionCalls` preserve invocation details
+- **Test Introspection**: Ability to verify factory usage patterns and parameter passing
+- **Error Resilience**: State updates occur even when creation functions throw errors
 
-**Independence & Isolation**:
-- Ensures each factory call returns unique instances
-- Tests that factories maintain no internal state
-- Confirms proper isolation between created instances
-
-**Mock State Tracking**:
-- Tests tracking arrays (`createdManagers`, `createdStores`, `createSessionCalls`)
-- Verifies parameter capture and preservation
-- Ensures chronological ordering of operations
-
-**Dependency Management**:
-- Validates proper dependency injection
-- Tests optional parameter handling
-- Confirms adapter/parameter passing to created instances
-
-## Testing Utilities
-
-### Mock Creation Helpers
-- `createMockDebugAdapter()`: Comprehensive IDebugAdapter mock with lifecycle, state management, and DAP protocol methods
-- Vitest framework integration with `vi.fn()` for spy functionality
-- Setup/teardown patterns for mock state management
+## Test Patterns and Conventions
 
 ### Verification Strategies
-- Instance type checking with `toBeInstanceOf()`
-- Method existence validation with `toBeTypeOf('function')`
-- Reference inequality testing for independence verification
-- Deep equality comparison for parameter preservation
-- Private property access for internal dependency verification
+- Type checking with `toBeInstanceOf()` for inheritance validation
+- Method existence verification using `toBeTypeOf('function')`
+- Reference inequality testing to ensure instance independence
+- Deep parameter comparison for accurate capture validation
+- Private property access (via `as any`) for dependency verification
+
+### Test Data and Scenarios
+- Uses realistic debug languages (Python, Mock) for comprehensive testing
+- Employs varying parameter configurations from minimal to complex
+- Tests both successful operations and error conditions
+- Validates concurrent usage patterns and state isolation
+
+## Key Dependencies
+- **Vitest framework**: Provides test runner, assertions, and mock utilities (`vi.fn()`)
+- **Core factory implementations**: ProxyManagerFactory, SessionStoreFactory and their interfaces
+- **Mock utilities**: Comprehensive IDebugAdapter mocks with lifecycle and protocol methods
+- **Type definitions**: IProxyManager, CreateSessionParams, DebugLanguage enums
 
 ## Integration Points
+The tests validate the factory system's role in the larger debug proxy architecture by ensuring:
+- Proper dependency injection for debug adapters and session parameters
+- Correct interface compliance for seamless integration with consuming code
+- Mock implementations that accurately mirror production behavior for testing
+- State isolation that prevents cross-contamination in multi-instance scenarios
 
-These factory tests validate the creation and configuration of core system components:
-- **Proxy Management**: Debug adapter integration and proxy lifecycle management
-- **Session Management**: Debug session storage and retrieval with language-specific support
-- **Mock Testing**: Comprehensive test utilities for factory behavior verification
-
-## Key Conventions
-
-- Stateless production factories with no instance tracking
-- Mock factories maintain test state for introspection and verification
-- Optional dependency parameters (adapters, configuration)
-- Comprehensive interface compliance testing
-- Independent instance creation ensuring proper isolation
+This test suite serves as both validation for the factory implementations and documentation of their expected behavior patterns within the debug proxy system.

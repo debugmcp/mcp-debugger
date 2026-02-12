@@ -1,72 +1,69 @@
 # examples\javascript/
-@generated: 2026-02-12T21:00:58Z
+@generated: 2026-02-12T21:05:47Z
 
-## Directory Purpose
+## Purpose
 
-The `examples/javascript` directory contains a comprehensive collection of JavaScript and TypeScript test files designed specifically for debugging tool validation and MCP (Model Context Protocol) debugger testing. This module serves as a test harness that exercises various debugging scenarios across different JavaScript language features and execution patterns.
+JavaScript testing suite for MCP (Model Context Protocol) debugger validation. This directory provides comprehensive test scenarios designed to exercise various debugging features across different JavaScript environments, including native JavaScript, TypeScript, and Node.js contexts.
 
-## Key Components and Organization
+## Key Components
 
-### Core Test Files
+### Core Test Scripts
+- **simple_test.js** & **test-simple.js**: Minimal smoke tests with basic arithmetic operations for initial debugger validation
+- **pause_test.js**: Basic computation patterns with embedded breakpoint markers for stepping functionality
+- **javascript_test_comprehensive.js**: Full-featured test suite with recursive functions, loops, objects, and conditional logic
+- **mcp_target.js**: Focused debugging scenarios for stack traces, variable inspection, and expression evaluation
 
-**Basic Test Scripts**
-- `simple_test.js` / `test-simple.js`: Minimal smoke tests for basic debugger functionality
-- `pause_test.js`: Focused on breakpoint placement and basic computation patterns
+### Advanced Testing
+- **test_complete_js_debug.js** & **test_javascript_debug.js**: Comprehensive debugging demonstrations showcasing mixed programming paradigms (recursive, iterative, functional)
+- **typescript_test.ts** & **typescript_test.js**: TypeScript debugging scenarios including source map resolution, generic types, async operations, and transpilation artifacts
 
-**Comprehensive Test Suites**
-- `javascript_test_comprehensive.js`: Full-featured test covering recursive functions, loops, arrays, and mathematical operations
-- `test_javascript_debug.js`: Advanced debugging scenarios with factorial calculations, array processing, and nested function calls
-- `mcp_target.js` / `test_complete_js_debug.js`: Specialized MCP debugger testing with stack trace validation and variable inspection
-
-**TypeScript Integration**
-- `typescript_test.ts`: Original TypeScript source with advanced type features, generics, and async operations
-- `typescript_test.js`: Transpiled JavaScript with source map support for TypeScript debugging scenarios
+### Testing Architecture Patterns
+- **Progressive complexity**: Tests range from simple variable swaps to complex nested data structures
+- **Strategic breakpoints**: Explicit console.log statements and comments marking optimal breakpoint locations
+- **Diverse data types**: Number, string, array, object, and TypeScript-specific types for comprehensive variable inspection
+- **Multiple paradigms**: Recursive functions, iterative loops, async/await, object-oriented patterns, and functional programming
 
 ## Public API Surface
 
-### Primary Entry Points
-All test files are self-executing Node.js scripts with consistent patterns:
-- `main()` functions as primary orchestrators
-- Direct script execution via `main().catch()` or immediate invocation
-- Node.js shebang for direct execution (`#!/usr/bin/env node`)
+### Main Entry Points
+- Each test script is self-executing with `main()` orchestrator functions
+- Scripts use Node.js shebang (`#!/usr/bin/env node`) for direct execution
+- TypeScript files include source map references for debugging original source
 
-### Common Test Scenarios
-- **Variable Inspection**: Mixed data types (numbers, strings, arrays, objects, nested structures)
-- **Stack Trace Testing**: Recursive functions with configurable depth levels
-- **Breakpoint Validation**: Strategic console.log statements and marked breakpoint locations
-- **Control Flow**: Loops, conditionals, function calls, and exception handling
-- **Async Operations**: Promise-based testing with artificial delays
+### Core Test Functions
+- **Mathematical operations**: `fibonacci()`, `factorial()`, `calculateSum()` for recursive/iterative testing
+- **Data processing**: `sumList()`, `processData()` for array manipulation debugging
+- **Stack testing**: `deepFunction()` for call stack depth validation
+- **Variable inspection**: `testVariables()` for diverse data type examination
+- **Async patterns**: `fetchData()` for Promise-based debugging scenarios
 
-## Internal Data Flow
+## Internal Organization
 
-### Test Execution Pattern
-1. **Initialization**: Variable setup and test data preparation
-2. **Sequential Testing**: Progressive complexity from simple arithmetic to complex nested operations
-3. **Output Generation**: Comprehensive console logging for debugging visibility
-4. **Error Handling**: Controlled exception scenarios for stack trace testing
+### Test Scenario Categories
+1. **Smoke Tests**: Basic execution validation (simple_test.js, test-simple.js)
+2. **Breakpoint Testing**: Strategic pause points for stepping (pause_test.js)
+3. **Feature Comprehensive**: Full debugger capability validation (javascript_test_comprehensive.js, mcp_target.js)
+4. **Language-Specific**: TypeScript debugging with source maps and type inspection
+5. **Error Handling**: Exception throwing and stack trace testing
 
-### Cross-File Consistency
-- Shared debugging patterns across all test files
-- Consistent variable naming (x, y, z for simple tests; testData for complex scenarios)
-- Similar function signatures for comparable operations (factorial, sum, swap patterns)
-- Unified console output formatting
+### Data Flow Pattern
+1. Script initialization with test data setup
+2. Sequential test execution through main() orchestrator
+3. Console logging for test progress and result verification
+4. Error handling with process.exit() for failure cases
 
-## Important Patterns and Conventions
+## Important Conventions
 
 ### Debugging-Specific Design
-- **Strategic Breakpoints**: Explicit comments marking intended breakpoint locations
-- **Variable Diversity**: Each test includes multiple data types for comprehensive inspection
-- **Progressive Complexity**: Tests move from simple operations to complex nested structures
-- **Source Map Integration**: TypeScript files include transpiled versions with debugging metadata
+- **Breakpoint markers**: Comments explicitly identifying optimal breakpoint locations
+- **Variable diversity**: Mixed primitive and complex types in each test scenario
+- **Output consistency**: Standardized console.log patterns for test phase identification
+- **Stack depth control**: Predictable recursion levels for stack trace testing
+- **Source map integration**: TypeScript files maintain line number references for debugging mapping
 
-### Architecture Conventions
-- **No External Dependencies**: All tests use only Node.js built-ins for maximum portability
-- **Functional Decomposition**: Clear separation of concerns with dedicated utility functions
-- **Error Isolation**: Each test scenario includes proper error handling and recovery
+### Cross-Language Testing
+- Equivalent test implementations across JavaScript and TypeScript
+- Consistent function signatures and test patterns
+- Parallel debugging scenarios for language-agnostic debugger validation
 
-### Testing Methodology
-- **Comprehensive Coverage**: Tests span recursive calls, iterative operations, object manipulation, and async patterns
-- **Cross-Language Validation**: TypeScript and JavaScript variants for tooling compatibility
-- **Reproducible Scenarios**: Deterministic outputs for consistent debugging validation
-
-This directory serves as a complete debugging validation suite, enabling thorough testing of JavaScript/TypeScript debugging tools across the full spectrum of language features and execution patterns.
+This directory serves as a comprehensive validation suite for JavaScript/TypeScript debugging tools, providing systematic test coverage from basic stepping functionality to advanced source map resolution and type inspection capabilities.

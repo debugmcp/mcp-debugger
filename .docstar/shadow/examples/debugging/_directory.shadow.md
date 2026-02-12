@@ -1,72 +1,73 @@
 # examples\debugging/
-@generated: 2026-02-12T21:01:00Z
+@generated: 2026-02-12T21:05:45Z
 
-## Purpose and Responsibility
+## Purpose
+The `examples/debugging` directory provides comprehensive test scripts and integration tests for validating MCP (Model Context Protocol) debugger functionality. This module serves as both a testing suite and demonstration collection for debugging capabilities across JavaScript and Python runtimes.
 
-The `examples/debugging` directory provides a comprehensive testing suite for MCP (Model Context Protocol) debugger functionality. It contains test scripts and integration tests designed to validate debugging capabilities across multiple programming languages and communication protocols, with particular focus on ensuring proper timing and session management in debugging workflows.
+## Key Components
 
-## Key Components and Relationships
+### Test Scripts
+- **`test-debug-javascript.js`**: Comprehensive JavaScript debugging test with arithmetic operations, array processing, recursion (Fibonacci), and object manipulation. Features extensive console logging for execution tracing and multiple data types for variable inspection.
 
-### Test Scripts for Debugging Scenarios
-- **test-debug-javascript.js**: JavaScript debugging test with comprehensive scenarios including arithmetic, array processing, recursion, and object manipulation
-- **test-debug-python.py**: Python debugging test with similar computational examples and extensive logging
-- **test-sse-fix.js**: Minimal JavaScript breakpoint testing script for basic debugging workflows
+- **`test-debug-python.py`**: Python debugging test script with simple computational examples including sum calculation and list processing. Designed with deliberate print statements for debugging observation and step-through analysis.
 
-### Integration Test Infrastructure  
-- **test-sse-js-debug-fix.js**: Critical integration test validating the fix for SSE (Server-Sent Events) timing bugs in JavaScript debugging sessions
+- **`test-sse-fix.js`**: Minimal debugging example for basic arithmetic operations with explicit breakpoint placement. Serves as a simple test case for debugging workflow validation.
 
-The components work together to provide a layered testing approach:
-1. **Language-specific test scripts** serve as debugging targets with predictable execution flows
-2. **Integration test** orchestrates complete debugging workflows using MCP client-server communication
-3. **Utility functions** handle infrastructure concerns like port availability and process management
+### Integration Tests
+- **`test-sse-js-debug-fix.js`**: Critical integration test that validates the fix for a timing bug in SSE (Server-Sent Events) JavaScript debugging. Tests the specific scenario where `stackTrace` was called before the child debugging session was fully active.
+
+## Architecture and Data Flow
+
+### Testing Strategy
+The directory implements a multi-layered testing approach:
+1. **Unit-level**: Simple scripts (`test-sse-fix.js`) for basic debugging operations
+2. **Feature-level**: Comprehensive scripts (`test-debug-javascript.js`, `test-debug-python.py`) covering various debugging scenarios
+3. **Integration-level**: Full end-to-end tests (`test-sse-js-debug-fix.js`) validating complete debugging workflows
+
+### Common Debugging Patterns
+All test scripts follow consistent patterns:
+- **Explicit logging**: Console/print statements at key execution points
+- **Breakpoint-friendly design**: Clear function boundaries and predictable execution flow
+- **Variable inspection support**: Named variables and structured data for debugging visibility
+- **Step-through optimization**: Simple, linear execution paths suitable for debugger interaction
 
 ## Public API Surface
 
-### Primary Entry Points
-- **Direct Script Execution**: All test scripts can be run standalone for manual debugging
-- **Integration Test**: `test-sse-js-debug-fix.js` provides automated test harness for SSE debugging functionality
-- **MCP Tool Integration**: Scripts expose debugging scenarios through MCP tool calls (`debugger_create_session`, `debugger_set_breakpoint`, `get_stack_trace`, `get_local_variables`)
+### Entry Points
+- **JavaScript Tests**: Direct Node.js execution of `.js` files with shebang support
+- **Python Tests**: Standalone Python script execution with `if __name__ == "__main__"` pattern
+- **Integration Tests**: Automated test runners that spawn MCP servers and clients
 
-### Key Test Functions
-- `main()` functions in language-specific scripts orchestrate debugging scenarios  
-- `runTest()` in integration test manages complete test lifecycle
-- `waitForPort()` utility provides infrastructure readiness checking
+### Key Testing Scenarios
+- **Arithmetic Operations**: Basic calculations with tracing
+- **Data Structure Processing**: Arrays, lists, and object manipulation
+- **Control Flow**: Recursion, iteration, and conditional logic
+- **Debugging Session Management**: Session creation, breakpoint setting, stack trace retrieval
+- **Timing Validation**: Critical timing bug fixes in SSE debugging scenarios
 
-## Internal Organization and Data Flow
+## Internal Organization
 
-### Test Script Architecture
-1. **Setup Phase**: Variable initialization and function definitions
-2. **Execution Phase**: Orchestrated function calls with extensive logging
-3. **Validation Phase**: Result verification and output generation
+### Language Coverage
+- **JavaScript**: Node.js runtime targeting, console API usage, recursive algorithms
+- **Python**: Standard library usage, enumerated iteration, functional design patterns
 
-### Integration Test Flow
-1. **Infrastructure Setup**: SSE server spawn and port availability verification
-2. **MCP Client Connection**: Transport establishment and client initialization  
-3. **Debug Session Lifecycle**: Session creation → breakpoint setup → execution → stack trace retrieval
-4. **Cleanup**: Guaranteed resource cleanup with graceful shutdown
+### Integration Testing Infrastructure
+- **MCP Client Setup**: SSEClientTransport configuration and connection management
+- **Server Lifecycle**: Process spawning, port availability checking, graceful cleanup
+- **Error Handling**: Comprehensive try-catch patterns with guaranteed resource cleanup
 
-### Data Flow Patterns
-- **Synchronous execution** in test scripts for predictable debugging behavior
-- **Event-driven communication** in integration tests using SSE transport
-- **Process orchestration** with child process management and cleanup
-
-## Important Patterns and Conventions
+## Important Patterns
 
 ### Debugging Instrumentation
-- **Extensive logging**: Console.log/print statements at key execution points
-- **Clear variable naming**: Explicit naming for easy debugger inspection
-- **Breakpoint-friendly code**: Strategic placement of operations for step-through debugging
-- **Multi-data-type scenarios**: Testing primitives, arrays, objects, and recursive calls
+- Extensive logging at function entry/exit points
+- Variable state capture before/after operations
+- Return value propagation for result verification
+- Mixed data types for comprehensive variable inspection
 
-### Error Handling and Cleanup
-- **Guaranteed cleanup**: Finally blocks ensure resource deallocation
-- **Graceful degradation**: Multiple shutdown strategies (SIGTERM → SIGKILL)
-- **Comprehensive error capture**: stdout/stderr logging for debugging visibility
+### Test Isolation
+- Fixed ports and file paths for consistent testing
+- Process cleanup and resource management
+- Error suppression during cleanup phases
+- Timeout handling for port availability
 
-### Test Design Principles
-- **Predictable execution flows** with hard-coded values for consistent test results
-- **Clear separation of concerns** between test orchestration and target functionality  
-- **Cross-language consistency** in test patterns and debugging scenarios
-- **Timing-sensitive validation** for ensuring proper session initialization before debugging operations
-
-This directory serves as both a validation suite for MCP debugging functionality and a reference implementation for debugging workflow patterns across different programming languages and transport mechanisms.
+The directory serves as both a validation suite for MCP debugging capabilities and a reference implementation for debugging best practices across multiple runtime environments.

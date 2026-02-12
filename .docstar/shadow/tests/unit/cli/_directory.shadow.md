@@ -1,65 +1,57 @@
 # tests\unit\cli/
-@generated: 2026-02-12T21:00:59Z
+@generated: 2026-02-12T21:05:41Z
 
-## Purpose
-Comprehensive unit test suite for the Debug MCP Server CLI interface, validating all command functionality, error handling, and transport modes with extensive mocking and edge case coverage.
+## Overview
+This directory contains comprehensive unit tests for the Debug MCP Server CLI components, providing complete test coverage for command-line interface functionality, server transports, error handling, and utility functions.
 
-## Module Organization
+## Purpose & Scope
+Tests all CLI functionality including:
+- **Command handling** for both STDIO and SSE transport modes
+- **Error management** with global exception/rejection handlers  
+- **Binary analysis** capabilities for Rust debugging
+- **Server lifecycle** management and configuration
+- **Utility functions** for version reporting and setup
 
-### Transport Command Testing
-- **`stdio-command.test.ts`** - Tests STDIO transport mode with server lifecycle, configuration handling, and graceful error recovery
-- **`sse-command.test.ts`** - Tests Server-Sent Events transport mode including Express app creation, WebSocket-like communication, connection management, and health checks
-- **`setup.test.ts`** - Tests CLI command structure creation, option parsing, and integration between stdio/SSE transport modes
+## Key Test Modules
 
-### Utility Command Testing
-- **`check-rust-binary.test.ts`** - Tests binary analysis capabilities for Rust executables with JSON/human-readable output modes and platform-specific format detection (GNU/DWARF vs MSVC/PDB)
-- **`version.test.ts`** - Tests version extraction utility with package.json parsing, error handling, and environment-based console output control
+### Core Command Testing
+- **`stdio-command.test.ts`**: Tests STDIO transport mode with server startup, configuration handling, and error scenarios
+- **`sse-command.test.ts`**: Comprehensive testing of SSE (Server-Sent Events) transport including Express app creation, WebSocket-like communication, connection management, and graceful shutdown
+- **`setup.test.ts`**: Tests CLI command creation and configuration for both transport modes
 
-### Infrastructure Testing
-- **`error-handlers.test.ts`** - Tests global error handling setup for uncaught exceptions and unhandled promise rejections with structured logging and graceful shutdown
+### Infrastructure Testing  
+- **`error-handlers.test.ts`**: Validates global error handling setup for uncaught exceptions and unhandled promise rejections
+- **`version.test.ts`**: Tests version utility with package.json parsing and error fallbacks
+- **`check-rust-binary.test.ts`**: Tests binary analysis functionality for Rust debugging with JSON/human-readable output modes
 
-## Key Testing Patterns
+## Testing Architecture
 
-### Mock Architecture
-- **Dependency Injection**: All external dependencies (loggers, servers, file system, process) are injectable for complete isolation
-- **Transport Layer Mocking**: Custom mocks for MCP SDK components with event simulation capabilities
-- **Process Environment Control**: Comprehensive process.on, process.exit, and environment variable mocking
+### Mock Strategy
+All tests use comprehensive mocking via Vitest:
+- **Dependency injection patterns** for servers, loggers, and transport layers
+- **Process interception** for exit handling and signal management
+- **File system mocking** for configuration and binary analysis
+- **Network transport mocking** for SSE connections and MCP protocol
 
-### Error Handling Coverage
-- File system failures and invalid inputs
-- Network transport errors and connection failures
-- JSON parsing and configuration validation errors
-- Process lifecycle and signal handling
-- Graceful shutdown scenarios with resource cleanup
-
-### Output Validation
-- **Structured Logging**: Winston logger verification across all modules
-- **CLI Output Modes**: JSON vs human-readable formatting validation
-- **Stream Interception**: stdout/stderr capture for assertion verification
-- **Console Control**: Environment-based output suppression testing
+### Common Patterns
+- **Setup/teardown management** with proper mock cleanup
+- **Error simulation** at multiple injection points for resilience testing
+- **Output capture** for CLI verification (stdout/stderr)
+- **Async operation testing** with Promise-based workflows
+- **Event-driven testing** for server lifecycle and connection management
 
 ## Integration Points
+The tests validate integration between:
+- CLI commands and underlying server implementations
+- Transport layers (STDIO/SSE) and MCP protocol handling
+- Error handlers and logging infrastructure
+- Configuration parsing and runtime behavior
+- Binary analysis tools and debugging capabilities
 
-### CLI Command Flow
-1. **Setup Module** (`setup.test.ts`) creates command structure and parses options
-2. **Transport Commands** (`stdio-command.test.ts`, `sse-command.test.ts`) handle server startup based on selected mode
-3. **Error Handlers** (`error-handlers.test.ts`) provide global exception management
-4. **Utility Commands** (`check-rust-binary.test.ts`, `version.test.ts`) support debugging and version information
-
-### Shared Dependencies
-- **Vitest Testing Framework**: Consistent mocking, async testing, and assertion patterns
-- **Winston Logging**: Structured error/info logging across all commands
-- **DebugMcpServer**: Core server instance with transport-agnostic interface
-- **Commander.js**: CLI option parsing and command structure
-
-## Architecture Validation
-- **Transport Abstraction**: Tests verify both stdio and SSE modes work with same underlying server
-- **Configuration Management**: Log levels, file paths, and transport-specific options properly handled
-- **Resource Management**: Proper cleanup of connections, timers, and event listeners
-- **Protocol Compliance**: JSON-RPC error formatting and MCP transport protocol adherence
-
-## Testing Infrastructure
-- **Mock Factories**: Reusable mock creation patterns for servers, transports, and loggers
-- **Event Simulation**: Custom helpers for triggering transport events and process signals  
-- **Async Testing**: Comprehensive Promise-based testing with proper error propagation
-- **Behavioral Verification**: Extensive use of mock call inspection and state validation
+## Test Coverage
+Ensures reliability across:
+- **Happy path scenarios** with successful operations
+- **Error conditions** including network failures, invalid inputs, and system errors
+- **Configuration variations** with default and custom settings
+- **Process lifecycle** including startup, shutdown, and signal handling
+- **Multiple transport modes** with appropriate protocol handling

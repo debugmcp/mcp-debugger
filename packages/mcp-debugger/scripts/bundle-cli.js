@@ -186,11 +186,23 @@ async function bundleCLI() {
   console.log('Copied bundle into packages/mcp-debugger/package/dist/.');
 
   console.log('\nGenerating npm pack tarball...');
-  execSync('pnpm pack --pack-destination package', {
-    cwd: packageRoot,
-    stdio: 'inherit'
-  });
-  console.log('npm pack artifact refreshed in packages/mcp-debugger/package/.');
+  const preparePackScript = path.join(repoRoot, 'scripts', 'prepare-pack.js');
+  try {
+    execSync(`node "${preparePackScript}" prepare`, {
+      cwd: repoRoot,
+      stdio: 'inherit'
+    });
+    execSync('pnpm pack --pack-destination package', {
+      cwd: packageRoot,
+      stdio: 'inherit'
+    });
+    console.log('npm pack artifact refreshed in packages/mcp-debugger/package/.');
+  } finally {
+    execSync(`node "${preparePackScript}" restore`, {
+      cwd: repoRoot,
+      stdio: 'inherit'
+    });
+  }
 
   console.log('\nBundle pipeline complete.');
 }

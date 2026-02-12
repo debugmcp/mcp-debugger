@@ -1,47 +1,38 @@
 # src\proxy\utils/
-@generated: 2026-02-12T21:00:49Z
+@generated: 2026-02-12T21:05:40Z
 
-## Overall Purpose
+## Overview
 
-The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on orphan detection and process cleanup decisions in both host and containerized environments.
+The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on orphan detection and process termination decisions in both traditional host and containerized environments.
+
+## Core Responsibility
+
+This module handles the critical decision of when a proxy process should terminate due to being orphaned by its parent process. It provides container-aware logic that prevents inappropriate shutdowns in Docker/containerized deployments where PID 1 behavior differs from traditional Unix processes.
 
 ## Key Components
 
-### Orphan Detection Module (`orphan-check.ts`)
-- **Core Function**: `shouldExitAsOrphan(ppid, inContainer)` - Primary decision logic for orphan detection
-- **Environment Wrapper**: `shouldExitAsOrphanFromEnv(ppid, env?)` - Convenience function with automatic container detection
-- **Container Detection**: Uses `MCP_CONTAINER` environment variable to identify containerized deployments
+### Orphan Detection (`orphan-check.ts`)
+- **`shouldExitAsOrphan(ppid, inContainer)`**: Core decision engine that evaluates whether a process should exit based on parent PID and container context
+- **`shouldExitAsOrphanFromEnv(ppid, env?)`**: Environment-aware wrapper that automatically detects container status via `MCP_CONTAINER` environment variable
 
 ## Public API Surface
 
 **Main Entry Points:**
-- `shouldExitAsOrphanFromEnv(ppid, env?)` - Recommended entry point that automatically detects container environment
-- `shouldExitAsOrphan(ppid, inContainer)` - Low-level function for explicit container status scenarios
+- `shouldExitAsOrphan(ppid: number, inContainer: boolean): boolean` - Direct orphan check with explicit container flag
+- `shouldExitAsOrphanFromEnv(ppid: number, env?: NodeJS.ProcessEnv): boolean` - Environment-based orphan check (recommended)
 
-**Input Parameters:**
-- `ppid`: Parent process ID to evaluate
-- `inContainer`: Boolean flag for container environment (explicit)
-- `env`: Environment variables object (defaults to `process.env`)
+## Architecture Patterns
 
-## Internal Organization & Data Flow
+**Container-Aware Design**: The module explicitly handles the container deployment pattern where PID 1 is the normal parent process, unlike traditional Unix systems where PID 1 indicates an orphaned process.
 
-1. **Environment Detection**: Check `MCP_CONTAINER` environment variable
-2. **Container-Aware Logic**: Apply different orphan rules based on deployment context
-3. **Decision Output**: Return boolean indicating whether proxy should exit
+**Pure Function Pattern**: All functions are stateless and deterministic, taking explicit parameters rather than relying on global state, making them easily testable and predictable.
 
-## Key Behavioral Patterns
+**Environment Abstraction**: Provides both low-level control (explicit container flag) and high-level convenience (environment-based detection) to suit different usage patterns.
 
-**Orphan Detection Rules:**
-- **Host Environment**: PPID=1 indicates orphaned process → should exit
-- **Container Environment**: PPID=1 is normal (init process parent) → should NOT exit
-- **Active Parent**: PPID≠1 in any environment → should NOT exit
+## Decision Logic
 
-**Architecture Conventions:**
-- Pure functions with no side effects
-- Explicit container-awareness to handle Docker/container deployment patterns
-- Environment variable-based configuration
-- Defensive defaults using `process.env`
+- **Host Process (PPID=1, not container)** → Exit (true orphan)
+- **Container Process (PPID=1, in container)** → Continue (normal)  
+- **Any Process (PPID≠1)** → Continue (has parent)
 
-## Integration Context
-
-This utility module supports proxy process management by providing reliable orphan detection that works correctly across different deployment environments, preventing premature process termination in containerized scenarios while maintaining proper cleanup behavior on host systems.
+This utility module is essential for proxy process stability in mixed deployment environments, preventing premature shutdowns in containerized scenarios while maintaining proper cleanup behavior on traditional hosts.

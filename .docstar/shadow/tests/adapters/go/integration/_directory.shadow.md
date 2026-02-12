@@ -1,47 +1,44 @@
 # tests\adapters\go\integration/
-@generated: 2026-02-12T21:00:52Z
+@generated: 2026-02-12T21:05:39Z
 
 ## Purpose
-Integration test directory for the Go debugger adapter, providing comprehensive smoke tests that validate the adapter's core functionality without launching actual debugger processes. This module ensures the Go adapter can properly configure debugging sessions, build command-line invocations, and handle various Go debugging scenarios.
+Integration test directory for the Go debugger adapter, containing smoke tests that validate core functionality and configuration transformations without launching actual debugger processes.
 
-## Test Architecture
-The directory implements a **mock-based integration testing approach** that isolates the adapter logic from external dependencies:
-- **Fake Dependencies**: Creates mock AdapterDependencies with no-op implementations to prevent actual file system access and process launching
-- **Controlled Environment**: Manages DLV_PATH environment variables for testing scenarios
-- **Session Simulation**: Uses standardized test identifiers (session ID: 'session-go-smoke', port: 48766) for consistent testing
+## Overall Architecture
+This directory provides isolated integration testing for the Go adapter by creating a controlled test environment with mocked dependencies. The tests focus on validating the adapter's ability to:
+- Build correct debugger commands (dlv DAP)
+- Transform launch configurations for different Go execution modes
+- Report metadata and dependencies accurately
+- Handle environment setup properly
 
-## Key Test Coverage Areas
+## Key Components
 
-### Command Generation & Validation
-- Validates `buildAdapterCommand()` method for generating proper dlv DAP commands
-- Ensures command paths are absolute and executable files exist
-- Verifies correct TCP port configuration and required 'dap' argument handling
+### Test Environment Setup
+- **Mock Dependencies**: Creates fake `AdapterDependencies` with no-op implementations to prevent actual process launches and file system interactions
+- **Environment Management**: Controls DLV_PATH environment variable using process.execPath as a mock delve binary
+- **Isolation Strategy**: All external dependencies (file system, process launcher) return safe default values
 
-### Configuration Transformation
-- **Standard Go Programs**: Tests `transformLaunchConfig()` for normal debugging scenarios with proper program path, working directory, arguments, and environment handling
-- **Go Test Mode**: Validates test-specific configuration including test flags (-test.v, -test.run) and mode setting
+### Core Test Coverage
+- **Command Building**: Validates dlv DAP command generation with proper TCP port configuration and executable validation
+- **Launch Configuration**: Tests transformation of launch configs for both normal Go programs and test mode execution
+- **Metadata Validation**: Ensures factory properly reports display name, supported file extensions (.go), and descriptions
+- **Dependencies**: Validates reporting of required tools (Go + Delve) and installation instructions
 
-### Adapter Metadata & Dependencies
-- Validates factory metadata exposure (display names, file extensions, descriptions)
-- Tests dependency reporting for Go toolchain and Delve debugger
-- Ensures installation instructions contain proper references
+## Test Configuration
+- **Test Port**: 48766 for DAP communication testing
+- **Session Management**: Uses controlled session ID ('session-go-smoke') for reproducible tests
+- **Sample Paths**: References standardized example files (examples/go/main.go, examples/go-hello)
 
-## Test Configuration & Samples
-- Uses controlled test paths referencing `examples/go/main.go` and `examples/go-hello`
-- Employs `process.execPath` as mock delve binary for testing
-- Implements isolation through mock file system operations that return empty/false values
+## Integration Points
+The tests validate the `GoAdapterFactory` class from `@debugmcp/adapter-go` by:
+- Testing public methods: `buildAdapterCommand()`, `transformLaunchConfig()`, factory metadata
+- Ensuring proper integration with shared adapter interfaces from `@debugmcp/shared`
+- Validating compatibility with the broader debugger adapter ecosystem
 
-## Public API Surface
-The tests validate the key entry points of the Go adapter:
-- `GoAdapterFactory` instantiation and configuration
-- `buildAdapterCommand()` method for command generation
-- `transformLaunchConfig()` method for configuration processing
-- Metadata and dependency reporting interfaces
+## Test Strategy
+Uses **smoke testing** approach - lightweight validation of critical paths without heavy resource usage or external dependencies. The mocked environment ensures tests are:
+- Fast and reliable (no actual debugger processes)
+- Isolated from system configuration
+- Focused on adapter logic rather than external tool behavior
 
-## Integration Patterns
-- **Mock-First Testing**: All external dependencies are mocked to focus on adapter logic
-- **Environment Simulation**: Real process.env access with controlled DLV_PATH manipulation
-- **Error Boundary Testing**: Mock processLauncher throws errors to prevent actual process execution
-- **Comprehensive Validation**: Tests cover command building, configuration transformation, metadata exposure, and dependency management
-
-This integration test suite serves as a critical validation layer ensuring the Go adapter maintains proper functionality across different debugging scenarios while remaining isolated from external system dependencies.
+This directory serves as a quality gate ensuring the Go adapter maintains correct behavior and integration compatibility across code changes.

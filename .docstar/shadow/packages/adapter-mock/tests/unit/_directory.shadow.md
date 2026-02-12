@@ -1,47 +1,65 @@
 # packages\adapter-mock\tests\unit/
-@generated: 2026-02-12T21:00:52Z
+@generated: 2026-02-12T21:05:42Z
 
-## Mock Adapter Unit Test Suite
+## Unit Test Suite for Mock Debug Adapter
 
-**Purpose:** Comprehensive unit test directory for the Mock Debug Adapter implementation, validating both factory creation patterns and core adapter functionality through isolated test scenarios.
+**Purpose:** This directory contains comprehensive unit tests for the mock debug adapter implementation, validating both the factory pattern for adapter creation and the core adapter functionality. The tests ensure proper behavior of the mock adapter used for testing and development scenarios in the debug MCP system.
 
 **Key Components:**
 
-### Factory Testing (`mock-adapter-factory.test.ts`)
-- **MockAdapterFactory Creation & Configuration:** Tests factory instantiation with custom settings (supportedFeatures, defaultDelay) and feature flag handling
-- **Metadata Validation:** Verifies correct adapter metadata (language type, display name, version, extensions)
-- **Configuration Validation:** Tests validation logic including warning generation for high error probabilities (>0.8) and excessive delays (>2500ms)
-- **Helper Function Testing:** Validates `createMockAdapterFactory` convenience function
+### Test Structure & Organization
 
-### Core Adapter Testing (`mock-debug-adapter.spec.ts`)
-- **Initialization & State Management:** Tests adapter lifecycle with state transitions (INITIALIZING → READY) and error scenarios
-- **Connection Management:** Validates connect/disconnect cycles with proper state handling and timeout scenarios
-- **DAP Event Processing:** Tests debug event handling ('stopped', 'terminated') with thread ID tracking and state transitions
-- **Feature Support:** Validates feature reporting and requirement querying based on configuration
-- **Error Translation:** Tests mock-specific error messaging and installation instructions
+- **Factory Tests (`mock-adapter-factory.test.ts`):** Validates the MockAdapterFactory class and its helper functions, focusing on configuration handling, metadata generation, and validation logic
+- **Adapter Tests (`mock-debug-adapter.spec.ts`):** Comprehensive testing of the MockDebugAdapter implementation covering lifecycle management, state transitions, and error scenarios
 
-**Public API Surface:**
-- MockAdapterFactory class constructor and validation methods
-- `createMockAdapterFactory()` helper function for simplified factory creation
-- MockDebugAdapter lifecycle methods: `initialize()`, `connect()`, `disconnect()`, `handleDapEvent()`
-- Feature support methods: `supportsFeature()`, `getFeatureRequirements()`
+### Core Testing Areas
 
-**Internal Organization:**
-- **Test Utilities:** Shared `createDependencies()` helper creates mock AdapterDependencies with spy loggers
-- **State Validation:** Tests use event listeners to validate proper state transitions
-- **Error Simulation:** MockErrorScenario enum enables testing various failure modes
-- **Configuration Testing:** Validation tests ensure proper warning generation for performance-impacting settings
+**Configuration & Factory Pattern:**
+- Tests adapter factory instantiation with custom configurations (supportedFeatures, defaultDelay)
+- Validates metadata generation (language type, display name, version, extensions)
+- Verifies configuration validation with warning generation for high error probabilities and excessive delays
 
-**Testing Patterns:**
-- Mock dependency injection for isolated unit testing
-- State transition validation through event-driven testing
-- Error scenario simulation using configurable mock behaviors
-- Async/await patterns for adapter lifecycle testing
-- Type casting strategies for mock object creation
+**Adapter Lifecycle Management:**
+- State transition validation (INITIALIZING → READY → CONNECTED → DEBUGGING)
+- Connection/disconnection flow testing with proper cleanup
+- Thread ID tracking and context management
+- Event emission and listener integration
 
-**Dependencies:**
-- **Vitest:** Primary testing framework with spy and assertion utilities
-- **@debugmcp/shared:** Core adapter types and interfaces (AdapterDependencies, DebugFeature, AdapterState)
-- **Local Mock Implementation:** MockAdapterFactory and MockDebugAdapter classes under test
+**Error Scenario Simulation:**
+- Mock error scenario handling (executable not found, connection timeouts)
+- Error code translation and message formatting
+- State management during error conditions
 
-This test suite ensures the mock adapter implementation properly handles all expected scenarios while providing a reliable foundation for development and testing workflows involving debug adapter protocols.
+### Test Utilities & Patterns
+
+**Common Infrastructure:**
+- `createDependencies()` helper functions in both files create mock AdapterDependencies with spy loggers
+- Consistent mocking patterns using Vitest framework
+- Object type casting for dependency injection (`{} as unknown`)
+
+**Testing Approaches:**
+- State-driven testing through event listeners
+- Async/await patterns for lifecycle method validation
+- Error scenario simulation using `MockErrorScenario` enum
+- Feature support validation against configuration flags
+
+### Dependencies & Integration
+
+**External Dependencies:**
+- **Vitest:** Test framework providing spy functions and assertion utilities
+- **@debugmcp/shared:** Core types and interfaces (AdapterDependencies, DebugFeature, AdapterState, etc.)
+
+**Internal Components:**
+- MockAdapterFactory and MockDebugAdapter from source modules
+- Shared test utilities for consistent dependency mocking
+
+### Public API Testing Surface
+
+The tests validate the public interface of:
+- `MockAdapterFactory` constructor and factory methods
+- `createMockAdapterFactory()` helper function
+- `MockDebugAdapter` lifecycle methods (initialize, connect, disconnect)
+- Feature support and configuration validation APIs
+- Error handling and state management interfaces
+
+This test suite ensures the mock adapter provides reliable testing infrastructure for the broader debug MCP system while maintaining proper adherence to the adapter interface contracts.

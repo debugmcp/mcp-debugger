@@ -1,68 +1,48 @@
 # tests\validation/
-@generated: 2026-02-12T21:01:10Z
+@generated: 2026-02-12T21:05:53Z
 
-## Overall Purpose and Responsibility
+## Overall Purpose
 
-The `tests/validation` directory serves as a comprehensive test fixture repository for validating debugger behavior, specifically focused on testing debugpy's breakpoint handling and message generation capabilities. This module provides a systematic collection of carefully crafted Python files designed to exercise various debugging scenarios, from basic breakpoint placement to edge cases involving syntax errors and empty files.
+The `tests/validation` directory serves as a comprehensive validation framework for testing debugger functionality, specifically focusing on debugpy's breakpoint placement behavior and message generation across diverse Python code scenarios. This module provides systematic testing capabilities to ensure debugging tools correctly handle breakpoint validation on various line types, syntactic constructs, and edge cases.
 
-## Key Components and Relationships
+## Key Components & Organization
 
-### Test Fixture Architecture
-The directory contains two primary components working in tandem:
-
-1. **Breakpoint Message Testing (`breakpoint-messages/`)** - A specialized subdirectory containing Python files that systematically test breakpoint validation across different code constructs:
-   - Line type validation (comments, blank lines, executable code, docstrings)
-   - Syntax error handling with malformed Python code
-   - Edge cases including empty files and boundary conditions
-   - Comprehensive line-by-line breakpoint placement scenarios
-
-2. **Validation Framework Integration** - The fixtures are designed to integrate seamlessly with automated testing frameworks that validate debugger behavior, providing predictable test cases with explicit line number tracking.
-
-### Component Interaction
-The test files work together to provide comprehensive coverage:
-- **`test_debugpy_messages.py`** serves as the primary validation target with systematic breakpoint testing
-- **`test_scenarios.py`** provides basic Python constructs for step-through debugging validation
-- **`test_syntax_error.py`** tests error resilience and malformed code handling
-- **`test_empty.py`** validates framework behavior with minimal input
+**Breakpoint Message Validation (`breakpoint-messages/`):**
+- **Primary Test Suite**: Contains focused test files that validate breakpoint behavior across different Python constructs
+- **Core Test Files**: Including comprehensive exploration utilities, basic scenario testing, syntax error handling, and boundary condition testing
+- **Line-by-Line Coverage**: Tests comment lines, blank lines, executable code, docstrings, function definitions, and error scenarios
 
 ## Public API Surface
 
-This directory functions as a **test data provider** rather than a programmatic API:
+**Main Entry Points:**
+- `breakpoint-messages/` subdirectory - Primary validation test suite for breakpoint behavior
+- Individual test files serve as isolated test scenarios for specific validation aspects
+- Line number annotations and strategic code constructs provide precise breakpoint targeting capabilities
 
-### Main Entry Points
-- **Test fixture files** - Serve as debugging targets for external validation tools
-- **Scenario-based testing** - Provide structured test cases with predictable outcomes
-- **Error case validation** - Enable testing of robust error handling in debugging tools
+## Internal Organization & Data Flow
 
-### Integration Interface
-- **File-based API** - External testing frameworks consume these files as input
-- **Standardized structure** - Consistent annotation patterns enable automated validation
-- **No runtime dependencies** - Self-contained fixtures requiring no imports or setup
+**Test Execution Flow:**
+1. **Test Discovery**: Validation frameworks consume test files from the breakpoint-messages directory
+2. **Line-by-Line Analysis**: Each test file provides specific line types and constructs for breakpoint placement validation
+3. **Message Validation**: Debugpy responses are captured and validated against expected behavior patterns
+4. **Error Handling**: Comprehensive testing of syntax errors and edge cases ensures robust debugging tool behavior
 
-## Internal Organization and Data Flow
+**Component Relationships:**
+- The `breakpoint-messages` subdirectory contains the core validation logic
+- Test files work together to provide comprehensive coverage of Python syntax scenarios
+- Each component focuses on specific aspects while contributing to overall debugger validation
 
-### Testing Methodology
-1. **Input Stage** - Test files serve as debugging targets for validation frameworks
-2. **Processing Stage** - External debugging tools (debugpy) process files for breakpoint validation
-3. **Validation Stage** - Framework verifies correct breakpoint placement and message generation
+## Important Patterns & Conventions
 
-### Data Flow Pattern
-```
-Test Fixtures → Debugger Tool → Validation Framework → Test Results
-```
+**Testing Strategy:**
+- Extensive use of inline comments with explicit line number references
+- Minimal, isolated code constructs to isolate specific debugging behaviors  
+- Strategic placement of breakpoint targets across different syntactic contexts
+- Systematic coverage of edge cases including file boundaries and unreachable code
 
-## Important Patterns and Conventions
+**Validation Approach:**
+- Pure Python implementations with minimal dependencies
+- Consistent naming patterns with descriptive test file prefixes
+- Comprehensive error condition testing alongside standard execution flow validation
 
-### Validation Standards
-- **Systematic annotation** - Every significant line marked with explicit line numbers for precise testing
-- **Minimal complexity** - Simple constructs that isolate specific debugging behaviors
-- **Comprehensive coverage** - Tests span all major Python line types and language constructs
-- **Error boundary testing** - Includes both valid and invalid syntax scenarios
-
-### Framework Design Principles
-- **Isolated testing** - Each file tests specific aspects without interdependencies
-- **Predictable structure** - Consistent patterns enable automated test generation and validation
-- **Strategic placement** - Code elements positioned to test various breakpoint scenarios
-- **Self-contained fixtures** - No external dependencies ensure reliable, repeatable testing
-
-This directory serves as a critical component in ensuring debugger reliability and correctness across diverse Python code scenarios and edge cases.
+This validation module serves as a critical quality assurance layer, ensuring debugging tools maintain reliable and predictable behavior across the full spectrum of Python code scenarios that developers encounter in real-world debugging sessions.

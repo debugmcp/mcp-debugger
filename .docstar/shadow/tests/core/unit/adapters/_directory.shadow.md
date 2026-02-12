@@ -1,74 +1,60 @@
 # tests\core\unit\adapters/
-@generated: 2026-02-12T21:00:56Z
+@generated: 2026-02-12T21:05:42Z
 
-## Purpose and Responsibility
+## Core Adapter Unit Tests
 
-The `tests/core/unit/adapters` directory contains comprehensive unit test suites that validate the core adapter interface contracts and type definitions used throughout the DebugMCP system. This testing module ensures the integrity and type safety of the foundational debug adapter protocol interfaces, enums, and error handling mechanisms defined in the `@debugmcp/shared` package.
+This directory contains comprehensive unit test suites that validate the foundational components and interfaces of the debug adapter system, specifically focusing on the shared contracts and types that define the debugging protocol.
 
-## Key Components and Architecture
+### Overall Purpose
 
-### Test Organization
-The directory follows a focused testing approach with a single comprehensive test file:
+The `tests/core/unit/adapters` directory serves as the primary validation layer for the debug adapter interface specifications. It ensures that all core enums, error classes, type interfaces, and data structures from the `@debugmcp/shared` package maintain their expected contracts and behaviors. These tests act as a safety net for the shared debugging protocol that underlies the entire MCP debug system.
 
-- **debug-adapter-interface.test.ts**: Master test suite validating all adapter interface components including enums, error classes, and complex type interfaces
+### Key Components & Architecture
 
-### Validated Components
-The test suite covers four primary areas:
+**Debug Adapter Interface Validation (`debug-adapter-interface.test.ts`)**:
+- **Lifecycle Management**: Validates the 7-state adapter lifecycle (uninitialized → ready → debugging → error)
+- **Error Classification**: Tests 13 categorized error codes across environment, connection, protocol, and runtime failures
+- **Feature Capabilities**: Validates 20+ debug protocol features including breakpoints, variable inspection, and step debugging
+- **Type Safety**: Ensures proper constraints and type safety across 40+ interface properties
 
-1. **Enum Validation**: Tests 40+ enum values across three critical enums:
-   - `AdapterState`: 7 lifecycle states (uninitialized → ready → debugging → error)
-   - `AdapterErrorCode`: 13 categorized error codes spanning environment, connection, protocol, and runtime errors
-   - `DebugFeature`: 20 debug protocol capability flags
+### Public API Coverage
 
-2. **Error Class Testing**: Validates the `AdapterError` custom error class with proper code categorization and recovery flag handling
+The test suite comprehensively covers the public API surface of the debug adapter system:
 
-3. **Type Interface Validation**: Comprehensive testing of 9 complex interfaces covering configuration, capabilities, validation results, and dependency management
+**Core Enums**:
+- `AdapterState` - Lifecycle state management
+- `AdapterErrorCode` - Standardized error classification  
+- `DebugFeature` - Protocol capability flags
 
-4. **Error Handling Patterns**: Tests systematic error categorization and recovery strategies
+**Error Handling**:
+- `AdapterError` class with categorization and recovery strategies
+- Error propagation patterns and recovery mechanisms
 
-## Public API Surface
+**Configuration Interfaces**:
+- `AdapterConfig` - Complete adapter setup and configuration
+- `GenericLaunchConfig` & `LanguageSpecificLaunchConfig` - Launch parameter management
+- `AdapterCapabilities` - Feature flag declarations
+- `FeatureRequirement` - Dependency and version constraint specifications
 
-### Primary Test Entry Points
-- **Enum validation suites**: Ensure consistent state management and error categorization
-- **Type interface tests**: Validate configuration contracts and capability definitions
-- **Error handling tests**: Verify proper error classification and recovery mechanisms
+**Validation & Metadata**:
+- `ValidationResult` - Configuration validation outcomes
+- `DependencyInfo` - Runtime dependency tracking
+- `ExceptionBreakpointFilter` - Exception handling configuration
 
-### Key Validated Interfaces
-- `AdapterConfig`: Complete adapter configuration including session, paths, and launch settings
-- `AdapterCapabilities`: Extensive capability flags for debug protocol features
-- `ValidationResult`: Validation state management with error/warning collections
-- `FeatureRequirement`: Requirement categorization for dependencies and versions
+### Testing Strategy & Patterns
 
-## Internal Organization and Data Flow
+The directory employs systematic validation patterns:
+- **Enum Completeness**: Ensures all enum values are properly defined and accessible
+- **Interface Compliance**: Validates complex nested object structures match specifications
+- **Error Boundary Testing**: Verifies error categorization and recovery flag behavior
+- **Type Constraint Validation**: Confirms proper TypeScript type safety enforcement
 
-### Testing Strategy
-The module employs a layered testing approach:
-1. **Foundation Layer**: Enum value validation ensuring consistent constants
-2. **Error Layer**: Custom error class testing with proper inheritance and categorization
-3. **Interface Layer**: Complex type validation with nested properties and relationships
-4. **Integration Layer**: Error handling pattern validation across different scenarios
+### Integration with Larger System
 
-### Test Architecture
-- Uses vitest framework for structured describe/it test organization
-- Implements both positive and negative test cases for comprehensive coverage
-- Validates type safety and enum constraint enforcement
-- Tests 40+ interface properties and enum values systematically
+These unit tests serve as the foundational contract validation for:
+- Debug adapter implementations that must conform to these interfaces
+- Protocol message serialization/deserialization processes
+- Error handling and recovery mechanisms across the debugging system
+- Feature capability negotiation between debug clients and adapters
 
-## Important Patterns and Conventions
-
-### Type Safety Enforcement
-- All enum values are tested for proper type constraints
-- Interface properties are validated for correct types and required/optional status
-- Error codes are systematically categorized and tested for proper inheritance
-
-### Error Handling Standardization
-- Consistent error categorization across environment, connection, protocol, and runtime domains
-- Recovery flag patterns for different error types
-- Proper error class inheritance and custom properties
-
-### Configuration Management
-- Standardized configuration interfaces with clear separation between generic and language-specific options
-- Capability flag patterns for feature detection and negotiation
-- Dependency management with version requirement validation
-
-This testing directory serves as the quality gate for the adapter interface contracts, ensuring that all components consuming these interfaces can rely on consistent, well-defined types and error handling patterns throughout the DebugMCP system.
+The test suite acts as living documentation for the debug adapter protocol, ensuring that any changes to the shared interfaces maintain backward compatibility and expected behaviors across the entire MCP debug ecosystem.

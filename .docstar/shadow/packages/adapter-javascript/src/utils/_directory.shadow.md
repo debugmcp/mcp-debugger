@@ -1,74 +1,59 @@
 # packages\adapter-javascript\src\utils/
-@generated: 2026-02-12T21:00:56Z
+@generated: 2026-02-12T21:05:45Z
 
 ## Overall Purpose
+The `utils` directory provides core debugging infrastructure utilities for the VS Code js-debug adapter, focusing on environment detection, configuration transformation, and launch coordination. It serves as the foundation layer that enables the adapter to make intelligent decisions about TypeScript/ESM projects, locate runtime executables, and coordinate debugging session initialization across different JavaScript environments.
 
-This utilities module provides configuration detection, process resolution, and launch coordination infrastructure for the JavaScript/TypeScript debugging adapter. It serves as a foundational layer that handles cross-platform executable discovery, project configuration analysis, and debugger synchronization patterns.
-
-## Key Components and Relationships
+## Key Components and Integration
 
 ### Configuration Analysis (`config-transformer.ts`)
-- **Primary Role**: Analyzes project structure to determine build outputs, module type (ESM/CommonJS), and TypeScript path mapping
-- **Key Functions**: `isESMProject()`, `hasTsConfigPaths()`, `determineOutFiles()`
-- **Data Sources**: package.json, tsconfig.json, file extensions
-- **Integration**: Feeds configuration data to debugger launch processes
+- **`isESMProject()`**: Multi-heuristic ESM detection via file extensions, package.json, and tsconfig.json
+- **`determineOutFiles()`**: Source map output file resolution with sensible defaults
+- **`hasTsConfigPaths()`**: TypeScript path mapping detection for module resolution
+- **`transformConfig()`**: Configuration normalization entry point
 
-### Executable Resolution (`executable-resolver.ts`)
-- **Primary Role**: Cross-platform Node.js executable discovery with PATH-aware search
-- **Key Functions**: `findNode()`, `whichInPath()`, `resolveNodeExecutable()`
-- **Strategy**: 4-tier precedence (preferred → process.execPath → PATH → fallback)
-- **Integration**: Consumed by TypeScript detector and debugger launch processes
-
-### TypeScript Runtime Detection (`typescript-detector.ts`)
-- **Primary Role**: Discovers local and global tsx/ts-node executables for TypeScript debugging
-- **Key Functions**: `detectTsRunners()`, `detectBinary()`
-- **Strategy**: Local node_modules first, then PATH fallback with caching
-- **Dependencies**: Uses `executable-resolver` utilities for platform-aware binary resolution
+### Runtime Discovery (`typescript-detector.ts` + `executable-resolver.ts`)
+- **`detectTsRunners()`**: Finds tsx/ts-node with local-first resolution and caching
+- **`findNode()`**: Cross-platform Node.js executable location with 4-tier precedence
+- **`whichInPath()`**: PATH-aware binary search respecting directory precedence
 
 ### Launch Coordination (`js-debug-launch-barrier.ts`)
-- **Primary Role**: Synchronizes debugger startup by waiting for DAP events or adapter connection
-- **Key Class**: `JsDebugLaunchBarrier` implementing barrier pattern
-- **Integration**: Orchestrates timing between debugger launch and readiness detection
+- **`JsDebugLaunchBarrier`**: Promise-based synchronization waiting for DAP 'stopped' events or adapter connection
+- Implements timeout fallback to prevent blocking on failed launches
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **`transformConfig(config)`**: Main configuration transformation (delegates to detection utilities)
-- **`resolveNodeExecutable(preferredPath?)`**: Simplified Node.js executable resolution
-- **`detectTsRunners(cwd?, fileSystem?)`**: TypeScript runtime discovery with caching
-- **`JsDebugLaunchBarrier`**: Debugger launch coordination class
+- **`transformConfig(config)`**: Main configuration transformation pipeline
+- **`detectTsRunners(cwd?, fileSystem?)`**: TypeScript runtime detection with caching
+- **`resolveNodeExecutable(preferredPath?)`**: Node.js executable resolution
+- **`JsDebugLaunchBarrier`**: Launch coordination barrier implementation
 
-### Configuration Detection
-- **`isESMProject()`**: ESM vs CommonJS module detection
-- **`hasTsConfigPaths()`**: TypeScript path mapping detection
-- **`determineOutFiles()`**: Build output pattern resolution
+### Testing Utilities
+- **`setDefaultFileSystem()`**: Dependency injection for filesystem mocking
+- **`clearCache()`**: TypeScript detection cache management
 
 ## Internal Organization and Data Flow
 
-### Layered Architecture
-1. **Base Layer**: Filesystem abstraction and platform detection
-2. **Detection Layer**: Configuration analysis and executable resolution
-3. **Coordination Layer**: Launch barrier and timing control
+**Configuration Flow**: Project directory → package.json/tsconfig.json analysis → ESM/TypeScript feature detection → configuration defaults
 
-### Data Flow Patterns
-1. **Configuration Flow**: File analysis → project characteristics → debugger configuration
-2. **Executable Flow**: Platform detection → PATH search → absolute path resolution
-3. **Launch Flow**: Request dispatch → event monitoring → barrier resolution
+**Runtime Resolution Flow**: Current working directory → local node_modules/.bin → PATH search → fallback to process.execPath
 
-## Important Patterns and Conventions
+**Launch Coordination Flow**: Launch request → barrier setup → DAP event monitoring → timeout management → resolution/cleanup
 
-### Design Principles
-- **No-Throw Safety**: All filesystem operations wrapped in try-catch with safe defaults
-- **Dependency Injection**: FileSystem abstraction enables testing with mock implementations
-- **Caching Strategy**: Module-level caching for expensive detection operations
-- **Platform Abstraction**: Windows/Unix executable naming and path handling
+## Architectural Patterns
 
-### Error Handling
-- **Graceful Degradation**: Functions return safe defaults rather than throwing
-- **Defensive Programming**: Guards against double resolution and resource leaks
-- **Timeout Fallbacks**: Launch barriers proceed with warnings rather than blocking indefinitely
+### Cross-Cutting Concerns
+- **No-Throw Design**: All utilities use safe filesystem operations with graceful degradation
+- **Dependency Injection**: FileSystem abstraction enables comprehensive testing
+- **Platform Abstraction**: Windows/POSIX differences handled transparently
+- **Performance Optimization**: Module-level caching for expensive detection operations
 
-### Testing Support
-- **`setDefaultFileSystem()`**: Injectable filesystem for unit testing
-- **`clearCache()`**: Cache reset utilities for test isolation
-- **Deterministic Behavior**: No process spawning, predictable fallback chains
+### Error Resilience
+- Filesystem errors ignored with safe defaults
+- Timeout mechanisms prevent hanging operations
+- Multiple fallback strategies for executable resolution
+- Defensive programming with settled flags and cleanup
+
+### Integration Points
+The utilities work cohesively to support the adapter's core mission: analyzing JavaScript/TypeScript project characteristics, locating appropriate runtime executables, and coordinating launch sequences. The configuration transformer informs runtime selection, the executable resolver provides the actual binaries, and the launch barrier ensures proper initialization timing.

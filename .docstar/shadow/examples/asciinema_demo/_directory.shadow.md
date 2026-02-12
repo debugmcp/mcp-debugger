@@ -1,75 +1,72 @@
 # examples\asciinema_demo/
-@generated: 2026-02-12T21:00:56Z
+@generated: 2026-02-12T21:05:45Z
 
 ## Overall Purpose
 
-Interactive demonstration environment for MCP (Model Context Protocol) debugger functionality using terminal-based UI. This module provides a complete end-to-end debugging workflow demonstration, combining a purposefully buggy Python script with a rich terminal interface that showcases real-time debugging capabilities including breakpoints, execution tracking, and log visualization.
+This directory contains a complete asciinema demo showcasing MCP (Model Context Protocol) debugging capabilities. It demonstrates an interactive debugging workflow using a Rich-based terminal UI to debug intentionally buggy Python code, specifically illustrating common copy/reference bugs in data processing pipelines.
 
-## Key Components & Integration
+## Key Components and Integration
 
-**Target Application (`buggy_event_processor.py`)**
-- Event processing system with intentionally introduced copy/reference bugs
-- Demonstrates common data transformation pipeline issues (shallow copying, reference management, state preservation)
-- Contains verification logic to detect when bugs manifest during execution
-- Serves as realistic debugging target with predictable failure modes
+**buggy_event_processor.py** - The debug target containing intentional bugs in event processing logic with shallow copy and reference management issues. Serves as the specimen for debugging demonstrations.
 
-**Demo UI Controller (`run_rich_demo.py`)**
-- Rich-based terminal interface providing split-pane debugging environment
-- Manages MCP server lifecycle (Node.js subprocess) and communication protocol
-- Orchestrates complete debugging workflow from session creation through cleanup
-- Provides real-time visualization of debug logs and source code with syntax highlighting
+**run_rich_demo.py** - The main demo orchestrator that provides a sophisticated terminal UI for debugging the buggy processor. Creates a split-pane interface showing debug logs and syntax-highlighted source code with breakpoint and execution line markers.
 
-## Public API Surface
+The components work together in a client-server debugging architecture where the Rich demo acts as an MCP client, launching and communicating with an external Node.js MCP server (located at `dist/index.js`) to debug the buggy processor script.
+
+## Public API and Entry Points
 
 **Primary Entry Point:**
-- `python run_rich_demo.py` - Launches full interactive debugging demonstration
+- `run_rich_demo.py` - Main executable that starts the complete debugging demonstration
 
-**Key Configuration:**
-- Automatic path resolution to locate target script and MCP server
-- Configurable layout with header/main/footer panels
-- Breakpoint and execution line visualization
+**Demo Workflow API:**
+- Session management via MCP `create_debug_session` tool
+- Breakpoint control through MCP protocol
+- Real-time execution monitoring with UI updates
+- Event processing verification and bug detection
 
-## Internal Organization & Data Flow
+## Internal Organization and Data Flow
 
-**Initialization Flow:**
-1. Path validation for target script and MCP server executable
-2. Rich UI layout setup (log pane + code pane)
-3. MCP server subprocess launch with JSON protocol communication
+**Initialization Phase:**
+1. Validates existence of target script and MCP server
+2. Sets up Rich terminal UI with three-panel layout
+3. Launches Node.js MCP server as subprocess
 
-**Debug Session Workflow:**
-1. Create debug session via MCP `create_debug_session` tool
-2. Set breakpoints at strategic locations (line 13 - event enrichment logic)
-3. Start debugging and monitor for execution events
-4. Process stop events, update UI highlights, request stack traces
-5. Clean shutdown of debug session and server process
+**Debugging Phase:**
+1. Creates debug session targeting `buggy_event_processor.py`
+2. Sets strategic breakpoints in event processing logic
+3. Executes buggy code with real-time UI feedback
+4. Captures execution state and highlights current line
+5. Demonstrates bug detection in copy/reference handling
 
-**UI Update Pipeline:**
-- Log messages with styled output (different colors for different event types)
-- Source code rendering with line numbers, breakpoint markers ("B>"), execution highlights ("H>")
-- Real-time refresh coordination between log and code panes
+**Communication Flow:**
+- Synchronous MCP request/response for control operations
+- Asynchronous event polling for execution state updates
+- JSON-based protocol for all MCP server communication
 
-## Important Patterns & Conventions
+## Important Patterns and Conventions
 
-**MCP Protocol Integration:**
-- Synchronous request/response pattern with incremental request IDs
-- Asynchronous event handling for debugger state changes (stoppedEvent, breakpointEvent)
-- JSON message serialization with stdin/stdout communication to Node.js server
+**Demo Architecture:**
+- **Target-Observer Pattern**: Buggy processor serves as observable target, Rich demo as observer
+- **Protocol Abstraction**: MCP protocol abstracts debugging operations across language boundaries
+- **UI State Synchronization**: Terminal UI reflects debugging state in real-time
 
-**Error Handling Strategy:**
-- Graceful degradation with timeout-based server shutdown
-- File existence validation before execution
-- Exception handling for subprocess communication and JSON parsing
+**Bug Demonstration Strategy:**
+- **Intentional Defects**: Processor contains carefully crafted copy/reference bugs
+- **Verification Logic**: Built-in assertions detect when bugs manifest
+- **Educational Focus**: Clear visualization of common Python pitfalls
 
-**Demo-Optimized Design:**
-- Hardcoded delays for visualization purposes
-- Simplified MCP client (single session, basic event polling)
-- Self-contained with automatic path resolution for portability
+**Error Resilience:**
+- Graceful server shutdown with progressive escalation
+- File validation before execution
+- Robust subprocess management with timeout handling
 
-## System Dependencies
+## Educational Value
 
-- Rich library for terminal UI components
-- Node.js MCP server (external subprocess)
-- Python standard library (subprocess, json, pathlib)
-- Target debugging environment assumes working MCP debugger server
+This demo effectively illustrates:
+- MCP protocol integration for cross-language debugging
+- Common Python copy semantics pitfalls
+- Rich terminal UI development patterns
+- Subprocess communication and lifecycle management
+- Interactive debugging workflow design
 
-This module serves as both a functional demonstration and testing environment for MCP debugger capabilities, providing a complete reference implementation for terminal-based debugging workflows.
+The directory serves as both a functional debugging demo and a reference implementation for MCP-based debugging tools.

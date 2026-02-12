@@ -1,57 +1,48 @@
 # tests\adapters\python\unit/
-@generated: 2026-02-12T21:00:53Z
+@generated: 2026-02-12T21:05:40Z
 
 ## Overall Purpose
-This directory contains unit tests for the Python adapter utilities in the debugmcp system. It provides comprehensive test coverage for Python executable discovery, version detection, and command finder functionality across multiple platforms (Windows, Linux, macOS).
+This directory contains unit tests for the Python adapter's core utility functions within the debugmcp system. It focuses on testing cross-platform Python executable discovery, version detection, and command resolution functionality that enables the adapter to locate and interact with Python installations across Windows, Linux, and macOS environments.
 
-## Key Components and Relationships
+## Key Components and Organization
 
-### Core Test Module
-- **python-utils.test.ts**: Primary test suite covering all Python utility functions
-  - Tests `findPythonExecutable()` cross-platform discovery logic
-  - Validates `getPythonVersion()` version extraction capabilities
-  - Verifies `setDefaultCommandFinder()` global configuration management
+### Test Coverage Areas
+- **Python Executable Discovery**: Comprehensive testing of `findPythonExecutable()` with platform-specific command prioritization and environment variable handling
+- **Version Detection**: Testing of `getPythonVersion()` for extracting Python version information from subprocess output
+- **Command Finder Configuration**: Testing of `setDefaultCommandFinder()` for global command discovery configuration
+- **Cross-Platform Compatibility**: Extensive platform-specific testing for Windows, Linux, and macOS behavior differences
 
 ### Mock Infrastructure
-- **MockCommandFinder Integration**: Simulates command discovery with configurable responses
-- **Process Mocking**: Uses EventEmitter-based mocks to simulate `child_process.spawn` behavior
-- **Environment Variable Management**: Comprehensive setup/teardown for testing environment-specific behaviors
+- **Process Mocking**: Sophisticated child_process mocking that preserves `exec` while providing controlled `spawn` behavior
+- **Environment Management**: Comprehensive environment variable save/restore mechanisms to prevent test pollution
+- **MockCommandFinder Integration**: Utilizes shared test utilities for simulating command discovery scenarios
+- **Platform Simulation**: Configurable mock responses that simulate different operating system behaviors
 
-## Public API Testing Surface
-The tests validate the public interface of the Python adapter utilities:
-
-1. **findPythonExecutable()**: Multi-platform Python executable discovery with environment variable precedence
-2. **getPythonVersion()**: Version string extraction from Python `--version` output
-3. **setDefaultCommandFinder()**: Global command finder configuration management
-
-## Testing Patterns and Organization
+## Testing Patterns and Conventions
 
 ### Cross-Platform Testing Strategy
-- **Platform-specific command prioritization**: Windows (`py -> python -> python3`) vs Unix (`python3 -> python`)
-- **Environment variable precedence**: Tests user paths > PYTHON_PATH > PYTHON_EXECUTABLE > platform defaults
-- **Windows Store alias detection**: Validates rejection of invalid Windows Store Python aliases
+- **Platform-specific prioritization**: Windows (`py -> python -> python3`) vs Unix (`python3 -> python`)
+- **Environment variable precedence**: Tests hierarchy of PYTHON_PATH > PYTHON_EXECUTABLE > platform defaults
+- **Windows Store alias handling**: Special validation to reject Windows Store Python aliases
+- **GitHub Actions compatibility**: Specific handling for pythonLocation environment variables
 
-### Mock Architecture
-- **Partial mocking**: Preserves real `child_process.exec` while mocking `spawn`
-- **Configurable responses**: MockCommandFinder provides flexible command discovery simulation
-- **State management**: Proper setup/teardown to prevent cross-test pollution
+### Error Handling and Fallback Testing
+- **Command cascade testing**: Validates fallback through multiple Python executable candidates
+- **Spawn error simulation**: Tests behavior when subprocess creation fails
+- **Version parsing resilience**: Tests handling of malformed or missing version output
+- **Graceful degradation**: Ensures system continues functioning when optimal Python not found
 
-### Error Handling Coverage
-- **Discovery failures**: Tests behavior when no Python executable found
-- **Spawn errors**: Validates error propagation from subprocess calls
-- **Version parsing failures**: Tests fallback behavior for malformed version output
+## Public API Surface
+The tests validate the adapter's primary Python utility functions:
+- `findPythonExecutable()`: Core function for locating Python installations
+- `getPythonVersion()`: Version detection and parsing functionality
+- `setDefaultCommandFinder()`: Global command discovery configuration
 
 ## Internal Data Flow
-1. **Environment Analysis**: Tests read environment variables and platform detection
-2. **Command Discovery**: MockCommandFinder simulates executable search across PATH
-3. **Validation**: Spawn mocks verify executable functionality (debugpy import checks)
-4. **Version Detection**: Process mocks simulate `--version` command execution
-5. **Result Processing**: Tests verify proper parsing and error handling of outputs
+Tests validate the complete flow from environment analysis → command discovery → executable validation → version detection, ensuring robust Python environment detection across diverse deployment scenarios.
 
-## Dependencies and Integration
-- **@debugmcp/adapter-python**: Core utilities under test
-- **MockCommandFinder**: Test utility for command discovery simulation
-- **vitest**: Primary testing framework with mocking capabilities
-- **Node.js modules**: child_process, fs, path for system integration testing
-
-This test suite ensures reliable Python environment detection across diverse deployment scenarios and platforms, providing confidence in the adapter's ability to locate and validate Python installations.
+## Integration Points
+- **MockCommandFinder**: Shared testing utility for command discovery simulation
+- **debugmcp adapter-python**: Core module under test
+- **vitest framework**: Comprehensive testing with advanced mocking capabilities
+- **Cross-platform node.js APIs**: File system and process management testing

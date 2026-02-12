@@ -1,37 +1,39 @@
 # tests\unit\implementations\__mocks__/
-@generated: 2026-02-12T21:00:53Z
+@generated: 2026-02-12T21:05:39Z
 
-## Purpose
-Jest/Vitest `__mocks__` directory containing manual mock implementations for Node.js built-in modules and external libraries. This directory serves as a centralized location for test mocks that replace real dependencies with controllable test doubles during unit testing.
-
-## Architecture
-The directory follows Jest/Vitest conventions for automatic mock resolution:
-- **Automatic Discovery**: Test frameworks automatically use mocks from `__mocks__` directories when the corresponding modules are imported in test files
-- **Manual Mocks**: Each file provides a complete mock implementation of its corresponding real module
-- **Isolation Strategy**: Prevents unit tests from executing actual system operations (subprocess spawning, filesystem I/O)
+## Overall Purpose
+Test mock directory providing manual mock implementations for external Node.js modules used in unit testing. Contains Jest and Vitest-compatible mocks that replace real module functionality with controllable test doubles, enabling isolated unit testing without external dependencies or side effects.
 
 ## Key Components
+- **`child_process.js`**: Jest manual mock for Node.js child process operations (`spawn`, `exec`)
+- **`fs-extra.js`**: Vitest manual mock for filesystem operations with comprehensive API coverage
 
-### Node.js Built-in Module Mocks
-- **child_process.js**: Mocks Node.js subprocess operations (`spawn`, `exec`) with Jest mock functions, preventing actual process execution during tests
-
-### External Library Mocks  
-- **fs-extra.js**: Comprehensive mock of the fs-extra filesystem library with Vitest mock functions covering:
-  - File operations (read, write, output)
-  - Directory management (create, remove, ensure)
-  - Path utilities (exists, access, stat)
-  - Stream operations and JSON handling
+## Mock Architecture Pattern
+Both mocks follow the `__mocks__` directory convention used by Jest and Vitest testing frameworks:
+- **Automatic Resolution**: Test frameworks automatically substitute these mocks when the corresponding modules are imported in test files
+- **Isolation**: Prevents actual system calls (process spawning, filesystem operations) during testing
+- **Controllability**: Provides mock functions that can be programmatically controlled and asserted against
 
 ## Public API Surface
-Each mock file exports the same interface as its real counterpart:
-- **child_process**: `spawn`, `exec` mock functions
-- **fs-extra**: Complete API surface with 20+ mocked methods supporting both named and default import patterns
+The mocks expose the same interfaces as their target modules:
 
-## Testing Integration
-- **Framework Agnostic**: Supports both Jest (`jest.fn()`) and Vitest (`vi.fn()`) testing frameworks
-- **Zero Configuration**: Automatic mock resolution requires no additional test setup
-- **Predictable Behavior**: Replaces unpredictable system interactions with controllable mock functions
-- **Side Effect Prevention**: Eliminates filesystem writes, subprocess spawning, and other system-level operations during testing
+**Child Process Mock**:
+- `spawn`: Mock replacement for spawning child processes
+- `exec`: Mock replacement for executing shell commands
+
+**Filesystem Mock**:
+- **File Operations**: `readFile`, `writeFile`, `outputFile`
+- **Directory Operations**: `ensureDir`, `mkdir`, `rmdir`, `ensureDirSync`
+- **Path Utilities**: `access`, `pathExists`, `existsSync`, `stat`
+- **File Management**: `remove`, `unlink`, `copy`, `move`
+- **Stream Operations**: `createReadStream`, `createWriteStream`
+- **JSON Operations**: `outputJson`, `readJson`
+- **Directory Listing**: `readdir`
 
 ## Internal Organization
-Mocks are organized by dependency type with each file providing a complete replacement for its corresponding module. The dual export pattern in fs-extra ensures compatibility with different import styles while maintaining API parity with the original libraries.
+- **Framework Compatibility**: Mixed Jest (`vi.fn()`) and Vitest (`jest.fn()`) mock implementations
+- **Import Patterns**: `fs-extra` mock supports both named and default import styles through dual export pattern
+- **Mock Function Factory**: Utilizes testing framework mock function factories for consistent test behavior
+
+## Testing Integration
+Integrates seamlessly with unit test suites by providing drop-in replacements for external dependencies. Tests can focus on application logic without managing actual system resources, while maintaining the ability to verify interaction patterns with mocked modules.

@@ -1,66 +1,70 @@
 # src\adapters/
-@generated: 2026-02-12T21:00:55Z
+@generated: 2026-02-12T21:05:46Z
 
 ## Purpose
-The `adapters` directory provides a comprehensive adapter management system for debugMCP, handling the dynamic discovery, loading, registration, and lifecycle management of debugger adapters for different programming languages. This module serves as the core infrastructure for making language-specific debugging capabilities available to the MCP framework.
+The adapters module provides the core infrastructure for dynamic debugger adapter management in debugMCP. It handles the discovery, loading, registration, and lifecycle management of debug adapters for different programming languages, enabling flexible runtime configuration and automatic resource management.
 
-## Architecture Overview
-The module implements a two-layer architecture:
+## Core Components
 
-1. **Dynamic Loading Layer** (`adapter-loader.ts`): Handles runtime discovery and loading of adapter packages
-2. **Registry Layer** (`adapter-registry.ts`): Manages adapter factory registration, instance creation, and lifecycle
+**AdapterLoader** (`adapter-loader.ts`): Dynamic discovery and loading system that resolves adapter packages using multiple fallback strategies. Implements a robust loading chain from NPM packages to monorepo paths with createRequire fallback for compatibility.
 
-## Key Components
-
-### AdapterLoader
-- **Purpose**: Dynamic adapter discovery and loading system
-- **Capabilities**: Multi-tier package resolution with fallback strategies
-- **Naming Convention**: Follows `@debugmcp/adapter-{language}` package pattern
-- **Loading Strategy**: Primary package import → node_modules fallback → monorepo paths → createRequire CJS compatibility
-- **Supported Languages**: mock, python, javascript, rust, go
-
-### AdapterRegistry 
-- **Purpose**: Central registry and lifecycle manager for adapter instances
-- **Pattern**: Singleton with event-driven architecture extending EventEmitter
-- **Configuration**: Configurable validation, instance limits, auto-disposal
-- **State Management**: Tracks factories, active adapters, and disposal timers
+**AdapterRegistry** (`adapter-registry.ts`): Central management hub that maintains active adapter instances and their factories. Provides lifecycle control including creation, tracking, auto-disposal, and resource limits with event-driven notifications.
 
 ## Public API Surface
 
-### Primary Entry Points
-- `getAdapterRegistry()`: Singleton access to the main registry
-- `AdapterRegistry.create(language, config)`: Creates adapter instances with full lifecycle management
-- `AdapterRegistry.register(language, factory)`: Manual factory registration
-- `AdapterRegistry.listAvailableAdapters()`: Discovery of all available adapters
+**Primary Entry Points**:
+- `AdapterRegistry.getAdapterRegistry()`: Singleton access to the registry instance
+- `registry.create(language, config)`: Main adapter instantiation method with dynamic loading support
+- `registry.register(language, factory)`: Manual factory registration for static adapters
+- `registry.listAvailableAdapters()`: Discovery of all available adapters with installation status
 
-### Discovery & Metadata
-- `getSupportedLanguages()`: Lists registered languages
-- `getAdapterInfo(language)`: Factory metadata and instance counts
-- `isAdapterAvailable(language)`: Non-throwing availability checks
+**Discovery & Metadata APIs**:
+- `registry.getSupportedLanguages()`: Currently registered language support
+- `registry.getAdapterInfo(language)`: Factory metadata and active instance counts
+- `listLanguages()`: Combined view of registered and dynamically available adapters
 
-### Lifecycle Management
-- Auto-dispose functionality with configurable timeouts (default 5 minutes)
-- Instance limit enforcement per language (default 10)
-- Graceful cleanup via `disposeAll()`
+**Lifecycle Management**:
+- `registry.disposeAll()`: Cleanup all active adapters and resources
+- `registry.unregister(language)`: Remove factory and dispose associated instances
 
-## Data Flow & Integration
+## Internal Organization & Data Flow
 
-1. **Discovery**: AdapterLoader scans for available adapter packages using naming conventions
-2. **Registration**: Factories are registered either manually or through dynamic loading
-3. **Creation**: Registry creates adapter instances on demand, enforcing limits and setting up monitoring
-4. **Lifecycle**: Auto-disposal monitors adapter states and cleans up disconnected/errored instances
-5. **Events**: Registry emits lifecycle events for monitoring and integration
+**Loading Chain** (AdapterLoader):
+1. Cache lookup for previously loaded factories
+2. Package name resolution using `@debugmcp/adapter-{language}` convention
+3. Progressive import: direct package → node_modules path → monorepo path → createRequire
+4. Factory class instantiation and validation
+5. Cache storage for future requests
 
-## Configuration & Behavior
+**Registry Management Flow**:
+1. Factory registration (manual or dynamic via loader)
+2. Adapter creation with dependency injection and instance limits
+3. Active instance tracking with state monitoring
+4. Auto-dispose setup on disconnect/error states
+5. Resource cleanup and event emission
 
-- **Dynamic Loading**: Enabled via `enableDynamicLoading` config or `MCP_CONTAINER` environment variable
-- **Validation**: Optional factory validation during registration
-- **Override Protection**: Configurable duplicate registration handling
-- **Auto-Disposal**: Automatic cleanup of inactive adapters with timer-based disposal
+**Configuration Integration**:
+- Dynamic loading enabled via configuration or `MCP_CONTAINER` environment variable
+- Configurable auto-dispose timeouts (default 5 minutes)
+- Per-language instance limits (default 10)
+- Validation and override controls for factory registration
 
-## Dependencies
-- **Core**: `@debugmcp/shared` for interfaces and error types
-- **Infrastructure**: Winston logging, Node.js module system
-- **Integration**: Container dependencies for production adapter creation
+## Key Patterns & Conventions
 
-This module serves as the foundational infrastructure enabling debugMCP to support multiple programming languages through a unified, extensible adapter system with robust error handling and lifecycle management.
+**Adapter Discovery**: Uses consistent naming patterns (`@debugmcp/adapter-{language}` packages, `{Language}AdapterFactory` classes) enabling predictable dynamic loading.
+
+**Dependency Injection**: Registry creates production dependencies (logger, fileSystem, environment) for each adapter instance, promoting testability and modularity.
+
+**Event-Driven Architecture**: Registry emits lifecycle events (factoryRegistered, adapterCreated, etc.) enabling loose coupling and monitoring integration.
+
+**Resource Management**: Automatic disposal timers and instance limits prevent resource leaks, with graceful error handling during cleanup operations.
+
+**Singleton Pattern**: Registry uses singleton access pattern while supporting reset functionality for testing environments.
+
+## Integration Points
+
+**Shared Interfaces**: Leverages `@debugmcp/shared` for core adapter contracts (`IAdapterFactory`, `IAdapterRegistry`) ensuring consistent integration across the system.
+
+**Container Dependencies**: Integrates with dependency injection container to provide consistent service instances (logging, file system, environment) to adapters.
+
+**Error Handling**: Provides detailed error context distinguishing installation issues (MODULE_NOT_FOUND) from configuration problems, with specific user guidance.

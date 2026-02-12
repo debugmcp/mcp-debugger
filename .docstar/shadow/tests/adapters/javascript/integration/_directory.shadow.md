@@ -1,57 +1,69 @@
 # tests\adapters\javascript\integration/
-@generated: 2026-02-12T21:00:54Z
+@generated: 2026-02-12T21:05:43Z
 
 ## Purpose and Responsibility
 
-Integration test suite for the JavaScript adapter within the debugger system, focusing on smoke testing critical adapter functionality including session management, TypeScript configuration handling, and debug server command generation.
+This integration test directory validates the JavaScript adapter's core functionality through smoke testing, ensuring proper TypeScript configuration handling, session management, and debug command generation with cross-platform compatibility.
 
-## Key Components
+## Key Components and Organization
 
-### JavaScript Session Smoke Test (`javascript-session-smoke.test.ts`)
-Primary integration test validating the JavaScript adapter's core functionality:
-- **Session Configuration**: Tests adapter setup with TypeScript file handling and tsx runtime configuration
-- **Launch Config Transformation**: Validates proper transformation of debug launch configurations with runtime executable overrides
-- **Adapter Command Building**: Verifies generation of debug server commands with correct paths and port configurations
-- **Cross-Platform Support**: Includes platform-specific path handling for Windows/Unix compatibility
+### Test Suite Structure
+The directory contains integration smoke tests that focus on critical adapter integration points rather than exhaustive unit testing. Tests are designed with platform-aware path handling and environment isolation patterns.
 
-## Test Architecture
+### Core Testing Areas
 
-### Integration Testing Pattern
-- **Registry-based Testing**: Uses adapter registry system to test real adapter registration and configuration flows
-- **Environment Isolation**: Preserves and restores NODE_OPTIONS and other environment state between tests
-- **Mock Management**: Comprehensive mock cleanup to ensure test isolation
+#### Session Management Integration
+- Validates JavaScript adapter session lifecycle with isolated session IDs (`session-js-3`)
+- Tests adapter registry integration with proper factory registration
+- Ensures clean test isolation through environment preservation/restoration
 
-### Cross-Platform Compatibility
-- Path normalization utilities for consistent assertions across operating systems
-- Platform-specific configuration handling for file paths and separators
-- Environment variable preservation patterns
+#### Configuration Transformation
+- Tests TypeScript configuration handling with tsx runtime detection
+- Validates launch configuration transformation for debug sessions
+- Verifies proper runtime executable and argument configuration
 
-## Public API Surface
+#### Command Generation
+- Tests adapter command building for debug server initialization
+- Validates absolute path resolution for adapter commands
+- Ensures proper port configuration and debug server endpoint setup
 
-The integration tests validate key adapter interfaces:
-- **Adapter Registration**: Testing `JavascriptAdapterFactory` registration with the adapter registry
-- **Configuration Transformation**: Validating `transformLaunchConfig` method behavior
-- **Command Generation**: Testing `buildAdapterCommand` output structure and content
+## Public Integration Points
 
-## Internal Organization
+### Primary Test Entry Points
+- **JavaScript Session Smoke Test**: Main integration validation covering adapter lifecycle, configuration transformation, and command generation
+- **Cross-Platform Support**: Platform detection and path normalization utilities for Windows/Unix compatibility
 
-### Test Flow
-1. **Setup Phase**: Environment preservation, adapter registry configuration, mock initialization
-2. **Execution Phase**: Adapter registration, configuration transformation, command building
-3. **Validation Phase**: Assertion of expected outputs, path validation, port configuration verification
-4. **Cleanup Phase**: Environment restoration, registry reset, mock cleanup
+### Validated API Surface
+- `JavascriptAdapterFactory` registration and configuration
+- `transformLaunchConfig` for TypeScript session setup
+- `buildAdapterCommand` for debug server command construction
+- Adapter registry integration patterns
 
-### Key Validation Points
-- TypeScript runtime configuration (tsx executable)
-- Debug server path resolution (`/vendor/js-debug/vsDebugServer.cjs`)
-- Port configuration propagation
-- Session isolation through unique session IDs
+## Internal Organization and Data Flow
 
-## Dependencies and Integration
+### Test Lifecycle Management
+1. **Setup Phase**: Environment preservation, adapter registry initialization, mock configuration
+2. **Execution Phase**: Adapter factory registration, configuration transformation, command building
+3. **Teardown Phase**: Environment restoration, registry cleanup, mock restoration
 
-- **Adapter Registry System**: Core dependency for adapter management
-- **JavaScript Adapter Factory**: Primary component under test
-- **Vitest Framework**: Testing infrastructure
-- **Cross-platform Path Handling**: Platform detection and normalization utilities
+### Cross-Platform Strategy
+- Platform detection for path separator handling
+- Path normalization utilities for consistent assertions
+- Environment variable management for Node.js runtime configuration
 
-This integration test directory serves as a smoke test gateway ensuring the JavaScript adapter integrates correctly with the broader debugger infrastructure, particularly focusing on TypeScript/JavaScript debugging workflows and debug server command generation.
+## Important Patterns and Conventions
+
+### Test Isolation
+- Session-specific identifiers prevent test interference
+- Environment variable preservation/restoration pattern
+- Mock lifecycle management with proper cleanup
+
+### Platform Compatibility
+- Conditional path handling for Windows vs Unix systems
+- Normalized path assertions for cross-platform validation
+- Runtime detection and configuration flexibility
+
+### Integration Testing Philosophy
+- Smoke testing approach focusing on critical integration points
+- Real adapter factory usage rather than extensive mocking
+- End-to-end validation of adapter command generation pipeline

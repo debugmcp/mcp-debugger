@@ -1,90 +1,74 @@
 # src/
-@generated: 2026-02-12T21:01:44Z
+@generated: 2026-02-12T21:06:27Z
 
 ## Overall Purpose
 
-The `src` directory contains the complete implementation of Debug MCP Server - a Model Context Protocol (MCP) server that provides debugging capabilities for multiple programming languages through standardized tooling. This module bridges AI agents and debug adapters, enabling programmatic debugging through MCP tools while supporting both containerized and standalone deployment modes.
+The `src` directory implements the complete Debug MCP Server - a Model Context Protocol (MCP) server that exposes debugging capabilities for multiple programming languages through a unified interface. It bridges AI agents with debug adapters, enabling programmatic debugging operations through MCP tools while supporting both stdio and HTTP/SSE transports.
 
-## Architecture & Component Integration
+## Primary Architecture
 
 The system follows a layered architecture with clear separation of concerns:
 
-### Core Server Layer (`index.ts`, `server.ts`)
-- **Entry Point**: `index.ts` handles initialization, console silencing for MCP protocol integrity, and CLI routing
-- **MCP Server**: `server.ts` exposes 16 MCP tools for debugging operations, wrapping session management and providing language discovery
-- **Dynamic Language Support**: Runtime detection of available debug adapters with containerized environment awareness
+**Protocol Layer**: `index.ts` serves as the main entry point with console output silencing and CLI routing. `server.ts` implements the core MCP server that exposes 16 debugging tools (session management, execution control, inspection, evaluation) to AI agents.
 
-### Debug Infrastructure
-- **Session Management** (`session/`): Complete debug session lifecycle management with multi-language support through adapter policies
-- **DAP Proxy System** (`proxy/`): Sophisticated Debug Adapter Protocol proxy enabling multi-session debugging and language-agnostic adapter orchestration
-- **Debug Adapters** (`adapters/`): Dynamic adapter loading, registration, and lifecycle management for different programming languages
+**Abstraction Layers**: 
+- `interfaces/` defines all contracts for dependency injection and testability
+- `implementations/` provides production Node.js-based implementations  
+- `errors/` establishes typed error hierarchy for robust error handling
 
-### Service Layer
-- **Dependency Container** (`container/`): Production IoC container orchestrating complete application dependency graph
-- **Implementations** (`implementations/`): Production-ready concrete implementations for file system, process management, and networking
-- **Factories** (`factories/`): Centralized object creation with dependency injection and testing support
+**Core Services**:
+- `session/` manages complete debug session lifecycle with hierarchical inheritance pattern
+- `proxy/` implements DAP proxy system with process isolation and multi-session support
+- `adapters/` provides dynamic language adapter discovery and registration
+- `container/` serves as dependency injection foundation wiring all components
 
-### Supporting Infrastructure
-- **CLI Commands** (`cli/`): Multi-transport command interface supporting stdio/SSE communication and binary analysis
-- **Core Protocol** (`dap-core/`): Pure functional DAP message handling and state management
-- **Error System** (`errors/`): Comprehensive typed error hierarchy with recovery strategies
-- **Utilities** (`utils/`): Cross-environment compatibility, logging, file operations, and type safety
+**Infrastructure**:
+- `cli/` implements complete CLI framework with stdio/SSE transport modes
+- `dap-core/` provides functional DAP message processing with immutable state
+- `utils/` offers cross-environment utilities for paths, logging, and type safety
+- `factories/` enables testable object creation patterns
+
+## Key Integration Flow
+
+1. **Startup**: `index.ts` silences console output, initializes dependencies via `container/`, and sets up CLI commands
+2. **MCP Server**: `server.ts` registers tools that delegate to `SessionManager` for debug operations
+3. **Session Management**: `session/` creates debug sessions, spawns proxy processes, and manages DAP communication
+4. **Proxy System**: `proxy/` isolates debug adapters in worker processes with DAP message routing
+5. **Language Support**: `adapters/` dynamically discovers and loads language-specific debug adapters
+6. **Transport**: `cli/` handles MCP protocol over stdio or HTTP/SSE for different client scenarios
 
 ## Public API Surface
 
-### Primary Entry Points
-- **`createDebugMcpServer(options)`**: Main server factory function accepting logging configuration
-- **CLI Commands**: `stdio`, `sse`, and `check-rust-binary` modes for different deployment scenarios
-- **MCP Tools**: 16 standardized debugging tools accessible through MCP protocol
+**Main Entry Points**:
+- `createDebugMcpServer(options)` - Factory for server instances with logging configuration
+- CLI commands: `stdio`, `sse`, `check-rust-binary` for different deployment modes
+- 16 MCP tools: session management, debugging control, execution control, inspection, evaluation
 
-### Key MCP Tools
-- **Session Management**: `create_debug_session`, `list_debug_sessions`, `close_debug_session`
-- **Debug Control**: `start_debugging`, `attach_to_process`, step operations, breakpoint management
-- **Runtime Inspection**: `get_variables`, `get_stack_trace`, `evaluate_expression`
-- **Language Discovery**: `list_supported_languages` with dynamic adapter detection
+**Key MCP Tools**:
+- Session: `create_debug_session`, `list_debug_sessions`, `close_debug_session`
+- Control: `start_debugging`, `attach_to_process`, `step_over`, `step_into`, `continue_execution`
+- Inspection: `get_variables`, `get_stack_trace`, `evaluate_expression`, `get_source_context`
+- Discovery: `list_supported_languages`
 
-### Configuration Interfaces
-- **ServerOptions**: Server-level configuration (logging, file output)
-- **Session Configuration**: Debug session parameters and adapter settings
-- **Transport Options**: Stdio/SSE communication configuration
+**Configuration Interfaces**:
+- `ServerOptions` - Server configuration (logLevel, logFile)
+- `ContainerConfig` - Dependency injection configuration
+- Transport-specific options for stdio/SSE modes
 
-## Internal Data Flow & Integration
+## Critical Design Patterns
 
-### Debugging Session Flow
-1. **Language Discovery**: Dynamic adapter registry queries available debug adapters
-2. **Session Creation**: SessionManager creates new debug sessions with language validation
-3. **Proxy Orchestration**: ProxyManager spawns language-specific debug adapter processes
-4. **DAP Communication**: Multi-layered proxy system handles Debug Adapter Protocol messaging
-5. **State Management**: Pure functional state transitions with event-driven coordination
-6. **Tool Execution**: MCP tools route through SessionManager to underlying debug operations
+**Dependency Injection**: Complete constructor injection throughout with `container/` providing production dependencies and `factories/` enabling test doubles.
 
-### Cross-Environment Support
-- **Path Resolution**: Centralized utilities handle host vs container path mapping
-- **Process Management**: Container-aware process spawning and lifecycle management
-- **Logging Strategy**: Environment-specific logging with console silencing for protocol integrity
-- **Resource Management**: Automatic cleanup and graceful shutdown across deployment modes
+**Process Isolation**: Debug adapters run in separate proxy processes via `proxy/` to prevent crashes from affecting the main MCP server.
 
-## Key Patterns & Design Principles
+**Dynamic Language Support**: `adapters/` registry enables runtime discovery and loading of language adapters using consistent naming conventions.
 
-### Protocol Integrity
-- Console output permanently silenced to prevent MCP protocol corruption
-- Structured error responses in JSON format for tool operations
-- Transport isolation preventing cross-protocol interference
+**Functional Architecture**: `dap-core/` provides stateless DAP message processing with immutable state management and command-based side effects.
 
-### Multi-Language Architecture
-- Plugin-style adapter system with dynamic loading capabilities
-- Policy-driven language-specific behavior without hardcoded logic
-- Unified debugging interface abstracting language differences
+**Cross-Environment Compatibility**: `utils/` provides container-aware path resolution and environment detection for consistent behavior across host and container deployments.
 
-### Production Readiness
-- Comprehensive dependency injection enabling testability and modularity
-- Robust error handling with typed error hierarchy and recovery strategies
-- Resource lifecycle management with automatic cleanup and orphan detection
-- Container-first design with native Docker/containerized deployment support
+**Type Safety**: Comprehensive TypeScript interfaces with discriminated unions, runtime validation at boundaries, and structured error handling via `errors/`.
 
-### Functional Core, Imperative Shell
-- Pure functional DAP message processing with immutable state management
-- Side effects represented as data structures for external execution
-- Clear separation between business logic and I/O operations
+**Event-Driven Communication**: Session management uses event emitters for DAP communication with automatic cleanup and resource management.
 
-This directory represents a complete MCP debugging server implementation that transforms complex debug adapter orchestration into simple, standardized MCP tools accessible to AI agents while maintaining production-grade reliability and multi-environment compatibility.
+The `src` directory represents a complete, production-ready MCP server implementation that abstracts complex debugging toolchains behind a clean, consistent API while supporting multiple transport protocols and deployment environments.

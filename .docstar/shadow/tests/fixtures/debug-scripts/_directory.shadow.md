@@ -1,50 +1,45 @@
 # tests\fixtures\debug-scripts/
-@generated: 2026-02-12T21:00:52Z
+@generated: 2026-02-12T21:05:41Z
 
 ## Overall Purpose
-Test fixtures directory providing simple, predictable scripts for validating debugging functionality and mock adapters. Contains minimal executable scripts designed specifically for testing debugger capabilities, breakpoint handling, variable inspection, and error scenarios without complex dependencies or side effects.
+Collection of minimal test fixture scripts designed for validating debugging tools and mock adapter functionality. These scripts provide controlled, predictable environments for testing breakpoints, exception handling, variable inspection, and path validation across different language runtimes (Python and JavaScript).
 
-## Key Components
+## Key Components & Organization
 
-### Language Coverage
-- **Python fixtures** (`simple.py`, `with-errors.py`, `with-variables.py`): Core debugging test scenarios
-- **JavaScript fixture** (`simple-mock.js`): Mock adapter and path validation testing
+### Language-Specific Test Fixtures
+- **simple-mock.js**: Minimal JavaScript fixture for mock adapter testing and path validation
+- **simple.py**: Basic Python script with strategic breakpoint markers for debugging workflow validation
+- **with-errors.py**: Python script that intentionally generates ZeroDivisionError for exception handling testing
+- **with-variables.py**: Python script showcasing multiple data types and nested scopes for variable inspection testing
 
-### Test Scenario Categories
-
-**Basic Execution Testing**
-- `simple.py`: Minimal arithmetic operation with strategic breakpoint markers
-- `simple-mock.js`: Basic variable operations for path validation and execution testing
-
-**Error Handling Validation**  
-- `with-errors.py`: Controlled ZeroDivisionError generation for exception handling testing
-
-**Variable Inspection Testing**
-- `with-variables.py`: Multi-type variable scenarios (int, str, list, dict) across different scopes
+### Functional Categories
+1. **Basic Execution Testing**: `simple-mock.js` and `simple.py` provide minimal arithmetic operations with predictable outputs
+2. **Error Scenario Testing**: `with-errors.py` provides controlled failure conditions
+3. **Advanced Debugging Features**: `with-variables.py` tests complex variable inspection across scopes and data types
 
 ## Public API Surface
-All scripts follow standard execution patterns:
-- **Python**: `if __name__ == "__main__"` entry points calling main test functions
-- **JavaScript**: Direct function invocation pattern
-- **Common**: Self-contained scripts with predictable outputs for assertion testing
+All scripts function as standalone executables with standard entry points:
+- JavaScript: Direct function calls and execution
+- Python: Standard `if __name__ == "__main__"` pattern with `main()` functions
 
-## Internal Organization
-Scripts are organized by testing purpose rather than language:
-- Execution flow testing (simple scripts)
-- Exception scenario testing (error scripts) 
-- State inspection testing (variable scripts)
-- Mock/path validation testing (mock scripts)
+Key testing scenarios supported:
+- **Path Validation**: Verify script discovery and loading mechanisms
+- **Breakpoint Testing**: Validate debugger attachment and step-through functionality
+- **Exception Handling**: Test error capture and reporting in debugging tools
+- **Variable Inspection**: Validate variable display across different types and scopes
 
-## Data Flow Patterns
-- **Linear execution**: Simple start-to-finish flows for basic testing
-- **Controlled failure**: Intentional exception paths for error handling validation
-- **Scope demonstration**: Nested functions to test variable inspection across scopes
-- **Minimal dependencies**: Standard library only to avoid test environment complications
+## Internal Organization & Data Flow
+Scripts follow a consistent pattern:
+1. Simple function definitions with clear execution paths
+2. Minimal external dependencies (standard library only)
+3. Predictable outputs for assertion testing
+4. Strategic comment markers indicating intended breakpoint locations
 
-## Testing Conventions
-- Strategic comment markers indicating intended breakpoint locations
-- Predictable variable names and values for assertion testing
-- Self-contained execution without external state dependencies
-- Intentionally simple syntax to focus on debugging functionality rather than code complexity
+## Important Patterns & Conventions
+- **Minimal Complexity**: All scripts intentionally simple to avoid side effects in test environments
+- **Self-Contained**: No external dependencies to ensure reliable test execution
+- **Predictable Behavior**: Fixed inputs/outputs enable deterministic testing
+- **Multi-Language Support**: Covers both Python and JavaScript debugging scenarios
+- **Explicit Debug Markers**: Comments clearly indicate intended breakpoint and testing locations
 
-This directory serves as a comprehensive test suite for debugging tools, providing controlled environments to validate breakpoint handling, variable inspection, error scenarios, and cross-language debugging capabilities.
+The directory serves as a comprehensive testing suite for debugging tool validation, providing both positive test cases (successful execution) and negative test cases (controlled failures) across common programming languages and debugging scenarios.

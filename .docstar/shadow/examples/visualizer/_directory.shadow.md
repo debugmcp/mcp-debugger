@@ -1,84 +1,79 @@
 # examples\visualizer/
-@generated: 2026-02-12T21:01:07Z
+@generated: 2026-02-12T21:05:55Z
 
-## MCP Debugger TUI Visualizer
+## Purpose and Responsibility
+The `examples/visualizer` module provides a comprehensive terminal-based user interface (TUI) system for visualizing MCP (Model Context Protocol) debugging sessions in real-time. It processes debug server logs to create interactive visual representations of code execution, breakpoints, variable states, and tool activities through a Rich-based terminal interface.
 
-**Purpose**: A comprehensive terminal-based user interface (TUI) system for visualizing MCP (Model Context Protocol) debugging sessions in real-time. Provides live monitoring of debug server logs, interactive code viewing with breakpoints, tool activity tracking, and session state management.
+## Core Architecture Components
 
-## Core Components
+### Live Visualization System
+- **DebugVisualizer**: Main TUI orchestrator managing Rich console layout and coordinating three specialized panels
+- **Panels Module**: Three Rich-based UI components:
+  - `HeaderPanel`: Session status and execution context
+  - `CodeViewPanel`: Syntax-highlighted source code with breakpoints and execution markers  
+  - `ToolActivityPanel`: MCP tool invocation history with status indicators
+- **CodeWindow**: Sliding window manager for source code display with smooth scrolling and file caching
 
-### Main Applications
-- **debug_visualizer.py**: Primary TUI application orchestrating a Rich-based interface with three panels (header, tools, code view) and external control API for debugging operations
-- **live_visualizer.py**: Integration layer that connects log file monitoring to the TUI, parsing MCP server logs and dispatching events to visualization components
-- **demo_mock.py**: Standalone mock demonstration that simulates a complete debugging session without requiring actual MCP infrastructure
+### Log Processing Pipeline
+- **LogWatcher**: Real-time file monitoring with position persistence and rotation handling
+- **LogEventParser**: Structured event parser that maps MCP debug events to visualizer state updates
+- **DebugState**: Centralized state management for sessions, breakpoints, variables, and tool activities
 
-### State Management
-- **state.py**: Centralized state management with `DebugState` class tracking session info, execution location, breakpoints, variables, and tool activities with bounded history (20 entries)
-- **log_parser.py**: Event processor that parses structured MCP log events and updates visualizer state according to logging specifications
+### Demo and Recording Infrastructure
+- **demo_runner.py**: Complete demo orchestration launching MCP server and visualizer
+- **demo_mock.py**: Mock debugging session simulator for standalone demonstrations
+- **live_visualizer.py**: Integration layer connecting log monitoring to visualization
+- Recording utilities: `record_session.py`, `convert_to_gif.py`, `optimize_gif.py` for creating documentation assets
 
-### UI Components
-- **panels.py**: Rich-based UI panels providing specialized views:
-  - `ToolActivityPanel`: Tool execution history with status indicators
-  - `CodeViewPanel`: Syntax-highlighted code with breakpoints and execution markers  
-  - `HeaderPanel`: Session information and status display
-- **code_window.py**: Dynamic sliding window manager for source code display (~20 lines) with smooth scrolling, multi-file caching, and visual markers
-
-### Infrastructure
-- **log_watcher.py**: Real-time log file monitor using polling with position persistence, file rotation detection, and event dispatching to registered callbacks
-
-## Demo and Utility Tools
-
-### Demo Orchestration
-- **demo_runner.py**: Complete demo orchestrator that launches MCP debug server and visualizer processes with lifecycle management
-- **prepare_demo_recording.py**: Environment cleanup utility for pristine demo recordings
-- **record_session.py**: Asciinema-based terminal session recorder for demo screencasts
-
-### Asset Management
-- **convert_to_gif.py**: Converts asciinema recordings to optimized GIF animations using `agg` tool
-- **optimize_gif.py**: Progressive GIF optimization using gifsicle with 4-level compression strategy
-- **optimize_screenshots.py**: PNG/WebP optimization for web delivery while maintaining authenticity
-
-### Testing
-- **test_log_watcher.py**: Integration tests for log watching functionality with event validation
-- **test_panels.py**: Visual debugging for CodeViewPanel rendering scenarios
-- **test_path_issue.py**: Path normalization debugging for cross-platform compatibility
-
-## Public API Surface
+## Public API and Entry Points
 
 ### Primary Entry Points
-- `DebugVisualizer.main()`: Standalone TUI execution
-- `live_visualizer.main()`: Live log monitoring with command-line log path
-- `demo_mock.main()`: Mock session demonstration
-- `demo_runner.main()`: Full demo orchestration
+- **`live_visualizer.py`**: Main production entry point for monitoring live MCP server logs
+- **`demo_runner.py`**: Full demo environment launcher with server and visualizer coordination
+- **`demo_mock.py`**: Standalone mock demonstration without server dependency
 
-### External Control API (DebugVisualizer)
-- Session management: `create_session()`, `close_session()`
-- Breakpoint control: `set_breakpoint()`
-- Execution control: `start_debugging()`, `pause_at_breakpoint()`, `step_to_line()`, `continue_execution()`
-- State updates: `update_variables()`
+### Core Classes (External Interface)
+- **`DebugVisualizer`**: Main visualizer class with methods for session control (`create_session`, `close_session`), breakpoint management (`set_breakpoint`), execution control (`start_debugging`, `pause_at_breakpoint`, `step_to_line`, `continue_execution`), and state updates (`update_variables`)
+- **`LogWatcher`**: File monitoring with event callback registration via `on_event(event_type, callback)`
+- **`LogEventParser`**: Event processing with methods for each MCP event type (`parse_tool_call`, `parse_debug_state`, etc.)
 
-## Data Flow Architecture
+## Data Flow and Integration
 
-1. **Log Monitoring**: `LogWatcher` tails MCP server log files, detecting new structured JSON events
-2. **Event Processing**: `LogEventParser` parses events and updates `DebugState` with session, breakpoint, and variable changes
-3. **UI Rendering**: Three specialized panels consume state and render Rich-based TUI at 4 FPS
-4. **Code Display**: `CodeWindow` provides sliding window views with syntax highlighting and execution markers
-5. **Interactive Control**: External API allows programmatic control of debugging operations
+### Event Processing Chain
+1. **LogWatcher** monitors MCP server log files using polling with position persistence
+2. **LogEventParser** processes structured JSON events and updates **DebugState**
+3. **DebugVisualizer** renders state changes through specialized panels at 4 FPS refresh rate
+4. **CodeWindow** provides file content with smooth scrolling and visual markers
 
-## Key Patterns
+### State Management
+- **DebugState**: Centralized storage for session data, execution location, breakpoints (file → line set mapping), variables, and bounded tool activity history (20 entries max)
+- **ToolActivity**: Immutable records tracking MCP tool invocations with status and timing
+- **CodeLocation**: File path and line number representation with display formatting
 
-- **Event-driven architecture**: Log events drive state updates and UI refresh cycles
-- **Producer-Consumer**: Separate threads handle log monitoring and UI rendering
-- **Centralized state**: Single `DebugState` instance coordinates all component interactions
-- **Bounded resources**: Automatic history trimming and memory management
-- **Cross-platform compatibility**: Path normalization and encoding fallbacks throughout
-- **Progressive optimization**: Multi-level compression strategies for media assets
+## Key Patterns and Conventions
 
-## Critical Dependencies
+### Visual Design
+- **Layout**: Three-region layout (header/tools/code) with responsive 2:3 ratio for tools:code panels
+- **Markers**: Red bullets (●) for breakpoints, yellow arrows (→) for current execution line
+- **Status Colors**: Blue (calling), green (success), red (error) for tool activities
+- **Syntax Highlighting**: Rich-based with theme support and line number display
 
-- **Rich library**: Terminal UI framework for panels, syntax highlighting, and layout
-- **MCP debug server**: Expected to write structured JSON events to monitored log files
-- **External tools**: `agg` (GIF conversion), `gifsicle` (GIF optimization), `asciinema` (recording)
-- **File structure**: Assumes project layout with `logs/`, `assets/`, and `examples/` directories
+### File and Path Handling
+- **Path Normalization**: Consistent absolute path conversion using pathlib
+- **File Caching**: CodeWindow caches loaded files with selective invalidation
+- **Encoding Resilience**: Multiple encoding fallbacks (UTF-8 → Latin-1 → CP1252 → binary)
+- **Position Persistence**: LogWatcher maintains read position across restarts
 
-This visualizer provides a complete solution for MCP debugging visualization, from real-time monitoring to demo asset generation, with robust error handling and cross-platform compatibility.
+### Error Handling and Robustness
+- **Graceful Degradation**: File access errors result in error display rather than crashes
+- **Thread Safety**: Daemon threads with proper cleanup and timeout handling
+- **Process Management**: Comprehensive subprocess lifecycle management with signal handling
+- **Memory Management**: Bounded collections and automatic cleanup for long-running sessions
+
+## Dependencies and Integration
+- **Rich Library**: Terminal UI rendering, syntax highlighting, and layout management
+- **Standard Library**: Core functionality using `pathlib`, `subprocess`, `threading`, `json`
+- **MCP Server Integration**: Expects structured JSON debug events in log files
+- **External Tools**: Optional integration with `agg` (GIF conversion) and `gifsicle` (optimization)
+
+The visualizer serves as both a development tool for MCP debugging and a demonstration platform showcasing protocol capabilities through rich terminal interfaces.

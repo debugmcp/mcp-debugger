@@ -1,57 +1,53 @@
 # docker/
-@generated: 2026-02-12T21:00:51Z
+@generated: 2026-02-12T21:05:40Z
 
 ## Purpose
-The `docker` directory contains containerization infrastructure for running an MCP (Model Context Protocol) server in a development environment with integrated debugging capabilities. It provides a Docker-based development workflow that supports both production deployment and developer debugging scenarios.
+The `docker` directory provides containerization infrastructure for running an MCP (Model Context Protocol) server in a development environment with integrated debugging capabilities.
 
 ## Key Components
 
-### Container Entrypoint (`docker-entrypoint.sh`)
-The primary orchestration script that manages the startup sequence of a multi-service development environment:
-- **Development Workspace Setup**: Conditionally configures `/workspace` volume mounting for host filesystem integration
-- **Debug Server Management**: Launches Python debugpy server for remote debugging capabilities
-- **MCP Server Execution**: Starts the main Node.js MCP server application
-- **Process Lifecycle**: Handles graceful shutdown and cleanup of all services
+### docker-entrypoint.sh
+The primary orchestration script that serves as the Docker container's entry point, managing:
+- **Development workspace setup** with conditional volume mounting
+- **Multi-process service coordination** between debug server and MCP server
+- **Remote debugging infrastructure** via Python debugpy server
+- **Graceful shutdown handling** with proper process cleanup
 
 ## Architecture & Data Flow
 
-### Multi-Service Orchestration
-The container runs two concurrent services:
-1. **Background Debug Service**: Python debugpy server listening on port 5679 for IDE connections
-2. **Foreground MCP Service**: Node.js server running the compiled MCP application
+The directory implements a **development-oriented containerization pattern**:
 
-### Development Integration Points
-- **Volume Mounting**: Supports `/workspace` directory for live code editing
-- **Remote Debugging**: Exposes debug interface for IDE attachment
-- **Signal Handling**: Proper cleanup on container termination
-- **Logging**: Debug-enabled MCP server output
+1. **Container Bootstrap**: Entrypoint script initializes workspace environment
+2. **Debug Service Launch**: Python debugpy server starts on port 5679 for remote debugging
+3. **Main Service Start**: Node.js MCP server launches with debug logging
+4. **Process Orchestration**: Script maintains both services until termination signal
 
 ## Public API Surface
 
 ### Container Interface
-- **Entry Point**: `docker-entrypoint.sh` as the primary container command
-- **Debug Port**: 5679 exposed for remote debugging connections
-- **Volume Mount**: `/workspace` for development file access
+- **Entry Point**: `docker-entrypoint.sh` (main container command)
+- **Debug Port**: `5679` (external debugpy connection point)
+- **Volume Mount**: `/workspace` (development filesystem integration)
 - **Signal Handling**: SIGINT/SIGTERM for graceful shutdown
 
-### Dependencies & Prerequisites
-- Pre-compiled JavaScript distribution at `dist/index.js`
-- Python debugpy package installation
+### Runtime Dependencies
+- Pre-built JavaScript distribution at `dist/index.js`
+- Python debugpy package and runtime
 - Node.js runtime environment
 - Debug server fixture at `tests/fixtures/python/debugpy_server.py`
 
 ## Internal Organization
 
-### Process Management Pattern
-- **Background Process**: debugpy server runs detached with PID tracking
-- **Foreground Process**: MCP server runs attached for container lifecycle
-- **Cleanup Handler**: Trap-based cleanup ensures proper resource deallocation
+The directory follows Docker best practices with a **single-responsibility entrypoint**:
+- **Process Management**: Background debug server + foreground main application
+- **Development Support**: Volume mounting, remote debugging, live development workflow
+- **Production Readiness**: Signal handling, proper cleanup, multi-service coordination
 
-### Development Workflow Support
-The directory enables a containerized development environment where developers can:
-- Mount local code via volumes for live editing
-- Attach debuggers remotely via the exposed debug port
-- Run the full MCP server stack in an isolated environment
-- Maintain proper process lifecycle management
+## Key Patterns
 
-This infrastructure bridges production containerization with development debugging needs, providing a unified Docker-based workflow for MCP server development and deployment.
+- **Multi-process orchestration** for concurrent debug and application services
+- **Development-production bridge** supporting both local development and containerized deployment  
+- **Signal-based lifecycle management** ensuring clean resource cleanup
+- **Port-based service discovery** with standardized debug port allocation
+
+This directory enables seamless transition between local development and containerized deployment while maintaining full debugging capabilities.

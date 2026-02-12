@@ -1,58 +1,78 @@
 # tests\test-utils\fixtures/
-@generated: 2026-02-12T21:01:09Z
+@generated: 2026-02-12T21:05:59Z
 
-## Test Fixtures Directory for Python Debugging
+## Python Debugging Test Fixtures
 
-**Overall Purpose**: This directory serves as a comprehensive test fixture repository for Python debugging scenarios within the MCP (Model Context Protocol) testing framework. It provides both static script templates and executable Python programs designed to test debugger functionality, Debug Adapter Protocol (DAP) integration, and MCP server debugging capabilities.
+This directory contains comprehensive Python script fixtures designed to support debugging and process testing functionality within the MCP test suite. The fixtures provide both static script templates and dynamic runtime environments for validating debugger capabilities.
 
-**Key Components and Relationships**:
+### Overall Purpose
 
-### TypeScript Fixture Templates (`python-scripts.ts`)
-- **Static Script Repository**: Collection of Python code templates as TypeScript string exports
-- **Debugging Scenario Coverage**: Provides fixtures for loops, functions, recursion, exception handling, multi-module scenarios, and intentional bugs
-- **Progressive Complexity**: Scripts range from simple iteration (`simpleLoopScript`) to complex recursive algorithms (`fibonacciScript`) and cross-module debugging (`multiModuleMainScript`, `multiModuleHelperScript`)
+The module serves as a testing foundation for Python debugging workflows, providing fixtures that range from simple code examples to complex debugging server implementations. It enables testing of debugger attachment, breakpoint functionality, step-through debugging, exception handling, and DAP (Debug Adapter Protocol) interactions.
 
-### Executable Python Fixtures (`python/` directory)
-- **Runtime Debug Targets**: Live Python processes for external debugger attachment testing
-- **DAP Server Implementation**: Full-featured debugpy server for sophisticated debugging protocol testing
-- **Process Monitoring**: Long-running targets for testing debugger attachment and process lifecycle management
+### Key Components
 
-### Component Integration
-The TypeScript templates and Python executables work together to provide a complete debugging test ecosystem:
-- TypeScript fixtures supply code content for dynamic debugging scenarios
-- Python executables provide runtime environments for actual debugger attachment
-- Both support the same core debugging patterns (functions, loops, exceptions, modules)
+**TypeScript Script Templates (`python-scripts.ts`)**
+- Collection of Python script templates as string exports
+- Covers debugging scenarios from basic loops to complex multi-module programs
+- Includes intentionally buggy code for debugging practice
+- Provides fibonacci, exception handling, and function call test cases
 
-**Public API Surface**:
+**Runtime Debug Targets (`python/` directory)**
+- `debug_test_simple.py`: Basic debug target with extended runtime for attachment testing
+- `debugpy_server.py`: Full-featured debugpy DAP server with configurable scenarios
+- Live processes that can be attached to by external debugging tools
 
-### TypeScript Template Exports
-- `simpleLoopScript`, `functionCallScript`, `fibonacciScript` - Core debugging patterns
-- `exceptionHandlingScript` - Error scenario testing
-- `multiModuleMainScript`, `multiModuleHelperScript` - Cross-module debugging
-- `buggyScript` - Intentional error scenarios for debugging exercises
+### Public API Surface
 
-### Python Executable Entry Points
-- **debug_test_simple.py**: Direct execution for basic 60-second attachment testing
-- **debugpy_server.py**: CLI with `--host`, `--port`, `--no-wait`, `--run-test` options
-- `start_debugpy_server(host, port, wait_for_client)`: Programmatic server initialization
+**Static Fixtures (TypeScript exports):**
+- `simpleLoopScript`: Basic iteration and variable tracking
+- `functionCallScript`: Function calls and parameter passing
+- `fibonacciScript`: Recursive vs iterative algorithm comparison
+- `exceptionHandlingScript`: Error handling and exception breakpoints
+- `multiModuleMainScript`/`multiModuleHelperScript`: Cross-module debugging
+- `buggyScript`: Intentional bugs for debugging exercises
 
-**Internal Organization and Data Flow**:
+**Runtime Entry Points:**
+- `debug_test_simple.py`: Direct execution for simple process attachment
+- `debugpy_server.py --host <host> --port <port>`: Configurable DAP server
+- `start_debugpy_server()`: Programmatic server initialization
+- `run_fibonacci_test()`: Breakpoint testing scenarios
 
-### Test Execution Patterns
-1. **Static Template Usage**: TypeScript fixtures consumed by test harnesses to generate debugging scenarios
-2. **Live Target Attachment**: Python executables launched as separate processes for external debugger connection
-3. **DAP Protocol Testing**: Debugpy server mode enabling MCP servers to connect as DAP clients
+### Internal Organization
 
-### Debugging Architecture
-- **Correct DAP Polarity**: Python fixtures act as debug servers, external MCP servers connect as clients
-- **Multi-Modal Testing**: Supports both programmatic debugging (via templates) and live attachment (via executables)
-- **Scenario Isolation**: Each fixture provides distinct debugging contexts for comprehensive test coverage
+The fixtures follow a layered approach:
 
-**Important Conventions**:
-- All Python scripts include proper `if __name__ == "__main__"` guards
-- TypeScript templates are self-contained with meaningful test data
-- Executable fixtures provide configurable runtime behavior
-- Error handling ensures graceful degradation for test reliability
-- Progressive complexity allows testing from basic to advanced debugging scenarios
+1. **Static Layer**: TypeScript templates provide predictable code samples for testing debugger parsing and execution control
+2. **Runtime Layer**: Python processes provide live debugging targets for attachment and DAP protocol testing
+3. **Complexity Progression**: From simple loops to multi-module applications to server-client interactions
 
-This fixture directory enables comprehensive testing of Python debugging capabilities within the MCP ecosystem, supporting both automated test scenarios and interactive debugging validation.
+### Data Flow
+
+**Static Fixture Usage:**
+Template Selection → Code Injection → Debugger Execution → Scenario Validation
+
+**Runtime Debug Flow:**
+Process Launch → Optional Debugger Attachment → Breakpoint/Step Testing → Validation
+
+**DAP Server Flow:**
+Server Initialization → Client Connection → Protocol Communication → Test Scenario Execution
+
+### Important Patterns
+
+- **Extended Lifetime Pattern**: Runtime fixtures use sleep mechanisms to remain available for external tool attachment
+- **Self-Contained Scripts**: Each template includes proper main guards and meaningful test data
+- **Configurable Behavior**: CLI-driven and programmatic configuration options
+- **Error Scenarios**: Deliberate bugs and exception cases for comprehensive testing
+- **Standard Protocols**: Uses DAP-compliant interfaces and non-conflicting ports (5679)
+
+### Integration Context
+
+This directory enables comprehensive testing of:
+- MCP server debugging capabilities
+- Debugger attachment to running processes
+- Step-through debugging workflows
+- Exception handling and error scenarios
+- Multi-module and cross-file debugging
+- DAP client-server communication patterns
+
+The fixtures support both automated testing scenarios and interactive debugging validation, providing a complete foundation for testing Python debugging functionality within the MCP ecosystem.

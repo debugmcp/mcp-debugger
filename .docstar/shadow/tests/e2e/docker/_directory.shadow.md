@@ -1,81 +1,88 @@
 # tests\e2e\docker/
-@generated: 2026-02-12T21:00:59Z
+@generated: 2026-02-12T21:05:45Z
 
-## Purpose and Scope
-This directory contains comprehensive end-to-end test suites for validating MCP (Model Context Protocol) debugger functionality within Docker containerized environments. Tests multiple language runtimes (JavaScript, Python, Rust) to ensure the debugger works correctly when running inside Docker containers, handling path resolution, breakpoint management, and debugging protocol operations across different execution environments.
+## Purpose
+End-to-end test suite for validating MCP debugger functionality when running inside Docker containers. This directory contains comprehensive smoke tests that verify the debugger works correctly across multiple language runtimes (JavaScript, Python, Rust) in containerized environments.
 
-## Core Components
+## Key Components
 
-### Language-Specific Test Suites
-- **docker-smoke-javascript.test.ts**: JavaScript debugging validation with Node.js runtime
-- **docker-smoke-python.test.ts**: Python debugging validation with DAP protocol integration  
-- **docker-smoke-rust.test.ts**: Rust debugging validation with async/await support and conditional execution
-- **docker-test-utils.ts**: Shared Docker infrastructure utilities and MCP client management
+### Core Test Files
+- **docker-smoke-javascript.test.ts**: Tests JavaScript/Node.js debugging workflows including breakpoints, stepping, variable inspection, and expression evaluation
+- **docker-smoke-python.test.ts**: Validates Python debugging functionality with comprehensive debugging cycle tests including variable state verification and source context retrieval
+- **docker-smoke-rust.test.ts**: Tests Rust debugging capabilities with focus on async code debugging and variable inspection in compiled environments
 
-### Test Infrastructure Architecture
-All test suites follow a consistent pattern:
-1. **Container Lifecycle Management**: `beforeAll` builds Docker images, creates containerized MCP clients
-2. **Resource Cleanup**: `afterAll` handles session closure, container teardown, log extraction on failures
-3. **Per-Test Isolation**: `afterEach` ensures debug sessions are properly closed between tests
-
-## Key Test Workflows
-
-### Standard Debug Cycle Validation
-Each language suite tests a complete 8-9 step debugging workflow:
-1. Debug session creation with container-specific naming
-2. Breakpoint setting using container-translated paths
-3. Debug launch with DAP protocol configuration
-4. Stack frame retrieval and validation
-5. Local variable inspection and state verification
-6. Step execution control (step-over, step-into)
-7. Expression evaluation in debug context
-8. Execution continuation and session termination
-
-### Additional Test Scenarios
-- **Multiple Breakpoints**: Concurrent breakpoint management without interference
-- **Source Context**: Source code retrieval with configurable context windows
-- **Path Resolution**: Host-to-container path mapping validation
-- **Error Handling**: Comprehensive error capture with Docker log extraction
+### Infrastructure Utilities
+- **docker-test-utils.ts**: Shared Docker infrastructure providing image building, container lifecycle management, MCP client setup, and path translation utilities
 
 ## Public API Surface
 
-### Entry Points
-- `buildDockerImage(config?)`: Singleton Docker image builder with force rebuild support
-- `createDockerMcpClient(config)`: MCP client factory for containerized debugging
-- `hostToContainerPath(hostPath)`: Path translation utility for container file access
-- `getDockerLogs(containerName)`: Debug log extraction for troubleshooting
+### Main Entry Points
+Each test file exports test suites that can be executed independently:
+- JavaScript smoke tests with 6 comprehensive test scenarios
+- Python smoke tests covering full debugging workflows
+- Rust smoke tests with conditional execution based on environment flags
 
-### Configuration Interface
-- `DockerTestConfig`: Standardized configuration for image names, container settings, workspace mounts, and logging levels
-- Environment variables: `SKIP_DOCKER`, `DOCKER_RUST_ENABLED`, `FORCE_DOCKER_BUILD`
+### Docker Utilities API
+- `buildDockerImage(config)`: Ensures Docker image is built for testing
+- `createDockerMcpClient(config)`: Creates MCP client connected to containerized debugger
+- `hostToContainerPath(path)`: Converts host paths to container-relative paths
+- `cleanupContainer(name)`: Handles container lifecycle cleanup
+- `getDockerLogs(name)`: Retrieves container logs for debugging
 
 ## Internal Organization
 
-### Resource Management Pattern
-- **Singleton Build**: `dockerBuildPromise` prevents duplicate Docker builds across test suites
-- **Cleanup Functions**: Each MCP client returns cleanup function for proper resource deallocation
-- **Container Auto-removal**: Uses `--rm` flag with manual cleanup fallback
+### Test Architecture Pattern
+All test files follow consistent structure:
+1. **Setup Phase**: Docker image building and container creation with extended timeouts (240s)
+2. **Test Execution**: Language-specific debugging workflows with comprehensive error handling
+3. **Cleanup Phase**: Session closure, container teardown, and conditional log extraction
 
-### Path Translation System
-- **Workspace Mapping**: `/examples` host directory → `/workspace` container mount
-- **Cross-platform Support**: Handles Windows/Unix path differences
-- **Absolute Path Resolution**: Converts relative paths to container-absolute paths
+### Common Testing Workflow
+Each language test implements similar debugging cycle:
+1. Debug session creation with container-specific naming
+2. Breakpoint setting using container path translation
+3. Debug launch with DAP protocol configuration
+4. Stack trace and variable inspection
+5. Execution control (step over, step into, continue)
+6. Expression evaluation in debug context
+7. Proper session termination and cleanup
 
-### Error Handling Strategy
-- **Extended Timeouts**: 240s for Docker setup, 60-120s for individual tests
-- **Graceful Degradation**: Tolerates cleanup errors during test teardown  
-- **Debug Log Capture**: Automatic Docker log extraction on test failures
-- **Conditional Execution**: Environment-based test skipping for CI/local flexibility
+### Path Resolution Strategy
+- Host paths converted to container paths via `hostToContainerPath()`
+- Workspace mounted at `/workspace/` with examples directory mapping
+- Cross-platform compatibility with Windows/Unix path normalization
 
-## Critical Dependencies
-- **MCP SDK**: Core protocol client for debugger communication
-- **Docker Engine**: Container runtime for isolated test execution
-- **Language Runtimes**: Node.js, Python interpreter, Rust compiler toolchain
-- **Debug Adapters**: DAP protocol support for each target language
+## Data Flow
 
-## Integration Patterns
-The directory serves as the primary validation layer for Docker-specific debugger functionality, ensuring that:
-- Container path resolution works correctly across all supported languages
-- Debug protocol operations function identically in containerized vs native environments  
-- Resource cleanup prevents container/session leaks in CI/CD pipelines
-- Cross-platform compatibility is maintained for development environments
+### Container Lifecycle
+1. **Image Build**: Singleton pattern prevents duplicate builds across tests
+2. **Container Creation**: Dynamic naming with timestamps for isolation
+3. **MCP Client Setup**: Stdio transport connection to containerized debugger
+4. **Test Execution**: Debug protocol operations via MCP tool calls
+5. **Resource Cleanup**: Container removal and client disconnection
+
+### Error Handling Pipeline
+- Docker operation failures trigger log extraction for debugging
+- Session cleanup includes error tolerance to prevent test cascade failures
+- Extended timeouts (60-120s) accommodate Docker operation overhead
+
+## Important Patterns
+
+### Conditional Execution
+Tests use environment flags (`SKIP_DOCKER`, `DOCKER_RUST_ENABLED`) to enable selective test execution based on environment capabilities.
+
+### Resource Management
+- Explicit cleanup functions prevent resource leaks
+- Container auto-removal with manual cleanup fallback
+- Session lifecycle tracking across test boundaries
+
+### Cross-Platform Compatibility
+- User ID mapping only on Unix systems outside CI
+- Path normalization handles Windows/Unix differences
+- Volume mount strategies adapt to platform requirements
+
+## Critical Invariants
+- All file operations use container paths, not host paths
+- Debug sessions must be explicitly closed to prevent resource leaks
+- Container cleanup is essential for test isolation between runs
+- Error states trigger comprehensive log collection for post-mortem analysis

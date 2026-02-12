@@ -1,72 +1,87 @@
 # packages\adapter-rust\src\utils/
-@generated: 2026-02-12T21:00:56Z
+@generated: 2026-02-12T21:05:49Z
 
-## Rust Adapter Utilities Package
+## Rust Development Environment Utilities
 
-This utils directory provides a comprehensive suite of utilities for Rust development environment integration, serving as the foundational support layer for the adapter-rust package. The module collectively handles Rust toolchain detection, Cargo project management, binary analysis, and debugging infrastructure.
+This directory provides comprehensive utility functions for managing Rust development environments within the adapter-rust package. It serves as the foundational layer for Rust toolchain integration, binary analysis, project management, and debugging infrastructure.
 
-## Core Components and Responsibilities
+## Overall Purpose
 
-### Toolchain and Environment Management
-- **rust-utils.ts**: Primary entry point providing Rust/Cargo installation verification, version detection, and host triple resolution
+The utils module abstracts away the complexity of Rust/Cargo toolchain interactions, providing a unified interface for:
+- Rust toolchain installation verification and version detection
+- Cargo project discovery, building, and metadata extraction
+- Binary format analysis and debug information detection
+- CodeLLDB debugger integration and executable resolution
+
+## Key Components & Integration
+
+### Core Toolchain Management
+- **rust-utils.ts**: Primary toolchain interface providing installation checks (`checkCargoInstallation`, `checkRustInstallation`), version detection, and build orchestration
+- **cargo-utils.ts**: Specialized Cargo project management with metadata extraction, target discovery, and intelligent rebuild detection
+
+### Binary Analysis Pipeline
+- **binary-detector.ts**: Post-build binary analysis determining compiler toolchain (MSVC/GNU), debug format (PDB/DWARF), and dependency imports
+- Integration with cargo-utils for complete build-to-analysis workflow
+
+### Debug Infrastructure
 - **codelldb-resolver.ts**: Platform-specific CodeLLDB debugger executable resolution with multi-path fallback strategies
-
-### Project Management and Build Operations
-- **cargo-utils.ts**: Comprehensive Cargo project lifecycle management including metadata extraction, target discovery, building, testing, and intelligent rebuild detection
-- Integration with Cargo CLI through spawned processes for metadata queries and build operations
-
-### Binary Analysis and Classification
-- **binary-detector.ts**: Executable format analysis determining compiler toolchain (MSVC vs GNU), debug information presence (PDB/DWARF), and import dependencies
+- **rust-utils.ts**: Re-exports CodeLLDB resolver and provides Windows dlltool discovery for debugging workflows
 
 ## Public API Surface
 
 ### Primary Entry Points
-- `checkCargoInstallation()` / `checkRustInstallation()`: Environment validation
-- `resolveCargoProject(projectPath)`: Project discovery and metadata extraction
-- `buildCargoProject(projectRoot, logger?, buildMode?)`: High-level build orchestration
-- `detectBinaryFormat(binaryPath)`: Binary analysis and classification
-- `resolveCodeLLDBExecutable()`: Debug infrastructure setup
 
-### Key Data Structures
-- `CargoTarget`: Compilation target representation (name, kind, source path)
-- `BinaryInfo`: Binary classification results (format, debug info, imports)
+**Toolchain Verification:**
+- `checkCargoInstallation()` → `Promise<boolean>`
+- `checkRustInstallation()` → `Promise<boolean>`
+- `getCargoVersion()` → `Promise<string | null>`
 
-## Internal Organization and Data Flow
+**Project Management:**
+- `resolveCargoProject(projectPath)` → `Promise<CargoProject | null>`
+- `findCargoProjectRoot(startPath)` → `Promise<string | null>`
+- `buildCargoProject(projectRoot, logger?, buildMode?)` → `Promise<string | null>`
 
-**Discovery → Analysis → Build → Debug Pipeline:**
+**Binary Analysis:**
+- `detectBinaryFormat(binaryPath)` → `Promise<BinaryInfo>`
+- `needsRebuild(projectPath, binaryName, release?)` → `Promise<boolean>`
 
-1. **Environment Setup**: rust-utils validates Rust/Cargo installation and resolves toolchain details
-2. **Project Discovery**: cargo-utils locates Cargo.toml, parses metadata, and identifies targets
-3. **Build Management**: Intelligent rebuild detection, spawned cargo builds, and binary path resolution
-4. **Binary Analysis**: Post-build executable classification for debugging strategy selection
-5. **Debug Infrastructure**: Platform-aware CodeLLDB resolver for debug session initialization
+**Debug Support:**
+- `resolveCodeLLDBExecutable()` → `Promise<string | null>`
+- `getCodeLLDBVersion()` → `Promise<string | null>`
 
-## Important Patterns and Conventions
+## Internal Organization & Data Flow
+
+### Project Discovery → Build → Analysis Pipeline
+1. **Discovery**: `findCargoProjectRoot()` locates project, `resolveCargoProject()` extracts metadata
+2. **Build Decision**: `needsRebuild()` compares source/binary timestamps
+3. **Compilation**: `buildCargoProject()` or `runCargoBuild()` executes cargo
+4. **Analysis**: `detectBinaryFormat()` analyzes output binary for debugging setup
+
+### Cross-Platform Abstraction
+- Platform-specific executable extensions (.exe on Windows)
+- Multi-architecture CodeLLDB resolution (arm64/x64, darwin/linux/win32)
+- Windows-specific toolchain discovery (dlltool, rustup directories)
+
+## Important Patterns & Conventions
 
 ### Error Handling Strategy
-- Graceful degradation with null/empty returns instead of exceptions
-- Try-catch wrapping of all file system and spawn operations
-- Multiple fallback mechanisms for tool and path resolution
+- **Graceful degradation**: Functions return `null`/`false`/empty arrays instead of throwing
+- **Try-catch wrapping**: All spawn operations and file I/O wrapped with error handling
+- **Fallback chains**: Multiple resolution strategies (environment vars, multiple search paths)
 
-### Cross-Platform Compatibility
-- Platform-specific executable extensions (.exe on Windows)
-- Shell-based spawn operations (`shell: true`)
-- Architecture-aware binary distribution paths
+### Async Operation Patterns
+- **Promise-wrapped spawns**: Child process execution wrapped in Promise constructors
+- **File system async**: Consistent use of fs/promises for non-blocking I/O
+- **Shell compatibility**: `shell: true` for cross-platform command execution
 
 ### Performance Optimizations
-- Intelligent rebuild detection using mtime comparisons
-- Limited binary scanning (1MB max) for format detection
-- Cached version lookups and path resolution
+- **Selective binary scanning**: Limited to first 1MB for binary format detection
+- **Intelligent rebuild**: mtime-based change detection avoiding unnecessary compilation
+- **Lazy resolution**: Toolchain checks only when needed
 
-### Integration Architecture
-- Heavy reliance on Cargo CLI integration rather than internal parsing
-- Promise-based async operations throughout
-- Modular composition allowing selective utility usage
+### Data Structures
+- **CargoTarget**: Standardized representation of compilation targets
+- **BinaryInfo**: Comprehensive binary analysis results with format/debug/imports
+- **CargoProject**: Project metadata combining TOML parsing with cargo metadata
 
-## Dependencies and External Integrations
-
-**Node.js Built-ins**: fs/promises, child_process, path, os, url
-**External Tools**: cargo, rustc, CodeLLDB
-**Optional**: which package for executable resolution
-
-The module serves as the bridge between the adapter's high-level debugging functionality and the underlying Rust development ecosystem, providing reliable detection, build management, and platform abstraction.
+This utility collection provides a robust, cross-platform foundation for Rust development tool integration, emphasizing reliability, performance, and comprehensive toolchain support.

@@ -1,76 +1,63 @@
 # packages\adapter-rust\scripts/
-@generated: 2026-02-12T21:00:56Z
+@generated: 2026-02-12T21:05:43Z
 
-## Purpose and Responsibility
-
-The `packages/adapter-rust/scripts` directory contains vendoring automation for the Rust adapter package, specifically focused on downloading and managing CodeLLDB debugger binaries across multiple platforms. This module enables cross-platform Rust debugging support by automatically provisioning platform-specific LLDB debugger components required for the MCP (Model Context Protocol) debug server.
+## Purpose
+The `packages/adapter-rust/scripts` directory contains Node.js automation scripts for setting up the Rust debugging environment. This module handles the complex task of downloading, extracting, and organizing platform-specific debugger binaries to enable cross-platform Rust debugging capabilities in the MCP server.
 
 ## Key Components
 
-### **vendor-codelldb.js - Primary Vendoring Script**
-The sole component is a comprehensive Node.js automation script that orchestrates the entire CodeLLDB vendoring process. It handles:
-
-- **Platform Detection & Management**: Supports 5 platforms (Windows x64, macOS x64/ARM64, Linux x64/ARM64) with automatic current platform detection
-- **Download Management**: Robust HTTP client with retry logic, progress tracking, and caching
-- **Artifact Processing**: VSIX package extraction, binary organization, and permission management
-- **Cache System**: SHA256-validated caching with atomic operations and invalidation
-- **Configuration**: Extensive environment variable support for CI/CD and development workflows
+### **vendor-codelldb.js**
+The primary script responsible for downloading and vendoring CodeLLDB debugger binaries from GitHub releases. This is a comprehensive utility that handles:
+- Multi-platform binary distribution (Windows, macOS, Linux - x64/ARM64)
+- Intelligent caching with SHA256 validation
+- Robust download mechanisms with retry logic
+- Binary extraction and organization
+- Version management and validation
 
 ## Public API Surface
 
 ### **Main Entry Point**
-```bash
-node vendor-codelldb.js [platforms...]
-```
+- `node vendor-codelldb.js [platforms...]` - Downloads and vendors CodeLLDB for specified or detected platforms
 
 ### **Environment Configuration**
-- **CODELLDB_VERSION**: Version targeting (default: '1.11.8')
-- **SKIP_ADAPTER_VENDOR**: Complete bypass mechanism
-- **CODELLDB_FORCE_REBUILD**: Force re-download
-- **CODELLDB_VENDOR_LOCAL_ONLY**: Offline-only mode
-- **CODELLDB_PLATFORMS**: Platform override
-- **CODELLDB_CACHE_DIR**: Custom cache location
+- **CODELLDB_VERSION**: Target CodeLLDB version (default: 1.11.8)
+- **SKIP_ADAPTER_VENDOR**: Bypass entire vendoring process
+- **CODELLDB_FORCE_REBUILD**: Force re-download of existing artifacts
+- **CODELLDB_VENDOR_LOCAL_ONLY**: Use cache only, forbid downloads
+- **CODELLDB_PLATFORMS**: Override platform selection
+- **CODELLDB_CACHE_DIR**: Custom cache directory location
 
-### **Platform Identifiers**
-- `win32-x64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`
+## Internal Organization
 
-## Internal Organization and Data Flow
+### **Data Flow**
+1. **Platform Detection**: Determines target platforms from CLI args, environment, or auto-detection
+2. **Cache Management**: Checks for existing cached artifacts with version validation
+3. **Download Orchestration**: Fetches platform-specific VSIX packages from GitHub
+4. **Binary Extraction**: Extracts debugger binaries, LLDB libraries, and language support files
+5. **Vendor Organization**: Creates structured directory layout for runtime consumption
 
-### **Processing Pipeline**
-1. **Platform Determination**: CLI args → Environment vars → CI detection → Current platform fallback
-2. **Cache Check**: Validates existing artifacts against version requirements
-3. **Download Phase**: Multi-candidate VSIX retrieval with exponential backoff
-4. **Extraction Phase**: VSIX → ZIP → Temp directory → Organized vendor structure
-5. **Installation Phase**: Binary copying, permission setting, version manifest creation
+### **Core Architecture**
+- **Platform Abstraction**: Maps Node.js platform identifiers to CodeLLDB VSIX variants
+- **Caching Layer**: SHA256-validated artifact storage with atomic operations
+- **Download Engine**: HTTP client with exponential backoff, progress reporting, and timeout handling
+- **Extraction Pipeline**: ZIP processing with validation, selective file copying, and permission management
 
-### **Directory Structure Output**
+## Directory Structure Output
 ```
 vendor/codelldb/
 ├── {platform}/
-│   ├── adapter/codelldb[.exe]      # Main debugger adapter
-│   ├── lldb/lib/liblldb.*          # LLDB runtime libraries  
-│   ├── lang_support/               # Language-specific components
-│   └── version.json                # Version tracking
+│   ├── adapter/codelldb[.exe]     # Main debugger adapter
+│   ├── lldb/lib/liblldb.*         # LLDB debugging libraries
+│   ├── lang_support/              # Language-specific support files
+│   └── version.json               # Version manifest
+└── temp/                          # Temporary extraction workspace
 ```
 
-### **Error Handling Strategy**
-- Network resilience through retry mechanisms and fallbacks
-- Cache corruption detection and automatic invalidation  
-- Graceful CI/local environment adaptation
-- Comprehensive logging with actionable error messages
+## Integration Patterns
+- **CI/CD Friendly**: Respects CI environment variables and provides appropriate logging levels
+- **Cross-Platform**: Handles platform-specific binary formats and file permissions
+- **Caching Strategy**: Implements intelligent caching to minimize redundant downloads
+- **Error Recovery**: Comprehensive retry mechanisms and graceful degradation
+- **Atomic Operations**: Ensures consistent state even during interrupted operations
 
-## Important Patterns and Conventions
-
-### **Platform Abstraction**
-Each platform is defined as a configuration object containing VSIX URLs, binary paths, library locations, and target structure - enabling easy addition of new platforms.
-
-### **Atomic Operations**
-Cache management and file operations use atomic patterns (temp files + rename) to prevent corruption during interruptions.
-
-### **Environment-Driven Configuration**
-Heavy reliance on environment variables enables seamless integration with CI/CD pipelines while maintaining developer-friendly defaults.
-
-### **Progressive Fallback Strategy**
-The script attempts multiple sources for each artifact: cached → primary download → alternative candidates, ensuring maximum reliability across network conditions.
-
-This directory serves as a critical infrastructure component, automatically provisioning the native debugging tools required for Rust development workflows within the broader MCP ecosystem.
+This module serves as the foundation for Rust debugging capabilities, automatically provisioning the necessary native debugging infrastructure across all supported platforms.

@@ -1,73 +1,72 @@
 # packages\adapter-python\src\utils/
-@generated: 2026-02-12T21:00:56Z
+@generated: 2026-02-12T21:05:44Z
 
 ## Purpose
-The utils directory provides core infrastructure utilities for the adapter-python package, specifically focused on Python executable discovery and validation across different platforms. This module serves as a foundational layer that enables the adapter to reliably locate and verify Python installations in diverse environments.
+The `utils` directory provides cross-platform Python executable discovery and validation utilities for the adapter-python package. It serves as the foundational layer for locating and verifying Python installations, with specialized handling for Windows environments and Python debugging capabilities.
 
-## Key Components & Integration
+## Key Components
 
-### Python Discovery System
-The directory contains a comprehensive Python executable detection system built around the `findPythonExecutable()` function, which serves as the primary entry point for Python discovery. This system implements a multi-tiered approach:
+### Core Functionality
+- **Python Discovery Engine**: Intelligent Python executable detection with multiple fallback strategies
+- **Windows Store Filtering**: Specialized logic to avoid problematic Windows Store Python aliases
+- **Debugpy Integration**: Detection and preference for Python installations with debugging capabilities
+- **Command Resolution**: Abstracted command-line tool discovery with caching and error handling
 
-1. **Preferred Path Resolution**: Checks user-specified Python paths first
-2. **Environment Variable Discovery**: Scans PATH and other environment variables
-3. **Auto-Detection**: Falls back to system-wide Python discovery
-4. **Validation & Filtering**: Ensures discovered executables are valid and not Windows Store aliases
+### Public API Surface
+- `findPythonExecutable(options?)`: Main entry point for Python discovery with configurable preferences
+- `isValidPythonExecutable(path)`: Validates Python executable functionality
+- `hasDebugpy(pythonPath)`: Checks for debugpy package availability
+- `getPythonVersion(pythonPath)`: Extracts version information from Python installation
+- `CommandNotFoundError`: Custom error class for command resolution failures
 
-### Command Resolution Architecture
-The module uses a strategy pattern with `CommandFinder` interface and `WhichCommandFinder` implementation to abstract command resolution. This design enables:
-- Cross-platform command location using the `which` library
-- Result caching for performance optimization
-- Dependency injection for testing scenarios
-- Platform-specific workarounds (especially Windows PATH handling)
+### Internal Organization
 
-### Validation & Quality Assurance
-Each discovered Python executable undergoes validation through:
-- Import test execution via `isValidPythonExecutable()`
-- Windows Store alias detection and filtering
-- debugpy package presence checking via `hasDebugpy()`
-- Version extraction through `getPythonVersion()`
+#### Command Resolution Layer
+- `CommandFinder` interface: Pluggable abstraction for command discovery
+- `WhichCommandFinder`: Primary implementation using the `which` library with Windows-specific enhancements
+- Caching mechanism for performance optimization
+- PATH normalization for Windows compatibility
 
-## Public API Surface
+#### Python Detection Pipeline
+1. **Preference Resolution**: Honors user-specified paths and environment variables
+2. **Auto-Discovery**: Systematic search through common Python installation locations
+3. **Validation**: Tests executables to filter out Windows Store aliases and broken installations
+4. **Debugpy Preference**: Prioritizes Python installations with debugging support
+5. **Fallback Selection**: Graceful degradation to any valid Python if preferred options fail
 
-### Primary Entry Points
-- **`findPythonExecutable()`**: Main function for Python discovery, returns validated executable path
-- **`getPythonVersion()`**: Extracts version information from Python executable
-- **`isValidPythonExecutable()`**: Validates that a Python path points to a functional interpreter
-- **`hasDebugpy()`**: Checks for debugpy package availability
+## Data Flow
+```
+User Request → findPythonExecutable() → CommandFinder → Validation → Debugpy Check → Selection
+```
 
-### Configuration & Customization
-- **`setDefaultCommandFinder()`**: Allows injection of custom command resolution logic
-- **Logger interface**: Supports custom logging implementations for diagnostic output
-- **Environment variables**: DEBUG_PYTHON_DISCOVERY enables verbose discovery mode
+The discovery process flows through multiple stages:
+- Configuration analysis (preferred paths, environment variables)
+- Candidate discovery via command resolution
+- Executable validation through spawn testing
+- Debugpy capability assessment
+- Final selection with comprehensive error reporting
 
-## Internal Organization & Data Flow
+## Important Patterns
 
-The module follows a layered architecture:
-
-1. **Discovery Layer**: `findPythonExecutable()` orchestrates the search process
-2. **Resolution Layer**: `CommandFinder` implementations locate potential executables
-3. **Validation Layer**: Multiple validation functions ensure executable quality
-4. **Platform Layer**: Windows-specific handling and cross-platform abstractions
-
-Data flows from discovery request through multiple candidate evaluation phases, with each candidate undergoing validation before selection. The system prioritizes Python installations with debugpy but gracefully falls back to any valid Python interpreter.
-
-## Important Patterns & Conventions
-
-### Cross-Platform Compatibility
-- Extensive Windows-specific handling for Store aliases and PATH normalization
-- Platform-agnostic interfaces with platform-specific implementations
-- Robust fallback mechanisms for different operating system behaviors
+### Platform Abstraction
+- Windows-specific handling for PATH case sensitivity and ComSpec fallbacks
+- Cross-platform process spawning for validation
+- Environment-aware discovery strategies
 
 ### Error Handling Strategy
-- Custom `CommandNotFoundError` for command resolution failures
-- Graceful degradation through multiple discovery strategies
-- Comprehensive error reporting with CI-specific enhancements
-- Non-blocking validation failures with fallback options
+- Graceful degradation through multiple fallback mechanisms
+- Detailed error reporting with CI-specific enhancements
+- Custom error types for precise failure classification
 
-### Performance Optimization
-- Command resolution result caching
-- Early termination when suitable Python is found
-- Minimal subprocess spawning for validation
+### Configuration Flexibility
+- Dependency injection for testability (`setDefaultCommandFinder`)
+- Debug mode activation via environment variables
+- Configurable logging interface
 
-This utilities module serves as the reliability foundation for Python adapter functionality, ensuring robust Python discovery across diverse deployment environments while maintaining performance and providing detailed diagnostics when issues arise.
+## Critical Features
+- **Windows Store Protection**: Active filtering prevents selection of problematic Python aliases
+- **Debugpy Awareness**: Preferential selection of Python installations with debugging support
+- **Environment Integration**: Respects user preferences and CI/CD environment configurations
+- **Robust Validation**: Multi-stage verification ensures selected Python executables are functional
+
+This module serves as the reliability foundation for Python-based development workflows, ensuring consistent and valid Python executable discovery across diverse deployment environments.

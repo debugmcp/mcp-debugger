@@ -1,49 +1,37 @@
 # tests\adapters\rust\integration/
-@generated: 2026-02-12T21:00:53Z
+@generated: 2026-02-12T21:05:39Z
 
-## Overall Purpose and Responsibility
+## Purpose
+Integration test directory for the Rust debugging adapter that validates core functionality through smoke tests. This module performs end-to-end testing of the Rust adapter's session management, command building, and launch configuration transformation capabilities without spawning actual debugging processes.
 
-This directory contains integration tests for the Rust debug adapter, focusing on validating the adapter's core functionality without requiring actual process launches or external dependencies. The tests verify that the Rust adapter correctly integrates with the VS Code debug protocol by testing command generation, launch configuration transformation, and environment setup.
+## Key Components and Architecture
 
-## Key Components and Integration
+**Test Infrastructure**:
+- **Mock Dependency System**: Comprehensive stubbing of external dependencies (FileSystem, Logger, ProcessLauncher) to isolate adapter logic during testing
+- **Environment Management**: Controlled manipulation of environment variables (CODELLDB_PATH, RUST_BACKTRACE) with proper cleanup between tests
+- **Platform-Aware Testing**: Cross-platform test execution handling Windows vs Unix differences in binaries and environment variables
 
-**rust-session-smoke.test.ts**: The primary integration test suite that validates:
-- **Command Building**: Ensures the RustAdapterFactory generates proper CodeLLDB commands with correct arguments, ports, and platform-specific flags
-- **Launch Configuration Transformation**: Verifies the adapter correctly normalizes and transforms debug launch configurations from relative to absolute paths
-- **Environment Management**: Tests proper setup of Rust-specific environment variables (RUST_BACKTRACE, LLDB_USE_NATIVE_PDB_READER)
+**Core Test Scenarios**:
+- **Command Building Validation**: Verifies the adapter correctly constructs CodeLLDB debugger commands with proper executable paths, port configurations, and platform-specific flags
+- **Launch Configuration Transformation**: Tests the adapter's ability to normalize and transform debugging configurations, including path resolution and output format standardization
 
-## Testing Architecture and Patterns
+## Testing Approach
 
-**Dependency Injection with Mocks**: Uses a factory pattern (`createDependencies()`) to inject stubbed implementations of core dependencies:
-- FileSystem operations return safe default values
-- ProcessLauncher prevents actual process execution
-- Logger provides no-op implementations
-- Environment delegates to real process.env for authentic testing
+The integration tests use a **smoke testing strategy** that validates critical paths without external process dependencies:
 
-**Platform-Aware Testing**: Implements cross-platform test logic that adapts to Windows vs Unix differences in:
-- Binary naming conventions (`.exe` suffixes)
-- Platform-specific LLDB configuration flags
-- Path handling and normalization
+1. **Dependency Injection Pattern**: Mock implementations prevent actual file system operations and process launches while maintaining realistic test scenarios
+2. **Session Lifecycle Testing**: Validates adapter initialization, configuration, and command generation phases
+3. **Cross-Platform Validation**: Ensures consistent behavior across Windows and Unix environments with platform-specific assertions
 
-## Public API Surface
+## Key Entry Points
 
-The integration tests validate the public interface of:
-- **RustAdapterFactory**: Main entry point for creating Rust debug adapter instances
-- **Adapter Command Building**: Validates the `buildCommand()` method generates proper CodeLLDB invocations
-- **Launch Configuration Processing**: Tests the adapter's ability to transform and normalize VS Code launch configurations
+- **createDependencies()**: Factory function for generating mock adapter dependencies
+- **RustAdapterFactory Integration**: Primary test target that validates adapter creation and configuration
+- **Command and Config Transformation Tests**: Core validation of adapter's debugging setup capabilities
 
-## Internal Organization and Data Flow
+## Testing Patterns
 
-1. **Test Setup**: Environment variables are managed through beforeEach/afterEach hooks for clean isolation
-2. **Mock Dependency Creation**: Factory function provides controlled, predictable implementations of external dependencies
-3. **Adapter Instantiation**: RustAdapterFactory creates adapter instances using mock dependencies
-4. **Functionality Validation**: Tests verify command generation and configuration transformation without side effects
-
-## Important Patterns and Conventions
-
-- **Smoke Testing Approach**: Tests core functionality without external dependencies or process launches
-- **Environment Isolation**: Careful management of environment variables to prevent test interference
-- **Cross-Platform Compatibility**: Platform-specific logic ensures tests work on both Windows and Unix systems
-- **Integration-Level Focus**: Tests the adapter as a complete unit while avoiding external system dependencies
-
-This testing approach ensures the Rust adapter correctly implements the debug protocol interface while maintaining fast, reliable test execution without requiring external debugger installations or process management.
+- Uses Vitest framework with beforeEach/afterEach hooks for clean test isolation
+- Validates both command structure (executable paths, arguments, flags) and environment setup (RUST_BACKTRACE, LLDB settings)
+- Focuses on adapter contract compliance rather than external tool integration
+- Maintains separation between adapter logic testing and actual debugging process management

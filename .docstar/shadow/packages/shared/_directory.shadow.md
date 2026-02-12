@@ -1,90 +1,59 @@
 # packages\shared/
-@generated: 2026-02-12T21:01:42Z
+@generated: 2026-02-12T21:06:28Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/shared` directory serves as the foundational abstraction layer and common contract for a comprehensive multi-language debugging framework built on the VSCode Debug Adapter Protocol (DAP). This shared package provides the unified interfaces, data models, and testing infrastructure that enable consistent debugging experiences across Python, JavaScript, Go, Rust, and other languages while maintaining language-specific customization capabilities.
+The `packages/shared` directory serves as the **foundational contract and abstraction layer** for a multi-language debug adapter system built on the VSCode Debug Adapter Protocol (DAP). This shared package provides the core interfaces, data models, factory patterns, and type definitions that enable consistent, extensible debugging across multiple programming languages (JavaScript, Python, Go, Rust) while maintaining strict type safety and architectural consistency throughout the system.
 
 ## Key Components and Integration
 
-### Core Architecture (`src/`)
-The heart of the shared package centers around the `IDebugAdapter` interface and adapter policy system, which provides:
-- **Unified Debug Contract**: Common interface abstraction for all language-specific debug adapters
-- **Policy-Based Customization**: `AdapterPolicy` strategy pattern enabling language-specific behaviors (session management, variable filtering, initialization protocols)
-- **Factory/Registry System**: Standardized adapter creation, validation, and lifecycle management through `IAdapterRegistry` and `BaseAdapterFactory`
-- **Comprehensive Data Models**: Session state management, launch/attach configurations, and DAP protocol abstractions
+### Core Architecture Components
+- **`src/`**: Contains the complete contract layer with interfaces (`IDebugAdapter`, `AdapterPolicy`), data models (`DebugSession`, `Breakpoint`), factory patterns (`AdapterFactory`), and dependency injection systems (`IDependencies`)
+- **`tests/`**: Comprehensive test suites validating the debug adapter policy implementations, particularly for JavaScript/Node.js and Rust debugging environments
+- **`vitest.config.ts`**: Test configuration establishing the testing framework, coverage reporting, and module resolution for the shared package
 
-### Dependency Injection Framework
-Complete abstractions for external dependencies (`IFileSystem`, `IChildProcess`, `INetworkManager`, `ILogger`) enable:
-- Full testability through mock implementations
-- Modular architecture with pluggable components
-- Platform-agnostic operation across different environments
+### Component Relationships and Data Flow
 
-### Testing Infrastructure (`tests/`)
-Comprehensive unit test suite validating:
-- Language-specific adapter policy implementations
-- DAP protocol compliance and command handling
-- Cross-platform compatibility and configuration
-- Mock-based testing patterns with systematic cleanup
+The directory implements a **policy-based debugging architecture** that separates language-agnostic DAP transport from language-specific behaviors:
 
-### Build and Configuration (`vitest.config.ts`)
-Standardized testing configuration providing:
-- Istanbul-based code coverage reporting
-- TypeScript and Node.js environment support
-- Module resolution with path aliasing for clean imports
+1. **Contract Definition**: The `src/` directory defines all interfaces and abstractions needed for multi-language debugging
+2. **Policy Implementation**: Language-specific adapter policies (JS, Python, Go, Rust) customize debugging behaviors while maintaining DAP compliance
+3. **Factory Pattern**: Standardized adapter creation with validation and compatibility checking across languages
+4. **State Management**: Dual-state model (lifecycle vs execution) coordinated through `DebugSession` instances
+5. **Testing Validation**: Comprehensive test coverage ensures policy implementations maintain protocol compliance and cross-platform compatibility
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **`IDebugAdapter`** - Main contract implemented by all language adapters
-- **`IAdapterRegistry`** - Adapter discovery, validation, and instantiation management
-- **`DebugSession`** - Central session data container with comprehensive state management
-- **`AdapterPolicy`** - Strategy interface for language-specific behavior customization
-- **`BaseAdapterFactory`** - Template pattern for creating language-specific adapter factories
+- **`IDebugAdapter`**: Main adapter contract defining lifecycle, DAP operations, and configuration transformation
+- **`AdapterPolicy`**: Strategy interface enabling language-specific debugging behaviors
+- **`IAdapterRegistry` / `IAdapterFactory`**: Factory-based system for adapter discovery and instantiation
+- **`DebugSession`**: Central data model for session state and metadata management
+- **`IDependencies`**: Complete dependency injection container abstracting external services
 
-### Configuration and Launch Management
-- **`GenericLaunchConfig`, `GenericAttachConfig`** - Language-agnostic debugging configuration models
-- **`AdapterConfig`, `AdapterCapabilities`** - Runtime configuration and feature declaration
-- **`CustomLaunchRequestArguments`** - Flexible launch parameter handling
+### Configuration and State Management
+- **`GenericLaunchConfig` / `LanguageSpecificLaunchConfig`**: Debug session configuration abstractions
+- **`SessionLifecycleState` / `ExecutionState`**: Dual-state model separating session existence from runtime status
+- **`DebugLanguage`**: Enumeration of supported languages with extensibility for new language support
 
-### Protocol and Client Behavior
-- **`DapClientBehavior`** - DAP protocol handling customization
-- **`AdapterLaunchBarrier`** - Launch coordination primitives
-- **Language-specific policies** - `JsDebugAdapterPolicy`, `PythonAdapterPolicy`, `RustAdapterPolicy`
+### Integration Support
+- **DAP Protocol Compliance**: Re-exports of `@vscode/debugprotocol` types ensuring VSCode compatibility
+- **Multi-session Coordination**: `DapClientBehavior` and `AdapterLaunchBarrier` for parent-child debugging sessions
+- **Cross-platform Support**: Environment abstraction through dependency injection and policy patterns
 
-## Internal Organization and Data Flow
+## Internal Organization and Patterns
 
-The architecture follows a layered approach with clear separation of concerns:
+### Design Principles
+- **Policy Pattern**: Language behaviors isolated in `AdapterPolicy` implementations for modularity
+- **Factory Pattern**: Standardized adapter creation with metadata management and version compatibility
+- **Dependency Injection**: Complete abstraction of external dependencies for testing and modularity
+- **Event-Driven Architecture**: EventEmitter-based reactive debugging workflows
+- **Type Safety**: Comprehensive TypeScript interfaces with runtime validation
 
-1. **Interface Layer** - Core abstractions and contracts defining the debugging framework
-2. **Factory Layer** - Standardized creation patterns with validation and environment checking
-3. **Model Layer** - Data structures for session management and configuration
-4. **Integration Layer** - Unified API facade consolidating all components
+### Testing Strategy
+- **Mock-Based Architecture**: Comprehensive mocking of file system, processes, and DAP communications
+- **Protocol Validation**: Ensures DAP compliance across all language-specific implementations
+- **Cross-Platform Testing**: Platform simulation and environment-specific behavior validation
+- **Integration Testing**: Validates the critical translation layer between debug sessions and language adapters
 
-**Data Flow**: Configuration validation → Factory-based adapter creation → Policy application for language-specific behavior → Session lifecycle management → DAP protocol operations, with comprehensive dependency injection throughout.
-
-## Architectural Patterns and Conventions
-
-### Design Patterns
-- **Strategy Pattern**: Enables pluggable language-specific behaviors through adapter policies
-- **Factory/Registry Pattern**: Centralized adapter creation and lifecycle management
-- **Facade Pattern**: Single entry point (`index.ts`) consolidating multiple interface modules
-- **Dependency Injection**: Complete abstraction enabling testability and modularity
-- **Template Method**: Standardized base implementations for consistent behavior
-
-### Key Conventions
-- **Type Safety**: Extensive TypeScript interfaces with runtime validation
-- **Extensibility**: Index signatures and structured patterns supporting future language additions
-- **DAP Integration**: Seamless integration with VSCode Debug Adapter Protocol standards
-- **Testing-First**: Comprehensive mock-based testing infrastructure with consistent cleanup patterns
-- **Platform Agnostic**: Cross-platform compatibility with environment-specific optimizations
-
-## Critical Integration Role
-
-This shared package serves as the essential contract layer between core debugger infrastructure and language-specific implementations, enabling:
-- **Pluggable Adapter Architecture**: Consistent interfaces allowing runtime adapter discovery and validation
-- **Cross-Language Debugging**: Unified debugging experiences while preserving language-specific optimizations
-- **Scalable Testing**: Mock-based infrastructure supporting comprehensive validation of complex debugging scenarios
-- **Framework Evolution**: Extensible design patterns supporting addition of new languages and debugging capabilities
-
-The `packages/shared` directory provides the foundational architecture for building maintainable, type-safe debug adapter ecosystems that can scale across multiple programming languages while maintaining consistent behavior and protocol compliance.
+This shared package serves as the architectural foundation enabling the debug adapter system to support multiple programming languages through a unified, extensible, and thoroughly testable framework while maintaining strict adherence to VSCode Debug Adapter Protocol standards. It provides the essential abstraction layer that allows language-specific debug adapters to integrate seamlessly into a cohesive multi-language debugging experience.

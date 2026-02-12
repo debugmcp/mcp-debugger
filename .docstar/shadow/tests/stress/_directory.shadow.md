@@ -1,73 +1,62 @@
 # tests\stress/
-@generated: 2026-02-12T21:00:56Z
+@generated: 2026-02-12T21:05:44Z
 
-## Stress Testing Module
+## Stress Testing Suite
 
-This directory contains comprehensive stress testing suites for validating MCP (Model Context Protocol) transport layer reliability and cross-transport parity under extreme conditions. The tests are designed to ensure robustness across different transport mechanisms (STDIO, SSE, Docker) and validate system behavior under load.
+The `tests/stress` directory contains comprehensive stress testing infrastructure for validating MCP (Model Context Protocol) transport layer reliability and debug functionality under extreme conditions. These tests are conditionally executed based on the `RUN_STRESS_TESTS` environment variable.
 
-### Core Purpose
+### Overall Purpose
 
-The stress testing module serves two primary functions:
-1. **Cross-Transport Validation**: Ensures identical behavior and results across different MCP transport implementations
-2. **Transport Reliability Testing**: Validates transport layer stability under high-load conditions, rapid connection cycling, and failure scenarios
+This module serves as a quality assurance layer for MCP transport implementations, focusing on:
+- **Transport Reliability**: Validating SSE and STDIO transports under high load
+- **Cross-Transport Parity**: Ensuring identical behavior across different transport mechanisms
+- **Stability Testing**: Verifying system resilience during extended operations and failure scenarios
+- **Performance Validation**: Monitoring memory usage, connection success rates, and timing metrics
 
 ### Key Components
 
-**Cross-Transport Parity Testing** (`cross-transport-parity.test.ts`):
-- **TransportTester**: Orchestrates debug operations across STDIO and SSE transports
-- **Debug Sequence Validation**: Executes standardized 6-step debug workflow (session creation, breakpoints, execution, stack traces, variables, cleanup)
-- **Result Comparison**: Validates identical outcomes across transports with tolerance for minor variations
+**Cross-Transport Validation (`cross-transport-parity.test.ts`)**:
+- `TransportTester` class orchestrates debug operations across STDIO and SSE transports
+- Validates identical results from complex debug sequences (session creation, breakpoints, stack traces, variables)
+- Uses hardcoded test script (`examples/javascript/simple_test.js`) for consistent validation scenarios
 
-**SSE Stress Testing** (`sse-stress.test.ts`):
-- **SSEStressTester**: Manages stress testing scenarios for Server-Sent Events transport
-- **Load Testing**: Rapid connect/disconnect cycles, burst connections, long-running stability
-- **Recovery Testing**: Server failure and restart scenarios with client reconnection validation
+**SSE Stress Testing (`sse-stress.test.ts`)**:
+- `SSEStressTester` class manages server lifecycle and client connection pools
+- Executes four distinct stress scenarios: rapid connections, burst load, long-running stability, and server recovery
+- Tracks comprehensive metrics including success rates, memory usage, and error patterns
 
 ### Test Architecture
 
-**Conditional Execution**: All stress tests are gated by `RUN_STRESS_TESTS` environment variable, preventing accidental execution during normal test runs.
+Both modules share common patterns:
+- **Server Process Management**: Spawning and lifecycle control of MCP servers
+- **Client Connection Orchestration**: Managing multiple concurrent client connections with proper cleanup
+- **Metrics Collection**: Tracking performance indicators and success/failure rates
+- **Health Checking**: Polling mechanisms for server readiness validation
 
-**Transport Management**:
-- **STDIO**: Uses spawned server processes with StdioClientTransport
-- **SSE**: Manages separate Node.js server instances with health check polling and random port allocation (4000-4999)
-- **Process Lifecycle**: Comprehensive setup/teardown with graceful shutdown and SIGTERM/SIGKILL fallback
+### Entry Points
 
-**Metrics Collection**:
-- Connection success/failure rates with 80-90% success thresholds
-- Memory usage monitoring with <50MB growth limits
-- Timing metrics for performance validation
-- Error tracking and detailed logging for debugging
+1. **`describeStress`**: Conditional test wrapper that respects `RUN_STRESS_TESTS` environment variable
+2. **Transport Test Suites**: Main test functions that execute full stress scenarios
+3. **Configuration Constants**: `TEST_TIMEOUT` (60-120s), port ranges (4000-4999), success rate thresholds
 
-### Public API Surface
+### Data Flow
 
-**Test Entry Points**:
-- Cross-transport parity validation with debug operation comparison
-- SSE transport stress testing with 4 distinct load scenarios
-- Comprehensive metrics collection and threshold validation
+1. **Setup Phase**: Environment validation, server spawning, port allocation
+2. **Execution Phase**: Concurrent client operations with metric collection
+3. **Validation Phase**: Success rate analysis, memory growth checks, result comparison
+4. **Cleanup Phase**: Graceful resource disposal with fallback termination
 
-**Key Interfaces**:
-- `DebugSequenceResult`: Captures debug session state and operations
-- `TransportTestResult`: Wraps transport validation outcomes
-- `TestMetrics`: Tracks performance and reliability metrics
+### Integration Points
 
-### Critical Dependencies
+- **MCP SDK**: Leverages `StdioClientTransport` and `SSEClientTransport` for protocol implementation
+- **Debug Tools**: Integrates with MCP debug capabilities for breakpoint and variable inspection
+- **Test Framework**: Built on Vitest with custom timeout configurations and conditional execution
+- **Process Management**: Uses Node.js `child_process` for server orchestration and `net` for port management
 
-**External Requirements**:
-- Test script dependency: `examples/javascript/simple_test.js` (hardcoded breakpoint on line 11)
-- MCP SDK components for client and transport implementations
-- Node.js child_process for server spawning and management
+### Quality Assurance Patterns
 
-**Configuration**:
-- 60-120 second timeouts for complex operations
-- Port range 4000-4999 for SSE server allocation
-- Breakpoint targeting line 11 of JavaScript test file
-
-### Internal Organization
-
-The module follows a pattern-based approach with:
-1. **Setup Phase**: Server spawning, health checks, port allocation
-2. **Execution Phase**: Debug operations or stress scenarios
-3. **Validation Phase**: Result comparison, metrics analysis, threshold checking
-4. **Teardown Phase**: Graceful shutdown with fallback mechanisms
-
-Both test suites use promise-based async patterns with comprehensive error handling and detailed console output for debugging test failures. The architecture supports parallel execution while maintaining test isolation through unique port allocation and separate process spaces.
+The module enforces strict reliability standards:
+- 80-90% minimum success rates for connection attempts
+- <50MB memory growth tolerance for long-running operations
+- Cross-transport result parity with ±1 tolerance for minor variations
+- Comprehensive error capturing and reporting for failure analysis

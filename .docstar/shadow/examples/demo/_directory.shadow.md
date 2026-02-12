@@ -1,50 +1,54 @@
 # examples\demo/
-@generated: 2026-02-12T21:00:51Z
+@generated: 2026-02-12T21:05:42Z
 
 ## Purpose
-Demo and documentation tooling directory for the mcp-debugger project. Provides a complete workflow for creating, recording, and distributing visual demonstrations of the MCP Debugger tool's capabilities through theatrical terminal presentations.
+The `examples/demo` directory provides a complete demonstration and recording system for the MCP Debugger tool. It contains both the demo content and infrastructure for creating professional documentation materials, specifically designed to showcase the debugger's capabilities for README and marketing purposes.
 
-## Key Components and Architecture
+## Key Components
 
-### Demo Presentation Engine
-- **mcp_debugger_demo.py**: Core demo script that simulates an AI debugging session
-  - Terminal presentation layer with ANSI color formatting and theatrical timing
-  - Simulated LLM-debugger interaction showing variable swap bug detection and resolution
-  - 11-stage narrative walkthrough demonstrating typical debugging workflow
-  - No actual debugging functionality - purely presentational for documentation
+### Demo Content
+- **mcp_debugger_demo.py**: Interactive theatrical simulation of an AI agent debugging session
+  - Simulates finding and fixing a classic variable swap bug
+  - Uses color-coded terminal output and timing delays for realistic presentation
+  - Demonstrates the complete debugging workflow from problem identification to solution verification
+  - No actual debugging capabilities - purely presentational for documentation
 
-### Recording and Distribution Pipeline
-- **record_demo.sh**: Automated recording and conversion tooling
-  - Dependency management and validation (asciinema, svg-term-cli)
-  - Terminal session capture with standardized dimensions (80x30)
-  - Multi-format conversion pipeline: terminal → asciinema cast → SVG → GIF
-  - Documentation integration guidance
+### Recording Infrastructure
+- **record_demo.sh**: Automated recording and conversion pipeline
+  - Captures terminal demonstrations using asciinema
+  - Converts recordings to SVG animations
+  - Provides guidance for final GIF conversion and integration
+  - Handles dependency validation and auto-installation
 
-## Public API and Entry Points
+## Public API Surface
+The directory serves two primary use cases:
 
-### Primary Entry Points
-1. **Interactive Demo**: `python mcp_debugger_demo.py` - Run live terminal demonstration
-2. **Recording Session**: `./record_demo.sh` - Create distributable demo recordings
+### For Demo Recording
+1. Execute `record_demo.sh` to start the recording pipeline
+2. Run `python mcp_debugger_demo.py` during recording to demonstrate the tool
+3. Follow provided instructions for GIF conversion and README integration
 
-### Output Artifacts
-- **demo.cast**: asciinema terminal recording
-- **demo.svg**: SVG animation for web integration
-- **demo.gif**: Final format for README documentation (manual conversion)
+### For Live Demonstrations
+- Direct execution of `mcp_debugger_demo.py` for interactive presentations
+- Self-contained demo that requires no actual debugger setup
 
-## Data Flow and Integration
-```
-Demo Script → Terminal Presentation → asciinema Recording → SVG Animation → GIF → README Integration
-```
+## Internal Organization
+The components follow a producer-consumer pattern:
+- **Demo script** produces the visual demonstration content
+- **Recording script** consumes and packages that content for distribution
+- Both components are designed to work independently or together
 
-## Design Patterns
-- **Theatrical Presentation**: Time-delayed, color-coded output simulating real debugging sessions
-- **Multi-Format Pipeline**: Progressive conversion from interactive demo to static documentation assets
-- **Self-Contained Tooling**: Complete workflow from creation to distribution within single directory
-- **Documentation-First**: Designed specifically for creating compelling visual documentation rather than functional debugging
+## Data Flow
+1. Demo script generates formatted, timed terminal output
+2. Recording script captures this output via asciinema
+3. Pipeline converts recordings to web-friendly formats (SVG → GIF)
+4. Final assets integrate into project documentation
 
-## Dependencies and Requirements
-- **Runtime**: Python 3.x with time/sys modules
-- **Recording**: asciinema (required), svg-term-cli (auto-installed)
-- **Optional**: ImageMagick for local GIF conversion
+## Important Patterns
+- **Theatrical timing**: Strategic delays and formatting create realistic interaction simulation
+- **Dependency management**: Graceful handling of missing tools with helpful error messages
+- **Multi-format pipeline**: Supports various output formats for different documentation needs
+- **Self-documenting**: Scripts provide clear usage instructions and next steps
 
-This directory serves as the complete demonstration and documentation asset generation system for showcasing mcp-debugger capabilities to users and developers.
+## Bug Demonstration Focus
+The demo centers on a pedagogical example - the classic swap algorithm bug where `a = b; b = a` fails due to variable overwriting, solved elegantly with Python's tuple unpacking syntax `a, b = b, a`. This provides a clear, relatable debugging scenario that demonstrates the tool's value proposition.
