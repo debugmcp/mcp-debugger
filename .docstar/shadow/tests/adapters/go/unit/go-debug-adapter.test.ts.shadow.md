@@ -1,56 +1,50 @@
-# tests/adapters/go/unit/go-debug-adapter.test.ts
-@source-hash: f94e3cb854fbd565
-@generated: 2026-02-10T00:41:19Z
+# tests\adapters\go\unit\go-debug-adapter.test.ts
+@source-hash: c14c8628e777dc5a
+@generated: 2026-02-12T21:00:37Z
 
 ## Purpose
-Comprehensive unit test suite for `GoDebugAdapter` class, testing Go/Delve debugger integration functionality including initialization, state management, connection handling, capabilities, and configuration transformations.
+Unit test suite for the GoDebugAdapter class using Vitest, validating Go debugger integration with Delve. Tests adapter lifecycle, state management, dependency validation, and DAP (Debug Adapter Protocol) command building.
 
-## Test Structure
-- **Test framework**: Vitest with mocking capabilities (L1-17)
-- **Mock setup**: Mocked `child_process.spawn` and comprehensive `AdapterDependencies` mock factory (L9-51)
-- **Test lifecycle**: Setup/teardown with mock clearing (L57-66)
+## Key Components
 
-## Key Test Groups
+### Test Setup (L9-51)
+- **mockSpawn** (L17): Mocked child_process.spawn for process execution simulation
+- **createMockDependencies** (L19-51): Factory creating comprehensive AdapterDependencies mock with file system, logger, environment, and process launcher stubs
 
-### Basic Properties Tests (L68-84)
-- Validates adapter language, name, initial state, and readiness
-- Confirms `DebugLanguage.GO` and "Go Debug Adapter (Delve)" identity
-
-### Initialization Tests (L86-141)
-- **Success path** (L87-111): Tests transition to READY state when Go/Delve available
-- **Event emission** (L113-132): Validates 'initialized' event firing  
-- **Error handling** (L134-140): Tests ERROR state on missing Go executable
-- Uses mocked `fs.promises.access` and `spawn` with simulated Go version output
-
-### Lifecycle Management (L143-203)
-- **Disposal** (L143-171): Tests state reset and 'disposed' event emission
-- **Connection flow** (L173-203): Tests CONNECTED/DISCONNECTED state transitions and event emission
-
-### Feature Support Tests (L205-260)
-- **Dependencies** (L205-214): Validates Go and Delve as required dependencies
-- **Feature flags** (L216-236): Tests support for conditional breakpoints, function breakpoints, log points, terminate requests; confirms no step-back support
-- **Capabilities** (L238-260): Comprehensive DAP capabilities validation including exception filters for 'panic' and 'fatal'
-
-### Error Translation (L262-298)
-Tests human-readable error message translation for common failure scenarios:
-- dlv/go command not found
-- Permission denied  
-- Process launch/attach failures
-- Unknown error passthrough
-
-### Configuration & Command Building (L300-373)
-- **Installation instructions** (L300-307): Validates help text generation
-- **Missing executable errors** (L309-315): Tests error message formatting
-- **Command building** (L317-346): Tests `dlv dap` command construction with proper arguments
-- **Config transformation** (L348-373): Tests generic-to-Go-specific launch configuration conversion, including test mode handling
-
-## Key Dependencies
-- `@debugmcp/adapter-go.GoDebugAdapter`: Primary class under test
-- `@debugmcp/shared`: Types and enums (`AdapterState`, `DebugLanguage`, `DebugFeature`)
-- Mocked Node.js modules: `child_process`, `fs`, process environment
+### Test Structure (L53-379)
+- **Basic Properties Tests** (L68-84): Validates language=GO, name, initial UNINITIALIZED state
+- **Initialize Tests** (L86-146): Tests Go/Delve availability checks, state transitions to READY/ERROR
+- **Dispose Tests** (L148-176): Validates cleanup and state reset to UNINITIALIZED
+- **Connection Tests** (L178-208): Tests CONNECTED/DISCONNECTED state transitions with host/port
+- **Dependencies Tests** (L210-219): Validates required Go and Delve dependencies
+- **Feature Support Tests** (L221-241): Tests DebugFeature support (conditional breakpoints, log points, etc.)
+- **Capabilities Tests** (L243-265): Validates DAP capabilities and exception filters
+- **Error Translation Tests** (L267-303): Tests user-friendly error message transformations
+- **Installation Instructions Tests** (L305-312): Validates help text generation
+- **Command Building Tests** (L322-351): Tests dlv dap command construction
+- **Launch Config Tests** (L353-378): Tests generic-to-Go config transformation
 
 ## Test Patterns
-- Extensive mocking of external dependencies (file system, process spawning)
-- State transition validation throughout adapter lifecycle
-- Event-driven behavior verification
-- Error condition simulation and handling validation
+
+### Mocking Strategy
+- Child process spawn mocking with EventEmitter simulation
+- Process stdout/stderr data injection via Buffer.from()
+- File system access mocking for executable detection
+- Environment variable manipulation for PATH testing
+
+### State Validation
+- Consistent state transition testing (UNINITIALIZED → READY → CONNECTED)
+- Event emission verification (initialized, connected, disposed events)
+- Bi-directional state checking (getState() and convenience methods)
+
+## Key Assertions
+- Go version parsing from stdout: 'go version go1.21.0 darwin/arm64'
+- DAP command structure: dlv dap --listen=host:port
+- Exception filters: 'panic' and 'fatal' breakpoint filters
+- Error message translation for common Go/Delve issues
+
+## Dependencies
+- **@debugmcp/adapter-go**: GoDebugAdapter class under test
+- **@debugmcp/shared**: AdapterDependencies, AdapterState, DebugLanguage, DebugFeature types
+- **vitest**: Testing framework with mocking capabilities
+- **events.EventEmitter**: Process simulation in mocks

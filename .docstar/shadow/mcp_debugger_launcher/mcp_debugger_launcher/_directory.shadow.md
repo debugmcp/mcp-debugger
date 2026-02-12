@@ -1,71 +1,79 @@
-# mcp_debugger_launcher/mcp_debugger_launcher/
-@generated: 2026-02-11T23:47:41Z
+# mcp_debugger_launcher\mcp_debugger_launcher/
+@generated: 2026-02-12T21:00:57Z
 
-## Overall Purpose
-The `mcp_debugger_launcher` package provides a comprehensive CLI tool for launching the MCP (Model Context Protocol) debugging server across different runtime environments. It automatically detects available execution contexts (Node.js/npx and Docker) and launches the debug server in either stdio or Server-Sent Events (SSE) modes with graceful process management and error handling.
+## Purpose
+The `mcp_debugger_launcher` package provides a cross-platform launcher for the MCP (Model Context Protocol) debugging server with automatic runtime detection and management. It abstracts away the complexity of launching debug servers across different execution environments (Node.js/npm and Docker) while providing a unified CLI interface.
 
-## Key Components and Architecture
+## Key Components and Relationships
 
-### Core Module Structure
-- **`__init__.py`**: Standard package initialization enabling importable package structure
-- **`cli.py`**: Primary CLI entry point with Click-based command interface
-- **`detectors.py`**: Runtime environment detection and validation system
-- **`launcher.py`**: Core process management and server launching implementation
+### Core Architecture
+The package follows a layered architecture with clear separation of concerns:
 
-### Component Relationships
-The package follows a layered architecture:
+- **CLI Layer** (`cli.py`): User-facing Click-based command interface that orchestrates runtime selection and server launching
+- **Detection Layer** (`detectors.py`): Runtime environment discovery and validation engine  
+- **Execution Layer** (`launcher.py`): Actual server process management and lifecycle control
+- **Package Marker** (`__init__.py`): Standard Python package initialization
 
-1. **CLI Layer** (`cli.py`): User-facing interface handling command-line arguments, mode selection, and coordination
-2. **Detection Layer** (`detectors.py`): Environment analysis providing runtime availability and recommendation logic
-3. **Execution Layer** (`launcher.py`): Process lifecycle management with unified interface across runtime environments
-
-**Data Flow**: CLI → RuntimeDetector (environment analysis) → DebugMCPLauncher (process execution) → MCP Debug Server
+### Component Interactions
+1. **CLI** invokes **RuntimeDetector** to identify available execution environments
+2. **CLI** instantiates **DebugMCPLauncher** based on user preferences or auto-detection
+3. **DebugMCPLauncher** manages the actual server subprocess with graceful shutdown handling
 
 ## Public API Surface
 
-### Primary Entry Points
-- **`main()` function in `cli.py`**: Core CLI command supporting:
-  - Mode selection: `stdio` (default) or `sse`
-  - Runtime control: `--docker`, `--npm` flags for explicit runtime selection
-  - Diagnostics: `--status` for runtime availability reporting
-  - Dry-run capabilities and installation help
+### Main Entry Point
+- `cli.main()`: Primary CLI command supporting stdio/SSE modes with runtime selection
+  - `--docker` / `--npm`: Force specific runtime environment  
+  - `--dry-run`: Preview commands without execution
+  - `--verbose`: Enable detailed diagnostics
+  - `--status`: Display runtime availability information
 
 ### Key Classes
-- **`RuntimeDetector`**: Static utility class for environment detection
+- `DebugMCPLauncher`: Core launcher with methods for npx and Docker execution
+  - `DEFAULT_SSE_PORT = 3001`: Default port for Server-Sent Events mode
+  - `launch_with_npx()`: Node.js/npm-based server launching
+  - `launch_with_docker()`: Docker-based server launching
+- `RuntimeDetector`: Static utility class for environment detection
   - `detect_available_runtimes()`: Comprehensive runtime status analysis
   - `get_recommended_runtime()`: Intelligent runtime selection logic
-- **`DebugMCPLauncher`**: Process management with dual runtime support
-  - `launch_with_npx()`: Node.js/npm-based execution
-  - `launch_with_docker()`: Docker-based execution with auto-pull capabilities
 
 ## Internal Organization and Data Flow
 
-### Runtime Detection Strategy
-1. **Node.js Ecosystem**: Validates Node.js installation → npx availability → npm package accessibility
-2. **Docker Ecosystem**: Checks Docker installation → daemon status → image availability
-3. **Recommendation Engine**: Prioritizes npx over Docker based on availability and readiness
+### Runtime Selection Logic
+1. User specifies runtime preference OR auto-detection is triggered
+2. `RuntimeDetector` validates Node.js/Docker availability and ecosystem readiness
+3. Priority order: npx (preferred) → Docker → error if neither available
+4. Selected runtime launches debug server in requested mode (stdio/SSE)
 
-### Process Management Patterns
-- **Unified Interface**: Both npx and Docker launchers implement identical process lifecycle management
-- **Signal Handling**: Graceful shutdown with SIGTERM followed by 5-second timeout before SIGKILL
-- **Resource Cleanup**: Defensive cleanup ensuring no process leaks
-- **Real-time Output**: Live stdout/stderr streaming maintaining interactive debugging experience
+### Process Management
+- Unified subprocess lifecycle management across both runtimes
+- Signal handler installation for graceful shutdown (SIGTERM with 5s timeout)
+- Real-time output streaming maintaining server interactivity
+- Defensive resource cleanup preventing process leaks
+
+### Error Handling Strategy
+- Runtime availability validation before launch attempts
+- Environment-specific error detection (FileNotFoundError patterns)
+- User-friendly installation guidance for missing dependencies
+- Proper exit codes for scripting integration
 
 ## Important Patterns and Conventions
 
-### Error Handling Strategy
-- **Layered Validation**: Environment checks before process launching prevent runtime failures
-- **Graceful Degradation**: Automatic runtime fallback when preferred option unavailable
-- **User Guidance**: Installation help and status reporting for troubleshooting
+### Dual Runtime Support
+The launcher maintains feature parity between npx and Docker execution paths:
+- Consistent command-line argument handling
+- Identical process management and cleanup patterns  
+- Equivalent error handling and logging strategies
 
-### Configuration Management
-- **Constants**: Centralized package/image references in `launcher.py`
-- **Defaults**: Sensible fallbacks (stdio mode, port 3001 for SSE)
-- **Runtime Selection**: Auto-detection with manual override capabilities
+### Defensive Programming
+- Comprehensive timeout handling for all subprocess operations
+- Fallback detection strategies (Docker ping → ps fallback)
+- Safe package/image checks only when base runtimes are available
+- Guaranteed resource cleanup via finally blocks
 
-### Extensibility Points
-- **Runtime Abstraction**: New execution environments can be added following the detector/launcher pattern
-- **Mode Support**: Additional communication modes beyond stdio/SSE can be integrated
-- **Package Configuration**: NPM package and Docker image references easily configurable
+### Version Compatibility
+- Backward compatibility checks for Python debugpy package
+- Flexible import patterns supporting both package and direct script execution
+- Version string "0.11.1" maintained for package identification
 
-This package serves as a runtime-agnostic bridge enabling developers to debug MCP implementations regardless of their local development environment setup.
+The package serves as a robust, production-ready launcher that abstracts MCP debugging server deployment across heterogeneous development environments while providing excellent observability and error reporting.

@@ -1,96 +1,116 @@
 # scripts/
-@generated: 2026-02-11T23:48:04Z
+@generated: 2026-02-12T21:01:28Z
 
-## Overall Purpose and Responsibility
-Comprehensive automation and development workflow orchestration for the MCP Debugger project. This directory provides essential build, test, deployment, and environment management scripts that support the entire development lifecycle across multiple platforms.
+## Overview
 
-## Key Components and How They Relate
+The `scripts` directory serves as the operational backbone of the MCP Debugger project, containing build automation, development tooling, environment setup, and maintenance utilities. This comprehensive script collection orchestrates the entire development lifecycle from environment setup through production deployment.
 
-**Build and Bundle Management:**
-- `bundle.js` - Core bundling orchestrator for MCP server and proxy components with console silencing
-- `prepare-pack.js` - Workspace dependency resolution for npm publishing
-- `docker-build-if-needed.js` - Intelligent Docker image building with change detection
-- `check-bundle-size.js` - Bundle size validation for npm distribution constraints
+## Primary Responsibilities
 
-**Testing and Validation Infrastructure:**
-- `act-test.sh` - GitHub Actions local testing wrapper
-- `validate-push.js` - Pre-push CI simulation in clean environments  
-- `test-*.sh` scripts - Various integration and smoke testing automation
-- `cleanup-test-processes.js` - Orphaned process cleanup for test stability
+- **Build & Bundle Management**: Intelligent Docker builds, JavaScript bundling with console silencing, and package preparation for npm distribution
+- **Development Environment**: Cross-platform setup automation, dependency validation, and toolchain management
+- **Testing Infrastructure**: Comprehensive test orchestration including Docker smoke tests, MCP protocol validation, and CI simulation
+- **Debug Adapter Management**: Vendoring status checking, cross-platform binary validation, and adapter lifecycle management
+- **Quality Assurance**: Bundle size monitoring, memory diagnostics, security validation, and automated cleanup
 
-**Environment Setup and Diagnostics:**
-- `setup/` subdirectory - Platform-specific environment configuration
-- `*-env.ps1` scripts - Environment optimization for specific contexts (LLM consumption)
-- Memory diagnostic tools (`memdiag.ps1`, `memwatch.ps1`)
-- Logo and asset management utilities
+## Key Entry Points
 
-**Development Workflow Support:**
-- `safe-commit.sh` - Git commit wrapper with mandatory security checks
-- `sync-to-wsl.sh` - Cross-platform development environment synchronization
-- `start-sse-server.sh` - Runtime dependency validation and server launching
+### Build & Deployment
+- **`bundle.js`**: Primary bundling orchestrator with console silencing injection for MCP protocol compliance
+- **`docker-build-if-needed.js`**: Intelligent Docker image builder with file change detection
+- **`prepare-pack.js`**: NPM package preparation with workspace dependency resolution
+- **`validate-push.js`**: Pre-push validation via clean repository simulation
 
-**Quality Assurance:**
-- `check-adapters.js` - Debug adapter vendoring status validation
-- Coverage collection and analysis tools
-- Docker-based testing isolation
+### Development Environment  
+- **`setup/windows-rust-debug.ps1`**: Complete Windows Rust debugging environment setup
+- **`sync-to-wsl.sh`**: Windows-to-WSL project synchronization with build automation
+- **`install-claude-mcp.sh`**: Claude Code IDE integration installer
 
-## Public API Surface
+### Testing & Validation
+- **`test-docker-local.sh`**: Docker containerized smoke test runner
+- **`test-mcp-integration.sh`**: MCP protocol compliance validation
+- **`act-test.sh`**: GitHub Actions local testing wrapper
 
-**Primary Entry Points:**
-- `bundle.js` - Main application bundling with MCP protocol compliance
-- `docker-build-if-needed.js` - Conditional Docker image building
-- `validate-push.js` - Pre-push validation pipeline
-- `safe-commit.sh` - Secure Git commit workflow
-- `test-mcp-integration.sh` - End-to-end MCP protocol validation
+### Monitoring & Diagnostics
+- **`memwatch.ps1`**: Continuous Windows memory monitoring with CSV logging
+- **`memdiag.ps1`**: Comprehensive system memory analysis
+- **`check-adapters.js`**: Debug adapter vendoring status validation
 
-**Development Commands:**
-- `act-test.sh [ci|release|e2e]` - Local GitHub Actions testing
-- `sync-to-wsl.sh [--clean|--no-install|--no-build]` - WSL development sync
-- `start-sse-server.sh` - Server startup with dependency checks
+## Architecture Patterns
 
-**Analysis Tools:**
-- `check-adapters.js` - Adapter status reporting
-- `analyze_logo.py` - Asset suitability assessment
-- Memory monitoring utilities for performance analysis
-
-## Internal Organization and Data Flow
-
-**Build Pipeline:**
-Repository Changes → Bundle Creation → Size Validation → Docker Image → Testing → Deployment
-
-**Testing Workflow:**
-Local Development → Pre-commit Checks → CI Simulation → Integration Tests → Docker Smoke Tests
-
-**Environment Management:**
-Platform Detection → Dependency Installation → Configuration → Validation → Runtime Support
-
-**Cross-Platform Strategy:**
-- PowerShell scripts for Windows environments
-- Bash scripts for Unix-like systems
-- Node.js scripts for cross-platform core functionality
-- Docker for environment isolation and reproducibility
-
-## Important Patterns and Conventions
-
-**Robust Automation:**
-- Fail-fast error handling with meaningful exit codes
-- Comprehensive dependency checking before operations
-- Graceful degradation for non-critical components
-
-**MCP Protocol Compliance:**
-- Console output silencing to prevent protocol corruption
-- Strict stdio handling for MCP transport compatibility
-- Bundle optimization for "batteries included" npm distribution
-
-**Security-First Development:**
-- Mandatory personal information checks in commit workflows
-- Safe file operations with backup/restore mechanisms
-- Isolated testing environments to prevent contamination
-
-**Developer Experience Focus:**
-- Colored console output for visual feedback
-- Comprehensive help documentation
-- Intelligent default behaviors with override options
+### Intelligent Automation
+Scripts employ sophisticated decision-making logic:
+- Docker builds only when source files change
+- Bundle size validation with actionable feedback
+- Multi-platform compatibility with graceful fallbacks
 - Environment-aware execution (CI detection, platform detection)
 
-The scripts directory serves as the central nervous system for the MCP Debugger project, orchestrating complex multi-platform development workflows while maintaining strict quality and security standards.
+### Cross-Platform Support
+Comprehensive platform handling across Windows, Linux, macOS:
+- Platform-specific implementations (PowerShell vs Bash)
+- Consistent interfaces despite underlying differences
+- Graceful degradation when platform features unavailable
+
+### Development Workflow Integration
+Scripts integrate seamlessly into development workflows:
+- Pre-commit hooks for security validation (`safe-commit.sh`)
+- Local GitHub Actions testing (`act-test.sh`) 
+- NPM script integration for build processes
+- IDE integration utilities (Claude Code, WSL synchronization)
+
+## Critical Infrastructure Components
+
+### Console Silencing Architecture
+The bundle system implements sophisticated console output management to prevent MCP protocol corruption:
+- Runtime detection of stdio/SSE transport modes
+- Dynamic console method overriding based on CLI arguments
+- Environment variable fallbacks for configuration
+
+### Adapter Management System
+Centralized debug adapter lifecycle management:
+- Multi-platform binary validation (Windows, macOS, Linux ARM64/x64)
+- Vendoring status tracking across JavaScript and Rust adapters
+- Version management and dependency validation
+
+### Memory Diagnostics Framework
+Windows-specific memory analysis with multiple measurement strategies:
+- Performance counter integration
+- Process-level attribution
+- Long-term monitoring with CSV export
+- Memory leak detection capabilities
+
+## Integration Points
+
+### Docker Ecosystem
+- Container build optimization with change detection
+- Smoke test execution in isolated environments
+- Volume mounting for log collection and analysis
+- Multi-stage build support with caching
+
+### NPM/Node.js Ecosystem
+- Workspace dependency resolution for monorepo publishing
+- ESBuild integration with advanced bundling features
+- Package size monitoring for distribution optimization
+- CI/CD integration with proper exit codes
+
+### Git Workflow Integration  
+- Pre-push validation through repository cloning
+- Personal information security scanning
+- Safe commit workflows with optional hook bypassing
+- Branch-aware testing and validation
+
+## Dependencies
+
+### External Tools
+- **Docker**: Container orchestration and isolated testing
+- **Node.js/NPM/PNPM**: JavaScript runtime and package management
+- **Rust/Cargo**: Native compilation and cross-platform binaries
+- **Git**: Version control integration and repository operations
+- **Python**: Debug adapter support and analysis utilities
+
+### Platform-Specific Dependencies
+- **Windows**: PowerShell, MSYS2/MinGW-w64, Windows SDK
+- **Linux**: Bash, standard POSIX utilities, systemd integration
+- **Cross-platform**: Act (GitHub Actions), Claude CLI, WSL2
+
+This scripts collection represents a mature DevOps automation suite that handles the complexity of multi-platform debugging tool development while maintaining developer productivity and system reliability.

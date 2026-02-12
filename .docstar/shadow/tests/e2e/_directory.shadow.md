@@ -1,85 +1,106 @@
-# tests/e2e/
-@generated: 2026-02-11T23:48:09Z
+# tests\e2e/
+@generated: 2026-02-12T21:01:30Z
 
-## E2E Test Suite for MCP Debugger
+## MCP Debugger End-to-End Test Suite
 
-**Primary Purpose**: Comprehensive end-to-end validation of the MCP (Model Context Protocol) debugger across multiple languages, deployment scenarios, and transport mechanisms. This test directory ensures the debugger functions correctly in real-world usage patterns from development to production deployment.
+**Overall Purpose**: Comprehensive end-to-end test suite that validates the MCP (Model Context Protocol) debugger across all supported languages, deployment environments, and transport protocols. Ensures production readiness by testing real debugging workflows from session creation through variable inspection and execution control.
 
-## Overall Architecture
+## Core Components & Architecture
 
-The test suite is organized into three main validation layers:
+### Primary Test Matrices
+- **Language Coverage**: JavaScript, Python, Rust, Go, and Mock adapters with complete workflow validation
+- **Transport Protocols**: Both stdio and SSE (Server-Sent Events) transport mechanisms
+- **Deployment Scenarios**: Native execution, Docker containers, and npm package distribution
+- **Integration Patterns**: Direct MCP tool calls, debug adapter protocol (DAP) interactions, and cross-platform compatibility
 
-### 1. Core Functionality Tests (Root Level)
-- **Comprehensive Matrix Testing** (`comprehensive-mcp-tools.test.ts`): Tests all 19 MCP debugger tools across 5 languages (Python, JavaScript, Rust, Go, Mock) with detailed PASS/FAIL/SKIP reporting
-- **Language-Specific Smoke Tests**: Individual test files for each supported language (`mcp-server-smoke-*.test.ts`) validating complete debugging workflows
-- **Transport Validation**: SSE (Server-Sent Events) transport testing including critical IPC corruption fixes for JavaScript debugging
-- **Direct Integration**: Tests against locally built MCP server via stdio transport
+### Key Test Categories
 
-### 2. Containerized Deployment Tests (`docker/`)
-- **Docker Environment Validation**: Ensures MCP debugger works correctly when containerized
-- **Isolated Runtime Testing**: Tests debugging functionality in clean container environments across JavaScript, Python, and Rust
-- **Cross-Platform Compatibility**: Validates container-based deployment scenarios with proper resource management
+**Comprehensive Coverage (`comprehensive-mcp-tools.test.ts`)**
+Central 19-tool × 5-language test matrix that validates every MCP debugger tool against all available language adapters. Generates detailed PASS/FAIL/SKIP matrices with timing metrics and supports conditional execution based on toolchain availability.
 
-### 3. Distribution Package Tests (`npx/`)
-- **NPM Package Validation**: Tests the complete npm package distribution pipeline
-- **Global Installation Testing**: Validates `npx @debugmcp/mcp-debugger` functionality
-- **Real-World Usage Simulation**: Ensures language adapters and dependencies are correctly bundled in distributed packages
+**Language-Specific Smoke Tests**
+- `mcp-server-smoke-*.test.ts`: Individual language validation (JavaScript, Python, Rust, Go)
+- Tests complete debugging lifecycle with language-specific behaviors and constraints
+- Validates debugger integration, breakpoint management, stack inspection, and variable access
 
-## Key Components & Integration
-
-### Test Infrastructure
-- **MCP Client Management**: Standardized MCP client creation and lifecycle management across stdio and SSE transports
-- **Session State Management**: Sophisticated debug session state polling and event detection utilities
-- **Cross-Platform Utilities**: Docker container management, port allocation, and path normalization
-- **Language Adapter Testing**: Rust example building, Python/JavaScript script execution, and Go toolchain integration
-
-### Validation Patterns
-- **Complete Workflow Testing**: Session creation → breakpoint setting → debugging → variable inspection → execution control → cleanup
-- **Error Resilience**: Graceful handling of missing toolchains (Rust/Go) with conditional test skipping
-- **Resource Management**: Comprehensive cleanup patterns preventing resource leaks in CI environments
-- **Timing Coordination**: Strategic delays and polling for debug adapter protocol state transitions
+**Transport Protocol Validation**
+- SSE transport testing with critical console output silencing fixes
+- Stdio transport baseline functionality across all supported languages
+- Protocol-specific error handling and resource cleanup patterns
 
 ## Public API Surface
 
-### Main Entry Points
-- **Test Execution**: Jest/Vitest test suites with configurable timeouts and environment detection
-- **Utility Functions**: 
-  - `executeDebugSequence()`: Standardized debug workflow orchestration
-  - `callToolSafely()`: Safe MCP tool invocation with error handling
-  - `parseSdkToolResult()`: Response parsing for MCP SDK results
+### Primary Entry Points
+- **Matrix Testing**: `comprehensive-mcp-tools.test.ts` provides complete coverage validation
+- **Individual Language Tests**: Focused smoke tests for specific language debugging scenarios  
+- **Environment Testing**: Docker and npm deployment validation suites
+- **Utility Functions**: Shared infrastructure in `smoke-test-utils.ts` and specialized helpers
 
-### Configuration Options
-- **Environment Variables**: `SKIP_DOCKER`, `DOCKER_RUST_ENABLED`, `TIMEOUT_MULTIPLIER` for CI optimization
-- **Conditional Execution**: Automatic toolchain detection and test skipping for unavailable languages
-- **Transport Selection**: Support for stdio and SSE transport mechanisms
+### Core Test Infrastructure
+- `executeDebugSequence()`: Standard 8-step debug workflow (session → breakpoint → execute → inspect → cleanup)
+- `callToolSafely()`: Wrapped MCP tool calls with comprehensive error handling
+- `parseSdkToolResult()`: Protocol response normalization across test cases
+- Event waiting utilities (`test-event-utils.ts`) for async debugging state management
 
-## Critical Validation Scenarios
+## Internal Organization & Data Flow
 
-### Language Support Matrix
-- **Python**: DAP integration with debugpy, expression evaluation, variable inspection
-- **JavaScript**: Node.js debugging with IPC corruption fixes, console output handling
-- **Rust**: Delve integration, async debugging support, cross-compilation testing
-- **Go**: Toolchain availability detection, binary compilation with debug symbols
-- **Mock**: Adapter testing without external dependencies
+### Test Execution Patterns
+1. **Setup Phase**: MCP server startup, client connection establishment, environment validation
+2. **Language Detection**: Toolchain availability checks (Go, Rust compilers, Python runtime)
+3. **Debug Workflow**: Systematic validation of debugging operations with proper state transitions
+4. **Cleanup Phase**: Session closure, process termination, resource deallocation
 
-### Deployment Scenarios
-- **Local Development**: Direct MCP server testing via built artifacts
-- **Container Deployment**: Docker-based debugging with workspace mounting
-- **Global Distribution**: NPM package installation and execution via npx
+### Specialized Test Environments
 
-## Internal Organization
+**Docker Integration (`docker/` subdirectory)**
+- Containerized debugging validation with path translation (host ↔ container)
+- Multi-language Docker image building and container lifecycle management
+- Isolated test execution preventing host environment interference
 
-### Data Flow
-1. **Environment Preparation**: Toolchain detection, port allocation, server startup
-2. **MCP Client Connection**: Transport establishment (stdio/SSE) with health checking
-3. **Debug Session Lifecycle**: Creation, configuration, execution, and cleanup
-4. **Result Validation**: Response parsing, state verification, and error handling
-5. **Resource Cleanup**: Session termination, server shutdown, container removal
+**NPX Distribution Testing (`npx/` subdirectory)**
+- End-to-end npm package validation from build through global installation
+- Content fingerprinting and caching system for efficient CI/CD execution
+- Real-world deployment simulation ensuring adapters are properly packaged
 
-### Key Dependencies
-- **MCP SDK**: `@modelcontextprotocol/sdk` for protocol communication
-- **Language Runtimes**: Python, Node.js, Rust toolchain, Go compiler as available
-- **Test Framework**: Vitest with extended timeouts and async support
-- **System Integration**: Docker, npm, child processes for real-world simulation
+**Rust Compilation Pipeline (`rust-example-utils.ts`)**
+- Cross-platform Rust binary compilation with Docker-based Linux builds
+- Intelligent caching and incremental compilation for performance
+- Windows GNU toolchain handling with MSVC fallbacks
 
-This test directory serves as the definitive validation suite ensuring the MCP debugger maintains compatibility, reliability, and functionality across all supported languages, deployment methods, and usage patterns from development through production distribution.
+## Critical Integration Points
+
+### MCP Protocol Validation
+- Complete MCP tool coverage: session management, breakpoint control, execution flow, variable inspection
+- Transport protocol testing (stdio/SSE) with error condition handling
+- Client SDK integration ensuring proper message serialization/deserialization
+
+### Debug Adapter Integration
+- DAP (Debug Adapter Protocol) compliance testing for each language
+- Language-specific debugging behavior validation (Python unverified breakpoints, Rust async debugging)
+- Cross-platform debugger integration (Node.js inspector, Python debugpy, Rust/Go Delve)
+
+### Production Readiness Checks
+- Resource leak prevention with comprehensive cleanup strategies
+- Error handling resilience across failure modes
+- Performance validation with configurable timeouts and retry logic
+- CI/CD pipeline integration with environment-based test skipping
+
+## Important Patterns & Conventions
+
+### Test Isolation & Reliability
+- Sequential execution where needed to prevent resource conflicts
+- Multi-level cleanup (afterEach, afterAll) ensuring no state leakage
+- Defensive error handling with graceful degradation for missing dependencies
+- Environment variable configuration for CI flexibility
+
+### Cross-Platform Compatibility
+- Platform-specific executable resolution (python vs python3, Go/Rust toolchain detection)
+- Path normalization for Windows/Unix compatibility in Docker environments  
+- Dynamic port allocation preventing conflicts in concurrent test execution
+
+### Real-World Simulation
+- Uses actual example programs rather than mock implementations
+- Tests against real debug adapters and language runtimes
+- Validates complete user workflows from session creation to program termination
+
+The test suite serves as the primary quality gate ensuring the MCP debugger functions correctly across all supported languages, deployment environments, and usage patterns before production release.

@@ -1,66 +1,47 @@
-# tests/adapters/go/integration/
-@generated: 2026-02-11T23:47:37Z
+# tests\adapters\go\integration/
+@generated: 2026-02-12T21:00:52Z
 
 ## Purpose
-Integration test directory for the Go debugger adapter, containing smoke tests that validate core functionality of the Go adapter without launching actual debugger processes. This directory ensures the Go adapter can properly build commands, configure launch settings, and integrate with the broader debugger ecosystem.
+Integration test directory for the Go debugger adapter, providing comprehensive smoke tests that validate the adapter's core functionality without launching actual debugger processes. This module ensures the Go adapter can properly configure debugging sessions, build command-line invocations, and handle various Go debugging scenarios.
 
-## Key Components
+## Test Architecture
+The directory implements a **mock-based integration testing approach** that isolates the adapter logic from external dependencies:
+- **Fake Dependencies**: Creates mock AdapterDependencies with no-op implementations to prevent actual file system access and process launching
+- **Controlled Environment**: Manages DLV_PATH environment variables for testing scenarios
+- **Session Simulation**: Uses standardized test identifiers (session ID: 'session-go-smoke', port: 48766) for consistent testing
 
-### Test Infrastructure
-- **go-session-smoke.test.ts**: Primary integration test suite providing comprehensive coverage of Go adapter functionality
-- **Mock Dependencies**: Sophisticated mocking system that isolates adapter logic from external dependencies while maintaining realistic behavior patterns
+## Key Test Coverage Areas
 
-### Test Coverage Areas
+### Command Generation & Validation
+- Validates `buildAdapterCommand()` method for generating proper dlv DAP commands
+- Ensures command paths are absolute and executable files exist
+- Verifies correct TCP port configuration and required 'dap' argument handling
 
-**Command Generation Testing**
-- Validates `buildAdapterCommand()` method for proper dlv DAP command construction
-- Ensures TCP port configuration and absolute path handling
-- Verifies required 'dap' argument and listen parameter formatting
+### Configuration Transformation
+- **Standard Go Programs**: Tests `transformLaunchConfig()` for normal debugging scenarios with proper program path, working directory, arguments, and environment handling
+- **Go Test Mode**: Validates test-specific configuration including test flags (-test.v, -test.run) and mode setting
 
-**Configuration Management** 
-- Tests `transformLaunchConfig()` for both normal Go programs and test mode
-- Validates standard debug mode configuration handling
-- Ensures proper test-specific argument processing (-test.v, -test.run)
+### Adapter Metadata & Dependencies
+- Validates factory metadata exposure (display names, file extensions, descriptions)
+- Tests dependency reporting for Go toolchain and Delve debugger
+- Ensures installation instructions contain proper references
 
-**Metadata & Dependencies**
-- Validates factory metadata exposure (display name, file extensions, descriptions)
-- Tests dependency reporting and installation instruction generation
+## Test Configuration & Samples
+- Uses controlled test paths referencing `examples/go/main.go` and `examples/go-hello`
+- Employs `process.execPath` as mock delve binary for testing
+- Implements isolation through mock file system operations that return empty/false values
 
 ## Public API Surface
+The tests validate the key entry points of the Go adapter:
+- `GoAdapterFactory` instantiation and configuration
+- `buildAdapterCommand()` method for command generation
+- `transformLaunchConfig()` method for configuration processing
+- Metadata and dependency reporting interfaces
 
-### Entry Points
-- Integration test suite accessible via standard test runners (vitest)
-- Mock adapter factory for isolated testing scenarios
-- Environment configuration utilities for test setup
+## Integration Patterns
+- **Mock-First Testing**: All external dependencies are mocked to focus on adapter logic
+- **Environment Simulation**: Real process.env access with controlled DLV_PATH manipulation
+- **Error Boundary Testing**: Mock processLauncher throws errors to prevent actual process execution
+- **Comprehensive Validation**: Tests cover command building, configuration transformation, metadata exposure, and dependency management
 
-### Test Configuration
-- **Test Port**: 48766 for consistent network testing
-- **Session ID**: 'session-go-smoke' for test identification
-- **Sample Paths**: References to examples/go/ directory for realistic testing
-
-## Internal Organization
-
-### Data Flow
-1. **Setup Phase**: Mock dependencies created with no-op implementations
-2. **Environment Management**: DLV_PATH variable controlled for test isolation  
-3. **Test Execution**: Various adapter methods tested in isolation
-4. **Validation**: Results compared against expected command structures and configurations
-
-### Testing Patterns
-- **Isolation Strategy**: Mock processLauncher prevents actual process execution
-- **File System Mocking**: All file operations return controlled values
-- **Environment Control**: Real process.env access but with controlled DLV_PATH
-
-## Important Conventions
-- Uses fake DLV path (process.execPath) as mock delve binary for testing
-- Maintains realistic command structures while preventing actual debugger launches
-- Follows standard vitest testing patterns and assertions
-- Ensures all adapter functionality is testable without external Go/Delve installations
-
-## Dependencies
-- **@debugmcp/adapter-go**: Core Go adapter implementation being tested
-- **@debugmcp/shared**: Shared types and interfaces (AdapterDependencies)
-- **vitest**: Testing framework for execution and assertions
-- **Node.js built-ins**: fs, path modules for file system operations
-
-This directory serves as the integration testing gateway for the Go adapter, ensuring reliable functionality across different configuration scenarios while maintaining complete isolation from external dependencies.
+This integration test suite serves as a critical validation layer ensuring the Go adapter maintains proper functionality across different debugging scenarios while remaining isolated from external system dependencies.

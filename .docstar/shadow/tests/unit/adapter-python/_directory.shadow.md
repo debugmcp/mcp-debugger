@@ -1,47 +1,82 @@
-# tests/unit/adapter-python/
-@generated: 2026-02-11T23:47:34Z
+# tests\unit\adapter-python/
+@generated: 2026-02-12T21:00:55Z
 
-## Python Debug Adapter Test Suite
+## Python Debug Adapter Test Module
 
-This directory contains comprehensive unit tests for the Python debug adapter implementation, specifically testing the `PythonDebugAdapter` class that enables Python debugging capabilities within VS Code through the Debug Adapter Protocol (DAP).
+This directory contains comprehensive unit tests for the Python language debug adapter implementation, specifically testing the `PythonDebugAdapter` class and its integration with the debugpy debugging protocol.
 
 ### Overall Purpose
 
-The test suite validates the complete lifecycle and functionality of the Python debug adapter, ensuring reliable debugging experiences for Python developers. It covers environment validation, debugpy integration, configuration management, and DAP communication protocols.
+The test suite validates the complete lifecycle and functionality of Python debugging capabilities within a multi-language debug environment. It ensures the adapter can properly:
+- Validate Python runtime environments and dependencies
+- Transform and manage debug configurations
+- Communicate with the Debug Adapter Protocol (DAP)
+- Handle Python-specific debugging features and error scenarios
 
-### Key Components & Architecture
+### Key Components
 
-**Test Infrastructure:**
-- Mock-based testing using Vitest framework with comprehensive dependency isolation
-- Standardized mock factories for consistent test setup across all test cases
-- EventEmitter simulation for testing asynchronous adapter communication
+#### Core Test Infrastructure
+- **Mock Management**: Comprehensive mocking of external dependencies (`child_process`, `python-utils`) for isolated testing
+- **Dependency Factory**: Standardized creation of mock dependencies with consistent logger interfaces
+- **Test Lifecycle**: Automatic cleanup and state management between test cases
 
-**Core Test Categories:**
-- **Environment Validation**: Tests Python executable resolution, version checking, and debugpy installation detection
-- **Configuration Management**: Validates launch configuration transformation and default settings application  
-- **DAP Communication**: Tests Debug Adapter Protocol message handling, exception filters, and event processing
-- **Lifecycle Management**: Validates adapter initialization, connection state management, and proper cleanup
-- **Error Handling**: Tests error message translation and user-friendly diagnostic reporting
+#### Primary Test Categories
 
-### Testing Patterns & Conventions
+**Environment Validation Engine**
+- Python executable resolution and caching mechanisms
+- Version compatibility checking (Python 3.7+ requirement)
+- Debugpy installation detection and virtual environment handling
+- Graceful error handling for runtime environment issues
 
-**Dependency Injection**: Uses factory patterns to create standardized mock dependencies, enabling isolated unit testing without external system dependencies.
+**DAP Communication Layer**
+- Command building for debugpy adapter invocation
+- Exception filter validation and breakpoint management
+- Event handling and thread tracking from debug sessions
+- Feature support detection and requirement specification
 
-**State Machine Testing**: Validates adapter lifecycle transitions (initialization → connection → disposal) with proper event emission and state consistency.
+**Configuration Management**
+- Launch configuration transformation with Python-specific defaults
+- Default configuration generation for baseline debugging setups
+- DAP capabilities reporting including exception breakpoint filters
 
-**Mock Strategy**: Extensively mocks external dependencies including:
-- File system operations (`python-utils`)
-- Process spawning (`child_process`)
-- Network communication for debugpy integration
+**Error Handling & User Experience**
+- Translation of technical Python/debugpy errors into user-friendly messages
+- Installation guidance and troubleshooting support
+- State management during error conditions
 
-**Error Translation Testing**: Ensures Python/debugpy technical errors are transformed into actionable user guidance with installation instructions and troubleshooting steps.
+**Debugpy Integration**
+- Spawn-based version detection of debugpy installations
+- Process lifecycle management for debug sessions
+- Connection state tracking and event emission
 
-### Integration Points
+### Public API Surface
 
-The test suite validates integration with:
-- **debugpy**: Python's official debug adapter implementation
-- **Python Runtime**: Version validation and virtual environment detection
-- **VS Code DAP**: Debug Adapter Protocol compliance and capability reporting
-- **Configuration System**: Launch configuration transformation and validation
+The tests validate the main entry points of the Python debug adapter:
+- `PythonDebugAdapter` constructor and initialization
+- `resolveExecutablePath()` for environment validation
+- `buildAdapterCommand()` for launching debug sessions  
+- `transformLaunchConfig()` for configuration processing
+- `supportsFeature()` and `getFeatureRequirements()` for capability detection
+- `translateErrorMessage()` for user-facing error handling
+- Lifecycle methods: `connect()`, `disconnect()`, `dispose()`
 
-This comprehensive test coverage ensures the Python debug adapter provides reliable debugging functionality while maintaining proper error handling and user experience standards.
+### Architecture Patterns
+
+The test suite employs several key patterns:
+- **Dependency Injection**: Extensive use of mock dependencies for isolated unit testing
+- **State Machine Testing**: Validation of adapter lifecycle transitions and state management
+- **Event-Driven Testing**: EventEmitter patterns for testing asynchronous debug session communication
+- **Caching Validation**: Tests for performance optimization through result caching
+- **Error Boundary Testing**: Comprehensive validation of error handling and recovery scenarios
+
+### Internal Organization
+
+Tests are organized by functional responsibility rather than implementation structure:
+1. **Environment Setup & Validation**: Runtime environment compatibility
+2. **Command Generation**: DAP protocol command construction
+3. **Feature Detection**: Capability reporting and requirement specification
+4. **Error Translation**: User experience and error messaging
+5. **Lifecycle Management**: Connection, disconnection, and cleanup flows
+6. **Integration Testing**: End-to-end debugpy integration scenarios
+
+This organization ensures comprehensive coverage of all Python debugging scenarios while maintaining clear separation of concerns for maintainability and debugging of test failures.

@@ -1,34 +1,34 @@
-# tests/fixtures/javascript-e2e/
-@generated: 2026-02-11T23:47:32Z
+# tests\fixtures\javascript-e2e/
+@generated: 2026-02-12T21:00:49Z
 
 ## Purpose
-This directory contains E2E testing fixtures specifically designed for validating JavaScript/TypeScript debugging capabilities. It serves as a controlled environment for testing debugging workflows, breakpoint functionality, and source map integration in development tools.
+E2E testing fixture directory for validating JavaScript/TypeScript debugging capabilities. Contains minimal test programs designed to verify debugger functionality, breakpoint handling, and source map support in end-to-end testing scenarios.
 
 ## Key Components
-- **app.ts**: Minimal TypeScript program serving as the primary debugging target
-  - Contains strategically placed breakpoint markers (`// BREAK_HERE`)
-  - Demonstrates TypeScript language features (type annotations, string transformations)
-  - Provides simple, predictable execution flow for test automation
+- **app.ts**: Primary TypeScript testing fixture providing a simple program with designated breakpoint locations for automated debugging verification
 
 ## Public API Surface
-The directory exposes a single entry point:
-- **app.ts**: Main executable fixture that can be compiled and debugged by E2E testing frameworks
+- **Test Entry Point**: `app.ts` serves as the main executable for E2E debugging tests
+- **Breakpoint Markers**: `// BREAK_HERE` comments provide standardized locations for automated test breakpoint placement
+- **TypeScript Features**: Type annotations and transformations demonstrate language-specific debugging scenarios
 
 ## Internal Organization
-The fixture follows a minimal architecture pattern:
-1. **Simple data transformation pipeline**: String literal → uppercase transformation → console output
-2. **Explicit breakpoint markers**: Comments indicating where debugging tools should pause execution
-3. **TypeScript language showcase**: Demonstrates type annotations and basic operations for comprehensive testing
+The directory follows a minimal fixture pattern:
+- Single-file programs with clear debugging targets
+- Strategic placement of breakpoint markers for test automation
+- TypeScript compilation and source map generation workflow
+- Simple console output for verification of execution flow
 
-## Testing Context
-This fixture module enables E2E tests to:
-- Verify breakpoint setting and hitting functionality
-- Test source map accuracy in TypeScript-to-JavaScript compilation
-- Validate debugging tool integration with TypeScript projects
-- Ensure proper variable inspection and step-through debugging capabilities
+## Data Flow
+1. TypeScript source compilation with source map generation
+2. Debugger attachment at designated breakpoint locations
+3. Variable inspection and transformation verification
+4. Console output validation for execution confirmation
 
-## Patterns and Conventions
-- Uses descriptive variable names for clear debugging visualization
-- Employs `// BREAK_HERE` comment convention for automated test breakpoint placement
-- Maintains minimal complexity to isolate debugging functionality from application logic
-- Follows standard TypeScript conventions while remaining accessible for testing automation
+## Important Patterns
+- **Breakpoint Annotation**: `// BREAK_HERE` comments serve as standardized markers for automated test tooling
+- **Minimal Complexity**: Programs designed with simplest possible logic while demonstrating key debugging features
+- **Type Safety**: Explicit TypeScript annotations for testing language-specific debugging capabilities
+- **Source Map Testing**: Implicit support for debugging transpiled code with proper source mapping
+
+This fixture directory enables comprehensive testing of debugging workflows across JavaScript/TypeScript environments in automated E2E test suites.

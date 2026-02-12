@@ -1,73 +1,77 @@
-# scripts/setup/
-@generated: 2026-02-11T23:47:40Z
+# scripts\setup/
+@generated: 2026-02-12T21:00:58Z
 
-## Overall Purpose and Responsibility
+## Overview
 
-The `scripts/setup` directory contains platform-specific environment setup automation for the mcp-debugger project. This module is responsible for bootstrapping complete development and debugging environments across different operating systems, ensuring all necessary toolchains, dependencies, and configurations are properly installed and configured.
+The `scripts/setup` directory contains platform-specific environment setup automation for the mcp-debugger project. This module handles the complex task of configuring complete Rust debugging environments across different operating systems, with particular focus on toolchain installation, cross-compilation setup, and validation testing.
 
-## Key Components and Architecture
+## Primary Responsibilities
 
-**Windows Setup Infrastructure (`windows-rust-debug.ps1`)**:
-- PowerShell-based automation for Windows environments
-- Comprehensive Rust toolchain management with GNU/MSVC dual-target support
-- MSYS2/MinGW-w64 integration for native Windows debugging capabilities
-- Automated dependency resolution and installation via winget/pacman
-- Environment persistence and PATH management
+- **Cross-platform Environment Setup**: Automates installation and configuration of Rust toolchains, debugging tools, and build dependencies
+- **Toolchain Management**: Orchestrates setup of multiple Rust targets (GNU, MSVC) with appropriate fallback mechanisms  
+- **Development Environment Validation**: Builds example projects and runs smoke tests to verify correct installation
+- **Path and Environment Configuration**: Manages system PATH updates and environment variables for optimal debugging experience
 
-**Core Setup Workflow**:
-1. **Environment Validation**: Verifies platform requirements and existing installations
-2. **Toolchain Installation**: Installs and configures Rust toolchains (stable-gnu primary, MSVC fallback)
-3. **Debugging Tools Setup**: Configures GNU toolchain (dlltool, gcc, ld, as) for debugging support
-4. **Dependency Management**: Ensures MSYS2 and MinGW-w64 availability through automated installation
-5. **Validation Testing**: Builds example projects and runs smoke tests to verify setup
+## Key Components
+
+### Windows Setup (windows-rust-debug.ps1)
+The primary entry point for Windows environment configuration, providing:
+
+- **Rust Toolchain Installation**: Installs and configures stable-gnu and stable-msvc toolchains via rustup
+- **GNU Tooling Integration**: Configures dlltool.exe, gcc, ld, and assembler from MSYS2/MinGW-w64
+- **MSYS2 Management**: Automated detection, installation, and package management for GNU toolchain dependencies
+- **Build Validation**: Compiles bundled example projects (hello_world, async_example) with fallback strategies
+- **Environment Persistence**: Optional PATH and environment variable updates for user sessions
 
 ## Public API Surface
 
-**Primary Entry Points**:
-- `windows-rust-debug.ps1`: Main Windows setup script with configurable parameters
-  - `-UpdateUserPath`: Persists environment changes to user profile
-  - `-SkipBuild`: Bypasses example project compilation for faster setup
-  - `-SkipTests`: Skips validation testing for minimal installations
-
-**Key Utility Functions**:
-- `Invoke-CommandChecked`: Robust command execution with error handling and environment support
-- `Ensure-Msys2`: Automated MSYS2 detection and installation orchestration
-- `Ensure-MingwToolchain`: MinGW-w64 toolchain installation and validation
-- `Build-ExampleProject`: Multi-target Rust project building with fallback support
-
-## Internal Organization and Data Flow
-
-**Dependency Chain**:
-```
-Platform Detection → Rust Toolchain → GNU Tools → MSYS2/MinGW → Environment Config → Validation
+### Command-Line Interface
+```powershell
+.\windows-rust-debug.ps1 [-UpdateUserPath] [-SkipBuild] [-SkipTests]
 ```
 
-**Configuration Management**:
-- Environment variable setup (DLLTOOL, PATH modifications)
-- Toolchain preference ordering (GNU primary, MSVC secondary)
-- Persistent vs. session-only configuration options
+**Parameters**:
+- `UpdateUserPath`: Persists environment changes to user profile
+- `SkipBuild`: Bypasses example project compilation
+- `SkipTests`: Skips smoke test execution
 
-**Error Handling Strategy**:
-- Graceful degradation for non-critical components
-- Comprehensive validation at each setup stage
-- Fallback mechanisms for toolchain selection
+### Core Functions
+- `Invoke-CommandChecked`: Robust command execution with proper error handling and environment support
+- `Build-ExampleProject`: Rust project compilation with GNU/MSVC target fallbacks
+- `Ensure-MingwToolchain`: GNU toolchain installation and validation
+- `Test-MingwTools`: Verification of required debugging tools availability
 
-## Important Patterns and Conventions
+## Internal Organization
 
-**Cross-Platform Preparation**: Directory structure designed to accommodate additional platform-specific setup scripts (Linux, macOS) following the Windows PowerShell model.
+The setup process follows a structured workflow:
 
-**Robust Automation**: 
-- Idempotent operations that can be safely re-run
-- Comprehensive error checking with meaningful diagnostics
-- Automatic detection of existing installations to avoid conflicts
+1. **Environment Validation**: Checks Windows compatibility and existing tool availability
+2. **Toolchain Installation**: Installs Rust toolchains through rustup with target-specific configurations
+3. **GNU Integration**: Configures MSYS2/MinGW-w64 toolchain for dlltool and cross-compilation support
+4. **Build Testing**: Validates installation by compiling example Rust projects
+5. **Smoke Testing**: Runs comprehensive tests via pnpm/vitest to ensure debugging capabilities
 
-**Development Workflow Integration**:
-- Validates setup through actual project builds
-- Integrates with existing npm/pnpm test infrastructure
-- Supports both minimal and full development environment configurations
+## Data Flow
 
-**Target Use Cases**:
-- New developer onboarding
-- CI/CD environment preparation  
-- Debugging environment standardization across development teams
-- Automated testing infrastructure setup
+```
+User Invocation → Environment Check → Rust Installation → GNU Toolchain Setup → 
+Example Builds → Smoke Tests → Environment Persistence (optional)
+```
+
+The module maintains state through environment variables (particularly `DLLTOOL`) and PATH modifications, with graceful degradation when optional components fail.
+
+## Key Patterns
+
+- **Graceful Fallbacks**: Non-critical failures (MSYS2 installation, GNU builds) don't halt the setup process
+- **Multi-Target Support**: Prioritizes GNU toolchain but maintains MSVC compatibility
+- **Idempotent Operations**: Safe to re-run without side effects
+- **Comprehensive Validation**: Each installation step includes verification testing
+- **User Choice**: Optional persistence of environment changes respects user preferences
+
+## Dependencies
+
+- **External Tools**: rustup, MSYS2/MinGW-w64, winget, pnpm, cargo
+- **System Requirements**: Windows environment with PowerShell execution policy allowing scripts
+- **Project Structure**: Assumes standard mcp-debugger project layout with examples in relative paths
+
+This setup module serves as the foundation for cross-platform Rust debugging support, ensuring developers have properly configured environments for both development and debugging workflows.

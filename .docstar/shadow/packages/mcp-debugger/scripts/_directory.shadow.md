@@ -1,74 +1,70 @@
-# packages/mcp-debugger/scripts/
-@generated: 2026-02-11T23:47:37Z
+# packages\mcp-debugger\scripts/
+@generated: 2026-02-12T21:00:55Z
 
 ## MCP Debugger Scripts Directory
 
-**Purpose:** Contains build automation scripts for packaging and distributing the MCP debugger CLI tool as production-ready artifacts with all necessary runtime dependencies.
+**Purpose:** Build automation and packaging infrastructure for the MCP debugger CLI tool. This directory contains scripts that orchestrate the creation of distributable artifacts, including CLI bundles, proxy components, and vendor dependencies required for multi-language debugging support.
 
-### Core Responsibility
+### Core Responsibilities
 
-This directory orchestrates the complete build pipeline for the MCP debugger, transforming TypeScript source code and vendor dependencies into distributable packages. It handles the complex task of bundling multiple runtime components (CLI, proxy, debug adapters) while managing platform-specific vendor assets.
+This directory serves as the build pipeline for the MCP debugger package, handling:
+
+- **CLI Distribution Creation:** Bundling the debugger CLI into executable artifacts
+- **Proxy Component Packaging:** Creating standalone DAP (Debug Adapter Protocol) proxy bundles  
+- **Vendor Asset Management:** Copying and organizing third-party debugging adapters
+- **Cross-Platform Support:** Managing platform-specific dependencies and assets
+- **npm Package Preparation:** Generating ready-to-publish distribution packages
 
 ### Key Components
 
 **bundle-cli.js**
-- Main build orchestrator that creates production distributions
-- Handles TypeScript compilation and bundling via tsup
-- Manages vendor asset collection from multiple adapter packages
-- Generates executable CLI scripts and npm-ready tarballs
+- Primary build orchestrator and entry point for the packaging process
+- Coordinates multiple bundling operations through `bundleProxy()` and `bundleCLI()` functions
+- Manages complex asset copying from monorepo shared resources
+- Handles vendor dependencies for JavaScript (js-debug) and Rust (CodeLLDB) debugging adapters
 
-### Build Pipeline Architecture
+### Build Architecture & Data Flow
 
-**Multi-Stage Bundling Process:**
-1. **Proxy Bundle:** Creates CommonJS proxy bundle for maximum compatibility
-2. **CLI Bundle:** Generates ESM CLI with Node.js compatibility shims
-3. **Asset Collection:** Copies runtime dependencies from repo-wide distributions
-4. **Vendor Management:** Handles platform-specific debug adapter assets
-5. **Package Generation:** Creates npm-ready tarballs for distribution
+The build process follows a structured pipeline:
 
-**Directory Flow:**
-```
-packages/mcp-debugger/src/ → dist/ → package/dist/ → *.tgz
-```
+1. **Bundle Creation:** Uses tsup to create optimized bundles for both CLI and proxy components
+2. **Asset Aggregation:** Copies shared runtime assets from repo-wide distributions (proxy, errors, adapters, session, utils)
+3. **Vendor Integration:** Incorporates third-party debugging adapters with platform-specific handling
+4. **Distribution Packaging:** Creates multiple output formats including ESM bundles, executable wrappers, and npm tarballs
 
-### Public API & Entry Points
+### Public API Surface
 
-**Primary Build Command:**
-- `node bundle-cli.js` - Executes complete build pipeline
+**Main Entry Point:**
+- `bundle-cli.js` - Execute via Node.js to trigger complete build process
 
 **Key Functions:**
-- `bundleProxy()` - Creates DAP proxy distribution bundle
-- `bundleCLI()` - Main orchestrator for all CLI build operations
+- `bundleProxy()` - Creates DAP proxy bundle for debugging communication
+- `bundleCLI()` - Main orchestrator for CLI packaging and distribution
 
-### Vendor Asset Management
+### Internal Organization
 
-**Multi-Platform Support:**
-- JavaScript debug adapters via `js-debug` vendor assets
-- Rust debug adapters via CodeLLDB with platform-specific binaries
-- Environment-driven platform selection (`CODELLDB_PACKAGE_PLATFORMS`)
-- Graceful fallback handling for missing vendor dependencies
+**Directory Structure Management:**
+- Sources from `packages/mcp-debugger/src/` 
+- Outputs to `packages/mcp-debugger/dist/` for runtime use
+- Mirrors to `packages/mcp-debugger/package/dist/` for npm packaging
+- Integrates with monorepo shared assets from repo root
 
-### Output Artifacts
+**Vendor Asset Handling:**
+- JavaScript debugging: `js-debug` adapter integration
+- Rust debugging: CodeLLDB with configurable platform support
+- Environment-driven platform selection via `CODELLDB_PACKAGE_PLATFORMS`
 
-**Runtime Distribution:**
-- `packages/mcp-debugger/dist/` - Complete CLI runtime with all dependencies
-- Platform-specific debug adapter binaries
-- Executable wrapper scripts with Node.js compatibility
+### Important Patterns
 
-**Packaging Distribution:**
-- `packages/mcp-debugger/package/dist/` - npm-ready mirror
-- `debugmcp-*.tgz` - Fresh tarball for distribution
+**Build Configuration:**
+- ESM-first approach with CommonJS compatibility shims
+- Node.js 18+ target with comprehensive dependency bundling
+- Platform-aware vendor asset management
+- Graceful degradation with warning messages for missing dependencies
 
-### Integration Patterns
+**Error Handling:**
+- Comprehensive try-catch blocks around vendor operations
+- Process-level error handling with explicit exit codes
+- Informative warning messages for missing optional dependencies
 
-**Monorepo Integration:**
-- Sources shared assets from repo root (`dist/proxy/`, `dist/errors/`, etc.)
-- Coordinates with individual adapter packages for vendor assets
-- Maintains separation between development and distribution artifacts
-
-**Build Tool Integration:**
-- Uses tsup for TypeScript bundling with custom configurations
-- Leverages Node.js built-ins for filesystem operations
-- Integrates with npm pack for tarball generation
-
-This directory serves as the critical bridge between development source code and production-ready CLI distributions, handling all the complexity of multi-platform builds and dependency management.
+This scripts directory enables the MCP debugger to be distributed as a self-contained CLI tool with embedded debugging capabilities for multiple programming languages, while maintaining compatibility across different deployment environments.

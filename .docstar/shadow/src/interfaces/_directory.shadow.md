@@ -1,59 +1,63 @@
-# src/interfaces/
-@generated: 2026-02-11T23:47:36Z
+# src\interfaces/
+@generated: 2026-02-12T21:00:54Z
 
 ## Purpose
-The interfaces directory defines TypeScript contracts and abstractions that enable dependency injection, testability, and loose coupling throughout the application. It provides comprehensive interface definitions for external dependencies, process management, and system command operations.
+The interfaces directory defines the core abstraction layer for the application, providing TypeScript contracts for system operations, dependency injection, and process management. This module serves as the foundation for testability and modularity by abstracting external dependencies and establishing clear API boundaries.
 
-## Key Components and Architecture
+## Key Components and Organization
 
-### Dependency Injection Foundation
-- **external-dependencies.ts**: Core dependency injection interfaces abstracting Node.js built-ins (filesystem, child processes, networking) and application services (logging, environment, proxy management)
-- **IDependencies**: Central container aggregating all external dependencies for constructor injection
-- **PartialDependencies**: Type alias supporting gradual migration and optional dependency patterns
-- **Factory interfaces**: ILoggerFactory, IChildProcessFactory, IProxyManagerFactory for complex object creation
+### System Abstractions (`external-dependencies.ts`)
+The primary dependency injection hub containing comprehensive interfaces for:
+- **Core System Operations**: File system (IFileSystem), process management (IProcessManager), networking (INetworkManager)
+- **Application Services**: Logging (ILogger), environment access (IEnvironment) 
+- **Factory Patterns**: Component creation interfaces (ILoggerFactory, IChildProcessFactory)
+- **Complete DI Container**: IDependencies aggregates all interfaces for constructor injection
 
-### Process Management Abstractions
-- **process-interfaces.ts**: High-level process management interfaces built on top of Node.js child_process
-- **IProcess**: Domain-focused abstraction over ChildProcess with simplified API
-- **Specialized launchers**: IDebugTargetLauncher for Python debugging, IProxyProcessLauncher for proxy operations
-- **IProcessLauncherFactory**: Central factory for all process launcher types
+### Process Management (`process-interfaces.ts`) 
+Specialized abstractions for application-specific process operations:
+- **General Process Control**: IProcess, IProcessLauncher for basic child process operations
+- **Debug Target Management**: IDebugTargetLauncher, IDebugTarget for Python debugging scenarios
+- **Proxy Process Handling**: IProxyProcessLauncher, IProxyProcess for proxy session management
+- **Centralized Factory**: IProcessLauncherFactory creates all launcher types
 
-### System Command Resolution
-- **command-finder.ts**: Interface for finding executable commands in system PATH
-- **CommandFinder**: Contract for command resolution with async PATH lookup
-- **CommandNotFoundError**: Specialized error handling for command resolution failures
+### Command Resolution (`command-finder.ts`)
+Simple but critical interface for system command discovery:
+- **CommandFinder Interface**: Async command path resolution
+- **CommandNotFoundError**: Specialized error handling for missing commands
 
 ## Public API Surface
+The module provides three main entry points:
 
-### Main Entry Points
-- **IDependencies**: Primary dependency container interface for application-wide injection
-- **IProcessLauncherFactory**: Central factory for all process management operations
-- **CommandFinder**: Interface for system command resolution
-- **IFileSystem, ILogger, IEnvironment**: Core service abstractions
+1. **Dependency Injection** (`IDependencies`, `PartialDependencies`)
+   - Complete application dependency container
+   - Gradual migration support through optional dependencies
 
-### Specialized Process Management
-- **IDebugTargetLauncher**: Python debug session management
-- **IProxyProcessLauncher**: Proxy process lifecycle management
-- **IProcessLauncher**: General-purpose process spawning
+2. **Process Management Factory** (`IProcessLauncherFactory`) 
+   - Creates specialized launchers for different process types
+   - Central point for all process-related operations
 
-## Internal Organization
+3. **Command Resolution** (`CommandFinder`)
+   - System PATH command discovery
+   - Foundation for executable location
 
-### Layered Abstraction Strategy
-1. **System Layer**: Abstracts Node.js built-ins (fs, child_process, net) via external-dependencies.ts
-2. **Domain Layer**: Provides domain-specific process management via process-interfaces.ts
-3. **Utility Layer**: System command utilities via command-finder.ts
+## Internal Organization and Data Flow
+The interfaces follow a layered architecture:
+- **Foundation Layer**: Command resolution and basic system abstractions
+- **Service Layer**: Application-specific services (logging, environment)  
+- **Domain Layer**: Specialized process management for debugging and proxy operations
+- **Integration Layer**: Dependency injection containers tying everything together
 
-### Design Patterns
-- **Interface Segregation**: Fine-grained interfaces matching specific responsibilities
-- **Factory Pattern**: Centralized object creation for complex dependencies
+## Key Design Patterns
 - **Dependency Injection**: All interfaces designed for constructor injection and easy testing
-- **Composition**: Complex objects (IDebugTarget) wrap simpler ones (IProcess) rather than inheriting
+- **Factory Pattern**: Centralized creation of complex objects through dedicated factories
+- **Interface Segregation**: Fine-grained interfaces matching specific responsibilities
+- **Async-First**: All I/O operations return Promises for non-blocking execution
+- **EventEmitter Extension**: Process-related interfaces extend EventEmitter for reactive patterns
 
-## Key Conventions
-- All async operations return Promises for consistent async patterns
-- EventEmitter extension pattern for stateful objects requiring event handling
-- Readonly properties for immutable data (command names, session IDs)
-- Optional parameters support gradual adoption and backward compatibility
-- Error types extend built-in Error class with domain-specific properties
-
-This interfaces module serves as the foundation for testable, loosely-coupled architecture by providing comprehensive abstractions over external dependencies and domain-specific operations.
+## Testing and Modularity Benefits
+This abstraction layer enables:
+- Easy mocking of external dependencies for unit tests
+- Gradual migration through PartialDependencies type
+- Clear separation of concerns between business logic and infrastructure
+- Consistent error handling patterns across the application
+- Platform-agnostic design despite wrapping Node.js APIs

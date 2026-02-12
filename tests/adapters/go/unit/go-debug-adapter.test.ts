@@ -133,10 +133,15 @@ describe('GoDebugAdapter', () => {
 
     it('should transition to ERROR when Go is not found', async () => {
       vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
+      const originalPath = process.env.PATH;
       process.env.PATH = '';
 
-      await expect(adapter.initialize()).rejects.toThrow();
-      expect(adapter.getState()).toBe(AdapterState.ERROR);
+      try {
+        await expect(adapter.initialize()).rejects.toThrow();
+        expect(adapter.getState()).toBe(AdapterState.ERROR);
+      } finally {
+        process.env.PATH = originalPath;
+      }
     });
   });
 

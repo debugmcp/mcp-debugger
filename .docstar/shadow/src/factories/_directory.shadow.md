@@ -1,58 +1,64 @@
-# src/factories/
-@generated: 2026-02-11T23:47:36Z
+# src\factories/
+@generated: 2026-02-12T21:00:53Z
 
-## Factory Pattern Implementation Hub
+## Factory Pattern Module for Debug MCP System
 
-The `src/factories` directory provides a centralized factory pattern implementation for creating key system components with dependency injection support and comprehensive testing capabilities.
+This directory implements the **Factory pattern** for creating core system components with dependency injection support and comprehensive testing capabilities within a debug MCP (Model Context Protocol) system.
 
-## Overall Purpose
+### Overall Purpose
 
-This module serves as the primary object creation layer within a debug MCP (Model Context Protocol) system, implementing the factory pattern to abstract instantiation logic and enable flexible dependency management. It provides both production factories for runtime use and mock factories for testing scenarios.
+Provides centralized, abstracted creation of key system components (`ProxyManager` and `SessionStore`) through factory interfaces that enable:
+- Clean dependency injection in production code
+- Easy mocking and testing through dedicated test factories
+- Consistent object creation patterns across the system
+- Runtime swapping of implementations for different environments
 
-## Key Components and Relationships
+### Key Components and Architecture
 
-**Factory Interfaces**
-- `IProxyManagerFactory` - defines contract for ProxyManager creation with optional debug adapter
-- `ISessionStoreFactory` - defines contract for SessionStore creation
+The module follows a consistent pattern across both factories:
 
 **Production Factories**
-- `ProxyManagerFactory` - creates ProxyManager instances with injected dependencies (process launcher, file system, logger)
-- `SessionStoreFactory` - creates standard SessionStore instances
+- `ProxyManagerFactory` - Creates `ProxyManager` instances with injected dependencies (proxy process launcher, file system, logger)
+- `SessionStoreFactory` - Creates standard `SessionStore` instances
 
-**Test Factories and Mocks**
-- `MockProxyManagerFactory` - provides test doubles with call tracking and configurable creation behavior
-- `MockSessionStoreFactory` - creates MockSessionStore instances for test isolation
-- `MockSessionStore` - test double extending SessionStore with method call tracking
+**Test Factories** 
+- `MockProxyManagerFactory` - Configurable mock with call tracking and injectable creation functions
+- `MockSessionStoreFactory` - Creates `MockSessionStore` instances with method call tracking
 
-## Public API Surface
+**Factory Interfaces**
+- `IProxyManagerFactory` - Defines contract for ProxyManager creation with optional debug adapter
+- `ISessionStoreFactory` - Defines contract for SessionStore creation
+
+### Public API Surface
 
 **Main Entry Points:**
-- Factory interface contracts (`IProxyManagerFactory`, `ISessionStoreFactory`)
-- Production factory implementations for dependency injection
-- Mock factory implementations for testing
+- `ProxyManagerFactory.create(adapter?: IDebugAdapter): IProxyManager` - Production proxy manager creation
+- `SessionStoreFactory.create(): SessionStore` - Production session store creation
+- `MockProxyManagerFactory` / `MockSessionStoreFactory` - Test implementations with tracking capabilities
 
-**Key Methods:**
-- `create()` methods on all factories for object instantiation
-- Mock factories provide additional test inspection properties (`createdManagers`, `createdStores`, call tracking arrays)
+### Internal Organization
 
-## Internal Organization and Data Flow
+**Dependency Flow:**
+1. Factories receive injected dependencies in constructors (production) or configuration (test)
+2. `create()` methods instantiate target objects with appropriate dependencies
+3. Mock factories track creation calls and parameters for test assertions
+4. Test doubles extend real classes to maintain interface compatibility
 
-The factories follow a consistent pattern:
-1. Interface definition establishing creation contract
-2. Production implementation requiring dependency injection
-3. Mock implementation with test tracking capabilities
-4. Object creation delegates to concrete classes with proper dependency wiring
+### Important Patterns
 
-Dependencies flow from external systems → factories → created instances, with factories serving as the composition root for complex object graphs.
+**Factory Pattern Implementation:**
+- Abstract interfaces enable polymorphic usage
+- Concrete implementations handle production vs. test scenarios
+- Consistent `create()` method signatures across all factories
 
-## Important Patterns and Conventions
+**Testing Support:**
+- Mock factories provide call tracking arrays (`createdManagers`, `createdStores`)
+- Test doubles extend real classes for drop-in replacement
+- Spy pattern captures method invocations with parameters
 
-**Factory Pattern**: Centralizes object creation logic and abstracts instantiation complexity
-**Dependency Injection**: All production factories require dependencies via constructor injection
-**Test Doubles**: Mock factories extend real behavior while adding test observability
-**Interface Segregation**: Separate interfaces for each factory type maintain clean contracts
-**Call Tracking**: Mock implementations record method invocations for test verification
+**Dependency Injection:**
+- Production factories require dependencies in constructors
+- Clean separation between object creation and business logic
+- Enables runtime environment switching (production/test)
 
-## Architectural Role
-
-This directory serves as the system's composition root, responsible for wiring together complex object dependencies in a testable manner. It enables the larger debug MCP system to maintain loose coupling between components while providing comprehensive testing support through injectable mock implementations.
+This module serves as the **creation layer** for the debug MCP system, abstracting instantiation complexity while providing robust testing infrastructure for component interactions.

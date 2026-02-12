@@ -23,27 +23,32 @@ const mockSpawn = vi.mocked(spawn);
 
 describe('python-utils', () => {
   let mockCommandFinder: MockCommandFinder;
+  let savedPythonLocation: string | undefined;
+  let savedPythonLocationCap: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Save original values before deleting
+    savedPythonLocation = process.env.pythonLocation;
+    savedPythonLocationCap = process.env.PythonLocation;
     // Reset environment variables
     delete process.env.PYTHON_PATH;
     delete process.env.PYTHON_EXECUTABLE;
     delete process.env.pythonLocation;
     delete process.env.PythonLocation;
-    
+
     // Create a fresh mock command finder for each test
     mockCommandFinder = new MockCommandFinder();
-    
+
     // Setup default spawn mock for isValidPythonExecutable
     mockSpawn.mockImplementation((cmd, args) => {
       const proc = new EventEmitter() as any;
       proc.stdout = new EventEmitter();
       proc.stderr = new EventEmitter();
-      
+
       // Default to successful validation
       process.nextTick(() => proc.emit('exit', 0));
-      
+
       return proc;
     });
   });
@@ -51,8 +56,17 @@ describe('python-utils', () => {
   afterEach(() => {
     vi.clearAllMocks();
     mockCommandFinder.reset();
-    delete process.env.pythonLocation;
-    delete process.env.PythonLocation;
+    // Restore original values
+    if (savedPythonLocation !== undefined) {
+      process.env.pythonLocation = savedPythonLocation;
+    } else {
+      delete process.env.pythonLocation;
+    }
+    if (savedPythonLocationCap !== undefined) {
+      process.env.PythonLocation = savedPythonLocationCap;
+    } else {
+      delete process.env.PythonLocation;
+    }
   });
 
   describe('findPythonExecutable', () => {

@@ -1,77 +1,92 @@
 # mcp_debugger_launcher/
-@generated: 2026-02-11T23:48:01Z
+@generated: 2026-02-12T21:01:16Z
 
-## Overall Purpose
+## Overall Purpose and Responsibility
+The `mcp_debugger_launcher` directory provides a complete cross-platform solution for launching MCP (Model Context Protocol) debugging servers. It abstracts the complexity of running debug servers across different execution environments (Node.js/npm and Docker) while providing intelligent runtime detection, unified CLI interface, and comprehensive testing infrastructure.
 
-The `mcp_debugger_launcher` directory contains a complete CLI package that provides runtime-agnostic launching capabilities for the MCP (Model Context Protocol) debugging server. This module serves as a bridge between different development environments, automatically detecting and utilizing available execution contexts (Node.js/npx and Docker) to launch debug servers in either stdio or Server-Sent Events (SSE) modes with robust process management.
+## Key Components and Architecture
 
-## Key Components and Integration
+### Core Package Structure
+The directory contains two main modules working in concert:
 
-The directory is organized into two main components that work together to provide a reliable debugging launch experience:
+**Main Package (`mcp_debugger_launcher/`)**:
+- **CLI Layer** (`cli.py`): Click-based command interface for user interaction
+- **Detection Layer** (`detectors.py`): Runtime environment discovery and validation
+- **Execution Layer** (`launcher.py`): Server process management and lifecycle control
+- **Package Definition** (`__init__.py`): Standard Python package initialization
 
-### Core Package (`mcp_debugger_launcher/`)
-- **CLI Interface** (`cli.py`): Primary user entry point providing Click-based command interface
-- **Runtime Detection** (`detectors.py`): Environment analysis system that validates Node.js, npx, and Docker availability
-- **Process Management** (`launcher.py`): Unified execution layer handling both npm and Docker-based server launches
-- **Package Structure** (`__init__.py`): Standard Python package initialization
+**Testing Infrastructure (`tests/`)**:
+- **Integration Test Suite** (`test_launcher.py`): Manual verification of real system interactions
+- **Runtime Validation**: Tests actual Node.js, npx, and Docker availability
+- **Command Generation Testing**: Validates launcher command construction
 
-### Test Suite (`tests/`)
-- **Manual Integration Tests** (`test_launcher.py`): Comprehensive validation framework for runtime detection, command generation, and CLI functionality
-- **Real-world Testing**: Integration tests against actual system dependencies rather than mocked components
-
-## Component Interaction Flow
-
-1. **CLI Entry**: User invokes CLI with mode selection (stdio/SSE) and optional runtime preferences
-2. **Environment Analysis**: `RuntimeDetector` performs comprehensive system analysis and provides runtime recommendations
-3. **Process Execution**: `DebugMCPLauncher` handles process lifecycle management with unified interface across runtime environments
-4. **Graceful Management**: Signal handling and resource cleanup ensure clean process termination
+### Component Interactions
+1. **CLI** orchestrates runtime detection through **RuntimeDetector**
+2. **RuntimeDetector** analyzes system environment and recommends optimal execution path
+3. **DebugMCPLauncher** manages actual server subprocess based on detected/selected runtime
+4. **Test Suite** validates end-to-end functionality through manual integration testing
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **`main()` in `cli.py`**: Core CLI command supporting:
-  - Mode selection: `stdio` (default) or `sse` 
-  - Runtime control: `--docker`, `--npm` flags for explicit selection
-  - Diagnostics: `--status` for environment reporting
-  - Installation guidance and dry-run capabilities
+**CLI Interface (`cli.main()`)**:
+- `--docker` / `--npm`: Force specific runtime environment
+- `--dry-run`: Preview commands without execution  
+- `--verbose`: Enable detailed diagnostics
+- `--status`: Display runtime availability information
+- Transport modes: stdio (default) and SSE (Server-Sent Events)
 
-### Key Classes
-- **`RuntimeDetector`**: Static utility for environment detection and runtime recommendation
-- **`DebugMCPLauncher`**: Process manager with dual runtime support (npx and Docker execution)
+**Core Classes**:
+- `DebugMCPLauncher`: Main launcher with dual runtime support
+  - `DEFAULT_SSE_PORT = 3001`: Standard SSE port configuration
+  - `launch_with_npx()`: Node.js/npm execution path
+  - `launch_with_docker()`: Docker execution path
+- `RuntimeDetector`: Environment analysis utility
+  - `detect_available_runtimes()`: Comprehensive runtime status
+  - `get_recommended_runtime()`: Intelligent selection logic
 
-### Testing Interface
-- **`test_launcher.py`**: Manual test framework for validation and diagnostics
-- Provides real-world integration testing with console-based verification
+**Testing Interface**:
+- `tests.test_launcher.main()`: Complete validation suite
+- Individual test functions for targeted validation
 
-## Internal Architecture
+## Internal Organization and Data Flow
 
-### Runtime Detection Strategy
-The package implements intelligent runtime selection with fallback capabilities:
-- Node.js ecosystem validation (Node.js → npx → npm package access)
-- Docker ecosystem validation (Docker installation → daemon status → image availability)  
-- Recommendation engine prioritizing npx over Docker based on readiness
+### Runtime Selection and Execution Flow
+1. **Detection Phase**: RuntimeDetector validates Node.js/Docker availability and ecosystem readiness
+2. **Selection Phase**: User preference or automatic recommendation determines execution path
+3. **Launch Phase**: DebugMCPLauncher creates subprocess with appropriate runtime
+4. **Management Phase**: Process lifecycle handled with graceful shutdown and resource cleanup
 
-### Process Management Patterns
-- **Unified Interface**: Consistent process lifecycle across runtime environments
-- **Signal Handling**: SIGTERM with 5-second timeout before SIGKILL
-- **Live Output Streaming**: Real-time stdout/stderr for interactive debugging
-- **Defensive Cleanup**: Resource management preventing process leaks
+### Dual Runtime Architecture
+The system maintains complete feature parity across execution environments:
+- **NPX Path**: Direct Node.js package execution with npm ecosystem
+- **Docker Path**: Containerized execution for isolated environments
+- **Unified Interface**: Identical command-line arguments and process management
+- **Consistent Error Handling**: Environment-specific detection with user-friendly guidance
 
-## Important Design Patterns
+### Testing and Validation Strategy
+- **Integration Testing**: Tests real system interactions rather than mocked components
+- **Manual Verification**: Console output approach allows visual validation of commands
+- **Runtime Validation**: Confirms actual availability of Node.js, Docker, and required packages
+- **End-to-End Coverage**: From CLI import through command generation and execution
 
-### Error Handling and Resilience
-- Layered validation preventing runtime failures
-- Automatic fallback between available runtimes
-- User-friendly error messages with installation guidance
+## Important Patterns and Conventions
 
-### Extensibility Architecture
-- Runtime abstraction pattern supporting additional execution environments
-- Mode-agnostic design allowing new communication protocols beyond stdio/SSE
-- Configurable package/image references for different deployment scenarios
+### Cross-Platform Design
+- **Environment Abstraction**: Single interface supporting heterogeneous development environments
+- **Defensive Programming**: Comprehensive timeout handling and resource cleanup
+- **Fallback Strategies**: Multiple detection methods with graceful degradation
+- **Version Compatibility**: Backward compatibility checks and flexible import patterns
 
-### Testing Strategy
-- Manual verification approach with human-readable diagnostics
-- Real system integration testing over mocked dependencies
-- Dry-run capabilities for safe command validation
+### Production Readiness
+- **Signal Handling**: Proper SIGTERM handling with timeout-based cleanup
+- **Process Management**: Subprocess lifecycle control preventing resource leaks
+- **Error Reporting**: User-friendly messages with actionable installation guidance
+- **Observability**: Detailed logging and dry-run capabilities for debugging
 
-This directory provides a complete, production-ready solution for launching MCP debugging servers across diverse development environments, with comprehensive testing and robust error handling to ensure reliable operation regardless of the underlying system configuration.
+### Development Support
+- **Manual Testing Framework**: Integration tests designed for developer verification
+- **Real-World Validation**: Tests actual runtime environments and dependencies
+- **Development Workflow**: Path manipulation and local module import support
+
+The `mcp_debugger_launcher` directory serves as a complete, production-ready solution that bridges the gap between MCP debugging server deployment and diverse development environments, providing excellent developer experience through intelligent automation and comprehensive testing.

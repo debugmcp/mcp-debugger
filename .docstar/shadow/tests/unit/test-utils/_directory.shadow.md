@@ -1,78 +1,72 @@
-# tests/unit/test-utils/
-@generated: 2026-02-11T23:47:41Z
+# tests\unit\test-utils/
+@generated: 2026-02-12T21:00:59Z
 
 ## Purpose
-The test-utils directory provides a comprehensive test infrastructure for creating and validating mocks in the debugger system. It combines automated mock generation capabilities with specialized test factories and validation utilities to ensure reliable, type-safe testing across the entire codebase.
+Test utilities module providing comprehensive mock generation, validation, and specialized testing infrastructure for the debugging system. Enables type-safe, deterministic testing by offering automated mock creation, interface validation, pre-configured component mocks, and test-optimized implementations of core services.
 
 ## Key Components and Integration
 
-### Auto-Mock System (`auto-mock.ts`)
-Core engine providing intelligent mock generation from real implementations:
-- **`createMockFromInterface<T>`**: Primary factory that generates type-safe mocks by traversing prototype chains and converting methods to `vi.fn()` spies
-- **`validateMockInterface`**: Ensures mock-real interface consistency, catching missing methods or type mismatches
-- **`createValidatedMock`**: One-step creation with immediate validation
-- **Specialized mocks**: EventEmitter patterns and lazy validation via Proxy pattern
+### Core Mock Generation (`auto-mock.ts`)
+**Primary entry point** for creating type-safe mocks from real implementations:
+- `createMockFromInterface<T>()` - Main mock generator with prototype chain traversal and method conversion
+- `validateMockInterface()` - Ensures mock-real interface consistency with comprehensive validation
+- `createValidatedMock()` - Combines creation and validation in single operation
+- `autoValidateMock()` - Lazy validation using Proxy pattern for performance optimization
 
-### Mock Factories (`mock-factories.ts`)
-Provides pre-configured, standardized mocks for system components:
-- **Process mocks**: Child processes, proxy processes, Python validation processes with proper EventEmitter behavior
-- **Service mocks**: Session managers, adapter registries, network managers with success-oriented defaults
-- **Infrastructure mocks**: Logging, filesystem, and environment detection utilities
-- All factories return sensible defaults to enable positive test paths
+### Component Mock Factories (`mock-factories.ts`) 
+**Standardized mock implementations** for system components with sensible defaults:
+- Process mocks (ChildProcess, ProxyProcess, Python validation processes)
+- Service mocks (SessionManager, AdapterRegistry, NetworkManager) 
+- Infrastructure mocks (Logger, FileSystem, Environment, WhichFinder)
+- All return success-oriented defaults to enable positive test paths
 
-### Test Infrastructure
-- **`mock-validation.test.ts`**: Comprehensive test suite validating the auto-mock system itself with inheritance, EventEmitter, and integration scenarios
-- **`test-proxy-manager.ts`**: Specialized test harness that overrides ProxyManager complexity for synchronous, deterministic testing
+### Test Infrastructure (`test-proxy-manager.ts`)
+**Specialized test implementation** of ProxyManager that overrides complex runtime behavior:
+- Synchronous initialization and cleanup for deterministic testing
+- Mock DAP request/response simulation with configurable responses
+- Event injection capabilities for testing message handling and debugging states
+- Maintains parent class compatibility while enabling controlled testing scenarios
+
+### Validation Suite (`mock-validation.test.ts`)
+**Comprehensive test coverage** demonstrating proper usage patterns and validating the mock generation utilities themselves.
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **Mock Creation**: `createMockFromInterface`, `createValidatedMock`, `autoValidateMock`
-- **Validation**: `validateMockInterface`
-- **Specialized Factories**: `createEventEmitterMock` for event-driven components
-- **Component Factories**: All `createMock*` functions for standardized system mocks
-- **Test Harness**: `TestProxyManager` for controlled proxy testing
+- `createMockFromInterface<T>(target, options?)` - Generate typed mocks from classes/objects
+- `validateMockInterface(mock, realClass, options?)` - Validate mock completeness
+- `createValidatedMock<T>(target, options?)` - One-step mock creation with validation
+- `createEventEmitterMock<T>(additionalMethods?)` - Specialized EventEmitter mocking
 
-### Configuration Options
-- Method exclusion patterns (regex or string arrays)
-- Custom return value mapping
-- Inheritance handling (`includeInherited`)
-- Default return strategies for method naming conventions
+### Factory Functions
+- Process factories: `createMockChildProcess()`, `createMockProxyProcess()`, `createPythonValidationProcess()`
+- Service factories: `createMockSessionManager()`, `createMockAdapterRegistry()`, `createMockNetworkManager()`
+- Infrastructure factories: `createMockLogger()`, `createMockFileSystem()`, `createMockEnvironment()`
+
+### Test Infrastructure
+- `TestProxyManager` class for controlled ProxyManager testing
+- Mock response configuration and message injection utilities
 
 ## Internal Organization and Data Flow
 
-1. **Mock Generation Flow**: Real class → prototype traversal → method conversion → validation → type-safe mock
-2. **Validation Pipeline**: Interface comparison → error detection → warning classification → consistency reporting
-3. **Factory Integration**: Auto-mock utilities → specialized factories → test-ready mocks
-4. **Test Execution**: Mock creation → configuration → validation → test scenario execution
+1. **Mock Generation Flow**: `createMockFromInterface` → prototype traversal → method conversion → validation → typed mock object
+2. **Validation Flow**: Interface comparison → missing member detection → type checking → error/warning reporting
+3. **Factory Pattern**: Pre-configured mocks with consistent return values and EventEmitter inheritance where appropriate
+4. **Test Integration**: Specialized implementations override complex behaviors while preserving interfaces
 
 ## Important Patterns and Conventions
 
-### Type Safety Strategy
-- Heavy use of TypeScript generics and conditional types
-- Runtime validation ensuring mock-real interface consistency
-- Vitest integration for proper Mock function types
+- **Type Safety**: Heavy use of TypeScript generics and conditional types for compile-time safety
+- **Lazy Validation**: Proxy-based validation deferral to optimize test setup performance  
+- **Success-Oriented Defaults**: All mocks return positive outcomes unless specifically configured otherwise
+- **EventEmitter Integration**: Proper event-driven mock implementations with method chaining support
+- **Prototype Chain Respect**: Comprehensive inheritance handling with configurable inclusion options
+- **Vitest Integration**: Deep integration with Vitest framework (vi.fn(), Mock types) for seamless testing
 
-### Mock Behavior Standards
-- Success-oriented defaults for positive test paths
-- EventEmitter inheritance for process and service mocks
-- Consistent async patterns (nextTick for process simulation)
-- Method chaining support where appropriate
+## Critical Dependencies
+- **Vitest**: Core testing framework for mock function creation and test execution
+- **Node.js EventEmitter**: Event-driven patterns for process and service mocks
+- **TypeScript**: Advanced type system features for type-safe mock generation
+- **Real System Components**: Extends/mocks actual classes (ProxyManager, ChildProcess, etc.)
 
-### Configuration-Driven Design
-- Flexible exclusion patterns for test-specific needs
-- Standardized return value conventions
-- Lazy evaluation for performance optimization
-
-### Integration Points
-- **Vitest Framework**: Core dependency for `vi.fn()` and Mock types
-- **EventEmitter Pattern**: Specialized support for event-driven components
-- **Prototype Introspection**: Deep reflection for comprehensive mock generation
-- **DAP Protocol**: Specialized ProxyManager testing with mock DAP responses
-
-## Critical Architecture Decisions
-- Separation of generic mock generation from domain-specific factories
-- Comprehensive validation to prevent test brittleness
-- Proxy-based lazy validation for performance
-- Pre-configured defaults to reduce test boilerplate
-- Type-safe mock generation maintaining full interface compatibility
+This module serves as the foundation for reliable, type-safe testing across the debugging system by providing automated mock generation with validation, standardized component mocks, and specialized test infrastructure that maintains interface compatibility while enabling deterministic testing scenarios.

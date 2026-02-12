@@ -1,109 +1,97 @@
-# src/session/
-@generated: 2026-02-11T23:47:43Z
+# src\session/
+@generated: 2026-02-12T21:00:59Z
 
 ## Session Management Module
 
-**Primary Purpose**: Complete debug session management system that provides centralized control over debug adapter lifecycle, state management, and debugging operations through a layered architecture with separation of concerns.
+### Overall Purpose
+The session module provides comprehensive debug session management functionality for VSCode debug adapters, implementing a layered architecture that handles the complete lifecycle of debugging sessions from creation through termination. This module serves as the primary interface between debug clients and language-specific debug adapters via the Debug Adapter Protocol (DAP).
 
-## Core Architecture
+### Architecture & Component Relationships
 
-The module follows a hierarchical composition pattern with four distinct layers:
+The module follows a clear inheritance hierarchy with separation of concerns:
 
-1. **SessionStore** - Pure data layer for session storage and lifecycle management
-2. **SessionManagerCore** - Abstract base providing event handling, state transitions, and dependency injection
-3. **SessionManagerData** - Data retrieval operations for variables, stack traces, and scopes
-4. **SessionManagerOperations** - Complete debugging operations including start/stop, stepping, breakpoints
-5. **SessionManager** - Main facade that composes all functionality
+```
+SessionManagerCore (abstract base)
+    ↓
+SessionManagerData (data operations)
+    ↓  
+SessionManagerOperations (debug operations)
+    ↓
+SessionManager (main facade)
+```
 
-## Key Components & Data Flow
+**SessionStore** provides pure data management as a composed dependency, maintaining session state independently of the manager hierarchy.
 
-### Session Storage Foundation
-- **SessionStore**: In-memory session registry using Map<string, ManagedSession>
-- Manages dual state model (legacy SessionState + new SessionLifecycleState/ExecutionState)
-- Handles session creation with UUID generation, language validation, and adapter policy selection
-- Provides both public (DebugSessionInfo) and internal (ManagedSession) views
+### Key Components
 
-### Core Session Management
-- **SessionManagerCore**: Abstract base class with dependency injection architecture
-- Manages session lifecycle (CREATED → RUNNING → PAUSED → STOPPED/ERROR)
-- Comprehensive proxy event handling system for debug adapter communication
-- WeakMap-based event listener tracking for memory leak prevention
-- Auto-continue logic for seamless debugging experiences
+**SessionManagerCore** - Abstract foundation providing:
+- Dependency injection architecture with complete service container
+- Session lifecycle management and state transitions
+- Proxy event handling system with comprehensive cleanup
+- Dual state model support (legacy + new lifecycle states)
+- Auto-continue logic for seamless debugging flow
 
-### Data Operations Layer  
-- **SessionManagerData**: Provides read-only operations for debug inspection
-- Variable fetching with language-specific policy filtering
-- Stack trace retrieval with frame filtering capabilities
-- Scope enumeration and local variable extraction
-- Consistent error handling with empty result fallbacks
+**SessionManagerData** - Data access layer offering:
+- Variable retrieval and inspection capabilities
+- Stack trace fetching with language-specific filtering
+- Scope enumeration for variable containers
+- Policy-driven data transformation for different languages
 
-### Operations Layer
-- **SessionManagerOperations**: Complete debugging command interface
-- Debug session startup with toolchain validation and dry-run support
+**SessionManagerOperations** - Core debugging operations including:
+- Session startup with dry-run capabilities
 - Step operations (over/into/out) with thread management
 - Breakpoint management and verification
-- Expression evaluation in multiple contexts (watch, repl, hover)
-- Process attachment/detachment for remote debugging
+- Expression evaluation for REPL-style debugging
+- Process attachment and detachment
 
-## Public API Surface
+**SessionStore** - Pure storage layer providing:
+- In-memory session persistence with UUID-based IDs
+- Language-specific adapter policy selection
+- State management with automatic timestamping
+- Collection operations with filtered public interfaces
 
-### Main Entry Point
-- **SessionManager**: Primary class extending SessionManagerOperations
-- Provides complete session management capabilities through inheritance
-- Re-exports key types for convenience (SessionManagerDependencies, DebugResult, etc.)
+**SessionManager** - Main facade that composes all functionality through inheritance and provides the primary public API.
 
-### Key Interfaces
-- **SessionManagerDependencies**: Complete dependency injection container
-- **CustomLaunchRequestArguments**: Extended VSCode debug protocol options
-- **DebugResult**: Standardized response with success/error states and continuation flags
-- **EvaluateResult**: Expression evaluation results with type and reference information
+### Public API Surface
 
-### Core Operations
-- `createSession()`: New debug session creation with language and executable parameters
-- `startDebugging()`: Full debug startup with proxy management and handshake
-- `stepOver/Into/Out()`: Code navigation operations
-- `setBreakpoint()`: Breakpoint management with verification
-- `evaluateExpression()`: REPL-style expression evaluation
-- `getVariables/StackTrace/Scopes()`: Debug state inspection
-- `attachToProcess/detachFromProcess()`: Remote debugging support
+**Primary Entry Point**: `SessionManager` class providing complete session management interface
 
-## Internal Organization
+**Core Operations**:
+- `createSession(language, name?, executablePath?)` - Initialize new debug sessions
+- `startDebugging(sessionId, options?)` - Launch debug processes with adapter configuration
+- `attachToProcess(sessionId, target)` - Attach to running processes
+- `stepOver/stepInto/stepOut(sessionId, threadId?)` - Execution control
+- `setBreakpoint(sessionId, location)` - Breakpoint management
+- `evaluateExpression(sessionId, expression, context)` - REPL evaluation
+- `getVariables/getStackTrace/getScopes(sessionId, ...)` - Runtime inspection
+- `closeSession/closeAllSessions()` - Session cleanup
 
-### Dependency Injection Pattern
-- Constructor injection of file system, networking, logging, and proxy management dependencies
-- Factory methods for session stores and proxy managers to enable testability
-- Clean separation between business logic and external dependencies
+**Configuration Types**:
+- `SessionManagerDependencies` - Complete dependency injection container
+- `SessionManagerConfig` - Logging, timeouts, and launch defaults
+- `CustomLaunchRequestArguments` - Extended DAP launch options
 
-### Event-Driven Architecture
-- Proxy managers emit events handled by session manager for state synchronization
-- Comprehensive event listener system with cleanup guarantees
-- Race condition handling for concurrent operations
+### Internal Organization & Data Flow
 
-### Language Adapter Integration
-- Policy pattern for language-specific behavior (Python, JavaScript, Rust, Go, Mock)
-- Adapter registry for executable resolution and command building
-- Language-specific error handling and toolchain validation
+1. **Session Creation**: SessionStore generates UUID-based sessions with language validation
+2. **Adapter Setup**: Language adapters resolve executables and build DAP configurations  
+3. **Proxy Management**: ProxyManager instances handle DAP communication per session
+4. **Event Processing**: Comprehensive event handlers manage state transitions and cleanup
+5. **Data Operations**: Policy-driven data retrieval with language-specific filtering
+6. **State Synchronization**: Dual state tracking ensures compatibility during migration
 
-## Important Patterns & Conventions
+### Important Patterns & Conventions
 
-### State Management
-- Dual state model supporting legacy and new lifecycle states
-- Centralized state transitions with logging and synchronization
-- Thread-aware operations with current session context
+**Dependency Injection**: Full constructor injection with interface-based dependencies enables testing and modularity
 
-### Error Resilience
-- Comprehensive error handling with proxy log tail capture for diagnostics
-- Graceful degradation with empty results on failure
-- Continue-on-error patterns for cleanup operations
+**Event-Driven Architecture**: Proxy managers emit events handled by session managers for loose coupling
 
-### Memory Management
-- WeakMap usage for event handler tracking to prevent memory leaks
-- Proper cleanup of proxy resources and event listeners
-- Session isolation through dedicated proxy managers per session
+**Policy Pattern**: Language-specific behavior through adapter policies (Python, JavaScript, Rust, Go, Mock)
 
-### Logging Strategy
-- Structured logging with session ID prefixes for operation tracking
-- Debug adapter communication logging for troubleshooting
-- Log directory management with fallback to system temp directories
+**Error Resilience**: Comprehensive error handling with operation continuation and diagnostic logging
 
-This module serves as the core debugging infrastructure, providing a complete abstraction over the Debug Adapter Protocol while maintaining language-specific customization through adapter policies and comprehensive state management for debugging workflows.
+**Resource Management**: WeakMap usage and explicit cleanup prevent memory leaks in long-running processes
+
+**State Management**: Centralized state transitions with logging and dual model support for migration scenarios
+
+The module provides a robust, extensible foundation for multi-language debug session management with clear separation between data storage, debug operations, and adapter communication.

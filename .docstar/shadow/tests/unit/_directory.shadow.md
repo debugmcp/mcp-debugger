@@ -1,86 +1,73 @@
-# tests/unit/
-@generated: 2026-02-11T23:48:19Z
+# tests\unit/
+@generated: 2026-02-12T21:01:34Z
 
-## Overall Purpose
+## Purpose and Scope
 
-The `tests/unit` directory contains a comprehensive unit test suite for the MCP (Model Context Protocol) Debug Server, providing complete test coverage across all system components. This test infrastructure validates the core functionality that enables VS Code-like debugging experiences for multiple programming languages (Python, JavaScript, Rust) through the Debug Adapter Protocol (DAP).
+The `tests/unit` directory provides comprehensive unit test coverage for the entire Debug MCP Server system, validating all core functionality through isolated testing with extensive mocking. This test suite ensures the reliability of multi-language debugging capabilities, adapter management, CLI interfaces, and supporting infrastructure through systematic validation of both happy-path scenarios and edge cases.
 
-## Key Components and System Integration
+## Overall Architecture and Integration
 
-The test suite is organized around the major architectural layers of the MCP debug system:
+The test suite mirrors the production system's layered architecture:
 
-### Core Server and Entry Points
-- **`index.test.ts`**: Tests the main CLI entry point with server factory, command handling, and module exports
-- **`server-coverage.test.ts`**: Comprehensive error path testing for `DebugMcpServer` edge cases and failure scenarios
-- **`session-manager-operations-coverage.test.ts`**: Tests session lifecycle management, proxy operations, and debugging protocol coordination
+### Foundation Layer
+- **Utils Tests**: Core infrastructure including logging, file operations, container-aware path resolution, and environment configuration
+- **Implementations Tests**: System interface implementations (filesystem, process management, network operations) with comprehensive Node.js integration mocking
+- **Container Tests**: Dependency injection system validation ensuring proper service wiring and adapter registration
 
-### Debug Adapter System
-- **`adapters/`**: Tests the pluggable adapter architecture for language-specific debugging (JavaScript, Python, Mock adapters)
-- **`adapter-python/`**: Specialized tests for Python debugging with debugpy integration and environment validation
-- Language-agnostic adapter loading, registry management, and lifecycle coordination
+### Protocol and Communication Layer  
+- **DAP Core Tests**: Debug Adapter Protocol message handling, state management, and proxy communication infrastructure
+- **Proxy Tests**: Complete DAP proxy system including connection management, message routing, process lifecycle, and retry logic
+- **Shared Tests**: Adapter policy pattern validation and filesystem abstractions supporting pluggable language-specific debugging behaviors
 
-### Debug Protocol Infrastructure
-- **`proxy/`**: Tests DAP proxy subsystem that bridges MCP clients with debug adapters, including connection management, message parsing, and process lifecycle
-- **`dap-core/`**: Tests core DAP message handling and immutable state management for debug sessions
-- **`shared/`**: Tests adapter policy system that provides language-specific debugging behaviors
+### Application Layer
+- **CLI Tests**: Command-line interface validation for STDIO/SSE transport modes, utility commands, and global error handling
+- **Server Coverage Tests**: DebugMcpServer error paths, edge cases, and boundary conditions with comprehensive session management testing
+- **Session Manager Tests**: Session lifecycle operations, proxy management, timeout handling, and debugging state transitions
 
-### System Implementation Layer
-- **`implementations/`**: Tests platform abstraction layer including filesystem, process management, network services, and environment handling
-- **`container/`**: Tests dependency injection container that wires together all system services
-- **`cli/`**: Tests command-line interface with STDIO/SSE transport modes and error handling
+### Adapter System Layer
+- **Adapters Tests**: Core adapter infrastructure (loading, registration, lifecycle) and language-specific implementations
+- **Adapter-Python Tests**: Complete Python debugging adapter validation with debugpy integration and environment management
 
-### Infrastructure and Utilities
-- **`utils/`**: Tests core utilities for path resolution, error handling, logging, and container environment management
-- **`test-utils/`**: Provides comprehensive mock generation and validation infrastructure used across all test suites
+### Integration and Testing Infrastructure
+- **Test Utils**: Sophisticated mock generation system with type safety, automated validation, and specialized test implementations
+- **Main Entry Point Tests**: End-to-end CLI setup, command handling, and server factory functionality
 
-## Public API Surface and Entry Points
+## Key Testing Patterns and Public API
 
-### Primary Server Interface
-- **`createDebugMcpServer(options)`**: Main server factory for creating MCP debug server instances
-- **`main()`**: CLI entry point with argument parsing and server initialization
-- **STDIO/SSE Transport Handlers**: Command handlers for different communication modes
+### Mock Architecture Strategy
+The entire test suite employs a sophisticated mocking strategy:
+- **Type-Safe Mock Generation**: Automated creation of typed mocks from interfaces with validation
+- **Comprehensive Dependency Injection**: All external dependencies (filesystem, network, processes, loggers) are mockable
+- **EventEmitter Simulation**: Extensive use of event-driven patterns for testing async communication and lifecycle management
+- **Isolation Guarantees**: Each test maintains complete isolation through systematic mock reset and cleanup
 
-### Debug Session Management
-- **`DebugMcpServer`**: Core server class managing debug sessions, adapters, and MCP protocol handling
-- **`SessionManager`**: Orchestrates debug session lifecycle with proxy management and adapter coordination
-- **`AdapterRegistry`**: Manages language adapter loading, registration, and instance lifecycle
+### Primary Entry Points Tested
+- **CLI Interface**: `main()` function, command setup, transport modes (stdio/SSE), utility commands
+- **Server Factory**: `createDebugMcpServer()` with configuration and transport abstraction
+- **Session Management**: Complete debugging session lifecycle from creation through cleanup
+- **Adapter System**: Dynamic adapter loading, registration, and language-specific debugging capabilities
+- **DAP Communication**: Full Debug Adapter Protocol implementation with message routing and state management
 
-### Debug Protocol Integration  
-- **`ProxyManager`**: Manages DAP proxy processes and bidirectional communication
-- **`AdapterPolicy` Interface**: Pluggable language-specific debugging behavior implementations
-- **DAP Message Processing**: Handles Debug Adapter Protocol communication and state management
+### Cross-Component Validation
+Tests validate critical integration points:
+- CLI commands properly initialize servers with correct transport modes
+- Adapter registry correctly loads and manages language-specific debugging adapters
+- Session managers coordinate with proxy systems for debug communication
+- DAP core handles message routing between clients and debug adapters
+- Container-aware utilities adapt behavior based on deployment context
 
-## Internal Organization and Data Flow
+## Testing Framework Integration
 
-### Testing Architecture
-The test suite follows consistent patterns across all components:
-1. **Comprehensive Mocking**: Extensive use of Vitest mocking with dependency injection for isolation
-2. **Error Path Coverage**: Systematic testing of failure scenarios, timeouts, and edge cases  
-3. **State Management Testing**: Validation of immutable state transitions and lifecycle management
-4. **Integration Testing**: End-to-end workflows with mocked external dependencies
+### Vitest-Centric Approach
+- **Mocking Infrastructure**: Extensive use of `vi.mock()`, `vi.fn()`, and fake timers for deterministic testing
+- **Async Testing**: Comprehensive Promise-based assertions with proper error propagation
+- **Environment Control**: Process environment manipulation with automatic restoration
+- **Resource Management**: Systematic cleanup patterns preventing test pollution
 
-### Component Interaction Flow
-1. **CLI Layer**: Command parsing → option validation → server factory invocation
-2. **Server Layer**: MCP protocol handling → session management → adapter coordination  
-3. **Debug Layer**: Adapter selection → proxy startup → DAP communication → session lifecycle
-4. **Infrastructure Layer**: Process management → file operations → network communication → logging
+### Coverage Strategy
+- **Error Path Testing**: Extensive validation of failure scenarios, timeout conditions, and edge cases
+- **Boundary Testing**: Input validation, resource limits, and state transition edge cases  
+- **Integration Scenarios**: Multi-component interaction testing while maintaining unit test isolation
+- **Platform Compatibility**: Cross-platform testing with environment-specific behavior validation
 
-## Important Patterns and Conventions
-
-### Mock and Test Infrastructure
-- **Auto-Mock System**: Type-safe mock generation with interface validation (`test-utils/`)
-- **Factory Pattern**: Standardized mock factories for consistent test setup across suites
-- **Environment Isolation**: Comprehensive setup/teardown with environment variable management
-- **Fake Timers**: Deterministic timeout and retry logic testing
-
-### Error Handling and Resilience
-- **Graceful Degradation**: Tests validate fallback behaviors and error recovery
-- **Resource Cleanup**: Systematic testing of process cleanup, connection teardown, and memory management
-- **Container Awareness**: Dual-mode testing for host vs containerized deployment scenarios
-
-### Protocol Compliance
-- **DAP Standard**: Comprehensive testing of Debug Adapter Protocol message handling
-- **MCP Integration**: Validation of Model Context Protocol transport and session management
-- **Language Agnostic**: Adapter pattern testing ensures consistent debugging across all supported languages
-
-This test suite ensures the MCP Debug Server can reliably provide VS Code-quality debugging experiences across multiple programming languages while maintaining robust error handling, proper resource management, and protocol compliance in both development and production environments.
+The unit test directory serves as the quality assurance foundation for the Debug MCP Server, ensuring reliable multi-language debugging capabilities through comprehensive validation of all system components, from low-level utilities to high-level debugging orchestration.

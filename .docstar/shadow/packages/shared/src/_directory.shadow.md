@@ -1,79 +1,77 @@
-# packages/shared/src/
-@generated: 2026-02-11T23:48:07Z
+# packages\shared\src/
+@generated: 2026-02-12T21:01:24Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/shared/src` directory serves as the foundational shared library for the MCP Debugger ecosystem, providing a comprehensive type-safe abstraction layer that enables multi-language debug adapter development. This module establishes the core architectural contracts, data models, and factory patterns that allow different programming languages (JavaScript, Python, Go, Rust) to integrate with a unified Debug Adapter Protocol (DAP) framework while maintaining language-specific customization capabilities.
+The `packages/shared/src` directory serves as the foundational abstraction layer for a comprehensive multi-language debugging system built on the VSCode Debug Adapter Protocol (DAP). It provides a unified, type-safe contract that enables pluggable debug adapter architectures while maintaining language-specific customization capabilities across Python, JavaScript, Go, Rust, and other languages.
 
-## Key Components and Integration
+## Key Components and Architecture
 
-### Core Architecture Layers
+### Core Debug Adapter Framework
+The system centers around the `IDebugAdapter` interface, which abstracts DAP operations while supporting language-specific behaviors through a sophisticated **adapter policy system**. Each language implements custom policies for command handling, session management, variable filtering, and initialization protocols, enabling specialized debugging strategies (e.g., JavaScript's multi-session pending targets, Python's Windows Store executable detection).
 
-**Interface Layer (`interfaces/`)**
-- Defines the primary contracts (`IDebugAdapter`, `AdapterPolicy`, `DapClientBehavior`) that all language adapters must implement
-- Provides dependency injection abstractions for external services (filesystem, process management, networking)
-- Establishes the adapter registry and factory pattern interfaces for pluggable architecture
-- Language-specific policy implementations (JavaScript, Python, Go, Rust, Mock) customize debugging behaviors
+### Factory and Registry Pattern
+A comprehensive factory/registry system manages adapter lifecycle through `IAdapterRegistry` and `IAdapterFactory` interfaces. The `BaseAdapterFactory` in the factories directory provides standardized adapter creation with validation, version compatibility checking, and metadata management. This enables runtime adapter discovery, environment validation, and consistent instantiation across all supported languages.
 
-**Factory Layer (`factories/`)**
-- Implements the standardized adapter creation pattern through `AdapterFactory` base class
-- Provides template method pattern for consistent validation, compatibility checking, and instantiation
-- Manages semantic versioning and compatibility verification across adapter implementations
-- Serves as the foundation for the plugin architecture enabling language-specific customization
+### Data Models and State Management
+The models directory provides sophisticated session state management through a dual-state system separating lifecycle concerns (`SessionLifecycleState`) from execution state (`ExecutionState`). The `DebugSession` serves as the central data container, while comprehensive launch and attach configuration models support multiple connection strategies and language-agnostic debugging operations.
 
-**Data Model Layer (`models/`)**
-- Defines core debugging entities (`DebugSession`, `Breakpoint`, `Variable`, `StackFrame`)
-- Implements sophisticated dual-state management separating session lifecycle from execution state
-- Provides language-agnostic configuration interfaces with extension points
-- Maintains VSCode Debug Adapter Protocol compliance while adding custom extensions
-
-**Central Export (`index.ts`)**
-- Acts as the unified facade providing type-safe access to all shared abstractions
-- Consolidates interfaces, models, factories, and utilities into a single entry point
-- Re-exports external dependencies (@vscode/debugprotocol) for convenience
+### Dependency Injection and External Abstractions
+Complete abstractions for external dependencies (`IFileSystem`, `IChildProcess`, `INetworkManager`, `ILogger`) enable testability and modularity. Process management interfaces provide high-level abstractions for debug targets and proxy processes, while the barrier system coordinates custom launch behaviors independent of DAP timing.
 
 ## Public API Surface
 
-### Main Entry Points
-- **`index.ts`**: Primary module export providing access to all shared abstractions
-- **`IDebugAdapter`**: Core adapter interface that language implementations must satisfy
-- **`AdapterPolicy`**: Strategy interface for language-specific debugging behaviors
-- **`AdapterFactory`**: Base factory class for standardized adapter creation
-- **`IAdapterRegistry`**: Registry interface for managing and discovering debug adapters
+### Primary Entry Points
+- **`IDebugAdapter`** - Main contract for all language-specific debug adapters
+- **`IAdapterRegistry`** - Adapter discovery, validation, and instantiation management
+- **`AdapterPolicy`** - Strategy interface for language-specific behavior customization
+- **`DebugSession`** - Central session data structure with comprehensive state management
+- **`BaseAdapterFactory`** - Template for creating language-specific adapter factories
 
-### Language Integration Points
-- **Policy Implementations**: `JsDebugAdapterPolicy`, `PythonAdapterPolicy`, `GoAdapterPolicy`, `RustAdapterPolicy`
-- **Factory Pattern**: `IAdapterFactory` and `BaseAdapterFactory` for consistent adapter instantiation
-- **Configuration Interfaces**: `GenericLaunchConfig`, `GenericAttachConfig`, `CustomLaunchRequestArguments`
+### Configuration and Launch Management
+- **`GenericLaunchConfig`, `CustomLaunchRequestArguments`** - Language-agnostic launch configuration
+- **`GenericAttachConfig`** - Multi-modal attach configuration (PID, process name, remote)
+- **`AdapterConfig`, `AdapterCapabilities`** - Adapter runtime configuration and feature declaration
 
-### State Management APIs
-- **Session Models**: `DebugSession`, `SessionConfig`, `DebugSessionInfo`
-- **State Enums**: `SessionLifecycleState`, `ExecutionState`, `DebugLanguage`
-- **Debug Entities**: `Breakpoint`, `Variable`, `StackFrame`, `DebugLocation`
+### Client Behavior and Protocol Customization
+- **`DapClientBehavior`** - DAP protocol handling customization
+- **`AdapterLaunchBarrier`** - Launch coordination primitives
+- **Language-specific policies** - `JsDebugAdapterPolicy`, `PythonAdapterPolicy`, etc.
 
 ## Internal Organization and Data Flow
 
-1. **Adapter Discovery**: Registry system locates appropriate adapter factories for target languages
-2. **Adapter Creation**: Factory pattern validates, checks compatibility, and instantiates language-specific adapters
-3. **Session Management**: Dual-state system tracks both session lifecycle and execution state independently
-4. **Protocol Handling**: Adapters implement DAP protocol operations with language-specific behaviors via policy pattern
-5. **Dependency Resolution**: Comprehensive dependency injection system provides testable abstractions for external services
+The architecture follows a layered approach:
 
-## Critical Design Patterns
+1. **Interface Layer** (`interfaces/`) - Core abstractions and contracts
+2. **Factory Layer** (`factories/`) - Standardized creation patterns with validation
+3. **Model Layer** (`models/`) - Data structures and state management
+4. **Integration Layer** (`index.ts`) - Unified API facade
 
-**Strategy Pattern**: Language-specific policies customize debugging behavior while maintaining unified interface
-**Factory Pattern**: Standardized adapter creation with validation and compatibility verification
-**Dependency Injection**: Comprehensive abstraction layer enables testing and different runtime environments
-**Template Method**: Base implementations provide structure while allowing customization through inheritance
-**Facade Pattern**: Single entry point consolidates complex subsystem interfaces
+**Data Flow**: Configuration → Factory validation → Adapter creation → Policy application → Session management → DAP protocol operations, with comprehensive dependency injection and state coordination throughout.
 
-## Integration Context
+## Architectural Patterns and Conventions
 
-This shared package serves as the contract layer between the core MCP Debugger and language-specific implementations, enabling:
-- Pluggable debug adapter architecture supporting multiple programming languages
-- Type-safe development with comprehensive TypeScript interfaces
-- Consistent debugging experience across different language ecosystems
-- Testable architecture through dependency injection and mock implementations
-- Future language support through extensible factory and policy patterns
+### Design Patterns
+- **Strategy Pattern**: AdapterPolicy enables language-specific customizations
+- **Factory Pattern**: Registry-based adapter creation with environment validation
+- **Facade Pattern**: Single entry point consolidating multiple interface modules
+- **Template Method**: BaseAdapterFactory provides structure for concrete implementations
+- **Dependency Injection**: Complete abstraction of external services
 
-The module maintains strict adherence to VSCode Debug Adapter Protocol standards while providing the flexibility needed for language-specific debugging requirements and custom extensions.
+### Key Conventions
+- **Type Safety**: Extensive TypeScript interfaces with runtime type guards
+- **Extensibility**: Index signatures and placeholder comments support future language additions
+- **Backward Compatibility**: Legacy state mapping maintains existing integrations
+- **Permissive Defaults**: Factories considered valid unless explicitly overridden
+- **DAP Integration**: Seamless integration with VSCode Debug Adapter Protocol standards
+
+## Critical Integration Points
+
+This shared package serves as the contract layer between the core debugger infrastructure and language-specific implementations, enabling:
+- **Pluggable adapter architectures** with consistent interfaces
+- **Cross-language debugging capabilities** while preserving language-specific optimizations  
+- **Comprehensive testing support** through dependency abstraction and mock implementations
+- **Runtime adapter discovery** and validation before debug session creation
+- **Standardized configuration transformation** from generic to language-specific parameters
+
+The module provides the essential foundation for building scalable, maintainable debug adapter ecosystems that can grow to support additional languages while maintaining type safety and architectural consistency.

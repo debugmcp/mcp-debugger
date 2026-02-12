@@ -1,58 +1,60 @@
-# tests/core/unit/utils/
-@generated: 2026-02-11T23:47:37Z
+# tests\core\unit\utils/
+@generated: 2026-02-12T21:00:56Z
 
 ## Purpose
-Unit test directory for core utility functions providing runtime type safety, data validation, and API migration verification for the debugmcp system. Tests critical boundary validation for IPC communication, serialization/deserialization, and session management parameter evolution.
+
+This directory contains unit tests for core utility modules in the debug system, focusing on two critical areas: session management migration and runtime type safety validation. The tests ensure system stability during API transitions and validate data integrity at system boundaries.
 
 ## Key Components
 
-### Session Migration Tests (`session-migration.test.ts`)
-- **Migration Verification**: Validates complete migration from deprecated `pythonPath` to `executablePath` parameter across all session APIs
-- **Multi-language Support**: Tests executable path handling for Python and Mock debug languages
-- **Platform Defaults**: Validates environment-specific executable defaults (python vs python3)
-- **API Completeness**: Documents that all interfaces (CreateSessionParams, ProxyConfig, ProxyInitPayload) use the new parameter structure
+### Session Migration Testing (`session-migration.test.ts`)
+Comprehensive test suite validating the migration from legacy `pythonPath` to standardized `executablePath` parameter across all session management interfaces. Tests cover:
+- API migration completeness verification
+- Multi-language support (Python, Mock) with new parameter structure
+- Platform-specific executable defaults and environment handling
+- Type safety enforcement preventing use of deprecated parameters
 
-### Type Guard Tests (`type-guards.test.ts`)
-- **Runtime Validation**: Tests type guards for AdapterCommand and ProxyInitPayload structures at IPC boundaries
-- **Serialization Safety**: Validates JSON serialization/deserialization with pre/post validation
-- **Factory Functions**: Tests safe construction utilities with default handling
-- **Error Handling**: Validates detailed error messaging with source context for debugging
+### Type Guard Testing (`type-guards.test.ts`)
+Extensive validation of runtime type safety utilities that protect critical system boundaries (IPC, serialization). Tests cover:
+- `AdapterCommand` structure validation with comprehensive edge case handling
+- `ProxyInitPayload` validation for session initialization data
+- Serialization/deserialization safety with error handling
+- Factory functions and property accessors with fallback mechanisms
+- Structured logging utilities for validation events
+
+## System Integration
+
+These test modules work together to ensure:
+
+**Data Flow Safety**: Type guards validate data structures before they flow between system components, while session tests ensure proper parameter handling during session lifecycle management.
+
+**API Evolution Support**: Session migration tests verify backward compatibility is properly broken (old API rejected) while new API works consistently across all supported languages and platforms.
+
+**Boundary Protection**: Both modules focus on testing critical boundaries - session creation/management and data validation at serialization points.
 
 ## Public API Coverage
-The tests validate these key utility functions:
-- **`isValidAdapterCommand`**: Runtime type guard with TypeScript narrowing
-- **`validateAdapterCommand`**: Throwing validator with detailed error context
-- **`hasValidAdapterCommand`**: ProxyInitPayload.adapterCommand validation
-- **`validateProxyInitPayload`**: Complete payload validation for IPC
-- **`serializeAdapterCommand`/`deserializeAdapterCommand`**: Safe JSON handling
-- **`createAdapterCommand`**: Factory with defaults
-- **`getAdapterCommandProperty`**: Safe property access with fallback
-- **`logAdapterCommandValidation`**: Structured logging utility
 
-## Internal Organization
+The tests validate these key entry points:
+- `SessionStore` creation and parameter validation
+- `CreateSessionParams`, `ProxyConfig`, and `ProxyInitPayload` interfaces
+- Type guard functions: `isValidAdapterCommand`, `validateAdapterCommand`, `hasValidAdapterCommand`, `validateProxyInitPayload`
+- Serialization utilities: `serializeAdapterCommand`, `deserializeAdapterCommand`
+- Factory and utility functions: `createAdapterCommand`, `getAdapterCommandProperty`, `logAdapterCommandValidation`
 
-### Test Patterns
-- **Boundary Testing**: Validates data at critical system interfaces (IPC, serialization)
-- **Migration Testing**: Ensures API evolution maintains backward compatibility while enforcing new patterns
-- **Performance Testing**: Large dataset validation to ensure type guards scale appropriately
-- **Error Context**: Comprehensive error message validation for developer experience
+## Testing Patterns
 
-### Data Flow Validation
-1. **Input Validation**: Type guards ensure data structure integrity at entry points
-2. **Transformation Safety**: Serialization tests ensure data survives round-trip processing
-3. **Output Validation**: Factory functions guarantee valid output structures
-4. **Error Propagation**: Validation failures include source context and detailed diagnostics
+Both test suites follow consistent patterns:
+- **Environment isolation**: Cleanup of environment variables and console mocks
+- **Comprehensive edge case coverage**: Including null/undefined, prototype pollution, circular references
+- **Performance validation**: Ensuring type guards perform well with large datasets
+- **Error message validation**: Verifying detailed, actionable error reporting
+- **Type safety verification**: Using TypeScript compiler behavior to validate type narrowing
 
-## Important Conventions
-- **Console Spy Management**: Consistent setup/teardown for logging validation
-- **Environment Isolation**: Try/finally blocks for environment variable cleanup
-- **Type Narrowing**: Verification that TypeScript compiler correctly narrows types after validation
-- **Performance Benchmarks**: Large dataset testing to ensure validation doesn't become a bottleneck
-- **Round-trip Testing**: Serialization consistency verification
+## Dependencies
 
-## Integration Points
-These utilities support:
-- **Session Management**: Parameter migration and validation for session creation
-- **IPC Communication**: AdapterCommand validation between proxy and adapter processes  
-- **Debugging Infrastructure**: Type-safe communication with language-specific debug adapters
-- **Error Diagnostics**: Structured logging and error reporting for system monitoring
+- **vitest** framework with mocking capabilities for console and timer control
+- **@debugmcp/shared** package for shared types and enums
+- Core session management modules (`SessionStore`, parameter types)
+- Platform-specific utilities for executable path resolution
+
+This test directory ensures the stability and reliability of the debug system's core utilities through comprehensive validation of both API evolution and runtime type safety mechanisms.

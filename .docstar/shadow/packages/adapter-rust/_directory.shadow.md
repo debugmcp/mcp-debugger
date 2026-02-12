@@ -1,77 +1,70 @@
-# packages/adapter-rust/
-@generated: 2026-02-11T23:48:26Z
+# packages\adapter-rust/
+@generated: 2026-02-12T21:01:33Z
 
-## Rust Debug Adapter Package
+## Overall Purpose and Responsibility
 
-The `adapter-rust` package provides a complete Rust debugging solution for the MCP (Model Context Protocol) Debugger framework. It implements a production-ready debug adapter that bridges Rust development workflows with Visual Studio Code's Debug Adapter Protocol (DAP) through the CodeLLDB debugger backend.
+The `packages/adapter-rust` module provides a comprehensive Rust debugging integration for the MCP (Model Context Protocol) Debugger framework. This adapter bridges Rust/Cargo development environments with CodeLLDB debugging capabilities through the Debug Adapter Protocol (DAP), enabling seamless debugging of Rust applications within the broader MCP ecosystem.
 
-## Overall Architecture
+## Key Components and Integration
 
-This package follows a multi-layered architecture combining external tool vendoring, comprehensive Rust ecosystem integration, and standards-compliant debugging protocol implementation. The system transforms Rust source code into debuggable binaries and manages the complete debugging session lifecycle.
+### Core Architecture Layers
 
-### Component Integration Flow
+**Factory Layer**: `RustAdapterFactory` implements the factory pattern for adapter lifecycle management, providing environment validation, dependency checking (CodeLLDB availability, Cargo installation, toolchain compatibility), and adapter instantiation with dependency injection.
 
-1. **Build Automation** (`scripts/`) - Downloads and caches CodeLLDB debugger binaries across platforms
-2. **Core Implementation** (`src/`) - Provides the main debug adapter and factory implementations
-3. **Utility Infrastructure** (`src/utils/`) - Handles Rust toolchain integration, binary analysis, and platform abstraction
-4. **Test Coverage** (`tests/`) - Validates all components through comprehensive unit and integration testing
+**Adapter Layer**: `RustDebugAdapter` serves as the core debugging implementation, extending EventEmitter and implementing IDebugAdapter. It manages complete debug session lifecycles through state machine transitions, handles Rust-specific configuration transformation, and provides CodeLLDB proxy management with TCP-mode communication.
 
-## Key Components & Relationships
+**Utilities Infrastructure**: Supporting modules provide foundational capabilities including Rust/Cargo environment detection, project discovery and build management, binary format analysis for debugging strategy selection, and platform-specific CodeLLDB executable resolution.
 
-### **External Tool Management**
-The `scripts/` directory handles the complex vendoring of CodeLLDB debugger binaries, automatically downloading platform-specific VSIX packages and organizing debugging tools across Windows, macOS, and Linux (x64/ARM64). This creates the foundation for cross-platform Rust debugging by ensuring consistent debugger availability.
-
-### **Debug Adapter Core**
-The `src/` directory implements the primary debugging interfaces:
-- **RustDebugAdapter** - Main state machine managing the debugging lifecycle with proxy-based DAP communication
-- **RustAdapterFactory** - Dependency injection and environment validation ensuring all prerequisites are met
-- **Comprehensive utilities** - Deep Rust ecosystem integration handling Cargo builds, binary analysis, and toolchain management
-
-### **Testing Infrastructure** 
-The `tests/` directory provides extensive validation coverage with sophisticated mocking infrastructure, testing everything from Cargo integration to binary format detection across different platforms and toolchain configurations.
+**Vendoring System**: Automated scripts handle cross-platform CodeLLDB binary distribution, downloading and organizing debugger components for Windows, macOS, and Linux platforms with comprehensive caching and validation.
 
 ## Public API Surface
 
-### Primary Entry Points
-- **`RustDebugAdapter`** - Core debug adapter implementing `IDebugAdapter` interface for MCP integration
-- **`RustAdapterFactory`** - Factory implementing `IAdapterFactory` for clean adapter instantiation with validation
-- **Environment validation utilities** - `resolveCodeLLDBPath()`, `checkCargoInstallation()` for prerequisite checking
-- **Cargo integration functions** - `resolveCargoProject()`, `getCargoTargets()` for build system interaction
-- **Binary analysis tools** - `detectBinaryFormat()` for toolchain compatibility detection
+### Main Entry Points
+- `RustAdapterFactory.createAdapter()` - Primary factory method for creating configured adapter instances
+- `RustDebugAdapter` - Core adapter class for debug session management and DAP communication
+- `resolveCodeLLDBPath()` / `resolveCodeLLDBExecutable()` - CodeLLDB infrastructure setup utilities
+- `checkCargoInstallation()` / `checkRustInstallation()` - Environment validation functions
+- `resolveCargoProject()` / `getCargoTargets()` - Cargo project management utilities
+- `detectBinaryFormat()` - Binary analysis for debugging compatibility assessment
 
-### Configuration Interface
-- **`RustLaunchConfig`** - Extends DAP with Rust-specific options (Cargo targets, build features, LLDB commands)
-- **`BinaryInfo`** - Metadata structure providing executable analysis results
-- **Platform-specific handling** - Automatic MSVC vs GNU toolchain detection and configuration
+### Configuration Interfaces
+- `RustLaunchConfig` - Rust-specific debugging configuration extending base DAP
+- `BinaryInfo` - Binary classification results (MSVC/GNU, debug info presence)
+- `CargoTarget` - Cargo compilation target representation
+- `ToolchainValidationResult` - Environment compatibility assessment
 
-## Internal Organization & Data Flow
+## Internal Organization and Data Flow
 
-### Debugging Session Lifecycle
-1. **Environment Validation** - Factory validates CodeLLDB availability and Rust toolchain presence
-2. **Project Analysis** - Cargo metadata parsing and binary target identification
-3. **Build Orchestration** - Intelligent rebuilding based on file timestamps and dependencies  
-4. **Binary Classification** - Debug format detection and toolchain compatibility checking
-5. **Debug Session Management** - CodeLLDB subprocess orchestration with DAP passthrough
-6. **State Management** - Event-driven state transitions with comprehensive error handling
+### Processing Pipeline
+1. **Environment Validation**: Factory validates Rust toolchain, Cargo installation, and CodeLLDB availability
+2. **Project Discovery**: Cargo utilities discover projects, resolve targets, and manage build dependencies
+3. **Binary Analysis**: Binary detector classifies executables and determines optimal debugging strategies
+4. **Adapter Creation**: Factory instantiates RustDebugAdapter with validated dependencies and configuration
+5. **Debug Session Management**: Adapter orchestrates DAP protocol communication through ProxyManager, managing state transitions and CodeLLDB proxy lifecycle
 
-### Key Design Patterns
-- **Factory Pattern** - Clean separation of adapter creation from configuration
-- **Proxy Architecture** - CodeLLDB subprocess management with transparent DAP communication
-- **Graceful Degradation** - Warnings for optional dependencies, errors only for critical requirements
-- **Platform Awareness** - Windows MSVC/GNU toolchain compatibility with configurable behavior
-- **Caching Strategy** - Optimized executable resolution with TTL-based invalidation
+### State Management
+- Adapter implements state machine: UNINITIALIZED → INITIALIZING → READY → CONNECTED → DEBUGGING
+- Executable path caching with TTL optimization for performance
+- Thread tracking and DAP event handling for session coordination
 
-## Integration Points
+### Platform Considerations
+- Cross-platform CodeLLDB executable resolution with multiple fallback paths
+- Windows MSVC vs GNU toolchain detection and compatibility handling  
+- Platform-specific binary format analysis and debug symbol detection
+- Automated binary vendoring across 5 supported platforms (Windows x64, macOS x64/ARM64, Linux x64/ARM64)
 
-The package integrates with multiple external systems:
-- **MCP Framework** - Standards-compliant debug adapter implementation
-- **CodeLLDB Backend** - LLDB-based debugging through TCP communication
-- **Rust Toolchain** - Deep cargo/rustc integration for build system operations
-- **VS Code DAP** - Full Debug Adapter Protocol compliance
-- **Platform Tools** - OS-specific tooling (Windows dlltool, Unix shared libraries)
+## Important Patterns and Conventions
 
-## Build & Development
+### Factory and Proxy Patterns
+Clean separation of adapter creation from configuration through factory pattern, with CodeLLDB process management abstracted through ProxyManager for reliable DAP communication.
 
-The package includes comprehensive build tooling with environment-based configuration, extensive caching mechanisms, and CI/CD optimization. The vendoring system supports offline development modes while ensuring consistent debugging capabilities across all supported platforms.
+### Validation-First Design
+Comprehensive environment checking occurs before adapter creation, with structured validation results providing errors, warnings, and environment details for troubleshooting.
 
-This package serves as a complete, production-ready solution for Rust debugging within the MCP ecosystem, handling the complexity of Rust toolchain integration while providing clean, standards-compliant interfaces for debugging workflows.
+### Platform Awareness and Resilience
+Handles platform differences in toolchain detection, executable resolution, and binary analysis, with graceful degradation and fallback mechanisms throughout the stack.
+
+### Comprehensive Testing Strategy
+Extensive test coverage with mock infrastructure for cross-platform validation, toolchain integration testing, and binary format detection verification, ensuring reliability across diverse development environments.
+
+This module serves as the definitive Rust debugging solution within the MCP framework, providing production-ready debugging capabilities with emphasis on reliability, platform compatibility, and seamless developer experience through comprehensive Rust toolchain integration.

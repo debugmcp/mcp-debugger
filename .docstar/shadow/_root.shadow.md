@@ -1,68 +1,91 @@
 # (root)/
-@generated: 2026-02-11T23:49:17Z
+@generated: 2026-02-12T21:02:43Z
 
 ## Overall Purpose and Responsibility
 
-This repository serves as the **MCP Debugger** - a complete debugging ecosystem that bridges AI agents with multi-language debugging capabilities through the Model Context Protocol (MCP). The system transforms language-specific debugging tools into a unified, protocol-compliant platform that enables AI agents to perform sophisticated debugging operations (step-through execution, breakpoint management, variable inspection, expression evaluation) across Python, JavaScript/TypeScript, Rust, and Go applications.
+The root directory contains the complete MCP (Model Context Protocol) Debug Server project - a comprehensive multi-language debugging platform that enables AI agents and development tools to perform sophisticated debugging operations across JavaScript/TypeScript, Python, Go, and Rust through standardized MCP protocol tools. This project bridges the gap between AI-driven development workflows and real debugging capabilities by providing a batteries-included debugging solution that operates both as a standalone CLI tool and as a protocol-compliant MCP service.
 
-## System Architecture and Component Integration
+## Key Components and Architecture
 
-The repository follows a sophisticated multi-layered architecture that orchestrates debugging capabilities across the entire development lifecycle:
+### Core Application Structure
+- **`src/`**: Complete MCP server implementation with 16 standardized debugging tools, multi-language adapter orchestration, and Debug Adapter Protocol (DAP) proxy system
+- **`packages/`**: Monorepo containing modular debugging framework with shared abstractions (`shared`), language-specific adapters (`adapter-*`), and primary distribution package (`mcp-debugger`)
+- **`mcp_debugger_launcher/`**: Cross-platform launcher providing intelligent runtime detection and unified execution across Node.js/npm and Docker environments
 
-### Core Debugging Infrastructure (`src/`)
-- **MCP Server Layer**: Primary debugging interface exposing 16 standardized debugging tools through MCP protocol
-- **Session Management**: Centralized debug session orchestration with lifecycle control and state management
-- **DAP Proxy System**: Sophisticated intermediary layer translating between MCP semantics and Debug Adapter Protocol
-- **Multi-Language Adapters**: Dynamic adapter registry supporting Python (debugpy), JavaScript (js-debug), Go (Delve), and Rust (CodeLLDB)
+### Development and Testing Infrastructure  
+- **`tests/`**: Comprehensive five-tier testing architecture from unit tests through end-to-end workflows, with complete cross-platform validation and stress testing
+- **`examples/`**: Educational demonstration suite featuring working implementations across all supported languages, TUI visualization tools, and autonomous AI agent debugging simulations
+- **`scripts/`**: Complete DevOps automation including intelligent build systems, cross-platform environment setup, memory diagnostics, and CI/CD integration
 
-### Language Adapter Ecosystem (`packages/`)
-- **Shared Foundation**: Type-safe abstraction layer with unified interfaces (`IDebugAdapter`, `AdapterFactory`) ensuring consistent behavior
-- **Language-Specific Implementations**: Complete debugging adapters with native toolchain integration and cross-platform compatibility
-- **Production Distribution**: Standalone CLI tools (`mcp-debugger/`) bundling all components for npm/npx deployment
+### Distribution and Deployment
+- **`docker/`**: Containerization infrastructure with multi-service orchestration supporting both production deployment and development debugging workflows
+- **Configuration Files**: Modern tooling setup including flat-config ESLint, Vitest with sophisticated console filtering, and cross-platform build automation
 
-### Development and Automation Infrastructure
-- **Build System (`scripts/`)**: Comprehensive build, test, and deployment automation with MCP protocol compliance
-- **Testing Framework (`tests/`)**: Multi-layered validation covering unit tests, integration workflows, and end-to-end debugging scenarios
-- **Development Environment (`docker/`)**: Containerized debugging with remote debugging support and workspace integration
+## How Components Work Together
 
-### Educational and Demonstration Resources
-- **Examples Directory**: Comprehensive demonstration suite with language-specific debugging scenarios, autonomous agent demos, and visualization tools
-- **Runtime Launcher (`mcp_debugger_launcher/`)**: Cross-platform CLI tool providing runtime-agnostic server launching with intelligent environment detection
+### Debugging Workflow Orchestration
+The system operates through a sophisticated multi-layer architecture:
 
-## Key Entry Points and Public API Surface
+1. **Entry Point Layer**: CLI interface (`mcp-debugger-wrapper.sh`, launcher modules) intelligently detects runtime environment and routes execution to appropriate transport mode (stdio/SSE)
 
-### Primary Integration Points
-- **`createDebugMcpServer(options)`**: Main factory function for embedding MCP debugging capabilities in applications
-- **CLI Commands**: 
-  - `npx @debugmcp/mcp-debugger stdio` - Standard MCP protocol integration
-  - `npx @debugmcp/mcp-debugger sse` - HTTP-based debugging with Server-Sent Events
-- **MCP Debugging Tools**: 16 standardized tools accessible via MCP protocol:
-  - Session management (`debug_session_create`, `debug_session_list`, `debug_session_destroy`)
-  - Execution control (`debug_step_over`, `debug_step_into`, `debug_continue`)
-  - Breakpoint management (`debug_set_breakpoint`, `debug_list_breakpoints`)
-  - Runtime inspection (`debug_get_variables`, `debug_get_stack_trace`)
-  - Expression evaluation (`debug_evaluate_expression`)
+2. **Protocol Layer**: MCP server (`src/server.ts`) exposes standardized debugging tools while managing console output to prevent protocol corruption, with sophisticated session management and adapter discovery
 
-### Developer Experience Entry Points
-- **Language Adapter Factories**: Standardized creation patterns for each supported language with automatic environment validation
-- **Docker Integration**: `docker run` deployment with integrated debugging infrastructure
-- **Educational Resources**: Progressive complexity examples from basic variable inspection to advanced concurrent debugging scenarios
+3. **Adapter Orchestration**: Centralized adapter registry (`packages/shared`) provides unified interfaces that language-specific adapters implement, enabling consistent debugging experiences across JavaScript, Python, Go, and Rust
 
-## Critical Integration Patterns
+4. **Debug Communication**: DAP proxy system (`src/proxy/`) manages Debug Adapter Protocol communication with language-specific debuggers (js-debug, debugpy, Delve, CodeLLDB) while maintaining session isolation
 
-### MCP Protocol Compliance
-The entire system is architected around MCP protocol requirements, with console output silencing, structured tool schemas, and transport-agnostic design enabling seamless integration with AI agents and development environments like Claude Code.
+5. **Resource Management**: Comprehensive dependency injection container (`src/container/`) orchestrates the complete application dependency graph with automatic cleanup and graceful shutdown
 
-### Multi-Language Debugging Strategy
-The system provides VS Code-quality debugging experiences across multiple languages through native toolchain integration while maintaining a unified interface. Each language adapter handles platform-specific requirements (virtual environments, build systems, runtime detection) while implementing shared debugging contracts.
+### Cross-Language Integration
+All components follow consistent patterns enabling seamless multi-language debugging:
+- **Unified Interfaces**: Shared abstractions ensure consistent behavior across language adapters
+- **Factory Registration**: Dynamic adapter discovery with environment validation and capability detection  
+- **Protocol Compliance**: Standardized MCP tool responses regardless of underlying debug adapter implementation
+- **Path Resolution**: Container-aware file system operations handling host vs container path mapping
 
-### Production Deployment Architecture
-The system supports multiple deployment scenarios:
-- **Container Mode**: Docker-based deployment with stdio transport for isolated environments
-- **HTTP Mode**: Server-Sent Events transport for web-based integrations with multi-session support
-- **Development Mode**: Rich CLI tooling with binary analysis and debugging workflow validation
+## Public API Surface and Entry Points
 
-### Quality Assurance Framework
-Comprehensive testing infrastructure validates the complete debugging ecosystem through layered validation covering protocol compliance, cross-platform compatibility, language-specific integration, and production deployment scenarios.
+### Primary Distribution Interface
+- **`@modelcontextprotocol/debugger`**: Main npm package supporting `npx` execution with complete multi-language debugging capabilities
+- **CLI Modes**: 
+  - `--transport stdio`: MCP protocol communication via standard input/output (default for AI agents)
+  - `--transport sse`: Server-Sent Events for web-based integrations
+  - `check-rust-binary`: Binary analysis and validation utilities
 
-This repository represents a complete, production-ready solution that successfully democratizes sophisticated debugging capabilities for AI agents, transforming complex language-specific debugging tools into a unified, accessible platform that maintains the full power and flexibility of native debugging workflows.
+### Core MCP Tools (16 standardized debugging operations)
+- **Session Management**: `create_debug_session`, `list_debug_sessions`, `close_debug_session`
+- **Debug Control**: `start_debugging`, `attach_to_process`, step operations (`step_into`, `step_over`, `step_out`)
+- **Breakpoint Management**: `set_breakpoint`, `list_breakpoints`, `remove_breakpoint`
+- **Runtime Inspection**: `get_variables`, `get_stack_trace`, `evaluate_expression`
+- **Language Discovery**: `list_supported_languages` with dynamic adapter detection
+
+### Development and Integration Points
+- **Cross-Platform Launcher**: `mcp_debugger_launcher` provides unified interface across Node.js/Docker execution environments
+- **Educational Resources**: `examples/` directory offers complete learning progression from basic debugging through advanced multi-language scenarios
+- **Testing Framework**: Comprehensive testing infrastructure supporting both component-level validation and complete debugging workflow verification
+- **Docker Integration**: Complete containerization with development workspace support and remote debugging capabilities
+
+### Configuration and Customization
+- **Language Adapter Policies**: Customizable debugging behavior through strategy patterns
+- **Transport Configuration**: Flexible communication modes supporting both AI agent integration and human developer workflows  
+- **Environment Detection**: Automatic adaptation to containerized vs native execution environments
+- **Resource Management**: Configurable session limits, timeout handling, and cleanup strategies
+
+## Critical Design Patterns
+
+### AI Agent Integration
+- **Protocol Integrity**: Console output permanently silenced to prevent MCP protocol corruption
+- **Standardized Responses**: All operations return structured JSON for reliable AI consumption
+- **Error Recovery**: Comprehensive typed error hierarchy with actionable recovery strategies
+
+### Production Readiness  
+- **Multi-Environment Support**: Seamless operation across development, containerized, and CI/CD environments
+- **Resource Safety**: Automatic cleanup with leak detection and orphan process prevention
+- **Cross-Platform Compatibility**: Unified behavior across Windows, Linux, and macOS with platform-specific optimizations
+
+### Developer Experience
+- **Zero Configuration**: Intelligent environment detection with automatic adapter discovery
+- **Rich Diagnostics**: Comprehensive logging, memory monitoring, and debugging visualization tools
+- **Educational Progression**: Complete learning resources from basic concepts through advanced debugging workflows
+
+This project represents a complete debugging ecosystem that transforms complex debug adapter orchestration into simple, standardized MCP tools accessible to AI agents while maintaining production-grade reliability and comprehensive multi-language support.

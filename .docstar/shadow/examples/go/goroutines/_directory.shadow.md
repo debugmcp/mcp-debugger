@@ -1,58 +1,48 @@
-# examples/go/goroutines/
-@generated: 2026-02-11T23:47:34Z
+# examples\go\goroutines/
+@generated: 2026-02-12T21:00:50Z
 
-## Overall Purpose
-Educational Go module demonstrating fundamental goroutine concurrency patterns and synchronization mechanisms. Serves as a comprehensive learning resource for understanding Go's concurrent programming model through progressively complex examples.
+## Purpose
+Educational module demonstrating fundamental Go concurrency patterns through practical goroutine examples. Serves as a comprehensive tutorial covering basic goroutine synchronization, channel communication, and advanced worker pool architectures.
 
-## Key Components and Architecture
+## Key Components
+The directory contains a single comprehensive example program (`main.go`) that presents three progressively complex concurrency scenarios:
 
-### Main Orchestrator (`main.go`)
-Single executable containing three self-contained goroutine demonstrations:
-
-1. **Simple Goroutines** - Basic concurrent execution with WaitGroup synchronization
-2. **Channel Communication** - Producer-consumer pattern with buffered/unbuffered channels  
-3. **Worker Pool** - Advanced job processing with bounded concurrency
-
-Each example builds upon previous concepts, creating a learning progression from basic goroutine spawning to sophisticated worker architectures.
+1. **Basic Goroutines** - Simple concurrent execution with WaitGroup synchronization
+2. **Channel Communication** - Producer-consumer pattern with buffered channels
+3. **Worker Pool** - Scalable job processing with bounded concurrency
 
 ## Public API Surface
+- **main()** - Primary entry point orchestrating all three demonstration examples
+- **simpleGoroutines()** - Basic goroutine lifecycle with synchronization
+- **channelCommunication()** - Producer-consumer channel patterns
+- **workerPool()** - Advanced concurrent job processing architecture
+- **worker()** - Reusable worker function for pool-based processing
 
-### Entry Points
-- **`main()`** - Primary entry point executing all three examples sequentially
-- **`simpleGoroutines()`** - Demonstrates basic goroutine lifecycle management
-- **`channelCommunication()`** - Shows channel-based message passing patterns
-- **`workerPool()`** - Implements scalable job processing architecture
+## Internal Organization
+The module follows a pedagogical structure, building complexity incrementally:
 
-### Supporting Functions
-- **`worker()`** - Reusable worker function for pool-based job processing
+1. Starts with fundamental goroutine creation and WaitGroup synchronization
+2. Progresses to channel-based communication patterns with proper closure semantics  
+3. Culminates in production-ready worker pool implementation
 
-## Internal Organization and Data Flow
+Each example is self-contained but demonstrates increasingly sophisticated concurrency control mechanisms.
 
-### Synchronization Strategy
-- **WaitGroup Pattern**: Used consistently across examples for coordinated goroutine completion
-- **Channel Direction**: Type-safe directional channels prevent misuse in worker functions
-- **Proper Channel Closure**: Producers close channels to enable range-based consumption
+## Data Flow
+- **Simple Example**: Direct goroutine execution → WaitGroup synchronization → completion
+- **Channel Example**: Producer generates messages → buffered channel → consumer processes → done signal
+- **Worker Pool**: Job distribution channel → multiple workers → result collection channel → aggregated output
 
-### Concurrency Models
-1. **Fork-Join**: Simple goroutines pattern with parallel execution and synchronized completion
-2. **Pipeline**: Producer pushes to channel, consumer pulls with processing delays
-3. **Worker Pool**: Job distribution across fixed number of workers with result aggregation
+## Important Patterns
+- **WaitGroup Lifecycle**: Proper increment before goroutine creation, defer decrement pattern
+- **Channel Direction**: Type-safe directional channels in worker functions
+- **Channel Closure**: Producer-side closure enabling range-based consumer loops
+- **Graceful Termination**: Coordinated shutdown of concurrent components
+- **Resource Management**: Bounded concurrency with appropriately-sized buffered channels
 
-## Important Patterns and Conventions
+## Critical Design Principles
+- All goroutines are properly synchronized to prevent premature program termination
+- Channels follow Go best practices with producer-side closure and consumer-side ranging
+- Race condition prevention through careful ordering of WaitGroup operations
+- Deadlock avoidance via asynchronous result channel closure after worker completion
 
-### Resource Management
-- WaitGroup incremented before goroutine creation to prevent race conditions
-- Defer pattern used for cleanup operations
-- Channels properly sized for workload (buffered appropriately)
-
-### Error Prevention
-- Results channel closed asynchronously to prevent deadlock
-- Channel ranging patterns preferred over explicit receive loops
-- Goroutine lifecycle carefully managed to prevent premature main exit
-
-### Educational Design
-- Examples ordered by complexity for progressive learning
-- Clear separation of concerns between different concurrency patterns  
-- Descriptive output formatting aids understanding of execution flow
-
-This module serves as a practical reference for Go concurrency best practices, suitable for educational purposes or as a foundation for more complex concurrent systems.
+This module serves as a practical reference for implementing concurrent Go applications, demonstrating both foundational concepts and production-ready patterns.

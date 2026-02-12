@@ -75,10 +75,15 @@ describe('go-utils', () => {
 
       it('should throw error if go not found', async () => {
         vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
+        const originalPath = process.env.PATH;
         process.env.PATH = '';
 
-        await expect(findGoExecutable(undefined, mockLogger))
-          .rejects.toThrow('Go executable not found');
+        try {
+          await expect(findGoExecutable(undefined, mockLogger))
+            .rejects.toThrow('Go executable not found');
+        } finally {
+          process.env.PATH = originalPath;
+        }
       });
     });
   });
@@ -141,12 +146,21 @@ describe('go-utils', () => {
 
       it('should throw error if dlv not found', async () => {
         vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
+        const originalPath = process.env.PATH;
+        const originalGoPath = process.env.GOPATH;
+        const originalGoBin = process.env.GOBIN;
         process.env.PATH = '';
         delete process.env.GOPATH;
         delete process.env.GOBIN;
 
-        await expect(findDelveExecutable(undefined, mockLogger))
-          .rejects.toThrow('Delve (dlv) not found');
+        try {
+          await expect(findDelveExecutable(undefined, mockLogger))
+            .rejects.toThrow('Delve (dlv) not found');
+        } finally {
+          process.env.PATH = originalPath;
+          if (originalGoPath !== undefined) process.env.GOPATH = originalGoPath;
+          if (originalGoBin !== undefined) process.env.GOBIN = originalGoBin;
+        }
       });
     });
   });

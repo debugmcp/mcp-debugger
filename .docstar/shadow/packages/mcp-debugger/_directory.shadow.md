@@ -1,70 +1,71 @@
-# packages/mcp-debugger/
-@generated: 2026-02-11T23:47:55Z
+# packages\mcp-debugger/
+@generated: 2026-02-12T21:01:12Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/mcp-debugger` directory provides a **complete standalone CLI distribution system** for the MCP debugger that transforms development source code into production-ready, protocol-compliant debugging tools. This package serves as the primary distribution mechanism for end-users, handling the complex orchestration of multi-language debug adapters, build automation, and MCP transport protocol compliance.
+The `packages/mcp-debugger` directory is a complete MCP (Model Context Protocol) debugger CLI package that provides multi-language debugging capabilities through a protocol-compliant interface. This module serves as both the implementation and distribution layer for a standalone debugging tool that integrates with MCP transports while supporting JavaScript, Python, and other language debugging adapters.
 
-## Key Components and Architecture
+## Key Components and Integration
 
-### Build Pipeline (`scripts/`)
-- **Production Bundling**: `bundle-cli.js` orchestrates complete TypeScript-to-distribution pipeline
-- **Multi-Stage Process**: Handles proxy bundling, CLI compilation, vendor asset collection, and npm packaging
-- **Platform Management**: Manages debug adapter binaries across platforms (JavaScript, Rust/CodeLLDB)
-- **Asset Coordination**: Sources shared components from monorepo while creating self-contained distributions
+### Build Infrastructure (`scripts/`)
+- **bundle-cli.js**: Primary build orchestrator that creates distributable CLI bundles, DAP proxy components, and integrates vendor debugging adapters (js-debug, CodeLLDB)
+- Handles cross-platform packaging and npm distribution preparation
+- Manages complex asset copying from monorepo shared resources
 
-### CLI Entry System (`src/`)
-- **Protocol-Compliant Bootstrap**: `cli-entry.ts` implements critical console silencing for MCP transport compatibility
-- **Static Adapter Bundling**: `batteries-included.ts` ensures all language adapters are included via global registry pattern
-- **Execution Orchestration**: Manages precise loading sequence through dynamic imports and environment coordination
+### Core Implementation (`src/`)
+- **cli-entry.ts**: Main CLI entry point with protocol-compliant console handling and transport detection
+- **batteries-included.ts**: Adapter bundle registry that ensures all debugging adapters are included in distribution
+- Provides side-effect based adapter registration and global discovery mechanisms
 
-## Data Flow and Integration
-
-**Development to Distribution Pipeline:**
-```
-TypeScript Source → Bundle Scripts → CLI Entry → Adapter Registry → Distribution Artifacts
-```
-
-1. **Build Phase**: Scripts transform source and collect vendor dependencies into `dist/` directory
-2. **Bootstrap Phase**: CLI entry establishes protocol compliance and environment setup
-3. **Registration Phase**: Adapters populate global registry via import side-effects
-4. **Runtime Phase**: Main system discovers adapters through coordinated bootstrap process
+### Architecture Integration
+The components work together in a coordinated build-to-runtime pipeline:
+1. **Build Phase**: Scripts bundle all components, copy shared assets, and create distributable packages
+2. **Runtime Phase**: Source code orchestrates adapter discovery, protocol compliance, and CLI bootstrapping
+3. **Distribution**: Results in a self-contained CLI tool with embedded multi-language debugging support
 
 ## Public API Surface
 
-**Primary Distribution Artifacts:**
-- `debugmcp-*.tgz` - Complete standalone CLI package for npm/npx distribution
-- `dist/` directory - Runtime-ready distribution with all dependencies
+### Primary Entry Points
+- **CLI Distribution**: Distributed as npm package with `cli-entry.ts` as main entry point
+- **npx Compatibility**: Direct execution via `npx @modelcontextprotocol/debugger`
+- **MCP Transport Support**: Handles stdio, SSE, and direct invocation modes
 
-**CLI Entry Points:**
-- Main executable via `cli-entry.ts` with protocol-compliant stdout management
-- Bundled language adapters: JavaScript, Python, Mock (via global registry)
+### Key Functions
+- `bundleProxy()` / `bundleCLI()`: Build-time bundling operations
+- Global adapter registry: `__DEBUG_MCP_BUNDLED_ADAPTERS__` for runtime adapter discovery
+- Protocol-safe console management for MCP compliance
 
-**Build Automation:**
-- `node scripts/bundle-cli.js` - Complete build pipeline execution
+## Internal Organization and Data Flow
 
-## Internal Organization Patterns
+### Build-to-Runtime Pipeline
+1. **Asset Aggregation**: Build scripts collect shared runtime assets and vendor dependencies
+2. **Bundle Creation**: Creates optimized ESM/CommonJS compatible bundles
+3. **Adapter Registration**: Language adapters self-register through module import side effects
+4. **CLI Bootstrap**: Entry point coordinates initialization with protocol-aware console handling
 
-### Critical Execution Sequence
-The directory enforces strict ordering to maintain MCP protocol compliance:
-1. Console silencing (pre-import, prevents protocol contamination)
-2. Adapter registration (import side-effects for bundle inclusion)
-3. Dynamic bootstrap (coordinated environment setup)
-4. Main system initialization
+### Multi-Language Support
+- **JavaScript**: js-debug adapter integration
+- **Rust**: CodeLLDB with platform-specific handling
+- **Python/Mock**: Additional adapter support through extensible registry pattern
+- **Vendor Management**: Environment-driven platform selection and graceful degradation
 
-### Multi-Platform Distribution Strategy
-- **Vendor Asset Management**: Handles platform-specific debug adapter binaries
-- **Graceful Fallback**: Environment-driven platform selection with missing dependency handling
-- **Self-Contained Packaging**: Bundles all runtime dependencies for standalone deployment
+## Important Patterns and Conventions
 
-### Cross-Module Coordination
-Uses loose coupling patterns (environment variables, global objects) to coordinate between build system, bootstrap process, and main implementation without tight dependency injection.
+### Protocol-First Design
+- Critical console silencing for MCP transport compatibility
+- Environment flag coordination (`CONSOLE_OUTPUT_SILENCED`, `DEBUG_MCP_SKIP_AUTO_START`)
+- Transport detection and protocol-appropriate error handling
 
-## Key Architectural Invariants
+### Distribution Architecture
+- Self-contained packaging with all dependencies bundled
+- Cross-platform support with platform-aware vendor handling
+- ESM-first approach with CommonJS compatibility
+- Node.js 18+ targeting with comprehensive dependency bundling
 
-- **Protocol Compliance**: Console output must be silenced before any module imports
-- **Static Inclusion**: All adapters must be registered via side-effects for bundler inclusion
-- **Bootstrap Coordination**: Environment flags enable communication between bootstrap and main systems
-- **Distribution Completeness**: All runtime dependencies must be bundled for standalone operation
+### Extensibility Patterns
+- Global registry pattern for adapter discovery
+- Factory-based adapter instantiation
+- Side-effect registration for clean module loading
+- Dynamic import strategy for controlled initialization sequences
 
-This directory serves as the critical bridge between the MCP debugger's development ecosystem and end-user CLI distribution, handling the complex requirements of protocol compliance, multi-platform support, and dependency bundling in a cohesive, maintainable system.
+This package enables developers to easily debug multi-language applications through MCP protocols while maintaining the flexibility to work in various transport modes and deployment environments.

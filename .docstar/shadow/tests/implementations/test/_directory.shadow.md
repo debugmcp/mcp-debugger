@@ -1,65 +1,60 @@
-# tests/implementations/test/
-@generated: 2026-02-11T23:47:38Z
+# tests\implementations\test/
+@generated: 2026-02-12T21:00:53Z
 
-## Overall Purpose and Responsibility
+## Overall Purpose
 
-The `tests/implementations/test` directory provides a comprehensive test infrastructure for process management and debugging functionality. It contains fake/mock implementations of all process-related interfaces that enable deterministic unit testing without spawning real system processes. This module serves as the primary test double layer for process lifecycle management, debug target launching, and proxy process communication.
+This directory provides comprehensive test infrastructure for process management and debugging functionality. It contains fake implementations of all process-related interfaces that enable deterministic, controllable unit testing without spawning real processes or external dependencies.
 
 ## Key Components and Architecture
 
-**Process Simulation Layer**
-- **FakeProcess** - Core process mock implementing `IProcess` with controllable lifecycle events
-- **FakeProxyProcess** - Extended process mock for proxy communication scenarios
-- Both use EventEmitter pattern to simulate real Node.js process behavior with deterministic timing
+The module is built around a hierarchical set of test doubles that mirror the production process management system:
 
-**Launcher Test Doubles**
-- **FakeProcessLauncher** - Basic process spawning mock implementing `IProcessLauncher`
-- **FakeDebugTargetLauncher** - Python debugging scenario mock with auto-incrementing debug ports
-- **FakeProxyProcessLauncher** - Proxy process launcher with automatic command interception and responses
+**Process Layer**
+- `FakeProcess` - Core EventEmitter-based process mock implementing `IProcess`
+- `FakeProxyProcess` - Extended process mock for proxy scenarios implementing `IProxyProcess`
 
-**Factory and Coordination**
-- **FakeProcessLauncherFactory** - Centralized factory providing singleton access to all fake launchers
-- Implements `IProcessLauncherFactory` interface for seamless substitution in tests
+**Launcher Layer**
+- `FakeProcessLauncher` - Basic process launcher test double
+- `FakeDebugTargetLauncher` - Specialized launcher for Python debugging scenarios
+- `FakeProxyProcessLauncher` - Proxy process launcher with auto-response capabilities
+
+**Factory Layer**
+- `FakeProcessLauncherFactory` - Centralized factory providing singleton instances of all fake launchers
 
 ## Public API Surface
 
-**Main Entry Points:**
-- `FakeProcessLauncherFactory` - Primary entry point providing access to all launcher mocks
-- Factory methods: `getProcessLauncher()`, `getDebugTargetLauncher()`, `getProxyProcessLauncher()`
-- Global reset capability via `reset()` method
+**Primary Entry Points:**
+- `FakeProcessLauncherFactory` - Main factory for obtaining all launcher instances
+- Individual launcher classes for direct instantiation in specific test scenarios
 
-**Process Control API:**
-- Launch methods return controllable process instances with simulate methods
-- Test helpers: `simulateOutput()`, `simulateExit()`, `simulateError()`, etc.
-- History tracking: `launchedProcesses`, `sentCommands` arrays for verification
-
-**Pre-configuration API:**
-- `prepareProcess()`, `prepareTarget()` methods for setting up next launch behavior
-- Enables deterministic test scenarios with pre-configured responses
+**Key Testing Methods:**
+- `launch()` / `launchPythonDebugTarget()` / `launchProxy()` - Process creation methods
+- `simulate*()` methods - Control process lifecycle events (output, errors, exit, spawn)
+- `prepare*()` methods - Pre-configure next process/target behavior
+- `reset()` methods - Clean up state between tests
 
 ## Internal Organization and Data Flow
 
-**State Management:**
-- Each fake maintains internal arrays tracking launched processes/targets/commands
-- Deterministic process IDs (12345) and auto-incrementing debug ports (5678+)
-- Process state tracking via private fields (`_killed`, `_exitCode`, etc.)
+The architecture follows a factory pattern where `FakeProcessLauncherFactory` provides access to all launcher types. Each launcher maintains:
 
-**Event Flow:**
-- Async event simulation using `process.nextTick()` to match real process timing
-- Command interception in proxy launchers with automatic 'init' command responses
-- PassThrough streams for stdin/stdout/stderr simulation
+1. **Launch History** - Arrays tracking all launched processes/targets with full configuration
+2. **State Management** - Current process states and controllable behavior
+3. **Event Simulation** - Async event emission using `process.nextTick()` for realistic timing
 
-**Test Integration:**
-- All fakes implement their corresponding production interfaces exactly
-- Reset methods provide clean state between test runs
-- History arrays enable comprehensive verification of process interactions
+Data flows from launcher configuration → process creation → controllable event emission → test verification.
 
 ## Important Patterns and Conventions
 
-- **Test Double Pattern** - Complete replacement of real process spawning with controllable fakes
-- **Factory Pattern** - Centralized creation and management of all launcher instances  
-- **Event Simulation** - Deterministic async behavior matching real Node.js processes
-- **Command Interception** - Automatic response handling for common initialization patterns
-- **State Isolation** - Each fake maintains independent state with cleanup capabilities
+**Test Double Pattern** - All fakes provide deterministic behavior without external dependencies
 
-This module enables comprehensive testing of process management workflows without system dependencies, providing full control over process lifecycle events and communication for reliable, fast unit testing.
+**Event-Driven Simulation** - Uses Node.js EventEmitter pattern with `process.nextTick()` for realistic async behavior
+
+**Command Interception** - `FakeProxyProcessLauncher` automatically responds to 'init' commands, simulating real proxy initialization
+
+**Deterministic Defaults** - Consistent process IDs (12345), auto-incrementing debug ports (5678+), predictable responses
+
+**Centralized Cleanup** - Factory-level `reset()` method clears all launcher states for test isolation
+
+**History Tracking** - All launchers maintain arrays of launched processes/targets for test verification
+
+This module enables comprehensive testing of process management workflows including basic process launching, Python debugging, and proxy process communication without the complexity and non-determinism of real process spawning.

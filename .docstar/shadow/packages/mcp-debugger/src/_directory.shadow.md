@@ -1,55 +1,59 @@
-# packages/mcp-debugger/src/
-@generated: 2026-02-11T23:47:36Z
+# packages\mcp-debugger\src/
+@generated: 2026-02-12T21:00:55Z
 
-## Overall Purpose and Responsibility
-This directory serves as the **CLI distribution entry point** for the MCP debugger, providing a carefully orchestrated bootstrap system that ensures protocol compliance while bundling all necessary language adapters for standalone deployment.
+## Overall Purpose
+The `packages/mcp-debugger/src` directory serves as the core distribution and entry point layer for the MCP (Model Context Protocol) debugger CLI tool. It orchestrates the bundling of language adapters and provides a protocol-compliant CLI interface that can be safely used with npx and various MCP transport modes.
 
-## Key Components and Integration
+## Key Components and Architecture
 
-### CLI Entry System (`cli-entry.ts`)
-The primary entry point that handles critical pre-execution concerns:
-- **Protocol Compliance**: Implements sophisticated console silencing to prevent stdout pollution that would break MCP transport protocols
-- **Bootstrap Orchestration**: Manages the precise loading sequence of dependencies through dynamic imports
-- **Environment Coordination**: Sets coordination flags (`CONSOLE_OUTPUT_SILENCED`, `DEBUG_MCP_SKIP_AUTO_START`) for cross-module communication
+### Adapter Bundle Management (`batteries-included.ts`)
+- **Static Registry**: Maintains a global registry of all available debugger adapters (JavaScript, Python, Mock)
+- **Bundle Inclusion**: Ensures esbuild includes all adapters in the CLI distribution through static imports
+- **Global Discovery Pattern**: Uses `__DEBUG_MCP_BUNDLED_ADAPTERS__` global key for cross-module adapter discovery
+- **Deduplication**: Prevents duplicate adapter registrations using Set-based language key tracking
 
-### Adapter Bundling (`batteries-included.ts`)
-Static registration system that ensures complete adapter availability:
-- **Global Registry Pattern**: Uses `__DEBUG_MCP_BUNDLED_ADAPTERS__` global namespace for cross-module adapter discovery
-- **Static Bundling**: Imports JavaScript, Python, and Mock adapters to guarantee esbuild inclusion
-- **Deduplication Logic**: Prevents duplicate adapter registrations through Set-based language key tracking
+### CLI Entry Point (`cli-entry.ts`) 
+- **Protocol Compliance Layer**: Critical console silencing logic to prevent stdout pollution in MCP transport modes
+- **Bootstrap Orchestration**: Coordinates initialization sequence between adapter bundling and main implementation
+- **Transport Detection**: Intelligently detects stdio/SSE transport modes from arguments and environment
+- **Error Handling**: Protocol-aware error reporting that respects console silencing requirements
 
-## Data Flow and Architecture
+## Public API and Entry Points
 
-1. **Pre-execution Phase**: `cli-entry.ts` executes console silencing before any imports
-2. **Adapter Registration**: `batteries-included.ts` populates global adapter registry via side-effects
-3. **Bootstrap Phase**: Dynamic import chain loads main implementation with proper environment setup
-4. **Runtime Discovery**: Main system discovers available adapters through global registry
+### Primary Entry Point
+- **`cli-entry.ts`**: Main CLI entry point for npx usage
+  - Handles all transport modes (stdio, SSE, direct)
+  - Provides protocol-safe console handling
+  - Bootstraps complete debugger environment
 
-## Public API Surface
+### Internal Integration Points
+- **Global Adapter Registry**: `globalThis.__DEBUG_MCP_BUNDLED_ADAPTERS__` - discoverable adapter collection
+- **Environment Coordination**: Uses `CONSOLE_OUTPUT_SILENCED` and `DEBUG_MCP_SKIP_AUTO_START` flags for cross-module communication
 
-**Primary Entry Point**: 
-- `cli-entry.ts` - Main executable entry for npx/CLI usage
+## Data Flow and Integration
 
-**Global Adapter Registry**:
-- `__DEBUG_MCP_BUNDLED_ADAPTERS__` - Runtime adapter discovery mechanism
-- Bundled adapters: JavaScript, Python, Mock
+1. **Module Loading Sequence**: 
+   - Console silencing executes first (critical for protocol compliance)
+   - Adapter bundling registration via `batteries-included.ts`
+   - Dynamic import of main implementation to avoid premature loading
 
-## Internal Organization Patterns
+2. **Adapter Discovery Flow**:
+   - Language adapters register themselves in global registry on module load
+   - Main implementation discovers adapters through global registry lookup
+   - Factory pattern enables runtime adapter instantiation
 
-### Critical Execution Order
-The directory implements a strict loading sequence:
-1. Console silencing (pre-import)
-2. Adapter registration (import side-effects) 
-3. Main system bootstrap (dynamic import)
+3. **CLI Bootstrap Process**:
+   - Argument parsing and transport detection
+   - Protocol-appropriate console configuration  
+   - Coordinated initialization with skip flags
+   - Error handling respecting transport requirements
 
-### Cross-Module Coordination
-Uses environment variables and global objects for loose coupling between bootstrap phases and main implementation, enabling proper protocol compliance without tight dependency injection.
+## Important Patterns and Conventions
 
-### Distribution Strategy
-Designed for standalone CLI distribution via esbuild bundling, ensuring all language adapters are statically included while maintaining runtime flexibility through global registration patterns.
+- **Side-Effect Based Registration**: Adapters self-register through module import side effects
+- **Global State Management**: Uses global object pattern for adapter discovery while maintaining safety through deduplication
+- **Protocol-First Design**: All console output carefully managed to maintain MCP protocol compliance
+- **Dynamic Import Strategy**: Strategic use of dynamic imports to control module loading sequence
+- **Environment Flag Coordination**: Cross-module communication through well-defined environment variables
 
-## Key Architectural Invariants
-- Console silencing MUST execute before any module imports
-- Adapter registration occurs via import side-effects for bundle inclusion
-- Bootstrap process coordinates with main implementation through environment flags
-- Global registry enables adapter discovery without explicit dependency management
+This directory essentially serves as the "distribution layer" - it packages everything needed for the MCP debugger CLI while ensuring protocol compliance and providing a clean entry point for various usage scenarios.

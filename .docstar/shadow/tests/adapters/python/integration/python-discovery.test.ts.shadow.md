@@ -1,55 +1,49 @@
-# tests/adapters/python/integration/python-discovery.test.ts
-@source-hash: 2b36cf5ef2b2e301
-@generated: 2026-02-10T21:25:34Z
+# tests\adapters\python\integration\python-discovery.test.ts
+@source-hash: ef87c123b8e5af84
+@generated: 2026-02-12T21:00:38Z
 
-## Python Discovery Integration Test
+## Primary Purpose
+Integration test for Python discovery functionality in the MCP (Model Context Protocol) Python adapter. Tests the real-world Python executable discovery logic on Windows systems without mocking, ensuring the adapter can find Python installations through system PATH.
 
-**Purpose**: Tests real Python executable discovery functionality without mocks, specifically validating that the Python adapter can find Python executables on the system path.
+## Test Structure
+**Main Test Suite (L12-143):** `Python Discovery - Real Implementation Test @requires-python`
+- **Setup (L15-58):** Creates MCP client, configures environment, connects to server via stdio transport
+- **Teardown (L60-68):** Closes client connection with error handling
+- **Core Test (L70-138):** Windows-specific Python discovery validation
 
-### Key Components
+## Key Functions and Logic
 
-**Main Test Suite (L12-139)**: `Python Discovery - Real Implementation Test @requires-python`
-- Uses real MCP client-server communication via stdio transport
-- Explicitly avoids mocking to test actual discovery behavior
-- Focuses on Windows compatibility where python3 may redirect to Microsoft Store
+### Environment Configuration (L27-44)
+Filters environment variables and removes Python-specific overrides (`PYTHON_PATH`, `PYTHON_EXECUTABLE`) to force discovery. Uses `ensurePythonOnPath()` helper for Windows CI environments.
 
-**Setup Phase (L15-58)**:
-- Creates MCP Client instance (L21-25) with basic tool capabilities
-- Constructs server script path relative to current file location (L19)
-- Environment preparation (L27-44):
-  - Filters environment variables to remove undefined values
-  - Clears Python-specific env vars (`PYTHON_PATH`, `PYTHON_EXECUTABLE`) to force discovery
-  - Calls `ensurePythonOnPath()` for Windows CI compatibility
-  - Logs PATH variable in CI environments for debugging
-- Establishes stdio transport to server process (L46-50) with debug logging
-- 30-second timeout for connection establishment
+### Client Setup (L21-50)
+- Creates MCP client with stdio transport to `dist/index.js` server
+- Uses Node.js executable path (`process.execPath`) as command
+- Passes debug logging and filtered environment
 
-**Core Test Case (L70-134)**:
-- Validates Python discovery without explicit path specification
-- Creates debug session without `pythonPath` argument to force discovery (L90-99)
-- Attempts to start debugging with dry run mode (L105-116)
-- Includes CI-specific failure payload persistence for debugging (L118-123)
-- Expects successful discovery and dry run execution
-- Clean up with session closure
+### Test Execution (L83-138)
+1. **Tool Result Parser (L83-90):** Extracts JSON from MCP server responses
+2. **Session Creation (L94-107):** Creates debug session without `pythonPath` to trigger discovery
+3. **Discovery Validation (L110-131):** Starts debugging with `dryRunSpawn: true` to test Python executable resolution
+4. **Failure Logging (L122-127):** Captures failure payloads in CI environments
 
-**Utility Functions**:
-- `parseToolResult()` (L79-86): Extracts JSON from MCP tool response structure
-- `persistFailurePayload()` (L141-151): Saves test failure data to logs directory for CI debugging
+### Utility Function
+**persistFailurePayload (L145-155):** Writes test failure data to `logs/tests/adapters/failures/` with timestamps for debugging
 
-### Dependencies
-- MCP SDK client components for transport and communication
-- `env-utils.js` for Python path management
-- Node.js path/fs modules for file operations
-- Vitest testing framework
+## Dependencies
+- **MCP SDK:** Client and stdio transport for server communication
+- **Vitest:** Test framework (describe, it, expect, lifecycle hooks)
+- **Node.js modules:** path, fs, url for file system operations
+- **Local utilities:** env-utils.js for environment setup
 
-### Architecture Patterns
-- Integration test pattern with real subprocess communication
-- Environment isolation through filtered environment variables
-- Dry run execution for safe testing without actual debugging
-- Failure artifact collection for CI troubleshooting
+## Critical Constraints
+- **Windows-specific:** Test only runs on `win32` platform (L71-73)
+- **No mocking:** Explicitly tests real Python discovery implementation (L9-10)
+- **CI considerations:** Special handling for Windows CI environments where Python may be off PATH
+- **30s timeout:** Extended timeout for server connection (L58)
 
-### Critical Constraints
-- Must NOT use mocks - tests real implementation only
-- Requires actual Python installation on test system
-- Windows-specific handling for Microsoft Store python3 redirect issue
-- Designed to fail meaningfully when Python discovery fails
+## Architectural Notes
+- Uses dry-run mode to avoid actually launching debugger processes
+- Follows MCP tool calling protocol with JSON response parsing
+- Implements comprehensive error logging for CI debugging
+- Tests the Microsoft Store Python redirect issue on Windows

@@ -1,97 +1,98 @@
-# tests/test-utils/
-@generated: 2026-02-11T23:48:18Z
+# tests\test-utils/
+@generated: 2026-02-12T21:01:30Z
 
-## Test Utilities Infrastructure for Debug MCP Server
-
-**Overall Purpose**: Comprehensive testing infrastructure providing specialized utilities, fixtures, helpers, and mocks for testing the Debug MCP (Model Context Protocol) Server. This module enables isolated, reliable testing across unit, integration, and end-to-end test suites by providing resource management, debugging session testing, Python environment simulation, and complete mock ecosystems.
+## Purpose
+Comprehensive test infrastructure module providing utilities, mocks, fixtures, and helpers for testing the MCP (Model Context Protocol) debugging system. This module creates isolated, deterministic test environments by replacing external dependencies with controlled mocks and providing specialized utilities for debugging workflow testing.
 
 ## Key Components and Integration
 
-### Core Testing Infrastructure
-- **Resource Management**: Global port allocation (`PortManager`) and process lifecycle tracking (`ProcessTracker`) prevent conflicts between concurrent tests and ensure cleanup
-- **Session Testing**: Debugging session utilities with singleton DebugMcpServer instances and comprehensive debugging workflow testing capabilities
-- **Environment Detection**: Python runtime and debugpy availability checking for cross-platform test execution
+### Test Infrastructure Core
+- **Utilities** (`promise-tracker.ts`, `session-id-generator.ts`, `python-environment.ts`) - Foundation services for test execution tracking, unique identification, and environment detection
+- **Helpers** - Complete test environment factories, resource management (ports, processes), and debug session integration
+- **Mocks** - Comprehensive mock implementations for all external dependencies (filesystem, network, child processes, debug protocols)
 
-### Test Fixtures and Templates
-- **Python Script Templates**: String-based Python fixtures for automated debugging scenario generation (loops, recursion, exceptions, multi-module)
-- **Runtime Debug Targets**: Live Python processes for external debugger attachment and DAP server testing
-- **Progressive Complexity Model**: Fixtures range from basic scenarios to complex multi-file debugging with intentional bugs
+### Test Environment Architecture
+The module follows a **dependency injection pattern** where components work together to create isolated test environments:
 
-### Mock Ecosystem
-- **System-Level Mocks**: Complete Node.js module replacement (child_process, net, fs-extra) with deterministic behavior
-- **Debug Protocol Mocks**: Full DAP client/server simulation with event-driven architecture
-- **Process Management Mocks**: Proxy manager and adapter registry mocking for multi-process debugging scenarios
+1. **Resource Management**: Port allocation and process tracking prevent conflicts across concurrent tests
+2. **Mock Infrastructure**: Replaces external systems with controllable test doubles
+3. **Test Fixtures**: Provides both TypeScript templates and executable Python programs for debugging scenarios
+4. **Session Management**: Tracks test execution and enables resource cleanup
 
-### Test Analysis and Reporting
-- **Result Processing**: Multiple CLI tools for test execution, failure analysis, coverage reporting, and formatted output
-- **Performance Monitoring**: Promise leak detection and test execution statistics
+### Integration Flow
+- **Setup Phase**: Helpers create isolated test environments with injected mock dependencies
+- **Execution Phase**: Fixtures provide test scenarios while utilities track resources and sessions
+- **Analysis Phase**: Result analyzers and reporting tools process test outcomes
+- **Cleanup Phase**: Resource managers and promise tracking ensure proper cleanup
 
 ## Public API Surface
 
-### Main Entry Points
-```typescript
-// Resource Management
-import { portManager, processTracker } from './helpers'
+### Primary Entry Points
 
-// Test Environment Setup
-import { createTestDependencies, createTestSessionManager } from './helpers'
+**Test Environment Creation**:
+- `createTestDependencies()` - Complete dependency container with fake implementations
+- `createMockDependencies()` - Vitest spy-based mocks for all interfaces
+- `createTestServer()` - DebugMcpServer optimized for testing
+- `createTestSessionManager()` - Pre-configured SessionManager with mock dependencies
 
-// Session Testing
-import { createDebugSession, setBreakpoint, continueExecution } from './helpers'
+**Resource Management Singletons**:
+- `portManager` - Centralized port allocation preventing test conflicts
+- `processTracker` - Global registry of spawned test processes with automatic cleanup
 
-// Environment Detection  
-import { isPythonAvailable, isDebugpyAvailable } from './python-environment'
+**Debug Session Integration**:
+- `getDebugServer()` - Lazy singleton DebugMcpServer for integration tests
+- `createDebugSession()`, `startDebugging()`, `closeDebugSession()` - Complete debug workflow management
+- Debug control flow utilities: `continueExecution()`, `stepOver()`, `setBreakpoint()`
 
-// Session Identification
-import { getTestSessionId, getTestNameFromSessionId } from './session-id-generator'
+**Mock Infrastructure**:
+- `childProcessMock` - Child process operations with specialized Python/proxy configurations
+- `mockDapClient` - Debug Adapter Protocol client simulation
+- `MockProxyManager` - Debug proxy lifecycle and communication
+- `createMockAdapterRegistry()` - Debug adapter management with language support
 
-// Promise Leak Detection
-import { trackPromise, resolvePromise, reportLeakedPromises } from './promise-tracker'
+**Test Utilities**:
+- `waitForCondition()`, `waitForEvent()` - Async test synchronization
+- `trackPromise()`, `resolvePromise()`, `untrackPromise()` - Promise lifecycle tracking for leak detection
+- `getTestSessionId()` - Unique session ID generation with test name correlation
 
-// Python Fixtures
-import { simpleLoopScript, fibonacciScript, multiModuleMainScript } from './fixtures'
+### Fixture Collections
 
-// Mock Infrastructure
-import { createMockAdapterRegistry, createMockLogger, mockDapClient } from './mocks'
-```
-
-### CLI Tools
-- `test-summary.js` - Clean test execution with formatted results
-- `test-results-analyzer.js` - Multi-level failure analysis
-- `show-failures.js` - Focused failure reporting
-- `test-coverage-summary.js` - Combined test and coverage execution
+**Python Debug Scenarios**:
+- TypeScript templates: `simpleLoopScript`, `functionCallScript`, `fibonacciScript`, `exceptionHandlingScript`
+- Executable programs: `debug_test_simple.py`, `debugpy_server.py` with CLI options
+- Multi-module scenarios for cross-file debugging testing
 
 ## Internal Organization and Data Flow
 
-### Test Lifecycle Management
-1. **Setup Phase**: Port allocation, process tracking, mock configuration, and environment detection
-2. **Execution Phase**: Test running with session management, debugging operations, and promise tracking
-3. **Verification Phase**: Result analysis, leak detection, and mock call verification  
-4. **Cleanup Phase**: Resource deallocation, process termination, and state reset
+### Layered Architecture
+1. **Foundation Layer**: Core utilities (session IDs, promise tracking, environment detection)
+2. **Resource Layer**: Managers for ports, processes, and cleanup
+3. **Mock Layer**: Test doubles for all external dependencies
+4. **Integration Layer**: Factories combining mocks and utilities into complete test environments
+5. **Analysis Layer**: Result processing and reporting tools
 
 ### Cross-Component Integration
-- **Resource Coordination**: Port manager and process tracker provide conflict-free resource allocation across test types (unit: 5679-5779, integration: 5779-5879, e2e: 5879-5979)
-- **Mock Ecosystem**: System mocks integrate with DAP protocol mocks and debug adapter mocks for comprehensive testing scenarios
-- **Fixture Pipeline**: Python script templates can be written to temporary files and executed as debug targets using runtime fixtures
-- **Session Tracking**: Unique session IDs enable correlation between promise leaks, debug sessions, and test execution context
+- **Promise Tracking**: Integrates with session management for resource leak detection
+- **Mock Coordination**: Multiple mocks work together for complex integration testing (DAP + process + filesystem)
+- **Resource Safety**: Port/process managers ensure test isolation and prevent conflicts
+- **Session Correlation**: Unique session IDs enable tracing resources back to specific tests
 
 ## Important Patterns and Conventions
 
-### Testing Architecture Principles
-- **Complete Isolation**: Each test gets fresh mocks, isolated ports, separate processes, and unique session identifiers
-- **Deterministic Behavior**: Mocks use `process.nextTick()` timing and controlled responses for predictable test execution
-- **Progressive Complexity**: Test fixtures and scenarios build from simple to complex debugging workflows
-- **Defensive Programming**: Graceful fallbacks, existence checks, and comprehensive error handling throughout
+### Test Isolation
+- Each factory creates fresh instances preventing test pollution
+- Comprehensive reset mechanisms for all mocks and utilities
+- Session-based resource grouping for bulk cleanup
 
-### Resource Management Strategy
-- **Singleton Coordination**: Global managers prevent resource conflicts while maintaining test isolation
-- **Range-Based Allocation**: Different test types get dedicated port ranges with fallback mechanisms
-- **Automatic Cleanup**: Process tracking, temporary file management, and mock state reset ensure clean test boundaries
+### Error Resilience
+- Graceful fallbacks for missing dependencies (Python environment detection)
+- Comprehensive error handling with timeout mechanisms
+- Defensive programming with null checks and validation
 
-### Mock Design Patterns
-- **Factory Pattern**: Configurable mock creation for scenario-specific testing with sensible defaults
-- **Event-Driven Simulation**: Realistic async behavior through EventEmitter patterns
-- **Call Tracking**: Complete method invocation history for test verification
-- **Type Safety**: Full TypeScript interface compliance with original system modules
+### Developer Experience
+- Consistent factory pattern across all components
+- Type-safe interfaces ensuring mock/real implementation compatibility
+- Rich debugging information with stack traces and timing data
+- CI-friendly reporting with clean failure output
 
-This infrastructure enables comprehensive testing of the Debug MCP Server's complex interactions with Python processes, debug protocols, network communication, and filesystem operations while maintaining complete test isolation and reliable execution across different environments.
+This module serves as the complete testing foundation for the MCP debugging system, enabling fast, reliable, and comprehensive testing without external dependencies while maintaining realistic behavior simulation.

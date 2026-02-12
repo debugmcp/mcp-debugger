@@ -1,68 +1,62 @@
-# packages/adapter-javascript/scripts/
-@generated: 2026-02-11T23:47:58Z
+# packages\adapter-javascript\scripts/
+@generated: 2026-02-12T21:01:09Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/adapter-javascript/scripts` directory is the build automation and dependency management system for the JavaScript adapter. Its primary responsibility is intelligently acquiring, processing, and vendoring Microsoft's js-debug DAP server into the adapter's distribution, supporting multiple acquisition strategies from local development to production builds with robust error handling and cross-platform compatibility.
+The `scripts` directory serves as the JavaScript adapter's build automation and dependency management system, specifically focused on vendoring Microsoft's js-debug DAP (Debug Adapter Protocol) server. It provides a complete pipeline for acquiring, building, and packaging js-debug from multiple sources with robust error handling and cross-platform compatibility.
 
 ## Key Components and Relationships
 
-### Core Architecture
-- **`build-js-debug.js`**: Main orchestration script that handles the complete js-debug vendoring workflow
-- **`lib/vendor-strategy.js`**: Environment-driven strategy selector that determines acquisition method based on configuration
-- **`lib/js-debug-helpers.js`**: Asset selection and path utilities for choosing optimal releases from GitHub API responses
+### Main Build Script (`build-js-debug.js`)
+The primary orchestrator that handles the complete js-debug vendoring process:
+- **Environment Configuration**: Reads JS_DEBUG_* environment variables to determine build mode
+- **Multi-Strategy Acquisition**: Supports GitHub releases, source builds, and local overrides
+- **Asset Processing**: Downloads, extracts, and validates js-debug artifacts
+- **DAP Server Discovery**: Locates debug server entry points using sophisticated fallback logic
+- **Vendoring Output**: Produces standardized `vendor/js-debug/` structure with required sidecars
 
-### Integration Flow
-1. **Strategy Determination**: `lib/vendor-strategy.js` analyzes environment variables to determine vendoring approach (local, source build, or prebuilt)
-2. **Asset Selection**: `lib/js-debug-helpers.js` processes GitHub release data to identify best-match assets using sophisticated ranking algorithms
-3. **Acquisition Execution**: `build-js-debug.js` orchestrates the chosen strategy, handling downloads, builds, extractions, and vendoring with comprehensive retry logic
+### Utility Library (`lib/`)
+Provides pure utility functions consumed by the main build script:
+- **Asset Selection** (`js-debug-helpers.js`): Intelligent GitHub release asset filtering and ranking
+- **Strategy Determination** (`vendor-strategy.js`): Environment-driven vendoring mode selection
 
 ## Public API Surface
 
 ### Main Entry Points
-- **`build-js-debug.js`**: Primary CLI script for complete js-debug vendoring (`node build-js-debug.js`)
-- **`determineVendoringPlan(env?)`**: Core strategy selector from vendor-strategy module
-- **`selectBestAsset(assets)`**: Asset selection algorithm for GitHub releases
-- **Helper utilities**: Path normalization, environment parsing, cross-platform compatibility
+- **`build-js-debug.js`**: Primary script executed via npm/node for js-debug vendoring
+- **`lib/js-debug-helpers.selectBestAsset(assets)`**: Asset selection from GitHub API responses
+- **`lib/vendor-strategy.determineVendoringPlan(env)`**: Vendoring strategy determination
 
 ### Configuration Interface
-- **`JS_DEBUG_VERSION`**: Target release tag or 'latest'
-- **`JS_DEBUG_LOCAL_PATH`**: Local override path for development
-- **`JS_DEBUG_BUILD_FROM_SOURCE`**: Force source compilation mode
-- **`JS_DEBUG_FORCE_REBUILD`**: Bypass caching mechanisms
-- **`GH_TOKEN`**: GitHub API authentication for rate limit mitigation
+Environment variables control behavior:
+- `JS_DEBUG_VERSION`: Target release version or 'latest'
+- `JS_DEBUG_LOCAL_PATH`: Local override path for development
+- `JS_DEBUG_BUILD_FROM_SOURCE`: Force source compilation
+- `JS_DEBUG_FORCE_REBUILD`: Bypass caching
+- `GH_TOKEN`: GitHub API authentication
 
 ## Internal Organization and Data Flow
 
-### Vendoring Strategy Pipeline
-1. **Environment Analysis**: Strategy module determines acquisition approach based on environment variables and availability
-2. **Source Resolution**: Asset selection identifies optimal GitHub releases or validates local paths
-3. **Acquisition**: Downloads, extractions, or builds are executed with retry logic and error recovery
-4. **Processing**: DAP server discovery locates entry points using multi-strategy fallback chains
-5. **Vendoring**: Files are copied to `vendor/js-debug/` with required sidecars and CommonJS enforcement
-
-### Multi-Strategy Support
-- **Local Override**: Direct file copy from development paths
-- **Prebuilt Artifacts**: GitHub release downloads with asset selection
-- **Source Compilation**: Git clone and build with auto-detected package managers
-- **Hybrid Mode**: Prebuilt with optional source override fallback
+1. **Strategy Planning**: `vendor-strategy.js` analyzes environment to determine acquisition mode (local/prebuilt/source)
+2. **Asset Resolution**: For GitHub releases, `js-debug-helpers.js` selects optimal assets from API responses
+3. **Acquisition Pipeline**: Main script executes chosen strategy with retry logic and validation
+4. **Server Discovery**: Multi-fallback logic locates DAP server entry points across different js-debug packaging formats
+5. **Standardization**: All paths converge to uniform `vendor/js-debug/` output with required CommonJS structure
 
 ## Important Patterns and Conventions
 
-### Robustness Architecture
+### Robustness Patterns
+- **Multi-Strategy Fallback**: Graceful degradation from preferred to acceptable acquisition methods
 - **Comprehensive Error Handling**: Actionable error messages with platform-specific guidance
-- **Retry Mechanisms**: Exponential backoff for network operations with rate limit awareness
-- **Cross-Platform Compatibility**: Windows shell fallbacks and platform-specific executable handling
-- **Idempotent Execution**: Cache-aware with force-rebuild capabilities
+- **Idempotent Execution**: Cache-aware operations with force-rebuild override capability
+- **Cross-Platform Compatibility**: Windows shell fallback and path normalization
 
-### Quality Assurance
-- **Validation**: SHA256 checksums, content-length verification, required sidecar presence
-- **Deterministic Output**: Consistent file structure with provenance metadata in manifest.json
-- **Runtime Invariants**: Always produces CommonJS-compatible server entry points with required dependencies
+### Architectural Principles
+- **Pure Utility Functions**: Side-effect-free helpers enable reliable testing and composition
+- **Environment-Driven Configuration**: Eliminates config file dependencies while supporting CI/development workflows
+- **Deterministic Output**: SHA256 validation and manifest generation ensure reproducible builds
+- **Dependency Isolation**: Minimal external dependencies with robust vendoring of critical assets
 
-### Development Workflow Support
-- **Offline Development**: Local path overrides bypass network entirely
-- **CI/CD Integration**: Environment-driven configuration with sensible defaults
-- **Debug Support**: Comprehensive logging and actionable error reporting for troubleshooting
+## Integration Context
 
-This module serves as the critical foundation enabling the JavaScript adapter to reliably source and manage its DAP server dependency across diverse development and deployment environments.
+This module bridges the JavaScript adapter's runtime requirements with Microsoft's js-debug project lifecycle, handling version mismatches, packaging variations, and build environment diversity while maintaining a consistent DAP server interface for the adapter's debugging functionality.

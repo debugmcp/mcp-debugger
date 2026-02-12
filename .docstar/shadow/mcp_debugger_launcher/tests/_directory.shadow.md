@@ -1,55 +1,66 @@
-# mcp_debugger_launcher/tests/
-@generated: 2026-02-11T23:47:36Z
+# mcp_debugger_launcher\tests/
+@generated: 2026-02-12T21:00:54Z
 
 ## Overall Purpose and Responsibility
-
-This test directory contains the manual test suite for the `mcp_debugger_launcher` package. It provides comprehensive validation of the launcher's core functionality through integration testing that checks actual system dependencies rather than using mocked components. The tests are designed for manual verification with console output, focusing on validating runtime detection, command generation, and CLI integration.
+The `tests` directory provides comprehensive validation for the debug-mcp-server launcher package through manual integration testing. Rather than using traditional unit test frameworks, it implements a custom test suite that validates real system interactions including runtime detection, command generation, and CLI functionality.
 
 ## Key Components and Architecture
 
-### Test Structure
-- **Single test file**: `test_launcher.py` contains all test functions in a cohesive manual testing framework
-- **Manual verification approach**: Uses print statements and console output rather than automated assertions
-- **Integration-focused**: Tests against real system state (Node.js, Docker availability) rather than mocked dependencies
+### Test Suite Structure
+The directory contains a single comprehensive test module (`test_launcher.py`) that orchestrates multiple test scenarios:
 
-### Test Coverage Areas
-1. **Runtime Detection Testing**: Validates the `RuntimeDetector` class functionality for Node.js, npx, and Docker availability
-2. **Command Generation Testing**: Tests `DebugMCPLauncher` command construction for both stdio and SSE modes without execution
-3. **CLI Integration Testing**: Verifies the importability and basic structure of the CLI module
+- **Runtime Detection Testing**: Validates the RuntimeDetector's ability to discover Node.js, npx, and Docker installations
+- **Command Generation Testing**: Verifies DebugMCPLauncher can construct proper NPX and Docker commands for both stdio and SSE modes
+- **CLI Integration Testing**: Ensures the CLI module can be imported and provides expected functionality
+
+### Testing Philosophy
+The test suite employs a **manual verification approach** using console output rather than automated assertions. This design choice allows for:
+- Real-time validation of actual system dependencies
+- Visual inspection of generated commands
+- Graceful handling of missing runtime dependencies
+- Immediate feedback on launcher functionality
 
 ## Public API and Entry Points
 
-### Main Test Functions
-- `test_runtime_detection()`: Primary test for runtime availability checking and recommendation logic
-- `test_dry_run()`: Core test for command generation patterns (NPX and Docker commands)
-- `test_cli_import()`: Validation test for CLI module integration
-- `main()`: Test orchestrator that runs all tests and provides summary output
+### Primary Test Interface
+- **`main()` function**: Central orchestrator that runs all test scenarios and provides summary output
+- **Individual test functions**: Can be called independently for targeted testing
+- **Runtime detection validation**: Tests actual system state for Node.js, Docker availability
+- **Command generation verification**: Produces real NPX and Docker commands for manual validation
 
-### Key Dependencies Tested
-- **RuntimeDetector**: Tests core runtime detection functionality
-- **DebugMCPLauncher**: Tests command generation for NPM and Docker execution modes
-- **CLI module**: Tests import and basic structure validation
+### Integration Points
+- **RuntimeDetector integration**: Tests core dependency detection logic
+- **DebugMCPLauncher integration**: Validates command construction for multiple transport modes
+- **CLI module integration**: Verifies proper module structure and entry points
 
 ## Internal Organization and Data Flow
 
-1. **Setup Phase**: Path manipulation ensures local imports work correctly
-2. **Sequential Testing**: Tests run in order with results feeding into summary
-3. **Results Aggregation**: Runtime detection results are collected and reported
-4. **Manual Verification**: Output provides actionable commands for further manual testing
+### Test Execution Flow
+1. **Runtime Detection Phase**: Discovers available runtimes and tests recommendation logic
+2. **Command Generation Phase**: Creates launcher instances and generates commands in dry-run mode
+3. **CLI Validation Phase**: Imports and validates CLI module structure
+4. **Summary Phase**: Aggregates results and provides actionable feedback
+
+### Data Dependencies
+- Uses actual launcher constants (`NPM_PACKAGE`, `DOCKER_IMAGE`) for realistic testing
+- Maintains runtime detection state across test phases
+- Provides structured output for manual verification
 
 ## Important Patterns and Conventions
 
 ### Testing Patterns
-- **Manual test framework**: Prioritizes human-readable output over automated assertions
-- **Graceful failure handling**: Tests continue execution even when components fail
-- **Real system integration**: Tests actual dependencies rather than mocked interfaces
-- **Dry run validation**: Command construction tested without execution for safety
+- **Integration over isolation**: Tests actual system interactions rather than mocked dependencies
+- **Verbose output**: Provides detailed console feedback for manual verification
+- **Graceful degradation**: Continues testing even when components fail
+- **Real-world validation**: Uses actual runtime environments and command structures
 
-### Configuration Constants
-- Tests both stdio and SSE modes with consistent port configuration (8080)
-- Uses package constants (`NPM_PACKAGE`, `DOCKER_IMAGE`) for command generation
-- Verbose mode enabled for detailed diagnostic output
+### Error Handling
+- Catches import errors gracefully during CLI testing
+- Continues test execution even if runtime detection fails
+- Provides clear success/failure indicators for each test phase
 
-## Critical Behavior Notes
-
-The test suite is designed as a development and validation tool that provides immediate feedback on system readiness and launcher functionality. It serves as both a testing framework and a diagnostic tool for developers working with the MCP debugger launcher, emphasizing real-world integration testing over unit test isolation.
+## Critical Usage Notes
+- Designed for manual execution and verification rather than automated CI/CD
+- Requires actual system dependencies (Node.js, Docker) for complete validation
+- Provides actionable next steps for manual launcher testing
+- Path manipulation ensures proper local module imports during development

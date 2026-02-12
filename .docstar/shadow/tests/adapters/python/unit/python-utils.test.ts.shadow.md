@@ -1,65 +1,56 @@
-# tests/adapters/python/unit/python-utils.test.ts
-@source-hash: 05c71052cdd484a7
-@generated: 2026-02-10T01:19:05Z
+# tests\adapters\python\unit\python-utils.test.ts
+@source-hash: 4e2432a2326cb883
+@generated: 2026-02-12T21:00:38Z
 
-## Purpose
-Comprehensive unit test suite for Python utility functions in the debugmcp adapter, specifically testing Python executable discovery, version detection, and command finding functionality across different platforms.
+## Primary Purpose
+Unit test file for Python utility functions in the debugmcp adapter. Tests Python executable discovery, version detection, and command finder functionality across different platforms (Windows, Linux, macOS).
 
-## Test Structure
-- **Main test suite**: `python-utils` (L24-427) covering all core functionality
-- **Cross-platform testing**: Tests run on win32, linux, and darwin platforms (L59-214)
-- **Windows-specific tests**: Special handling for Store aliases and py launcher (L216-319)
+## Key Test Suites
 
-## Key Test Functions
+### findPythonExecutable Tests (L72-334)
+- **Cross-platform testing** (L73-228): Tests executable discovery on win32/linux/darwin platforms
+- **Environment variable handling**: Tests PYTHON_PATH (L91-98), PYTHON_EXECUTABLE (L100-107), pythonLocation (L109-124)
+- **Platform-specific command prioritization**: Windows uses `py -> python -> python3`, Unix uses `python3 -> python`
+- **Windows Store alias detection** (L230-333): Tests validation of Windows Store Python aliases and their rejection
+- **Command fallback logic** (L177-198): Tests cascading through available Python commands
+- **Error handling** (L200-227): Tests behavior when no Python found or spawn errors occur
 
-### findPythonExecutable Tests (L58-320)
-Tests Python executable discovery with multiple fallback strategies:
-- User-specified pythonPath validation (L68-75)
-- Environment variable precedence: PYTHON_PATH, PYTHON_EXECUTABLE (L77-93)
-- Windows pythonLocation support for GitHub Actions (L96-110)
-- Platform-specific command order and debugpy preference (L112-161)
-- Fallback chain testing (L163-184)
-- Error handling for missing Python (L186-198, L200-213)
+### getPythonVersion Tests (L336-422)
+- **Version extraction** (L337-355): Tests parsing Python version from `--version` output
+- **Multi-stream handling** (L357-375): Tests version output on both stdout and stderr
+- **Error scenarios** (L377-401): Tests spawn errors and non-zero exit codes
+- **Fallback behavior** (L403-421): Tests raw output return when version pattern not found
 
-### getPythonVersion Tests (L322-408)
-Tests version string extraction from Python executable:
-- Standard stdout version output parsing (L323-341)
-- stderr version output handling (L343-361)
-- Error conditions: spawn errors (L363-374), non-zero exit codes (L376-387)
-- Fallback to raw output when version pattern not found (L389-407)
+### setDefaultCommandFinder Tests (L424-440)
+- **Global configuration**: Tests setting and restoring default command finder instances
 
-### setDefaultCommandFinder Tests (L410-426)
-Tests global command finder configuration for dependency injection.
+## Key Mock Infrastructure
 
-## Mock Infrastructure
+### Mocking Setup (L14-70)
+- **Partial child_process mock** (L14-22): Preserves exec while mocking spawn
+- **Environment variable management** (L29-70): Saves/restores pythonLocation variants
+- **Default spawn behavior** (L44-53): Mock process with EventEmitter for validation
 
-### Mocking Strategy
-- **child_process mock**: Partial mock preserving other APIs like exec (L14-20)
-- **MockCommandFinder**: Custom mock for command discovery testing (L25, L36)
-- **spawn mock**: EventEmitter-based process simulation (L39-48, L22)
+### MockCommandFinder Integration (L6, L25-70)
+- Uses test utility for simulating command discovery
+- Provides configurable responses for different Python executable searches
+- Tracks call history for verification
 
-### Mock Patterns
-- **Platform stubbing**: Uses vi.stubGlobal for cross-platform testing (L61)
-- **Environment cleanup**: Resets Python-related env vars in beforeEach/afterEach (L29-34, L51-56)
-- **Process simulation**: Mocks child processes with EventEmitter pattern for async testing
+## Critical Test Patterns
 
-## Test Environment Management
-- **beforeEach setup**: Clears mocks, resets env vars, creates fresh MockCommandFinder (L27-49)
-- **afterEach cleanup**: Clears mocks, resets command finder, removes env vars (L51-56)
-- **Global stubbing**: Platform-specific test isolation with proper cleanup (L64-66)
+### Spawn Mock Configuration
+- **Process simulation**: Uses EventEmitter to simulate child process behavior
+- **Debugpy detection**: Special handling for debugpy import checks in spawn mocks
+- **Platform-specific responses**: Different mock behaviors for Windows vs Unix platforms
 
-## Platform-Specific Logic
-- **Windows**: Tests py launcher priority, Store alias detection, where.exe usage
-- **Unix-like**: Tests python3 → python fallback order
-- **Cross-platform**: Environment variable handling, error conditions
+### Environment Variable Testing
+- Tests precedence: user-specified path > PYTHON_PATH > PYTHON_EXECUTABLE > platform defaults
+- Windows-specific pythonLocation handling for GitHub Actions compatibility
+- Proper cleanup to avoid cross-test pollution
 
 ## Dependencies
-- **Core modules**: vitest testing framework, node fs/path, child_process
-- **Target code**: @debugmcp/adapter-python utilities and errors
-- **Test utilities**: MockCommandFinder from test-utils
-
-## Key Patterns
-- **Parameterized testing**: describe.each for platform variants
-- **Process mocking**: EventEmitter-based child process simulation
-- **Error simulation**: CommandNotFoundError and spawn error testing
-- **Async testing**: Promise-based test patterns with proper await handling
+- **@debugmcp/adapter-python**: Core functions under test
+- **MockCommandFinder**: Test utility for command discovery simulation
+- **vitest**: Testing framework with comprehensive mocking capabilities
+- **child_process**: Mocked for subprocess testing
+- **node:fs/path**: File system operations for executable validation

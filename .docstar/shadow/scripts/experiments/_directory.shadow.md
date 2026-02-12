@@ -1,43 +1,45 @@
-# scripts/experiments/
-@generated: 2026-02-11T23:47:32Z
+# scripts\experiments/
+@generated: 2026-02-12T21:00:50Z
 
 ## Purpose
-Experimental testing infrastructure for debugging and development workflows. This directory contains specialized test harnesses and probes designed to validate Debug Adapter Protocol (DAP) behavior and provide controlled debugging environments.
+The `scripts/experiments` directory contains experimental debugging and testing utilities designed to validate and test Debug Adapter Protocol (DAP) behavior. This module serves as a controlled testing environment for debugging tools and debugger attachment scenarios.
 
 ## Key Components
+The directory currently contains:
 
-**Test Targets:**
-- `probe-target.js` - Primary debugging test harness providing reliable breakpoint targets and process lifecycle management for debugger attachment scenarios
+**probe-target.js** - A minimal test harness script that provides:
+- Reliable debugging breakpoints and hooks
+- Process lifecycle management for debugger attachment
+- Simple execution flow for step-through debugging tests
 
 ## Public API Surface
+**Entry Points:**
+- `probe-target.js` - Primary test target for debugging validation
+  - Intended usage: `node probe-target.js --line 13`
+  - Provides predictable breakpoint at line 13 (`probeVar` constant)
+  - Includes `debugger` statement for forced breakpoints
 
-**Main Entry Points:**
-- `probe-target.js` - Execute with `--line 13` parameter for targeted debugging validation
-- Designed for external debugger tool integration and DAP behavior testing
+**Key Testing Functions:**
+- `add(a, b)` - Simple arithmetic function for step-through testing
+- Built-in timing controls (500ms delay, keep-alive interval)
 
 ## Internal Organization & Data Flow
+The experimental scripts follow a minimal test harness pattern:
 
-**Debugging Infrastructure:**
-1. **Breakpoint Management** - Strategic placement of `debugger` statements and target variables for consistent debugging behavior
-2. **Process Lifecycle Control** - Timeout/interval patterns ensuring processes remain available for debugger adoption
-3. **Execution Markers** - Console logging providing clear execution state visibility
-
-**Timing Architecture:**
-- 500ms initialization delay for debugger attachment window
-- Infinite interval loops preventing premature process termination
-- Predictable execution flow for reliable testing
+1. **Initialization Phase** - Console logging and debugger hooks setup
+2. **Execution Phase** - Delayed computation with predictable timing (500ms)
+3. **Persistence Phase** - Keep-alive interval to maintain process for debugger adoption
 
 ## Important Patterns & Conventions
+- **Debugger-First Design**: Scripts are optimized for debugging tool validation rather than production use
+- **Process Lifecycle Management**: Explicit control over process termination to support external debugger attachment
+- **Predictable Execution**: Fixed timing and sequential flow for reliable test scenarios
+- **Zero Dependencies**: Pure Node.js runtime usage for maximum compatibility
 
-**Debugging Stability:**
-- Minimal dependencies (Node.js runtime only)
-- Explicit process management for external tool integration
-- Sequential execution with predictable timing windows
+## Use Cases
+- DAP behavior validation and testing
+- Debugger attachment and adoption scenario testing
+- Step-through debugging verification
+- Breakpoint reliability testing
 
-**Test Harness Design:**
-- Simple, focused functionality optimized for debugger reliability
-- Clear separation between debugging hooks and functional code
-- Consistent breakpoint targeting for automated testing scenarios
-
-## Usage Context
-This experimental directory supports development tooling validation, particularly for debugging protocol implementation and debugger behavior testing. Components are designed to work with external debugging tools and provide controlled environments for testing debugger attachment, breakpoint handling, and process adoption scenarios.
+This directory serves as a sandbox for debugging tool development and validation, providing controlled, predictable test scenarios for debugging infrastructure.

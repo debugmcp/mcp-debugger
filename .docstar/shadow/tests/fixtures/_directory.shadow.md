@@ -1,68 +1,68 @@
-# tests/fixtures/
-@generated: 2026-02-11T23:47:55Z
+# tests\fixtures/
+@generated: 2026-02-12T21:01:08Z
 
 ## Overall Purpose
 
-The `tests/fixtures` directory provides a comprehensive collection of test fixtures and mock environments for validating debugging functionality across multiple programming languages and protocols. This testing infrastructure enables automated verification of debugger implementations, IDE integrations, and debugging workflow tools within the MCP Server ecosystem.
+The `tests/fixtures` directory provides comprehensive test fixtures for validating debugging functionality across multiple programming languages and testing scenarios. It serves as a controlled testing environment for MCP Server debugging capabilities, offering minimal, predictable programs and mock infrastructure designed specifically for automated testing of debugger attachment, protocol communication, breakpoint handling, and variable inspection.
 
-## Key Components & Architecture
+## Key Components and Organization
 
-### Multi-Language Debug Targets
-- **Python fixtures** (`python/`): Complete debugging ecosystem with target applications and DAP server simulation
-- **JavaScript/TypeScript fixtures** (`javascript-e2e/`): TypeScript debugging validation with source map support  
-- **Cross-language debug scripts** (`debug-scripts/`): Standalone debugging scenarios for breakpoint and variable inspection testing
+The directory is organized into three specialized subdirectories, each serving distinct testing purposes:
 
-### Testing Scope Coverage
-1. **Protocol Testing**: DAP (Debug Adapter Protocol) server simulation and command processing validation
-2. **Breakpoint Validation**: Strategic breakpoint placement across different language contexts
-3. **Variable Inspection**: Multi-scope variable testing including nested functions and type annotations
-4. **Error Handling**: Controlled exception scenarios for debugging error workflows
-5. **Source Map Integration**: TypeScript-to-JavaScript debugging accuracy verification
+### Debug-Scripts (Cross-Language Basic Testing)
+- **Python fixtures**: `simple.py`, `with-errors.py`, `with-variables.py` for core debugging scenarios
+- **JavaScript fixture**: `simple-mock.js` for mock adapter and path validation
+- **Purpose**: Basic execution testing, error handling validation, and variable inspection across different programming languages
 
-## Component Integration & Data Flow
+### JavaScript-E2E (End-to-End Testing)
+- **app.ts**: TypeScript fixture for comprehensive E2E debugging validation
+- **Purpose**: Testing JavaScript/TypeScript debugging capabilities, source map support, and breakpoint handling in realistic execution environments
 
-The fixtures operate as a coordinated testing ecosystem:
-
-1. **Target Applications**: Simple, predictable programs (`debug_test_simple.py`, `app.ts`, `simple.py`) that serve as debugging subjects
-2. **Protocol Servers**: Mock DAP implementation (`debugpy_server.py`) for testing debugger communication protocols
-3. **Scenario Scripts**: Specialized fixtures for testing specific debugging features (error handling, variable scopes, multi-language support)
-4. **Test Coordination**: All components designed for integration with automated E2E testing frameworks
+### Python (Debugging Infrastructure Testing)
+- **debug_test_simple.py**: Target application for debugging attachment testing
+- **debugpy_server.py**: Mock DAP (Debug Adapter Protocol) server implementation
+- **Purpose**: Testing both debugger targets and debugging protocol communication infrastructure
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **Python debugging**: `python/debug_test_simple.py` (target) + `python/debugpy_server.py` (DAP server on port 5678)
-- **TypeScript debugging**: `javascript-e2e/app.ts` with explicit breakpoint markers
-- **Scenario testing**: Individual scripts in `debug-scripts/` for specific debugging capabilities
+- **Target Applications**: All fixture scripts are self-contained executables with standard entry points (`if __name__ == "__main__"` for Python, direct invocation for JavaScript/TypeScript)
+- **Mock Infrastructure**: `debugpy_server.py` provides a DAP-compliant server on port 5678 for protocol testing
+- **Breakpoint Markers**: Standardized `// BREAK_HERE` comments and strategic line positioning for automated test breakpoint placement
 
-### Standard Testing Interface
-- **Breakpoint conventions**: `// BREAK_HERE` comments and line-specific markers (e.g., line 13 in Python fixtures)
-- **Predictable execution flows**: Deterministic outputs and timing for automated assertion testing
-- **Multi-language consistency**: Common debugging patterns across Python, JavaScript, and TypeScript
+### Testing Interfaces
+- **Linear Execution**: Simple start-to-finish flows for basic debugging functionality validation
+- **Error Scenarios**: Controlled exception generation for testing error handling capabilities
+- **Variable Inspection**: Multi-type, multi-scope variable scenarios for state inspection testing
+- **Protocol Communication**: DAP-compliant message handling for debugging protocol validation
 
-## Internal Organization Patterns
+## Internal Data Flow and Integration
 
-### Design Principles
-- **Test isolation**: Each fixture is self-contained with minimal dependencies
-- **Controlled complexity**: Simple execution paths to isolate debugging functionality from application logic  
-- **Protocol compliance**: Standard DAP message handling with proper Content-Length framing
-- **Graceful cleanup**: Signal handlers and proper session management for test teardown
+The fixtures follow a complementary three-tier testing architecture:
 
-### Common Architectural Elements
-- **Standard library only**: No external dependencies to ensure reliable test environments
-- **Explicit debug markers**: Comment-based breakpoint indicators and variable inspection points
-- **Deterministic behavior**: Consistent outputs across executions for reliable automated testing
-- **Modular design**: Independent components that can be composed for comprehensive debugging workflow validation
+1. **Basic Functionality Layer** (debug-scripts): Validates core debugging operations across languages
+2. **Integration Layer** (javascript-e2e): Tests realistic debugging workflows with compilation and source mapping
+3. **Infrastructure Layer** (python): Tests both target applications and debugging server communication
 
-## Critical Testing Capabilities
+## Important Patterns and Conventions
 
-This fixture collection enables comprehensive validation of:
-- Debugger attachment and detachment workflows
-- Breakpoint setting, hitting, and removal across multiple languages
-- Variable inspection and scope analysis
-- Exception handling and error debugging scenarios  
-- Source map accuracy for compiled languages
-- DAP protocol compliance and command processing
-- Multi-language debugging tool integration
+### Testing Standards
+- **Minimal Dependencies**: Standard library only to avoid test environment complications
+- **Predictable Behavior**: Consistent execution flows and well-defined breakpoint locations
+- **Strategic Markers**: Comment-based breakpoint indicators for test automation integration
+- **Self-Contained Design**: No external state dependencies or complex setup requirements
 
-The directory serves as the foundation for automated debugging tool validation, providing the controlled environments necessary for reliable, repeatable testing of debugging functionality across the MCP Server ecosystem.
+### Language Coverage
+- **Python**: Complete debugging scenario coverage from basic execution to protocol communication
+- **JavaScript/TypeScript**: E2E testing with transpilation and source map validation
+- **Cross-Language**: Consistent testing patterns across different runtime environments
+
+## Role in Larger System
+
+This fixture directory enables comprehensive automated testing of MCP Server debugging capabilities by providing:
+- Controlled debugging targets for attachment and inspection testing
+- Mock infrastructure for protocol communication validation
+- Cross-language compatibility testing across Python and JavaScript/TypeScript environments
+- End-to-end workflow validation from debugger attachment through variable inspection and execution control
+
+The fixtures collectively support the validation of debugging functionality without requiring complex applications or full debugging infrastructure installations, making them ideal for CI/CD testing environments and development validation workflows.

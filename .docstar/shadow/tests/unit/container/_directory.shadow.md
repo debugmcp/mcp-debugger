@@ -1,37 +1,32 @@
-# tests/unit/container/
-@generated: 2026-02-11T23:47:33Z
+# tests\unit\container/
+@generated: 2026-02-12T21:00:50Z
 
 ## Purpose
-This directory contains unit tests for the dependency injection container system, specifically testing the `createProductionDependencies` factory function that wires together all core services, adapters, and configurations for the MCP (Model Context Protocol) system.
+This directory contains unit tests for the dependency injection container system, specifically testing the production dependency factory that wires together the core MCP application services and manages adapter registration.
 
-## Key Components and Organization
-The test suite focuses on validating three critical aspects of the dependency injection container:
+## Key Components
+The test suite focuses on validating the `createProductionDependencies` factory function through comprehensive mocking and integration testing:
 
-1. **Core Service Wiring**: Tests that all fundamental services (filesystem, process manager, network manager, launcher) are properly instantiated and connected through the dependency injection system
-2. **Adapter Registration**: Validates the asynchronous loading and registration of bundled language adapters from the global adapter registry
-3. **Environment-Aware Filtering**: Tests conditional adapter loading based on container environment settings and language enablement flags
+- **Mock Infrastructure**: Extensive mock system covering all core services (filesystem, process manager, network manager, launcher), logging infrastructure, service implementations, factories, and adapter registry
+- **Environment Management**: Test utilities for managing process environment state and global bundled adapter configurations
+- **Container Validation**: Tests that verify proper dependency injection wiring and service instantiation
 
-## Mock Infrastructure
-The tests employ comprehensive mocking to isolate the container logic:
-- **Service Layer Mocks**: All core implementation classes (FileSystem, ProcessManager, NetworkManager, etc.)
-- **Factory Mocks**: ProxyManagerFactory and SessionStoreFactory for service creation
-- **Registry Mock**: Custom AdapterRegistryMock class simulating language adapter registration
-- **Configuration Mocks**: Logger factory and language configuration utilities
-- **Global State Management**: Handles `__DEBUG_MCP_BUNDLED_ADAPTERS__` global key for bundled adapter testing
+## Test Coverage Areas
+1. **Core Service Wiring**: Validates that the dependency injection container correctly instantiates and connects all core services with proper logger configuration and adapter registry setup
+2. **Adapter Registration**: Tests asynchronous bundled adapter registration process with error handling, using global state management for adapter configurations
+3. **Environment-Aware Filtering**: Verifies container behavior in different environments (MCP_CONTAINER=true) with conditional adapter loading based on language configuration
 
-## Test Patterns and Critical Functionality
-The test suite follows rigorous patterns for reliability:
-- **Environment Isolation**: Preserves and restores `process.env` state across test runs
-- **Mock State Management**: Comprehensive reset of all mocks between tests
-- **Async Error Testing**: Validates error handling in adapter registration workflows
-- **Container Environment Detection**: Tests `MCP_CONTAINER=true` environment behavior
+## Critical Testing Patterns
+- **Isolation Strategy**: Each test maintains complete isolation through comprehensive mock resets and environment restoration
+- **Async Error Testing**: Validates error handling in adapter registration using Promise timing patterns
+- **Global State Management**: Tests interaction with global bundled adapter configurations via `__DEBUG_MCP_BUNDLED_ADAPTERS__` key
+- **Environment Simulation**: Tests different deployment scenarios through process.env manipulation
 
-## Public API Coverage
-Tests validate the primary entry point `createProductionDependencies()` function, ensuring it:
-- Returns a properly configured dependency container with all services wired
-- Handles bundled adapter registration asynchronously with error resilience
-- Respects environment-based filtering for container deployments
-- Maintains proper logger configuration throughout the dependency graph
+## Public API Validation
+The tests focus on the main entry point - the `createProductionDependencies` factory function - ensuring it:
+- Returns a properly configured dependency container
+- Handles bundled adapter registration correctly
+- Responds appropriately to environment-specific configurations
+- Maintains error resilience during startup
 
-## Data Flow Validation
-The tests verify the complete dependency injection flow from factory function invocation through service instantiation, adapter registration, and final container assembly, ensuring all components are properly connected and configured for production use.
+This test directory serves as the validation layer for the application's dependency injection system, ensuring reliable service wiring and adapter management across different deployment environments.

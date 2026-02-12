@@ -1,36 +1,37 @@
-# tests/integration/rust/
-@generated: 2026-02-11T23:47:33Z
+# tests\integration\rust/
+@generated: 2026-02-12T21:00:50Z
 
 ## Purpose
-Integration testing module for the Rust language debugging adapter, providing comprehensive validation of debugging session lifecycle, breakpoint management, and Cargo project integration within the larger debugging system.
+This directory contains integration tests for the Rust programming language support within the debugging adapter system. It serves as a validation layer ensuring the debugging infrastructure correctly handles Rust-specific scenarios including session management, breakpoint operations, and Cargo project integration.
 
 ## Key Components
-- **rust-integration.test.ts**: Primary integration test suite that validates end-to-end Rust debugging functionality through the SessionManager API
+- **rust-integration.test.ts**: Comprehensive integration test suite that validates end-to-end Rust debugging functionality using the vitest testing framework
 
-## Testing Scope and Coverage
+## Test Coverage Areas
 The integration tests validate critical debugging workflows:
-- **Session Lifecycle Management**: Creation, validation, and proper cleanup of Rust debug sessions
-- **Language-Specific Features**: Cargo project detection and Rust-specific debugging configurations
-- **Breakpoint Operations**: Setting breakpoints in Rust source files with graceful error handling
-- **Configuration Integration**: DAP (Debug Adapter Protocol) settings including stop-on-entry and just-my-code debugging
+- **Session Lifecycle**: Creation, configuration, and cleanup of Rust debug sessions
+- **Cargo Project Support**: Verification of Cargo-based project detection and language identification
+- **Breakpoint Management**: Setting and validation of breakpoints in Rust source files
+- **Error Resilience**: Graceful handling of missing files and test environment variations
 
 ## Integration Points
-- **SessionManager**: Core dependency for orchestrating debug sessions across the system
-- **Production Dependencies**: Uses real dependency injection container to ensure authentic integration testing
-- **File System**: Tests against actual Rust project structure (`examples/rust/hello_world/`)
-- **Logging Infrastructure**: Integrates with system logging for test isolation and debugging
+The test suite integrates with core system components:
+- **SessionManager**: Primary interface for debug session orchestration
+- **Production Dependencies**: Full dependency injection container for realistic testing
+- **File System Operations**: Path resolution and temporary directory management
+- **Debug Language Constants**: Rust-specific debugging configuration
 
-## Test Architecture Patterns
-- **Sequential State Management**: Tests maintain session state across multiple operations to validate complete workflows
-- **Resource Isolation**: Uses temporary directories and dedicated log files to prevent test interference
+## Test Architecture
+- **Sequential Test Flow**: Tests maintain state through shared session identifiers, creating dependency chains that mirror real debugging workflows
+- **Isolated Environment**: Uses temporary directories and log files to prevent test interference
+- **Production Configuration**: Tests against actual production dependencies rather than mocks for higher fidelity validation
 - **Graceful Degradation**: Handles missing test resources without failing the entire suite
-- **Production-Like Environment**: Leverages actual production dependencies rather than mocks for authentic integration validation
 
-## Public API Validation
-Tests verify the SessionManager's public interface for Rust debugging:
-- Session creation with language-specific parameters
-- Breakpoint setting operations
-- Session retrieval and validation
-- Proper resource cleanup and state management
+## Entry Points
+The main entry point is the "Rust Adapter Integration" test suite, which can be executed independently or as part of the broader integration test pipeline. Tests are designed to validate the complete Rust debugging adapter functionality from session creation through cleanup.
 
-This module serves as a quality gate ensuring the Rust debugging adapter integrates correctly with the broader debugging infrastructure before deployment.
+## Testing Patterns
+- Async/await throughout for proper handling of debugging operations
+- Resource cleanup via afterAll hooks to prevent test pollution
+- Try-catch blocks for optional scenarios that depend on external test files
+- Debug-level logging with temporary log files for troubleshooting integration issues

@@ -1,56 +1,56 @@
-# packages/shared/src/models/
-@generated: 2026-02-11T23:47:36Z
+# packages\shared\src\models/
+@generated: 2026-02-12T21:00:54Z
 
-## Overview
+## Overall Purpose
 
-The `models` directory serves as the core type system and data model foundation for debug session management. It provides comprehensive interfaces, enums, and utility functions that define the structure and behavior of debugging operations across multiple programming languages, built on top of the VSCode Debug Adapter Protocol (DAP).
+The `packages/shared/src/models` directory serves as the central data modeling layer for a cross-platform debug session management system. It provides comprehensive type definitions, interfaces, and state management utilities that abstract debug operations across multiple programming languages while maintaining compatibility with the VSCode Debug Adapter Protocol (DAP).
 
 ## Key Components and Relationships
 
-**Core Data Models:**
-- `DebugSession`: Central session entity that maintains state, execution context, and active breakpoints
-- `Breakpoint`: Represents debug breakpoints with verification status and conditional logic
-- `CustomLaunchRequestArguments`: Extended launch configuration for debug sessions
-- `GenericAttachConfig`: Comprehensive attachment configuration supporting multiple connection modes
+The module is organized around three primary concerns:
 
-**State Management System:**
-The directory implements a sophisticated dual-state model that separates session lifecycle from execution state:
-- `SessionLifecycleState`: Tracks session existence (CREATED → ACTIVE → TERMINATED)
-- `ExecutionState`: Tracks runtime status within active sessions (INITIALIZING → RUNNING/PAUSED → TERMINATED/ERROR)
-- Legacy `SessionState` maintained for backward compatibility with mapping functions
+**Configuration Models**: `CustomLaunchRequestArguments` and `GenericAttachConfig` define how debug sessions are initiated. The attach configuration supports multiple connection strategies (PID, process name, remote debugging) through the `ProcessIdentifierType` enum, while the launch configuration extends VSCode's standard launch arguments with debug-specific options.
 
-**Language and Connection Support:**
-- `DebugLanguage`: Defines supported programming languages including mock testing
-- `ProcessIdentifierType`: Enables flexible debugger attachment via PID, process name, or remote connection
+**Session State Management**: A sophisticated dual-state system separates session lifecycle concerns from execution state. `SessionLifecycleState` tracks whether a session exists (CREATED, ACTIVE, TERMINATED), while `ExecutionState` manages runtime status (INITIALIZING, RUNNING, PAUSED, etc.). Legacy `SessionState` is maintained for backward compatibility with bidirectional mapping functions.
+
+**Runtime Data Structures**: `DebugSession` acts as the central session container, holding metadata, state information, execution context, and active breakpoints. `Breakpoint` models individual breakpoints with DAP verification status and conditional logic support.
+
+**Language Abstraction**: `DebugLanguage` enum defines supported programming languages, with MOCK for testing scenarios, enabling language-agnostic tooling with extension points for language-specific behaviors.
 
 ## Public API Surface
 
-**Primary Entry Points:**
-- `DebugSession` interface: Main session data structure
-- `GenericAttachConfig` interface: Attachment configuration
-- `CustomLaunchRequestArguments` interface: Launch configuration
-- State enums: `SessionLifecycleState`, `ExecutionState`, `DebugLanguage`, `ProcessIdentifierType`
+**Primary Entry Points**:
+- `CustomLaunchRequestArguments` - Launch configuration interface
+- `GenericAttachConfig` - Attach configuration with multi-modal connection support
+- `DebugSession` - Core session data structure
+- `Breakpoint` - Breakpoint representation with DAP integration
 
-**State Management Functions:**
-- `mapLegacyState()`: Converts deprecated states to new dual-state model
-- `mapToLegacyState()`: Reverse mapping for backward compatibility
+**State Management API**:
+- `SessionLifecycleState`, `ExecutionState` - Modern dual-state enums
+- `mapLegacyState()`, `mapToLegacyState()` - State conversion utilities for backward compatibility
 
-## Internal Organization
+**Supporting Types**:
+- `ProcessIdentifierType` - Attachment strategy enumeration
+- `DebugLanguage` - Supported language definitions
+
+## Internal Organization and Data Flow
 
 The module follows a layered architecture:
-1. **Protocol Extensions**: Builds upon VSCode Debug Adapter Protocol with custom extensions
-2. **Type Definitions**: Language-agnostic interfaces with extension points for specific languages
-3. **State Management**: Dual-state system with migration utilities for legacy support
-4. **Data Structures**: Efficient storage patterns (Map-based breakpoint storage for O(1) lookups)
+1. **Configuration Layer**: Defines session initiation parameters
+2. **State Management Layer**: Handles session lifecycle and execution state transitions
+3. **Data Layer**: Manages runtime session data and breakpoint information
+4. **Compatibility Layer**: Provides legacy state mapping for backward compatibility
 
-## Design Patterns and Conventions
+Data flows from configuration (launch/attach) → session creation → state transitions → runtime data management, with the `DebugSession` serving as the primary data container throughout the lifecycle.
 
-**Language Agnostic Design**: Generic interfaces use index signatures and extension points to accommodate language-specific requirements without coupling to specific debugger implementations.
+## Important Patterns and Conventions
 
-**Protocol Compliance**: All interfaces extend or align with VSCode Debug Adapter Protocol standards, ensuring interoperability with existing debugging infrastructure.
+**Extensibility Pattern**: Interfaces use index signatures and placeholder comments to support future language-specific extensions without breaking changes.
 
-**State Separation**: Clear separation between session lifecycle (existence) and execution state (runtime status) prevents invalid state combinations and improves debugging logic clarity.
+**State Separation**: Critical architectural decision to separate lifecycle state from execution state, ensuring clarity about when execution states are valid (only during ACTIVE lifecycle state).
 
-**Backward Compatibility**: Maintains deprecated APIs with explicit migration paths, allowing gradual system updates without breaking existing integrations.
+**DAP Integration**: All models are designed to integrate seamlessly with VSCode Debug Adapter Protocol, using standard DAP types and conventions.
 
-**Extensibility**: Placeholder comments and flexible configuration patterns indicate readiness for future feature additions and language support expansion.
+**Backward Compatibility**: Maintains deprecated APIs with explicit mapping functions, allowing gradual migration to new state models without breaking existing integrations.
+
+**Type Safety**: Comprehensive TypeScript definitions ensure compile-time validation of debug configurations and session data structures.

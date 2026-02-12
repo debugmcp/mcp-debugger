@@ -1,46 +1,46 @@
-# tests/adapters/go/unit/go-adapter-factory.test.ts
-@source-hash: 1fd5f417e1c012fd
-@generated: 2026-02-10T00:41:18Z
+# tests\adapters\go\unit\go-adapter-factory.test.ts
+@source-hash: e2049138fd925c2a
+@generated: 2026-02-12T21:00:35Z
 
-**Purpose & Responsibility**
-Unit test suite for GoAdapterFactory, testing the creation, validation, and metadata retrieval functionality of the Go debug adapter factory. Validates environment setup including Go and Delve debugger installation requirements.
+## Purpose
+Unit test suite for GoAdapterFactory, validating Go debug adapter factory functionality including adapter creation, metadata retrieval, and environment validation.
 
-**Key Test Structure**
+## Key Test Structure
+- **Main Test Suite** (L53-264): `GoAdapterFactory` - comprehensive testing of the factory class
+- **Mock Dependencies Factory** (L19-51): `createMockDependencies()` - creates complete mock AdapterDependencies with stubbed file system, logger, environment, and process launcher
+- **Mock Setup** (L9-17): Mocks child_process.spawn for process execution testing
 
-- **Mock Setup (L9-51)**: Comprehensive mocking infrastructure including child_process.spawn for simulating tool execution, and createMockDependencies() factory for AdapterDependencies interface
-- **GoAdapterFactory Tests (L53-258)**: Main test suite organized into three core areas:
+## Test Categories
 
-**createAdapter Tests (L66-76)**
-- Validates factory correctly instantiates GoDebugAdapter instances
-- Ensures proper language assignment (DebugLanguage.GO)
+### Adapter Creation Tests (L66-76)
+- **createAdapter test** (L67-70): Verifies factory produces GoDebugAdapter instances
+- **language validation** (L72-75): Confirms adapter has correct DebugLanguage.GO
 
-**getMetadata Tests (L78-99)**  
-- Verifies adapter metadata including language, display name, version (0.1.0)
-- Validates Delve-related description, .go file extensions
-- Tests documentation URL and SVG icon presence
+### Metadata Tests (L78-99)  
+- **metadata validation** (L79-87): Validates language, displayName, version, description, and file extensions
+- **documentation URL** (L89-92): Ensures GitHub documentation link presence
+- **icon validation** (L94-98): Confirms SVG icon data URI format
 
-**validate Tests (L101-258)**
-- **Success Case (L102-133)**: Mocks successful Go and Delve version checks, validates environment setup
-- **Go Not Found (L135-144)**: Tests PATH-based tool discovery failure
-- **Old Go Version (L146-173)**: Validates minimum Go 1.18 requirement enforcement  
-- **Delve Missing (L175-203)**: Tests Delve debugger availability checks
-- **No DAP Support (L205-236)**: Validates Delve DAP (Debug Adapter Protocol) capability
-- **Platform Info (L238-257)**: Ensures validation includes platform/architecture details
+### Environment Validation Tests (L101-263)
+- **successful validation** (L102-133): Tests valid Go/Delve setup with version checking and DAP support
+- **Go not found** (L135-149): Handles missing Go installation by manipulating PATH
+- **version compatibility** (L151-178): Rejects Go versions < 1.18
+- **Delve missing** (L180-208): Detects missing Delve debugger
+- **DAP support** (L210-241): Validates Debug Adapter Protocol compatibility
+- **platform details** (L243-262): Includes system platform/architecture in validation results
 
-**Dependencies & Mocking**
-- Uses vitest for testing framework with comprehensive mocking
-- Mocks child_process.spawn to simulate Go/Delve command execution
-- Creates mock EventEmitter processes with stdout/stderr simulation
-- Mock file system operations through fs.promises.access
+## Key Dependencies
+- `@debugmcp/adapter-go`: GoAdapterFactory, GoDebugAdapter classes
+- `@debugmcp/shared`: AdapterDependencies interface, DebugLanguage enum  
+- `vitest`: Test framework with mocking capabilities
+- `child_process.spawn`: Mocked for process execution testing
+- `fs.promises.access`: File system validation mocking
 
-**Key Validation Logic**
-The validate() method tests critical environment prerequisites:
-- Go binary availability and minimum version (1.18+)
-- Delve debugger installation and DAP support
-- Platform information collection for debugging context
+## Testing Patterns
+- Comprehensive mocking of external dependencies (file system, process spawning)
+- Event-driven process simulation using EventEmitter
+- Environment manipulation for negative test cases
+- Async validation with proper cleanup in beforeEach/afterEach hooks (L56-64)
 
-**Test Patterns**
-- Process.nextTick() for async command simulation
-- Buffer-based stdout data emission for version parsing
-- Exit code handling for success/failure scenarios
-- Comprehensive error message validation
+## Validation Logic
+Tests simulate Go/Delve version checking by spawning processes and parsing stdout for version strings, with specific handling for DAP capability detection through command exit codes.

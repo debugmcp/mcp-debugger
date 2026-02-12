@@ -1,45 +1,42 @@
-# tests/adapters/rust/
-@generated: 2026-02-11T23:47:45Z
+# tests\adapters\rust/
+@generated: 2026-02-12T21:01:02Z
 
-## Purpose
-The `tests/adapters/rust` directory provides comprehensive integration testing for the Rust debugging adapter, focusing on validating adapter functionality through controlled smoke tests. This testing module ensures the Rust adapter correctly integrates with the debugging infrastructure while maintaining isolation from external process dependencies through sophisticated mocking strategies.
+## Overall Purpose and Responsibility
 
-## Key Components and Organization
+This directory contains integration tests for the Rust debug adapter, focusing on validating the adapter's ability to integrate with the VS Code debug protocol without requiring external dependencies or actual process launches. The tests ensure the Rust adapter correctly transforms launch configurations, generates proper debugger commands, and manages environment setup for Rust debugging scenarios.
 
-**Integration Testing Layer**: The `integration/` subdirectory contains the core testing infrastructure that validates the Rust adapter's session management, command building, and configuration transformation capabilities without launching external processes.
+## Key Components and Integration
 
-**Primary Test Suite**: `rust-session-smoke.test.ts` serves as the main integration test file, performing comprehensive validation of the RustAdapterFactory and its associated debugging workflows through dependency injection and mock implementations.
+**integration/**: Contains the primary integration test suite that validates end-to-end adapter functionality:
+- **Command Generation Testing**: Verifies the RustAdapterFactory produces correct CodeLLDB commands with appropriate arguments, ports, and platform-specific configurations
+- **Configuration Transformation**: Ensures launch configurations are properly normalized from relative to absolute paths and transformed for debugger consumption
+- **Environment Management**: Tests Rust-specific environment variable setup (RUST_BACKTRACE, LLDB_USE_NATIVE_PDB_READER)
 
-## Public API Surface
+## Testing Architecture and Public API Surface
 
-The directory validates the Rust adapter's public interface across several key areas:
-
-- **Adapter Factory Integration**: Tests RustAdapterFactory's ability to create properly configured debugging adapters
-- **Command Construction Validation**: Verifies CodeLLDB command building with correct executable paths, port configurations, and environment variables
-- **Configuration Transformation**: Tests launch configuration normalization and transformation for debugging sessions
-- **Platform Compatibility**: Validates adapter behavior across Windows and Unix platforms
+The tests validate the public interface of the Rust adapter through:
+- **RustAdapterFactory**: Main entry point for creating Rust debug adapter instances
+- **buildCommand() Method**: Core API for generating CodeLLDB debugger invocations
+- **Launch Configuration Processing**: Adapter's ability to transform VS Code debug configurations
 
 ## Internal Organization and Data Flow
 
-**Test Infrastructure Pattern**:
-- `createDependencies()` factory provides controlled mock implementations of AdapterDependencies (FileSystem, Logger, ProcessLauncher)
-- Environment variable management with setup/teardown hooks for CODELLDB_PATH and RUST_BACKTRACE
-- Platform-aware testing patterns handling Windows vs Unix differences
+**Dependency Injection Pattern**: Uses a mock factory pattern to inject controlled implementations:
+- FileSystem operations return predictable values without file I/O
+- ProcessLauncher prevents actual process execution during tests
+- Logger provides no-op implementations for clean test output
+- Environment delegates to real process.env for authentic variable testing
 
-**Validation Flow**:
-1. Mock dependency creation with controlled behavior simulation
-2. Adapter instantiation through RustAdapterFactory with injected dependencies
-3. Command building verification ensuring proper executable paths and environment setup
-4. Launch configuration transformation testing with path normalization and output format validation
+**Platform-Aware Testing Strategy**: Implements cross-platform logic handling:
+- Windows vs Unix binary naming conventions (.exe suffixes)
+- Platform-specific LLDB configuration flags
+- Path normalization differences across operating systems
 
 ## Important Patterns and Conventions
 
-**Isolation-First Testing**: The module employs sophisticated mocking to test integration-level behavior without external dependencies, allowing comprehensive validation of adapter logic while preventing actual process launches.
+- **Smoke Testing Methodology**: Validates core adapter functionality without external dependencies, ensuring fast and reliable test execution
+- **Environment Isolation**: Careful setup/teardown of environment variables prevents test interference
+- **Integration-Level Validation**: Tests the complete adapter unit while avoiding external debugger installations
+- **Mock-Based Isolation**: Uses dependency injection to eliminate side effects while maintaining realistic testing scenarios
 
-**Platform-Aware Design**: Tests systematically account for platform-specific differences including binary naming conventions (.exe on Windows) and LLDB configuration parameters (LLDB_USE_NATIVE_PDB_READER).
-
-**Environment Discipline**: Rigorous environment variable management ensures test isolation and repeatability across different execution contexts.
-
-**Behavioral Validation**: Tests verify both structural correctness and content accuracy of generated commands and transformed configurations, ensuring compatibility with the underlying CodeLLDB debugger infrastructure.
-
-This testing directory serves as a critical quality gate ensuring the Rust adapter maintains correct integration patterns with the debugging infrastructure while providing reliable, isolated validation of core adapter functionality.
+This testing approach ensures the Rust debug adapter correctly implements the VS Code debug protocol interface while maintaining test reliability and cross-platform compatibility without requiring actual debugger processes or file system operations.
