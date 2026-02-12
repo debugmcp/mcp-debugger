@@ -29,7 +29,7 @@ function getWorkspaceVersions() {
   const packagesDir = path.resolve(__dirname, '../packages');
   
   // Read each workspace package
-  const workspaces = ['shared', 'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-rust'];
+  const workspaces = ['shared', 'adapter-go', 'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-rust'];
   
   for (const ws of workspaces) {
     const pkgPath = path.join(packagesDir, ws, 'package.json');
