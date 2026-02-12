@@ -1,43 +1,43 @@
 # scripts/experiments/
-@generated: 2026-02-10T21:26:12Z
+@generated: 2026-02-11T23:47:32Z
 
 ## Purpose
-Development testing utilities for experimental debugging and protocol validation. This directory contains specialized scripts designed to support DAP (Debug Adapter Protocol) behavior testing and debugger tool validation in controlled environments.
+Experimental testing infrastructure for debugging and development workflows. This directory contains specialized test harnesses and probes designed to validate Debug Adapter Protocol (DAP) behavior and provide controlled debugging environments.
 
 ## Key Components
 
 **Test Targets:**
-- `probe-target.js` - Minimal debugging test harness providing reliable breakpoint targets and process lifecycle management for debugger attachment scenarios
+- `probe-target.js` - Primary debugging test harness providing reliable breakpoint targets and process lifecycle management for debugger attachment scenarios
 
 ## Public API Surface
 
-**Entry Points:**
-- `probe-target.js` - Execute with `--line 13` parameter for targeted debugging tests
-  - Provides immediate debugger statement breakpoint
-  - Offers predictable breakpoint target at line 13 (`probeVar`)
-  - Includes simple arithmetic function for step-through testing
+**Main Entry Points:**
+- `probe-target.js` - Execute with `--line 13` parameter for targeted debugging validation
+- Designed for external debugger tool integration and DAP behavior testing
 
 ## Internal Organization & Data Flow
 
-**Execution Flow:**
-1. Immediate debugger hook activation
-2. Variable declaration for breakpoint targeting
-3. Function definition for step-through scenarios  
-4. Delayed execution phase (500ms) for debugger attachment window
-5. Keep-alive interval to prevent process termination
+**Debugging Infrastructure:**
+1. **Breakpoint Management** - Strategic placement of `debugger` statements and target variables for consistent debugging behavior
+2. **Process Lifecycle Control** - Timeout/interval patterns ensuring processes remain available for debugger adoption
+3. **Execution Markers** - Console logging providing clear execution state visibility
 
-**Process Management:**
-- Controlled timing with 500ms delay for external tool attachment
-- Infinite interval loop ensuring process remains available for debugger adoption
-- Console logging providing execution state visibility
+**Timing Architecture:**
+- 500ms initialization delay for debugger attachment window
+- Infinite interval loops preventing premature process termination
+- Predictable execution flow for reliable testing
 
-## Patterns & Conventions
+## Important Patterns & Conventions
 
-**Testing Architecture:**
-- Minimal dependency design (Node.js runtime only)
-- Explicit process lifecycle management for external debugger integration
-- Sequential execution with predictable timing for reliable test conditions
-- Multiple debugging hook types (statement, line target, step-through function)
+**Debugging Stability:**
+- Minimal dependencies (Node.js runtime only)
+- Explicit process management for external tool integration
+- Sequential execution with predictable timing windows
+
+**Test Harness Design:**
+- Simple, focused functionality optimized for debugger reliability
+- Clear separation between debugging hooks and functional code
+- Consistent breakpoint targeting for automated testing scenarios
 
 ## Usage Context
-Supports debugging tool development and DAP implementation validation by providing stable, predictable test targets. Designed for scenarios requiring debugger attachment, process adoption, and breakpoint behavior verification in controlled test environments.
+This experimental directory supports development tooling validation, particularly for debugging protocol implementation and debugger behavior testing. Components are designed to work with external debugging tools and provide controlled environments for testing debugger attachment, breakpoint handling, and process adoption scenarios.

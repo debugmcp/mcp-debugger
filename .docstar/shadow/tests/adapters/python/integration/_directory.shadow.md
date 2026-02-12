@@ -1,74 +1,65 @@
 # tests/adapters/python/integration/
-@generated: 2026-02-10T21:26:30Z
+@generated: 2026-02-11T23:47:38Z
 
-## Python Integration Test Suite
+## Python Adapter Integration Tests
 
-**Purpose**: Comprehensive integration testing module for the Python debugger adapter, validating real-world debugging workflows through MCP (Model Context Protocol) communication without mocks. This test suite ensures the Python adapter can reliably discover Python installations, establish debug sessions, and execute debugging operations across different environments, particularly Windows CI systems.
+**Purpose**: Comprehensive integration test suite for the Python debugging adapter, validating real-world Python environment discovery and full debugging workflow functionality through MCP (Model Context Protocol) communication.
 
-### Key Components and Their Relationships
+### Key Components
 
-**env-utils.ts** - Python Environment Management
-- Core utility for ensuring Python installations with debugpy support are available on PATH
-- Implements Windows-specific Python discovery with prioritized search strategy
-- Handles automatic debugpy installation and PATH manipulation
-- Provides foundation for consistent test environment setup
+**env-utils.ts**: Environment preparation utility focused on ensuring Python installations with debugpy support are available, particularly for Windows CI environments. Implements intelligent Python discovery across system paths and handles debugpy installation when needed.
 
-**python-discovery.test.ts** - Python Discovery Validation
-- Tests real Python executable discovery without mocks
-- Validates system-wide Python detection capabilities
-- Focuses on Windows compatibility issues (Microsoft Store python3 redirects)
-- Depends on env-utils for environment preparation
+**python-discovery.test.ts**: Integration test validating Python executable discovery without mocks. Tests the adapter's ability to find and use Python executables on the system PATH, with special handling for Windows Microsoft Store Python redirects.
 
-**python_debug_workflow.test.ts** - Full Debug Workflow Testing
-- Comprehensive end-to-end debugging workflow validation
-- Tests complete debug session lifecycle: breakpoints, stack inspection, variable access
-- Validates MCP server communication and debug protocol compliance
-- Uses env-utils for Python environment setup
+**python_debug_workflow.test.ts**: Full debugging workflow integration test exercising the complete debug session lifecycle including session creation, breakpoint management, execution control, stack inspection, and variable examination.
+
+### Integration Architecture
+
+All tests use real MCP client-server communication via stdio transport, explicitly avoiding mocks to validate actual system behavior. The flow follows this pattern:
+
+1. **Environment Preparation**: `env-utils.ensurePythonOnPath()` ensures Python+debugpy availability
+2. **MCP Communication**: Tests spawn the debug server as a subprocess and communicate via MCP protocol
+3. **Real Debugging**: Tests execute actual Python scripts with real breakpoints and variable inspection
 
 ### Public API Surface
 
-**Main Entry Points:**
-- `ensurePythonOnPath(env)` - Ensures Python with debugpy is available (env-utils)
-- Integration test suites that validate:
-  - Python executable discovery capabilities
-  - Complete debugging workflow operations
-  - MCP client-server communication protocols
+**Entry Points**:
+- `ensurePythonOnPath(env)`: Main utility for Python environment preparation
+- Debug server communication via MCP tools: `list_sessions`, `create_session`, `set_breakpoint`, `start_debugging`, `continue`, `get_stack_frames`, `get_scopes`, `get_variables`
 
-**Test Utilities:**
-- `parseToolResult()` - Extracts JSON from MCP responses
-- `waitForStackFrames()` - Polling utility for debug state changes
-- `persistFailurePayload()` - CI debugging artifact collection
+### Internal Organization
 
-### Internal Organization and Data Flow
+**Environment Layer**: `env-utils.ts` handles Python discovery and PATH management
+**Discovery Layer**: `python-discovery.test.ts` validates Python executable discovery
+**Workflow Layer**: `python_debug_workflow.test.ts` tests end-to-end debugging scenarios
 
-1. **Environment Preparation**: env-utils establishes Python environment with debugpy
-2. **Discovery Testing**: python-discovery validates Python executable detection
-3. **Workflow Testing**: python_debug_workflow executes complete debugging scenarios
-4. **MCP Communication**: All tests use real MCP client-server stdio transport
-5. **CI Integration**: Comprehensive logging and failure artifact collection
+### Data Flow
 
-### Important Patterns and Conventions
+1. Environment utilities prepare Python runtime with debugpy
+2. MCP client establishes stdio transport to debug server subprocess
+3. Server process handles DAP (Debug Adapter Protocol) conversion internally
+4. Tests validate debugging operations through MCP tool calls
+5. Cleanup ensures proper session and transport closure
 
-**Testing Philosophy**:
-- No mocks - tests real implementation behavior only
-- Integration over unit testing approach
-- CI-first design with extensive diagnostic logging
+### Key Patterns
 
-**Environment Handling**:
-- Windows-specific path normalization and Python discovery
-- Environment variable filtering for clean subprocess spawning
-- Automatic debugpy installation with fallback strategies
+- **Real Integration Testing**: No mocks - tests actual system behavior
+- **Environment Isolation**: Filtered environment variables to force discovery behavior
+- **CI-Friendly**: Extensive logging, failure artifact collection, and Windows-specific handling
+- **Polling Strategies**: Asynchronous debug state monitoring with configurable timeouts
+- **Dry Run Support**: Safe testing mode without full debugging execution
 
-**Error Handling**:
-- Graceful degradation with comprehensive diagnostic output
-- Failure artifact persistence for CI debugging
-- Timeout-based polling for async debug operations
+### Dependencies
 
-**MCP Integration**:
-- SDK-based client communication for robust server interaction
-- JSON response parsing and validation
-- Proper session lifecycle management with cleanup
+- **@modelcontextprotocol/sdk**: MCP client communication
+- **@debugmcp/shared**: Debug protocol type definitions  
+- **@vscode/debugprotocol**: VS Code DAP compatibility
+- **Node.js built-ins**: Process spawning, filesystem, and path utilities
+- **Vitest**: Testing framework with integration test support
 
-### System Role
+### Critical Constraints
 
-This module serves as the integration testing foundation for Python debugging capabilities, ensuring the adapter works reliably across different Python installations and environments. It validates that the MCP-based architecture can successfully orchestrate debugging sessions from discovery through execution, making it critical for deployment confidence in diverse production environments.
+- Requires actual Python installation with debugpy support
+- Windows-specific PATH and environment handling
+- Tests tagged with `@requires-python` for conditional execution
+- Designed for CI environments with comprehensive error reporting and diagnostic logging

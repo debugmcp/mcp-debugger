@@ -1,45 +1,41 @@
 # tests/adapters/rust/integration/
-@generated: 2026-02-10T21:26:20Z
+@generated: 2026-02-11T23:47:34Z
 
 ## Purpose
-Integration testing directory for the Rust debugger adapter that validates end-to-end functionality without external process dependencies. Provides smoke tests for session management, command building, and launch configuration transformation.
+Integration testing module for the Rust debugging adapter, focusing on smoke tests that verify adapter functionality without launching external processes. This directory contains tests that validate the core adapter behaviors like command building and configuration transformation in an isolated environment.
 
-## Key Components
+## Key Components and Organization
 
-**rust-session-smoke.test.ts**: Comprehensive integration test suite that validates the Rust adapter's core functionality through mocked dependencies. Tests command construction for CodeLLDB and launch configuration normalization.
+**rust-session-smoke.test.ts**: The primary integration test file that performs comprehensive smoke testing of the Rust adapter's session management capabilities. Uses dependency injection with mock implementations to isolate adapter logic from external dependencies.
 
-## Testing Architecture
+## Public API Surface
 
-**Dependency Injection Pattern**: Uses `createDependencies()` factory to provide mock implementations of:
-- FileSystem operations (stubbed to return empty/false)
-- Logger (no-op implementations)
-- Environment access (delegates to real process.env)
-- ProcessLauncher (throws to prevent actual launches)
+The directory serves as a test validation layer for the Rust adapter's public interface:
+- **RustAdapterFactory integration**: Tests the main factory's ability to create properly configured adapters
+- **Command building validation**: Verifies CodeLLDB command construction with correct arguments and environment
+- **Launch configuration transformation**: Tests the adapter's ability to normalize and transform debugging configurations
 
-**Test Isolation**: Manages environment variables (CODELLDB_PATH, RUST_BACKTRACE) through beforeEach/afterEach hooks to ensure clean test state.
+## Internal Organization and Data Flow
 
-## Test Coverage Areas
+**Test Infrastructure**:
+- `createDependencies()`: Factory function providing mock AdapterDependencies with stubbed FileSystem, Logger, and ProcessLauncher implementations
+- Environment variable management with cleanup hooks for CODELLDB_PATH and RUST_BACKTRACE
+- Platform-aware testing patterns for Windows vs Unix differences
 
-**Command Building Validation**:
-- Verifies RustAdapterFactory produces correct CodeLLDB command structure
-- Validates executable paths, port arguments, and optional liblldb flags
-- Tests environment variable setup (RUST_BACKTRACE=1, platform-specific LLDB settings)
+**Test Flow**:
+1. Mock dependencies creation with controlled behavior
+2. Adapter instantiation through RustAdapterFactory
+3. Command building verification (executable paths, port configuration, environment variables)
+4. Launch configuration transformation testing (path normalization, output format validation)
 
-**Launch Configuration Transformation**:
-- Tests normalization of binary launch configurations
-- Path resolution from relative to absolute
-- Platform-aware binary naming (.exe on Windows)
-- Output format validation (type='lldb', sourceLanguages=['rust'], console='internalConsole')
+## Important Patterns and Conventions
 
-## Integration Points
+**Isolation Strategy**: Tests prevent actual process launches while validating adapter logic through dependency mocking. This allows integration-level testing without external dependencies.
 
-**External Dependencies**:
-- RustAdapterFactory from adapter-rust package
-- AdapterDependencies type from shared package
-- Vitest testing framework
-- Node.js built-in modules (fs, path)
+**Platform Awareness**: Tests account for platform-specific differences in binary naming (.exe on Windows) and LLDB configuration (LLDB_USE_NATIVE_PDB_READER).
 
-**Platform Awareness**: Handles Windows vs Unix differences in binary naming and LLDB configuration flags.
+**Environment Management**: Careful setup/teardown of environment variables ensures test isolation and repeatability.
 
-## Testing Philosophy
-Smoke testing approach that validates adapter behavior through dependency mocking rather than launching actual debug processes. Ensures integration-level confidence while maintaining fast, reliable test execution without external system dependencies.
+**Configuration Validation**: Tests verify both the structure and content of generated commands and transformed configurations, ensuring compatibility with the underlying CodeLLDB debugger.
+
+This module serves as a critical validation layer ensuring the Rust adapter correctly interfaces with the debugging infrastructure while maintaining isolation from external process dependencies.

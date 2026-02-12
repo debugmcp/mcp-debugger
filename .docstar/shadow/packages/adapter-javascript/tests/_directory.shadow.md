@@ -1,74 +1,63 @@
 # packages/adapter-javascript/tests/
-@generated: 2026-02-10T21:26:46Z
+@generated: 2026-02-11T23:48:00Z
 
-## Overall Purpose and Responsibility
+## Purpose
 
-This directory contains the comprehensive test suite for the `adapter-javascript` package, validating a JavaScript/TypeScript debug adapter implementation that integrates with the Debug Adapter Protocol (DAP). The tests ensure reliable debugging capabilities for Node.js applications across diverse development environments, with support for multiple runtime configurations and cross-platform compatibility.
+The `packages/adapter-javascript/tests` directory contains a comprehensive test suite that validates the JavaScript debug adapter package's integration with VS Code's Debug Adapter Protocol (DAP) for Node.js and TypeScript debugging. The tests ensure robust functionality across diverse development environments and maintain protocol compliance for debugging JavaScript and TypeScript applications.
 
-## Key Components and Architecture
+## Key Components and Integration
 
-The test suite is organized into a single **unit** test subdirectory that provides comprehensive coverage for:
+### Test Organization Structure
+The directory is organized around the **unit** subdirectory which contains systematic testing of all adapter components:
 
-### Core Debug Adapter Components
-- **JavascriptDebugAdapter**: Primary adapter class with DAP integration, lifecycle management, and error handling
-- **JavascriptAdapterFactory**: Factory pattern implementation with environment validation and adapter instantiation
-- **Configuration System**: Project analysis utilities for ESM detection, TypeScript support, and build configuration
+- **Core Adapter Testing**: Factory creation, lifecycle management, and DAP protocol handling
+- **Configuration Processing**: Launch config transformation, TypeScript detection, and runtime discovery  
+- **Utility Module Validation**: Cross-platform executable resolution, TypeScript tooling detection, and ESM project analysis
+- **Build System Testing**: Asset selection and deployment strategy validation
 
-### Runtime Detection and Resolution
-- **TypeScript Detector**: Discovery and validation of ts-node/tsx runtime tools with PATH resolution
-- **Executable Resolver**: Cross-platform Node.js binary location with fallback mechanisms
-- **Build Infrastructure**: Vendor strategy and asset management for debug server deployment
+### Component Relationships
+The tests validate a complete integration flow:
+1. **Environment Validation** → **Configuration Transformation** → **Process Management** → **DAP Integration** → **Error Handling**
+2. Tests ensure each component properly interfaces with others through dependency injection and mock abstractions
+3. Mock infrastructure (MockFileSystem, environment isolation) enables isolated testing while maintaining realistic integration scenarios
 
-## Test Organization and Coverage Strategy
+## Public API Surface
 
-### Multi-Layered Testing Approach
-- **Base Tests** (`*.test.ts`): Core functionality and happy path scenarios
-- **Edge Case Tests** (`*.edge.test.ts`): Boundary conditions, error recovery, and complex configurations  
-- **Exception Tests** (`*.throw.edge.test.ts`): Fault tolerance when dependencies fail
+The test suite validates these primary entry points:
 
-### Key Test Categories
-- **Protocol Integration**: DAP request/response handling and event processing
-- **Configuration Transformation**: Launch config analysis and TypeScript integration
-- **Platform Compatibility**: Cross-platform executable resolution and path handling
-- **Environment Validation**: Node.js version checking and dependency verification
+- **`JavascriptAdapterFactory`**: Main factory for creating adapter instances with environment validation
+- **`JavascriptDebugAdapter`**: Core adapter implementing IDebugAdapter interface with full DAP support
+- **Configuration Utilities**: ESM detection, TypeScript path mapping, and launch configuration enrichment
+- **Runtime Resolution**: Cross-platform Node.js executable discovery with intelligent caching
+- **Error Translation**: User-friendly error messaging with actionable installation guidance
 
-## Public API Surface and Entry Points
+## Internal Organization and Data Flow
 
-### Primary Interfaces
-- **JavascriptAdapterFactory**: Main entry point for adapter creation with comprehensive validation
-- **JavascriptDebugAdapter**: Core IDebugAdapter implementation managing debug sessions
-- **Configuration Utilities**: ESM detection, TypeScript analysis, and output file determination
+### Testing Methodology
+Tests are categorized by validation type:
+- **Happy Path Tests** (`.test.ts`): Standard functionality validation
+- **Edge Case Tests** (`.edge.test.ts`): Boundary conditions and unusual inputs  
+- **Error Handling Tests** (`.throw.edge.test.ts`): Exception scenarios and fault tolerance
 
-### Supported Capabilities
-- **Multi-Runtime Support**: Node.js, tsx, ts-node with automatic detection
-- **Cross-Platform Operation**: Windows and POSIX executable resolution
-- **Intelligent Configuration**: Project type detection with TypeScript integration
-- **Graceful Error Handling**: User-friendly error messages with installation guidance
+### Mock Infrastructure and Patterns
+- **Filesystem Abstraction**: Configurable file operations simulation
+- **Environment Safety**: Process environment isolation preventing test pollution
+- **Cross-platform Compatibility**: Windows/POSIX path handling and executable resolution
+- **Dependency Injection**: Pluggable components for filesystem, logging, and process launching
 
-## Internal Data Flow and Integration
+## Important Patterns and Conventions
 
-### Initialization and Configuration Pipeline
-1. **Environment Assessment**: Node.js version validation, vendor file verification, TypeScript tooling detection
-2. **Project Analysis**: Package.json and tsconfig.json parsing for project characteristics
-3. **Runtime Selection**: Automatic choice between Node.js variants based on file types and tool availability
-4. **Debug Session Setup**: DAP communication configuration and launch parameter assembly
+### Robustness Testing
+- **Cross-platform executable discovery** with PATH precedence and caching validation
+- **Graceful degradation** when preferred tools (TypeScript, ts-node) are unavailable
+- **Event-driven DAP protocol** testing with state transition validation
+- **Exception safety** ensuring filesystem errors don't crash the adapter
 
-### Error Handling and Resilience
-The test suite validates a robust error handling strategy featuring:
-- **Graceful Degradation**: Default value fallbacks when filesystem operations fail
-- **Installation Guidance**: Automated generation of dependency installation instructions
-- **Platform Adaptation**: Environment-specific behavior with consistent cross-platform APIs
+### Real-world Environment Simulation
+Tests validate adapter behavior across varying:
+- Node.js versions and installation patterns
+- TypeScript configuration setups (tsx, ts-node, native tooling)
+- System configurations and development environment variations
+- Network conditions and external dependency availability
 
-## Important Testing Patterns and Conventions
-
-### Mock Infrastructure and Isolation
-- **FileSystem Abstraction**: Dependency injection enabling comprehensive filesystem operation mocking
-- **Environment Manipulation**: Safe PATH and NODE_OPTIONS modification with automatic cleanup
-- **Cross-Platform Testing**: Platform-aware mocking supporting both Windows and POSIX behaviors
-
-### Performance and Caching Validation
-- **Binary Detection Caching**: Tests verify results are cached per adapter instance with proper invalidation
-- **Executable Resolution Optimization**: PATH scanning with memoization to minimize filesystem access
-- **Configuration Analysis Efficiency**: File parsing with error recovery and performance-conscious defaults
-
-The test directory ensures the JavaScript debug adapter can reliably handle diverse development environments while maintaining excellent performance characteristics and providing clear, actionable feedback to developers when issues arise.
+The test suite ensures the JavaScript debug adapter maintains reliable operation and DAP compliance across the diverse landscape of JavaScript/TypeScript development environments while providing excellent developer experience through robust error handling and configuration management.

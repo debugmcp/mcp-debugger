@@ -1,94 +1,77 @@
 # packages/adapter-python/
-@generated: 2026-02-10T21:27:26Z
+@generated: 2026-02-11T23:48:14Z
 
-## Overall Purpose and Responsibility
+## Purpose and Responsibility
 
-The `packages/adapter-python` directory implements a complete Python debugging adapter for the mcp-debugger framework. This module serves as a bridge between the Debug Adapter Protocol (DAP) and Python's debugpy debugging infrastructure, providing reliable cross-platform Python debugging capabilities with comprehensive environment detection and validation.
+The `packages/adapter-python` directory provides a complete Python debugging adapter implementation for the mcp-debugger framework. It serves as a critical bridge between the Debug Adapter Protocol (DAP) and Python's debugpy debugging infrastructure, enabling full-featured Python debugging sessions with comprehensive environment validation and cross-platform support.
 
-## Key Components and Integration
+## Key Components and Architecture
 
-The package follows a three-layer architecture with clear separation of concerns:
+### Core Component Structure
+The package implements a layered architecture with clear separation of concerns:
 
-### Core Architecture Layers
-
-1. **Factory Layer** (`PythonAdapterFactory`): Provides dependency injection patterns for adapter creation with comprehensive environment validation
-2. **Adapter Layer** (`PythonDebugAdapter`): Implements DAP protocol operations, manages debugging session lifecycle, and maintains debugpy connection state  
-3. **Utilities Layer** (`utils/`): Handles cross-platform Python executable discovery, environment validation, and debugpy integration
+1. **Factory Layer** (`PythonAdapterFactory`): Implements dependency injection pattern with comprehensive Python environment validation before adapter creation
+2. **Adapter Layer** (`PythonDebugAdapter`): Core DAP protocol implementation providing Python-specific debugging capabilities and session management
+3. **Discovery Layer** (`utils/python-utils.ts`): Cross-platform Python executable discovery and environment validation system
+4. **Test Infrastructure**: Comprehensive test suite ensuring cross-platform reliability and error handling
 
 ### Component Integration Flow
+```
+Environment Discovery → Validation Pipeline → Factory Creation → Adapter Instantiation → Debug Session Management
+```
 
-The components integrate through a validation-first approach:
-- **Environment Discovery**: Utilities perform sophisticated cross-platform Python executable detection with platform-specific strategies (Windows Store Python handling, Unix PATH resolution)
-- **Validation Pipeline**: Factory validates Python ≥3.7 and debugpy availability before adapter instantiation
-- **Session Management**: Adapter manages complete debugging lifecycle from initialization through DAP request/response processing
-- **State Tracking**: Event-driven state transitions with proper connection cleanup and error handling
+The factory validates Python environments (≥3.7, debugpy availability) before creating adapters. Adapters then manage debugging sessions with full DAP compliance and Python-specific features like virtual environment detection and module execution support.
 
 ## Public API Surface
 
-### Primary Entry Points (`src/index.ts`)
+### Primary Entry Points
+- **`PythonAdapterFactory`**: Main factory class implementing `IAdapterFactory` for creating validated Python debug adapters
+- **`PythonDebugAdapter`**: Core adapter class implementing `IDebugAdapter` for debug session management
+- **`findPythonExecutable()`**: Utility for cross-platform Python executable discovery
+- **`getPythonVersion()`**: Python version extraction and validation utility
 
-**Factory Interface:**
-- `PythonAdapterFactory`: Main factory class implementing `IAdapterFactory` for adapter creation and environment validation
-- `createAdapter()`: Instantiates validated Python debug adapters
-- `validate()`: Comprehensive environment validation with detailed error reporting
-- `getMetadata()`: Returns adapter capabilities and supported file extensions (.py, .pyw)
-
-**Debug Adapter Interface:**
-- `PythonDebugAdapter`: Core adapter implementing `IDebugAdapter` for debugging sessions
-- `initialize()`: Environment validation and state transitions
-- `connect()/disconnect()`: debugpy connection lifecycle management  
-- `sendDapRequest()`: DAP protocol message handling with Python-specific transformations
-- `getCapabilities()`: Returns debugging capabilities (breakpoints, exception handling, variable inspection)
-
-**Utility Functions:**
-- `findPythonExecutable`: Cross-platform Python executable discovery
-- `getPythonVersion`: Python version extraction and validation
-- `setDefaultCommandFinder`: Configuration point for custom command resolution
-- `CommandNotFoundError`: Structured error handling for missing executables
+### Configuration Interface
+- **`PythonLaunchConfig`**: Extended configuration interface supporting Python-specific debugging options
+- **`setDefaultCommandFinder()`**: Dependency injection point for custom command resolution strategies
+- **`CommandFinder`**: Pluggable interface for executable discovery customization
 
 ## Internal Organization and Data Flow
 
-### Environment Detection Pipeline
-1. **Discovery Phase**: Platform-specific executable search with Windows Store Python filtering and Unix preference handling
-2. **Validation Phase**: Python version checking (≥3.7) and debugpy availability validation
-3. **Caching Layer**: TTL-based caching (60 seconds) for expensive operations
-4. **Selection Logic**: Prioritization of debugpy-enabled Python installations
+### Validation and Initialization Pipeline
+1. **Multi-Platform Discovery**: Handles Windows Store Python, virtual environments, and standard system installations
+2. **Environment Validation**: Ensures Python ≥3.7 and debugpy package availability
+3. **Capability Assessment**: Determines supported DAP features based on Python environment
+4. **Session Management**: Full lifecycle management with event emission and state tracking
 
-### Debug Session Lifecycle
-1. **Pre-flight Validation**: Factory performs comprehensive environment checks
-2. **Adapter Instantiation**: Creation with validated Python dependencies
-3. **Session Initialization**: Environment setup and DAP capability negotiation
-4. **Protocol Processing**: Request/response handling with Python-specific transformations
-5. **Connection Management**: debugpy integration and cleanup
+### Cross-Platform Strategy
+- **Platform-Specific Handling**: Windows Store Python aliases, Unix PATH resolution, environment variable precedence
+- **Fallback Mechanisms**: Multiple discovery strategies ensure robust Python detection across environments
+- **Virtual Environment Support**: Automatic detection and proper handling of Python virtual environments
 
 ## Important Patterns and Conventions
 
-### Cross-Platform Robustness
-- Sophisticated Windows Store Python alias detection and filtering
-- Platform-specific search strategies with environment variable precedence
-- Graceful degradation with comprehensive error reporting
+### Architectural Patterns
+- **Factory Pattern**: Clean separation of environment validation from adapter creation
+- **Caching Strategy**: TTL-based caching (60-second timeout) for Python executable paths and metadata
+- **Event-Driven Design**: Adapter lifecycle managed through event emission with proper state transitions
+- **Strategy Pattern**: Pluggable command finding for testing and environment customization
 
-### Performance Optimization
-- TTL-based caching for expensive subprocess operations
-- Lazy evaluation of debugpy availability checking
-- Efficient validation pipeline with early termination on failures
+### Python-Specific Features
+- **debugpy Integration**: Complete integration with Python's official debugging protocol
+- **Module Execution Support**: Debugging for both scripts and modules (`python -m` patterns)
+- **Framework Compatibility**: Specialized support for Django/Flask debugging configurations
+- **Virtual Environment Awareness**: Seamless handling of conda, venv, and virtualenv setups
 
-### Development Experience
-- Comprehensive test coverage with mock-driven testing infrastructure
-- CI-aware logging and error reporting
-- Monorepo integration with workspace aliases for shared dependencies
+### Quality Assurance
+- **Comprehensive Testing**: Cross-platform test coverage with mock-based environment simulation
+- **Error Handling**: Custom exception types with user-friendly error translation
+- **Validation Results**: Structured feedback with errors, warnings, and environment diagnostics
+- **CI Integration**: Environment-aware logging and validation for continuous integration
 
-### State Management
-- Event-driven state transitions using `AdapterState` enum
-- Thread-safe caching mechanisms with proper cleanup
-- Connection state tracking with graceful error recovery
+## Critical Requirements
+- **Python Version**: Requires Python 3.7 or higher for debugging functionality
+- **debugpy Dependency**: Validates debugpy package installation as prerequisite
+- **Platform Support**: Full cross-platform compatibility (Windows, macOS, Linux)
+- **DAP Compliance**: Complete Debug Adapter Protocol implementation with Python extensions
 
-## Testing and Validation
-
-The package includes a comprehensive test suite covering:
-- **Unit Tests**: Component-level validation for utilities, factory, and adapter layers
-- **Integration Tests**: Package-level API surface verification
-- **Cross-Platform Tests**: Windows, macOS, and Linux compatibility validation
-- **Error Scenarios**: Comprehensive edge case and failure mode coverage
-
-This module serves as the definitive Python debugging solution within the mcp-debugger ecosystem, providing enterprise-grade reliability, cross-platform compatibility, and seamless integration with modern Python development workflows.
+This package serves as a production-ready, comprehensive Python debugging solution within the mcp-debugger ecosystem, providing robust environment detection, thorough validation, and full-featured debugging capabilities for Python development workflows.

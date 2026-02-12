@@ -1,58 +1,55 @@
 # examples/demo/
-@generated: 2026-02-10T21:26:17Z
+@generated: 2026-02-11T23:47:38Z
 
-## Overall Purpose
-The `examples/demo` directory provides a complete demonstration system for the MCP Debugger tool, designed to create compelling visual documentation and marketing materials. It combines a theatrical debugging simulation with professional recording capabilities to showcase the debugger's value proposition.
+## Overall Purpose and Responsibility
+
+The `examples/demo` directory provides demonstration and recording infrastructure for the MCP Debugger tool. It contains a complete theatrical demo simulation and the tooling necessary to record professional documentation materials, specifically designed to showcase the debugger's capabilities for README and promotional content.
 
 ## Key Components and Integration
 
-### Core Demo Components
-- **mcp_debugger_demo.py**: A theatrical simulation script that presents an AI agent debugging session
-  - Creates a step-by-step narrative showing bug discovery and resolution
-  - Uses color-coded terminal output and strategic delays for visual appeal
-  - Demonstrates a classic variable swap bug and its solution
-  - No actual debugging functionality - purely presentational
+### Demo Simulation (`mcp_debugger_demo.py`)
+A self-contained theatrical presentation that simulates an AI agent debugging session without requiring actual debugger functionality. Features:
+- **Interactive Terminal Display**: Color-coded output with timing delays to simulate real debugging
+- **Educational Bug Scenario**: Classic variable swap bug demonstration with step-by-step resolution
+- **Narrative Structure**: 11-stage debugging process from problem identification to solution verification
 
-- **record_demo.sh**: Professional recording and conversion pipeline
-  - Handles asciinema terminal recording with optimized settings
-  - Converts recordings to SVG format for web integration
-  - Provides guidance for GIF conversion and README integration
-  - Includes dependency management and validation
+### Recording Infrastructure (`record_demo.sh`)
+Automated recording and conversion pipeline that transforms the demo into distributable documentation:
+- **Dependency Management**: Validates and auto-installs required recording tools
+- **Multi-Format Pipeline**: Terminal → Asciinema cast → SVG → GIF conversion workflow
+- **Production Ready**: Configured dimensions and timing for professional documentation
 
-### Workflow Integration
-The components work together in a sequential workflow:
-1. `mcp_debugger_demo.py` provides the content to be recorded
-2. `record_demo.sh` captures this content as a professional terminal recording
-3. The recording is converted through multiple formats (cast → SVG → GIF) for documentation use
+## Public API and Entry Points
 
-## Public API / Entry Points
-- **Demo Execution**: `python mcp_debugger_demo.py` - Runs the theatrical debugging simulation
-- **Recording Pipeline**: `./record_demo.sh` - Captures and processes demo recordings
-- **Output Artifacts**: 
-  - `demo.cast` (asciinema recording)
-  - `demo.svg` (web-ready animation)
-  - Final GIF for README integration
+### Primary Entry Points
+- **`python mcp_debugger_demo.py`**: Runs the complete interactive debugging demonstration
+- **`bash record_demo.sh`**: Records the demo session and generates documentation assets
 
-## Internal Organization
-### Data Flow
-```
-Demo Script → Terminal Output → asciinema Recording → SVG Animation → GIF → Documentation
-```
+### Output Artifacts
+- **Terminal Demo**: Live interactive presentation suitable for screenshots or screen recording
+- **Asciinema Cast**: Structured recording format (`demo.cast`)
+- **SVG Animation**: Web-ready animation (`demo.svg`)
+- **GIF Ready**: Instructions and tooling for final GIF conversion
 
-### Architecture Patterns
-- **Separation of Concerns**: Demo content separated from recording infrastructure
-- **Multi-format Pipeline**: Progressive conversion through different media formats
-- **Dependency Management**: Automated validation and installation of required tools
-- **Graceful Degradation**: Fail-fast for critical dependencies, auto-install for secondary ones
+## Internal Organization and Data Flow
 
-## Key Conventions
-- **Visual Design**: Consistent color coding (blue for LLM, green for debugger, yellow for highlights)
-- **Timing Control**: Strategic delays for natural pacing in recordings
-- **Terminal Optimization**: Fixed dimensions (80×30) and idle limits for consistent output
-- **Error Handling**: Keyboard interrupt support and dependency validation
+The directory follows a two-stage workflow:
 
-## Target Use Cases
-- **Documentation**: README.md integration with visual demonstrations
-- **Marketing Materials**: Professional-quality terminal recordings for presentations
-- **Educational Content**: Step-by-step debugging workflow illustration
-- **Development Workflow**: Reproducible demo recording for version updates
+1. **Content Creation**: The Python demo script provides the actual demonstration content with carefully timed sequences and visual formatting
+2. **Content Capture**: The shell script orchestrates the recording process, handling technical dependencies and format conversions
+
+Data flows from live terminal presentation → recorded session → multiple output formats for different documentation contexts.
+
+## Important Patterns and Conventions
+
+### Demo Design Patterns
+- **Time-Paced Narrative**: Uses deliberate delays (0.3-0.5s) to create natural viewing rhythm
+- **Color-Coded Communication**: Different colors for LLM output (blue), debugger responses (green), and code highlighting (yellow)
+- **Educational Structure**: Follows logical debugging methodology rather than tool-specific commands
+
+### Recording Conventions
+- **Standard Dimensions**: 80×30 terminal for consistent documentation appearance
+- **Idle Time Management**: 2-second limit to keep recordings concise
+- **Multi-Format Support**: Provides pathway from terminal recording to web-ready formats
+
+This directory serves as a complete demonstration package, enabling both live presentations and the creation of high-quality documentation materials for the MCP Debugger project.

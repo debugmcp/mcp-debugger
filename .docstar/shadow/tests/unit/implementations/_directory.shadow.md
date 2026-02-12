@@ -1,76 +1,70 @@
 # tests/unit/implementations/
-@generated: 2026-02-10T21:26:35Z
+@generated: 2026-02-11T23:47:54Z
 
-## Unit Test Suite for Core Implementation Classes
+## Unit Test Suite for Implementation Layer
 
-**Primary Purpose:** Comprehensive unit test coverage for all major implementation classes in the MCP (Model Context Protocol) debugging system. This directory contains tests that validate process management, file system operations, network handling, environment abstraction, and debug target launching functionality.
+**Overall Purpose:** Complete unit test coverage for the MCP implementations layer, providing comprehensive testing of all core infrastructure components including environment management, filesystem operations, network services, and process lifecycle management. This directory validates the behavioral contracts and error handling of the platform abstraction layer.
 
-**Testing Architecture:**
-- **Framework:** Vitest-based testing with extensive mocking infrastructure
-- **Isolation Strategy:** Complete mocking of external dependencies (Node.js modules, filesystem, network)
-- **Mock Directory:** `__mocks__/` provides controlled test doubles for `child_process` and `fs-extra`
-- **Resource Management:** Systematic cleanup patterns prevent test pollution and resource leaks
+## Test Organization & Structure
 
-## Core Implementation Test Coverage
-
-### Process Management Tests
-- **ProcessManagerImpl** (`process-manager-impl.test.ts`): Tests process spawning and execution with util.promisify edge cases
-- **ProcessLauncherImpl** (`process-launcher-impl.test.ts`): Validates basic process launching, signal handling, and process lifecycle management
-- **ProcessLauncherImpl (Base)** (`process-launcher-impl-base.test.ts`): Core launcher functionality including event forwarding, IPC, and process control
-- **DebugTargetLauncherImpl** (`process-launcher-impl-debug.test.ts`): Specialized Python debug target launching with debugpy integration
-
-### System Integration Tests
-- **FileSystemImpl** (`file-system-impl.test.ts`): Complete filesystem abstraction layer testing covering file I/O, directory operations, and path utilities
-- **NetworkManagerImpl** (`network-manager-impl.test.ts`): Network server creation and port discovery functionality
-- **ProcessEnvironment** (`environment-impl.test.ts`): Environment variable snapshot behavior and immutability guarantees
-
-## Key Testing Patterns
+### Core Implementation Tests
+- **environment-impl.test.ts**: ProcessEnvironment snapshot immutability and current directory access
+- **file-system-impl.test.ts**: Comprehensive FileSystemImpl testing with fs-extra abstraction layer
+- **network-manager-impl.test.ts**: NetworkManagerImpl server creation and port discovery functionality
+- **process-manager-impl.test.ts**: ProcessManagerImpl spawn/exec operations with util.promisify edge cases
+- **process-launcher-impl.test.ts**: ProcessLauncherImpl signal handling and process control
+- **process-launcher-impl-base.test.ts**: Base process launching with event forwarding and IPC
+- **process-launcher-impl-debug.test.ts**: DebugTargetLauncherImpl Python debugpy integration testing
 
 ### Mock Infrastructure
-- **MockChildProcess**: Standardized mock across tests simulating complete child process lifecycle
-- **Defensive Mocking**: Each test file implements comprehensive mocks for its external dependencies
-- **State Management**: BeforeEach/afterEach hooks ensure clean test isolation
+- **__mocks__/ directory**: Provides Jest/Vitest-compatible mocks for Node.js core modules (`child_process`) and filesystem libraries (`fs-extra`), enabling isolated testing without external dependencies
 
-### Resource Management
-- **Process Cleanup**: All process launcher tests track spawned processes and ensure termination
-- **Timer Management**: Fake timers enable deterministic timeout testing
-- **Mock Clearing**: Systematic mock reset prevents cross-test interference
+## Key Testing Patterns & Components
 
-### Error Handling Coverage
-- **Edge Cases**: Comprehensive testing of failure modes, race conditions, and resource exhaustion
-- **Platform Differences**: Windows/Unix-specific behavior testing where applicable
-- **Signal Handling**: Process termination, graceful shutdown, and force-kill scenarios
+### Mock Architecture
+- **Comprehensive Mocking**: Complete interface implementations for child processes, filesystem operations, and network services
+- **EventEmitter Simulation**: Realistic child process lifecycle events and stream handling
+- **Resource Management**: Systematic cleanup patterns preventing test pollution and process leakage
+- **Platform Abstraction**: Cross-platform testing with platform-specific behavior simulation
 
-## Test Organization Structure
+### Test Coverage Areas
+1. **Environment Management**: Variable snapshots, immutability guarantees, working directory access
+2. **File System Operations**: Read/write, directory management, path operations, error propagation
+3. **Network Services**: Server creation, port allocation, connection management
+4. **Process Management**: Spawning, execution, signal handling, IPC communication
+5. **Debug Target Launching**: Python debugpy integration with port coordination
 
-### Process Lifecycle Testing
-1. **Basic Operations**: Process creation, parameter passing, stream access
-2. **Event Systems**: Exit, error, spawn, and message event propagation
-3. **Control Operations**: Process termination, signal handling, IPC communication
-4. **Error Conditions**: Failed spawns, dead process operations, timeout scenarios
-
-### File System Testing
-1. **Path Operations**: Existence checking, access validation
-2. **File I/O**: Read/write operations with encoding support
-3. **Directory Management**: Creation, removal, recursive operations
-4. **Utility Functions**: Copy, move, stat operations
-
-### Network Testing
-1. **Server Creation**: Basic server instantiation and configuration
-2. **Port Management**: Free port discovery and allocation
-3. **Error Handling**: Network failures and resource conflicts
-
-## Dependencies & External Integrations
-- **Testing Framework**: Vitest with describe/it/expect patterns
-- **Mocking Utilities**: vi.mock(), vi.fn(), vi.spyOn() for comprehensive test isolation
-- **Node.js Modules**: child_process, fs-extra, net, util (all mocked)
-- **Process Management**: EventEmitter-based mock processes for realistic simulation
+### Critical Testing Scenarios
+- **Error Propagation**: Comprehensive error handling across all system boundaries
+- **Resource Cleanup**: Process termination, file handle cleanup, network resource management
+- **Race Conditions**: Process exit during operations, concurrent initialization
+- **Edge Cases**: Platform differences, null handling, timeout scenarios
+- **State Management**: Process lifecycle tracking, immutable snapshots
 
 ## Integration Points
-All tests validate the implementation classes that serve as the foundation for:
-- **MCP Server Process Management**: Debug target launching and proxy coordination
-- **File System Abstraction**: Safe filesystem operations across platforms
-- **Network Resource Management**: Server creation and port allocation for debugging
-- **Environment Isolation**: Secure environment variable handling and working directory management
 
-This test suite ensures the core implementation layer is robust, handles edge cases gracefully, and maintains proper resource management for the larger MCP debugging system.
+### External Dependencies
+- **Vitest Framework**: Primary testing framework with mocking, fake timers, and spying capabilities
+- **fs-extra**: Filesystem operations library (extensively mocked)
+- **Node.js Core Modules**: child_process, net, events (mocked for isolation)
+
+### Mock Coordination
+- **beforeEach/afterEach**: Consistent mock setup and teardown across test suites
+- **Fake Timers**: Deterministic timeout and async behavior testing
+- **Process Isolation**: Each test operates with fresh mock instances
+- **Environment Cleanup**: Test environment variable management
+
+## Public Testing API Surface
+
+### Mock Utilities
+- **createMockProcess()**: Factory for realistic child process simulation
+- **MockChildProcess**: Complete IChildProcess interface implementation
+- **Network Manager Mocks**: Server and port allocation simulation
+- **FileSystem Mocks**: Complete fs-extra method coverage
+
+### Test Helpers
+- **Resource Tracking**: Arrays for created processes/targets cleanup
+- **State Management**: Mock behavior control through global state variables
+- **Error Simulation**: Configurable error scenarios for edge case testing
+
+This test suite ensures the implementation layer provides reliable, well-tested abstractions over Node.js system APIs while maintaining proper error handling, resource management, and cross-platform compatibility.

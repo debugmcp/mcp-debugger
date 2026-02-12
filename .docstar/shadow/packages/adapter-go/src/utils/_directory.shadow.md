@@ -1,52 +1,51 @@
 # packages/adapter-go/src/utils/
-@generated: 2026-02-10T21:26:17Z
+@generated: 2026-02-11T23:47:37Z
 
-## Purpose
-The `utils` directory provides core infrastructure for the Go adapter, specifically handling the discovery, validation, and integration of external Go toolchain components. This module serves as the foundation for locating and verifying Go and Delve debugger executables across different platforms, enabling the adapter to interface with the Go development environment.
+## Overall Purpose and Responsibility
 
-## Architecture
-The module implements a comprehensive executable discovery system with multiple fallback strategies:
+The `utils` directory provides essential infrastructure for the Go adapter, specifically focused on discovering and validating Go toolchain executables across different platforms. This module serves as the foundation for the adapter's ability to interact with Go and Delve debugger tools by handling the complex task of locating these executables in various installation scenarios.
 
-1. **Preferred Path Resolution**: Accepts user-specified executable paths as first priority
-2. **Environment-Based Search**: Leverages PATH, GOBIN, and GOPATH environment variables
-3. **Platform-Specific Defaults**: Falls back to common installation directories per OS
-4. **Version Validation**: Ensures discovered tools meet compatibility requirements
+## Key Components and Architecture
 
-## Key Components
+The directory centers around **go-utils.ts**, which implements a comprehensive executable discovery and validation system with three main subsystems:
 
-### Primary Discovery Functions
-- `findGoExecutable()`: Multi-tiered Go compiler discovery with error handling for missing installations
-- `findDelveExecutable()`: Delve debugger location with support for multiple variants (dlv, dlv-dap)
-- Both functions follow the same search hierarchy: preferred → environment → platform defaults
+1. **Executable Discovery Engine**: Multi-tiered search strategies that prioritize user preferences, then fall back to PATH scanning and platform-specific common installation directories
+2. **Version Validation System**: Command-line integration to verify tool versions and capabilities
+3. **Cross-Platform Path Resolution**: Platform-aware search paths and executable naming conventions
 
-### Version Management
-- `getGoVersion()` and `getDelveVersion()`: Extract semantic versions from tool output
-- `checkDelveDapSupport()`: Validates DAP protocol compatibility for debugging features
-- Regex-based parsing ensures reliable version extraction across tool updates
+## Public API Surface
 
-### Path Resolution Utilities
-- `getGoSearchPaths()`: Platform-aware search path generation
-- `getGopathBin()`: Go workspace binary directory resolution
-- `findInPath()` and `fileExists()`: Low-level path and file system utilities
+### Primary Entry Points
+- `findGoExecutable(preferredPath?, logger?)` - Main Go compiler discovery
+- `findDelveExecutable(preferredPath?, logger?)` - Delve debugger discovery with DAP variant support
+- `getGoVersion(goPath)` - Go version extraction and validation
+- `getDelveVersion(dlvPath)` - Delve version checking
+- `checkDelveDapSupport(dlvPath)` - DAP protocol capability verification
 
-## Public API
-The module exposes two main entry points for the Go adapter:
-- **`findGoExecutable(preferredPath?, logger?)`**: Locates Go compiler
-- **`findDelveExecutable(preferredPath?, logger?)`**: Locates Delve debugger
+### Supporting Utilities
+- `getGoSearchPaths()` - Platform-specific installation path discovery
+- `getGopathBin()` - Go workspace binary directory resolution
+- `fileExists(filePath)` - Executable permission validation
 
-Both functions accept optional preferred paths and logger instances, returning absolute paths to validated executables or throwing descriptive errors.
+## Internal Organization and Data Flow
 
-## Cross-Platform Support
-Handles platform differences through:
-- Windows executable suffix handling (.exe)
-- OS-specific installation path collections
-- Environment variable precedence systems
-- File permission validation appropriate to each platform
+The module follows a hierarchical search strategy:
 
-## Integration Patterns
-- Optional logger interface for debugging and user feedback
-- Promise-based async API for non-blocking operations
-- Graceful error handling with null returns vs exceptions
-- Environment variable priority systems respecting Go toolchain conventions
+1. **User Preference Layer**: Accepts optional preferred executable paths
+2. **Environment Discovery**: Scans PATH and Go-specific environment variables (GOBIN, GOPATH)
+3. **Platform Fallbacks**: Searches common installation directories based on OS
+4. **Validation Layer**: Confirms executable permissions and functionality
 
-This utilities module abstracts away the complexity of Go toolchain discovery, providing the adapter with reliable access to required development tools regardless of installation method or platform.
+Data flows from high-level discovery functions through platform-specific path generators to low-level file system validation, with consistent error handling and logging throughout.
+
+## Important Patterns and Conventions
+
+- **Graceful Degradation**: Version checks return null on failure rather than throwing, allowing the adapter to function with limited information
+- **Platform Abstraction**: Windows executable suffix handling (.exe) with unified API
+- **Environment Variable Precedence**: Respects Go ecosystem conventions (GOBIN > GOPATH/bin > defaults)
+- **Async-First Design**: Promise-based API with proper error propagation
+- **Safe Logging**: Optional logger interface with defensive programming patterns
+
+## Role in Larger System
+
+This utility module serves as the critical bootstrap layer for the Go adapter, enabling all subsequent Go toolchain interactions. It abstracts away platform differences and installation variations, providing a reliable foundation for debugging operations. The adapter depends on this module to establish communication with Go compiler and Delve debugger before any debugging sessions can commence.

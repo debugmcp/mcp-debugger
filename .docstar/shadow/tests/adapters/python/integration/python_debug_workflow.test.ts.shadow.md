@@ -1,58 +1,64 @@
 # tests/adapters/python/integration/python_debug_workflow.test.ts
-@source-hash: 7ae57dde2e2c5068
-@generated: 2026-02-10T21:25:37Z
+@source-hash: 0c6700a12af6e05b
+@generated: 2026-02-11T20:15:05Z
 
-## Python Debug Workflow Integration Test
+## Purpose
+Integration test suite for the Python debugging workflow using the MCP (Model Context Protocol) client to test debug adapter functionality. Tests full debug session lifecycle including breakpoints, stack inspection, and variable examination.
 
-**Purpose:** Comprehensive integration test for Python debugging workflow through MCP (Model Context Protocol) client, validating full debug session lifecycle including breakpoints, stack inspection, and variable access.
+## Key Components
 
-### Key Components
+### Test Client Setup (L14-85)
+- `client` (L14): Global MCP Client instance for communicating with debug server
+- `startTestServer()` (L17-72): Initializes MCP client with StdioClientTransport, spawns debug server process at `../../../../dist/index.js`, configures logging and environment
+- `stopTestServer()` (L74-85): Cleanly closes client connection and server process
 
-**Test Server Management (L17-85)**
-- `startTestServer()` (L17-72): Spawns MCP server via SDK StdioClientTransport, handles environment setup, Python path validation, and log file management
-- `stopTestServer()` (L74-85): Cleanly shuts down MCP client connection and server process
-- Uses `dist/index.js` as server executable path with debug logging enabled
+### Utility Functions (L87-125)
+- `delay()` (L88): Promise-based timeout utility
+- `parseToolResult()` (L90-97): Extracts and parses JSON content from MCP ServerResult responses
+- `waitForStackFrames()` (L99-125): Polling mechanism to wait for stack frames to be available during debugging, with configurable timeout and retry interval
 
-**Test Infrastructure**
-- `parseToolResult()` (L90-97): Extracts JSON content from MCP ServerResult responses, validates structure
-- `waitForStackFrames()` (L99-125): Polling utility for stack frame availability with configurable timeout/intervals
-- `delay()` (L88): Simple promise-based delay helper
-- `persistFailurePayload()` (L287-297): CI failure debugging utility that saves error payloads to filesystem
+### Main Test Suite (L127-286)
+**"Python Debugging Workflow - Integration Test @requires-python"**
 
-### Test Cases
+#### Full Debug Session Test (L140-234)
+Tests complete debugging workflow:
+1. Lists existing debug sessions
+2. Creates new Python debug session 
+3. Sets breakpoint at line 13 in `debug_test_simple.py` 
+4. Starts debugging with `stopOnEntry: true`
+5. Continues execution to breakpoint
+6. Inspects stack frames and verifies location
+7. Retrieves scopes (specifically "Locals" scope)
+8. Examines local variables `a` and `b` with expected values (5, 10)
+9. Closes debug session
 
-**Main Debug Workflow Test (L140-234)**
-1. **Session Management**: Creates debug session, lists existing sessions
-2. **Breakpoint Setup**: Sets breakpoint at line 13 of `debug_test_simple.py` 
-3. **Debug Execution**: Starts debugging with stopOnEntry, continues to breakpoint
-4. **Stack Inspection**: Retrieves and validates stack frames, focuses on `sample_function`
-5. **Scope Analysis**: Gets scopes for top frame, locates 'Locals' scope
-6. **Variable Inspection**: Validates local variables `a=5` and `b=10` with correct types
-7. **Cleanup**: Closes debug session properly
+#### Dry Run Test (L236-285)
+Tests dry run functionality for `start_debugging`:
+- Creates separate session for dry run
+- Calls `start_debugging` with `dryRunSpawn: true`
+- Verifies dry run response structure and state
+- Includes CI-specific error logging and failure payload persistence
 
-**Dry Run Test (L236-285)**
-- Tests `start_debugging` with `dryRunSpawn: true` flag
-- Validates command logging without actual process execution
-- Verifies session state transitions and dry run response structure
+### Error Handling & Debugging
+- `persistFailurePayload()` (L287-297): Saves failure payloads to `logs/tests/adapters/failures/` for CI debugging
+- Extensive console logging throughout test execution
+- CI-specific environment variable checks and enhanced error reporting
 
-### Dependencies & Configuration
+## Dependencies
+- **Vitest**: Test framework
+- **@debugmcp/shared**: Debug protocol types (DebugSessionInfo, StackFrame, Variable)
+- **@vscode/debugprotocol**: VS Code Debug Adapter Protocol definitions
+- **@modelcontextprotocol/sdk**: MCP client SDK for server communication
+- **env-utils.js**: Python environment setup utility
 
-**Key Imports:**
-- `@debugmcp/shared`: Core debugging types (DebugSessionInfo, StackFrame, Variable)
-- `@vscode/debugprotocol`: VS Code debug adapter protocol types
-- `@modelcontextprotocol/sdk`: MCP client SDK for server communication
-- `./env-utils.js`: Python environment validation utilities
-
-**Test Configuration:**
+## Test Configuration
 - Target script: `tests/fixtures/python/debug_test_simple.py`
-- Breakpoint line: 13 (`c = a + b` statement)
-- Server log: `integration_test_server.log`
-- Timeout: 60s for entire suite, 30s for setup
+- Breakpoint location: Line 13 (`c = a + b`)
+- Timeouts: 30s beforeAll, 60s suite, 15s stack frame polling
+- Requires Python runtime (tagged with `@requires-python`)
 
-### Architecture Notes
-
-- Uses SDK-based MCP client instead of raw WebSocket/stdio connections
-- Implements polling pattern for async debug state changes
-- Handles CI-specific logging and failure persistence
-- Environment filtering ensures clean subprocess spawning
-- Absolute path resolution prevents file location issues
+## Architecture Notes
+- Uses MCP protocol for debug adapter communication instead of direct DAP
+- Employs polling strategy for asynchronous debug state changes
+- Separates transport layer (StdioClientTransport) from client logic
+- Server process lifecycle managed by MCP transport layer

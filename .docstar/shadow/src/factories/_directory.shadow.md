@@ -1,52 +1,58 @@
 # src/factories/
-@generated: 2026-02-10T21:26:26Z
+@generated: 2026-02-11T23:47:36Z
 
-## Factory Pattern Module for Debug MCP System
+## Factory Pattern Implementation Hub
 
-This directory implements a centralized factory pattern module that provides abstracted object creation for core components in a debug MCP (Model Context Protocol) system. The factories enable dependency injection, test isolation, and polymorphic instantiation of critical system components.
+The `src/factories` directory provides a centralized factory pattern implementation for creating key system components with dependency injection support and comprehensive testing capabilities.
 
 ## Overall Purpose
 
-The factories module serves as the object creation layer, abstracting the instantiation of complex objects with their dependencies. This design supports both production deployment and comprehensive testing by providing swappable factory implementations and mock objects that maintain interface compatibility while enabling test verification.
+This module serves as the primary object creation layer within a debug MCP (Model Context Protocol) system, implementing the factory pattern to abstract instantiation logic and enable flexible dependency management. It provides both production factories for runtime use and mock factories for testing scenarios.
 
 ## Key Components and Relationships
 
 **Factory Interfaces**
-- `IProxyManagerFactory` - Contract for creating ProxyManager instances with optional debug adapters
-- `ISessionStoreFactory` - Contract for creating SessionStore instances
+- `IProxyManagerFactory` - defines contract for ProxyManager creation with optional debug adapter
+- `ISessionStoreFactory` - defines contract for SessionStore creation
 
 **Production Factories**
-- `ProxyManagerFactory` - Creates ProxyManager instances with injected dependencies (proxy process launcher, file system, logger)
-- `SessionStoreFactory` - Creates standard SessionStore instances
+- `ProxyManagerFactory` - creates ProxyManager instances with injected dependencies (process launcher, file system, logger)
+- `SessionStoreFactory` - creates standard SessionStore instances
 
-**Testing Infrastructure**
-- `MockProxyManagerFactory` - Test double with creation tracking and configurable creation functions
-- `MockSessionStoreFactory` - Creates MockSessionStore instances with call tracking capabilities
-- `MockSessionStore` - Extended SessionStore with method call tracking for test verification
+**Test Factories and Mocks**
+- `MockProxyManagerFactory` - provides test doubles with call tracking and configurable creation behavior
+- `MockSessionStoreFactory` - creates MockSessionStore instances for test isolation
+- `MockSessionStore` - test double extending SessionStore with method call tracking
 
 ## Public API Surface
 
 **Main Entry Points:**
-- Factory interfaces (`IProxyManagerFactory`, `ISessionStoreFactory`) for dependency injection
-- Production factories (`ProxyManagerFactory`, `SessionStoreFactory`) for application code
-- Mock factories (`MockProxyManagerFactory`, `MockSessionStoreFactory`) for test environments
+- Factory interface contracts (`IProxyManagerFactory`, `ISessionStoreFactory`)
+- Production factory implementations for dependency injection
+- Mock factory implementations for testing
 
-**Creation Methods:**
-- `create(adapter?: IDebugAdapter): IProxyManager` - ProxyManager creation with optional debug adapter
-- `create(): SessionStore` - SessionStore creation
+**Key Methods:**
+- `create()` methods on all factories for object instantiation
+- Mock factories provide additional test inspection properties (`createdManagers`, `createdStores`, call tracking arrays)
 
 ## Internal Organization and Data Flow
 
-1. **Production Flow**: Application code depends on factory interfaces, production factories inject dependencies and create concrete instances
-2. **Testing Flow**: Test code swaps in mock factories, which create instrumented mock objects that track method calls and maintain behavioral compatibility
-3. **Dependency Management**: Production factories handle complex dependency injection (file system, logging, process launchers), while mock factories focus on test verification
+The factories follow a consistent pattern:
+1. Interface definition establishing creation contract
+2. Production implementation requiring dependency injection
+3. Mock implementation with test tracking capabilities
+4. Object creation delegates to concrete classes with proper dependency wiring
+
+Dependencies flow from external systems → factories → created instances, with factories serving as the composition root for complex object graphs.
 
 ## Important Patterns and Conventions
 
-- **Factory Pattern**: Consistent abstraction of object creation across different component types
-- **Interface Segregation**: Clean separation between production and testing concerns through interfaces
-- **Dependency Injection**: Constructor injection of dependencies in production factories
-- **Test Double Strategy**: Mock objects extend real classes for drop-in replacement while adding test capabilities
-- **Call Tracking**: Systematic recording of method invocations and parameters for test assertions
+**Factory Pattern**: Centralizes object creation logic and abstracts instantiation complexity
+**Dependency Injection**: All production factories require dependencies via constructor injection
+**Test Doubles**: Mock factories extend real behavior while adding test observability
+**Interface Segregation**: Separate interfaces for each factory type maintain clean contracts
+**Call Tracking**: Mock implementations record method invocations for test verification
 
-This module enables the debug MCP system to maintain clean separation between object creation, dependency management, and testing concerns while providing a consistent API for component instantiation.
+## Architectural Role
+
+This directory serves as the system's composition root, responsible for wiring together complex object dependencies in a testable manner. It enables the larger debug MCP system to maintain loose coupling between components while providing comprehensive testing support through injectable mock implementations.

@@ -1,78 +1,104 @@
 # tests/unit/proxy/
-@generated: 2026-02-10T21:27:26Z
+@generated: 2026-02-11T23:47:50Z
 
-## Overall Purpose
+## Purpose and Scope
 
-The `tests/unit/proxy` directory contains comprehensive unit tests for the DAP (Debug Adapter Protocol) proxy system that orchestrates Python debugging sessions. This test suite validates the core infrastructure that manages debug adapter connections, message routing, session lifecycle, and child session coordination in a distributed debugging environment.
+The `tests/unit/proxy` directory contains comprehensive unit tests for the Debug Adapter Protocol (DAP) proxy subsystem. This test suite validates the core functionality that enables MCP (Model Context Protocol) to bridge debug sessions between clients and Python debug adapters. The tests ensure robust connection management, message parsing, request tracking, process lifecycle management, and error handling for debugging workflows.
 
-## Key Components and Their Relationships
+## Key Components and Architecture
 
-### Core Management Layer
-- **ProxyManager** (`proxy-manager*.test.ts`) - Central orchestrator for proxy lifecycle, process management, and DAP communication
-- **DapConnectionManager** (`dap-proxy-connection-manager.test.ts`) - Handles DAP client connections with retry logic and session initialization
-- **MessageParser** (`dap-proxy-message-parser.test.ts`) - Validates and parses proxy commands (init, DAP, terminate)
-- **RequestTracker** (`dap-proxy-request-tracker.test.ts`) - Manages request/response correlation and timeout handling
+### Core Proxy Management (`proxy-manager.*` tests)
+- **ProxyManager**: Central orchestrator for proxy processes and DAP communication lifecycle
+- **Handshake & Initialization**: Connection establishment with retry logic and timeout handling
+- **Message Handling**: Bidirectional communication between clients and debug adapters
+- **Process Lifecycle**: Startup, shutdown, and error recovery scenarios
+- **Branch Coverage**: Edge cases and less common execution paths
 
-### Communication Layer
-- **MinimalDapClient** (`minimal-dap.test.ts`) - Low-level DAP protocol client with message parsing and child session integration
-- **Message Handling** - Tests event propagation, status updates, and error scenarios across the proxy communication stack
+### Connection Infrastructure (`dap-proxy-connection-manager.test.ts`)
+- **DapConnectionManager**: Core DAP client connection orchestration with exponential backoff retry logic
+- **Session Management**: DAP initialize requests, event handler setup, and graceful disconnection
+- **Breakpoint Management**: Setting, validation, and synchronization of breakpoints
+- **Concurrency Handling**: Multiple simultaneous connections and rapid disconnect/reconnect cycles
 
-### Utilities
-- **Orphan Detection** (`orphan-check.test.ts`) - Process orphan detection for container-aware cleanup
-- **Test Infrastructure** (`proxy-manager-test-setup.ts`) - Timeout test utilities for managing expected promise rejections
+### Message Processing (`dap-proxy-message-parser.test.ts`, `dap-proxy-request-tracker.test.ts`)
+- **MessageParser**: Command parsing and validation for init, DAP, and terminate payloads
+- **RequestTracker**: Request lifecycle management with timeout handling and callback mechanisms
+- **Protocol Validation**: Comprehensive validation of DAP message structures and formats
+
+### DAP Client Implementation (`minimal-dap.test.ts`)
+- **MinimalDapClient**: Low-level DAP communication with network socket management
+- **Message Assembly**: Multi-chunk message parsing and protocol frame handling
+- **Child Session Management**: Hierarchical session creation and request routing
+- **Event Handling**: DAP event forwarding and response correlation
+
+### Utility Functions (`orphan-check.test.ts`)
+- **Process Orphan Detection**: Container-aware process lifecycle management
+- **Environment Validation**: Runtime environment checks and cleanup logic
+
+## Test Infrastructure and Patterns
+
+### Mock Architecture
+- **Comprehensive Mocking**: Network sockets, file systems, loggers, and process launchers
+- **Event Simulation**: EventEmitter-based testing for async communication flows
+- **Timer Control**: Fake timers for deterministic timeout and retry logic testing
+- **State Management**: Type casting to access private members for state verification
+
+### Testing Strategies
+- **Concurrent Operation Testing**: Multiple simultaneous connections and operations
+- **Error Injection**: Strategic failure scenarios for resilience validation
+- **Edge Case Coverage**: Boundary conditions, malformed data, and race conditions
+- **Timeout Scenarios**: Comprehensive timeout handling with controlled timing
+
+### Test Utilities
+- **TestProxyManager**: Simplified proxy manager avoiding real process spawning
+- **Helper Functions**: Message creation, buffer manipulation, and mock setup utilities
+- **Custom Handlers**: Specialized error handling for timeout test scenarios
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **ProxyManager**: Main proxy lifecycle management with `start()`, `stop()`, and DAP request routing
-- **DapConnectionManager**: DAP client connection orchestration with `connectWithRetry()`, session initialization, and breakpoint management
-- **MessageParser**: Command parsing and validation with `parseCommand()` and payload validators
-- **MinimalDapClient**: Low-level DAP communication with request/response handling and child session support
+- **ProxyManager.start()**: Main proxy initialization and startup
+- **ProxyManager.sendCommand()**: DAP command dispatch to debug adapter
+- **DapConnectionManager.connectWithRetry()**: Connection establishment with retry logic
+- **MessageParser.parseCommand()**: Command parsing and validation
+- **MinimalDapClient**: Direct DAP protocol communication
 
-### Key Interfaces Tested
-- `IProxyProcess`, `IProxyProcessLauncher` - Process management abstractions
-- `IDapClient`, `IDapClientFactory` - DAP client abstractions
-- `ProxyInitPayload`, `DapCommandPayload`, `TerminatePayload` - Message format contracts
+### Configuration Interfaces
+- **ProxyConfig**: Session configuration including adapter paths and debug settings
+- **Initialization Payloads**: Session setup with breakpoints, arguments, and debug flags
+- **Connection Parameters**: Host, port, timeout, and retry configuration
 
 ## Internal Organization and Data Flow
 
-### Request Flow
-1. **Command Parsing** (MessageParser) → **Validation** → **ProxyManager routing**
-2. **DAP Requests** → **DapConnectionManager** → **MinimalDapClient** → **Protocol transmission**
-3. **Response Correlation** via RequestTracker with timeout management
-4. **Event Propagation** from DAP client through manager to application layer
+### Message Flow Architecture
+1. **Command Reception**: Raw commands parsed and validated by MessageParser
+2. **Request Tracking**: RequestTracker manages pending requests with timeouts
+3. **Connection Management**: DapConnectionManager handles adapter connections
+4. **Protocol Communication**: MinimalDapClient manages low-level DAP messaging
+5. **Response Correlation**: Responses matched to requests via sequence numbers
 
 ### Session Lifecycle
-1. **Initialization**: ProxyManager starts proxy process with retry logic and handshake validation
-2. **Connection**: DapConnectionManager establishes DAP client with exponential backoff (200ms intervals, 60 max attempts)
-3. **Configuration**: Python adapter setup with launch parameters and breakpoint synchronization  
-4. **Operation**: Request routing, child session management, and event forwarding
-5. **Cleanup**: Graceful termination with pending request cleanup and timeout clearing
-
-### Error Handling Patterns
-- **Retry Logic**: Exponential backoff for transient connection failures
-- **Timeout Management**: 30-second initialization, 1-second disconnect timeouts
-- **Graceful Degradation**: Fallback behaviors for missing components and communication failures
-- **Resource Cleanup**: Comprehensive cleanup on exit/error scenarios
+1. **Proxy Startup**: Process launch and initialization handshake
+2. **Adapter Connection**: DAP client connection with retry logic
+3. **Session Configuration**: Debug adapter setup with breakpoints and settings
+4. **Active Debugging**: Request/response cycles and event handling
+5. **Cleanup**: Graceful shutdown with pending request cleanup
 
 ## Important Patterns and Conventions
 
-### Testing Infrastructure
-- **Mock Architecture**: Comprehensive mocking of network, filesystem, and logging dependencies
-- **Fake Timers**: Deterministic async testing with `vi.useFakeTimers()` for retry and timeout scenarios
-- **Event-Driven Testing**: EventEmitter-based test coordination for async operations
-- **Type Casting**: Strategic use of type assertions to access private members for internal state verification
+### Error Handling
+- **Retry Logic**: Exponential backoff with configurable max attempts (typically 60)
+- **Timeout Management**: Consistent timeout patterns (30s initialization, 1s disconnect)
+- **Graceful Degradation**: Fallback behaviors for communication failures
 
-### Protocol Patterns
-- **Message Framing**: Content-Length header protocol for DAP message boundaries
-- **Session Management**: SessionId-based request routing and child session coordination
-- **Command Structure**: Type-safe payload validation for init/DAP/terminate commands
-- **Error Propagation**: Structured error handling with diagnostic information preservation
-
-### Concurrency Handling
+### Concurrency Management
 - **Request Correlation**: Sequence number-based request/response matching
-- **Concurrent Protection**: Prevention of duplicate start operations and race condition handling
-- **Child Session Coordination**: Adoption waiting, breakpoint mirroring, and request routing policies
-- **Cleanup Coordination**: Proper resource disposal during concurrent operations
+- **State Protection**: Prevention of concurrent startup/shutdown operations
+- **Race Condition Handling**: Proper cleanup during rapid state transitions
 
-This test suite ensures reliable operation of the DAP proxy system across various failure modes, timing scenarios, and concurrent access patterns, providing confidence in the debugging infrastructure's robustness.
+### Testing Standards
+- **Deterministic Timing**: Fake timers for reliable async behavior testing
+- **Comprehensive Mocking**: Full dependency injection with mock validation
+- **Edge Case Coverage**: Extensive boundary condition and error scenario testing
+
+This test suite ensures the proxy subsystem can reliably manage debug sessions, handle network failures, parse complex protocol messages, and maintain state consistency across concurrent operations.

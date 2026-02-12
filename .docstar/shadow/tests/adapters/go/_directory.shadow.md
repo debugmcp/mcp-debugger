@@ -1,92 +1,79 @@
 # tests/adapters/go/
-@generated: 2026-02-10T21:26:44Z
+@generated: 2026-02-11T23:47:58Z
 
 ## Overall Purpose and Responsibility
 
-This directory contains the complete test suite for the Go debugger adapter within the debugmcp ecosystem. It provides comprehensive validation of Go/Delve debugger integration through both unit and integration testing approaches, ensuring the adapter properly implements the Debug Adapter Protocol (DAP) and maintains reliable debugging capabilities for Go applications.
+The `tests/adapters/go` directory provides comprehensive test coverage for the Go debugger adapter, ensuring reliable integration between the debug framework and Go/Delve toolchain. This test suite validates the complete lifecycle of Go debugging sessions, from environment validation and adapter instantiation through Debug Adapter Protocol (DAP) communication and session management.
 
-## Key Components and Their Relationships
+## Key Components and Integration
 
-The test suite is structured into two complementary testing layers that work together to validate different aspects of the Go adapter:
+### Test Architecture Organization
 
-### Integration Test Layer (`integration/`)
-- **Smoke Testing**: Validates end-to-end adapter functionality without launching actual debugger processes
-- **Mock Environment**: Uses comprehensive fake implementations to test adapter behavior in isolation
-- **Configuration Validation**: Tests command building, launch configuration transformation, and Go test mode support
-- **Factory Integration**: Ensures proper adapter registration and metadata exposure within the debugmcp system
+**Unit Tests (`unit/`)**
+- **Core Adapter Testing**: Complete lifecycle validation of GoDebugAdapter state management (INITIALIZING → READY → CONNECTED → DISPOSED)
+- **Factory Pattern Testing**: GoAdapterFactory creation, validation, and metadata exposure
+- **Utility Functions Testing**: Tool discovery, version parsing, and platform-specific path resolution
+- **Environment Validation**: Go (≥1.18) and Delve installation requirement verification
 
-### Unit Test Layer (`unit/`)
-- **Component Testing**: Detailed validation of individual adapter components and utilities
-- **Lifecycle Management**: Tests adapter state transitions and event handling throughout debug sessions
-- **Environment Validation**: Comprehensive testing of Go toolchain and Delve debugger discovery and version validation
-- **Platform Coverage**: Cross-platform testing with proper mocking strategies for different operating systems
+**Integration Tests (`integration/`)**
+- **End-to-End Validation**: Smoke tests for complete adapter functionality without launching actual debugger processes
+- **Command Generation Testing**: Validation of dlv DAP command construction and configuration
+- **Configuration Management**: Testing of launch config transformations for both normal programs and test mode
+- **Mock Integration**: Sophisticated mocking system that maintains realistic behavior while preventing external dependencies
 
-### Test Infrastructure Synergy
-Both layers share common patterns:
-- **Comprehensive Mocking**: Child process simulation, file system abstraction, and environment variable management
-- **State Validation**: Systematic testing of adapter state transitions and configuration transformations
-- **Error Handling**: Thorough validation of failure modes with proper error message translation
-- **Dependency Management**: Testing of both Go toolchain and Delve debugger requirements
+### Component Relationships
 
-## Public API Surface and Entry Points
+The test components work together in a layered validation approach:
+1. **Unit tests** validate individual components in isolation with comprehensive mocking
+2. **Integration tests** verify component interactions and realistic command generation
+3. **Shared mock infrastructure** provides consistent test environments across both layers
+4. **Common validation patterns** ensure consistent testing of Go toolchain requirements
 
-The test suite validates these critical interfaces:
+## Public API Surface Validation
 
-### Primary Factory Interface
-- **GoAdapterFactory.createAdapter()**: Main adapter instantiation and dependency injection
-- **GoAdapterFactory.getMetadata()**: Adapter capabilities and version information
-- **GoAdapterFactory.validate()**: Environment prerequisite validation and toolchain verification
+### Primary Entry Points Tested
+- **GoAdapterFactory.createAdapter()**: Factory instantiation and adapter creation
+- **GoAdapterFactory.validate()**: Environment prerequisite validation
+- **GoDebugAdapter lifecycle methods**: initialize(), dispose(), connect(), disconnect()
+- **Configuration transformation**: transformLaunchConfig() for debug and test modes
+- **Utility functions**: Tool discovery, version parsing, DAP support detection
 
-### Core Adapter Interface
-- **GoDebugAdapter lifecycle**: init(), dispose(), connect(), disconnect() with proper state management
-- **Configuration Processing**: Launch configuration transformation for normal Go programs and test execution
-- **DAP Capabilities**: Breakpoint support, log points, and Go-specific exception handling
-
-### Utility Functions
-- **Tool Discovery**: findGoExecutable(), findDelveExecutable() with multi-path search strategies
-- **Version Management**: Go and Delve version parsing, validation, and DAP support detection
-- **Platform Abstraction**: Cross-platform executable resolution and environment handling
+### Test Configuration Interfaces
+- Standard test runners (vitest) for both unit and integration execution
+- Mock adapter factories for isolated testing scenarios
+- Environment configuration utilities for controlled test setup
+- Consistent test ports (48766) and session identifiers for network testing
 
 ## Internal Organization and Data Flow
 
-### Test Execution Flow
-```
-Environment Setup → Component Testing → Integration Validation → Cleanup
-       ↓                   ↓                    ↓               ↓
-   Mock config      Unit validation    End-to-end smoke    State restore
-```
+### Testing Strategy
+1. **Isolation Phase**: Mock dependencies prevent external tool execution while maintaining realistic interfaces
+2. **Environment Control**: Platform-aware testing with careful environment variable management and cleanup
+3. **State Validation**: Event-driven testing of adapter state transitions and capability negotiation
+4. **Integration Verification**: Command generation and configuration validation without actual debugger launches
 
-### Validation Strategy
-1. **Unit Phase**: Individual component testing with isolated mocks for precise control
-2. **Integration Phase**: End-to-end testing with realistic mock environments for system validation
-3. **Cross-Validation**: Both layers test overlapping functionality to ensure consistency
+### Mock Infrastructure Patterns
+- **Process Isolation**: child_process.spawn mocking with EventEmitter simulation
+- **File System Abstraction**: Controlled fs.promises.access responses for tool availability
+- **Platform Abstraction**: Current platform testing to avoid cross-platform complexity
+- **Dependency Injection**: createMockDependencies() factory for consistent test setup
 
-### Mock Architecture
-- **Process Simulation**: EventEmitter-based child process mocking with realistic async behavior
-- **File System Abstraction**: Controlled executable discovery testing without actual file system dependencies
-- **Environment Isolation**: Comprehensive backup/restore patterns to prevent test pollution
+## Important Testing Conventions
 
-## Important Patterns and Conventions
+### Cross-Platform Considerations
+- Tests execute only on current platform for reliability
+- Platform-specific tool discovery validation (GOPATH/GOBIN support)
+- Windows/Unix path handling verification
 
-### Testing Patterns
-- **Layered Validation**: Unit tests for precise component behavior, integration tests for system-level functionality
-- **State Transition Testing**: Systematic validation of adapter lifecycle with proper event emission
-- **Configuration Testing**: Both normal Go program debugging and Go test execution scenarios
-- **Platform-Aware Testing**: Current platform focus with cross-platform compatibility considerations
+### Environment Safety
+- Comprehensive environment variable cleanup to prevent test pollution
+- Careful mock lifecycle management with setup/teardown isolation
+- Real vs. fake tool path management for testing without installation requirements
 
-### Quality Assurance
-- **Comprehensive Coverage**: Tests validate both success paths and error conditions
-- **Realistic Simulation**: Mock implementations closely mirror actual debugger behavior
-- **Isolation Guarantees**: Each test runs independently without side effects or state leakage
-- **Human-Readable Errors**: Proper error message translation for debugging workflow issues
+### Validation Standards
+- DAP protocol compliance verification
+- Go toolchain version requirement enforcement (≥1.18)
+- Delve Debug Adapter Protocol capability detection
+- Human-readable error message generation for common failure scenarios
 
-## Integration Context
-
-This test directory ensures the Go adapter reliably integrates with the broader debugmcp system by validating:
-- Proper DAP implementation for Go-specific debugging scenarios
-- Correct factory registration and metadata exposure
-- Robust environment validation and dependency management
-- Seamless configuration transformation from generic to Go-specific parameters
-- Reliable adapter lifecycle management throughout debug sessions
-
-The test suite provides confidence that the Go adapter delivers consistent debugging capabilities while maintaining compatibility with the Debug Adapter Protocol specification and the debugmcp ecosystem's architecture.
+This directory serves as the comprehensive testing gateway for Go debug adapter functionality, ensuring reliable operation across diverse development environments while maintaining complete isolation from external Go/Delve installations and providing confidence in adapter behavior across the full debugging lifecycle.

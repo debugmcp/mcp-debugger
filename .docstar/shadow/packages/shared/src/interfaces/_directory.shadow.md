@@ -1,104 +1,91 @@
 # packages/shared/src/interfaces/
-@generated: 2026-02-10T21:26:28Z
+@generated: 2026-02-11T23:47:48Z
 
-## Debug Adapter Interface System
+## Purpose and Responsibility
 
-**Primary Purpose**: This directory defines the complete interface layer for a multi-language debug adapter system built on the Debug Adapter Protocol (DAP). It provides a pluggable architecture that abstracts language-specific debugging behaviors while maintaining compatibility with VS Code's debugging infrastructure.
+The `packages/shared/src/interfaces` directory defines the core interface contracts and type system for a multi-language debug adapter framework. This module establishes the architectural boundaries between different components of the debugging system, enabling language-specific adapters (JavaScript, Python, Go, Rust, Mock) to integrate with a unified DAP (Debug Adapter Protocol) client through well-defined abstractions.
 
-## Core Architecture
+## Key Components and Architecture
 
-The system implements a **policy-based adapter architecture** where language-specific behaviors are encapsulated in policy objects that implement common interfaces. This enables the debug transport layer to remain generic while supporting the unique requirements of different debuggers (js-debug, debugpy, CodeLLDB, etc.).
+### Adapter Policy System
+The adapter policy framework (`adapter-policy.ts`) serves as the central abstraction, with language-specific implementations (`adapter-policy-*.ts`) providing customized behaviors:
 
-### Key Components and Relationships
+- **Core Interface**: `AdapterPolicy` defines the contract for session management, command handling, variable extraction, and initialization behaviors
+- **Language Implementations**: JavaScript (`js.ts`), Python (`python.ts`), Go (`go.ts`), Rust (`rust.ts`), and Mock (`mock.ts`) adapters each implement specific debugging behaviors
+- **Multi-Session Support**: JavaScript adapter supports complex child session strategies, while others use single-session models
+- **Command Queueing**: Language-specific command ordering and state management (JavaScript requires strict handshake sequencing, others process immediately)
 
-**Policy System (`adapter-policy.ts` + language implementations)**:
-- `AdapterPolicy` interface defines the contract for language-specific behaviors
-- Language policies (Go, Java, JavaScript, Python, Rust, Mock) implement adapter-specific logic
-- Handles variable extraction, stack frame filtering, command queueing, and session management
-- Coordinates multi-session debugging for languages like JavaScript that spawn child processes
+### Debug Adapter Abstraction
+The `debug-adapter.ts` interface defines the core `IDebugAdapter` contract that all language adapters must implement:
 
-**Registry System (`adapter-registry.ts`)**:
-- Factory-based registration and instantiation of debug adapters
-- Dependency injection container for adapter services
-- Metadata management and adapter discovery
-- Lifecycle management with validation and error handling
+- **Lifecycle Management**: Initialize, connect, debug, disconnect, dispose states
+- **DAP Protocol Operations**: Send requests, handle events/responses with typed interfaces
+- **Configuration Transformation**: Convert generic launch configs to language-specific formats
+- **Feature Capabilities**: Declare supported debugging features through comprehensive capability flags
 
-**Core Adapter Interface (`debug-adapter.ts`)**:
-- `IDebugAdapter` - Main abstraction for all language adapters
-- Defines lifecycle (initialize, connect, dispose), DAP operations, and configuration transformation
-- Event-driven architecture with comprehensive state management
-- Feature capability negotiation and environment validation
-
-**Launch Coordination (`adapter-launch-barrier.ts`)**:
-- `AdapterLaunchBarrier` interface for synchronizing DAP request/response cycles
-- Enables custom launch timing for adapters with complex initialization sequences
-- Decouples ProxyManager from adapter-specific launch behavior
-
-### Multi-Session Support
-
-The system provides sophisticated multi-session debugging capabilities:
-
-**DAP Client Behavior (`dap-client-behavior.ts`)**:
-- Configures reverse request handling and child session routing
-- Manages breakpoint mirroring between parent and child sessions
-- Defines command routing strategies for complex debugging scenarios
-
-**Session Strategies**:
-- Single-session (Python, Go, Rust) - Traditional debugging model
-- Multi-session (JavaScript) - Parent handles configuration, children execute code
-- Launch barriers coordinate timing between sessions
+### DAP Client Behavior Framework
+The `dap-client-behavior.ts` interface enables customization of reverse request handling, child session management, and adapter-specific client behaviors without modifying core DAP transport logic.
 
 ### Dependency Injection System
+Multiple interface files establish testable abstractions:
 
-**External Dependencies (`external-dependencies.ts`, `filesystem.ts`, `process-interfaces.ts`)**:
-- Comprehensive abstraction layer over Node.js built-ins (fs, child_process, net)
-- Enables complete mocking for testing
-- Type-safe dependency containers with gradual migration support
-- Specialized process launchers for debug targets and proxy processes
+- **External Dependencies** (`external-dependencies.ts`): File system, process management, networking, logging
+- **Process Management** (`process-interfaces.ts`): High-level process launching with debug-specific abstractions
+- **Filesystem** (`filesystem.ts`): Basic file operations with error-safe defaults
+
+### Registry and Factory Patterns
+- **Adapter Registry** (`adapter-registry.ts`): Centralized adapter management with factory-based instantiation
+- **Launch Coordination** (`adapter-launch-barrier.ts`): Synchronization primitive for custom DAP request handling
 
 ## Public API Surface
 
-### Main Entry Points
+### Primary Entry Points
+- `IDebugAdapter`: Core adapter interface that language implementations must satisfy
+- `AdapterPolicy`: Strategy interface for language-specific debugging behaviors
+- `DapClientBehavior`: Configuration interface for customizing DAP client behaviors
+- `IAdapterRegistry`: Registry interface for managing and creating debug adapters
 
-1. **Adapter Policy Registration**: Language implementers create `AdapterPolicy` objects and register them with the system
-2. **Adapter Factory**: `IAdapterFactory` and `IAdapterRegistry` for creating and managing adapter instances
-3. **Debug Adapter Interface**: `IDebugAdapter` for implementing language-specific debug adapters
-4. **Launch Coordination**: `AdapterLaunchBarrier` for custom launch synchronization
+### Language-Specific Policies
+- `JsDebugAdapterPolicy`: JavaScript/Node.js debugging with multi-session support
+- `PythonAdapterPolicy`: Python debugpy integration with executable validation
+- `GoAdapterPolicy`: Go Delve integration with variable filtering
+- `RustAdapterPolicy`: Rust CodeLLDB integration with compilation support
+- `MockAdapterPolicy`: Testing implementation with minimal functionality
 
-### Language Integration Points
+### Factory Interfaces
+- `IAdapterFactory`: Creates adapter instances with dependency injection
+- `IProcessLauncherFactory`: Creates specialized process launchers
+- `IProxyManagerFactory`: Creates proxy managers for adapter communication
 
-Each language adapter must provide:
-- Policy implementation with variable extraction and command handling logic
-- Executable resolution and validation
-- DAP configuration transformation (launch/attach configs)
-- Session management strategy (single vs. multi-session)
-- Stack frame filtering and internal code detection
+## Internal Organization and Data Flow
 
-## Data Flow and Coordination
+1. **Adapter Selection**: Registry matches commands to appropriate language policies
+2. **Initialization**: Adapters validate environment and resolve executables
+3. **Configuration**: Transform generic configs to language-specific formats
+4. **Connection**: Establish DAP protocol connection with language-specific handshakes
+5. **Session Management**: Handle single or multi-session debugging based on adapter policy
+6. **Command Processing**: Route commands through language-specific queueing and filtering
+7. **Event Handling**: Process DAP events with adapter-specific behaviors
+8. **Cleanup**: Dispose resources and terminate processes
 
-1. **Registration Phase**: Language adapters register policies and factories with the registry
-2. **Discovery Phase**: Client queries registry for available languages and capabilities
-3. **Instantiation Phase**: Factory creates adapter instance with injected dependencies
-4. **Initialization Phase**: Adapter validates environment and establishes DAP connection
-5. **Configuration Phase**: Generic configs transformed to language-specific formats
-6. **Execution Phase**: DAP requests/responses flow through policy-filtered handlers
-7. **Multi-Session Phase**: Child sessions created and coordinated per language strategy
+## Important Patterns and Conventions
 
-## Key Patterns and Conventions
+### Strategy Pattern
+Language adapters implement the `AdapterPolicy` interface to provide customized behaviors while keeping the core DAP transport generic.
 
-- **Policy Pattern**: Language behaviors encapsulated in interchangeable policy objects
-- **Factory Pattern**: Adapter creation through configurable factories
-- **Strategy Pattern**: Pluggable session management and command handling strategies
-- **Event-Driven Architecture**: State changes and DAP events propagated through EventEmitter
-- **Dependency Injection**: All external dependencies abstracted through interfaces
-- **Async-First Design**: All I/O operations return Promises with < 5ms performance targets
+### Factory Pattern  
+Registry and factory interfaces enable dependency injection and facilitate testing by allowing mock implementations.
 
-## Critical Invariants
+### Event-Driven Architecture
+All adapters extend EventEmitter for state changes and DAP event propagation.
 
-- All adapters must emit state change events for proper lifecycle management
-- Multi-session adapters must coordinate initialization through launch barriers
-- Command queueing policies must prevent DAP protocol violations
-- Environment validation is mandatory before debugging operations begin
-- Language policies must provide safe defaults for all optional operations
+### Async-First Design
+All I/O operations return Promises with < 5ms performance constraints for responsiveness.
 
-This interface system enables the debug MCP to support multiple programming languages through a unified, extensible architecture while preserving the unique debugging characteristics each language requires.
+### Error Safety
+Interfaces prefer graceful degradation with safe defaults rather than throwing exceptions, especially in filesystem and process operations.
+
+### Type Safety
+Comprehensive TypeScript interfaces with generic type parameters for DAP protocol type safety and language-specific configuration typing.
+
+This interface layer enables the debugging framework to support multiple programming languages through a unified architecture while allowing each language adapter to implement its specific requirements and optimizations.

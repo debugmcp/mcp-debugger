@@ -1,100 +1,80 @@
 # tests/core/unit/server/
-@generated: 2026-02-10T21:26:24Z
+@generated: 2026-02-11T23:47:45Z
 
 ## Purpose
-This directory contains comprehensive unit tests for the DebugMcpServer core functionality, focusing on testing the Model Context Protocol (MCP) server implementation for debugging operations. The tests validate server initialization, lifecycle management, tool registration, session management, and debugging capabilities.
+Comprehensive unit test suite for the core DebugMcpServer functionality, providing complete coverage of server lifecycle, tool handlers, session management, and debugging operations. This directory validates the MCP (Model Context Protocol) server implementation that enables AI agents to perform debugging operations on various programming languages.
 
-## Test Architecture
+## Key Components
 
-### Test Infrastructure (`server-test-helpers.ts`)
-Central testing utilities providing comprehensive mock implementations for all server dependencies:
-- **Mock Factory Pattern**: `createMockDependencies()` creates complete dependency injection containers
-- **Component Mocks**: Server, SessionManager, StdioTransport, and AdapterRegistry mocks
-- **Cross-Platform Support**: File system and path utilities with Windows/Unix compatibility
-- **Handler Extraction**: `getToolHandlers()` utility for accessing registered MCP request handlers
+### Test Structure
+- **Test Infrastructure** (`server-test-helpers.ts`) - Centralized mock factory providing comprehensive dependency injection mocks for logger, file system, environment, process/network managers, path utilities, and adapter registry
+- **Lifecycle Testing** (`server-lifecycle.test.ts`) - Server start/stop operations and error handling
+- **Initialization Testing** (`server-initialization.test.ts`) - Constructor behavior, configuration validation, and MCP tool registration
+- **Tool Testing** - Comprehensive validation of all 14 debugging tools:
+  - **Session Tools** (`server-session-tools.test.ts`) - create/list/close debug sessions
+  - **Control Tools** (`server-control-tools.test.ts`) - breakpoints, execution control (step, continue, pause)
+  - **Inspection Tools** (`server-inspection-tools.test.ts`) - variables, stack traces, scopes
 
-### Core Server Testing
+### Specialized Testing Areas
+- **Language Discovery** (`server-language-discovery.test.ts`) - Dynamic language detection, adapter registry integration, metadata generation
+- **Documentation Validation** (`dynamic-tool-documentation.test.ts`) - Tool parameter descriptions and MCP response serialization
 
-#### Server Lifecycle (`server-lifecycle.test.ts`)
-Tests fundamental server operations:
-- Start/stop lifecycle with stdio transport integration
-- Error handling during server startup and shutdown
-- Session cleanup during server termination
-- Logging behavior validation
+## Public API Surface
+The test suite validates the complete MCP tool interface:
 
-#### Server Initialization (`server-initialization.test.ts`)
-Validates server constructor and setup:
-- Dependency injection and configuration handling
-- MCP tool handler registration (14 debugging tools total)
-- Error boundary setup and propagation
-- Tool availability verification
+### Session Management
+- `create_debug_session` - Session creation with language validation
+- `list_debug_sessions` - Active session enumeration  
+- `close_debug_session` - Session cleanup
 
-## MCP Tool Testing
+### Debugging Control
+- `set_breakpoint` - Breakpoint management with conditional support
+- `start_debugging` - Session initialization with dry-run mode
+- `step_over/step_into/step_out` - Code execution stepping
+- `continue_execution/pause_execution` - Execution flow control
 
-### Session Management Tools (`server-session-tools.test.ts`)
-Tests core session lifecycle operations:
-- **`create_debug_session`**: Session creation with language validation and error handling
-- **`list_debug_sessions`**: Session enumeration and state reporting
-- **`close_debug_session`**: Session cleanup and resource management
+### Runtime Inspection  
+- `get_variables` - Variable scope inspection
+- `get_stack_trace` - Call stack examination
+- `get_scopes` - Frame scope analysis
+- `evaluate_expression` - Runtime expression evaluation
+- `get_source_context` - Source code context retrieval
 
-### Debugging Control Tools (`server-control-tools.test.ts`)
-Tests debugging execution control:
-- **Breakpoint Management**: Setting breakpoints with conditional expressions
-- **Execution Control**: Start debugging, step operations (over/into/out), continue/pause
-- **Session Validation**: Ensures operations only work on active sessions
-- **Error Scenarios**: Handles session not found, invalid states, and operation failures
+## Internal Organization & Data Flow
 
-### Inspection Tools (`server-inspection-tools.test.ts`)
-Tests debugging introspection capabilities:
-- **`get_variables`**: Variable retrieval with scope validation
-- **`get_stack_trace`**: Stack frame inspection with thread ID handling
-- **`get_scopes`**: Scope enumeration for frame analysis
-- **Error Handling**: Graceful degradation from exceptions to error responses
+### Testing Architecture
+1. **Mock Setup** - `server-test-helpers.ts` provides unified mock creation for all server dependencies
+2. **Test Isolation** - Each test file focuses on specific functionality areas with comprehensive beforeEach/afterEach lifecycle
+3. **Tool Handler Testing** - Consistent pattern using `getToolHandlers()` to extract and test MCP tool implementations
+4. **Error Boundary Testing** - Validates both MCP parameter validation errors and graceful operational error handling
 
-## Advanced Features Testing
+### Key Patterns
+- **Dependency Injection Testing** - Validates proper mock injection through production dependency container
+- **MCP Protocol Compliance** - Tests proper request/response structures and error codes
+- **Session Lifecycle Management** - Validates debugging session state transitions and cleanup
+- **Language Adapter Integration** - Tests dynamic language discovery and adapter registry interactions
 
-### Language Discovery (`server-language-discovery.test.ts`)
-Tests dynamic language and adapter detection:
-- **Dynamic Discovery**: `getSupportedLanguagesAsync` with adapter registry integration
-- **Metadata Generation**: Language-specific configuration and executable detection
-- **Container Environment**: Special handling for containerized environments
-- **Validation Integration**: Language support validation before session creation
-- **Fallback Mechanisms**: Graceful handling of discovery failures
-
-### Tool Documentation (`dynamic-tool-documentation.test.ts`)
-Tests MCP tool metadata generation:
-- **Path Parameter Documentation**: Generic, environment-agnostic path guidance
-- **Serialization**: Proper MCP response formatting for tool descriptions
-- **AI Agent Optimization**: Path descriptions avoid specific directory references
-
-## Key Testing Patterns
+## Important Testing Conventions
 
 ### Mock Strategy
-- **Comprehensive Mocking**: All external dependencies mocked via `server-test-helpers.ts`
-- **Dependency Injection**: Tests validate proper DI container usage
-- **Component Isolation**: Each test focuses on specific functionality without side effects
+- Uses Vitest framework with comprehensive `vi.mock()` for external dependencies
+- Centralizes all mock creation through helper functions for consistency
+- Follows dependency injection pattern with mock container replacement
 
-### Error Handling Validation
-- **Dual Error Patterns**: Tests both MCP protocol errors and graceful error responses
-- **Session State Validation**: Ensures operations respect session lifecycle
-- **Parameter Validation**: MCP parameter validation with proper error codes
+### Error Handling Patterns
+- **MCP Validation Errors** - Returns `McpError` with appropriate error codes for parameter validation
+- **Operational Errors** - Returns success responses containing error messages for runtime failures
+- **Graceful Degradation** - Tests fallback behaviors when optional components fail
 
-### Integration Testing Approach
-- **Tool Handler Testing**: Tests tools via extracted MCP request handlers
-- **JSON Response Parsing**: Validates MCP response structure and content
-- **Mock Verification**: Extensive interaction testing with dependency mocks
+### Response Validation
+- All tool responses follow JSON structure: `{success: boolean, content: [{type: 'text', text: string}]}`
+- Consistent parsing pattern: `JSON.parse(result.content[0].text)`
+- Validates both success and error response formats
 
 ## Dependencies
-- **Vitest**: Primary testing framework with comprehensive mocking capabilities
-- **MCP SDK**: Model Context Protocol server and transport abstractions
-- **Core Components**: DebugMcpServer, SessionManager, AdapterRegistry integration
-- **Shared Types**: Cross-package type definitions for debugging operations
+- **Vitest** - Testing framework with mocking capabilities
+- **@modelcontextprotocol/sdk** - MCP server and transport abstractions
+- **Core Server Components** - DebugMcpServer, SessionManager, AdapterRegistry
+- **Shared Types** - Language definitions, session states, and protocol interfaces
 
-## Public API Coverage
-The test suite validates all 14 MCP debugging tools:
-- Session management (3 tools)
-- Debugging control (7 tools) 
-- Runtime inspection (4 tools)
-- Plus server lifecycle, language discovery, and documentation generation
-
-This comprehensive test suite ensures the DebugMcpServer provides a reliable MCP interface for AI-driven debugging operations across multiple programming languages.
+This test suite ensures the DebugMcpServer provides a robust, well-documented MCP interface for AI agents to perform comprehensive debugging operations across multiple programming languages.

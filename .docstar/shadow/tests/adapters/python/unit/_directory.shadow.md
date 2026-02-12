@@ -1,52 +1,68 @@
 # tests/adapters/python/unit/
-@generated: 2026-02-10T21:26:22Z
+@generated: 2026-02-11T23:47:37Z
 
 ## Purpose
-Unit test suite for the Python adapter utilities in the debugmcp system. This directory contains comprehensive test coverage for Python executable discovery, version detection, and command finding functionality across multiple platforms (Windows, Linux, macOS).
 
-## Key Components and Organization
+This directory contains comprehensive unit tests for the Python adapter's core utility functions in the debugmcp project. It focuses on testing Python executable discovery, version detection, and command finding functionality across different operating systems and environments.
 
-### Core Test Suite: python-utils.test.ts
-The primary test file providing comprehensive coverage of Python utility functions with:
-- **Cross-platform testing**: Validates behavior across win32, linux, and darwin platforms
-- **Python executable discovery**: Tests fallback strategies from user-specified paths to environment variables to system commands
-- **Version detection**: Validates Python version extraction from stdout/stderr output
-- **Command finder configuration**: Tests dependency injection for command discovery
+## Key Components
 
-## Test Architecture
+### Test Coverage
+- **Python executable discovery** - Tests multiple fallback strategies for finding Python installations
+- **Cross-platform compatibility** - Validates behavior on Windows, Linux, and macOS
+- **Version detection** - Tests parsing Python version strings from various output formats  
+- **Command finding** - Tests configurable command discovery mechanisms
+- **Error handling** - Validates graceful failure scenarios and fallback chains
 
 ### Mock Infrastructure
-- **Process Mocking**: EventEmitter-based child_process simulation for testing async spawn operations
-- **Platform Isolation**: Global stubbing mechanism for testing platform-specific logic without OS dependencies  
-- **Command Discovery**: MockCommandFinder for testing command resolution strategies
-- **Environment Management**: Systematic cleanup of Python-related environment variables between tests
+- **Process simulation** - EventEmitter-based mocking of child processes for async testing
+- **Platform abstraction** - Global stubbing for cross-platform test isolation
+- **Environment management** - Controlled testing of environment variables and cleanup
+- **Command finder mocking** - Dependency injection testing with MockCommandFinder
 
-### Test Patterns
-- **Parameterized Testing**: Uses describe.each for running identical test logic across multiple platforms
-- **Fallback Chain Testing**: Validates progressive fallback from preferred to available Python executables
-- **Error Condition Testing**: Comprehensive coverage of failure scenarios including missing executables and spawn errors
+## Test Organization
 
-## Test Coverage Areas
+The test suite is structured around the core Python utility functions:
 
-### Platform-Specific Behavior
-- **Windows**: py launcher priority, Microsoft Store alias detection, where.exe command resolution
-- **Unix-like systems**: python3 → python fallback ordering, which command usage
-- **Cross-platform**: Environment variable precedence (PYTHON_PATH, PYTHON_EXECUTABLE, pythonLocation)
+1. **findPythonExecutable** - Tests the primary Python discovery logic with:
+   - User-specified path validation
+   - Environment variable precedence (PYTHON_PATH, PYTHON_EXECUTABLE)  
+   - Platform-specific command ordering
+   - Windows-specific features (py launcher, Store aliases)
+   - Comprehensive fallback chains
 
-### Core Functionality Testing
-- **findPythonExecutable**: Multi-stage discovery process with user preferences, environment variables, and system fallbacks
-- **getPythonVersion**: Version string extraction with robust parsing of both stdout and stderr output
-- **setDefaultCommandFinder**: Global configuration for command discovery dependency injection
+2. **getPythonVersion** - Tests version extraction from Python executables:
+   - Standard output parsing
+   - Error output handling
+   - Spawn error recovery
+   - Fallback mechanisms
+
+3. **Command finder configuration** - Tests dependency injection patterns
+
+## Testing Patterns
+
+### Cross-Platform Strategy
+- Parameterized tests using `describe.each` for platform variants
+- Platform-specific logic isolation with proper mocking
+- Environment variable testing with cleanup between tests
+
+### Process Mocking
+- EventEmitter-based child process simulation
+- Controlled stdout/stderr output for version parsing tests
+- Error condition simulation for robust error handling validation
+
+### Test Environment Management
+- Consistent setup/teardown with beforeEach/afterEach hooks
+- Environment variable isolation and cleanup
+- Mock state reset between test runs
+
+## Dependencies
+
+- **Testing framework**: Vitest for test execution and assertions
+- **Node.js APIs**: child_process, fs, and path modules for system interaction
+- **Target modules**: @debugmcp/adapter-python utilities and error classes
+- **Test utilities**: MockCommandFinder for dependency injection testing
 
 ## Integration Points
-- **Target Code**: Tests utilities from @debugmcp/adapter-python package
-- **Error Handling**: Validates CommandNotFoundError and other adapter-specific exceptions
-- **Test Utilities**: Leverages shared MockCommandFinder from test-utils for consistent mocking patterns
 
-## Key Testing Strategies
-- **Environment Isolation**: Systematic setup/teardown of environment variables and global state
-- **Async Process Testing**: EventEmitter-based mocking for testing child process interactions
-- **Error Simulation**: Comprehensive testing of failure modes including network issues, missing files, and invalid responses
-- **Cross-Platform Validation**: Ensures Python discovery works consistently across different operating systems
-
-This test suite ensures the Python adapter can reliably discover and interact with Python installations across diverse deployment environments while providing comprehensive error handling and fallback mechanisms.
+This test suite validates the foundational Python discovery and version detection logic that other components of the debugmcp Python adapter depend on. It ensures reliable Python executable location across different development environments and deployment scenarios, which is critical for the adapter's core functionality.

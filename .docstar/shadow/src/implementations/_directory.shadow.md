@@ -1,95 +1,76 @@
 # src/implementations/
-@generated: 2026-02-10T21:26:18Z
+@generated: 2026-02-11T23:47:40Z
 
-## Purpose
+## Overall Purpose and Responsibility
 
-The `src/implementations` directory provides production-ready concrete implementations of all core abstraction interfaces in the debugmcp system. This module serves as the bridge between domain abstractions and Node.js runtime capabilities, enabling dependency injection and testability throughout the application.
+The `src/implementations` directory provides concrete, production-ready implementations of all core abstraction interfaces defined in the debugmcp system. This module serves as the "implementation layer" that bridges domain interfaces with real Node.js runtime capabilities, enabling the system to interact with the operating system, file system, network, and external processes.
 
-## Key Components and Architecture
+## Key Components and Relationships
 
-### Core System Implementations
-- **ProcessManagerImpl** - Wraps Node.js `child_process` module for process spawning and execution
-- **FileSystemImpl** - Enhanced file system operations using `fs-extra` with promise-based APIs
-- **NetworkManagerImpl** - Node.js networking abstraction for server creation and port discovery
-- **ProcessEnvironment** - Immutable environment variable access with snapshot consistency
-- **WhichCommandFinder** - Command path resolution with optional caching using the `which` package
+### Core System Abstractions
+- **FileSystemImpl** - Production file system operations using `fs-extra`
+- **ProcessManagerImpl** - Child process management wrapping Node.js `child_process`
+- **NetworkManagerImpl** - Network server creation and port discovery using Node.js `net`
+- **ProcessEnvironment** - Environment variable access with immutable snapshot pattern
 
-### Specialized Process Launchers
-- **ProcessLauncherImpl** - Basic process launching with enhanced IProcess wrapper
-- **DebugTargetLauncherImpl** - Python debugpy integration with automatic port allocation
-- **ProxyProcessLauncherImpl** - Advanced proxy process management with initialization handshaking
-- **ProcessLauncherFactoryImpl** - Factory for creating configured launcher instances
+### Process Launching Ecosystem
+- **ProcessLauncherImpl** - Basic process spawning with enhanced wrapper interfaces
+- **DebugTargetLauncherImpl** - Python debugging with `debugpy` integration
+- **ProxyProcessLauncherImpl** - Specialized proxy worker process management with IPC
+- **ProcessAdapter/ProxyProcessAdapter** - Event-driven process wrappers with lifecycle management
+- **ProcessLauncherFactoryImpl** - Central factory for creating launcher instances
 
-## Public API Surface
+### Utility Components
+- **WhichCommandFinder** - Command path resolution using system PATH with optional caching
 
-### Main Entry Point
-The `index.ts` barrel export provides centralized access to all implementations:
+## Public API Surface and Entry Points
+
+### Main Export (index.ts)
+Central barrel export providing clean API access to all implementations:
 ```typescript
 import { 
-  FileSystemImpl, 
-  ProcessManagerImpl, 
-  NetworkManagerImpl,
-  ProcessLauncherImpl,
-  DebugTargetLauncherImpl,
-  ProxyProcessLauncherImpl,
+  FileSystemImpl, ProcessManagerImpl, NetworkManagerImpl,
+  ProcessLauncherImpl, DebugTargetLauncherImpl, ProxyProcessLauncherImpl,
   ProcessLauncherFactoryImpl 
 } from '@debugmcp/implementations'
 ```
 
-### Key Interfaces Implemented
-- `IEnvironment` - Environment variable access
-- `IFileSystem` - File system operations  
-- `INetworkManager` - Network operations
-- `IProcessManager` - Process management
-- `IProcessLauncher` - Process launching
-- `IDebugTargetLauncher` - Debug target creation
-- `IProxyProcessLauncher` - Proxy process management
-- `CommandFinder` - Command path resolution
+### Key Factory Pattern
+**ProcessLauncherFactoryImpl** serves as the primary entry point for process-related operations, creating pre-configured launcher instances for different use cases.
 
 ## Internal Organization and Data Flow
 
-### Adapter Pattern Implementation
-Most classes follow the adapter pattern, wrapping Node.js built-in modules (`fs`, `child_process`, `net`) with domain-specific interfaces. This enables:
-- Consistent error handling across the system
-- Testability through interface substitution
-- Clean separation between domain logic and platform specifics
+### Layered Architecture
+1. **Interface Layer**: All classes implement contracts from `@debugmcp/shared`
+2. **Adapter Layer**: Wraps Node.js APIs with enhanced domain interfaces
+3. **Enhancement Layer**: Adds debugging, proxy capabilities, and resource management
 
-### Process Management Hierarchy
-```
-ProcessManagerImpl (core spawning)
-  ↓
-ProcessLauncherImpl (basic wrapping)
-  ↓
-DebugTargetLauncherImpl (debug-specific)
-ProxyProcessLauncherImpl (proxy-specific with state machine)
-```
-
-### Resource Management
-- **Snapshot Pattern**: ProcessEnvironment captures immutable environment state
-- **Defensive Copying**: All returned data structures prevent external mutation
-- **Lifecycle Management**: ProcessAdapter tracks listeners and provides cleanup
-- **State Machine**: ProxyProcessAdapter manages initialization states
+### Data Flow Patterns
+- **Environment Access**: Snapshot-based consistency model captures environment state at construction
+- **Process Lifecycle**: Event-driven architecture with proper cleanup and resource management
+- **Network Operations**: Promise-based async patterns for server creation and port discovery
+- **File Operations**: Enhanced fs-extra capabilities with defensive copying
 
 ## Important Patterns and Conventions
 
+### Resource Management
+- **Automatic Cleanup**: Event listener tracking and disposal to prevent memory leaks
+- **Defensive Copying**: All returned data structures are copies to prevent external mutation
+- **Proper Disposal**: Explicit cleanup methods and timeout-based termination
+
 ### Error Handling
-- Native Node.js errors are translated to domain-specific error types
-- Comprehensive try/catch patterns with meaningful error messages
-- Graceful degradation for edge cases (especially in testing environments)
+- **Error Translation**: Third-party errors converted to domain-specific exceptions
+- **Graceful Degradation**: Multiple fallback strategies (especially in ProcessManagerImpl.exec())
+- **Comprehensive Logging**: Detailed diagnostic information for debugging
 
-### Async/Promise Patterns
-- All I/O operations use modern async/await patterns
-- Promise-based wrappers around callback-based Node.js APIs
-- Proper resource cleanup in async operations
-
-### Dependency Injection Ready
-- All implementations accept their dependencies through constructors or factory methods
-- Clean interfaces enable easy mocking and testing
-- Separation of concerns between interface contracts and implementation details
+### Initialization Patterns
+- **State Machines**: ProxyProcessAdapter uses initialization states for lifecycle tracking
+- **Promise-based Initialization**: Async setup with timeout and cleanup mechanisms
+- **Message-based Handshakes**: IPC communication for proxy process readiness detection
 
 ### Configuration Management
-- Environment-based configuration through ProcessEnvironment
-- Optional caching strategies (WhichCommandFinder)
-- Flexible process launching with comprehensive options support
+- **Environment Filtering**: Test-related environment variable removal for clean proxy environments
+- **Working Directory Management**: Consistent project root directory setup
+- **Diagnostic Configuration**: Built-in debugging flags and trace options
 
-This module is essential for production deployment, providing robust, well-tested implementations of all system abstractions while maintaining clean architectural boundaries.
+This implementation layer provides the critical bridge between abstract interfaces and concrete Node.js runtime capabilities, enabling the debugmcp system to operate effectively in production environments while maintaining clean architectural boundaries.

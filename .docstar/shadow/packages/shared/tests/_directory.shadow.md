@@ -1,49 +1,67 @@
 # packages/shared/tests/
-@generated: 2026-02-10T21:26:26Z
+@generated: 2026-02-11T23:47:54Z
 
 ## Purpose
-This directory provides comprehensive unit test coverage for the shared debugging infrastructure's language-specific debug adapter policies. It validates Debug Adapter Protocol (DAP) compliance and ensures robust cross-platform debugging capabilities for JavaScript/Node.js and Rust development environments.
+This directory contains the comprehensive test suite for the MCP debugging framework's adapter policy layer. It validates language-specific Debug Adapter Protocol (DAP) implementations that manage debugging sessions across different programming languages through standardized protocol communication.
 
-## Key Components and Integration
+## Key Components and Organization
 
-### Test Structure
-- **`unit/`** subdirectory containing focused unit tests for debug adapter policy implementations
-- Language-specific test suites for JavaScript (`adapter-policy-js.spec.ts`) and Rust (`adapter-policy-rust.test.ts`) debug adapters
-- Comprehensive DAP protocol compliance validation across multiple debugging scenarios
+### Unit Test Suite (`unit/`)
+The core testing infrastructure focuses on two primary language-specific adapter policies:
+- **JavaScript/Node.js Adapter Policy Tests**: Validates `JsDebugAdapterPolicy` functionality including process management, variable filtering, and js-debug adapter integration
+- **Rust Adapter Policy Tests**: Validates `RustAdapterPolicy` behavior covering executable resolution, CodeLLDB integration, and Cargo toolchain support
 
-### Component Relationships
-The test suite validates the integration between:
-- Debug adapter policy classes and the DAP command queue management system
-- Language-specific debugging features with the shared session state infrastructure
-- Platform abstraction layers with actual debugger binaries and toolchains
-- External dependencies (`@vscode/debugprotocol`, `@debugmcp/shared`) with internal implementations
+## Testing Architecture and Patterns
 
-## Testing Architecture
+### Comprehensive Mock Strategy
+The test suite employs sophisticated mocking patterns using vitest to isolate components:
+- File system operations and child process spawning
+- External adapter binaries and toolchain dependencies
+- Platform-specific behaviors through `process.platform` manipulation
+- DAP protocol message flows and state transitions
 
-### Common Testing Patterns
-- **Mock-First Strategy**: Extensive vitest mocking of file system operations, child processes, and external dependencies
-- **Cross-Platform Validation**: Platform simulation and temporary environment overrides for comprehensive compatibility testing
-- **Event-Driven Testing**: Asynchronous operation validation through event-driven patterns
-- **State Lifecycle Testing**: Full debug session lifecycle validation from initialization through termination
+### Cross-Platform Validation
+Tests ensure adapter policies work correctly across different operating systems and architectures through:
+- Platform simulation for Windows, macOS, and Linux scenarios
+- Architecture-specific binary resolution testing
+- Executable validation across different file system layouts
 
-### Quality Assurance Coverage
-- **DAP Protocol Compliance**: Command queueing, state transitions, and reverse debugging request handling
-- **Language Integration**: JavaScript Node.js internal filtering and Rust Cargo toolchain integration
-- **Infrastructure Robustness**: Adapter spawning, environment configuration, and error recovery mechanisms
-- **Cross-Platform Compatibility**: Platform-specific path resolution and process management
+### DAP Protocol Compliance
+All tests validate adherence to the Visual Studio Code Debug Adapter Protocol using `@vscode/debugprotocol` types, ensuring proper:
+- Command queue management and message sequencing
+- Session state tracking through initialization phases
+- Variable and stack frame data structure compliance
 
-## Public API Validation
-Tests validate the public interfaces of:
-- `JsDebugAdapterPolicy` for JavaScript/Node.js debugging sessions
-- `RustAdapterPolicy` for Rust debugging via CodeLLDB
-- Debug session management and DAP command queue coordination
-- Variable extraction and stack frame filtering capabilities
+## Core Functionality Areas
 
-## System Integration Points
-Ensures proper integration with:
-- VSCode Debug Adapter Protocol specifications
-- Platform-specific debugger binaries (Node.js debugger, CodeLLDB)
-- External build systems (Cargo for Rust projects)
-- Cross-platform file system and process APIs
+### Variable Management System
+Tests validate sophisticated variable extraction and filtering capabilities:
+- Local variable extraction with configurable internal variable filtering
+- Debugger-specific variable exclusion (e.g., `this`, `__proto__` in JavaScript)
+- Stack frame processing with fallback mechanisms for incomplete data
 
-This test directory serves as the quality gate ensuring the shared debugging infrastructure maintains protocol compliance, cross-platform compatibility, and robust error handling across all supported programming languages.
+### Executable and Process Management
+Comprehensive testing of adapter binary discovery and process spawning:
+- Environment variable-based executable resolution
+- Binary validation through version checking and file access verification
+- Adapter process configuration and child session management
+
+### Language-Specific Debug Features
+Each language adapter is tested for its unique debugging characteristics:
+- **JavaScript**: Node.js internal frame filtering, pending target attachment handling
+- **Rust**: Cargo workspace integration, CodeLLDB adapter configuration
+
+## Public API Surface
+
+The test suite validates the key public methods that form the adapter policy interface:
+- `extractLocalVariables()` - Variable filtering and data extraction
+- `buildChildStartArgs()` - Debug session configuration building
+- `filterStackFrames()` - Stack trace processing and cleanup
+- `matchesAdapter()` - Language/adapter identification logic
+- `getAdapterSpawnConfig()` - Process spawning configuration
+- `validateExecutable()` - Binary validation and verification
+- `resolveExecutablePath()` - Executable location resolution
+
+## Integration Role
+
+This test suite validates the critical adapter policy layer that bridges the MCP debugging framework with language-specific debug adapters. It ensures proper abstraction of DAP protocol complexities while providing language-specific debugging capabilities through a unified interface. The tests guarantee that the adapter policies correctly translate between the framework's generic debugging operations and the specialized requirements of each supported programming language's debug tooling.

@@ -1,57 +1,73 @@
 # scripts/setup/
-@generated: 2026-02-10T21:26:19Z
+@generated: 2026-02-11T23:47:40Z
 
-## Overall Purpose
+## Overall Purpose and Responsibility
 
-The `scripts/setup` directory contains platform-specific environment configuration scripts for the mcp-debugger project. This module is responsible for automating the complex setup process required for Rust debugging across different operating systems, ensuring all necessary toolchains, dependencies, and development tools are properly installed and configured.
+The `scripts/setup` directory contains platform-specific environment setup automation for the mcp-debugger project. This module is responsible for bootstrapping complete development and debugging environments across different operating systems, ensuring all necessary toolchains, dependencies, and configurations are properly installed and configured.
 
-## Key Components
+## Key Components and Architecture
 
-**windows-rust-debug.ps1** - A comprehensive Windows PowerShell script that serves as the primary setup automation for Windows development environments. This script handles the complete configuration pipeline from toolchain installation through smoke testing.
+**Windows Setup Infrastructure (`windows-rust-debug.ps1`)**:
+- PowerShell-based automation for Windows environments
+- Comprehensive Rust toolchain management with GNU/MSVC dual-target support
+- MSYS2/MinGW-w64 integration for native Windows debugging capabilities
+- Automated dependency resolution and installation via winget/pacman
+- Environment persistence and PATH management
+
+**Core Setup Workflow**:
+1. **Environment Validation**: Verifies platform requirements and existing installations
+2. **Toolchain Installation**: Installs and configures Rust toolchains (stable-gnu primary, MSVC fallback)
+3. **Debugging Tools Setup**: Configures GNU toolchain (dlltool, gcc, ld, as) for debugging support
+4. **Dependency Management**: Ensures MSYS2 and MinGW-w64 availability through automated installation
+5. **Validation Testing**: Builds example projects and runs smoke tests to verify setup
 
 ## Public API Surface
 
-**Main Entry Points:**
-- `windows-rust-debug.ps1` - Primary Windows setup script with configurable parameters:
+**Primary Entry Points**:
+- `windows-rust-debug.ps1`: Main Windows setup script with configurable parameters
   - `-UpdateUserPath`: Persists environment changes to user profile
-  - `-SkipBuild`: Bypasses example project compilation
-  - `-SkipTests`: Skips smoke test execution
+  - `-SkipBuild`: Bypasses example project compilation for faster setup
+  - `-SkipTests`: Skips validation testing for minimal installations
 
-**Core Functions Available:**
-- `Write-Section`: Standardized output formatting for setup progress
-- `Invoke-CommandChecked`: Robust command execution with error handling
-- `Build-ExampleProject`: Rust project compilation with fallback strategies
+**Key Utility Functions**:
+- `Invoke-CommandChecked`: Robust command execution with error handling and environment support
+- `Ensure-Msys2`: Automated MSYS2 detection and installation orchestration
+- `Ensure-MingwToolchain`: MinGW-w64 toolchain installation and validation
+- `Build-ExampleProject`: Multi-target Rust project building with fallback support
 
 ## Internal Organization and Data Flow
 
-The setup process follows a structured pipeline:
+**Dependency Chain**:
+```
+Platform Detection → Rust Toolchain → GNU Tools → MSYS2/MinGW → Environment Config → Validation
+```
 
-1. **Environment Validation** - Checks Windows compatibility and prerequisites
-2. **Toolchain Installation** - Installs and configures Rust toolchains (stable-gnu, stable-msvc)
-3. **GNU Tooling Configuration** - Sets up dlltool.exe and MSYS2/MinGW-w64 toolchain
-4. **Path Management** - Configures environment variables and PATH entries
-5. **Project Compilation** - Builds example Rust projects with GNU/MSVC fallback
-6. **Smoke Testing** - Validates setup through pnpm/vitest test execution
+**Configuration Management**:
+- Environment variable setup (DLLTOOL, PATH modifications)
+- Toolchain preference ordering (GNU primary, MSVC secondary)
+- Persistent vs. session-only configuration options
 
-Data flows from environment detection through progressive toolchain setup, culminating in validation through actual project builds and test execution.
+**Error Handling Strategy**:
+- Graceful degradation for non-critical components
+- Comprehensive validation at each setup stage
+- Fallback mechanisms for toolchain selection
 
 ## Important Patterns and Conventions
 
-**Error Handling Strategy**: Implements graceful degradation with fallback mechanisms - GNU toolchain failures fall back to MSVC, non-critical component failures (like MSYS2 installation) don't abort the entire setup process.
+**Cross-Platform Preparation**: Directory structure designed to accommodate additional platform-specific setup scripts (Linux, macOS) following the Windows PowerShell model.
 
-**Environment Management**: Follows a pattern of detection → installation → configuration → validation for each component, with optional persistence of changes to user environment.
+**Robust Automation**: 
+- Idempotent operations that can be safely re-run
+- Comprehensive error checking with meaningful diagnostics
+- Automatic detection of existing installations to avoid conflicts
 
-**Cross-Platform Preparation**: The directory structure suggests this is part of a larger cross-platform setup system, with the Windows script serving as a template for similar platform-specific setup automation.
+**Development Workflow Integration**:
+- Validates setup through actual project builds
+- Integrates with existing npm/pnpm test infrastructure
+- Supports both minimal and full development environment configurations
 
-**Modular Design**: Functions are designed for reusability and independent operation, allowing for partial setup execution and easier maintenance.
-
-## Dependencies and Integration
-
-**External Dependencies:**
-- rustup (Rust toolchain management)
-- MSYS2/MinGW-w64 (GNU toolchain)
-- winget (Windows package management)
-- pnpm (Node.js package management)
-- cargo (Rust build system)
-
-**Integration Points**: The setup scripts integrate with the broader mcp-debugger project by preparing the environment for debugging Rust applications, ensuring all necessary toolchains are available for both development and testing workflows.
+**Target Use Cases**:
+- New developer onboarding
+- CI/CD environment preparation  
+- Debugging environment standardization across development teams
+- Automated testing infrastructure setup

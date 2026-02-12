@@ -1,66 +1,64 @@
 # packages/shared/tests/unit/
-@generated: 2026-02-10T21:26:13Z
+@generated: 2026-02-11T23:47:39Z
 
 ## Purpose
-This directory contains comprehensive unit tests for language-specific debug adapter policies within the shared debugging infrastructure. It validates the Debug Adapter Protocol (DAP) implementation for JavaScript/Node.js and Rust debugging environments.
+This directory contains comprehensive unit tests for language-specific Debug Adapter Protocol (DAP) policies within the MCP debugging framework. It validates the behavior of adapter policy implementations that manage debugging sessions for different programming languages through standardized DAP communication.
 
 ## Key Components
 
-### JavaScript Debug Adapter Tests (`adapter-policy-js.spec.ts`)
-- Tests `JsDebugAdapterPolicy` class for JavaScript/Node.js debugging sessions
-- Validates DAP command queue management and initialization flows
-- Tests stack frame filtering to hide Node.js internals
-- Verifies variable extraction from debug scopes
-- Tests adapter detection and spawning configuration
-
-### Rust Debug Adapter Tests (`adapter-policy-rust.test.ts`)  
-- Tests `RustAdapterPolicy` class for Rust debugging via CodeLLDB
-- Validates executable resolution and binary validation through Cargo
-- Tests platform-specific adapter configuration and spawning
-- Verifies variable filtering and state management
+### Language-Specific Adapter Policy Tests
+- **JavaScript/Node.js Policy Tests** (`adapter-policy-js.spec.ts`): Tests `JsDebugAdapterPolicy` class functionality including child process management, stack frame filtering, variable extraction, and DAP command queue handling
+- **Rust Policy Tests** (`adapter-policy-rust.test.ts`): Tests `RustAdapterPolicy` class covering executable resolution/validation, variable filtering, state management, and CodeLLDB adapter integration
 
 ## Testing Architecture
 
-### Common Test Patterns
-- **Mock Strategy**: Extensive use of vitest mocking for file system, child processes, and external dependencies
-- **Platform Testing**: Cross-platform validation with temporary platform overrides
-- **State Management**: Tests for debug session lifecycle and DAP protocol compliance
-- **Error Handling**: Both positive and edge case validation
+### Common Testing Patterns
+- **Mock Strategy**: Extensive use of vitest mocking for file system access, child processes, and external dependencies
+- **Cross-Platform Testing**: Platform simulation via `process.platform`/`process.arch` manipulation for comprehensive coverage
+- **DAP Protocol Compliance**: Uses `@vscode/debugprotocol` types to ensure proper Debug Adapter Protocol adherence
+- **State Management Validation**: Tests complex state transitions during debug session lifecycle
 
 ### Shared Test Utilities
-- Mock DebugProtocol object creation for stack frames and variables
-- Platform simulation helpers for cross-platform testing
-- Child process mocking for adapter spawn testing
-- Event-driven testing patterns for asynchronous operations
+- Mock object creation helpers for DebugProtocol types (StackFrame, Variables)
+- Platform switching utilities for cross-platform test scenarios
+- Child process simulation via EventEmitter for spawn behavior testing
+- State transition validation helpers
 
-## Key Testing Areas
+## Core Functionality Areas
 
-### DAP Protocol Compliance
-- Command queueing and ordering (initialize → configure → launch)
-- State transitions during debug session lifecycle
-- Reverse debugging request handling
-- Adapter ID normalization and matching
+### Variable Management
+- Local variable extraction with filtering of internal/special variables (`this`, `__proto__`)
+- Configurable inclusion/exclusion of debugger internals
+- Stack frame processing with fallback mechanisms
+
+### Executable & Process Management
+- Adapter process spawning configuration and validation
+- Executable path resolution through environment variables and inputs
+- Binary validation via version checking and file access verification
+
+### DAP Protocol Handling
+- Command queue management with proper initialization flow
+- Configuration deferral and runtime injection capabilities
+- Adapter identification and matching logic
+- Session state tracking and readiness determination
 
 ### Language-Specific Features
-- **JavaScript**: Node.js internal frame filtering, variable scope handling
-- **Rust**: Cargo integration, CodeLLDB adapter configuration, binary validation
-
-### Infrastructure Validation  
-- Adapter process spawning and configuration
-- Environment variable handling and path resolution
-- Network settings and connection management
-- Error propagation and recovery mechanisms
+- **JavaScript**: Node.js internal frame filtering, js-debug adapter integration, pending target attachment
+- **Rust**: Cargo toolchain integration, CodeLLDB adapter configuration, platform-specific binary handling
 
 ## Integration Points
-Tests validate integration with:
-- `@vscode/debugprotocol` for DAP type definitions
-- `@debugmcp/shared` for session state management
-- Platform-specific file system and process APIs
-- External debugger binaries and toolchains
+These tests validate the adapter policy layer that sits between the MCP debugging framework and language-specific debug adapters, ensuring proper:
+- DAP command translation and queueing
+- Session state management across initialization phases
+- Language-specific debugging feature support
+- Cross-platform compatibility and adapter discovery
 
-## Quality Assurance
-Provides comprehensive test coverage for debug adapter policies ensuring:
-- Robust DAP protocol implementation
-- Cross-platform compatibility
-- Proper error handling and state management  
-- Language-specific debugging feature validation
+## Public API Testing
+The tests validate public methods exposed by adapter policy classes:
+- `extractLocalVariables()` - Variable filtering and extraction
+- `buildChildStartArgs()` - Child session configuration
+- `filterStackFrames()` - Stack trace processing
+- `matchesAdapter()` - Adapter identification
+- `getAdapterSpawnConfig()` - Process spawning setup
+- `validateExecutable()` - Binary validation
+- `resolveExecutablePath()` - Executable location

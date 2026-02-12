@@ -1,70 +1,64 @@
 # tests/adapters/go/unit/
-@generated: 2026-02-10T21:26:22Z
+@generated: 2026-02-11T23:47:40Z
 
 ## Overall Purpose and Responsibility
 
-This directory contains comprehensive unit tests for the Go debug adapter implementation within the debugmcp ecosystem. The test suite validates the complete functionality of Go/Delve debugger integration, ensuring proper adapter lifecycle management, environment validation, and debug session orchestration.
+This directory contains comprehensive unit tests for the Go debug adapter implementation, validating the complete lifecycle and functionality of Go/Delve debugger integration. The test suite ensures proper environment validation, adapter state management, tool discovery, and Debug Adapter Protocol (DAP) compatibility for Go debugging workflows.
 
 ## Key Components and Relationships
 
-The test suite is organized around three core components that work together to provide Go debugging capabilities:
+### GoAdapterFactory Tests (`go-adapter-factory.test.ts`)
+- **Factory Pattern Validation**: Tests creation and instantiation of GoDebugAdapter instances
+- **Environment Prerequisites**: Validates Go (≥1.18) and Delve debugger installation requirements
+- **Metadata Verification**: Tests adapter identity, versioning (0.1.0), and file associations (.go)
+- **Validation Pipeline**: Comprehensive testing of environment setup including platform info and DAP support
 
-### GoAdapterFactory Testing (`go-adapter-factory.test.ts`)
-- **Role**: Factory pattern implementation for Go adapter instantiation
-- **Validation**: Tests adapter creation, metadata retrieval, and comprehensive environment validation
-- **Environment Checks**: Validates Go binary availability, minimum version requirements (1.18+), Delve debugger installation, and DAP support
-- **Dependencies**: Ensures both Go toolchain and Delve debugger are properly configured
+### GoDebugAdapter Tests (`go-debug-adapter.test.ts`) 
+- **Lifecycle Management**: Tests complete adapter state transitions (INITIALIZING → READY → CONNECTED → DISPOSED)
+- **Event-Driven Architecture**: Validates event emission for initialization, connection, and disposal
+- **Feature Capabilities**: Tests DAP feature support including breakpoints, log points, and Go-specific exception handling
+- **Configuration Transform**: Tests conversion of generic debug configs to Go-specific launch parameters
+- **Error Translation**: Human-readable error message generation for common failure scenarios
 
-### GoDebugAdapter Testing (`go-debug-adapter.test.ts`)
-- **Role**: Core adapter implementation managing debug session lifecycle
-- **State Management**: Tests adapter state transitions (INIT → READY → CONNECTED → DISCONNECTED)
-- **Capabilities**: Validates DAP (Debug Adapter Protocol) feature support including breakpoints, log points, and Go-specific exception handling
-- **Configuration**: Tests launch configuration transformation from generic to Go-specific parameters
+### Utilities Tests (`go-utils.test.ts`)
+- **Tool Discovery**: Platform-aware testing of Go and Delve executable location
+- **Version Management**: Parsing and validation of Go/Delve version strings
+- **Platform Integration**: Cross-platform path resolution with GOPATH/GOBIN support
+- **DAP Support Detection**: Verification of Delve Debug Adapter Protocol capabilities
 
-### Go Utilities Testing (`go-utils.test.ts`)
-- **Role**: Platform-specific utility functions for tool discovery and validation
-- **Executable Discovery**: Tests Go and Delve binary resolution across different search paths (PATH, GOPATH, custom locations)
-- **Version Management**: Validates version parsing for both Go and Delve with format normalization
-- **Platform Support**: Handles cross-platform considerations for Windows, Linux, and macOS
+## Testing Architecture and Patterns
 
-## Public API Surface and Entry Points
+### Mock Infrastructure
+- **Process Isolation**: Comprehensive `child_process.spawn` mocking using EventEmitter patterns
+- **File System Mocking**: `fs.promises.access` simulation for tool availability checks
+- **Environment Control**: Platform stubbing and environment variable manipulation with cleanup
+- **Dependency Injection**: `createMockDependencies()` factory for consistent test setup
 
-The test suite validates these main entry points:
-- **GoAdapterFactory.createAdapter()**: Primary adapter instantiation
-- **GoAdapterFactory.getMetadata()**: Adapter information and capabilities
-- **GoAdapterFactory.validate()**: Environment prerequisite validation
-- **GoDebugAdapter lifecycle methods**: init(), dispose(), connect(), disconnect()
-- **Utility functions**: findGoExecutable(), findDelveExecutable(), version parsing, and DAP support detection
+### Test Organization
+- **State-Based Testing**: Validation of adapter state machines and transitions
+- **Error Boundary Coverage**: Systematic testing of failure modes and recovery
+- **Platform Awareness**: Current platform testing to avoid cross-platform mocking complexity
+- **Event-Driven Verification**: Async event emission and handling validation
+
+## Public API Surface Validation
+
+The test suite validates these key entry points:
+- **GoAdapterFactory.createAdapter()**: Factory method for adapter instantiation
+- **GoAdapterFactory.validate()**: Environment prerequisite checking
+- **GoDebugAdapter lifecycle methods**: initialize(), dispose(), connect(), disconnect()
+- **Utility functions**: Tool discovery, version parsing, and platform path resolution
 
 ## Internal Organization and Data Flow
 
-### Test Infrastructure
-- **Mocking Strategy**: Comprehensive mocking of `child_process.spawn`, file system operations, and environment variables
-- **Test Isolation**: Each test suite uses independent mock setups with proper cleanup
-- **Platform Awareness**: Tests adapt to current platform while maintaining cross-platform compatibility
+1. **Factory Layer**: Environment validation → Adapter creation → Metadata provision
+2. **Adapter Layer**: Initialization → Feature negotiation → State management → Configuration
+3. **Utilities Layer**: Tool discovery → Version verification → Platform integration → DAP support
 
-### Validation Flow
-1. **Environment Discovery**: Tests locate Go and Delve executables through multiple search strategies
-2. **Version Validation**: Ensures minimum Go version requirements and Delve DAP compatibility
-3. **Adapter Lifecycle**: Validates state transitions and event emission throughout debug session lifecycle
-4. **Configuration Processing**: Tests transformation of generic debug configurations to Go-specific parameters
+## Critical Testing Constraints
 
-## Important Patterns and Conventions
+- **Platform Specificity**: Tests execute only on current platform to ensure reliability
+- **Environment Isolation**: Careful cleanup of environment modifications to prevent test pollution
+- **Async Simulation**: `process.nextTick()` based event simulation for realistic process behavior
+- **Mock Lifecycle**: Comprehensive setup/teardown to maintain test independence
 
-### Testing Patterns
-- **EventEmitter Simulation**: Uses EventEmitter pattern to mock child processes with realistic async behavior
-- **Environment Isolation**: Comprehensive backup/restore of environment variables to prevent test pollution
-- **State Transition Testing**: Systematic validation of adapter state changes with proper event emission
-- **Error Boundary Testing**: Thorough testing of failure modes with human-readable error message translation
-
-### Mock Architecture
-- **Process Mocking**: `process.nextTick()` for async event simulation with realistic stdout/stderr data
-- **File System Abstraction**: Mocked `fs.promises.access` for executable discovery testing
-- **Dependency Injection**: Mock factory pattern for `AdapterDependencies` interface
-
-### Platform Considerations
-- **Current Platform Focus**: Tests run only on current platform to avoid unreliable cross-platform mocking
-- **Path Resolution**: Platform-specific handling for Windows vs. Unix-like systems
-- **Home Directory Discovery**: Cross-platform user home directory resolution for GOPATH detection
-
-The test suite ensures the Go debug adapter provides reliable debugging capabilities while maintaining proper integration with the broader debugmcp ecosystem and adhering to the Debug Adapter Protocol specification.
+This test directory ensures the Go debug adapter's reliability across diverse development environments while maintaining strict validation of Go toolchain requirements and DAP protocol compliance.

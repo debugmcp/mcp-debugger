@@ -1,67 +1,64 @@
 # examples/debugging/
-@generated: 2026-02-10T21:26:30Z
+@generated: 2026-02-11T23:47:37Z
 
-## Overall Purpose
+## Overall Purpose and Responsibility
 
-The `examples/debugging` directory provides comprehensive test scripts and examples for validating MCP (Model Context Protocol) debugger functionality across different runtime environments. This module serves as both a testing suite and demonstration package for debugging capabilities in JavaScript and Python environments.
+The `examples/debugging` directory serves as a comprehensive testing and demonstration suite for MCP (Model Context Protocol) debugging capabilities. It provides concrete examples and validation tests for debugging both JavaScript and Python applications through MCP debugger integration.
 
 ## Key Components and Relationships
 
-### Test Scripts for Runtime-Specific Debugging
-- **JavaScript Test Suite**: `test-debug-javascript.js` and `test-sse-fix.js` provide comprehensive JavaScript debugging scenarios including arithmetic operations, array processing, recursion, and object manipulation
-- **Python Test Suite**: `test-debug-python.py` offers similar debugging patterns adapted for Python runtime with list processing and function orchestration
-- **SSE Integration Test**: `test-sse-js-debug-fix.js` validates critical timing fixes in Server-Sent Events debugging infrastructure
+### Test Target Scripts
+- **test-debug-javascript.js**: Comprehensive JavaScript debugging target with multiple scenarios (arithmetic, arrays, recursion, objects)
+- **test-debug-python.py**: Python equivalent providing similar debugging scenarios with clear tracing
+- **test-sse-fix.js**: Minimal JavaScript target for basic breakpoint testing
 
-### Debugging Pattern Demonstrations
-All test scripts follow consistent patterns designed for debugger validation:
-- Extensive logging/print statements for execution tracing
-- Multiple data types (primitives, arrays/lists, objects) for variable inspection
-- Clear function boundaries for breakpoint placement
-- Predictable execution flows suitable for step-through debugging
+### Integration Test Suite
+- **test-sse-js-debug-fix.js**: Critical integration test that validates the fix for a timing bug in SSE-based JavaScript debugging where `stackTrace` was called before debug sessions were fully initialized
 
-## Public API Surface
+## Public API Surface and Entry Points
 
-### Entry Points for Testing
-- **JavaScript Runtime Testing**: Execute `test-debug-javascript.js` or `test-sse-fix.js` for basic debugging validation
-- **Python Runtime Testing**: Execute `test-debug-python.py` for Python-specific debugging scenarios
-- **Integration Testing**: Run `test-sse-js-debug-fix.js` for comprehensive SSE debugging validation including server lifecycle management
+### Direct Execution Scripts
+- `test-debug-javascript.js` and `test-debug-python.py`: Standalone scripts that can be executed directly to provide debugging targets with extensive console output for observation
+- `test-sse-fix.js`: Simple breakpoint testing target
 
-### Key Testing Functions
-- **Arithmetic Operations**: Basic calculation functions across all scripts for simple breakpoint testing
-- **Data Structure Processing**: Array/list iteration with enumerated logging for complex state inspection
-- **Recursive Functions**: Fibonacci implementation in JavaScript for call stack analysis
-- **Object/Data Manipulation**: Result aggregation patterns for multi-variable debugging scenarios
+### Integration Test Entry
+- `test-sse-js-debug-fix.js`: Main validation script that:
+  - Spawns MCP SSE server instances
+  - Creates MCP client connections
+  - Performs complete debugging workflow testing
+  - Validates timing-critical operations like immediate stack trace calls
 
 ## Internal Organization and Data Flow
 
-### Test Execution Architecture
-1. **Setup Phase**: Initialize test data and runtime environment
-2. **Execution Phase**: Run computational scenarios with extensive logging
-3. **Aggregation Phase**: Combine results into structured output
-4. **Validation Phase**: Verify expected outcomes and debugging visibility
+### Debugging Target Pattern
+1. **Setup Phase**: Variable initialization and function definitions
+2. **Execution Phase**: Step-through operations with extensive logging
+3. **Return Phase**: Result aggregation and final output
 
-### SSE Integration Testing Flow
-1. **Server Lifecycle**: Spawn SSE server process and wait for availability
-2. **Client Setup**: Establish MCP client connection via SSEClientTransport
-3. **Debug Session Management**: Create debug sessions and configure breakpoints
-4. **Critical Timing Tests**: Validate stack trace availability immediately after session creation
-5. **Cleanup**: Graceful shutdown of all resources with error handling
+### Integration Test Flow
+1. **Server Lifecycle**: SSE server spawn → port availability wait → client connection
+2. **Debug Session**: Session creation → breakpoint setup → debugging start
+3. **Critical Timing Test**: Immediate stack trace/variable calls (validates timing fix)
+4. **Cleanup**: Graceful client closure → server termination
 
 ## Important Patterns and Conventions
 
-### Debugging-Optimized Design
-- **Verbose Logging**: All scripts include comprehensive console output for execution visibility
-- **Predictable Control Flow**: Linear execution paths with clear function boundaries
-- **Mixed Data Types**: Deliberate use of different data structures for comprehensive variable inspection
-- **Hard-coded Test Values**: Consistent, predictable inputs for reliable debugging behavior
+### Debugging Instrumentation
+- Heavy use of console.log/print statements at operation boundaries
+- Explicit variable naming for easy inspector visibility
+- Clear function separation for breakpoint placement
+- Mixed data types (primitives, collections, objects) for comprehensive testing
 
-### Error Handling and Resource Management
-- Comprehensive try-catch blocks with guaranteed cleanup (especially in SSE integration tests)
-- Port availability checking and server lifecycle management
-- Graceful degradation and error reporting for debugging tool validation
+### Error Handling and Resilience
+- Comprehensive try-catch blocks with guaranteed cleanup
+- Graceful degradation with fallback termination strategies
+- Timeout mechanisms for network operations
+- Error suppression during cleanup to prevent cascade failures
 
-### Cross-Runtime Consistency
-- Similar computational patterns implemented across JavaScript and Python for consistent debugging experience
-- Parallel function structures (calculate_sum/calculateProduct, processArray/process_list) for cross-language debugging validation
+### Testing Architecture
+- Fixed ports (3100) and file paths for reproducible testing
+- Immediate validation of critical operations (timing-sensitive calls)
+- Process isolation using child_process spawning
+- Both positive path testing and edge case validation
 
-This module enables comprehensive validation of MCP debugger functionality while providing clear examples of debugging-friendly code patterns for both development and testing purposes.
+This directory represents the quality assurance foundation for MCP debugging capabilities, providing both simple targets for manual testing and automated validation of critical timing-sensitive debugging operations.

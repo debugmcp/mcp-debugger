@@ -1,6 +1,15 @@
 {
   "source": "packages/shared/src/models/index.ts",
-  "source_hash": "e8cc72868be7359c",
-  "generated": "2026-02-10T00:41:14Z",
-  "findings": []
+  "source_hash": "7b495d7251f1ec83",
+  "generated": "2026-02-11T16:13:00Z",
+  "findings": [
+    {
+      "category": "stale_comment",
+      "line_start": 12,
+      "line_end": 12,
+      "severity": "warning",
+      "description": "Comment mentions adding 'console, cwd, env' but cwd and env are already present in GenericAttachConfig",
+      "suggestion": "Update comment to reflect current state or remove if no longer needed"
+    }
+  ]
 }

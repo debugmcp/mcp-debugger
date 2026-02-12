@@ -1,40 +1,44 @@
 # tests/unit/utils/simple-file-checker.spec.ts
-@source-hash: 39a266bc20945734
-@generated: 2026-02-10T00:41:36Z
+@source-hash: d147bd04f1c94c94
+@generated: 2026-02-11T16:12:52Z
 
-## Purpose
-Unit test suite for `SimpleFileChecker` utility that validates file existence checking with different path handling behaviors in host vs container environments.
+Unit test suite for the SimpleFileChecker utility class - a path-checking component with dual operation modes (host vs container).
 
-## Test Structure
-- **Main test suite (L8-165)**: `SimpleFileChecker` with comprehensive mocking setup
-- **Setup (L14-48)**: Creates mocks for `IFileSystem`, `IEnvironment`, and logger with all required interface methods
-- **Host Mode tests (L50-100)**: Tests behavior when not in container mode
-- **Container Mode tests (L102-157)**: Tests path prefixing behavior in containerized environment
-- **Factory function tests (L159-164)**: Validates factory pattern implementation
+## Core Test Structure
 
-## Key Test Scenarios
+**Main Test Suite Setup (L8-48)**: Comprehensive test harness with mocked dependencies:
+- `mockFileSystem` (L16-32): Mock IFileSystem interface with all standard file operations
+- `mockEnvironment` (L35-39): Mock IEnvironment with environment variable access
+- `mockLogger` (L42-44): Mock logger with debug method
+- Test instance creation using constructor (L47)
 
-### Host Mode Behavior (L50-100)
-- **File existence check (L56-69)**: Verifies direct path usage without manipulation
-- **Non-existent files (L71-83)**: Tests negative case handling
-- **System errors (L85-99)**: Tests error handling with proper error message formatting
+## Test Scenarios
 
-### Container Mode Behavior (L102-157)
-- **Environment setup (L103-110)**: Mocks `MCP_CONTAINER=true` and `MCP_WORKSPACE_ROOT=/workspace`
-- **Relative path prefixing (L112-125)**: Tests `/workspace/` prefix addition to relative paths
-- **Absolute path handling (L127-140)**: Tests double prefixing behavior (intentional design)
-- **Path format agnostic (L142-156)**: Tests that Windows-style paths get simple prefix without interpretation
+**Host Mode Tests (L50-115)**: Tests behavior when not running in container:
+- Environment mock setup returns `undefined` for container detection (L52-54)
+- File existence checking without path manipulation (L56-69)
+- Non-existent file handling (L71-83) 
+- System error handling with error message formatting (L85-99)
+- Relative path rejection with validation error (L101-114)
+
+**Container Mode Tests (L117-172)**: Tests container-specific path handling:
+- Environment mock returns `MCP_CONTAINER='true'` and `MCP_WORKSPACE_ROOT='/workspace'` (L119-125)
+- Relative path transformation by prepending `/workspace/` (L127-140)
+- Always prepends workspace root, even to absolute paths (L142-155)
+- Raw path handling without interpretation for Windows-like paths (L157-171)
+
+**Factory Function Test (L174-179)**: Validates the `createSimpleFileChecker` factory function.
+
+## Key Testing Patterns
+
+The tests demonstrate a "hands-off" approach with simple path manipulation rules:
+- Host mode: No path transformation, absolute paths required
+- Container mode: Always prepend workspace root regardless of input path format
+- No intelligent path parsing or OS-specific handling
 
 ## Dependencies
-- **Testing framework**: Vitest with mocking capabilities
-- **Source imports**: 
-  - `SimpleFileChecker`, `createSimpleFileChecker` from `src/utils/simple-file-checker.js`
-  - Interface types from `src/interfaces/external-dependencies.js`
 
-## Mock Strategy
-Comprehensive interface mocking with all `IFileSystem` methods (L16-32) and `IEnvironment` methods (L35-39), ensuring isolated testing without real file system access.
-
-## Critical Test Insights
-- Container mode always prepends `/workspace/` regardless of input path format (L137-139)
-- No path interpretation or normalization - purely additive prefixing approach
-- Error handling wraps system errors in descriptive messages (L97)
+Imports from:
+- `vitest` testing framework (L4)
+- Main implementation: `SimpleFileChecker`, `createSimpleFileChecker` (L5)
+- Interface definitions: `IFileSystem`, `IEnvironment` (L6)

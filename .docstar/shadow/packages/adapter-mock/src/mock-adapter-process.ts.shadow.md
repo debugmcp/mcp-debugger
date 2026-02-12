@@ -1,76 +1,56 @@
 # packages/adapter-mock/src/mock-adapter-process.ts
-@source-hash: 478c902562832db2
-@generated: 2026-02-10T00:41:36Z
+@source-hash: af712d113d12d66d
+@generated: 2026-02-11T16:12:56Z
 
-## Primary Purpose
-Mock Debug Adapter Process that simulates a DAP (Debug Adapter Protocol) server for testing. Provides a complete DAP implementation that can communicate via stdin/stdout or TCP, handling all standard debugging operations with simulated responses.
+This file implements a mock Debug Adapter Protocol (DAP) server for testing purposes. It can communicate via stdin/stdout or TCP, simulating a complete debugging session with breakpoints, stepping, and variable inspection.
 
-## Key Components
+## Architecture & Core Components
 
-### DAPConnection (L16-86)
-Low-level DAP protocol handler managing message parsing and transport.
-- **Constructor (L19-22)**: Configures input/output streams (defaults to stdin/stdout)
-- **start() (L24-28)**: Initiates message listening on input stream
-- **on() (L31-38)**: Event registration for 'request' and 'disconnect' events
-- **processMessages() (L50-79)**: Parses Content-Length headers and extracts JSON messages
-- **sendMessage() (L81-85)**: Formats and sends DAP protocol messages with proper headers
-- **messageBuffer (L17)**: Accumulates partial messages during parsing
+**DAPConnection (L16-86)**: Lightweight DAP protocol implementation handling message parsing and transport
+- Manages buffered message parsing with Content-Length headers (L50-78)
+- Supports both stdio and TCP socket communication
+- Provides event-driven interface for requests and disconnections
 
-### MockDebugAdapterProcess (L95-768)
-Main debug adapter implementation with comprehensive DAP command support.
+**MockDebugAdapterProcess (L95-787)**: Main mock debug server implementation
+- Command-line argument parsing for TCP mode (--port, --host, --session) (L107-128)
+- Maintains debug session state: breakpoints, variables, execution position (L98-104)
+- Comprehensive DAP request handler with 16 supported commands (L190-260)
 
-#### Core State Management (L98-104)
-- **breakpoints (L99)**: Map of file paths to breakpoint arrays
-- **variableHandles (L100)**: Maps variable references to scope data
-- **currentLine (L102)**: Simulated execution position
-- **isRunning/isInitialized (L98, L103)**: Execution state tracking
+## Key Protocol Handlers
 
-#### Command Line Processing (L107-141)
-Parses `--port`, `--host`, `--session` arguments to configure transport mode (TCP vs stdio).
+**Session Management**:
+- `handleInitialize` (L263-318): Returns full capability set, sends initialized event
+- `handleLaunch` (L330-401): Supports stopOnEntry, simulates breakpoint execution
+- `handleConfigurationDone` (L320-328): Completes initialization handshake
 
-#### Transport Setup
-- **setupTCPServer() (L144-171)**: Creates TCP server for remote connections with client reconnection support
-- **setupConnection() (L173-183)**: Configures message handlers and disconnect behavior
+**Execution Control**:
+- `handleContinue` (L560-622): Finds next breakpoint or terminates program
+- `handleNext/StepIn/StepOut` (L624-693): Step operations with simulated delays
+- `handlePause` (L695-716): Immediate pause with stopped event
 
-#### DAP Command Handlers (L190-731)
-Complete implementation of standard DAP commands:
-- **handleInitialize() (L259-314)**: Returns capability negotiation with extensive feature flags
-- **handleLaunch() (L326-397)**: Simulates program launch with `stopOnEntry` support and automatic breakpoint hitting
-- **handleSetBreakpoints() (L399-426)**: Stores breakpoints and returns verified status
-- **handleStackTrace() (L441-476)**: Returns mock stack frames (`main.mock`, `lib.mock`)
-- **handleScopes() (L478-513)**: Provides "Locals" and "Globals" variable scopes
-- **handleVariables() (L515-539)**: Returns variables for given scope reference
-- **handleContinue() (L541-603)**: Simulates execution with breakpoint detection logic
-- **handleNext/StepIn/StepOut() (L605-674)**: Step operations with immediate stopped events
-- **handlePause() (L676-697)**: Immediate pause simulation
-- **handleDisconnect/Terminate() (L699-731)**: Cleanup and process exit
+**Debug Information**:
+- `handleSetBreakpoints` (L403-430): Stores breakpoints per file path
+- `handleStackTrace` (L445-480): Returns mock stack with main.mock and lib.mock frames
+- `handleScopes/Variables` (L482-543): Provides locals/globals with sample data
 
-#### Variable Management (L763-767)
-- **getOrCreateVariableReference()**: Creates unique references for variable scopes
-- **nextVariableReference (L101)**: Auto-incrementing reference counter starting at 1000
+## State Management
 
-#### Mock Data Generation
-- Provides realistic variable data (locals: x=10, y=20, result=30; globals: __name__, __file__)
-- Simulates multi-frame stack traces with line numbers
-- Implements breakpoint verification and hit simulation
+**Variable System**: Uses reference-based handles (L782-786) for nested variable access
+- Locals: x=10, y=20, result=30 (sample integers)
+- Globals: __name__, __file__ (sample strings)
+
+**Execution State**: Tracks current line number and running status for realistic step behavior
+- Breakpoint navigation logic finds next breakpoint by line number (L576-587)
+- Automatic program termination when no more breakpoints exist
+
+## Communication Modes
+
+**Stdio Mode**: Default, uses process.stdin/stdout for DAP communication
+**TCP Mode**: Creates server on specified host:port, allows reconnections (L144-171)
 
 ## Dependencies
 - `@vscode/debugprotocol`: DAP type definitions
-- `net`: TCP server functionality
-- `path`: File path operations
-- `stream`: Stream abstractions
+- Node.js built-ins: `net`, `path`, `stream`
 
-## Architectural Patterns
-- Command pattern for DAP request handling with explicit handler methods
-- State machine for debugging session lifecycle management  
-- Transport abstraction supporting both stdio and TCP modes
-- Asynchronous event simulation using setTimeout for realistic timing
-
-## Critical Invariants
-- All DAP responses include proper `seq`, `request_seq`, and `command` fields
-- Variable references are unique and persistent within session
-- Breakpoint simulation respects line number ordering
-- Process exits cleanly on disconnect (stdio) but allows reconnection (TCP)
-
-## Usage Context
-Executable process (`#!/usr/bin/env node`) designed for spawning by debug clients or running as standalone TCP server. Logs operations to stderr to avoid protocol interference.
+## Usage Patterns
+Designed for integration testing of DAP clients. Simulates realistic debugging scenarios with configurable breakpoint behavior and variable inspection. All responses include proper DAP message formatting with Content-Length headers.

@@ -1,70 +1,78 @@
 # tests/e2e/comprehensive-mcp-tools.test.ts
-@source-hash: abcd3ac3e7f3b630
-@generated: 2026-02-10T21:25:43Z
+@source-hash: d852b625423a6506
+@generated: 2026-02-11T20:15:09Z
 
-## Comprehensive E2E MCP Debugger Test Suite
+## Comprehensive MCP Debugger E2E Test Suite
 
-**Purpose**: End-to-end integration test that validates all 19 MCP debugger tools across 6 programming languages (Python, JavaScript, Rust, Go, Java, Mock). Generates a detailed PASS/FAIL matrix report for comprehensive debugging server validation.
+This file implements a comprehensive end-to-end test matrix that validates all 19 MCP debugger tools across 5 supported languages (Python, JavaScript, Rust, Go, Mock).
 
-### Core Architecture
+### Core Purpose
+- **Matrix Testing**: Tests every MCP tool against every available language adapter
+- **Result Tracking**: Generates detailed PASS/FAIL/SKIP matrix with timing metrics
+- **Comprehensive Coverage**: Validates complete debug workflow from session creation to closure
 
-**Test Framework**: Vitest-based test suite with MCP client integration
-- **MCP Client Setup** (L127-145): Establishes StdioClientTransport connection to debugger server
-- **Result Tracking System** (L25-41): Records test outcomes with status, timing, and detailed messages
-- **Language Detection** (L60-90): Runtime toolchain availability checking for Rust/Go/Java
+### Key Components
 
-### Key Types & Interfaces
+**Result Tracking System (L25-41)**
+- `ToolResult` interface defines test outcome structure with tool, language, status, detail, and duration
+- `record()` function (L37-41) logs results with colored console output and timing
+- Global `results` array accumulates all test outcomes for final reporting
 
-- **ToolResult** (L27-33): Test result record with tool, language, status, detail, duration
-- **LangDef** (L75-81): Language definition with script paths, breakpoint lines, availability
-- **ToolStatus** (L25): Union type for test outcomes ('PASS' | 'FAIL' | 'SKIP' | 'PENDING')
+**Language Configuration (L70-84)**
+- `LangDef` interface defines language test parameters including script paths and breakpoint lines
+- `LANGUAGES` array (L78-84) configures 5 languages with availability detection
+- Toolchain detection via `hasCommand()` (L57-64) for Rust/Go availability
 
-### Language Configuration
+**Test Infrastructure (L112-158)**
+- MCP client setup with stdio transport to debugger server
+- Session state management with `currentSessionId` tracking
+- Automatic session cleanup in `afterEach` hook
 
-**Supported Languages** (L83-90): 6 language adapters with example scripts
-- Python: `examples/python/simple_test.py` (BP line 8)
-- JavaScript: `examples/javascript/simple_test.js` (BP line 9)  
-- Mock: Uses Python script for testing (BP line 8)
-- Rust: `examples/rust/hello_world/src/main.rs` (BP line 13) - conditional
-- Go: `examples/go/hello_world.go` (BP line 12) - conditional
-- Java: `examples/java/TestJavaDebug.java` (BP line 44) - conditional
+### Test Structure
 
-### Test Tool Coverage
+**Language-Agnostic Tools (L163-195)**
+- `list_supported_languages` - validates available language adapters
+- `list_debug_sessions` - tests session enumeration
 
-**All 19 MCP Tools** (L94-114): Complete debugger API validation
-- Session management: create, list, close
-- Breakpoint operations: set_breakpoint, get_source_context
-- Debug execution: start, step_over/into/out, continue, pause
-- Inspection: get_stack_trace, get_scopes, get_variables, get_local_variables, evaluate_expression
-- Process attachment: attach_to_process, detach_from_process
+**Per-Language Test Matrix (L201-668)**
+- Dynamic test generation for each language in `LANGUAGES` array
+- Conditional skipping for unavailable toolchains (Rust/Go)
+- Session lifecycle tests for basic tools (create, set breakpoint, get source context)
 
-### Test Execution Patterns
+**Full Debug Workflow Tests (L310-501)**
+For real languages (non-mock):
+- Complete debug session lifecycle: create → set breakpoint → start → inspect → step → continue → close
+- Stack frame inspection with `get_stack_trace` (L349-363)
+- Variable inspection via `get_scopes`/`get_variables`/`get_local_variables` (L365-418)
+- Expression evaluation testing simple arithmetic (L420-434)
+- Stepping operations: step_over, step_into, step_out (L436-475)
+- Execution control: continue_execution (L477-487)
 
-**Language-Agnostic Tests** (L169-201): Tools 1 & 3 (list operations) tested once across all languages
+**Mock Adapter Testing (L502-574)**
+- Simplified lifecycle testing without real process execution
+- Tests basic tool responses for mock debugging scenarios
 
-**Per-Language Test Suites** (L207-674): Individual language validation with two workflows:
-1. **Real Language Full Workflow** (L316-507): Complete debug session lifecycle with breakpoint hitting, inspection, stepping, and cleanup
-2. **Mock Adapter Lifecycle** (L510-579): Simplified session testing without real debugging
+**Process Attachment Tools (L576-666)**
+- `pause_execution` - expects "not implemented" response
+- `attach_to_process` - tests connection attempt (expects failure)
+- `detach_from_process` - tests graceful detachment
 
-**Session State Management** (L122-163): Automatic cleanup in afterEach, proper session lifecycle management
+### Reporting System
 
-### Error Handling & Expectations
+**Matrix Summary (L672-715)**
+- `printSummary()` generates comprehensive results matrix
+- Console output with tool×language grid showing PASS/FAIL/SKIP status
+- JSON report generation for external tooling integration
+- Statistical summary with totals by status
 
-**Graceful Failure Handling**: Expected failures for unimplemented features (pause_execution), connection errors (attach_to_process), and mock limitations are treated as PASS results
+### Test Execution Parameters
+- Individual tool timeout: 15-30 seconds
+- Full workflow timeout: 90 seconds
+- Process attachment timeout: 45 seconds
+- Built-in delays for debugger state transitions (2-4 seconds)
 
-**Timeout Configuration**: Generous timeouts (15-90 seconds) for different operation complexities
-
-### Reporting & Output
-
-**Matrix Report Generation** (L678-721): 
-- Console matrix display with visual status indicators (✓/✗/⊘)
-- JSON report export to `comprehensive-test-results.json`
-- Summary statistics (total/pass/fail/skip counts)
-
-**Real-time Progress Logging** (L37-41): Live test result streaming with timing information
-
-### Dependencies
-
-- **MCP SDK**: Client and transport layers for server communication
-- **Utility Functions** (L17): `parseSdkToolResult`, `callToolSafely` from smoke test utils
-- **Node.js Core**: Path, URL, child_process for toolchain detection and file operations
+### Key Dependencies
+- MCP SDK client components for server communication
+- Utility functions from `smoke-test-utils.js` for safe tool calling
+- Example scripts in `examples/` directory for each language
+- Vitest framework for test execution and assertions

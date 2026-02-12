@@ -1,52 +1,47 @@
 # packages/shared/src/models/index.ts
-@source-hash: e8cc72868be7359c
-@generated: 2026-02-10T00:41:14Z
+@source-hash: 7b495d7251f1ec83
+@generated: 2026-02-11T16:13:00Z
 
-## Purpose
-TypeScript module defining core data models for debug session management. Provides type definitions for VS Code Debug Adapter Protocol integration, session state management, and debugging runtime data structures.
+Primary purpose: Core data models and type definitions for debug session management, providing interfaces and enums for debugger operations, session state management, and DAP (Debug Adapter Protocol) integration.
 
-## Key Types and Interfaces
+## Key Interfaces
 
-### Debug Protocol Extensions
-- **CustomLaunchRequestArguments** (L9-13): Extends VS Code DAP with `stopOnEntry` and `justMyCode` flags for enhanced launch control
-- **ProcessIdentifierType** enum (L18-25): Defines process attachment methods - PID, NAME, or REMOTE connection
-- **GenericAttachConfig** (L30-69): Comprehensive attach configuration supporting multiple connection types, source mapping, and extensible language-specific options
+**CustomLaunchRequestArguments (L9-13)**: Extends VSCode's DebugProtocol.LaunchRequestArguments with additional debug-specific options (`stopOnEntry`, `justMyCode`). Designed for extensibility with placeholder comment for future arguments.
 
-### Language and Session Configuration
-- **DebugLanguage** enum (L79-86): Supported languages including Python, JavaScript, Java, Rust, Go, and Mock adapter
-- **SessionConfig** (L189-196): Basic session configuration with language, name, and optional executable path
+**GenericAttachConfig (L30-69)**: Comprehensive interface for attaching to debug processes. Supports three attachment modes via `ProcessIdentifierType`: PID-based (L37-38), name-based (L40-41), and remote debugging (L43-47). Includes common debug options like source mapping, timeouts, and environment configuration. Uses index signature for language-specific extensions.
 
-### State Management (Dual Model)
-**Modern State Model:**
-- **SessionLifecycleState** enum (L91-98): CREATED → ACTIVE → TERMINATED lifecycle
-- **ExecutionState** enum (L104-115): INITIALIZING → RUNNING → PAUSED → TERMINATED/ERROR execution phases
+**DebugSession (L218-241)**: Central session data structure containing session metadata, dual state tracking (legacy `state` + new `sessionLifecycle`/`executionState`), current execution context (`currentFile`, `currentLine`), and active breakpoints as a Map.
 
-**Legacy Compatibility:**
-- **SessionState** enum (L121-136): @deprecated flat state model for backward compatibility
-- **mapLegacyState()** (L141-157): Converts legacy states to modern lifecycle + execution model
-- **mapToLegacyState()** (L162-184): Converts modern state back to legacy format
+**Breakpoint (L200-213)**: Represents debug breakpoints with verification status, conditional expressions, and validation messages from DAP adapters.
 
-### Core Session Data
-- **DebugSession** (L219-242): Complete session state with dual state tracking, location info, timestamps, and breakpoint map
-- **DebugSessionInfo** (L247-254): Lightweight session summary for list operations
-- **Breakpoint** (L201-214): Full breakpoint definition with verification status and conditions
+## Key Enums
 
-### Runtime Debug Data
-- **Variable** (L260-271): Hierarchical variable representation with expandability support
-- **StackFrame** (L276-287): Call stack frame with source location
-- **DebugLocation** (L292-303): Enhanced location info with optional source code context
+**ProcessIdentifierType (L18-25)**: Defines attachment strategies for debuggers - PID, NAME, and REMOTE modes.
+
+**DebugLanguage (L79-85)**: Supported programming languages including MOCK for testing scenarios.
+
+**SessionLifecycleState (L90-97)**: High-level session existence states (CREATED, ACTIVE, TERMINATED).
+
+**ExecutionState (L103-114)**: Detailed execution states within active sessions (INITIALIZING, RUNNING, PAUSED, TERMINATED, ERROR).
+
+**SessionState (L120-135)**: Legacy state enum marked deprecated, maintained for backward compatibility.
+
+## State Management Functions
+
+**mapLegacyState() (L140-156)**: Converts deprecated SessionState values to new dual-state model (SessionLifecycleState + ExecutionState).
+
+**mapToLegacyState() (L161-183)**: Reverse mapping from new state model to legacy SessionState for backward compatibility.
 
 ## Dependencies
-- `@vscode/debugprotocol`: VS Code Debug Adapter Protocol types for DAP compliance
+- `@vscode/debugprotocol`: VSCode Debug Adapter Protocol types (L4)
 
-## Architectural Patterns
-- **State Evolution**: Maintains backward compatibility while transitioning from flat to hierarchical state model
-- **Generic + Specific**: GenericAttachConfig allows language-specific extensions via index signature
-- **Type Safety**: Comprehensive enums and interfaces for all debug operations
-- **Runtime Flexibility**: Variable and StackFrame types support dynamic debugging scenarios
+## Architectural Decisions
+- **Dual State Model**: Separates session lifecycle (existence) from execution state (runtime status) for clearer state management
+- **Language Agnostic Design**: Generic interfaces with language-specific extension points
+- **DAP Integration**: Built on VSCode Debug Adapter Protocol standards
+- **Backward Compatibility**: Maintains deprecated SessionState with mapping functions
 
 ## Critical Constraints
-- SessionLifecycleState and ExecutionState operate independently - ExecutionState only meaningful when lifecycle is ACTIVE
-- Legacy SessionState mapping must maintain exact behavioral compatibility
-- Breakpoint verification status affects debugger behavior
-- Map-based breakpoint storage enables efficient ID-based lookups
+- ExecutionState only meaningful when SessionLifecycleState is ACTIVE (L101)
+- Breakpoints stored as Map for efficient ID-based lookups
+- All timestamp fields use Date objects for consistency

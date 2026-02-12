@@ -1,62 +1,64 @@
 # packages/adapter-mock/tests/
-@generated: 2026-02-10T21:26:30Z
+@generated: 2026-02-11T23:47:52Z
 
-## Purpose & Responsibility
+## Purpose
 
-This directory contains the complete test suite for the MockAdapter package, providing comprehensive validation of the mock debugging infrastructure used throughout the debug adapter ecosystem. The tests ensure the mock adapter properly implements the standard debug adapter interface while providing configurable behavior for development, testing, and demonstration scenarios.
+This directory contains the comprehensive test suite for the mock debug adapter package, providing validation coverage for both the adapter implementation and its factory pattern. The tests ensure the mock adapter properly implements the Debug Adapter Protocol (DAP) while serving as a reliable test double for development and testing scenarios.
 
-## Directory Organization
+## Overall Architecture
 
-The test suite is organized in two layers:
+The test suite is organized into two complementary layers:
 
-- **Root level tests** (`mock-adapter.test.ts`): Integration tests validating package exports and basic factory functionality
-- **Unit test directory** (`unit/`): Comprehensive unit tests covering detailed adapter and factory behavior
+### Integration Tests (`mock-adapter.test.ts`)
+- **Package Export Validation**: Ensures `MockAdapterFactory` and `MockDebugAdapter` are properly exported from the package index
+- **Basic Factory Integration**: Validates the factory can instantiate adapter instances with proper type checking
+- **Smoke Tests**: Provides minimal coverage focusing on package-level integration
 
-## Key Test Components
+### Comprehensive Unit Tests (`unit/` directory)
+- **Factory Testing**: Deep validation of `MockAdapterFactory` including configuration, metadata, and validation logic
+- **Adapter Implementation**: Complete lifecycle testing of `MockDebugAdapter` with state management, error scenarios, and DAP event handling
+- **Mock Infrastructure**: Shared dependency mocking patterns for isolated testing
 
-### Integration Layer
-- **Package Export Validation**: Ensures `MockAdapterFactory` and `MockDebugAdapter` are properly exported and accessible
-- **Factory Integration**: Validates the factory pattern can create adapter instances with correct typing
+## Key Components and Relationships
 
-### Unit Test Layer
-- **`mock-debug-adapter.spec.ts`**: Complete adapter lifecycle testing including initialization, connection management, DAP event handling, state transitions, thread tracking, and configurable error simulation
-- **`mock-adapter-factory.test.ts`**: Factory pattern validation covering adapter creation, metadata exposure, configuration validation, and warning systems
+### Test Structure Flow
+1. **Package-level exports** are validated for basic availability and instantiation
+2. **Factory functionality** is tested for proper adapter creation and configuration validation
+3. **Adapter lifecycle** is thoroughly tested including state transitions (INITIALIZING → READY → CONNECTED → DEBUGGING)
+4. **Error scenarios** are validated through configurable error injection using `MockErrorScenario`
+5. **DAP compliance** is verified through event handling ('stopped', 'terminated') and feature support
 
-## Public API Test Coverage
+### Common Testing Patterns
+- **Mock Dependencies**: Shared `createDependencies()` functions create isolated test environments with stubbed file system, process launcher, environment, and logger interfaces
+- **State Transition Validation**: Event listeners track adapter state changes throughout lifecycle operations
+- **Spy Integration**: Vitest spy functions enable logger validation and method call tracking
+- **Async/Await Patterns**: Proper handling of adapter lifecycle methods and event processing
 
-### MockDebugAdapter Interface
-- **Lifecycle Management**: `initialize()`, `connect()`, `disconnect()` with state transition validation
-- **Protocol Handling**: `handleDapEvent()` for Debug Adapter Protocol events
-- **Feature Support**: `supportsFeature()`, `getFeatureRequirements()` with configurable capabilities
-- **Error Management**: Installation instruction mapping and filesystem error translation
-- **State Tracking**: INITIALIZING → READY → CONNECTED → DEBUGGING state machine validation
+## Public API Coverage
 
-### MockAdapterFactory Interface
-- **Adapter Creation**: Custom configuration support (supportedFeatures, defaultDelay, errorProbability)
-- **Metadata API**: Language type, display name, version, and file extension information
-- **Configuration Validation**: Warning system for performance threshold violations
-- **Convenience Methods**: `createMockAdapterFactory()` helper function testing
+The test suite validates the complete public interface:
 
-## Test Infrastructure & Patterns
+### Factory Interface
+- `MockAdapterFactory` constructor with configuration options (supportedFeatures, defaultDelay)
+- `createMockAdapterFactory` convenience helper function
+- Metadata reporting (language type, display name, version, file extensions)
+- Configuration validation with warnings for problematic settings
 
-### Shared Testing Utilities
-- **Dependency Injection**: `createDependencies()` pattern providing consistent mock objects for file system, process launcher, environment, and logger interfaces
-- **State Transition Testing**: Event-driven validation using async/await patterns and event listeners
-- **Error Scenario Simulation**: MockErrorScenario enumeration for testing various failure conditions
+### Adapter Interface
+- Standard debug adapter lifecycle methods (initialize, connect, disconnect)
+- State management and transition events
+- DAP event processing and handling
+- Feature support querying and dynamic configuration
+- Error scenario simulation for negative testing
 
-### Quality Assurance Patterns
-- **Boundary Testing**: Configuration validation warnings for errorProbability > 0.8 and defaultDelay > 2500ms
-- **Interface Compliance**: Type satisfaction testing ensuring proper adapter interface implementation
-- **Error Coverage**: Connection timeouts, executable not found, and configuration validation scenarios
+## Integration with Broader System
 
-## Integration with Debug Adapter Ecosystem
+This test directory ensures the mock adapter maintains compatibility with the shared debug adapter interfaces from `@debugmcp/shared`, validating that it can serve as a drop-in replacement for real adapters during development and testing. The comprehensive coverage provides confidence that the mock adapter behaves predictably while supporting configurable error scenarios for robust testing of dependent systems.
 
-The tests validate seamless integration with the broader debug adapter system through shared types from `@debugmcp/shared`, including AdapterDependencies, DebugFeature, DebugLanguage, AdapterState, and AdapterErrorCode. This ensures the mock adapter serves as a reliable testing and development tool while maintaining full compatibility with the standard debug adapter protocol.
+## Test Infrastructure Benefits
 
-## Test Entry Points
-
-Primary test execution flows through:
-1. **Package-level validation** via root test file
-2. **Detailed functionality testing** via unit test suite
-3. **Factory pattern verification** ensuring proper adapter instantiation and configuration
-4. **Protocol compliance testing** validating DAP event handling and state management
+The test suite establishes patterns for:
+- **Dependency Injection**: Clean separation of concerns through mock dependencies
+- **Error Simulation**: Configurable failure modes for comprehensive negative testing
+- **State Validation**: Event-driven testing of complex state transitions
+- **Feature Testing**: Dynamic capability validation and requirements checking

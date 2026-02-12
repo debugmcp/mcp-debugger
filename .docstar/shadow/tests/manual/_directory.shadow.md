@@ -1,69 +1,79 @@
 # tests/manual/
-@generated: 2026-02-10T21:26:17Z
+@generated: 2026-02-11T23:47:42Z
 
 ## Overall Purpose
-The `tests/manual` directory contains standalone test scripts for validating core system components through interactive testing and debugging. These scripts are designed for manual execution during development to test SSE (Server-Sent Events) connections, debugpy adapter integration, and PythonDebugger instantiation.
 
-## Key Components and Organization
+The `tests/manual` directory contains standalone manual test scripts for validating critical communication protocols and debugging infrastructure. These scripts provide hands-on testing capabilities for Server-Sent Events (SSE) connections, session-based authentication, and Python debugging adapter functionality outside of automated test suites.
+
+## Key Components
 
 ### SSE Protocol Testing Suite
-Three complementary scripts validate different aspects of SSE communication:
+Three complementary scripts test different aspects of SSE communication:
 
-- **test-sse-connection.js**: Basic SSE connectivity test using EventSource API with session-based authentication
-- **test-sse-protocol.js**: Low-level SSE protocol implementation with manual HTTP parsing and JSON-RPC integration
-- **test-sse-working.js**: Complete SSE handshake validation including session extraction and authenticated API calls
-
-All scripts target `localhost:3001/sse` and test the bidirectional communication pattern (SSE for server-to-client, HTTP POST for client-to-server) with session ID correlation.
+- **test-sse-connection.js**: Basic SSE connectivity test using EventSource API with session ID extraction and JSON-RPC communication
+- **test-sse-protocol.js**: Low-level SSE protocol implementation with manual parsing and MCP SDK integration patterns  
+- **test-sse-working.js**: Complete SSE handshake validation including session establishment and authenticated API calls
 
 ### Python Debugger Testing
-Two scripts for debugpy adapter validation:
+Two scripts validate debugpy adapter integration:
 
-- **test_debugpy_launch.ts**: Full lifecycle test of debugpy.adapter subprocess with process monitoring and cleanup
-- **test_python_debugger_instantiation.ts**: Basic constructor validation for PythonDebugger class
+- **test_debugpy_launch.ts**: Full debugpy process lifecycle testing with subprocess management, logging, and graceful termination
+- **test_python_debugger_instantiation.ts**: Basic constructor validation for PythonDebugger class instantiation
 
-Both use hardcoded Windows Python paths (`C:\Python313\python.exe`) and focus on different aspects of the debugging infrastructure.
+## Communication Protocols
 
-## Communication Patterns
+### SSE + JSON-RPC Pattern
+All SSE tests implement a consistent bi-directional communication pattern:
+1. **Connection Phase**: Establish SSE connection to `localhost:3001/sse`
+2. **Session Phase**: Extract session ID from `connection/established` or `endpoint` events
+3. **Authentication Phase**: Use session ID in `X-Session-ID` header for subsequent HTTP POST requests
+4. **API Phase**: Send JSON-RPC 2.0 requests (typically `tools/list` method calls)
 
-### SSE Protocol Flow
-1. Establish SSE connection to server endpoint
-2. Parse incoming events for `connection/established` or `endpoint` messages
-3. Extract session ID from server response
-4. Send authenticated JSON-RPC requests using `X-Session-ID` header
-5. Monitor bidirectional communication for validation
+### Session Management
+- Session IDs extracted via regex patterns from SSE event data
+- Session correlation maintained through custom HTTP headers
+- Timeout-based sequencing ensures proper connection establishment before API calls
 
-### Process Management
-- Subprocess spawning with comprehensive stdio monitoring
-- Graceful termination with SIGTERM signals
-- Session-based logging in temporary directories
-- Event-driven process lifecycle management
+## Internal Organization
 
-## Key Testing Scenarios
+### Testing Patterns
+- **Manual Execution**: All scripts designed for direct command-line execution with console logging
+- **Hardcoded Configuration**: Local development server endpoints (`localhost:3001`) and paths
+- **Process Management**: Scripts keep running for observation (require manual termination)
+- **Error Resilience**: Comprehensive error handling with detailed logging for debugging
 
-### Network Communication
-- SSE connection establishment and persistence
-- Session-based authentication flows
-- JSON-RPC 2.0 protocol compliance (`tools/list` method calls)
-- Error handling and connection resilience
+### Data Flow
+1. **SSE Stream Processing**: Raw chunk parsing → event extraction → JSON deserialization → session ID extraction
+2. **Authentication Flow**: Session establishment → header injection → authenticated API calls
+3. **Debugging Flow**: Configuration setup → process spawning → stream monitoring → lifecycle management
 
-### Debugger Integration
-- Python debugger adapter subprocess management
-- Configuration validation and process initialization
-- Log directory setup and file system operations
-- Constructor validation and error boundary testing
+## Public Entry Points
 
-## Architecture Notes
-- Manual execution scripts (not automated test suite)
-- Platform-specific hardcoded paths for Python interpreter
-- Defensive programming with comprehensive error handling
-- Long-running processes requiring manual termination (Ctrl+C)
-- Temporary file management with session-based naming conventions
+### SSE Testing
+- Run any SSE test script directly: `node test-sse-*.js`
+- Expected server: Local SSE endpoint on port 3001
+- Output: Console logs of connection events, session data, and API responses
 
-## Usage Context
-These scripts serve as development tools for:
-- Validating SSE server implementations during development
-- Testing debugger adapter integration before production deployment
-- Debugging communication protocols and session management
-- Verifying subprocess lifecycle management and cleanup procedures
+### Debugger Testing  
+- Execute TypeScript tests: `ts-node test_*.ts`
+- Prerequisites: Python 3.13+ installed at hardcoded Windows path
+- Output: Process lifecycle logs and instantiation validation
 
-All scripts are designed to run independently and provide verbose console output for manual observation and debugging.
+## Important Conventions
+
+### Configuration Management
+- Hardcoded local development paths and endpoints
+- Platform-specific Python interpreter paths (Windows-centric)
+- Session-based temporary directory creation for debugger logs
+
+### Protocol Compliance
+- JSON-RPC 2.0 message format adherence
+- SSE protocol standard implementation (manual and EventSource-based)
+- MCP SDK communication pattern following
+
+### Development Workflow
+These manual tests serve as:
+- **Protocol Validation**: Verify SSE and debugging protocols work end-to-end
+- **Integration Testing**: Test real network communication and process management
+- **Debugging Tools**: Provide observable test scenarios for troubleshooting communication issues
+- **Development Aid**: Quick validation during feature development without full test suite execution

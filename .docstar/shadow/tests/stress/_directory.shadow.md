@@ -1,95 +1,68 @@
 # tests/stress/
-@generated: 2026-02-10T21:26:21Z
+@generated: 2026-02-11T23:47:39Z
 
-## Stress Testing Suite for MCP Transport Layers
+## Stress Testing Suite for MCP Transport Layer
 
-This directory contains comprehensive stress testing infrastructure for validating the Model Context Protocol (MCP) transport implementations under extreme conditions and ensuring cross-transport compatibility.
+The `tests/stress` directory provides comprehensive stress testing capabilities for the Model Context Protocol (MCP) transport layer, focusing on reliability, performance, and cross-transport consistency validation under extreme conditions.
 
 ### Overall Purpose
 
-The stress test suite serves three critical functions:
-1. **Cross-Transport Parity Validation**: Ensures identical behavior across STDIO, SSE, and Docker transport layers
-2. **SSE Transport Reliability Testing**: Validates SSE transport performance under high load, rapid connections, and failure scenarios
-3. **Production Readiness Assessment**: Provides confidence in transport layer stability before deployment
+This module serves as a quality assurance suite that validates MCP transport implementations can handle production-level stress scenarios including rapid connection cycling, burst loads, long-running sessions, and failure recovery. The tests ensure transport parity and identify performance bottlenecks or reliability issues before deployment.
 
 ### Key Components
 
-**Cross-Transport Parity Testing (`cross-transport-parity.test.ts`)**:
-- `TransportTester` class orchestrates identical debug operations across multiple transports
-- Validates debug session lifecycle: creation, breakpointing, execution, stack inspection, variable access
-- Compares results between STDIO and SSE transports with tolerance for minor variations
-- Ensures consistent MCP protocol behavior regardless of underlying transport
+**Cross-Transport Validation (`cross-transport-parity.test.ts`)**:
+- Primary orchestrator for validating identical behavior across STDIO and SSE transports
+- `TransportTester` class manages transport lifecycle and executes standardized debug sequences
+- Validates functional parity through comprehensive debug operations (session creation, breakpoints, stack traces, variable inspection)
 
-**SSE Stress Testing (`sse-stress.test.ts`)**:
-- `SSEStressTester` class provides comprehensive SSE transport validation
-- Tests rapid connection cycling, burst load handling, long-running stability, and server recovery
-- Monitors memory usage, connection success rates, and operation timing
-- Validates graceful degradation and recovery scenarios
+**SSE-Specific Stress Testing (`sse-stress.test.ts`)**:
+- Dedicated stress testing for SSE (Server-Sent Events) transport reliability
+- `SSEStressTester` class orchestrates extreme load scenarios and failure conditions
+- Comprehensive metrics collection for performance analysis and regression detection
 
 ### Public API Surface
 
-**Test Execution Control**:
-- All stress tests are gated by `RUN_STRESS_TESTS` environment variable
-- `describeStress` wrapper enables conditional test execution
-- 60-120 second timeouts accommodate complex operations
+**Main Entry Points**:
+- Both test suites are conditionally executed via `RUN_STRESS_TESTS` environment variable
+- Test suites integrate with Vitest framework for CI/CD pipeline integration
+- Each component provides isolated testing capabilities for different transport aspects
 
-**Core Test Classes**:
-- `TransportTester`: Cross-transport validation orchestrator
-- `SSEStressTester`: SSE-specific stress testing framework
-
-**Key Interfaces**:
-- `DebugSequenceResult`: Captures debug session state and metrics
-- `TransportTestResult`: Wraps transport test outcomes
-- `TestMetrics`: Tracks performance and reliability metrics
+**Key Test Scenarios**:
+- **Cross-transport parity validation**: Ensures identical debug operations across transports
+- **Rapid connection cycling**: Validates connection stability under frequent connect/disconnect patterns  
+- **Burst load testing**: Tests concurrent connection handling capabilities
+- **Long-running session stability**: Monitors memory leaks and sustained operation reliability
+- **Server failure recovery**: Validates graceful handling of transport interruptions
 
 ### Internal Organization
 
-**Transport Management**:
-- Automated server process spawning and lifecycle management
-- Health check polling for service readiness
-- Graceful shutdown with fallback termination strategies
-- Dynamic port allocation to avoid conflicts
+**Shared Architecture Patterns**:
+- Promise-based async operations with comprehensive error handling
+- Process spawning for server isolation and realistic testing conditions
+- Metrics collection and validation with configurable success thresholds
+- Port management and health checking for transport setup
 
-**Debug Sequence Flow**:
-1. Session creation with JavaScript language binding
-2. Breakpoint placement on test script
-3. Execution initiation and control
-4. Stack frame and variable inspection
-5. Session cleanup and validation
+**Data Flow**:
+1. Environment-based test activation via `RUN_STRESS_TESTS`
+2. Server process spawning with random port allocation for isolation
+3. Client transport setup and connection establishment
+4. Stress scenario execution with metrics collection
+5. Graceful cleanup and resource deallocation
+6. Results validation against expected performance baselines
 
-**Stress Testing Scenarios**:
-- Rapid connect/disconnect cycles (20x3 connections)
-- Burst load testing (10 simultaneous connections)
-- Long-running stability validation (15+ seconds)
-- Server failure and recovery testing
+### Important Patterns
 
-### Data Flow and Patterns
+**Test Isolation**: Each test uses random port allocation and separate server processes to prevent interference
+**Conditional Execution**: Stress tests are opt-in via environment variables to avoid impacting regular test runs
+**Comprehensive Metrics**: Success rates, timing data, memory usage, and error tracking provide detailed performance insights
+**Transport Abstraction**: Common testing patterns work across different MCP transport implementations
+**Failure Resilience**: Tests validate both happy path and failure recovery scenarios
 
-**Cross-Transport Pattern**:
-1. Execute identical debug sequence on each transport
-2. Collect structured results with timing and state information
-3. Compare outcomes with tolerance for transport-specific variations
-4. Validate parity in core functionality while allowing minor differences
+### Dependencies
 
-**Stress Testing Pattern**:
-1. Spawn isolated server processes with random port allocation
-2. Execute concurrent client operations with metrics collection
-3. Monitor system resources and connection health
-4. Validate success rate thresholds and performance criteria
+- **MCP SDK**: Core client libraries and transport implementations (STDIO, SSE)
+- **Node.js Runtime**: Process management, networking, and file system operations
+- **Vitest Framework**: Test execution, conditional test control, and assertion utilities
 
-### Critical Dependencies
-
-**External Requirements**:
-- Test script dependency: `examples/javascript/simple_test.js`
-- MCP SDK client libraries and transport implementations
-- Node.js process management capabilities
-
-**Configuration Constraints**:
-- Hardcoded breakpoint locations for consistent testing
-- Specific timeout windows for complex operations
-- Memory growth thresholds for leak detection
-- Success rate minimums for reliability validation
-
-### Integration Points
-
-The stress test suite validates the entire MCP transport stack from protocol-level operations through system resource management, ensuring production readiness across all supported transport mechanisms. Results provide confidence in cross-transport compatibility and performance under adverse conditions.
+This stress testing suite ensures MCP transport layer robustness and provides confidence in production deployment scenarios.

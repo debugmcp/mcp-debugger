@@ -1,48 +1,46 @@
 # tests/core/unit/server/server-control-tools.test.ts
-@source-hash: 97bb8987bfb49ae1
-@generated: 2026-02-10T00:41:26Z
+@source-hash: cdf6aad6d5f3a99b
+@generated: 2026-02-11T16:12:53Z
 
 ## Purpose
-Test suite for debugging server control tools functionality, specifically testing breakpoint management and execution control operations through the MCP (Model Context Protocol) server interface.
+Test suite for server control tools functionality in the DebugMCP server, validating debugging operations like breakpoint management and execution control.
 
 ## Test Structure
-- **Main Test Suite (L26-409)**: `Server Control Tools Tests` - comprehensive testing of debugging tool operations
-- **Setup/Teardown (L33-52)**: Mock initialization for dependencies including server, session manager, and transport layers
-- **Tool Handler Access (L47)**: Extracts `callToolHandler` from mock server for tool invocation testing
+Main test suite (L26-409) organized into functional groups:
+- **set_breakpoint tests** (L54-153): Validates breakpoint setting with and without conditions
+- **start_debugging tests** (L155-256): Tests debugging session initialization including dry run mode
+- **step operations tests** (L258-334): Parameterized tests for step_over, step_into, step_out
+- **continue_execution tests** (L336-378): Tests execution continuation
+- **pause_execution tests** (L380-408): Tests unimplemented pause functionality
 
-## Key Test Groups
+## Key Test Setup (L33-48)
+Mock infrastructure initialization:
+- Creates mock dependencies via `createMockDependencies()` (L34)
+- Mocks MCP SDK components (Server, StdioServerTransport) (L37-41)
+- Initializes mock SessionManager (L43-44)
+- Extracts `callToolHandler` for testing tool invocations (L47)
 
-### Breakpoint Management Tests (L54-153)
-- **Basic Breakpoint Setting (L55-93)**: Tests successful breakpoint creation with file/line parameters
-- **Conditional Breakpoints (L95-130)**: Tests breakpoints with conditional expressions
-- **Error Handling (L132-152)**: Tests session validation and not-found scenarios
+## Mock Strategy
+Comprehensive mocking of external dependencies (L21-24):
+- `@modelcontextprotocol/sdk` components
+- SessionManager for debugging operations
+- Production dependencies container
 
-### Debugging Session Control (L155-256)
-- **Start Debugging (L156-196)**: Tests successful debugging session initiation with script path and DAP launch arguments
-- **Dry Run Mode (L198-233)**: Tests command preview without actual execution
-- **Session Validation (L235-255)**: Tests error responses for invalid sessions
-
-### Step Operation Tests (L258-334)
-- **Parameterized Step Tests (L259-284)**: Uses `it.each` to test step_over, step_into, step_out operations
-- **Error Scenarios (L286-306)**: Tests session validation failures for step operations
-- **Failure Response Handling (L308-333)**: Tests handling of operation failures (e.g., not paused state)
-
-### Execution Control Tests (L336-408)
-- **Continue Execution (L337-378)**: Tests resuming paused debugging sessions
-- **Pause Execution (L381-407)**: Tests unimplemented pause functionality (throws McpError)
-
-## Mock Infrastructure
-- **Dependencies**: Uses `createMockDependencies()` for logger and adapter registry mocking
-- **Server Components**: Mocks `Server`, `StdioServerTransport`, and `SessionManager`
-- **Test Helpers**: Leverages helper functions from `server-test-helpers.js` for consistent mock setup
-
-## Error Handling Patterns
-- Tests both exception-based errors (McpError for unimplemented features) and structured error responses
-- Validates session lifecycle checks (ACTIVE vs terminated sessions)
-- Confirms error messages include session IDs and context information
+## Test Patterns
+- **Session validation**: Most tests mock session existence/state validation
+- **Error handling**: Tests both SessionManager errors and tool-level failures
+- **Response format**: Validates JSON response structure with success/error fields
+- **Parameterized testing**: Uses `it.each` for testing similar operations (L259-263, L286-289, L308-312)
 
 ## Key Dependencies
-- `@modelcontextprotocol/sdk` for MCP server infrastructure
-- `@debugmcp/shared` for Breakpoint type definitions
-- Vitest testing framework with mocking capabilities
-- Custom session management and dependency injection systems
+- **Vitest framework**: Test runner and mocking utilities (L4)
+- **MCP SDK**: Server infrastructure and error types (L5-7)
+- **DebugMcpServer**: Main server class under test (L8)
+- **SessionManager**: Core debugging session management (L9)
+- **Test helpers**: Mock creation utilities (L12-18)
+
+## Notable Implementation Details
+- Tests expect server to return success responses with error messages rather than throwing exceptions for operational errors
+- Pause execution is tested as unimplemented functionality (L381-407)
+- Breakpoint tests validate both simple and conditional breakpoints
+- Path normalization is expected in SessionManager calls (`expect.stringContaining()`)

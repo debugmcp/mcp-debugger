@@ -1,60 +1,63 @@
 # src/container/
-@generated: 2026-02-10T21:26:20Z
+@generated: 2026-02-11T23:47:35Z
 
-## Container Module - Dependency Injection System
+## Purpose and Responsibility
 
-This module implements the core dependency injection container for the debug-mcp application, providing centralized dependency management and configuration for the entire debugging/MCP (Model Context Protocol) ecosystem.
+The `src/container` module implements the dependency injection system for a debugging/session management application. It provides centralized configuration and instantiation of all application dependencies, creating a complete dependency graph for production use with proper service wiring and adapter registration.
 
-### Overall Purpose
+## Key Components and Relationships
 
-The container module serves as the application's composition root, responsible for:
-- Wiring together all production dependencies with their concrete implementations
-- Managing the complete dependency graph including services, launchers, factories, and adapters
-- Providing flexible configuration options for logging, session management, and DAP integration
-- Supporting both bundled and dynamically loaded MCP adapters
+**Core Architecture**:
+- **`types.ts`**: Defines configuration contracts (`ContainerConfig`, `SessionManagerConfig`) that specify how the container should be initialized
+- **`dependencies.ts`**: Implements the actual dependency container creation and service wiring through the `createProductionDependencies()` factory function
 
-### Key Components and Relationships
+**Service Categories**:
+1. **Infrastructure Services**: File system, process management, networking, logging, and environment access
+2. **Process Launchers**: Hierarchical process management with base, proxy, and debug-specific launchers
+3. **Factory Services**: Dynamic object creation for proxy managers and session stores
+4. **Adapter System**: Language adapter registry with dynamic loading and pre-registration capabilities
 
-**Configuration Layer (`types.ts`)**
-- `ContainerConfig`: Main container configuration interface controlling logging behavior, session directories, and extensible logger options
-- `SessionManagerConfig`: Specialized configuration for session management with storage settings and DAP launch parameters
-- Both interfaces use optional properties for maximum flexibility and compose together for complete system configuration
+## Public API Surface
 
-**Dependency Container (`dependencies.ts`)**
-- `Dependencies` interface: Central contract defining the complete application dependency surface
-- `createProductionDependencies()`: Main factory function that creates the entire wired dependency graph
-- Organizes dependencies into logical groups: core services, process launchers, factories, and adapter registry
+**Main Entry Point**:
+- `createProductionDependencies(config: ContainerConfig): Dependencies` - Primary factory function that creates the complete dependency graph
 
-### Public API Surface
+**Configuration Interfaces**:
+- `ContainerConfig` - Container-level configuration (logging, session directories)
+- `SessionManagerConfig` - Session management specific settings (storage, DAP parameters)
+- `Dependencies` - Complete dependency container interface defining all injectable services
 
-**Primary Entry Point:**
-- `createProductionDependencies(config?: ContainerConfig): Dependencies` - Main factory for production dependency graph creation
+## Internal Organization and Data Flow
 
-**Configuration Types:**
-- `ContainerConfig` - Container-level configuration interface
-- `SessionManagerConfig` - Session management specific configuration
+**Initialization Flow**:
+1. Configuration validation and logger setup
+2. Core infrastructure service instantiation
+3. Process launcher hierarchy creation
+4. Factory service registration
+5. Adapter system initialization with dynamic loading
+6. Complete dependency container assembly
 
-**Dependency Groups Exposed:**
-- Core implementations (Logger, Environment, FileSystem, ProcessManager, NetworkManager)
-- Process launcher hierarchy (ProcessLauncher → ProxyProcessLauncher → DebugTargetLauncher)
-- Factory instances (ProxyManagerFactory, SessionStoreFactory)
-- Adapter registry with dynamic loading capabilities
+**Adapter Management**:
+- Registry-based adapter discovery and registration
+- Support for both bundled and dynamically loaded adapters
+- Environment-aware adapter enabling/disabling
+- Fire-and-forget registration with graceful error handling
 
-### Internal Organization and Data Flow
+## Important Patterns and Conventions
 
-1. **Configuration Processing**: Optional `ContainerConfig` parameter flows through to configure individual services
-2. **Layered Dependency Construction**: Dependencies built in order with explicit passing between layers
-3. **Process Launcher Hierarchy**: Multi-level wrapping pattern where each launcher enhances the previous layer
-4. **Adapter Registry Setup**: Two-phase approach with bundled adapters registered immediately and container-specific adapters loaded dynamically
-5. **Factory Wiring**: Factories receive pre-configured dependencies for consistent object creation
+**Design Patterns**:
+- **Dependency Injection**: Single factory creates entire dependency graph with proper service wiring
+- **Factory Pattern**: Separate factories for complex object creation (proxy managers, session stores)
+- **Registry Pattern**: Centralized adapter registration and discovery system
 
-### Important Patterns and Conventions
+**Configuration Strategy**:
+- Optional properties throughout for flexible deployment scenarios
+- Environment-specific behavior detection (container vs non-container)
+- Separation of concerns between container-level and domain-specific configuration
 
-- **Fire-and-forget Dynamic Loading**: Optional adapters loaded asynchronously without blocking startup
-- **Separation of Concerns**: Registration-time vs creation-time validation for adapter registry
-- **Environment Conditional Logic**: Uses `MCP_CONTAINER` flag to determine adapter loading strategy
-- **Composition Root Pattern**: Single location for complete dependency graph assembly
-- **Optional Configuration**: All configuration parameters are optional with sensible defaults
-- **Type-safe Extensibility**: Generic types and optional properties allow customization while maintaining type safety
+**Error Handling**:
+- Graceful degradation for missing or failed adapter loading
+- Validation deferred to usage time rather than registration time
+- Non-blocking startup with fire-and-forget adapter registration
 
-This module enables clean dependency injection throughout the application while supporting both development and production scenarios with dynamic adapter capabilities.
+This module serves as the composition root for the entire application, ensuring all services are properly configured and wired together for production use while maintaining flexibility for different deployment scenarios.

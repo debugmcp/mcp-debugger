@@ -1,69 +1,68 @@
 # tests/unit/utils/
-@generated: 2026-02-10T21:26:22Z
+@generated: 2026-02-11T23:47:38Z
 
 ## Purpose
-This directory contains comprehensive unit test suites for the utility layer of the MCP debug server, providing test coverage for core infrastructure components including path resolution, file operations, error handling, logging, and configuration management.
+Unit test suite for core utility modules in the MCP debug server, providing comprehensive test coverage for path resolution, error handling, file operations, logging, and container environment functionality.
 
-## Key Components and Testing Areas
+## Key Components and Organization
 
-### Container Path Utilities Testing
-- **container-path-utils.spec.ts**: Tests container-aware path resolution functionality, validating workspace root detection, path prefixing in containerized environments, and path description generation for user feedback
-- Provides mock environment implementation for isolated testing of container vs host mode behaviors
+### Container Path Management Tests
+- **`container-path-utils.spec.ts`**: Tests container-aware path resolution utilities, validating workspace root detection, path prefixing, and environment-based container mode detection
+- **`simple-file-checker.spec.ts` & `simple-file-checker.test.ts`**: Tests file existence checking with dual-mode operation (host vs container environments), including path transformation and error handling
 
-### File System Utilities Testing  
-- **simple-file-checker.spec.ts & simple-file-checker.test.ts**: Dual test coverage for file existence checking with path resolution integration
-- Tests both factory pattern and constructor-based instantiation
-- Validates container-aware path prefixing and error handling for file system operations
+### Error and Message Handling Tests  
+- **`error-messages.test.ts`**: Validates timeout message generation for DAP operations and robust error message extraction from various input types
+- **`language-config.test.ts`**: Tests language configuration parsing from environment variables, including disabled language detection and case-insensitive matching
 
-### Line Reading and File Processing
-- **line-reader.spec.ts**: Comprehensive testing of file content reading with line context extraction, caching mechanisms, binary file detection, and size limits
-- Tests multi-line range extraction and cache management for performance optimization
+### File and System Operations Tests
+- **`line-reader.spec.ts`**: Comprehensive testing of file reading utilities with line context extraction, caching behavior, binary detection, and size limits
+- **`logger.test.ts`**: Tests winston-based logger configuration, transport setup, container-specific logging paths, and error handling
 
-### Error Handling and Messaging
-- **error-messages.test.ts**: Tests standardized error message generation for timeout scenarios (DAP requests, proxy initialization, step operations, adapter readiness)
-- Validates consistent error message extraction from various input types
+## Testing Patterns and Conventions
 
-### Configuration Management
-- **language-config.test.ts**: Tests environment-based language configuration, specifically the parsing and querying of disabled languages from `DEBUG_MCP_DISABLE_LANGUAGES`
-- Validates case-insensitive language matching and robust input parsing
+### Mock Architecture
+- Consistent use of Vitest mocking framework with `vi.mocked()` for type safety
+- Mock factories for complex dependencies (file systems, environments, loggers)
+- Environment isolation with `beforeEach`/`afterEach` cleanup patterns
+- Hoisted mocks for module-level dependencies
 
-### Logging Infrastructure  
-- **logger.test.ts**: Tests winston-based logger creation with transport configuration, error handling, and environment-specific behaviors
-- Validates container vs host logging configurations and fallback mechanisms
+### Container Environment Testing
+- Dual-mode testing for host vs container environments using `MCP_CONTAINER` flag
+- Workspace root path resolution testing with `MCP_WORKSPACE_ROOT` variable
+- Container-specific path transformations and log file locations
 
-## Testing Patterns and Organization
+### Error Handling Coverage
+- Comprehensive edge case testing (missing files, invalid inputs, boundary conditions)
+- Graceful degradation testing for system failures
+- Error message validation and user-friendly formatting
 
-### Common Test Patterns
-- **Mock Environment Management**: Consistent pattern of preserving and restoring `process.env` state across tests
-- **Dependency Injection**: Extensive use of interface mocking (`IFileSystem`, `IEnvironment`) for isolated unit testing
-- **Error Boundary Testing**: Comprehensive coverage of error conditions and graceful failure handling
-- **Environment-Aware Testing**: Tests validate different behaviors in container vs host environments
+## Key Testing Utilities
 
-### Test Infrastructure
-- **Vitest Framework**: All tests use Vitest with consistent describe/it structure and mock management
-- **Mock Factories**: Reusable mock implementations for common interfaces and dependencies
-- **Type Safety**: Tests maintain TypeScript type safety even with mock objects using `vi.mocked()` patterns
+### Environment Management
+- Mock environment implementations with configurable variables
+- Environment state preservation and restoration between tests
+- Container mode detection and workspace root configuration
 
-### Coverage Areas
-- Path resolution and workspace root handling in containerized environments
-- File system operations with caching and performance considerations  
-- Error message standardization for debugging operations
-- Configuration parsing from environment variables
-- Logging setup and transport management
-- Robust input validation and edge case handling
+### File System Abstraction
+- Mock file system implementations with all standard operations
+- Path existence checking, file reading, and directory creation testing
+- Binary file detection and size limit enforcement
 
-## Integration Points
-The test suites validate utilities that support the broader MCP debug server functionality:
-- Container path utilities enable workspace-relative file operations
-- File checkers support source file validation and debugging
-- Line readers provide context for error reporting and debugging output
-- Error messages standardize user-facing diagnostic information
-- Language configuration supports selective feature enabling/disabling
-- Logging infrastructure provides observability across the debug server
+### Logging and Debugging
+- Logger initialization and transport configuration testing
+- Debug message formatting and container-specific log paths
+- Error suppression and console output management
 
-## Key Testing Insights
-- Tests emphasize container vs host environment behavioral differences
-- Comprehensive error handling ensures graceful degradation
-- Caching mechanisms are validated for performance-critical file operations
-- Environment variable parsing includes robust whitespace and case handling
-- Mock patterns enable isolated testing of complex dependency chains
+## Dependencies and Integration
+- **Vitest Framework**: Primary testing framework with mocking capabilities
+- **Winston Logger**: Logging infrastructure testing with transport configuration
+- **Container Utilities**: Path resolution and environment detection for containerized deployments
+- **File System Abstractions**: Mock implementations for isolated file operation testing
+
+## Critical Test Coverage Areas
+- Container vs host mode path resolution and file access
+- Error message generation for timeout scenarios and debug operations
+- Language configuration parsing from environment variables
+- File reading with caching, context extraction, and boundary handling
+- Logger setup with environment-specific transport configuration
+- Robust error handling across all utility functions

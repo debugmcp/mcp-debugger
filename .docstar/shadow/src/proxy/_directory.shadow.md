@@ -1,109 +1,98 @@
 # src/proxy/
-@generated: 2026-02-10T21:26:44Z
+@generated: 2026-02-11T23:48:00Z
 
 ## Purpose and Responsibility
 
-The `src/proxy` directory implements a comprehensive Debug Adapter Protocol (DAP) proxy system that bridges between debug clients and language-specific debug adapters. This proxy layer provides language-agnostic debugging capabilities, multi-session support, and robust process management for the MCP Debug system. The proxy acts as an intelligent intermediary that can spawn debug adapters, manage DAP communication, handle child session adoption, and provide policy-driven behavior customization.
+The `src/proxy` directory implements a comprehensive Debug Adapter Protocol (DAP) proxy system that acts as an intermediary layer between MCP debug servers and actual debug adapters. The proxy enables language-agnostic debugging by spawning and managing debug adapter processes, handling DAP message routing, and providing multi-session debugging capabilities with sophisticated state management.
 
 ## Key Components and Architecture
 
-### Core Orchestration Layer
-- **ProxyManager** (`proxy-manager.ts`): Main orchestrator managing proxy process lifecycle, DAP message routing, and state synchronization
-- **DapProxyWorker** (`dap-proxy-worker.ts`): Core worker implementing the full debugging lifecycle with adapter policy pattern
-- **ProxyRunner** (`dap-proxy-core.ts`): Pure business logic for proxy execution with dual communication channels (IPC/stdin)
+### Core Proxy Engine
+- **dap-proxy-core.ts**: `ProxyRunner` class providing the main orchestration logic with dual communication channels (IPC/stdin)
+- **dap-proxy-worker.ts**: `DapProxyWorker` implementing the actual proxy functionality using the Adapter Policy pattern for language-agnostic behavior
+- **dap-proxy-entry.ts**: Production entry point with environment detection and auto-execution logic
 
-### Protocol and Communication
-- **MinimalDapClient** (`minimal-dap.ts`): Sophisticated DAP client with multi-session support, child session adoption, and VSCode-compatible message parsing
-- **DapConnectionManager** (`dap-proxy-connection-manager.ts`): Manages DAP connections with robust retry logic and session initialization
-- **MessageParser** (`dap-proxy-message-parser.ts`): Pure message parsing utilities for IPC command validation and routing
+### Process and Session Management  
+- **proxy-manager.ts**: `ProxyManager` class orchestrating proxy process lifecycle, DAP message routing with timeout management, and state synchronization
+- **child-session-manager.ts**: `ChildSessionManager` handling multi-session debugging scenarios, particularly for JavaScript debugging requiring concurrent sessions
+- **dap-proxy-adapter-manager.ts**: `GenericAdapterManager` for spawning and managing debug adapter processes in a language-agnostic way
 
-### Multi-Session Management
-- **ChildSessionManager** (`child-session-manager.ts`): Handles child debug sessions for complex debugging scenarios (e.g., JavaScript with js-debug/pwa-node requiring concurrent sessions)
-- **RequestTracker** (`dap-proxy-request-tracker.ts`): Manages DAP request timeouts and lifecycle tracking
+### Communication and Protocol Layer
+- **minimal-dap.ts**: `MinimalDapClient` providing sophisticated DAP protocol client with multi-session support, child session adoption, and policy-driven behavior
+- **dap-proxy-connection-manager.ts**: `DapConnectionManager` handling DAP connections with robust retry logic and session initialization
+- **dap-proxy-message-parser.ts**: `MessageParser` utilities for parsing and validating IPC messages from parent processes
 
-### Process and Lifecycle Management
-- **GenericAdapterManager** (`dap-proxy-adapter-manager.ts`): Language-agnostic debug adapter process spawning and management
-- **proxy-bootstrap.js**: Bootstrap script with orphan detection, signal handling, and heartbeat monitoring
-- **signal-debug.ts**: Comprehensive signal debugging and process termination diagnostics
-
-### Configuration and Dependencies
-- **ProxyConfig** (`proxy-config.ts`): Language-agnostic configuration interface for proxy startup
-- **DapProxyDependencies** (`dap-proxy-dependencies.ts`): Production dependency injection factory
-- **Interfaces** (`dap-proxy-interfaces.ts`): Complete type system and dependency abstractions
+### Infrastructure and Support
+- **dap-proxy-interfaces.ts**: Complete type system and dependency abstractions defining the proxy's communication protocol
+- **dap-proxy-dependencies.ts**: Production dependency injection factory providing concrete implementations
+- **dap-proxy-request-tracker.ts**: Request timeout management with callback support
+- **proxy-bootstrap.js**: Bootstrap script handling process lifecycle, orphan detection, and dynamic proxy loading
 
 ## Public API Surface
 
 ### Main Entry Points
-- `ProxyManager`: Primary interface for spawning and managing proxy processes
-- `ProxyConfig`: Configuration interface for proxy initialization
-- `IProxyManager` & `ProxyManagerEvents`: Contract and event system for proxy lifecycle
-- `ProxyRunner`: Core execution engine for programmatic use
-- `MinimalDapClient`: DAP client implementation for direct protocol interaction
+- **ProxyManager**: Primary orchestrator for spawning and managing proxy processes
+- **ProxyRunner**: Core proxy execution engine for programmatic control
+- **MinimalDapClient**: DAP client for direct protocol communication
 
-### Key Configuration Types
-- `ProxyConfig`: Complete proxy startup configuration
-- `ProxyInitPayload`: Worker initialization command structure
-- `DapCommandPayload`: DAP command forwarding wrapper
-- `AdapterConfig`: Debug adapter spawn configuration
+### Configuration Interfaces
+- **ProxyConfig**: Language-agnostic proxy startup parameters
+- **ProxyInitPayload**: Complete initialization command structure
+- **AdapterConfig**: Debug adapter spawn configuration
+
+### Communication Protocol
+- **ParentCommand**: Union type for all incoming commands (init, DAP, terminate)
+- **ProxyMessage**: Response message system (status, DAP responses, events, errors)
 
 ## Internal Organization and Data Flow
 
-### Proxy Lifecycle Flow
-1. **Initialization**: ProxyManager spawns proxy process via bootstrap script
-2. **Worker Setup**: DapProxyWorker initializes with adapter policy selection
-3. **Adapter Spawning**: GenericAdapterManager launches language-specific debug adapter
-4. **DAP Connection**: DapConnectionManager establishes protocol communication
-5. **Session Management**: ChildSessionManager handles multi-session scenarios
-6. **Command Routing**: Message parsing and policy-driven command forwarding
-7. **Cleanup**: Graceful shutdown with resource cleanup and process termination
+### Initialization Flow
+1. **Proxy Manager** spawns proxy process via bootstrap script
+2. **Bootstrap** detects environment, loads appropriate proxy implementation
+3. **Proxy Worker** receives initialization, selects adapter policy based on language
+4. **Adapter Manager** spawns debug adapter process
+5. **Connection Manager** establishes DAP communication with retry logic
 
-### Communication Architecture
-- **Dual Channel Support**: IPC preferred, stdin/readline fallback
-- **Request Correlation**: Timeout-based request tracking with automatic cleanup
-- **Event Forwarding**: Comprehensive DAP event routing between sessions
-- **Error Recovery**: Retry logic, graceful degradation, and orphan detection
+### Runtime Message Flow
+1. DAP commands from MCP server → **Proxy Manager**
+2. IPC routing → **Proxy Worker**  
+3. Policy-driven processing → **DAP Client**
+4. Protocol communication → Debug Adapter
+5. Responses/events flow back through the same chain
 
-### Policy-Driven Behavior
-- **Adapter Policies**: Language-specific behavior encapsulation (JavaScript, Python, Java, etc.)
-- **Command Queueing**: Policy-controlled message ordering and timing
-- **Child Session Logic**: Configurable multi-session adoption strategies
-- **State Management**: Policy-aware debugging state transitions
+### Multi-Session Architecture
+For complex debugging scenarios (particularly JavaScript):
+1. **Child Session Manager** detects need for additional sessions
+2. Spawns child DAP clients with modified policies
+3. Routes specific commands to appropriate child sessions
+4. Mirrors breakpoints and forwards events between sessions
 
 ## Important Patterns and Conventions
 
 ### Adapter Policy Pattern
-Eliminates hardcoded language-specific logic through policy objects that control:
-- Command routing and queueing decisions
-- Child session creation and adoption
-- Adapter-specific initialization sequences
-- Debug state management strategies
+The system uses pluggable **AdapterPolicy** implementations to eliminate language-specific hardcoding. Policies control:
+- Command queueing behavior
+- Child session creation logic  
+- State transition handling
+- Request routing decisions
 
-### Multi-Session Architecture
-Sophisticated support for debugging scenarios requiring multiple concurrent sessions:
-- Parent-child session relationships
-- Breakpoint mirroring across sessions
-- Event forwarding and state synchronization
-- Policy-driven session adoption
+### Dependency Injection
+Comprehensive DI system enables testing and modularity:
+- **DapProxyDependencies**: Complete dependency container
+- Factory pattern for configurable component creation
+- Interface abstractions for all external dependencies
 
-### Dependency Injection Design
-Clean separation of concerns through comprehensive DI:
-- External dependencies abstracted via interfaces
-- Production vs test configurations
-- Modular component composition
-- Enhanced testability and maintainability
+### State Management
+- **ProxyState** enum for lifecycle management
+- Request tracking with timeout handling
+- Command queueing for proper DAP sequencing
+- Graceful shutdown with escalating termination signals
 
-### Container-Aware Process Management
-Robust process lifecycle management with container support:
-- Orphan detection with container awareness (`MCP_CONTAINER` environment variable)
-- Signal handling and graceful shutdown
-- Heartbeat monitoring and parent process tracking
-- Cross-platform process termination strategies
+### Error Handling and Reliability
+- Extensive retry logic with exponential backoff
+- Timeout protection on all DAP operations
+- Orphan detection with container-awareness
+- Comprehensive logging and diagnostics
+- Graceful degradation when components fail
 
-### Error Recovery and Robustness
-Comprehensive error handling throughout the stack:
-- Retry logic with exponential backoff
-- Timeout protection on all async operations
-- Graceful degradation when optional features fail
-- Resource cleanup in error scenarios
-
-The proxy system provides a production-ready foundation for multi-language debugging with sophisticated session management, robust process handling, and flexible policy-driven behavior customization.
+The proxy system provides a robust, language-agnostic debugging infrastructure that handles the complexity of DAP protocol management while providing clean abstractions for the MCP debug server layer.

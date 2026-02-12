@@ -1,89 +1,66 @@
 # examples/asciinema_demo/
-@generated: 2026-02-10T21:26:53Z
+@generated: 2026-02-11T23:47:41Z
 
 ## Purpose
 
-A complete demonstration package showcasing MCP (Model Context Protocol) debugging capabilities through an interactive terminal-based debugging session. Combines a buggy event processing script with a rich terminal UI debugger to demonstrate real-time debugging workflows, breakpoint management, and code execution visualization.
+Interactive demonstration module showcasing MCP (Model Context Protocol) debugging capabilities through a live terminal UI demo. Provides a complete end-to-end example of debugging Python code with intentional bugs using an MCP debugger server with Rich-based visualization.
 
 ## Key Components
 
-### buggy_event_processor.py
-Demonstration target containing intentionally buggy event processing logic with common copy/reference issues. Features:
-- Event transformation pipeline with shallow copy protection
-- Priority classification and value transformation logic
-- Special revert functionality that introduces reference bugs
-- Built-in test data and verification logic for debugging exercises
+**buggy_event_processor.py** - Target application containing intentionally buggy event processing logic designed to demonstrate common copy/reference issues in data transformation pipelines. Includes verification logic to detect when bugs manifest.
 
-### run_rich_demo.py
-Interactive terminal UI that serves as both MCP client and demo orchestrator. Provides:
-- Split-pane Rich terminal interface (debug logs + syntax-highlighted source)
-- MCP server lifecycle management (Node.js subprocess)
-- Real-time debugging workflow demonstration
-- Breakpoint visualization and execution line tracking
+**run_rich_demo.py** - Rich-based terminal UI that serves as both MCP client and demo orchestrator, providing split-pane interface showing debug logs alongside syntax-highlighted source code with breakpoint and execution markers.
 
-## Demo Architecture & Data Flow
+## Component Interaction
 
-**Setup Phase:**
-1. `run_rich_demo.py` validates file paths and launches Node.js MCP debugger server
-2. Establishes MCP communication channel via JSON-RPC over subprocess pipes
-3. Creates debug session targeting `buggy_event_processor.py`
-
-**Interactive Debugging:**
-1. Sets breakpoint at critical line (L13) in event processing logic
-2. Starts debug execution of the buggy script
-3. Handles debug events (stopped, breakpoint hit) with UI updates
-4. Displays execution state through syntax highlighting and line markers
-
-**State Visualization:**
-- Left pane: Real-time debug log messages with styled output
-- Right pane: Source code with breakpoint markers ("B>") and execution pointer ("H>")
-- Automatic UI refresh after each debugging operation
+The demo follows this workflow:
+1. **Demo Launcher**: `run_rich_demo.py` validates file paths and starts the MCP server subprocess
+2. **UI Initialization**: Rich console creates three-panel layout (header/main/footer) with logs and code panes
+3. **MCP Communication**: Establishes JSON-RPC communication with Node.js MCP server via stdin/stdout pipes
+4. **Debug Session**: Creates debug session targeting `buggy_event_processor.py`
+5. **Interactive Debugging**: Sets breakpoints, starts execution, and visualizes debugging state changes
+6. **Bug Demonstration**: The buggy event processor exhibits copy/reference issues that are visible through the debugger
 
 ## Public API Surface
 
-### Entry Points
-- **run_rich_demo.py**: Main demo executable - launches complete debugging demonstration
-- **buggy_event_processor.py**: Standalone script that can be debugged independently
+**Main Entry Point:**
+- `run_rich_demo.py` - Execute with `python run_rich_demo.py` to launch interactive demo
 
-### Key Functions
-- `process_events(events, important_threshold=5)`: Core buggy logic demonstration
-- `start_mcp_server()`: MCP debugger server initialization
-- `send_mcp_request(tool_name, arguments)`: MCP protocol communication
-- `update_code_pane()`: Terminal UI rendering with syntax highlighting
+**Demo Target:**
+- `buggy_event_processor.process_events()` - Primary function containing intentional bugs for debugging demonstration
+
+**Key Configuration:**
+- Hardcoded file paths resolve relative to project structure
+- MCP server expected at `dist/index.js` 
+- Demo script targets `buggy_event_processor.py`
 
 ## Internal Organization
 
-**Communication Layer:**
-- Synchronous MCP request/response pattern with JSON serialization
-- Asynchronous event handling for debug state changes
-- Subprocess management for Node.js MCP server lifecycle
+**Data Flow:**
+```
+User Launch → UI Setup → MCP Server Start → Debug Session Creation → 
+Breakpoint Setting → Code Execution → Event Processing → Bug Detection → 
+UI Visualization → Session Cleanup → Server Shutdown
+```
 
-**UI Management:**
-- Rich library components for professional terminal interface
-- State-driven rendering with execution line tracking
-- Log buffer management with overflow protection
-
-**Demo Orchestration:**
-- Hardcoded debugging workflow with visualization delays
-- Error handling for graceful demo execution
-- Progressive server shutdown (wait → terminate → kill)
+**State Management:**
+- MCP communication state (process handle, session ID, request counter)
+- UI state (log buffer, execution line, breakpoints)
+- Debug state (current line highlight, stack traces)
 
 ## Important Patterns
 
-**Bug Demonstration Strategy:**
-- Intentional copy/reference bugs in event processing
-- Built-in verification logic to detect and explain issues
-- Test data designed to trigger specific bug conditions
+**Error Demonstration Pattern**: The buggy event processor intentionally exhibits shallow copy issues where special revert logic accesses modified state instead of original state, demonstrating common Python reference bugs.
 
-**MCP Integration:**
-- Simplified MCP client implementation for demo purposes
-- Mixed sync/async communication patterns
-- Manual event polling for UI responsiveness
+**Interactive Debugging Pattern**: Real-time visualization of debugging state through Rich UI with synchronized log output and source code highlighting showing execution flow and breakpoint hits.
 
-**Terminal UI Conventions:**
-- "B>" prefix for breakpoint lines
-- "H>" prefix for current execution line  
-- Styled log messages for different event types
-- Split-pane layout for simultaneous code and log viewing
+**MCP Client Pattern**: Simplified MCP protocol implementation using synchronous request/response with manual event polling, suitable for demo purposes but not production use.
 
-This demo package serves as a complete reference implementation for MCP debugging workflows, combining realistic buggy code with professional debugging visualization tools.
+## Dependencies & Architecture
+
+- **Rich Library**: Terminal UI framework for syntax highlighting and layout management
+- **Node.js MCP Server**: External debugger server process managed via subprocess
+- **JSON-RPC Protocol**: Communication between Python client and Node.js server
+- **Cross-platform Paths**: Uses pathlib for reliable file path resolution
+
+This module serves as both a functional debugging demo and a reference implementation for MCP client integration patterns.

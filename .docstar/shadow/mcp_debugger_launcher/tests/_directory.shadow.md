@@ -1,41 +1,55 @@
 # mcp_debugger_launcher/tests/
-@generated: 2026-02-10T21:26:15Z
+@generated: 2026-02-11T23:47:36Z
 
 ## Overall Purpose and Responsibility
-The `mcp_debugger_launcher/tests` directory contains the test suite for the MCP Debug Server Launcher package. This module provides manual integration testing that validates the launcher's core functionality including runtime detection, command generation, and CLI module integration. Rather than using automated test frameworks, it employs console-based testing to verify real system dependencies and provide human-readable verification of launcher behavior.
 
-## Key Components and Their Relationships
-The test suite consists of a single comprehensive test file (`test_launcher.py`) that orchestrates validation of the launcher's three critical subsystems:
+This test directory contains the manual test suite for the `mcp_debugger_launcher` package. It provides comprehensive validation of the launcher's core functionality through integration testing that checks actual system dependencies rather than using mocked components. The tests are designed for manual verification with console output, focusing on validating runtime detection, command generation, and CLI integration.
 
-- **Runtime Detection Testing**: Validates `RuntimeDetector` class functionality by checking availability of Node.js, npx, and Docker runtimes, plus recommendation logic
-- **Command Generation Testing**: Tests `DebugMCPLauncher` dry-run capabilities for both NPX and Docker execution modes (stdio and SSE)
-- **CLI Integration Testing**: Verifies the CLI module can be imported and provides version/function information
+## Key Components and Architecture
 
-These components work together to provide end-to-end validation of the launcher pipeline from runtime detection through command construction to CLI entry point availability.
+### Test Structure
+- **Single test file**: `test_launcher.py` contains all test functions in a cohesive manual testing framework
+- **Manual verification approach**: Uses print statements and console output rather than automated assertions
+- **Integration-focused**: Tests against real system state (Node.js, Docker availability) rather than mocked dependencies
 
-## Public API Surface and Entry Points
-The main entry point is the `main()` function which orchestrates the complete test sequence. Individual test functions can be called independently:
+### Test Coverage Areas
+1. **Runtime Detection Testing**: Validates the `RuntimeDetector` class functionality for Node.js, npx, and Docker availability
+2. **Command Generation Testing**: Tests `DebugMCPLauncher` command construction for both stdio and SSE modes without execution
+3. **CLI Integration Testing**: Verifies the importability and basic structure of the CLI module
 
-- `test_runtime_detection()`: Returns detected runtimes dictionary
-- `test_dry_run()`: Demonstrates command generation without execution  
-- `test_cli_import()`: Returns boolean CLI module status
+## Public API and Entry Points
 
-The test suite is designed for manual execution rather than automated CI integration, providing detailed console output for human verification.
+### Main Test Functions
+- `test_runtime_detection()`: Primary test for runtime availability checking and recommendation logic
+- `test_dry_run()`: Core test for command generation patterns (NPX and Docker commands)
+- `test_cli_import()`: Validation test for CLI module integration
+- `main()`: Test orchestrator that runs all tests and provides summary output
+
+### Key Dependencies Tested
+- **RuntimeDetector**: Tests core runtime detection functionality
+- **DebugMCPLauncher**: Tests command generation for NPM and Docker execution modes
+- **CLI module**: Tests import and basic structure validation
 
 ## Internal Organization and Data Flow
-Tests follow a sequential execution pattern:
-1. Runtime detection validates system dependencies
-2. Dry run testing generates commands using detected runtimes
-3. CLI import validation ensures entry point availability
-4. Summary aggregation provides actionable feedback
 
-Path manipulation ensures local imports work correctly during development testing. The architecture gracefully handles component failures to provide complete test coverage even in partial failure scenarios.
+1. **Setup Phase**: Path manipulation ensures local imports work correctly
+2. **Sequential Testing**: Tests run in order with results feeding into summary
+3. **Results Aggregation**: Runtime detection results are collected and reported
+4. **Manual Verification**: Output provides actionable commands for further manual testing
 
 ## Important Patterns and Conventions
-- **Manual verification approach**: Uses print statements rather than assertions for human-readable output
-- **Integration over unit testing**: Tests actual system state rather than mocked dependencies
-- **Dry run validation**: Command construction testing without execution risk
-- **Graceful degradation**: Continues testing even when individual components fail
-- **Actionable output**: Provides specific next steps and manual testing commands
 
-The test suite serves as both validation and documentation, demonstrating proper usage patterns for the launcher components while verifying system readiness for MCP server debugging workflows.
+### Testing Patterns
+- **Manual test framework**: Prioritizes human-readable output over automated assertions
+- **Graceful failure handling**: Tests continue execution even when components fail
+- **Real system integration**: Tests actual dependencies rather than mocked interfaces
+- **Dry run validation**: Command construction tested without execution for safety
+
+### Configuration Constants
+- Tests both stdio and SSE modes with consistent port configuration (8080)
+- Uses package constants (`NPM_PACKAGE`, `DOCKER_IMAGE`) for command generation
+- Verbose mode enabled for detailed diagnostic output
+
+## Critical Behavior Notes
+
+The test suite is designed as a development and validation tool that provides immediate feedback on system readiness and launcher functionality. It serves as both a testing framework and a diagnostic tool for developers working with the MCP debugger launcher, emphasizing real-world integration testing over unit test isolation.

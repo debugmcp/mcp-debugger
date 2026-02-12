@@ -1,55 +1,62 @@
 # packages/adapter-javascript/scripts/lib/
-@generated: 2026-02-10T21:26:19Z
+@generated: 2026-02-11T23:47:37Z
 
 ## Overall Purpose
-The `packages/adapter-javascript/scripts/lib` directory contains core utility libraries for managing js-debug dependency acquisition and deployment strategies. This module provides the foundational logic for determining how to obtain js-debug assets - whether from local development paths, GitHub releases, or source builds - and includes specialized helpers for asset selection and path handling.
+The `packages/adapter-javascript/scripts/lib` directory provides a foundational utility library for the JavaScript adapter's build and dependency management system. This module serves as the core decision-making layer for vendoring strategies and asset selection, enabling the adapter to intelligently source and manage js-debug dependencies based on environment configuration and available GitHub releases.
 
-## Key Components and Relationships
+## Key Components and Integration
 
-### Asset Selection Pipeline (`js-debug-helpers.js`)
-- **`selectBestAsset(assets)`**: Primary entry point for choosing optimal js-debug assets from GitHub releases
-- **`getArchiveType(name)`**: Internal classifier for supported archive formats (tgz, zip, vsix)
-- **`normalizePath(p)`**: Cross-platform path display utility (display-only, not filesystem operations)
+### Core Modules
+- **`vendor-strategy.js`**: Environment-driven strategy selector that determines how js-debug dependencies should be obtained (local development, build from source, or use prebuilt)
+- **`js-debug-helpers.js`**: Asset selection and path utilities for choosing optimal js-debug releases from GitHub API responses
 
-### Strategy Determination (`vendor-strategy.js`) 
-- **`determineVendoringPlan(env)`**: Central decision engine that analyzes environment variables to select vendoring approach
-- **`parseEnvBool(v)`**: Environment variable parser for boolean flags
+### Component Relationship
+These modules work in tandem to form a complete dependency resolution pipeline:
+1. `vendor-strategy.js` determines *how* to obtain dependencies based on environment variables
+2. `js-debug-helpers.js` handles *which* specific assets to select when fetching from external sources
+3. Together they enable flexible development workflows from local debugging to production builds
 
 ## Public API Surface
 
-**Main Entry Points:**
-1. `selectBestAsset(assets)` - Selects best js-debug asset from GitHub API response
-2. `determineVendoringPlan(env = process.env)` - Returns vendoring strategy based on environment
+### Primary Entry Points
+- **`determineVendoringPlan(env?)`**: Main strategy selector returning vendoring mode objects
+- **`selectBestAsset(assets)`**: Core asset selection algorithm for GitHub release processing
+- **`normalizePath(p)`**: Cross-platform path display utility
+- **`parseEnvBool(v)`**: Environment variable boolean parser
 
-**Vendoring Modes:**
-- `{ mode: 'local', localPath: string }` - Local development with specified path
-- `{ mode: 'prebuilt-then-source' }` - Try prebuilt assets, fallback to source build  
-- `{ mode: 'prebuilt-only' }` - Use only prebuilt artifacts (default)
+### API Design Patterns
+All functions are pure, side-effect-free utilities designed for:
+- Deterministic unit testing
+- Safe concurrent execution  
+- Environment-agnostic operation
+- Clear separation of concerns
 
 ## Internal Organization and Data Flow
 
-The module follows a clear separation of concerns:
+### Vendoring Strategy Flow
+1. Environment variables (`JS_DEBUG_LOCAL_PATH`, `JS_DEBUG_BUILD_FROM_SOURCE`) drive strategy selection
+2. Strategy objects contain mode flags and configuration data
+3. Calling scripts use strategy objects to determine execution paths
 
-1. **Strategy Layer** (`vendor-strategy.js`): Determines *how* to acquire js-debug based on environment
-2. **Asset Selection Layer** (`js-debug-helpers.js`): Determines *which* assets to use from available options
-
-**Typical Flow:**
-```
-Environment Variables → determineVendoringPlan() → Vendoring Strategy
-GitHub Release Assets → selectBestAsset() → Optimal Asset Selection  
-```
+### Asset Selection Flow
+1. GitHub API asset arrays are processed and categorized by type and role
+2. Preference algorithms rank assets: server > dap > generic, tgz > zip
+3. Best match is selected using sophisticated filtering and ranking logic
 
 ## Important Patterns and Conventions
 
-**Pure Functions**: Both modules are side-effect-free ESM modules designed for unit testing and predictable behavior.
+### Error Handling
+- Descriptive errors with context (available asset names, strategy conflicts)
+- Graceful degradation with sensible defaults
+- No throwing on invalid inputs where reasonable defaults exist
 
-**Asset Prioritization**: Sophisticated ranking system favoring:
-- Server assets > DAP assets > Generic assets
-- tgz/tar.gz archives > zip/vsix archives
-- Pattern matching with primary/fallback regex strategies
+### Architecture Principles
+- **Pure functions only**: No global state or side effects
+- **Environment safety**: Graceful handling of missing `process.env`
+- **Type safety**: Clear return type unions and input validation
+- **Testability**: Designed for comprehensive unit test coverage
 
-**Environment Safety**: Graceful handling of non-Node environments with safe fallbacks and flexible input validation.
-
-**Error Handling**: Descriptive errors with context (available asset names) when selection fails.
-
-**Cross-Platform Compatibility**: Path normalization utilities and archive format detection support diverse deployment scenarios.
+### Domain-Specific Logic
+- VSIX files treated as zip archives for extraction compatibility
+- GitHub API response format assumptions (name, download URL fields)
+- Cross-platform path handling considerations (display vs. filesystem operations)

@@ -1,46 +1,36 @@
 # tests/integration/
-@generated: 2026-02-10T21:26:33Z
+@generated: 2026-02-11T23:47:43Z
 
 ## Purpose
-This directory provides comprehensive integration testing for language-specific debugging capabilities within the VSCode debugging extension. It serves as the validation layer for end-to-end debugging workflows, ensuring that the debugging adapter correctly handles real-world scenarios across different programming languages and their respective toolchains.
+Integration testing directory that provides comprehensive end-to-end validation of language-specific debugging adapters within the broader debugging system. This module ensures that debugging functionality works correctly across the entire stack, from debug session management to language-specific features and protocol integration.
 
-## Key Components and Organization
-The directory is organized by programming language, with each subdirectory containing focused integration test suites:
+## Key Components
+- **rust/**: Complete integration test suite for Rust language debugging adapter, validating session lifecycle, breakpoint management, and Cargo project integration
 
-- **rust/**: Complete integration testing for Rust debugging capabilities, including Cargo project handling, session lifecycle management, and Debug Adapter Protocol (DAP) compliance
+## Testing Architecture and Scope
+The integration tests validate critical cross-system workflows:
+- **End-to-End Debug Sessions**: Complete debugging workflows from session creation through cleanup
+- **Language Adapter Integration**: Validation that language-specific adapters integrate correctly with the core debugging infrastructure
+- **Protocol Compliance**: DAP (Debug Adapter Protocol) implementation testing with real debugging scenarios
+- **Production Environment Simulation**: Uses actual production dependencies and file system interactions rather than mocks
 
-Each language-specific test directory provides comprehensive coverage of:
-- Session creation, management, and cleanup workflows
-- Language-specific project detection and configuration
-- Breakpoint operations with graceful error handling
-- Debug adapter protocol integration and compliance
+## Integration Points and Dependencies
+- **SessionManager API**: Primary interface for orchestrating debug sessions across all language adapters
+- **Production Dependency Container**: Ensures authentic integration testing with real system components
+- **File System Integration**: Tests against actual project structures and source files
+- **Logging Infrastructure**: System-wide logging integration for test isolation and debugging
 
-## Test Architecture and Patterns
-The integration tests follow a consistent architectural pattern across languages:
+## Public API Validation
+Integration tests serve as comprehensive validation of the debugging system's public interfaces:
+- Session creation and management across different languages
+- Breakpoint operations and state management
+- Configuration handling for language-specific debugging features
+- Resource cleanup and proper session lifecycle management
 
-- **Isolated Test Environment**: Uses temporary directories and separate logging to prevent test interference
-- **Sequential Workflow Testing**: Maintains session state across test cases to validate complete debugging scenarios
-- **Graceful Degradation**: Handles missing test files and optional scenarios without failing the entire test suite
-- **Resource Management**: Implements proper setup/teardown with cleanup hooks
+## Test Organization Patterns
+- **Language-Specific Modules**: Each supported language has dedicated integration test coverage
+- **Production-Like Testing**: Uses real dependencies and actual project files to ensure authentic validation
+- **Resource Isolation**: Temporary directories and dedicated logging prevent test interference
+- **Sequential Workflow Testing**: Validates complete debugging scenarios rather than isolated operations
 
-## Public API and Entry Points
-- **Test Execution**: Primary entry through vitest framework for all language-specific test suites
-- **Test Data Integration**: Consumes example projects from `examples/` directory for realistic testing scenarios
-- **Dependency Integration**: Interfaces with core `SessionManager` and dependency injection systems
-- **Configuration Management**: Integrates with shared debugging constants and session management APIs
-
-## Data Flow and Dependencies
-The integration tests operate in a layered approach:
-1. **Setup Phase**: Initializes isolated test environments with temporary logging and directories
-2. **Session Management**: Creates and validates debug sessions using production-level dependencies
-3. **Workflow Validation**: Executes complete debugging scenarios including breakpoint operations
-4. **Cleanup Phase**: Ensures proper resource disposal and session termination
-
-## Important Conventions
-- **Error Handling**: Implements robust try-catch patterns for optional scenarios and missing test files
-- **Async Operations**: Consistent use of async/await throughout test suites for proper asynchronous handling
-- **Logging Strategy**: Debug-level logging to temporary files for test isolation and debugging
-- **Test Isolation**: Each test suite operates independently while maintaining realistic integration scenarios
-
-## Role in Larger System
-This integration testing layer serves as the critical validation point between unit tests and production usage, ensuring that the debugging extension's language adapters function correctly in realistic development environments. It validates the complete integration chain from VSCode debugging interface through the Debug Adapter Protocol to language-specific debugging tools.
+This directory serves as the quality gate ensuring that all language debugging adapters integrate seamlessly with the core debugging infrastructure, providing confidence that the system works correctly in real-world debugging scenarios before deployment.

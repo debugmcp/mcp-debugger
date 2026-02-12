@@ -1,79 +1,72 @@
 # packages/adapter-rust/scripts/
-@generated: 2026-02-10T21:26:20Z
+@generated: 2026-02-11T23:47:39Z
 
-## Overall Purpose
+## Overview
+The `packages/adapter-rust/scripts` directory contains build automation scripts for the Rust adapter package of a debug MCP server. This module is responsible for downloading, caching, and organizing external debugging tools to enable cross-platform Rust debugging capabilities.
 
-This directory contains build/setup scripts for the Rust adapter package of an MCP (Model Context Protocol) debug server. The primary responsibility is to vendor (download and organize) external debugging tools required for cross-platform Rust development support.
+## Core Responsibility
+The primary purpose is to vendor CodeLLDB debugger binaries across multiple platforms (Windows, macOS, Linux on x64/ARM64 architectures) by downloading platform-specific VSIX packages from GitHub releases, extracting the necessary debugging components, and organizing them in a standardized vendor directory structure.
 
 ## Key Components
 
-### **vendor-codelldb.js** - Primary Vendoring Script
-The core script that manages the download, extraction, and organization of CodeLLDB debugger binaries across multiple platforms. This is essential for providing LLDB-based debugging capabilities for Rust code in various target environments.
+### **vendor-codelldb.js**
+The main and only script in this directory, serving as a comprehensive vendoring solution that handles:
+- Multi-platform binary distribution management
+- HTTP download orchestration with retry logic and caching
+- VSIX package extraction and file organization
+- Cache management with SHA256 validation
+- Environment-based configuration and build control
 
 ## Public API Surface
 
-### Main Entry Point
-- **vendor-codelldb.js**: Command-line script invoked during package setup/build
-- Supports CLI arguments for platform selection
-- Environment variable configuration for build customization
+### **Entry Points**
+- **CLI Interface**: Direct script execution with platform arguments
+- **Environment Variables**: Extensive configuration through environment variables
+  - `CODELLDB_VERSION`: Version targeting (default: 1.11.8)
+  - `SKIP_ADAPTER_VENDOR`: Complete bypass flag
+  - `CODELLDB_FORCE_REBUILD`: Force re-download
+  - `CODELLDB_VENDOR_LOCAL_ONLY`: Offline-only mode
+  - `CODELLDB_PLATFORMS`: Platform selection override
+  - `CODELLDB_CACHE_DIR`: Cache location customization
 
-### Environment Configuration
-- **CODELLDB_VERSION**: Target debugger version (default: '1.11.8')
-- **SKIP_ADAPTER_VENDOR**: Complete bypass mechanism
-- **CODELLDB_FORCE_REBUILD**: Force re-download of artifacts
-- **CODELLDB_VENDOR_LOCAL_ONLY**: Offline-only mode
-- **CODELLDB_PLATFORMS**: Custom platform list override
-- **CODELLDB_CACHE_DIR**: Cache location override
+### **Main Function**
+- `main()`: Primary orchestrator with comprehensive error handling and progress reporting
 
-## Internal Organization and Data Flow
+## Internal Organization
 
-### 1. Platform Detection & Selection
-- Automatic detection of current platform (Node.js process.platform/arch)
-- Support for 5 target platforms: Windows x64, macOS x64/ARM64, Linux x64/ARM64
-- Flexible platform selection via environment variables or CLI arguments
+### **Data Flow**
+1. **Platform Determination** → Selects target platforms based on environment/arguments
+2. **Cache Check** → Validates existing artifacts via SHA256 checksums
+3. **Download Phase** → Fetches VSIX packages from GitHub with retry logic
+4. **Extraction Phase** → Unpacks and organizes debugger components
+5. **Validation** → Creates version manifests and sets proper permissions
 
-### 2. Artifact Management Pipeline
-```
-Platform Selection → Cache Check → Download → Extract → Vendor → Validate
-```
+### **Core Subsystems**
+- **Platform Management**: Maps Node.js platform/arch to CodeLLDB targets
+- **HTTP Client**: Robust download system with progress tracking and failure handling
+- **Cache System**: Persistent artifact storage with integrity validation
+- **File Operations**: ZIP extraction, permission setting, and directory organization
 
-### 3. Caching System
-- SHA256-validated cache entries for downloaded VSIX packages
-- Atomic cache operations with metadata tracking
-- Cache invalidation on corruption detection
-
-### 4. Vendor Directory Structure
-Organizes extracted debugger components into standardized layout:
+## Output Structure
+Creates a standardized vendor directory layout:
 ```
 vendor/codelldb/{platform}/
-├── adapter/           # Core debugger executable
-├── lldb/lib/          # LLDB runtime libraries
-├── lang_support/      # Language-specific support files
-└── version.json       # Version manifest
+├── adapter/codelldb[.exe]          # Main debugger binary
+├── lldb/lib/liblldb.[dll|dylib|so] # LLDB debugging libraries
+├── lang_support/                    # Language-specific support files
+└── version.json                     # Version tracking manifest
 ```
 
-## Important Patterns and Conventions
+## Integration Patterns
+- **Build System Integration**: Designed for npm scripts and CI/CD pipelines
+- **Cross-Platform Support**: Handles platform-specific binary differences
+- **Development Workflow**: Supports local development with cache persistence and offline modes
+- **CI Optimization**: Special handling for CI environments with comprehensive platform coverage
 
-### Robust Download Handling
-- HTTP downloads with retry logic and exponential backoff
-- Progress indication (except in CI environments)
-- User-Agent identification: 'debugmcp/adapter-rust'
-- 30-second timeout with comprehensive error handling
+## Dependencies
+- **extract-zip**: VSIX archive handling
+- **node-fetch**: HTTP client for downloads
+- **progress**: User-friendly download progress indication
+- Core Node.js modules for file system, streaming, and cryptographic operations
 
-### Cross-Platform Considerations
-- Platform-specific binary paths and file extensions
-- Unix executable permission setting
-- ZIP magic header validation for VSIX integrity
-- Temporary directory cleanup (configurable via CODELLDB_KEEP_TEMP)
-
-### Build Integration
-- CI/local environment detection for behavior adaptation
-- Graceful fallback mechanisms when downloads fail
-- Comprehensive logging with severity levels
-- Summary reporting of vendoring operations
-
-## Role in Larger System
-
-This scripts directory serves as the build-time dependency management layer for the Rust adapter package. It ensures that the necessary debugging infrastructure (CodeLLDB) is available across all supported platforms, enabling the MCP debug server to provide consistent Rust debugging capabilities regardless of the target deployment environment.
-
-The vendored artifacts become part of the distributed package, eliminating runtime download requirements and ensuring offline debugging support.
+This directory serves as the foundation for enabling Rust debugging capabilities across the supported platforms by automating the complex process of acquiring and organizing the necessary debugging tools.

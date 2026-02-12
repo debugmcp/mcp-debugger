@@ -1,75 +1,57 @@
 # tests/unit/dap-core/
-@generated: 2026-02-10T21:26:20Z
+@generated: 2026-02-11T23:47:38Z
 
 ## Purpose
-Unit test suite for the DAP (Debug Adapter Protocol) core module, providing comprehensive validation of message handling, state management, and protocol communication for debug session proxy functionality.
+Unit test suite for the DAP (Debug Adapter Protocol) core module, providing comprehensive test coverage for message handling and state management components that enable proxy-based debug session communication.
 
-## Overall Module Responsibility
-The `dap-core` module serves as the central message processing and state management layer for debug adapter protocol sessions. It handles bidirectional communication between debug clients and adapters, manages session state, and translates protocol messages into actionable commands and events.
+## Test Coverage Structure
 
-## Key Components and Relationships
+### Core Message Processing (`handlers.test.ts`)
+Tests the primary DAP core functionality through the `handleProxyMessage` function, which serves as the main entry point for processing debug adapter communication. Test coverage includes:
 
-### Message Handling (`handlers.test.ts`)
-Tests the core message processing pipeline that:
-- Validates incoming proxy messages for session integrity
-- Processes status messages from debug adapters (lifecycle events, IPC tests, configuration)
-- Handles error propagation with proper event emission
-- Forwards DAP events (stopped, continued, terminated, exited) with state synchronization
-- Manages thread tracking for debugging sessions
-- Generates warnings for invalid sessions or unknown message types
+- **Session Management**: Validation of session IDs and rejection of mismatched requests
+- **Debug Lifecycle Events**: Processing of adapter configuration, launch, exit, and termination states
+- **DAP Event Handling**: Thread tracking, continuation, and standard DAP event forwarding
+- **Error Processing**: Error message handling with proper event emission
+- **Message Validation**: Structural validation through `isValidProxyMessage`
 
 ### State Management (`state.test.ts`)
-Tests immutable state operations for:
-- Session initialization and configuration tracking
-- Debug adapter lifecycle flags (initialized, configured)
-- Current thread ID management for debugging context
-- Pending request tracking with Map-based storage
-- Atomic bulk state updates
+Tests the immutable state operations that underpin the DAP core's session tracking capabilities:
+
+- **State Initialization**: Factory function testing for clean session state creation
+- **Flag Management**: Testing of initialization and adapter configuration state flags
+- **Thread Tracking**: Current thread ID assignment and management
+- **Request Lifecycle**: Pending request addition, retrieval, removal, and bulk clearing
+- **Immutability Guarantees**: Ensuring all state operations maintain immutability
+
+## Key Components Integration
+
+### Message Flow Pipeline
+1. **Validation**: Messages validated via `isValidProxyMessage` before processing
+2. **Handling**: `handleProxyMessage` processes validated messages based on type (status, error, DAP event)
+3. **State Updates**: Handler functions update session state immutably using state management functions
+4. **Command Generation**: Handlers emit appropriate commands (logging, events, process control)
+
+### State Management Layer
+- **Immutable Operations**: All state changes create new state objects without mutation
+- **Session Tracking**: Maintains debug session context including initialization status and thread information
+- **Request Management**: Tracks pending DAP requests with comprehensive lifecycle management
 
 ## Public API Surface
-**Core Functions:**
-- `handleProxyMessage`: Primary message processor for DAP proxy communication
-- `isValidProxyMessage`: Message structure validator
-- `createInitialState`: Session state factory
+Based on test coverage, the main entry points include:
 
-**State Operations:**
-- `setInitialized`, `setAdapterConfigured`: Lifecycle flag management
-- `setCurrentThreadId`: Thread context tracking  
-- `addPendingRequest`, `getPendingRequest`, `removePendingRequest`, `clearPendingRequests`: Request lifecycle management
-- `updateState`: Atomic multi-property updates
+- `handleProxyMessage(message, state, sessionId)`: Primary message processor
+- `isValidProxyMessage(message)`: Message structure validator
+- `createInitialState(sessionId)`: State factory function
+- State mutation functions: `setInitialized`, `setAdapterConfigured`, `setCurrentThreadId`
+- Request management: `addPendingRequest`, `getPendingRequest`, `removePendingRequest`, `clearPendingRequests`
+- `updateState`: Atomic multi-property state updates
 
-## Internal Organization and Data Flow
+## Test Patterns and Quality Assurance
+- **Immutability Verification**: Extensive testing with frozen objects to guarantee no mutations
+- **State Isolation**: Each test uses fresh state instances via setup hooks
+- **Message Structure Consistency**: Standardized proxy message format validation
+- **Command Verification**: Thorough validation of generated downstream commands
+- **Error Handling**: Comprehensive testing of error conditions and edge cases
 
-### Message Processing Pipeline
-1. **Validation**: Session ID verification and message structure validation
-2. **Routing**: Message type classification (status, error, DAP event)
-3. **Processing**: State updates, command generation, event emission
-4. **Output**: Structured commands for downstream consumers
-
-### State Management Flow
-- **Immutable Operations**: All state changes create new objects
-- **Session Tracking**: Centralized session state with lifecycle management
-- **Request Management**: Map-based pending request tracking with cleanup
-- **Thread Context**: Current debugging thread ID maintenance
-
-## Important Patterns and Conventions
-
-### Testing Patterns
-- **Immutability Enforcement**: All tests verify no state mutation using frozen objects
-- **Fresh State**: Each test uses newly created state via `beforeEach`
-- **Mock Data Construction**: Consistent proxy message structure validation
-- **Command Verification**: Thorough validation of generated logging, events, and process control commands
-
-### Protocol Handling
-- **Session Validation**: Strict session ID matching with warning generation
-- **Event Forwarding**: Direct DAP event passthrough with state synchronization
-- **Error Propagation**: Structured error handling with event emission
-- **Lifecycle Management**: Debug adapter state tracking through configuration and execution phases
-
-### State Architecture
-- **Immutable Design**: No direct state mutations, always return new state objects
-- **Type Safety**: Comprehensive TypeScript types for all message and state structures
-- **Request Tracking**: Map-based storage for pending debug protocol requests
-- **Thread Management**: Current debugging context maintenance
-
-The module serves as the foundational layer for debug session management, ensuring reliable message processing and consistent state management across debug adapter protocol interactions.
+This test suite ensures the DAP core module can reliably process debug adapter communication, maintain session state integrity, and handle the full lifecycle of debugging sessions with proper error handling and state transitions.

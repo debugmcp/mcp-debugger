@@ -1,57 +1,60 @@
 # tests/fixtures/python/
-@generated: 2026-02-10T21:26:32Z
+@generated: 2026-02-11T23:47:36Z
 
-## Python Test Fixtures Directory
+## Python Debugging Test Fixtures
 
-This directory contains Python test fixtures specifically designed for validating debugging workflows and debugger protocol implementations in the MCP Server ecosystem.
+This directory provides Python-based test fixtures specifically designed for validating debugging workflows and debugger protocol implementations within the MCP Server ecosystem.
 
-### Overall Purpose
+## Overall Purpose
 
-The `tests/fixtures/python` directory provides controlled test environments for debugging functionality, containing both debuggee targets and mock debugging infrastructure. These fixtures enable comprehensive testing of debugging capabilities without requiring complex real-world applications.
+The directory contains complementary test fixtures that enable comprehensive testing of Python debugging capabilities:
 
-### Key Components
+1. **Target Application Testing**: Provides a simple, debuggable Python script for testing debugger attachment and breakpoint functionality
+2. **Protocol Server Testing**: Implements a minimal DAP (Debug Adapter Protocol) server for testing debugger protocol communications
 
-**Test Target (`debug_test_simple.py`)**
-- Simple Python script with predictable execution flow designed as a debuggee target
-- Contains strategically placed breakpoint locations and variable scopes for testing debugger inspection capabilities
-- Provides both synchronous computation and timed operations to test different debugging scenarios
-- Minimal dependencies and linear execution flow to reduce test complexity
+## Key Components
 
-**Mock Debug Server (`debugpy_server.py`)**
-- Lightweight DAP (Debug Adapter Protocol) server implementation for testing MCP Server debugpy connections
-- Handles standard debugging protocol messages without actual debugging capabilities
-- Socket-based server with proper DAP message framing and basic capability negotiation
-- Supports essential DAP commands: initialize, launch, configurationDone, threads, disconnect
+### Debug Target (`debug_test_simple.py`)
+- **Primary Function**: `sample_function()` - Designed with explicit breakpoint targets and local variables for inspection
+- **Entry Point**: `main()` - Orchestrates execution flow with timing controls for step debugging
+- **Key Features**: Predictable execution path, strategic breakpoint locations (line 13), multiple variable scopes
 
-### Public API & Entry Points
+### DAP Server Simulator (`debugpy_server.py`)
+- **Core Handler**: `handle_connection()` - Implements DAP message parsing and command processing
+- **Protocol Support**: Handles standard DAP commands (initialize, launch, configurationDone, threads, disconnect)
+- **Communication**: `send_dap_response()` - Manages DAP-compliant message framing with Content-Length headers
 
-**For Debuggee Testing:**
-- `debug_test_simple.py` - Execute directly as standalone script or target for external debuggers
-- Primary breakpoint target at line 13 (`c = a + b` calculation)
-- Predictable output and execution flow for verification
+## Component Interaction
 
-**For Protocol Testing:**
-- `debugpy_server.py` - Run as mock DAP server on localhost:5678 (standard debugpy port)
-- Command-line interface with `--port` and `--no-wait` options
-- Graceful shutdown handling via signal handlers
+These fixtures work together to enable end-to-end debugging workflow testing:
 
-### Internal Organization
+1. `debugpy_server.py` can be started as a mock debug server listening on port 5678
+2. `debug_test_simple.py` serves as the target application that debuggers can attach to
+3. Test harnesses can coordinate between both to validate complete debugging scenarios
 
-The fixtures follow a complementary design pattern:
-- **Target-side testing**: `debug_test_simple.py` provides a controlled debuggee with known execution patterns
-- **Server-side testing**: `debugpy_server.py` provides a mock debugging infrastructure for protocol validation
+## Public API Surface
 
-### Data Flow & Integration
+### Entry Points
+- `debug_test_simple.py`: Direct execution via `python debug_test_simple.py`
+- `debugpy_server.py`: Server launch via `python debugpy_server.py [--port PORT] [--no-wait]`
 
-1. **Debugging Workflow Tests**: Use `debug_test_simple.py` as target application while testing debugger attachment, breakpoint setting, and variable inspection
-2. **Protocol Compliance Tests**: Use `debugpy_server.py` to validate DAP message handling, connection management, and command processing
-3. **End-to-End Scenarios**: Combine both fixtures to test complete debugging pipelines from client connection through target execution
+### Test Integration Points
+- Line 13 in `debug_test_simple.py`: Primary breakpoint target location
+- Port 5678: Standard debugpy server endpoint for DAP communication
+- Signal handlers: Graceful shutdown capabilities for test cleanup
 
-### Design Patterns
+## Internal Organization
 
-- **Minimal Dependencies**: Both fixtures use only standard library components to reduce test environment requirements
-- **Predictable Behavior**: Deterministic execution flows and responses for reliable test outcomes
-- **Protocol Compliance**: Proper DAP message framing and standard debugging port usage
-- **Isolation**: Self-contained fixtures that don't interfere with production debugging infrastructure
+Both fixtures follow standard Python patterns:
+- Minimal external dependencies (standard library only)
+- Clear separation of concerns between target and server functionality
+- Synchronous execution models for predictable test behavior
+- Proper error handling and cleanup mechanisms
 
-This directory enables comprehensive validation of debugging features by providing both the target applications to debug and the infrastructure to test debugging protocol implementations.
+## Testing Patterns
+
+The directory enables validation of:
+- **Debugger Attachment**: Using the simple target script with known execution flow
+- **Protocol Compliance**: Via the DAP server implementation with standard command support
+- **Variable Inspection**: Through strategically placed local variables and computation steps
+- **Session Management**: Including connection establishment, command processing, and clean disconnection

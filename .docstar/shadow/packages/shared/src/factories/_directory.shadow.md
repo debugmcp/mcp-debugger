@@ -1,53 +1,73 @@
 # packages/shared/src/factories/
-@generated: 2026-02-10T21:26:13Z
+@generated: 2026-02-11T23:47:36Z
 
 ## Purpose
-The `factories` directory provides the core infrastructure for creating and managing debug adapters across different programming languages. It establishes a standardized factory pattern that ensures consistent adapter creation, validation, and compatibility checking throughout the debugging system.
+
+The `factories` directory provides the foundational architecture for creating debug adapters across different programming languages in a standardized, extensible way. This module establishes the core factory pattern that ensures consistent adapter instantiation, validation, and version compatibility management throughout the debugging system.
 
 ## Core Architecture
 
 ### Factory Pattern Implementation
-The directory centers around the **AdapterFactory** abstract base class, which serves as the foundational template for all language-specific debug adapter factories. This design enforces a consistent creation pattern while allowing customization for different debugging environments.
+The directory centers around the **AdapterFactory** abstract base class, which serves as the template for all language-specific debug adapter factories. This design enforces a uniform interface while allowing language-specific customization through inheritance and method overrides.
 
 ### Key Components
 
-#### AdapterFactory Base Class
-- **Central abstraction** implementing the `IAdapterFactory` interface
-- **Template method pattern** with extensible validation and compatibility hooks
-- **Metadata management** with defensive copying for immutability
-- **Version compatibility** system with semantic version comparison utilities
+**AdapterFactory Base Class**
+- Abstract factory implementing `IAdapterFactory` interface
+- Provides standardized lifecycle: validation → compatibility checking → adapter creation
+- Encapsulates adapter metadata management with defensive copying
+- Includes built-in semantic version comparison utilities
 
-#### Public API Surface
-- `getMetadata()`: Retrieve adapter metadata safely
-- `validate()`: Async validation with customizable override points
-- `isCompatibleWithCore()`: Version compatibility verification
-- `createAdapter()`: Abstract factory method requiring concrete implementation
+**Template Method Pattern**
+- Abstract `createAdapter()` method forces concrete implementation
+- Overridable `validate()` and `isCompatibleWithCore()` methods with sensible defaults
+- Protected metadata access for subclass customization
+
+## Public API Surface
+
+### Main Entry Points
+- **AdapterFactory constructor**: Accepts `AdapterMetadata` for factory configuration
+- **getMetadata()**: Returns immutable copy of adapter configuration
+- **validate()**: Async validation hook (default: always valid)
+- **isCompatibleWithCore()**: Version compatibility verification
+- **createAdapter()**: Abstract method for adapter instantiation
+
+### Integration Points
+The factory interfaces with the broader system through:
+- `IDebugAdapter` interface for created adapters
+- `AdapterMetadata` for factory configuration
+- `AdapterDependencies` for runtime requirements
+- `FactoryValidationResult` for validation feedback
 
 ## Internal Organization
 
 ### Data Flow
-1. **Factory instantiation** with required `AdapterMetadata`
-2. **Validation phase** through extensible `validate()` method
-3. **Compatibility checking** against core debugger version requirements
-4. **Adapter creation** via concrete `createAdapter()` implementation
+1. **Initialization**: Factory configured with adapter metadata
+2. **Validation**: Optional async validation of factory state
+3. **Compatibility**: Version checking against core debugger requirements
+4. **Creation**: Language-specific adapter instantiation
 
 ### Design Patterns
-- **Abstract Factory**: Enforces consistent adapter creation interface
-- **Template Method**: Provides default behavior with customization points
-- **Defensive Programming**: Metadata immutability and version fallback handling
-- **Extensibility First**: Protected methods and validation hooks for inheritance
-
-## Integration Points
-The factory system integrates with the broader debugging infrastructure through:
-- **Interface contracts** with `IDebugAdapter` and related types
-- **Metadata system** for adapter capability declaration
-- **Dependency injection** through `AdapterDependencies`
-- **Validation framework** via `FactoryValidationResult`
+- **Factory Pattern**: Standardized object creation interface
+- **Template Method**: Base implementation with customization hooks
+- **Defensive Programming**: Immutable metadata access, version fallbacks
+- **Strategy Pattern**: Pluggable validation and compatibility strategies
 
 ## Key Conventions
-- Default implementations favor permissive behavior (always valid/compatible)
-- Version checking only activates when `minimumDebuggerVersion` is specified
-- Clean separation between factory orchestration and actual adapter instantiation
-- Consistent error handling and validation patterns across all factory implementations
 
-This directory serves as the **foundational layer** for the entire debug adapter ecosystem, providing the structural guarantees and patterns that enable reliable, extensible debugging capabilities across multiple programming languages.
+### Version Management
+- Semantic versioning with flexible comparison (`compareVersions` utility)
+- Graceful handling of missing or malformed version strings
+- Conservative compatibility defaults (permissive when uncertain)
+
+### Error Handling
+- Defensive metadata copying prevents external mutations
+- Default implementations favor availability over strict validation
+- Version parsing with integer conversion and zero-padding fallbacks
+
+### Extensibility Points
+- Protected metadata access for subclass customization
+- Virtual validation and compatibility methods for override
+- Abstract adapter creation forces language-specific implementation
+
+This directory serves as the foundation for the plugin architecture, enabling consistent debug adapter management while supporting diverse language-specific requirements through controlled extensibility.

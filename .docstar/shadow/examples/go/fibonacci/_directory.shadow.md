@@ -1,41 +1,38 @@
 # examples/go/fibonacci/
-@generated: 2026-02-10T21:26:16Z
+@generated: 2026-02-11T23:47:32Z
 
 ## Purpose
-Educational demonstration module showcasing algorithmic optimization techniques through Fibonacci sequence calculation. Serves as a comparative study of three fundamental programming approaches: naive recursion, iterative optimization, and dynamic programming with memoization.
+Educational Go example demonstrating Fibonacci sequence computation with algorithmic complexity analysis. This module serves as a comparative study of three fundamental algorithm design patterns: naive recursion, iterative optimization, and dynamic programming with memoization.
 
 ## Key Components
-The directory contains a single comprehensive program (`main.go`) that implements and benchmarks three distinct Fibonacci algorithms:
+The directory contains a single comprehensive example (`main.go`) that implements and benchmarks three distinct Fibonacci algorithms:
 
-- **Recursive Implementation**: Classic exponential-time approach demonstrating algorithmic inefficiency
-- **Iterative Implementation**: Linear-time optimization using constant space
-- **Memoized Implementation**: Dynamic programming solution combining recursion with caching
+- **Recursive Implementation**: Classic exponential-time approach O(2^n) showcasing the inefficiency of naive recursion
+- **Iterative Implementation**: Linear-time solution O(n) demonstrating algorithmic optimization through iteration
+- **Memoized Implementation**: Dynamic programming approach achieving O(n) time complexity through caching
 
 ## Public API Surface
-**Main Entry Point**: 
-- `main()` - Orchestrates the complete demonstration, benchmarking all three implementations with n=10 and displaying performance comparisons
+**Main Entry Point**: `main()` function serves as the primary demonstration driver, executing all three algorithms with performance benchmarking for n=10.
 
-**Algorithm Implementations**:
-- `fibonacciRecursive(int) int` - Naive recursive approach (O(2^n) time)
-- `fibonacciIterative(int) int` - Optimized iterative approach (O(n) time, O(1) space)
-- `fibonacciMemoized(int, map[int]int) int` - Memoized recursive approach (O(n) time with caching)
+**Algorithm Functions**:
+- `fibonacciRecursive(n int) int`: Exponential-time recursive implementation
+- `fibonacciIterative(n int) int`: Linear-time iterative implementation  
+- `fibonacciMemoized(n int, memo map[int]int) int`: Memoized recursive implementation
 
-## Internal Organization
-The program follows a clear educational progression:
-1. **Benchmarking Phase**: Times each algorithm implementation using Go's `time` package
-2. **Comparison Phase**: Displays performance results highlighting complexity differences
-3. **Demonstration Phase**: Generates complete Fibonacci sequence using the efficient iterative method
+## Internal Organization and Data Flow
+1. **Initialization**: Main function sets up timing infrastructure and test parameters
+2. **Sequential Benchmarking**: Each algorithm is timed individually using `time.Now()` and `time.Since()`
+3. **Performance Comparison**: Results are displayed showing execution time differences
+4. **Sequence Generation**: Complete Fibonacci sequence F(0) through F(n) is generated using the efficient iterative approach
 
-## Data Flow
-All implementations handle the same mathematical function but with different computational strategies:
-- Input: Integer n (sequence position)
-- Processing: Three distinct calculation approaches with varying time/space complexity
-- Output: Fibonacci number F(n) plus performance metrics
+## Important Patterns and Conventions
+- **Performance Measurement**: Consistent timing methodology across all implementations
+- **Base Case Handling**: All algorithms handle edge cases (n≤1) by returning n
+- **Memoization Pattern**: External map initialization and passing for cache management
+- **Educational Structure**: Progressive complexity demonstration from naive to optimized solutions
 
-## Important Patterns
-- **Performance Measurement**: Consistent timing methodology using `time.Now()` and `time.Since()`
-- **Base Case Handling**: All implementations uniformly return n for n≤1
-- **Educational Progression**: Demonstrates evolution from inefficient to optimized solutions
-- **Memory Management**: Memoized version requires external map initialization, showcasing trade-offs between time and space complexity
+## Dependencies
+- Standard library only: `fmt` for output formatting, `time` for performance measurement
+- No external dependencies, making it suitable for educational environments
 
-This module serves as an excellent educational resource for understanding algorithmic complexity, optimization techniques, and performance analysis in Go programming.
+This example effectively demonstrates fundamental computer science concepts including algorithm analysis, time complexity, space complexity, and optimization techniques through practical implementation.
