@@ -68,10 +68,14 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
   });
 
   it('should find Python on Windows without explicit path', async () => {
+    if (process.platform !== 'win32') {
+      return; // This test is Windows-specific; covered by windows-python-integration CI job
+    }
+
     // This test MUST NOT mock Python discovery
     // It should use the real findPythonExecutable function
     // On Windows, this should find 'py' or 'python' (not 'python3' which is often Microsoft Store)
-    
+
     if (!client) {
       throw new Error("Client not initialized");
     }
