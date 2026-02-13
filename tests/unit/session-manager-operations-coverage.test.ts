@@ -87,6 +87,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         mockSession.state = newState;
       }),
       delete: vi.fn(),
+      remove: vi.fn().mockReturnValue(true),
       getAll: vi.fn().mockReturnValue([mockSession])
     };
 

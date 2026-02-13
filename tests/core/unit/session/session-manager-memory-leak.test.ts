@@ -142,8 +142,8 @@ describe('SessionManager - Memory Leak Prevention', () => {
         (sum, event) => sum + mockProxy.listenerCount(event as string), 0
       );
       
-      // Second close should not throw
-      await expect(sessionManager.closeSession(session.id)).resolves.toBe(true);
+      // Second close should return false since session was removed from store
+      await expect(sessionManager.closeSession(session.id)).resolves.toBe(false);
       
       const secondCloseListenerCount = mockProxy.eventNames().reduce(
         (sum, event) => sum + mockProxy.listenerCount(event as string), 0
@@ -305,6 +305,38 @@ describe('SessionManager - Memory Leak Prevention', () => {
       // Other listeners should still be removed
       expect(mockProxy.listenerCount('continued')).toBe(0);
       expect(mockProxy.listenerCount('terminated')).toBe(0);
+    });
+
+    it('should remove session from store after close', async () => {
+      const sessions: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const session = await sessionManager.createSession({
+          language: DebugLanguage.MOCK,
+          pythonPath: 'python'
+        });
+        sessions.push(session.id);
+      }
+
+      expect(sessionManager.getAllSessions().length).toBe(5);
+
+      for (const id of sessions) {
+        await sessionManager.closeSession(id);
+      }
+
+      expect(sessionManager.getAllSessions().length).toBe(0);
+    });
+
+    it('should return undefined from getSession after close', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        pythonPath: 'python'
+      });
+
+      expect(sessionManager.getSession(session.id)).toBeDefined();
+
+      await sessionManager.closeSession(session.id);
+
+      expect(sessionManager.getSession(session.id)).toBeUndefined();
     });
   });
 });

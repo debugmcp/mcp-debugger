@@ -189,6 +189,7 @@ export abstract class SessionManagerCore {
     });
     
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
+    this.sessionStore.remove(sessionId);
     return true;
   }
 

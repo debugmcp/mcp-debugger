@@ -270,10 +270,10 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Configure proxy to throw error on stop
       dependencies.mockProxyManager.stop = vi.fn().mockRejectedValue(new Error('Stop failed'));
       
-      // Should handle error gracefully and still mark as stopped (lines 758-762)
+      // Should handle error gracefully and still close session
       const result = await sessionManager.closeSession(session.id);
       expect(result).toBe(true);
-      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);
+      expect(sessionManager.getSession(session.id)).toBeUndefined();
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('Error stopping proxy'),
         'Stop failed'
@@ -298,7 +298,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Don't start debugging, so no proxy manager
       const result = await sessionManager.closeSession(session.id);
       expect(result).toBe(true);
-      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);
+      expect(sessionManager.getSession(session.id)).toBeUndefined();
     });
   });
 });

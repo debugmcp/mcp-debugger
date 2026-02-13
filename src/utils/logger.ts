@@ -90,6 +90,9 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     transports.push(
       new winston.transports.File({
         filename: logFilePath,
+        maxsize: 50 * 1024 * 1024,  // 50 MB per file
+        maxFiles: 3,                 // Keep 3 rotated files (150 MB max)
+        tailable: true,              // Newest logs always in base filename
         format: winston.format.combine(
           winston.format.timestamp(),
           winston.format.json()

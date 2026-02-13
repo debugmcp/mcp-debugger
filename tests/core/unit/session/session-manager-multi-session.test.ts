@@ -123,9 +123,9 @@ describe('SessionManager - Multi-Session Management', () => {
     // Close all sessions
     await sessionManager.closeAllSessions();
     
-    // All sessions should be stopped
-    expect(sessionManager.getSession(session1.id)?.state).toBe(SessionState.STOPPED);
-    expect(sessionManager.getSession(session2.id)?.state).toBe(SessionState.STOPPED);
+    // All sessions should be removed from store after close
+    expect(sessionManager.getSession(session1.id)).toBeUndefined();
+    expect(sessionManager.getSession(session2.id)).toBeUndefined();
     expect(dependencies.mockProxyManager.stopCalls).toBe(2);
   });
 
@@ -164,8 +164,8 @@ describe('SessionManager - Multi-Session Management', () => {
     
     // Should still close all sessions despite error
     await sessionManager.closeAllSessions();
-    
-    expect(sessionManager.getSession(session1.id)?.state).toBe(SessionState.STOPPED);
-    expect(sessionManager.getSession(session2.id)?.state).toBe(SessionState.STOPPED);
+
+    expect(sessionManager.getSession(session1.id)).toBeUndefined();
+    expect(sessionManager.getSession(session2.id)).toBeUndefined();
   });
 });

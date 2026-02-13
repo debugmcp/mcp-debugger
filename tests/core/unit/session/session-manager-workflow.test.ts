@@ -79,7 +79,7 @@ describe('SessionManager - Debug Session Workflow', () => {
       // Stop debugging
       const closeResult = await sessionManager.closeSession(session.id);
       expect(closeResult).toBe(true);
-      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);
+      expect(sessionManager.getSession(session.id)).toBeUndefined();
     });
 
     it('should handle dry run workflow correctly', async () => {

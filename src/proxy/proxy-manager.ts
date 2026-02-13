@@ -313,14 +313,15 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Mark as shutting down to stop processing new messages
     this.isStopped = true;
     const process = this.proxyProcess;
-    
+    const sessionIdSnapshot = this.sessionId;
+
     // Immediately cleanup to prevent "unknown request" warnings
     this.cleanup();
 
     // Send terminate command if process is still running
     try {
       if (!process.killed) {
-        process.send({ cmd: 'terminate', sessionId: this.sessionId });
+        process.send({ cmd: 'terminate', sessionId: sessionIdSnapshot });
       }
     } catch (error) {
       this.logger.error(`[ProxyManager] Error sending terminate command:`, error);
@@ -1017,6 +1018,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.isInitialized = false;
     this.adapterConfigured = false;
     this.currentThreadId = null;
+    this.stderrBuffer = [];
+    this.sessionId = null;
   }
 
   private setActiveLaunchBarrier(barrier: AdapterLaunchBarrier, requestId: string): void {

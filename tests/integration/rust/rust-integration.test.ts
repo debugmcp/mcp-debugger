@@ -80,6 +80,6 @@ describe('Rust Adapter Integration', () => {
     expect(closed).toBe(true);
     
     const session = sessionManager.getSession(sessionId);
-    expect(session?.state).toBe('stopped');
+    expect(session).toBeUndefined();
   });
 });

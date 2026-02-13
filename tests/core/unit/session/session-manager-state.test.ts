@@ -54,9 +54,9 @@ describe('SessionManager - State Machine Integrity', () => {
     dependencies.mockProxyManager.simulateEvent('continued');
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
     
-    // RUNNING → STOPPED
+    // RUNNING → STOPPED (session removed from store after close)
     await sessionManager.closeSession(session.id);
-    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);
+    expect(sessionManager.getSession(session.id)).toBeUndefined();
   });
 
   it('should reject invalid operations based on state', async () => {
