@@ -1,6 +1,6 @@
 {
-  "source": "packages/mcp-debugger/src/batteries-included.ts",
-  "source_hash": "08080fa3e5673837",
-  "generated": "2026-02-10T00:41:21Z",
+  "source": "packages\\mcp-debugger\\src\\batteries-included.ts",
+  "source_hash": "2b3f8be929735b87",
+  "generated": "2026-02-15T09:00:52Z",
   "findings": []
 }

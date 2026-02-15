@@ -1,6 +1,6 @@
 {
-  "source": "packages/adapter-mock/src/mock-debug-adapter.ts",
-  "source_hash": "f95ff85dc8a61525",
-  "generated": "2026-02-10T00:41:26Z",
+  "source": "packages\\adapter-mock\\src\\mock-debug-adapter.ts",
+  "source_hash": "2ac6c9b538db1264",
+  "generated": "2026-02-15T09:01:05Z",
   "findings": []
 }
