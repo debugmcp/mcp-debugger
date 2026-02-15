@@ -1,38 +1,42 @@
 # src\proxy\utils/
-@generated: 2026-02-12T21:05:40Z
+@children-hash: 9d552a0dfeee4a14
+@generated: 2026-02-15T09:01:16Z
 
-## Overview
+## Overall Purpose
 
-The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on orphan detection and process termination decisions in both traditional host and containerized environments.
-
-## Core Responsibility
-
-This module handles the critical decision of when a proxy process should terminate due to being orphaned by its parent process. It provides container-aware logic that prevents inappropriate shutdowns in Docker/containerized deployments where PID 1 behavior differs from traditional Unix processes.
+The `src/proxy/utils` directory provides utility functions for proxy process lifecycle management, specifically focused on orphan detection and container-aware process termination decisions.
 
 ## Key Components
 
-### Orphan Detection (`orphan-check.ts`)
-- **`shouldExitAsOrphan(ppid, inContainer)`**: Core decision engine that evaluates whether a process should exit based on parent PID and container context
-- **`shouldExitAsOrphanFromEnv(ppid, env?)`**: Environment-aware wrapper that automatically detects container status via `MCP_CONTAINER` environment variable
+**orphan-check.ts** - Core utility module containing functions for determining when a proxy process should terminate due to being orphaned from its parent process.
 
 ## Public API Surface
 
-**Main Entry Points:**
-- `shouldExitAsOrphan(ppid: number, inContainer: boolean): boolean` - Direct orphan check with explicit container flag
-- `shouldExitAsOrphanFromEnv(ppid: number, env?: NodeJS.ProcessEnv): boolean` - Environment-based orphan check (recommended)
+### Main Entry Points
 
-## Architecture Patterns
+- `shouldExitAsOrphan(ppid: number, inContainer: boolean): boolean` - Core decision function that determines if a process should exit based on PPID and container context
+- `shouldExitAsOrphanFromEnv(ppid: number, env?: NodeJS.ProcessEnv): boolean` - Environment-aware wrapper that auto-detects container status from `MCP_CONTAINER` environment variable
 
-**Container-Aware Design**: The module explicitly handles the container deployment pattern where PID 1 is the normal parent process, unlike traditional Unix systems where PID 1 indicates an orphaned process.
+## Internal Organization and Data Flow
 
-**Pure Function Pattern**: All functions are stateless and deterministic, taking explicit parameters rather than relying on global state, making them easily testable and predictable.
+The module follows a layered approach:
+1. **Core Logic Layer**: `shouldExitAsOrphan()` implements the fundamental orphan detection rules
+2. **Environment Abstraction Layer**: `shouldExitAsOrphanFromEnv()` handles environment variable parsing and delegates to core logic
+3. **Container Detection**: Uses `MCP_CONTAINER` environment variable to determine deployment context
 
-**Environment Abstraction**: Provides both low-level control (explicit container flag) and high-level convenience (environment-based detection) to suit different usage patterns.
+Data flow: Environment variables → Container detection → PPID evaluation → Exit decision
 
-## Decision Logic
+## Important Patterns and Conventions
 
-- **Host Process (PPID=1, not container)** → Exit (true orphan)
-- **Container Process (PPID=1, in container)** → Continue (normal)  
-- **Any Process (PPID≠1)** → Continue (has parent)
+### Container-Aware Architecture
+The utilities implement special handling for containerized environments where PPID=1 is expected behavior (due to PID namespaces) rather than indicating an orphaned process.
 
-This utility module is essential for proxy process stability in mixed deployment environments, preventing premature shutdowns in containerized scenarios while maintaining proper cleanup behavior on traditional hosts.
+### Decision Rules
+- **Host Process**: PPID=1 indicates orphaning → should exit
+- **Container Process**: PPID=1 is normal → should NOT exit  
+- **Any Context**: PPID≠1 indicates living parent → should NOT exit
+
+### Pure Function Design
+All functions are pure with explicit parameters, making the utilities easily testable and predictable in behavior.
+
+This directory serves as a critical component for proxy process stability, preventing zombie processes while correctly handling modern containerized deployment scenarios.

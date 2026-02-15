@@ -1,98 +1,64 @@
 # tests\unit\proxy/
-@generated: 2026-02-12T21:05:54Z
+@children-hash: 2f69c053f9b1f4ac
+@generated: 2026-02-15T09:01:31Z
 
 ## Overview
-This directory contains comprehensive unit tests for the DAP (Debug Adapter Protocol) proxy system, which enables debugging of target programs through a standardized protocol interface. The proxy acts as an intermediary between debug clients and debug adapters, managing connections, message routing, session lifecycle, and state synchronization.
+The `tests/unit/proxy` directory contains comprehensive unit test coverage for the DAP (Debug Adapter Protocol) proxy subsystem, which enables debug session management and communication between debug adapters and clients. The test suite validates core proxy functionality including connection management, message parsing, request tracking, process lifecycle, and error handling scenarios.
 
-## Core Components Tested
+## Key Components Tested
 
-### ProxyManager (`proxy-manager*.test.ts`)
-The central orchestrator for debugging sessions that manages:
-- **Session lifecycle**: Start/stop operations, initialization handshakes, and cleanup
-- **Process management**: Proxy process spawning, monitoring, and termination
-- **Message routing**: Bidirectional communication between clients and debug adapters
-- **Error handling**: Retry logic, timeout management, and graceful failure recovery
-- **State tracking**: Session state, thread information, and dry-run execution snapshots
+### ProxyManager (Core Orchestrator)
+- **Entry Point**: Primary facade class managing proxy lifecycle and communication
+- **Key Tests**: `proxy-manager.start.test.ts`, `proxy-manager.handshake.test.ts`, `proxy-manager.branch-coverage.test.ts`, `proxy-manager-message-handling.test.ts`
+- **Functionality**: Process spawning, initialization handshakes, DAP request/response handling, retry logic, timeout management, and graceful shutdown
 
-Key test files:
-- `proxy-manager.start.test.ts`: Startup, initialization, and script resolution
-- `proxy-manager.handshake.test.ts`: Init retry logic with exponential backoff
-- `proxy-manager.branch-coverage.test.ts`: Edge cases and command processing
-- `proxy-manager-message-handling.test.ts`: Event propagation and cleanup scenarios
+### Connection Management Layer
+- **DapConnectionManager** (`dap-proxy-connection-manager.test.ts`): DAP client connection orchestration with exponential backoff retry logic, session initialization, breakpoint management, and event handler setup
+- **MinimalDapClient** (`minimal-dap.test.ts`): Low-level DAP protocol communication, message parsing, request correlation, and child session integration
 
-### DapConnectionManager (`dap-proxy-connection-manager.test.ts`)
-Manages DAP client connections with sophisticated retry and error recovery:
-- **Connection establishment**: Retry logic with 200ms intervals and exponential backoff
-- **Session initialization**: Python adapter configuration and client ID management
-- **Breakpoint management**: Setting, validation, and synchronization
-- **Event handling**: DAP event registration and forwarding
-- **Graceful disconnection**: Timeout handling and resource cleanup
+### Message Processing Infrastructure  
+- **MessageParser** (`dap-proxy-message-parser.test.ts`): Command parsing and payload validation for init, DAP, and terminate message types with comprehensive error handling
+- **RequestTracker** (`dap-proxy-request-tracker.test.ts`): Request lifecycle tracking with timeout management and callback-based timeout notifications
 
-### Message Processing (`dap-proxy-message-parser.test.ts`)
-Validates command parsing and payload validation for different message types:
-- **Command parsing**: From objects and JSON strings
-- **Payload validation**: Init, DAP, and terminate payloads with comprehensive error checking
-- **Type safety**: Field validation, type checking, and boundary condition handling
+### Utility Components
+- **Orphan Detection** (`orphan-check.test.ts`): Process orphan detection based on parent PID and container environment awareness
+- **Test Infrastructure** (`proxy-manager-test-setup.ts`): Specialized timeout test handlers for managing expected rejections during timeout scenarios
 
-### Request Tracking (`dap-proxy-request-tracker.test.ts`)
-Manages request lifecycle and timeout handling:
-- **RequestTracker**: Basic request tracking with timeout management
-- **CallbackRequestTracker**: Extended functionality with timeout callbacks
-- **Concurrency handling**: Multiple simultaneous requests and race conditions
+## Test Architecture & Patterns
 
-### Network Communication (`minimal-dap.test.ts`)
-Low-level DAP protocol communication and message handling:
-- **Message parsing**: DAP protocol message assembly from network chunks
-- **Request/response correlation**: Sequence number management and timeout handling
-- **Child session management**: Multi-session debugging support
-- **Event propagation**: DAP events forwarded to client handlers
+### Mock Strategy
+- **Process Isolation**: Extensive use of mock proxy processes (`FakeProxyProcess`, `StubProxyProcess`) to avoid real process spawning
+- **Network Mocking**: Mock DAP clients and socket implementations for network communication testing
+- **Timer Control**: Comprehensive fake timer usage for deterministic retry logic and timeout testing
+- **Dependency Injection**: Full mocking of file system, logger, and launcher dependencies
 
-## Supporting Utilities
+### Coverage Focus Areas
+- **Connection Resilience**: Retry logic, exponential backoff, timeout handling, and error recovery
+- **Message Protocol**: DAP message parsing, validation, request correlation, and event handling
+- **Process Lifecycle**: Startup, handshake, graceful shutdown, and error scenarios
+- **Concurrency**: Simultaneous requests, race conditions, and cleanup coordination
+- **Edge Cases**: Malformed messages, orphaned processes, container environments, and resource exhaustion
 
-### Orphan Detection (`orphan-check.test.ts`)
-Process lifecycle management for container and non-container environments:
-- **Orphan detection**: Parent process monitoring and container-aware exit logic
-- **Environment handling**: Container flag interpretation and process cleanup
+## Key Testing Utilities
 
-### Test Infrastructure (`proxy-manager-test-setup.ts`)
-Test utilities for managing unhandled promise rejections during timeout scenarios:
-- **Error filtering**: Expected timeout exceptions vs genuine errors
-- **Test isolation**: Clean test environment without noise from expected failures
+### TestProxyManager
+Simplified proxy manager implementation that avoids complex process management while preserving message handling and event propagation behavior for focused unit testing.
 
-## Key Design Patterns
-
-### Mock Architecture
-Comprehensive mocking strategy using:
-- **Fake timers**: Deterministic async behavior testing with `vi.advanceTimersByTime()`
-- **Event simulation**: EventEmitter-based mocks for IPC and network communication
-- **Dependency injection**: Mock factories for loggers, filesystem, and network components
-
-### Retry and Timeout Logic
-Consistent patterns across components:
-- **Exponential backoff**: 200ms intervals with configurable max attempts
-- **Timeout handling**: 30-second initialization, 1000ms disconnect timeouts
-- **Error recovery**: Graceful degradation and resource cleanup
-
-### Concurrent Operation Testing
-Sophisticated testing of race conditions and concurrent scenarios:
-- **Multiple simultaneous requests**: Out-of-order response handling
-- **Rapid state transitions**: Connect/disconnect cycles and cleanup validation
-- **Resource lifecycle**: Proper cleanup of pending operations during shutdown
+### Async Coordination Patterns
+- Event-driven testing with `EventEmitter` simulation
+- Promise-based async coordination for concurrent scenarios  
+- Deterministic timing control through fake timer advancement
+- Request/response correlation validation
 
 ## Integration Points
 
-The proxy system integrates with several external components:
-- **Debug Adapters**: Language-specific debugging backends (Python, JavaScript, etc.)
-- **DAP Clients**: VS Code and other DAP-compatible debugging frontends
-- **Child Sessions**: Multi-target debugging scenarios
-- **Container Runtime**: Docker and containerized debugging environments
+### DAP Protocol Integration
+Tests validate proper DAP message formatting, sequence number handling, event emission, and response correlation following the Debug Adapter Protocol specification.
 
-## Test Coverage Strategy
+### Child Session Management
+Comprehensive testing of child session creation, adoption waiting, breakpoint mirroring, and request routing policies through mock child session managers.
 
-The test suite provides comprehensive coverage of:
-- **Happy path scenarios**: Normal operation and successful flows
-- **Error conditions**: Network failures, timeouts, and malformed messages
-- **Edge cases**: Boundary conditions, race conditions, and resource exhaustion
-- **Resilience testing**: Recovery from failures and cleanup scenarios
+### Error Handling & Recovery
+Extensive validation of error scenarios including connection failures, timeout conditions, malformed messages, process exits, and resource cleanup to ensure robust proxy operation.
 
-This testing approach ensures the proxy system can reliably handle production debugging scenarios with proper error recovery and resource management.
+The test suite ensures the proxy subsystem can reliably manage debug sessions, handle protocol communication, and recover gracefully from various failure conditions while maintaining proper resource cleanup and state consistency.

@@ -1,78 +1,85 @@
 # tests\test-utils\fixtures/
-@generated: 2026-02-12T21:05:59Z
+@children-hash: 0caed388f7c91bf5
+@generated: 2026-02-15T09:01:38Z
 
-## Python Debugging Test Fixtures
+## Test Fixtures Directory for Debugging Infrastructure
 
-This directory contains comprehensive Python script fixtures designed to support debugging and process testing functionality within the MCP test suite. The fixtures provide both static script templates and dynamic runtime environments for validating debugger capabilities.
+This directory provides comprehensive test fixtures for validating Python debugging capabilities, containing both script templates and executable test targets for different debugging scenarios.
 
 ### Overall Purpose
+Serves as a centralized fixture collection for testing Python debugging infrastructure, supporting:
+- Debug Adapter Protocol (DAP) client-server interactions
+- Debugger attachment to running processes  
+- Multi-module debugging workflows
+- Exception handling and breakpoint testing
+- MCP (Model Context Protocol) server debugging validation
 
-The module serves as a testing foundation for Python debugging workflows, providing fixtures that range from simple code examples to complex debugging server implementations. It enables testing of debugger attachment, breakpoint functionality, step-through debugging, exception handling, and DAP (Debug Adapter Protocol) interactions.
+### Key Components and Architecture
 
-### Key Components
+**Script Templates (python-scripts.ts)**
+TypeScript module exporting Python code as string templates for automated test generation:
+- `simpleLoopScript` - Basic iteration and variable tracking
+- `functionCallScript` - Function stepping and parameter inspection
+- `fibonacciScript` - Recursive vs iterative algorithm debugging
+- `exceptionHandlingScript` - Error condition and try/catch testing
+- `multiModuleMainScript` + `multiModuleHelperScript` - Cross-module debugging
+- `buggyScript` - Intentional bugs for debugging exercise scenarios
 
-**TypeScript Script Templates (`python-scripts.ts`)**
-- Collection of Python script templates as string exports
-- Covers debugging scenarios from basic loops to complex multi-module programs
-- Includes intentionally buggy code for debugging practice
-- Provides fibonacci, exception handling, and function call test cases
-
-**Runtime Debug Targets (`python/` directory)**
-- `debug_test_simple.py`: Basic debug target with extended runtime for attachment testing
-- `debugpy_server.py`: Full-featured debugpy DAP server with configurable scenarios
-- Live processes that can be attached to by external debugging tools
+**Executable Test Targets (python/)**
+Live Python programs for runtime debugging attachment:
+- `debug_test_simple.py` - Long-running process (60s sleep) for basic attachment testing
+- `debugpy_server.py` - Full DAP server with configurable scenarios and CLI interface
 
 ### Public API Surface
 
-**Static Fixtures (TypeScript exports):**
-- `simpleLoopScript`: Basic iteration and variable tracking
-- `functionCallScript`: Function calls and parameter passing
-- `fibonacciScript`: Recursive vs iterative algorithm comparison
-- `exceptionHandlingScript`: Error handling and exception breakpoints
-- `multiModuleMainScript`/`multiModuleHelperScript`: Cross-module debugging
-- `buggyScript`: Intentional bugs for debugging exercises
+**Template Access:**
+```typescript
+import { simpleLoopScript, functionCallScript, fibonacciScript, /* ... */ } from './python-scripts'
+```
 
-**Runtime Entry Points:**
-- `debug_test_simple.py`: Direct execution for simple process attachment
-- `debugpy_server.py --host <host> --port <port>`: Configurable DAP server
-- `start_debugpy_server()`: Programmatic server initialization
-- `run_fibonacci_test()`: Breakpoint testing scenarios
+**Runtime Debugging:**
+```bash
+# Basic attachment target
+python debug_test_simple.py
 
-### Internal Organization
+# Configurable DAP server
+python debugpy_server.py [--host HOST] [--port PORT] [--no-wait] [--run-test]
+```
 
-The fixtures follow a layered approach:
+**Key Server Functions:**
+- `start_debugpy_server(host, port, wait_for_client)` - DAP server initialization
+- `run_fibonacci_test()` - Predefined debugging scenario with breakpoints
 
-1. **Static Layer**: TypeScript templates provide predictable code samples for testing debugger parsing and execution control
-2. **Runtime Layer**: Python processes provide live debugging targets for attachment and DAP protocol testing
-3. **Complexity Progression**: From simple loops to multi-module applications to server-client interactions
+### Internal Organization and Data Flow
 
-### Data Flow
+**Template-Based Testing:**
+1. TypeScript fixtures generate Python code strings
+2. Test frameworks execute generated scripts with debugger attachment
+3. Validates specific debugging features (stepping, breakpoints, variable inspection)
 
-**Static Fixture Usage:**
-Template Selection → Code Injection → Debugger Execution → Scenario Validation
+**Runtime Testing:**
+1. Target processes start and enter predictable execution states
+2. External debuggers/MCP servers attach as DAP clients
+3. Interactive or automated debugging scenarios execute
+4. Validation occurs through DAP protocol interactions
 
-**Runtime Debug Flow:**
-Process Launch → Optional Debugger Attachment → Breakpoint/Step Testing → Validation
+### Important Patterns and Conventions
 
-**DAP Server Flow:**
-Server Initialization → Client Connection → Protocol Communication → Test Scenario Execution
+**Test Design Principles:**
+- **Predictable Execution**: All fixtures have deterministic flow for reliable breakpoint placement
+- **Progressive Complexity**: From simple loops to multi-module recursive scenarios
+- **Self-Contained**: Each fixture includes proper `__main__` guards and meaningful test data
+- **Extended Runtime**: Long-running processes provide sufficient time for manual debugging
 
-### Important Patterns
+**Debugging Architecture:**
+- Follows standard debugpy server pattern (not client mode)
+- Uses non-conflicting port (5679) for isolation from development debugging
+- Supports both automated test harnesses and manual debugging sessions
+- Handles graceful error conditions and dependency validation
 
-- **Extended Lifetime Pattern**: Runtime fixtures use sleep mechanisms to remain available for external tool attachment
-- **Self-Contained Scripts**: Each template includes proper main guards and meaningful test data
-- **Configurable Behavior**: CLI-driven and programmatic configuration options
-- **Error Scenarios**: Deliberate bugs and exception cases for comprehensive testing
-- **Standard Protocols**: Uses DAP-compliant interfaces and non-conflicting ports (5679)
+**Integration Model:**
+The directory supports two complementary testing approaches:
+1. **Generated Testing**: TypeScript templates → dynamic Python script generation → automated debugging validation
+2. **Live Process Testing**: Persistent Python processes → external debugger attachment → interactive debugging workflows
 
-### Integration Context
-
-This directory enables comprehensive testing of:
-- MCP server debugging capabilities
-- Debugger attachment to running processes
-- Step-through debugging workflows
-- Exception handling and error scenarios
-- Multi-module and cross-file debugging
-- DAP client-server communication patterns
-
-The fixtures support both automated testing scenarios and interactive debugging validation, providing a complete foundation for testing Python debugging functionality within the MCP ecosystem.
+This fixture collection enables end-to-end testing of Python debugging infrastructure from basic process attachment through complex multi-module debugging scenarios and MCP server integration.

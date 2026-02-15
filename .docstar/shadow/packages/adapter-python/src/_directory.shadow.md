@@ -1,79 +1,80 @@
 # packages\adapter-python\src/
-@generated: 2026-02-12T21:06:00Z
+@children-hash: 10c6608c9801779a
+@generated: 2026-02-15T09:01:41Z
 
 ## Purpose
-The `packages/adapter-python/src` directory provides a complete Python debugging adapter implementation for the MCP debugger framework. It serves as a specialized adapter that enables debugging Python applications using the Debug Adapter Protocol (DAP) and debugpy, with intelligent Python environment discovery and validation.
+The `adapter-python` source module provides a complete Python debugging adapter implementation for the mcp-debugger framework. It enables Python debugging capabilities through debugpy integration, offering robust environment detection, configuration management, and DAP (Debug Adapter Protocol) compliance for Python debugging sessions.
 
-## Key Components and Integration
+## Key Components and Architecture
 
-### Core Adapter Architecture
-- **PythonDebugAdapter**: The primary adapter implementation that manages Python debugging sessions, handles DAP protocol operations, and maintains debugging state
-- **PythonAdapterFactory**: Factory class that creates and validates Python adapter instances, implementing dependency injection patterns for the MCP framework
-- **index.ts**: Centralized entry point providing clean exports of all public APIs
+### Core Adapter Implementation
+- **PythonDebugAdapter**: Main adapter class implementing `IDebugAdapter` interface, managing Python debugging sessions with state tracking, connection lifecycle, and comprehensive DAP protocol operations
+- **PythonAdapterFactory**: Factory implementation following dependency injection pattern for creating and validating Python debug adapter instances
 
-### Python Environment Management
-- **Utils Module**: Comprehensive Python executable discovery system with cross-platform support, Windows Store filtering, and debugpy capability detection
-- **Validation Pipeline**: Multi-stage environment validation ensuring Python 3.7+ compatibility and debugpy availability
-- **Caching Layer**: TTL-based caching (60-second timeout) for Python executable paths and metadata to optimize performance
+### Environment Discovery System
+- **Utils Module**: Sophisticated cross-platform Python executable discovery with Windows Store alias filtering, virtual environment detection, and debugpy-aware selection
+- **Multi-layered Discovery**: Priority-based detection using preferred paths, environment variables, and auto-detection with comprehensive fallback mechanisms
 
-### Integration Flow
-1. **Discovery**: Utils module locates valid Python installations across platforms
-2. **Factory Creation**: PythonAdapterFactory validates environment and creates adapter instances
-3. **Adapter Operation**: PythonDebugAdapter manages debugging sessions using discovered Python executables
-4. **Protocol Translation**: Converts generic DAP operations to Python-specific debugpy commands
+### Configuration Management
+- **PythonLaunchConfig**: Extended launch configuration supporting Python-specific options including module execution, Django/Flask frameworks, console types, and subprocess debugging
+- **Environment Validation**: Comprehensive validation checking Python 3.7+ requirement and debugpy installation availability
 
 ## Public API Surface
 
-### Main Entry Points
-- `PythonDebugAdapter`: Core debugging functionality with DAP protocol support
-- `PythonAdapterFactory`: Adapter instantiation and environment validation
-- `findPythonExecutable(options?)`: Primary Python discovery function with configurable preferences
-- `getPythonVersion(pythonPath)`: Version extraction from Python installations
+### Primary Entry Points
+- **index.ts**: Centralized export interface providing access to all public components
+  - `PythonDebugAdapter` and `PythonAdapterFactory` classes
+  - `findPythonExecutable`, `getPythonVersion` utility functions
+  - `CommandFinder` type definition and `CommandNotFoundError` exception
 
-### Utility Functions
-- `isValidPythonExecutable(path)`: Executable validation
-- `hasDebugpy(pythonPath)`: Debugging capability detection
-- `setDefaultCommandFinder(finder)`: Custom command discovery configuration
-- `CommandNotFoundError`: Specialized error handling for command resolution failures
+### Factory Interface
+- `createAdapter()`: Instantiates new Python debug adapter instances
+- `getMetadata()`: Returns adapter metadata including language info, supported file extensions (.py, .pyw), and embedded SVG icon
+- `validate()`: Performs comprehensive environment validation with detailed error/warning reporting
 
-### Type Definitions
-- `CommandFinder`: Interface for pluggable command discovery
-- `PythonLaunchConfig`: Extended launch configuration for Python-specific debugging options
+### Adapter Interface
+- Implements full `IDebugAdapter` interface with Python-specific behavior
+- DAP protocol operations with Python-specific request validation
+- Connection management and debugging session lifecycle
+- Comprehensive capability reporting including breakpoints, exception handling, and variable inspection
 
 ## Internal Organization and Data Flow
 
-### Environment Discovery Pipeline
-```
-User Request → findPythonExecutable() → Validation → Debugpy Check → Caching → Adapter Creation
-```
+### Initialization Flow
+1. Factory validation checks Python environment and debugpy availability
+2. Adapter initialization resolves Python executable with TTL-based caching
+3. Environment detection uses platform-specific search strategies
+4. Connection establishment prepares debugpy adapter commands
 
-### Debugging Session Flow
-```
-Factory Validation → Adapter Initialization → DAP Protocol Handling → Debugpy Integration → Session Management
-```
+### Runtime Architecture
+- **State Management**: Adapter lifecycle tracking with event emission
+- **Caching Strategy**: 60-second TTL cache for Python executable resolution and metadata
+- **Command Building**: Platform-appropriate debugpy command construction
+- **Error Translation**: Converts low-level Python errors to user-friendly messages
+
+### Discovery Pipeline
+1. Multi-priority discovery evaluates preferred paths, environment variables, and auto-detection
+2. Candidate validation filters Windows Store aliases and validates executables
+3. Debugpy capability assessment prioritizes development-friendly installations
+4. Result caching optimizes performance for repeated operations
 
 ## Important Patterns and Conventions
 
-### Platform Abstraction
-- Windows-specific handling for PATH normalization and Store filtering
-- Cross-platform process spawning for validation and version detection
-- Environment-aware discovery strategies with CI/CD integration
+### Design Patterns
+- **Factory Pattern**: Clean adapter instantiation with validation
+- **Strategy Pattern**: Pluggable command resolution via CommandFinder interface
+- **Template Method**: IDebugAdapter implementation with Python-specific behavior
+- **Graceful Degradation**: Multiple fallback paths ensure robust operation
 
-### Error Handling Strategy
-- Graceful degradation through multiple fallback mechanisms
-- Comprehensive validation with blocking errors and non-blocking warnings
-- Custom error types for precise failure classification
+### Platform Awareness
+- Windows-specific handling including Store alias detection and py launcher support
+- Cross-platform executable discovery with platform-appropriate search paths
+- Environment variable-controlled verbose logging for troubleshooting
 
-### Configuration Management
-- Dependency injection for testability and customization
-- Environment variable integration for debug mode and preferences
-- Configurable command resolution with caching optimization
+### Critical Constraints
+- Requires Python 3.7+ for operation
+- Depends on debugpy module availability in target Python environment
+- Thread safety considerations for concurrent cache access
+- Platform-specific naming conventions and executable search strategies
 
-## Critical Requirements and Constraints
-- **Python Version**: Enforces Python 3.7+ requirement across all components
-- **Debugpy Dependency**: Validates debugpy package availability for debugging functionality
-- **Platform Support**: Handles Windows, macOS, and Linux with platform-specific optimizations
-- **State Management**: Thread-safe caching and state tracking for concurrent debugging sessions
-- **Performance**: Implements caching strategies to minimize expensive executable discovery operations
-
-This directory serves as a complete, production-ready Python debugging solution that seamlessly integrates with the broader MCP debugger ecosystem while providing robust Python-specific functionality and environment management.
+The module serves as a comprehensive Python debugging solution, providing reliable environment detection, robust configuration management, and full DAP protocol compliance while maintaining cross-platform compatibility and development-friendly defaults.

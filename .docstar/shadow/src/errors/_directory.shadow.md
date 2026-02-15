@@ -1,52 +1,56 @@
 # src\errors/
-@generated: 2026-02-12T21:05:40Z
+@children-hash: 310c2d668524f424
+@generated: 2026-02-15T09:01:22Z
 
 ## Purpose
-The `src/errors` directory provides a comprehensive typed error hierarchy for the MCP (Model Context Protocol) debugger. It defines semantic error classes that extend the base `McpError` to provide structured, type-safe error handling with specific error codes, avoiding string-based error detection and enabling more robust error recovery strategies.
+The `src/errors` directory provides a comprehensive typed error system for the MCP (Model Context Protocol) debugger. It establishes a semantic error hierarchy that extends the base MCP SDK error framework with debugger-specific error classes, enabling structured error handling and avoiding brittle string-based error detection.
 
 ## Key Components
 
-### Core Error Hierarchy
-All error classes extend `McpError` from the MCP SDK and are organized into functional categories:
+### Error Hierarchy
+The module defines specialized error classes organized by functional domain:
 
 - **Runtime Errors**: `LanguageRuntimeNotFoundError`, `PythonNotFoundError`, `NodeNotFoundError` - Handle missing language runtime executables
-- **Session Management**: `SessionNotFoundError`, `SessionTerminatedError` - Manage debug session lifecycle errors
-- **Language Support**: `UnsupportedLanguageError` - Handle unsupported programming language scenarios
-- **Operational Errors**: `ProxyNotRunningError`, `DebugSessionCreationError`, `FileValidationError`, `PortAllocationError`, `ProxyInitializationError` - Cover various operational failure modes
+- **Session Management**: `SessionNotFoundError`, `SessionTerminatedError` - Manage debug session lifecycle errors  
+- **Language Support**: `UnsupportedLanguageError` - Handle unsupported programming languages
+- **Operational Errors**: `ProxyNotRunningError`, `DebugSessionCreationError`, `FileValidationError`, `PortAllocationError`, `ProxyInitializationError` - Cover various runtime operational failures
 
 ### Error Utilities
-- **Type Guards**: `isMcpError<T>` for runtime type checking
-- **Message Extraction**: `getErrorMessage` for safe error message retrieval
-- **Recovery Classification**: `isRecoverableError` to distinguish between recoverable and fatal errors
+Provides essential helper functions for error handling:
+- Type guards (`isMcpError<T>`) for safe error type checking
+- Error message extraction (`getErrorMessage`) with fallback handling
+- Recoverability detection (`isRecoverableError`) to distinguish between fatal and recoverable errors
 
 ## Public API Surface
 
 ### Main Entry Points
-- **Error Classes**: All error constructors accept structured data relevant to their specific failure context
-- **Utility Functions**: 
-  - `isMcpError<T>(error: unknown): error is T` - Type-safe error instance checking
-  - `getErrorMessage(error: unknown): string` - Safe message extraction
-  - `isRecoverableError(error: McpError): boolean` - Recovery strategy determination
+- **Error Classes**: All error classes are exportable and instantiable with structured data
+- **Type Guards**: `isMcpError<T>` for runtime type checking
+- **Utilities**: `getErrorMessage`, `isRecoverableError` for error processing
+
+### Integration Points
+- Extends `@modelcontextprotocol/sdk` base `McpError` class
+- Uses standardized MCP `ErrorCode` enum values
+- Provides structured error data for consistent error context
 
 ## Internal Organization
 
-### Data Flow Pattern
-1. Errors are created with context-specific structured data (sessionId, language, reason, etc.)
-2. All errors use appropriate MCP error codes (`InvalidParams`, `InvalidRequest`, `InternalError`)
-3. Error utilities provide type-safe handling and recovery decision support
-4. Original error context is preserved through stack traces and nested error properties
+### Data Flow
+1. Errors are constructed with semantic context data (session IDs, file paths, reasons, etc.)
+2. Base MCP error codes are assigned based on error category
+3. Structured data is preserved for upstream error handling
+4. Utility functions provide safe error introspection and classification
 
-### Design Conventions
-- **Consistent Naming**: `[Context][Condition]Error` pattern
-- **Structured Data**: Each error class includes relevant properties for debugging context
-- **Error Code Mapping**: Semantic mapping to MCP standard error codes
-- **Recovery Classification**: Clear distinction between recoverable and non-recoverable errors
+### Architectural Patterns
+- **Semantic Inheritance**: Each error class represents a specific failure mode with relevant context
+- **Structured Data**: All errors carry typed properties for programmatic handling
+- **Error Classification**: Clear separation between recoverable and non-recoverable errors
+- **Type Safety**: Full TypeScript support with generic type guards
+- **Consistent Naming**: `[Context][Condition]Error` convention for clarity
 
-## Integration Patterns
-This error system integrates with the broader MCP debugger by providing:
-- Type-safe error handling throughout the debugger components
-- Structured error context for logging and debugging
-- Recovery strategy guidance for error handling middleware
-- Consistent error reporting to MCP clients
-
-The module serves as the foundation for robust error handling across session management, language runtime discovery, debug proxy operations, and file system interactions.
+## Role in Larger System
+This error system serves as the foundation for reliable error handling throughout the MCP debugger, providing:
+- Structured error reporting to MCP clients
+- Type-safe error handling in debug session management
+- Consistent error semantics across language runtime integrations
+- Recoverability hints for automated error recovery strategies

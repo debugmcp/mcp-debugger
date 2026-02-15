@@ -1,78 +1,89 @@
 # scripts/
-@generated: 2026-02-12T21:06:08Z
+@children-hash: 6670c59ed347d0a1
+@generated: 2026-02-15T09:01:48Z
 
 ## Purpose
-The `scripts` directory contains automation and utility tools for the mcp-debugger project's development workflow. This module provides build automation, testing infrastructure, deployment helpers, and environment setup tools that support the project's complex multi-platform debugging capabilities.
+Build automation, development tooling, and deployment orchestration hub for the mcp-debugger project. This directory provides comprehensive scripting infrastructure for cross-platform development, testing, packaging, and deployment workflows.
 
-## Key Components and Integration
+## Key Components & Integration
 
-### Build and Packaging Pipeline
-- **bundle.js** - Core bundling orchestrator using esbuild, creates standalone executables with console silencing for MCP protocol compliance
-- **prepare-pack.js** - Monorepo package preparation that resolves workspace dependencies for npm distribution
-- **docker-build-if-needed.js** - Intelligent Docker image builder with file change detection and NPM pack coordination
-- **docker-build.sh** - Simple Docker build wrapper for development workflows
+### Build & Bundle Management
+- **bundle.js** - Core bundling orchestrator using esbuild, creates production artifacts with console silencing for MCP protocol compliance
+- **docker-build-if-needed.js** - Intelligent Docker image builder with file change detection and NPM pack operation coordination
+- **docker-build.sh** - Simple Docker wrapper for development workflows
+- **prepare-pack.js** - NPM package preparation with workspace dependency resolution
 
-### Testing and Validation Infrastructure  
-- **validate-push.js** - Pre-push validation that simulates CI environments through clean repository clones
-- **test-mcp-integration.sh** - MCP protocol compliance testing with Claude CLI integration verification
-- **test-docker-local.sh** - Docker smoke testing with state-aware regression tracking
-- **check-adapters.js** - Debug adapter vendoring status verification across multiple platforms
-- **check-bundle-size.js** - Build artifact size monitoring to ensure distribution suitability
+### Testing Infrastructure
+- **test-*.sh/.js** scripts - Comprehensive test execution including Docker smoke tests, MCP integration validation, and IPC communication testing
+- **act-test.sh** - GitHub Actions local testing wrapper using Act CLI
+- **validate-push.js** - Pre-push validation that simulates CI environment in clean repository clones
 
-### Development and Debugging Tools
-- **act-test.sh** - Local GitHub Actions testing wrapper for CI workflow validation
-- **test-ipc.js** - IPC communication testing for proxy bootstrap functionality
-- **safe-commit.sh** - Security-enforced Git commit wrapper with personal information checks
+### Development Environment Setup
+- **setup/** subdirectory - Windows-specific Rust debugging environment configuration with GNU toolchain integration
+- **install-claude-mcp.sh** - Automated Claude Code IDE integration setup
+- **sync-to-wsl.sh** - Cross-platform development synchronization for WSL2 environments
+
+### Diagnostic & Monitoring Tools  
+- **memdiag.ps1/memwatch.ps1** - Windows memory analysis and continuous monitoring utilities
+- **analyze_logo.py/resize_logo.py** - Logo marketplace compliance and asset optimization
+- **collect-stdio-logs.ps1** - Docker-based diagnostic log collection
+
+### Utility & Safety Scripts
+- **check-adapters.js** - Debug adapter vendoring status validation across multiple platforms
+- **safe-commit.sh** - Git commit wrapper with mandatory personal information checks
 - **cleanup-test-processes.js** - Cross-platform orphaned process cleanup for test environments
-
-### Environment and System Management
-- **setup/** subdirectory - Platform-specific development environment configuration
-- **experiments/** subdirectory - Controlled testing utilities for DAP validation
-- **start-sse-server.sh** - SSE mode server launcher with dependency validation
-- **sync-to-wsl.sh** - Windows-to-WSL project synchronization with optimization
-- **install-claude-mcp.sh** - Automated Claude CLI MCP server configuration
-
-### Analysis and Diagnostics
-- **analyze_logo.py** / **resize_logo.py** - Logo processing utilities for marketplace compliance
-- **memdiag.ps1** / **memwatch.ps1** - Windows memory analysis and monitoring tools
-- **clean-coverage.js** - Docker-aware coverage directory cleanup with permission handling
-- **collect-stdio-logs.ps1** - Diagnostic log collection via Docker container execution
-
-### Environment Optimization
-- **llm-env.ps1** - PowerShell environment that optimizes command output for LLM/AI consumption
-- Various platform-specific utilities for cross-platform development support
+- **llm-env.ps1** - PowerShell environment optimization for LLM/AI agent consumption
 
 ## Public API Surface
 
-### Main Entry Points
-- **bundle.js** - `bundle()` function for creating distribution bundles
-- **validate-push.js** - Can be imported or executed via CLI for pre-push validation
-- **docker-build-if-needed.js** - Intelligent Docker building with environment variable configuration
-- **prepare-pack.js** - `prepare`/`restore` commands for workspace dependency resolution
+### Primary Entry Points
+- **bundle.js** - `node scripts/bundle.js` - Production bundling with MCP protocol safety
+- **docker-build-if-needed.js** - Conditional Docker image building with intelligent change detection
+- **validate-push.js** - Pre-push validation with configurable test execution (`--smoke`, `--no-tests`, `--verbose`)
+- **act-test.sh** - Local GitHub Actions testing (`ci`, `release`, `e2e` commands)
 
-### Key Workflows
-- **Build Pipeline**: bundle.js → docker-build-if-needed.js → check-bundle-size.js
-- **Testing Pipeline**: act-test.sh → test-docker-local.sh → validate-push.js
-- **Environment Setup**: setup/ scripts → start-sse-server.sh → install-claude-mcp.sh
+### Development Workflow Commands
+- **sync-to-wsl.sh** - WSL synchronization with dependency management (`--no-install`, `--no-build`, `--clean`)
+- **safe-commit.sh** - Secure Git commits with bypass options (`--skip-tests`)
+- **test-mcp-integration.sh** - MCP protocol compliance validation
+- **cleanup-test-processes.js** - Test environment cleanup automation
 
-## Internal Organization and Data Flow
+### Asset & Package Management
+- **prepare-pack.js** - NPM package preparation (`prepare`/`restore` commands)
+- **check-bundle-size.js** - Bundle size monitoring with marketplace compliance thresholds
+- **resize_logo.py** - Logo asset optimization for marketplace requirements
 
-The directory follows a layered architecture:
+## Internal Organization & Data Flow
 
-1. **Foundation Layer** - Environment setup and validation tools
-2. **Build Layer** - Compilation, bundling, and packaging automation
-3. **Testing Layer** - Multi-tier testing from unit to integration to E2E
-4. **Deployment Layer** - Docker, distribution, and external tool integration
-5. **Diagnostics Layer** - Monitoring, analysis, and debugging support tools
+### Build Pipeline Flow
+1. **Source bundling** (bundle.js) → **Package preparation** (prepare-pack.js) → **Docker containerization** (docker-build-if-needed.js)
+2. **Asset optimization** (logo scripts) → **Size validation** (check-bundle-size.js) → **Adapter verification** (check-adapters.js)
 
-## Important Patterns and Conventions
+### Testing & Validation Flow  
+1. **Local validation** (validate-push.js) → **GitHub Actions simulation** (act-test.sh) → **Integration testing** (test-mcp-integration.sh)
+2. **Environment cleanup** (cleanup-test-processes.js) → **Memory monitoring** (memdiag.ps1) → **Log collection** (collect-stdio-logs.ps1)
 
-- **Cross-Platform Support** - Most tools handle Windows/Unix differences gracefully
-- **Docker-First Development** - Many tools assume or provide Docker-based workflows
-- **MCP Protocol Awareness** - Build tools understand stdout pollution concerns
-- **Environment Variable Configuration** - Extensive use of env vars for CI/development mode switching
-- **Graceful Degradation** - Tools provide fallbacks and skip modes for different environments
-- **State-Aware Testing** - Testing infrastructure understands known regressions and expected failures
-- **Security-First** - Multiple layers of validation for personal information and commit safety
+### Development Environment Flow
+1. **Platform setup** (setup/windows-rust-debug.ps1) → **Synchronization** (sync-to-wsl.sh) → **IDE integration** (install-claude-mcp.sh)
+2. **Commit safety** (safe-commit.sh) → **Push validation** (validate-push.js) → **CI execution**
 
-This scripts directory serves as the operational backbone of the mcp-debugger project, providing comprehensive automation that enables reliable development, testing, and deployment across complex multi-platform debugging scenarios.
+## Important Patterns & Conventions
+
+### Cross-Platform Compatibility
+- Shell scripts (.sh) for Unix-like systems, PowerShell (.ps1) for Windows
+- Node.js scripts (.js) for platform-neutral operations
+- Python scripts (.py) for image processing and analysis
+
+### Safety & Reliability
+- Mandatory security checks in git operations (safe-commit.sh)
+- Console output silencing for MCP protocol integrity (bundle.js)
+- Graceful degradation with fallback strategies across all automation scripts
+- Environment-aware execution (CI detection, platform detection)
+
+### Developer Experience
+- Comprehensive help systems and usage documentation in all CLI tools
+- Colored output and progress indicators for user feedback
+- Configurable behavior through flags and environment variables
+- Fail-fast validation with clear error messages and remediation guidance
+
+This directory serves as the operational backbone of the mcp-debugger project, providing robust automation that supports both development workflows and production deployment while maintaining safety, reliability, and cross-platform compatibility.

@@ -1,68 +1,49 @@
 # tests\implementations\test/
-@generated: 2026-02-12T21:05:44Z
+@children-hash: 35148f1e4c88a4ed
+@generated: 2026-02-15T09:01:25Z
 
-## Overall Purpose and Responsibility
+## Overall Purpose
+This directory provides comprehensive test doubles and fake implementations for all process management interfaces in the system. It enables deterministic, controllable unit testing of process-launching functionality without spawning actual processes or external dependencies.
 
-This directory provides a comprehensive test implementation layer for process management and launching functionality. It contains controllable test doubles (fake implementations) that simulate all process-related interfaces without spawning real processes, enabling deterministic unit testing of process lifecycle management, debugging workflows, and proxy communication patterns.
+## Key Components and Integration
+The module consists of hierarchical fake implementations that mirror the production process management architecture:
 
-## Key Components and Relationships
+- **FakeProcess** - Core process simulation with EventEmitter-based lifecycle events
+- **FakeProcessLauncher** - Basic process launching with command/argument tracking
+- **FakeDebugTargetLauncher** - Specialized Python debugging process launcher with port management
+- **FakeProxyProcess** - Extended process mock with command interception capabilities
+- **FakeProxyProcessLauncher** - Proxy-specific launcher with automatic initialization handling
+- **FakeProcessLauncherFactory** - Centralized factory providing singleton instances of all fakes
 
-The module implements a layered architecture of test doubles that mirror the production process management system:
-
-**Core Process Layer**
-- `FakeProcess` - Base process mock implementing `IProcess` with controllable lifecycle events
-- `FakeProxyProcess` - Extended process mock for proxy scenarios with command tracking
-
-**Process Launchers**
-- `FakeProcessLauncher` - Basic process launcher for general process spawning
-- `FakeDebugTargetLauncher` - Specialized launcher for Python debugging scenarios with port management
-- `FakeProxyProcessLauncher` - Advanced launcher with automatic initialization handling
-
-**Factory and Coordination**
-- `FakeProcessLauncherFactory` - Centralized factory providing singleton access to all fake launchers
-- Unified reset mechanism across all components for test isolation
+These components work together to provide a complete test environment that matches the real process management interfaces while offering full control over process behavior.
 
 ## Public API Surface
+**Primary Entry Points:**
+- `FakeProcessLauncherFactory` - Main factory for obtaining all fake launcher instances
+- `FakeProcessLauncher.launch()` - Creates controllable process instances
+- `FakeDebugTargetLauncher.launchPythonDebugTarget()` - Creates debug targets with auto-assigned ports
+- `FakeProxyProcessLauncher.launchProxy()` - Creates proxy processes with initialization handling
 
-**Primary Entry Point**
-- `FakeProcessLauncherFactory` - Main factory class providing access to all launcher implementations
-
-**Core Testing Methods**
-- `launch()` / `launchPythonDebugTarget()` / `launchProxy()` - Process creation methods
-- `simulate*()` methods - Control process lifecycle events (output, errors, exit, spawn)
-- `prepare*()` methods - Pre-configure next process/target behavior
+**Test Control Methods:**
+- `simulate*()` methods on FakeProcess - Control process lifecycle events (output, errors, exit)
+- `prepare*()` methods on launchers - Pre-configure next launch behavior
 - `reset()` methods - Clean state for test isolation
-- History tracking properties - Verify launched processes and sent commands
+- History tracking arrays - Verify launched processes and sent commands
 
 ## Internal Organization and Data Flow
+The architecture follows a layered approach:
+1. **Base Layer**: FakeProcess provides fundamental process simulation with streams and event emission
+2. **Launcher Layer**: Various launcher fakes create and manage process instances
+3. **Factory Layer**: Centralized factory coordinates all launcher instances
+4. **Test Control Layer**: Simulation methods and state tracking enable test orchestration
 
-**Process Simulation Flow**
-1. Factory creates appropriate launcher instance
-2. Launcher creates fake process with deterministic properties (PID 12345)
-3. Process provides controllable streams (PassThrough) for I/O simulation
-4. Test code controls process behavior via simulate methods
-5. Events are emitted asynchronously using `process.nextTick()` for realistic timing
+Data flows from test code through launcher interfaces to fake process instances, with full bidirectional control over process communication via streams and events.
 
-**State Management**
-- Each launcher tracks its launched processes/targets for verification
-- Commands and interactions are logged for test assertions
-- Auto-incrementing debug ports (starting at 5678) for debugging scenarios
-- Automatic initialization responses in proxy scenarios
+## Key Testing Patterns
+- **Deterministic Behavior**: Fixed PIDs (12345) and predictable port assignment (starting at 5678)
+- **Event Simulation**: Async event emission using `process.nextTick()` to match real Node.js behavior
+- **Command Interception**: Automatic responses to common commands (e.g., 'init' in proxy processes)
+- **State Verification**: Comprehensive tracking of launches, commands, and process interactions
+- **Test Isolation**: Reset methods ensure clean state between test cases
 
-## Important Patterns and Conventions
-
-**Test Double Patterns**
-- EventEmitter-based simulation matching real Node.js process behavior
-- Controllable deterministic behavior instead of real system dependencies
-- Method interception for automatic response handling (proxy initialization)
-
-**Testing Support Features**
-- Comprehensive history tracking for all operations
-- Pre-configuration capabilities for complex test scenarios  
-- Unified reset mechanism for test isolation
-- Async simulation using Node.js event loop for realistic timing
-
-**Integration Points**
-- Implements all production process interfaces for drop-in replacement
-- Maintains API compatibility while providing test-specific enhancements
-- Centralized factory pattern enables easy integration into test suites
+This module enables comprehensive testing of process management code with full control over process lifecycle, communication, and error conditions without external dependencies.

@@ -1,83 +1,87 @@
 # mcp_debugger_launcher\mcp_debugger_launcher/
-@generated: 2026-02-12T21:05:49Z
+@children-hash: 3192bb02ab913890
+@generated: 2026-02-15T09:01:25Z
 
 ## Overall Purpose
+The `mcp_debugger_launcher` module is a comprehensive CLI tool and Python package that auto-detects and manages runtime environments to launch the MCP (Model Context Protocol) debugging server. It provides a unified interface for running the debug server in either stdio or SSE modes using the most appropriate available runtime (Node.js/npx or Docker).
 
-The `mcp_debugger_launcher` package provides a command-line interface and runtime management system for launching the MCP (Model Context Protocol) debugging server across multiple execution environments. It auto-detects available runtimes (Node.js/npm and Docker) and provides a unified interface to launch debug-mcp-server in either stdio or SSE (Server-Sent Events) modes.
+## Key Components and Relationships
 
-## Key Components and Architecture
+### Core Architecture
+The module follows a clean separation of concerns across three main components:
 
-### Core Component Relationships
+1. **CLI Interface (`cli.py`)**: User-facing Click-based command-line interface that orchestrates the entire launch process
+2. **Runtime Detection (`detectors.py`)**: Static utility class that discovers and validates available execution environments  
+3. **Server Launcher (`launcher.py`)**: Core implementation that manages server process lifecycle with graceful shutdown
 
-The package follows a layered architecture with clear separation of concerns:
-
-1. **CLI Layer** (`cli.py`): User-facing Click-based command interface that orchestrates the entire launch process
-2. **Detection Layer** (`detectors.py`): Runtime environment discovery and validation system
-3. **Execution Layer** (`launcher.py`): Process management and server launching implementation
-4. **Package Structure** (`__init__.py`): Standard Python package initialization
-
-### Data Flow
-
+### Component Interactions
 ```
-User CLI Command → Runtime Detection → Launcher Selection → Process Management
+CLI Entry Point → Runtime Detection → Server Launcher
+     ↓               ↓                    ↓
+  User Commands → Environment Check → Process Management
 ```
 
-1. **CLI Entry**: `main()` function processes user arguments (mode selection, runtime preferences, debugging options)
-2. **Runtime Detection**: `RuntimeDetector` scans system for Node.js/npx and Docker availability
-3. **Launcher Orchestration**: `DebugMCPLauncher` executes the appropriate launch strategy based on detected/specified runtime
-4. **Process Management**: Signal handling and graceful shutdown for launched debug server processes
+The CLI coordinates between the detector and launcher, using detection results to select the optimal runtime and passing configuration to the launcher for execution.
 
 ## Public API Surface
 
-### Main Entry Point
-- **`mcp_debugger_launcher.cli.main()`**: Primary CLI command accepting:
-  - Mode selection: `stdio` (default) or `sse`
-  - Runtime forcing: `--docker`, `--npm` flags
-  - Port configuration for SSE mode
-  - Dry-run and verbose modes
+### Primary Entry Points
+- **Command Line**: `main()` function in `cli.py` serves as the primary entry point via Click CLI framework
+- **Package Import**: Standard `__init__.py` enables package-level imports for programmatic usage
 
-### Key Classes
-- **`DebugMCPLauncher`**: Core launcher with methods:
-  - `launch_with_npx()`: Node.js/npx execution path
-  - `launch_with_docker()`: Docker container execution path
-  - Automatic cleanup and signal handling
+### CLI Interface
+- **Modes**: `stdio` (default) and `sse` server modes
+- **Runtime Selection**: `--docker` and `--npm` flags for explicit runtime choice, with intelligent auto-detection as default
+- **Diagnostics**: Built-in runtime status reporting and installation guidance
+- **Process Control**: Dry-run mode and graceful shutdown handling
 
-- **`RuntimeDetector`**: Static detection utilities:
-  - `detect_available_runtimes()`: Comprehensive runtime status
-  - `get_recommended_runtime()`: Intelligent runtime selection
-  - Individual component checkers for Node.js, Docker, packages, and images
+### Key Configuration
+- Default SSE port: 3001
+- NPM package: "@debugmcp/mcp-debugger"  
+- Docker image: "debugmcp/mcp-debugger:latest"
+- Version: "0.11.1"
 
-## Internal Organization
+## Internal Organization and Data Flow
 
-### Runtime Priority Logic
-The system implements a preference hierarchy:
-1. **NPX Path**: Preferred when Node.js and npx are available with the `@debugmcp/mcp-debugger` package
-2. **Docker Path**: Fallback when Docker daemon is running with `debugmcp/mcp-debugger:latest` image
-3. **Error Handling**: User-friendly guidance for missing runtime dependencies
+### Detection Phase
+1. `RuntimeDetector` performs comprehensive environment scanning:
+   - Node.js/npx availability and version checking
+   - Docker installation and daemon status validation
+   - Package/image accessibility verification
 
-### Process Management Patterns
-- **Consistent Lifecycle**: Both npx and Docker launchers follow identical process management patterns
-- **Graceful Shutdown**: Signal handlers with 5-second timeout before force termination
-- **Resource Cleanup**: Defensive cleanup in finally blocks preventing resource leaks
-- **Real-time Output**: Live stdout/stderr streaming maintaining user interactivity
+2. Returns structured runtime status with recommendation engine prioritizing npx over Docker
+
+### Launch Phase  
+1. `DebugMCPLauncher` provides unified process management:
+   - Runtime-specific command construction
+   - Signal handler setup for graceful termination
+   - Real-time output streaming
+   - Automatic resource cleanup
 
 ### Error Handling Strategy
-- **Detection Phase**: Comprehensive environment validation with detailed status reporting
-- **Execution Phase**: Runtime-specific error detection and user guidance
-- **Process Phase**: Timeout handling and graceful degradation
+- Defensive subprocess execution with timeouts
+- Comprehensive error reporting for missing dependencies
+- Graceful degradation with helpful installation guidance
+- Exit code propagation for scripting integration
 
-## Key Constants and Configuration
-- **NPM Package**: `@debugmcp/mcp-debugger`
-- **Docker Image**: `debugmcp/mcp-debugger:latest` 
-- **Default SSE Port**: 3001
-- **Package Version**: 0.11.1
+## Important Patterns and Conventions
 
-## Integration Patterns
+### Design Patterns
+- **Static Utility Classes**: `RuntimeDetector` uses static methods for stateless detection operations
+- **Process Lifecycle Management**: Consistent subprocess handling with signal handlers and cleanup
+- **Dual Import Strategy**: Supports both package imports and direct script execution
+- **Command Builder Pattern**: Runtime-specific command construction with shared configuration
 
-The package is designed for:
-- **Standalone CLI usage**: Direct command-line invocation for development workflows
-- **IDE Integration**: Support for development environment integration via programmatic API
-- **CI/CD Integration**: Docker-based execution for containerized development environments
-- **Cross-platform compatibility**: Runtime detection handles Windows, macOS, and Linux environments
+### Error Handling Conventions
+- Try/except blocks with timeout protection for all external calls
+- Structured error reporting with user-friendly messages
+- Exit code standardization (1 for errors, 0 for success)
+- Resource cleanup guaranteed via finally blocks
 
-The architecture prioritizes reliability through comprehensive runtime detection, graceful error handling, and consistent process management across different execution environments.
+### Key Invariants
+- Single active process per launcher instance
+- 5-second termination timeout before force kill
+- Consistent logging patterns across components
+- Runtime detection performed before any launch attempts
+
+The module serves as a robust, production-ready launcher that abstracts away the complexity of multi-runtime MCP server deployment while providing comprehensive diagnostics and error handling.

@@ -1,60 +1,51 @@
 # tests\core\unit\adapters/
-@generated: 2026-02-12T21:05:42Z
+@children-hash: 8b0c0341ac9f1c84
+@generated: 2026-02-15T09:01:20Z
 
-## Core Adapter Unit Tests
+## Overview
 
-This directory contains comprehensive unit test suites that validate the foundational components and interfaces of the debug adapter system, specifically focusing on the shared contracts and types that define the debugging protocol.
+The `tests/core/unit/adapters` directory contains comprehensive unit tests that validate the debug adapter interface contracts defined in the @debugmcp/shared package. This test suite serves as both quality assurance and living documentation for the debug adapter protocol implementation.
 
-### Overall Purpose
+## Purpose and Scope
 
-The `tests/core/unit/adapters` directory serves as the primary validation layer for the debug adapter interface specifications. It ensures that all core enums, error classes, type interfaces, and data structures from the `@debugmcp/shared` package maintain their expected contracts and behaviors. These tests act as a safety net for the shared debugging protocol that underlies the entire MCP debug system.
+This directory focuses exclusively on testing the foundational types, enums, and interfaces that define how debug adapters communicate within the DebugMCP system. It validates:
 
-### Key Components & Architecture
+- **Protocol Contracts**: Ensures all debug adapter interface definitions are properly structured and type-safe
+- **State Management**: Validates adapter lifecycle states and transitions
+- **Error Handling**: Tests comprehensive error categorization and recovery mechanisms
+- **Feature Coverage**: Verifies support for 20+ debug protocol features across different language adapters
 
-**Debug Adapter Interface Validation (`debug-adapter-interface.test.ts`)**:
-- **Lifecycle Management**: Validates the 7-state adapter lifecycle (uninitialized → ready → debugging → error)
-- **Error Classification**: Tests 13 categorized error codes across environment, connection, protocol, and runtime failures
-- **Feature Capabilities**: Validates 20+ debug protocol features including breakpoints, variable inspection, and step debugging
-- **Type Safety**: Ensures proper constraints and type safety across 40+ interface properties
+## Key Components
 
-### Public API Coverage
+### Core Test Suite: debug-adapter-interface.test.ts
+- **Enum Validation**: Tests critical enums including AdapterState (7 lifecycle states), AdapterErrorCode (13 error categories), and DebugFeature (20+ protocol features)
+- **Type Interface Testing**: Comprehensive validation of 8+ complex interfaces covering configuration, capabilities, validation, and dependency management
+- **Error Class Testing**: Validates custom AdapterError class with proper code categorization and recovery flags
+- **Type Safety Enforcement**: Ensures enum constraints and interface contracts are properly enforced
 
-The test suite comprehensively covers the public API surface of the debug adapter system:
+## Testing Architecture
 
-**Core Enums**:
-- `AdapterState` - Lifecycle state management
-- `AdapterErrorCode` - Standardized error classification  
-- `DebugFeature` - Protocol capability flags
+The test suite follows a structured approach:
 
-**Error Handling**:
-- `AdapterError` class with categorization and recovery strategies
-- Error propagation patterns and recovery mechanisms
+1. **Enum Testing Pattern**: Validates each enum value exists and has correct typing
+2. **Interface Validation**: Tests complex nested objects with required/optional properties
+3. **Error Scenario Coverage**: Tests both success and failure paths for error handling
+4. **Type Constraint Verification**: Ensures compile-time and runtime type safety
 
-**Configuration Interfaces**:
-- `AdapterConfig` - Complete adapter setup and configuration
-- `GenericLaunchConfig` & `LanguageSpecificLaunchConfig` - Launch parameter management
-- `AdapterCapabilities` - Feature flag declarations
-- `FeatureRequirement` - Dependency and version constraint specifications
+## Coverage Areas
 
-**Validation & Metadata**:
-- `ValidationResult` - Configuration validation outcomes
-- `DependencyInfo` - Runtime dependency tracking
-- `ExceptionBreakpointFilter` - Exception handling configuration
+- **Adapter Lifecycle**: uninitialized → ready → debugging → error state transitions
+- **Error Categories**: Environment, connection, protocol, and runtime errors
+- **Debug Features**: Breakpoints, variable inspection, step debugging, exception handling
+- **Configuration Management**: Launch configs, adapter capabilities, dependency requirements
+- **Protocol Compliance**: Validation of debug protocol feature support across adapters
 
-### Testing Strategy & Patterns
+## Quality Assurance Role
 
-The directory employs systematic validation patterns:
-- **Enum Completeness**: Ensures all enum values are properly defined and accessible
-- **Interface Compliance**: Validates complex nested object structures match specifications
-- **Error Boundary Testing**: Verifies error categorization and recovery flag behavior
-- **Type Constraint Validation**: Confirms proper TypeScript type safety enforcement
+This test directory serves as the contract validation layer, ensuring that:
+- All debug adapter implementations conform to shared interface definitions  
+- Type safety is maintained across the debug protocol
+- Error handling follows consistent patterns
+- New features are properly integrated into the type system
 
-### Integration with Larger System
-
-These unit tests serve as the foundational contract validation for:
-- Debug adapter implementations that must conform to these interfaces
-- Protocol message serialization/deserialization processes
-- Error handling and recovery mechanisms across the debugging system
-- Feature capability negotiation between debug clients and adapters
-
-The test suite acts as living documentation for the debug adapter protocol, ensuring that any changes to the shared interfaces maintain backward compatibility and expected behaviors across the entire MCP debug ecosystem.
+The tests act as a safety net for the broader DebugMCP system, catching interface violations and ensuring consistent behavior across different debug adapter implementations.

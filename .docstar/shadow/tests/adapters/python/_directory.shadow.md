@@ -1,78 +1,63 @@
 # tests\adapters\python/
-@generated: 2026-02-12T21:06:03Z
+@children-hash: 208d63163778485f
+@generated: 2026-02-15T09:01:45Z
 
-## Test Suite for Python Debug Adapter
+## Test Suite for MCP Python Debug Adapter
 
-**Purpose**: Comprehensive test coverage for the Python debug adapter module, validating both isolated utility functions and complete debugging workflows through a two-tier testing approach. Ensures reliable Python environment discovery and debugging functionality across diverse deployment scenarios, with particular emphasis on challenging Windows CI environments.
+**Purpose**: Comprehensive testing module for the MCP (Model Context Protocol) Python debug adapter, providing both unit-level validation of Python utility functions and integration-level testing of complete debugging workflows. This test directory ensures the adapter can reliably discover Python installations, establish debug sessions, and execute debugging operations across different platforms and environments.
 
 ### Key Components and Architecture
 
-**Unit Test Layer (`unit/`)**: Focuses on core Python utility functions with extensive cross-platform testing:
-- Tests `findPythonExecutable()` with platform-specific command prioritization 
-- Validates `getPythonVersion()` for version detection and parsing
-- Covers `setDefaultCommandFinder()` for command discovery configuration
-- Comprehensive mocking infrastructure for subprocess and environment simulation
+#### Unit Test Layer (`unit/`)
+- **python-utils.test.ts**: Core unit tests for Python executable discovery, version detection, and command finder functionality
+- **Cross-platform validation**: Tests Python interpreter discovery across Windows, Linux, and macOS with platform-specific command prioritization
+- **Mock-based testing**: Uses sophisticated mocking of child_process and command finders to simulate various Python environments without requiring actual installations
+- **Environment isolation**: Ensures test independence through proper cleanup of environment variables and global state
 
-**Integration Test Layer (`integration/`)**: Validates real-world functionality through complete debugging workflows:
-- Full debug session lifecycle testing via MCP (Model Context Protocol) 
-- Python environment discovery and setup for Windows CI scenarios
-- End-to-end debugging workflow from session creation to variable inspection
-- Real implementation testing without mocking dependencies
+#### Integration Test Layer (`integration/`)
+- **env-utils.ts**: Python environment management utilities that discover and configure Python installations with debugpy support
+- **python-discovery.test.ts**: Real-world Python discovery validation using actual MCP client-server communication
+- **python_debug_workflow.test.ts**: Complete debugging workflow testing including session lifecycle, breakpoints, and variable inspection
+- **Real implementation testing**: Explicitly avoids mocking to validate actual Python discovery and debugging in CI environments
 
-### Testing Strategy and Patterns
+### Component Relationships and Data Flow
 
-**Cross-Platform Coverage**: 
-- Platform-specific Python command prioritization (Windows: `py → python → python3`, Unix: `python3 → python`)
-- Environment variable precedence testing (PYTHON_PATH > PYTHON_EXECUTABLE > platform defaults)
-- Windows Store alias rejection and GitHub Actions compatibility
+1. **Foundation Layer**: Unit tests validate the core Python utility functions that form the basis of the adapter's Python interaction capabilities
+2. **Discovery Layer**: Integration tests build on these utilities to test real Python executable discovery through MCP protocol communication
+3. **Workflow Layer**: Complete debugging scenarios exercise the full stack from Python discovery through active debugging sessions
 
-**No-Mocking Integration Philosophy**: Integration tests deliberately use real Python installations to validate actual CI/production behavior, while unit tests employ sophisticated mocking for isolated component testing.
+The integration components work synergistically:
+- `env-utils.ts` prepares Python environments for testing
+- `python-discovery.test.ts` validates the adapter can find prepared Python installations
+- `python_debug_workflow.test.ts` exercises complete debugging functionality using discovered Python interpreters
 
-**CI-Focused Design**: Special emphasis on Windows environment challenges including:
-- Python off PATH scenarios
-- Microsoft Store redirects
-- GitHub Actions toolcache integration
-- Automatic debugpy installation and management
+### Public Testing Interface
 
-### Public API Surface and Entry Points
+#### Key Test Categories
+- **Cross-platform Python discovery**: Validates executable finding across Windows, Linux, and macOS
+- **Version detection and parsing**: Tests Python version extraction from various output formats
+- **Environment variable handling**: Validates precedence of PYTHON_PATH, PYTHON_EXECUTABLE, and system PATH
+- **Debug session lifecycle**: Tests session creation, breakpoint management, execution control, and variable inspection
+- **Error handling and recovery**: Comprehensive failure scenarios and graceful degradation
 
-**Core Testing Functions**:
-- Unit test validation of Python discovery utilities (`findPythonExecutable`, `getPythonVersion`)
-- Integration test suites for complete debugging workflows
-- Environment setup utilities for CI scenarios (`ensurePythonOnPath`)
-
-**Test Suite Categories**:
-- `Python Discovery - Real Implementation Test`: Validates executable discovery in CI environments
-- `Python Debugging Workflow - Integration Test`: Tests complete debug session functionality
-- Platform-specific unit tests for Windows, Linux, and macOS behavior
-
-### Internal Organization and Data Flow
-
-**Two-Tier Validation Approach**:
-1. **Unit Layer**: Mock-based testing of individual utility functions with comprehensive platform simulation
-2. **Integration Layer**: Real implementation testing through MCP communication with actual Python processes
-
-**Communication Patterns**:
-- Unit tests use sophisticated child_process mocking with controlled subprocess behavior
-- Integration tests communicate via MCP protocol using StdioClientTransport
-- Debug server spawned as child process for realistic testing scenarios
-
-**Error Handling and Resilience**:
-- Command cascade fallback testing through multiple Python executable candidates
-- Spawn error simulation and graceful degradation validation
-- Comprehensive failure logging and debugging support for CI environments
+#### Test Execution Patterns
+- **Platform-specific execution**: Windows-focused integration tests due to Python discovery complexity
+- **Conditional execution**: Tests tagged with `@requires-python` for runtime dependency management
+- **Extended timeouts**: Configured for real process spawning and network communication (30-60s)
+- **Failure diagnostics**: Automatic logging to `logs/tests/adapters/failures/` for CI debugging
 
 ### Dependencies and Integration Points
 
-**Test Infrastructure**:
-- Vitest framework with extended timeouts for integration scenarios
-- MockCommandFinder shared testing utility
-- MCP SDK for client and transport communication layers
-- VS Code Debug Protocol types for debug session management
+#### Core Dependencies
+- **@debugmcp/adapter-python**: The primary module under test
+- **MCP SDK**: Client libraries for protocol communication in integration tests
+- **VS Code Debug Protocol**: Types and interfaces for debugging structures
+- **MockCommandFinder**: Test utility for command discovery simulation
 
-**Runtime Requirements**:
-- Integration tests tagged with `@requires-python` for actual Python installations
-- Target debugging scripts in `tests/fixtures/python/` for validation
-- Windows-specific tooling for PATH management and Python installation
+#### Testing Infrastructure
+- **Vitest**: Primary test framework with lifecycle management
+- **Child process mocking**: Sophisticated subprocess simulation for unit tests
+- **MCP client-server communication**: Real protocol testing in integration scenarios
+- **Python runtime dependency**: Actual Python installation required for integration tests
 
-This test directory serves as the quality assurance foundation for the Python debug adapter, ensuring reliable functionality across diverse Python installations and deployment environments while maintaining comprehensive coverage from isolated component testing to full workflow validation.
+This test directory provides comprehensive coverage of the MCP Python debug adapter, from low-level utility functions to complete debugging workflows, ensuring reliability across diverse Python environments and system configurations.

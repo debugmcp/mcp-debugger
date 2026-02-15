@@ -1,53 +1,59 @@
 # examples\python/
-@generated: 2026-02-12T21:05:43Z
+@children-hash: 0859d8fbd8f03319
+@generated: 2026-02-15T09:01:24Z
 
-## Overview
-The `examples/python` directory contains a collection of Python test scripts specifically designed for MCP (Message Control Protocol) debugger testing and demonstration. This module serves as a debugging sandbox, providing various Python programming patterns and scenarios to exercise debugging capabilities.
+## Overall Purpose and Responsibility
 
-## Primary Purpose
-- **Debugger Testing**: Comprehensive test cases for validating MCP Server debugging functionality
-- **Educational Examples**: Simple, well-structured code snippets for learning debugging techniques
-- **Development Validation**: Controlled test environments for debugging tool development and verification
+The `examples/python` directory serves as a collection of debugging test scenarios and educational examples for MCP (Message Control Protocol) server functionality. This module provides a comprehensive suite of Python scripts designed to exercise debugger capabilities, test breakpoint functionality, and demonstrate various programming patterns in controlled environments.
 
-## Key Components
+## Key Components and Integration
 
-### Core Test Scripts
-- **`simple_test.py`**: Minimal debugging target with basic variable swap operations and clear breakpoint locations
-- **`test_python_debug.py`**: Focused mathematical operations (factorial, list processing) for step-through debugging
-- **`python_test_comprehensive.py`**: Extensive debugging scenarios covering multiple language features and control flows
-- **`fibonacci.py`**: Specialized debugging exercise with intentional bugs and algorithmic comparisons
+The directory contains four complementary test scripts, each targeting different aspects of debugging workflow:
 
-### Common Patterns
-All scripts follow consistent architectural patterns:
-- **Self-contained execution**: No external dependencies, using only Python built-ins
-- **Clear entry points**: Standard `if __name__ == "__main__"` pattern
-- **Breakpoint-friendly design**: Strategic comment placement and logical pause points
-- **Observable state changes**: Variable mutations and print statements for debugging validation
+- **fibonacci.py**: Focuses on algorithm comparison and intentional bug injection, implementing both recursive O(2^n) and iterative O(n) Fibonacci calculations with deliberate error introduction for debugging practice
+- **python_test_comprehensive.py**: Serves as the primary comprehensive test suite with 6 distinct debugging scenarios covering variable assignment, function calls, data structures, and control flow
+- **simple_test.py**: Provides minimal debugging target with basic variable swap operation, ideal for introductory debugging demonstrations
+- **test_python_debug.py**: Offers mathematical operations focus with factorial, summation, and data processing functions for step-through debugging
 
 ## Public API Surface
-Each script functions as an independent executable:
-- **Direct execution**: `python <script_name>.py` runs complete test scenarios
-- **Function-level testing**: Individual functions can be imported and tested in isolation
-- **Debugging targets**: Well-defined breakpoint locations and state inspection opportunities
 
-## Internal Organization
-The directory follows a progression of complexity:
-1. **Simple scenarios** (`simple_test.py`) - Basic variable operations
-2. **Algorithm focus** (`test_python_debug.py`) - Mathematical functions and data processing  
-3. **Comprehensive coverage** (`python_test_comprehensive.py`) - Multiple language features
-4. **Bug injection** (`fibonacci.py`) - Intentional errors for debugging practice
+### Main Entry Points
+All scripts follow the standard Python `if __name__ == "__main__"` pattern, making them executable as standalone debugging targets:
 
-## Data Flow Patterns
-- **Procedural execution**: Linear function calls with clear input/output relationships
-- **Test orchestration**: Main functions coordinate multiple test scenarios
-- **Result validation**: Print statements and return values enable debugging verification
-- **State inspection points**: Strategic variable assignments for breakpoint placement
+- `fibonacci.py`: Demonstrates algorithm debugging with bug detection
+- `python_test_comprehensive.py::main()`: Comprehensive debugging scenario orchestrator
+- `simple_test.py::main()`: Minimal breakpoint testing
+- `test_python_debug.py::main()`: Mathematical operations debugging
 
-## Usage Context
-This module integrates with MCP debugging infrastructure by providing:
-- **Reproducible test cases** for debugger validation
-- **Educational examples** for debugging technique demonstration  
-- **Development targets** for testing new debugging features
-- **Regression testing** through predictable, deterministic execution paths
+### Core Functions Available for Testing
+- **Recursive algorithms**: `fibonacci_recursive()`, `factorial()` implementations
+- **Iterative patterns**: `fibonacci_iterative()`, `calculate_sum()`, `sum_list()`
+- **Data processing**: `process_data()` for list transformation
+- **Variable manipulation**: Basic assignment, swapping, arithmetic operations
 
-The scripts collectively ensure comprehensive coverage of Python debugging scenarios while maintaining simplicity and educational value.
+## Internal Organization and Data Flow
+
+The scripts are organized by complexity and debugging focus:
+
+1. **Simple → Complex**: From basic variable swaps to comprehensive multi-scenario testing
+2. **Algorithm Types**: Recursive vs iterative implementations for comparative debugging
+3. **Error Scenarios**: Intentional bugs (fibonacci.py) for debugging skill development
+4. **Coverage Areas**: Variable inspection, call stack analysis, control flow, data structure manipulation
+
+## Important Patterns and Conventions
+
+### Debugging-Optimized Design
+- Clear variable naming and explicit state changes
+- Strategic comment placement indicating intended breakpoint locations
+- Self-contained functions with single responsibilities
+- Predictable, deterministic outputs for validation
+- No external dependencies to minimize debugging complexity
+
+### Educational Structure
+- Progressive complexity from simple_test.py to python_test_comprehensive.py
+- Multiple implementation approaches (recursive vs iterative) for comparison
+- Intentional bug injection for realistic debugging scenarios
+- Comprehensive coverage of Python language features commonly debugged
+
+### Execution Patterns
+All scripts implement consistent execution flow: initialization → processing → output, with clear state transitions suitable for step-through debugging and breakpoint analysis.

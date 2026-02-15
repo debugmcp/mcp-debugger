@@ -1,63 +1,67 @@
 # packages\adapter-rust\scripts/
-@generated: 2026-02-12T21:05:43Z
+@children-hash: c31d884e1fa3a140
+@generated: 2026-02-15T09:01:22Z
 
-## Purpose
-The `packages/adapter-rust/scripts` directory contains Node.js automation scripts for setting up the Rust debugging environment. This module handles the complex task of downloading, extracting, and organizing platform-specific debugger binaries to enable cross-platform Rust debugging capabilities in the MCP server.
+This directory contains build automation scripts for the Rust adapter package, specifically focused on vendoring external debugging dependencies for cross-platform support.
+
+## Overall Purpose
+The scripts directory orchestrates the acquisition and preparation of third-party debugging tools required by the Rust adapter. Its primary responsibility is ensuring that CodeLLDB debugger binaries are available locally across all supported platforms without requiring users to install them separately.
 
 ## Key Components
 
 ### **vendor-codelldb.js**
-The primary script responsible for downloading and vendoring CodeLLDB debugger binaries from GitHub releases. This is a comprehensive utility that handles:
-- Multi-platform binary distribution (Windows, macOS, Linux - x64/ARM64)
-- Intelligent caching with SHA256 validation
-- Robust download mechanisms with retry logic
-- Binary extraction and organization
-- Version management and validation
+The sole script in this directory, serving as a comprehensive vendoring system that:
+- Downloads CodeLLDB VSIX packages from GitHub releases
+- Extracts platform-specific binaries and libraries
+- Organizes them in a standardized vendor directory structure
+- Implements robust caching and retry mechanisms
+- Provides extensive configuration through environment variables
 
 ## Public API Surface
+The script serves as a build-time utility with multiple entry points:
 
-### **Main Entry Point**
-- `node vendor-codelldb.js [platforms...]` - Downloads and vendors CodeLLDB for specified or detected platforms
-
-### **Environment Configuration**
-- **CODELLDB_VERSION**: Target CodeLLDB version (default: 1.11.8)
-- **SKIP_ADAPTER_VENDOR**: Bypass entire vendoring process
-- **CODELLDB_FORCE_REBUILD**: Force re-download of existing artifacts
-- **CODELLDB_VENDOR_LOCAL_ONLY**: Use cache only, forbid downloads
-- **CODELLDB_PLATFORMS**: Override platform selection
-- **CODELLDB_CACHE_DIR**: Custom cache directory location
-
-## Internal Organization
-
-### **Data Flow**
-1. **Platform Detection**: Determines target platforms from CLI args, environment, or auto-detection
-2. **Cache Management**: Checks for existing cached artifacts with version validation
-3. **Download Orchestration**: Fetches platform-specific VSIX packages from GitHub
-4. **Binary Extraction**: Extracts debugger binaries, LLDB libraries, and language support files
-5. **Vendor Organization**: Creates structured directory layout for runtime consumption
-
-### **Core Architecture**
-- **Platform Abstraction**: Maps Node.js platform identifiers to CodeLLDB VSIX variants
-- **Caching Layer**: SHA256-validated artifact storage with atomic operations
-- **Download Engine**: HTTP client with exponential backoff, progress reporting, and timeout handling
-- **Extraction Pipeline**: ZIP processing with validation, selective file copying, and permission management
-
-## Directory Structure Output
+**Command Line Interface:**
+```bash
+node vendor-codelldb.js [platform1] [platform2] ...
 ```
-vendor/codelldb/
-├── {platform}/
-│   ├── adapter/codelldb[.exe]     # Main debugger adapter
-│   ├── lldb/lib/liblldb.*         # LLDB debugging libraries
-│   ├── lang_support/              # Language-specific support files
-│   └── version.json               # Version manifest
-└── temp/                          # Temporary extraction workspace
-```
+
+**Environment Configuration:**
+- `CODELLDB_VERSION`: Target version selection
+- `SKIP_ADAPTER_VENDOR`: Complete bypass mechanism
+- `CODELLDB_FORCE_REBUILD`: Force fresh downloads
+- `CODELLDB_VENDOR_LOCAL_ONLY`: Cache-only mode
+- `CODELLDB_PLATFORMS`: Platform override
+- `CODELLDB_CACHE_DIR`: Custom cache location
+
+## Internal Organization and Data Flow
+
+1. **Platform Detection** → Determines which platforms to vendor (current, specified, or all)
+2. **Cache Layer** → SHA256-validated artifact caching with atomic operations
+3. **Download Engine** → HTTP client with retry logic, progress tracking, and timeout handling
+4. **Extraction Pipeline** → VSIX processing, file copying, and permission management
+5. **Vendor Structure** → Standardized directory layout with version manifests
+
+The flow follows a fail-safe pattern: cache first, download on miss, validate integrity, extract atomically.
+
+## Platform Support Matrix
+Supports 5 platform targets:
+- **Windows**: win32-x64
+- **macOS**: darwin-x64, darwin-arm64  
+- **Linux**: linux-x64, linux-arm64
+
+Each platform has specific binary paths, library locations, and executable configurations defined in the PLATFORMS mapping.
 
 ## Integration Patterns
-- **CI/CD Friendly**: Respects CI environment variables and provides appropriate logging levels
-- **Cross-Platform**: Handles platform-specific binary formats and file permissions
-- **Caching Strategy**: Implements intelligent caching to minimize redundant downloads
-- **Error Recovery**: Comprehensive retry mechanisms and graceful degradation
-- **Atomic Operations**: Ensures consistent state even during interrupted operations
+- **Build Integration**: Called during package preparation and CI workflows
+- **Dependency Management**: Creates self-contained vendor tree eliminating runtime dependencies
+- **Cross-compilation Support**: Can vendor for platforms different from build host
+- **CI Optimization**: Intelligent platform selection (all vs current) based on environment
 
-This module serves as the foundation for Rust debugging capabilities, automatically provisioning the necessary native debugging infrastructure across all supported platforms.
+## Error Handling Strategy
+Implements defense-in-depth error handling:
+- Network failures → Exponential backoff with multiple retry attempts
+- Cache corruption → Automatic invalidation and re-download
+- Platform mismatches → Graceful fallbacks and comprehensive logging
+- Resource constraints → Progress indication and timeout management
+
+This directory essentially acts as the dependency acquisition layer for the Rust adapter, ensuring that debugging capabilities are consistently available across all deployment scenarios without external tool requirements.

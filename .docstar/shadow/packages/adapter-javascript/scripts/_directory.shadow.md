@@ -1,84 +1,55 @@
 # packages\adapter-javascript\scripts/
-@generated: 2026-02-12T21:06:04Z
+@children-hash: 22355bd75980c4bf
+@generated: 2026-02-15T09:01:38Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/adapter-javascript/scripts` directory provides the complete vendoring system for Microsoft's js-debug DAP server, handling acquisition, processing, and deployment into the JavaScript adapter's vendor directory. This module serves as the critical bridge between the adapter and the external js-debug dependency, implementing multiple acquisition strategies with robust error handling and cross-platform compatibility.
+The `scripts` directory serves as the JavaScript debug adapter's dependency management system, responsible for acquiring, building, and vendoring Microsoft's `vscode-js-debug` DAP server into the local `vendor/js-debug/` directory. This module provides a comprehensive solution for obtaining debug server artifacts through multiple acquisition strategies while maintaining cross-platform compatibility and robust error handling.
 
-## Key Components and Integration
+## Key Components and Relationships
 
-### Core Orchestrator (`build-js-debug.js`)
-The primary vendoring script that coordinates the entire acquisition pipeline:
-- Environment configuration and strategy determination
-- Network-based asset acquisition from GitHub releases
-- Local development overrides and source compilation
-- Archive processing and file system operations
-- DAP server discovery with intelligent fallback chains
-- Cross-platform build automation with package manager detection
+### Main Orchestrator (`build-js-debug.js`)
+The primary automation script that coordinates the entire vendoring process. It integrates with the utility library to determine acquisition strategy, then executes the appropriate workflow:
+- **Strategy Execution**: Uses `vendor-strategy.js` to determine acquisition mode based on environment
+- **Asset Selection**: Leverages `js-debug-helpers.js` for intelligent GitHub release asset selection
+- **Multi-Modal Acquisition**: Implements four distinct acquisition strategies with fallback chains
+- **Post-Processing**: Handles CommonJS conversion, sidecar validation, and manifest generation
 
-### Foundation Libraries (`lib/`)
-Supporting utilities that provide the decision-making logic:
-- **`js-debug-helpers.js`**: Asset selection algorithms for GitHub releases with intelligent ranking
-- **`vendor-strategy.js`**: Environment-driven strategy determination engine
-
-The integration follows a clear separation: the lib utilities handle *what* and *how* decisions, while the main script executes the chosen acquisition plan with comprehensive error handling and retry logic.
+### Utility Library (`lib/`)
+Provides core support functions consumed by the main orchestrator:
+- **`js-debug-helpers.js`**: Pure functions for GitHub asset analysis and selection with sophisticated preference ranking
+- **`vendor-strategy.js`**: Environment-driven configuration system that translates environment variables into structured acquisition plans
 
 ## Public API Surface
 
-### Main Entry Points
-1. **`build-js-debug.js`** - Primary vendoring command
-   - Executable Node.js script for CI/CD and development workflows
-   - Environment-driven configuration via `JS_DEBUG_*` variables
-   - Idempotent execution with force-rebuild capabilities
-   - Exit codes: 0 for success/cache-hit, non-zero with actionable errors
+**Primary Entry Point:**
+- `build-js-debug.js` - Main script executable via Node.js for complete vendoring workflow
 
-### Supporting Functions
-2. **`selectBestAsset(assets)`** - GitHub release asset selection
-   - Intelligent ranking: server bundles > DAP assets > generic assets
-   - Archive preference: tgz/tar.gz over zip/vsix formats
-
-3. **`determineVendoringPlan(env)`** - Strategy resolution
-   - Returns acquisition mode: `'local'` | `'prebuilt-then-source'` | `'prebuilt-only'`
-   - Environment-driven with sensible defaults
+**Library Functions:**
+- `selectBestAsset(assets)` - Intelligent asset selection from GitHub release data
+- `determineVendoringPlan(env)` - Strategy determination based on environment configuration
+- `getArchiveType(name)` - Archive format detection for download processing
+- `normalizePath(p)` - Cross-platform path display normalization
 
 ## Internal Organization and Data Flow
 
-### Acquisition Pipeline
-1. **Strategy Resolution**: Environment variables determine vendoring approach
-2. **Asset Discovery**: GitHub API integration with rate limiting and retry logic
-3. **Download & Processing**: Archive handling with validation and extraction
-4. **Server Location**: Multi-strategy DAP server discovery across build variants
-5. **Vendoring**: File copying with sidecar validation and CommonJS enforcement
-
-### Data Flow Patterns
-- **Pure Functional Utilities**: Library functions are side-effect free with clear inputs/outputs
-- **Imperative Orchestration**: Main script coordinates stateful operations with comprehensive error handling
-- **Deterministic Output**: Always produces consistent vendor structure regardless of acquisition method
+1. **Configuration Phase**: Environment analysis determines acquisition strategy via `determineVendoringPlan()`
+2. **Strategy Execution**: Main orchestrator branches to appropriate acquisition mode:
+   - **Local Override**: Direct file copy from `JS_DEBUG_LOCAL_PATH`
+   - **Prebuilt Acquisition**: GitHub release download with `selectBestAsset()` optimization
+   - **Source Build**: Git clone, dependency installation, and Gulp compilation
+   - **Hybrid Mode**: Prebuilt download with optional source build override
+3. **Post-Processing**: CommonJS enforcement, sidecar validation, and provenance tracking
+4. **Output Generation**: Deterministic artifact placement with SHA256 checksums and metadata
 
 ## Important Patterns and Conventions
 
-### Acquisition Strategies
-- **Local Override**: Direct file copy for offline development (`JS_DEBUG_LOCAL_PATH`)
-- **Prebuilt Artifacts**: GitHub releases download with asset selection intelligence
-- **Source Compilation**: Git clone + build pipeline with package manager auto-detection
-- **Hybrid Mode**: Prebuilt primary with source fallback for maximum reliability
+- **Environment-Driven Configuration**: All behavior controlled via environment variables with sensible defaults
+- **Idempotent Execution**: Cache-aware operation with force-rebuild override capability
+- **Comprehensive Error Handling**: Actionable error messages with platform-specific guidance and retry logic
+- **Cross-Platform Compatibility**: Windows shell fallbacks and platform-agnostic path handling
+- **Deterministic Output**: SHA256 checksums, structured manifests, and consistent artifact organization
+- **Fallback Chains**: Multi-strategy server discovery and graceful degradation on acquisition failures
+- **Side-Effect Isolation**: Pure utility functions with no global state modifications
 
-### Cross-Platform Compatibility
-- Windows shell fallback for command execution
-- Normalized path handling for display and filesystem operations
-- Platform-specific executable extension detection
-
-### Error Resilience
-- Exponential backoff retry for network operations
-- Comprehensive HTTP error handling with actionable guidance
-- Graceful degradation with fallback acquisition methods
-- Detailed error messages with platform-specific troubleshooting
-
-## Runtime Invariants
-
-1. **Consistent Output Structure**: Always produces `vsDebugServer.js` and `vsDebugServer.cjs` with required sidecars
-2. **CommonJS Enforcement**: Local `package.json` with `"type": "commonjs"` boundary
-3. **Provenance Tracking**: `manifest.json` with acquisition metadata and checksums
-4. **Sidecar Validation**: Hard requirements for `bootloader.js`, `hash.js`, and associated WebAssembly files
-
-This directory implements a production-ready dependency vendoring system that balances reliability, performance, and developer experience across multiple acquisition strategies and deployment environments.
+The module ensures reliable DAP server availability across diverse deployment scenarios while maintaining transparency through detailed logging and provenance tracking.

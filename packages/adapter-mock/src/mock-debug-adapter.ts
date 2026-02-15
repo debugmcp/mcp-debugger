@@ -9,7 +9,8 @@
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import { 
+import * as fs from 'fs';
+import {
   IDebugAdapter,
   AdapterState,
   ValidationResult,
@@ -271,32 +272,44 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
     // Get the directory of this module
     // When compiled, this will be in dist/adapters/mock/
     let mockAdapterPath: string;
-    
+
     try {
       // Try to use import.meta.url if available
       const currentFileUrl = new URL(import.meta.url);
       let currentDir = path.dirname(currentFileUrl.pathname);
-      
+
       // In Windows, remove the leading slash from the pathname
       if (process.platform === 'win32' && currentDir.startsWith('/')) {
         currentDir = currentDir.substring(1);
       }
-      
+
       // Decode URL encoding (e.g., %20 for spaces)
       currentDir = decodeURIComponent(currentDir);
-      
+
       mockAdapterPath = path.join(currentDir, 'mock-adapter-process.js');
+
+      // In npx bundle, the process file is bundled as mock-adapter-process.cjs
+      // in the same directory as cli.mjs
+      if (!fs.existsSync(mockAdapterPath)) {
+        const bundledPath = path.join(currentDir, 'mock-adapter-process.cjs');
+        if (fs.existsSync(bundledPath)) {
+          mockAdapterPath = bundledPath;
+          this.dependencies.logger?.debug(
+            `[MockDebugAdapter] Using bundled mock adapter process: ${mockAdapterPath}`
+          );
+        }
+      }
     } catch {
       // Fallback: assume we're running from the project root
       // The compiled file is at packages/adapter-mock/dist/mock-adapter-process.js
       const projectRoot = path.resolve(process.cwd());
       mockAdapterPath = path.join(projectRoot, 'packages', 'adapter-mock', 'dist', 'mock-adapter-process.js');
-      
+
       this.dependencies.logger?.debug(
         `[MockDebugAdapter] Using fallback path resolution: ${mockAdapterPath}`
       );
     }
-    
+
     return {
       command: process.execPath,
       args: [

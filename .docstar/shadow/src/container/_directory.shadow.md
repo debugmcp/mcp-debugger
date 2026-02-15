@@ -1,49 +1,61 @@
 # src\container/
-@generated: 2026-02-12T21:05:39Z
+@children-hash: 075d69170eb9b1d4
+@generated: 2026-02-15T09:01:20Z
 
-## Overall Purpose
+## Overview
 
-The `container` module serves as the dependency injection foundation for the debugging/session management system. It provides centralized configuration types and a production-ready dependency container that wires together all core services, process management components, and language adapters into a cohesive runtime environment.
+The `src/container` directory provides the dependency injection infrastructure for the debugging/session management system. It serves as the central bootstrapping module that wires together all application dependencies and provides type-safe configuration interfaces for container initialization.
 
-## Key Components and Architecture
+## Key Components
 
-The module consists of two complementary components:
+### Configuration Types (`types.ts`)
+- **ContainerConfig**: Core container configuration interface for logging setup, session directories, and extensible logger options
+- **SessionManagerConfig**: Specialized configuration for session management with DAP (Debug Adapter Protocol) integration settings
 
-**Configuration Layer (`types.ts`)**:
-- `ContainerConfig`: Defines logging configuration including log levels, file output, and session-specific logging directories
-- `SessionManagerConfig`: Specialized configuration for session management with storage parameters and DAP (Debug Adapter Protocol) launch settings
-- Provides flexible, optional configuration contracts with extensible logger options
+### Dependency Container (`dependencies.ts`)
+- **Dependencies Interface**: Complete contract defining all injectable services across the application
+- **createProductionDependencies()**: Main factory function that creates the full production dependency graph
 
-**Dependency Injection Layer (`dependencies.ts`)**:
-- `Dependencies` interface: Complete contract defining all injectable services across the application
-- `createProductionDependencies()`: Primary factory function that instantiates and wires the entire dependency graph
+## Architecture & Organization
+
+The module follows a layered dependency injection pattern:
+
+1. **Configuration Layer**: Type-safe interfaces define container and service configuration contracts
+2. **Service Categories**: Dependencies are organized into logical groups:
+   - Core Services (filesystem, process management, networking, logging)
+   - Process Launchers (hierarchical process management with proxy and debug capabilities)
+   - Factories (dynamic object creation for proxy managers and session stores)
+   - Adapter System (language adapter registration and loading)
+
+3. **Initialization Flow**: Single factory function creates entire dependency graph with proper wiring
 
 ## Public API Surface
 
-**Primary Entry Point**:
-- `createProductionDependencies(config: ContainerConfig): Dependencies` - Main factory for creating production dependency container
+### Primary Entry Points
+- `createProductionDependencies(config: ContainerConfig): Dependencies` - Main factory for production container
+- `Dependencies` interface - Complete dependency container contract
+- `ContainerConfig` & `SessionManagerConfig` interfaces - Configuration types
 
-**Key Interfaces**:
-- `Dependencies` - Complete dependency container interface
-- `ContainerConfig` - Container configuration contract
-- `SessionManagerConfig` - Session-specific configuration contract
+### Key Capabilities
+- **Environment-Aware Initialization**: Adapts behavior for container vs non-container deployment
+- **Dynamic Adapter Loading**: Supports both bundled and runtime-loaded language adapters
+- **Hierarchical Process Management**: Layered process launchers with proxy and debug specializations
+- **Flexible Configuration**: Optional configuration properties with extensible logger options
 
-## Internal Organization and Data Flow
+## Internal Patterns
 
-The dependency creation follows a hierarchical pattern:
+- **Dependency Injection**: Single factory creates and wires entire dependency graph
+- **Factory Pattern**: Specialized factories for complex object creation (proxy managers, session stores)
+- **Registry Pattern**: Centralized adapter registration with graceful error handling
+- **Configuration-Driven**: Behavior controlled through type-safe configuration interfaces
 
-1. **Core Infrastructure**: Base services (filesystem, process manager, network, logging)
-2. **Process Management**: Layered launchers (base → proxy → debug target specialized)
-3. **Dynamic Factories**: Service factories for runtime object creation
-4. **Adapter Ecosystem**: Language adapter registry with dynamic loading and pre-registration
+## Integration Points
 
-The container supports both bundled and dynamically loaded adapters, with environment-specific behavior for container vs non-container deployments.
+The container serves as the bridge between:
+- Core implementations (`../implementations/`)
+- Shared interfaces (`@debugmcp/shared`)
+- Language adapters (dynamically loaded)
+- Session management and DAP integration
+- Process management and proxy systems
 
-## Important Patterns and Conventions
-
-- **Dependency Injection**: Single factory creates complete dependency graph with proper wiring
-- **Configuration-Driven**: All components configured through type-safe configuration objects
-- **Graceful Degradation**: Adapter registration is fire-and-forget to prevent blocking startup
-- **Environment Awareness**: Adapts behavior based on deployment context (container vs standalone)
-- **Extensibility**: Registry pattern allows dynamic language adapter discovery and loading
-- **Type Safety**: Comprehensive TypeScript interfaces provide compile-time guarantees while allowing runtime flexibility
+This module is typically used during application startup to bootstrap the entire system with properly configured and wired dependencies.

@@ -1,91 +1,75 @@
 # packages\adapter-rust\tests/
-@generated: 2026-02-12T21:05:48Z
+@children-hash: 7a64eb8f04b72801
+@generated: 2026-02-15T09:01:27Z
 
 ## Overall Purpose
+The `packages/adapter-rust/tests` directory contains a comprehensive test suite for the Rust debug adapter implementation. This test module validates all aspects of Rust debugging integration including toolchain detection, binary analysis, cargo project management, and CodeLLDB debug adapter orchestration.
 
-The `packages/adapter-rust/tests` directory contains comprehensive test suites that validate the Rust debug adapter functionality. This testing module ensures the reliability of Rust debugging integration within the MCP (Model Context Protocol) system through extensive unit tests covering toolchain detection, binary analysis, cargo project management, and debug session orchestration.
+## Key Components and Test Coverage
 
-## Key Components and Relationships
+### Core Adapter Testing
+- **`rust-adapter.test.ts`**: Tests the main `RustDebugAdapter` and `RustAdapterFactory` classes, covering basic properties, capabilities, command building, launch configuration transformation, and connection management
+- **`rust-debug-adapter.toolchain.test.ts`**: Extensive toolchain-specific testing including environment validation, executable resolution, DAP operations, and platform-specific behavior
 
-### Core Test Suites
+### Utility Module Testing  
+- **`cargo-utils.test.ts`**: Tests Cargo build system integration utilities including project resolution, target discovery, build orchestration, and binary management
+- **`rust-utils.test.ts`**: Tests core Rust toolchain utilities for process detection, filesystem operations, and platform-specific binary resolution
+- **`binary-detector.test.ts`**: Tests binary format analysis capabilities for distinguishing MSVC vs GNU compiler outputs through signature detection
 
-**Binary Format Detection** (`binary-detector.test.ts`):
-- Tests `detectBinaryFormat` utility for distinguishing MSVC vs GNU compiler outputs
-- Validates RSDS/PDB detection, DWARF section parsing, and DLL import extraction
-- Uses synthetic binary data with embedded signatures for controlled testing
+## Testing Architecture & Patterns
 
-**Cargo Integration** (`cargo-utils.test.ts`):
-- Comprehensive testing of Cargo build system utilities including project resolution, target discovery, and build orchestration
-- Mocks child processes to test cargo command execution without system dependencies
-- Validates metadata parsing, binary target filtering, and rebuild logic
+### Mock Infrastructure
+All test files employ comprehensive mocking strategies:
+- **Process Mocking**: Custom `createMockProcess` factories simulate `child_process.spawn` behavior with configurable stdout/stderr and exit codes
+- **Filesystem Mocking**: Temporary directory creation with automatic cleanup tracking
+- **Platform Mocking**: Runtime platform override utilities for cross-platform testing
+- **Dependency Injection**: Mock `AdapterDependencies` objects isolate units under test
 
-**Rust Adapter Core** (`rust-adapter.test.ts`):
-- Tests main `RustDebugAdapter` and `RustAdapterFactory` classes
-- Validates debug capabilities, command building, launch configuration transformation, and connection management
-- Tests error handling and platform-specific behavior (Windows vs Unix)
+### Test Organization
+- **Setup/Teardown**: Consistent `beforeEach`/`afterEach` patterns reset mocks and clean temporary resources
+- **Isolated Testing**: Each test file focuses on specific module functionality while maintaining integration test coverage
+- **Platform Coverage**: Explicit Windows vs Unix testing for toolchain and binary handling differences
 
-**Toolchain Management** (`rust-debug-adapter.toolchain.test.ts`):
-- Tests environment validation, executable resolution, and DAP (Debug Adapter Protocol) operations
-- Validates CodeLLDB integration, toolchain compatibility detection, and platform-specific tooling
-- Covers build pipeline integration and state management
+### Data Management
+- Temporary directory tracking with force removal cleanup
+- Synthetic binary data generation for format detection testing
+- Mock cargo metadata JSON responses for realistic project simulation
 
-**System Utilities** (`rust-utils.test.ts`):
-- Tests Rust toolchain detection (cargo, rustc installation checking)
-- Validates filesystem operations for project discovery and binary resolution
-- Tests platform-specific tool detection and process management
+## Key Integration Points
 
-### Shared Testing Infrastructure
+### Toolchain Validation Flow
+Tests validate the complete toolchain detection pipeline:
+1. Rust/Cargo installation verification (`rust-utils`)
+2. Binary format analysis for MSVC/GNU detection (`binary-detector`) 
+3. CodeLLDB compatibility checking (`rust-debug-adapter.toolchain`)
+4. Environment variable configuration and path resolution
 
-All test suites utilize common patterns:
-- **Vitest framework** for mocking and assertions
-- **Temporary filesystem management** with automatic cleanup
-- **Mock process factory** for simulating cargo/rustc command execution
-- **Platform override utilities** for cross-platform testing
-- **Dependency injection mocking** for isolated unit testing
+### Build System Integration
+Tests cover end-to-end Cargo project handling:
+1. Project root discovery and metadata parsing (`cargo-utils`)
+2. Target identification and binary path construction
+3. Build orchestration with output capture and error handling
+4. Up-to-date checking and rebuild determination
 
-## Test Organization and Data Flow
+### Debug Adapter Lifecycle
+Tests validate complete debug session management:
+1. Adapter factory creation and dependency injection
+2. Launch configuration transformation for Rust-specific parameters
+3. CodeLLDB command building with platform-specific environment setup
+4. DAP event handling and state management
 
-```
-Test Execution Flow:
-1. Setup Phase: Mock dependencies, create temp directories
-2. Execution Phase: Test specific adapter functionality
-3. Validation Phase: Assert expected behaviors and outputs  
-4. Cleanup Phase: Remove temp files, reset mocks
+## Public API Validation
 
-Component Integration Testing:
-binary-detector → cargo-utils → rust-adapter → toolchain validation → system utilities
-```
+The test suite validates key adapter interfaces:
+- **Factory Pattern**: `RustAdapterFactory.createAdapter()` with proper dependency injection
+- **Adapter Interface**: Standard debug adapter methods (connect, disconnect, transformLaunchConfig)
+- **Utility Functions**: All exported functions from utils modules with comprehensive input/output validation
+- **Error Handling**: Translation and propagation of tool-specific error messages
 
-The tests validate the complete debugging workflow from initial toolchain detection through active debug session management, ensuring robust error handling and platform compatibility throughout.
+## Testing Dependencies
 
-## Key Testing Patterns
+- **Vitest**: Primary testing framework with extensive mocking capabilities
+- **@debugmcp/shared**: Core debug adapter types and interfaces
+- **Node.js APIs**: Filesystem, process, and OS modules for system integration testing
 
-### Mock Strategy
-- **Child process mocking** for cargo/rustc commands without system dependencies
-- **Filesystem mocking** for controlled file operations
-- **Platform simulation** for Windows/Unix compatibility testing
-- **Environment variable manipulation** with proper cleanup
-
-### Test Data Management
-- **Synthetic binary creation** with embedded signatures (PE headers, debug markers)
-- **Temporary Rust project generation** with minimal Cargo.toml/main.rs structures
-- **Mock JSON metadata** simulating cargo command outputs
-- **Controlled error scenarios** for failure path validation
-
-### Coverage Areas
-- **Positive path testing**: Normal operation validation
-- **Error handling**: Graceful degradation and meaningful error messages
-- **Platform compatibility**: Windows (.exe handling, MSVC toolchain) vs Unix behavior
-- **Environment resilience**: Missing tools, malformed configs, permission issues
-- **State management**: Debug session lifecycle and adapter state transitions
-
-## Integration Points
-
-The test suite validates integration between:
-- **Cargo build system** and debug adapter configuration
-- **Binary format detection** and toolchain compatibility
-- **CodeLLDB debugger** and Rust-specific debugging features  
-- **Platform-specific tooling** (dlltool, MSVC detection) and cross-platform operation
-- **File system operations** and temporary resource management
-
-This comprehensive testing ensures the Rust debug adapter can reliably handle diverse development environments, project configurations, and debugging scenarios while maintaining consistent behavior across platforms.
+The test suite ensures robust validation of the Rust debug adapter's ability to integrate with the Rust toolchain, manage Cargo projects, analyze compiled binaries, and orchestrate CodeLLDB debugging sessions across different platforms and configurations.

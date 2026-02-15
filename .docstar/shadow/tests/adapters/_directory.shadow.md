@@ -1,98 +1,75 @@
 # tests\adapters/
-@generated: 2026-02-12T21:06:30Z
+@children-hash: f73e3c3312c04ea8
+@generated: 2026-02-15T09:02:07Z
 
-## Purpose and Responsibility
+## Overall Purpose and Responsibility
 
-The `tests/adapters` directory provides comprehensive test coverage for all debug adapter implementations, ensuring reliable Debug Adapter Protocol (DAP) compliance and proper integration with language-specific debugging toolchains. This module serves as the central quality assurance gateway for the debug adapter ecosystem, validating adapter functionality from individual component behavior to complete end-to-end debugging workflows.
+The `tests/adapters` directory provides comprehensive test coverage for all debugger adapter implementations within the Debug MCP framework. This directory serves as the quality assurance gateway, validating that each language-specific adapter (Go, JavaScript/TypeScript, Python, and Rust) correctly implements the debugger adapter protocol while maintaining proper isolation, cross-platform compatibility, and reliable integration with their respective debugging backends.
 
-## Overall Architecture and Testing Strategy
+## Key Components and Integration Architecture
 
-The testing suite employs a **multi-tier validation approach** consistent across all language adapters:
+### Multi-Language Adapter Testing Suite
+The directory is organized by programming language, with each subdirectory containing specialized test suites:
 
-### Two-Layer Testing Pattern
-- **Unit Testing Layer**: Deep validation of individual components with comprehensive mocking of external dependencies, focusing on internal logic and API contracts
-- **Integration Testing Layer**: End-to-end smoke tests validating complete adapter pipelines using controlled environments without heavy external process dependencies
+- **Go Adapter Tests** (`go/`): Validates Go/Delve debugger integration with comprehensive unit and integration testing
+- **JavaScript/TypeScript Tests** (`javascript/`): Ensures reliable debugging for JavaScript/TypeScript applications via VS Code js-debug adapter
+- **Python Adapter Tests** (`python/`): Tests Python debugger integration with debugpy support across different Python installations
+- **Rust Adapter Tests** (`rust/`): Validates Rust debugging through CodeLLDB integration with platform-specific handling
 
-### Cross-Platform Compatibility Framework
-All adapter test suites implement robust cross-platform testing infrastructure:
-- Platform-aware executable discovery and path resolution
-- Environment variable management and isolation
-- Windows/Unix-specific behavior validation
-- CI environment compatibility (especially GitHub Actions)
+### Unified Testing Patterns and Component Relationships
 
-## Key Components and Relationships
+All adapter test suites follow a consistent two-tier architecture:
 
-### Language-Specific Adapter Test Suites
+1. **Unit Testing Layer**: Focused validation of individual components (factories, utilities, configuration handlers) with comprehensive mocking
+2. **Integration Testing Layer**: End-to-end workflow validation using either mock dependencies or controlled real environments
 
-**Go Adapter Tests** (`go/`):
-- Comprehensive validation of Go + Delve integration
-- Mock-based unit testing with EventEmitter-based process simulation
-- Integration smoke tests for DAP command building and configuration transformation
-- Tool compatibility validation (Go 1.18+, Delve with DAP support)
+The adapters work together through shared interfaces and patterns:
+- **Adapter Factory Pattern**: Each language implements a factory for creating debug adapter instances
+- **Configuration Transformation Pipeline**: Common launch configuration processing with language-specific overrides
+- **Command Generation Framework**: Standardized approach to building debugger-specific commands
+- **Environment Validation System**: Cross-platform executable discovery and version compatibility checking
 
-**JavaScript/TypeScript Adapter Tests** (`javascript/`):
-- Integration-focused testing emphasizing real adapter factory interaction
-- Session management and registry integration validation
-- TypeScript runtime detection with tsx fallback support
-- Debug server command construction and execution preparation
+## Public API Surface and Entry Points
 
-**Python Adapter Tests** (`python/`):
-- Dual-strategy approach: sophisticated mocking for units, real implementations for integration
-- Python environment discovery across diverse deployment scenarios
-- MCP (Model Context Protocol) communication testing for debug workflows
-- Special emphasis on Windows CI environment challenges and Microsoft Store alias handling
-
-**Rust Adapter Tests** (`rust/`):
-- CodeLLDB integration validation through mock dependency frameworks
-- Platform-specific binary handling and environment configuration
-- Launch configuration transformation and command generation testing
-- Smoke testing approach avoiding actual debugging process spawning
+### Primary Test Interfaces
+- **Adapter Factory Testing**: Validation of adapter creation, metadata retrieval, and environment checks across all languages
+- **Configuration Processing**: Launch config transformation testing with runtime-specific parameters (tsx for TypeScript, debugpy for Python, etc.)
+- **Command Building Validation**: Debugger command generation testing for each backend (dlv, js-debug, debugpy, CodeLLDB)
+- **Cross-Platform Compatibility**: Platform-specific testing for Windows, Linux, and macOS environments
 
 ### Shared Testing Infrastructure
-
-All adapter test suites leverage common patterns:
-- **Mock Dependency Injection**: Consistent factory patterns for test doubles across process spawning, file system operations, and environment management
-- **Session Lifecycle Management**: Standardized adapter state transition validation (UNINITIALIZED → READY → CONNECTED → DISCONNECTED)
-- **Environment Isolation**: Systematic preservation and restoration of system state between test runs
-
-## Public API Surface
-
-### Primary Entry Points
-- **Adapter Factory Testing**: Validation of language-specific factory implementations, metadata reporting, and environment compatibility
-- **Debug Session Management**: Lifecycle testing from initialization through disposal with proper state management
-- **Configuration Transformation**: Testing of launch config processing, path resolution, and platform normalization
-- **Tool Discovery and Validation**: Cross-platform executable detection and version compatibility verification
-
-### Core Testing Capabilities
-- **DAP Protocol Compliance**: Validation of Debug Adapter Protocol implementation correctness
-- **Command Generation**: Testing of language-specific debugger command construction (dlv, node --inspect, debugpy, CodeLLDB)
-- **Cross-Platform Compatibility**: Ensuring consistent behavior across Windows, Linux, and macOS environments
-- **Error Handling**: Comprehensive failure mode testing and graceful degradation validation
+- **Mock Strategy Framework**: Comprehensive process isolation using EventEmitter simulation and filesystem abstraction
+- **Environment Management**: Standardized setup/teardown patterns with PATH manipulation and environment variable handling
+- **Integration Points**: Common testing of adapter lifecycle, session management, and DAP protocol communication
 
 ## Internal Organization and Data Flow
 
 ### Test Execution Pipeline
-1. **Environment Setup**: System state preservation, mock dependency initialization, adapter registry configuration
-2. **Component Validation**: Factory registration, configuration transformation, command building verification
-3. **Integration Testing**: End-to-end workflow validation through controlled environments
-4. **Cleanup and Isolation**: State restoration, registry clearing, mock cleanup
+1. **Environment Setup**: Each test suite preserves system state and initializes controlled test environments
+2. **Adapter Registration**: Language-specific adapter factories are registered with mock or real dependencies
+3. **Configuration Validation**: Launch configurations are processed and validated for each debugging scenario
+4. **Command Generation Testing**: End-to-end validation of debugger command building with proper ports and parameters
+5. **Integration Verification**: Communication testing between adapter components and debugging backends
+6. **Environment Restoration**: Clean teardown ensuring no test pollution or side effects
 
 ### Quality Assurance Patterns
-- **Smoke Testing Philosophy**: Focus on critical integration points rather than exhaustive edge case coverage
-- **Real vs Mock Strategy**: Strategic balance between mock-based isolation and real implementation validation
-- **CI-First Design**: Special attention to GitHub Actions, container environments, and automated testing scenarios
-- **Platform Matrix Testing**: Comprehensive coverage across operating systems and runtime configurations
+- **Isolation Strategy**: All tests prevent actual debugger process execution while validating complete logic paths
+- **Cross-Platform Design**: Consistent handling of platform differences including executable extensions and path normalization
+- **Dependency Injection**: Mock factories enable comprehensive testing without external dependencies
+- **Error Scenario Coverage**: Robust testing of failure modes, missing tools, and version incompatibilities
 
-## Dependencies and Integration Points
+## Framework Integration and Dependencies
 
-### Testing Framework Integration
-- **Vitest**: Primary testing framework with extended timeouts for integration scenarios
-- **Mock Infrastructure**: Sophisticated process, filesystem, and environment mocking capabilities
-- **MCP SDK**: Model Context Protocol integration for Python adapter communication testing
+### Core Testing Technologies
+- **Vitest**: Primary testing framework across all adapter test suites
+- **MCP SDK**: Client libraries for protocol communication in integration scenarios
+- **Debug Adapter Protocol**: Standardized interfaces for debugging communication
+- **Node.js Built-ins**: System integration testing utilities (child_process, fs, path, events)
 
-### Runtime Dependencies
-- **Language Toolchain Integration**: Real tool discovery and version validation (Go, Node.js, Python, Rust)
-- **Debug Protocol Libraries**: VS Code Debug Protocol types and DAP specification compliance
-- **Cross-Platform Utilities**: Path handling, environment management, and executable discovery across platforms
+### Language-Specific Dependencies
+- **Go**: Delve debugger integration and GOPATH/GOBIN discovery
+- **JavaScript/TypeScript**: VS Code js-debug adapter and tsx runtime support
+- **Python**: debugpy integration with MCP client-server communication
+- **Rust**: CodeLLDB debugger integration with LLDB platform requirements
 
-This test directory ensures the debug adapter ecosystem maintains high reliability, proper protocol compliance, and consistent cross-platform behavior while providing comprehensive validation coverage from individual component testing to complete debugging workflow integration.
+This test directory ensures that the Debug MCP framework provides reliable debugging capabilities across all supported programming languages while maintaining consistent quality, cross-platform compatibility, and proper isolation from system dependencies. The comprehensive coverage validates both individual adapter functionality and the unified debugging experience across the entire ecosystem.

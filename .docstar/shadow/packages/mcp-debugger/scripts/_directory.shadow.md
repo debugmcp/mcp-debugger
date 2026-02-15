@@ -1,57 +1,57 @@
 # packages\mcp-debugger\scripts/
-@generated: 2026-02-12T21:05:41Z
+@children-hash: 9536641ca0c7c82f
+@generated: 2026-02-15T09:01:23Z
 
-## MCP Debugger Build Scripts Directory
+## MCP Debugger Scripts Directory
 
-**Primary Purpose**: Contains build automation scripts responsible for bundling, packaging, and distributing the MCP debugger CLI as a complete, self-contained executable with all necessary runtime dependencies and debugging adapters.
+**Purpose**: Build and packaging infrastructure for the MCP debugger CLI tool, responsible for creating production-ready distribution artifacts from TypeScript sources and assembling multi-component bundles.
 
-### Core Responsibility
+### Overall Responsibility
 
-This directory houses the build pipeline infrastructure that transforms the MCP debugger source code into distributable artifacts. The scripts handle complex bundling requirements including multi-language debugging adapter integration, platform-specific asset management, and npm package preparation.
+This directory contains the build orchestration logic that transforms the MCP debugger from development sources into deployable CLI tools. It handles bundling, packaging, and distribution artifact generation with support for multiple platforms and runtime environments.
 
 ### Key Components
 
-**bundle-cli.js** - Main build orchestration script that:
-- Bundles the CLI application using tsup with ESM output format
-- Creates executable wrapper scripts with proper shebang headers
-- Manages runtime asset copying and vendor payload integration
-- Handles platform-specific debugging adapter distribution
-- Generates final npm package tarballs for distribution
+**bundle-cli.js** - Primary build orchestrator that:
+- Creates ESM CLI bundles with Node.js compatibility shims
+- Generates executable wrapper scripts for command-line usage  
+- Assembles multi-component runtime packages including proxies, adapters, and utilities
+- Produces npm-ready distribution packages and tarballs
+- Handles platform-specific vendor debug adapter integration
 
 ### Public API Surface
 
-**Main Entry Points:**
-- `bundleProxy()` - Builds the DAP (Debug Adapter Protocol) proxy component as CommonJS bundle
-- `bundleCLI()` - Complete CLI build pipeline including asset management and packaging
+**Main Entry Point:**
+- `bundleCLI()` - Complete build pipeline that produces all distribution artifacts
 
-### Build Pipeline Architecture
+**Component Bundlers:**
+- `bundleProxy()` - Creates DAP proxy bundle for debugger communication
+- `bundleMockAdapterProcess()` - Bundles mock adapter for testing scenarios
 
-**Multi-Stage Process:**
-1. **Core Bundling** - Compiles TypeScript CLI entry point to optimized ESM bundle
-2. **Proxy Integration** - Builds separate DAP proxy component for debugging protocol handling  
-3. **Asset Aggregation** - Copies runtime components (proxy, errors, adapters, session, utils)
-4. **Vendor Integration** - Embeds debugging adapters for JavaScript (js-debug) and Rust (CodeLLDB)
-5. **Package Preparation** - Creates npm-ready package structure with fresh tarballs
+### Internal Organization & Data Flow
 
-### Internal Organization
+The build process follows a structured pipeline:
 
-**Asset Management Strategy:**
-- Runtime assets filtered and copied from repo-level dist directory
-- Vendor payloads conditionally included based on environment configuration
-- Platform-specific handling for CodeLLDB Rust debugging support
-- Executable permissions managed for cross-platform compatibility
+1. **Source Bundling** - TypeScript sources are bundled into executable formats using tsup
+2. **Asset Assembly** - Runtime components are copied from various package dist directories
+3. **Vendor Integration** - Debug adapters (js-debug, CodeLLDB) are selectively bundled based on platform availability
+4. **Package Generation** - npm-compatible package structure is mirrored and packed into tarballs
+5. **Artifact Finalization** - Multiple output formats are generated for different consumption patterns
 
-### Key Patterns & Conventions
+### Important Patterns
 
-**Build Configuration:**
-- Aggressive bundling with `noExternal: [/./]` to create self-contained artifacts  
-- Node.js 18 targeting with ESM/CommonJS hybrid support
-- Environment-driven vendor inclusion via `CODELLDB_PACKAGE_PLATFORMS`
-- Graceful degradation for missing vendor dependencies
+**Multi-Artifact Strategy**: Single build process creates multiple output formats (bundle, package, tarball) to support different deployment scenarios.
 
-**Output Structure:**
-- `dist/` - Primary runtime bundle with executable CLI
-- `package/dist/` - Mirror structure for npm packaging
-- Platform-specific vendor assets organized by debugging language support
+**Graceful Degradation**: Missing optional components (like platform-specific adapters) generate warnings rather than build failures, enabling partial builds.
 
-This directory serves as the critical bridge between development source code and production distribution, handling the complex requirements of packaging a multi-language debugging tool with embedded protocol adapters and runtime dependencies.
+**Platform Awareness**: Respects environment variables like `CODELLDB_PACKAGE_PLATFORMS` to conditionally include platform-specific assets.
+
+**Stable Naming**: Generates both timestamped and stable-named artifacts to support both versioned releases and testing workflows.
+
+### Critical Dependencies
+
+- **tsup**: TypeScript bundling engine for creating optimized Node.js bundles
+- **Node.js Built-ins**: File system, path manipulation, and child process execution
+- **External Packages**: Depends on pre-built adapter packages (mock, javascript, rust) being available in the monorepo
+
+This directory serves as the final assembly point where distributed TypeScript packages are consolidated into cohesive, deployable CLI tools ready for end-user consumption.

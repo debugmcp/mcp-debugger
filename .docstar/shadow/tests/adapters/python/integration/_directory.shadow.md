@@ -1,71 +1,60 @@
 # tests\adapters\python\integration/
-@generated: 2026-02-12T21:05:46Z
+@children-hash: ccf134b809608548
+@generated: 2026-02-15T09:01:29Z
 
-## Integration Test Suite for Python Debug Adapter
+## Integration Test Suite for MCP Python Debug Adapter
 
-**Purpose**: Comprehensive integration test module that validates the Python debug adapter's real-world functionality through the MCP (Model Context Protocol). Tests the complete debugging workflow from Python environment discovery to full debug session lifecycle without mocking dependencies.
+**Purpose**: Comprehensive integration testing module for the MCP (Model Context Protocol) Python debug adapter, focusing on real-world Python discovery, environment setup, and full debugging workflow validation. These tests verify the adapter's ability to locate Python installations, establish debug sessions, and execute complete debugging scenarios without mocking.
 
 ### Core Components
 
-**env-utils.ts** - Python environment management utility specifically designed for Windows CI environments:
-- Discovers and validates Python installations with debugpy support
-- Implements prioritized search strategy (GitHub Actions locations, toolcache)
-- Automatically installs debugpy when missing
-- Manages PATH modifications for proper Python accessibility
+#### Python Environment Management (`env-utils.ts`)
+- **ensurePythonOnPath()**: Main utility function that discovers and configures Python installations with debugpy support for Windows CI environments
+- **Python Discovery Strategy**: Implements prioritized search across GitHub Actions variables and toolcache directories
+- **PATH Management**: Intelligently modifies environment PATH to ensure debugpy-enabled Python is available
+- **Automatic Debugpy Installation**: Falls back to pip installation when debugpy is missing
 
-**python-discovery.test.ts** - Integration test for Python executable discovery:
-- Tests real Python discovery logic without mocking on Windows systems
-- Validates PATH-based Python resolution through MCP server communication
-- Handles CI-specific environment challenges (Python off PATH, Microsoft Store redirects)
-- Uses dry-run mode to test executable resolution without launching processes
+#### Python Discovery Validation (`python-discovery.test.ts`)  
+- **Real Implementation Testing**: Validates Python executable discovery without mocking on Windows systems
+- **Environment Filtering**: Tests discovery by removing Python-specific environment overrides
+- **MCP Protocol Integration**: Uses MCP client-server communication to test discovery through the actual adapter
+- **CI Environment Handling**: Special accommodation for Windows CI where Python may not be on PATH
 
-**python_debug_workflow.test.ts** - Full debug session lifecycle integration test:
-- Complete debugging workflow: session creation → breakpoints → execution → inspection → cleanup
-- Tests stack frame analysis, variable examination, and scope inspection
-- Validates both normal and dry-run debugging modes
-- Comprehensive error handling with CI-specific debugging support
+#### Complete Debug Workflow Testing (`python_debug_workflow.test.ts`)
+- **Full Debug Session Lifecycle**: Tests session creation, breakpoint setting, execution control, and variable inspection
+- **Stack Frame Inspection**: Validates debugger state and call stack examination
+- **Variable Examination**: Tests local variable retrieval and value verification
+- **Dry Run Validation**: Ensures dry run mode works correctly for testing scenarios
 
-### Public API & Entry Points
+### Integration Architecture
 
-**Primary Test Suites**:
-- `Python Discovery - Real Implementation Test` - Validates Python executable discovery
-- `Python Debugging Workflow - Integration Test` - Tests complete debug session functionality
+The components work together to provide comprehensive test coverage:
 
-**Key Utilities**:
-- `ensurePythonOnPath(env)` - Main environment setup function for Windows CI
-- `parseToolResult(result)` - MCP response parsing utility
-- `waitForStackFrames()` - Polling mechanism for asynchronous debug operations
-- `persistFailurePayload()` - CI debugging support with failure logging
+1. **Environment Preparation**: `env-utils.ts` ensures Python with debugpy is available on PATH
+2. **Discovery Validation**: `python-discovery.test.ts` verifies the adapter can find Python installations
+3. **Workflow Testing**: `python_debug_workflow.test.ts` exercises the complete debugging functionality
 
-### Internal Organization & Data Flow
+### Key Test Patterns
 
-1. **Environment Setup**: `env-utils.ts` ensures Python with debugpy is available and properly configured on PATH
-2. **Discovery Testing**: `python-discovery.test.ts` validates that the adapter can find Python installations in CI environments
-3. **Workflow Testing**: `python_debug_workflow.test.ts` exercises the full debug protocol through MCP communication
+- **MCP Client-Server Communication**: All tests use MCP protocol via StdioClientTransport to communicate with the debug adapter server
+- **Real-World Testing**: Explicitly avoids mocking to test actual Python discovery and debugging
+- **CI-Aware Testing**: Includes Windows CI-specific handling and comprehensive failure logging
+- **Polling-Based State Verification**: Uses retry mechanisms for asynchronous debug state changes
+- **Error Recovery**: Comprehensive error handling with payload persistence for CI debugging
 
-**Communication Pattern**:
-- Tests communicate with debug server via MCP protocol using StdioClientTransport
-- Server spawned as child process at `../../../../dist/index.js`
-- All interactions use MCP tool calling pattern with JSON response parsing
+### Public Test Interface
 
-### Important Patterns & Conventions
+- **Platform-Specific Execution**: Tests are Windows-focused due to Python discovery complexity on that platform
+- **Python Runtime Dependency**: Tests tagged with `@requires-python` for conditional execution
+- **Extended Timeouts**: Configured for real process spawning and network communication (30-60s)
+- **Failure Diagnostics**: Automatic failure payload logging to `logs/tests/adapters/failures/`
 
-**Windows-Centric Design**: Primary focus on Windows environments where Python discovery is most complex (toolcache locations, PATH issues, Microsoft Store redirects)
+### Dependencies and Environment
 
-**No Mocking Strategy**: Deliberately tests real implementations to validate actual CI/production behavior
+- **MCP SDK**: Client libraries for protocol communication
+- **Vitest**: Test framework with lifecycle management
+- **VS Code Debug Protocol**: Types and interfaces for debugging structures
+- **Python Runtime**: Requires actual Python installation with debugpy support
+- **Node.js Process Management**: Child process spawning and environment manipulation
 
-**Comprehensive Error Logging**: Extensive debugging support with failure payload persistence for CI environments (`logs/tests/adapters/failures/`)
-
-**Timeout Management**: Carefully configured timeouts (5s for checks, 120s for installations, 30s for connections)
-
-**MCP Protocol Integration**: Uses Model Context Protocol for debug adapter communication rather than direct Debug Adapter Protocol
-
-### Dependencies & Requirements
-
-- **Runtime**: Requires actual Python installation (tagged with `@requires-python`)
-- **Test Framework**: Vitest with extended timeouts for integration scenarios  
-- **MCP SDK**: Client and transport layers for server communication
-- **Target Script**: `tests/fixtures/python/debug_test_simple.py` for debugging validation
-- **VS Code Debug Protocol**: Types and interfaces for debug session management
-
-This module serves as the critical validation layer ensuring the Python debug adapter works reliably across different Python installations and CI environments, particularly focusing on the challenging Windows deployment scenarios.
+This integration test suite ensures the MCP Python debug adapter works end-to-end in real environments, particularly focusing on the challenging aspects of Python discovery and debugging workflow reliability across different system configurations.

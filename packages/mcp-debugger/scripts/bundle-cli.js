@@ -44,6 +44,37 @@ async function bundleProxy() {
   console.log('Proxy bundle refreshed at packages/mcp-debugger/dist/proxy/proxy-bundle.cjs');
 }
 
+async function bundleMockAdapterProcess() {
+  const mockProcessSrc = path.join(repoRoot, 'packages/adapter-mock/dist/mock-adapter-process.js');
+  if (!fs.existsSync(mockProcessSrc)) {
+    console.warn('Warning: mock-adapter-process.js not found; mock debugging in npx bundle may fail.');
+    console.warn('Ensure @debugmcp/adapter-mock is built first.');
+    return;
+  }
+
+  console.log('Bundling mock-adapter-process with tsup...');
+
+  await build({
+    entry: {
+      'mock-adapter-process': mockProcessSrc
+    },
+    format: ['cjs'],
+    platform: 'node',
+    target: 'node18',
+    splitting: false,
+    sourcemap: false,
+    clean: false,
+    outDir: 'dist',
+    shims: true,
+    noExternal: [/./],
+    cwd: packageRoot,
+    skipNodeModulesBundle: false,
+    silent: true
+  });
+
+  console.log('Mock adapter process bundled at packages/mcp-debugger/dist/mock-adapter-process.cjs');
+}
+
 async function bundleCLI() {
   console.log('Bundling MCP debugger CLI with tsup...');
   console.log(`Working directory: ${process.cwd()}`);
@@ -119,6 +150,9 @@ async function bundleCLI() {
 
   console.log('\nBundling proxy from fresh dist...');
   await bundleProxy();
+
+  console.log('\nBundling mock adapter process...');
+  await bundleMockAdapterProcess();
 
   const jsDebugSrc = path.join(repoRoot, 'packages/adapter-javascript/vendor/js-debug');
   if (fs.existsSync(jsDebugSrc)) {
@@ -197,6 +231,18 @@ async function bundleCLI() {
       stdio: 'inherit'
     });
     console.log('npm pack artifact refreshed in packages/mcp-debugger/package/.');
+
+    // Copy tarball to stable name for local npx testing
+    const tgzFiles = fs.readdirSync(path.join(packageRoot, 'package'))
+      .filter(f => f.endsWith('.tgz'));
+    if (tgzFiles.length > 0) {
+      const latestTgz = tgzFiles.sort().pop();
+      fs.copyFileSync(
+        path.join(packageRoot, 'package', latestTgz),
+        path.join(packageRoot, 'package', 'mcp-debugger-latest.tgz')
+      );
+      console.log(`Copied ${latestTgz} → mcp-debugger-latest.tgz`);
+    }
   } finally {
     execSync(`node "${preparePackScript}" restore`, {
       cwd: repoRoot,

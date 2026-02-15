@@ -1,70 +1,76 @@
 # src\adapters/
-@generated: 2026-02-12T21:05:46Z
+@children-hash: 3328dc163a775ec4
+@generated: 2026-02-15T09:01:26Z
 
 ## Purpose
-The adapters module provides the core infrastructure for dynamic debugger adapter management in debugMCP. It handles the discovery, loading, registration, and lifecycle management of debug adapters for different programming languages, enabling flexible runtime configuration and automatic resource management.
+The `src/adapters` directory provides the core adapter management infrastructure for debugMCP, enabling dynamic discovery, loading, and lifecycle management of debugger adapters for different programming languages. This module serves as the foundation for pluggable debugger support, allowing the system to work with various language runtimes through standardized adapter interfaces.
 
-## Core Components
+## Key Components
 
-**AdapterLoader** (`adapter-loader.ts`): Dynamic discovery and loading system that resolves adapter packages using multiple fallback strategies. Implements a robust loading chain from NPM packages to monorepo paths with createRequire fallback for compatibility.
+**AdapterLoader (`adapter-loader.ts`)**: Dynamic adapter discovery and loading system that:
+- Implements multi-tier resolution strategy for finding adapter packages
+- Manages adapter package naming conventions (`@debugmcp/adapter-{language}`)
+- Provides robust fallback mechanisms (direct import → node_modules → monorepo paths → createRequire)
+- Handles factory class instantiation with caching and error recovery
+- Supports both installed packages and development environments
 
-**AdapterRegistry** (`adapter-registry.ts`): Central management hub that maintains active adapter instances and their factories. Provides lifecycle control including creation, tracking, auto-disposal, and resource limits with event-driven notifications.
+**AdapterRegistry (`adapter-registry.ts`)**: Central registry and lifecycle manager that:
+- Maintains factory registration and active adapter instance tracking
+- Implements singleton pattern with configurable behavior
+- Provides auto-dispose functionality with timeout-based cleanup
+- Enforces instance limits per language to prevent resource exhaustion
+- Integrates with AdapterLoader for on-demand adapter discovery
+- Emits lifecycle events for monitoring and integration
+
+## Architecture & Data Flow
+
+The components work together in a layered architecture:
+
+1. **Discovery Layer**: AdapterLoader discovers and loads adapter factories using progressive resolution
+2. **Registry Layer**: AdapterRegistry manages factory registration and creates adapter instances
+3. **Lifecycle Layer**: Registry tracks active adapters, handles auto-disposal, and manages resource cleanup
+
+**Typical Flow**:
+1. Client requests adapter for a language via Registry.create()
+2. Registry checks for registered factory, falls back to AdapterLoader if dynamic loading enabled
+3. AdapterLoader attempts package resolution and factory instantiation with caching
+4. Registry creates adapter instance, sets up auto-dispose monitoring, and tracks lifecycle
+5. Registry handles cleanup through dispose timers or explicit disposal calls
 
 ## Public API Surface
 
 **Primary Entry Points**:
-- `AdapterRegistry.getAdapterRegistry()`: Singleton access to the registry instance
-- `registry.create(language, config)`: Main adapter instantiation method with dynamic loading support
-- `registry.register(language, factory)`: Manual factory registration for static adapters
-- `registry.listAvailableAdapters()`: Discovery of all available adapters with installation status
+- `getAdapterRegistry()`: Singleton registry access
+- `AdapterRegistry.create(language, config)`: Main adapter creation method
+- `AdapterRegistry.register(language, factory)`: Manual factory registration
+- `AdapterRegistry.listAvailableAdapters()`: Discovery of installed/available adapters
 
-**Discovery & Metadata APIs**:
-- `registry.getSupportedLanguages()`: Currently registered language support
-- `registry.getAdapterInfo(language)`: Factory metadata and active instance counts
-- `listLanguages()`: Combined view of registered and dynamically available adapters
+**Discovery & Metadata**:
+- `getSupportedLanguages()`: Currently registered languages
+- `getAdapterInfo(language)`: Factory metadata and instance counts
+- `isAdapterAvailable(language)`: Non-throwing availability check
 
 **Lifecycle Management**:
-- `registry.disposeAll()`: Cleanup all active adapters and resources
-- `registry.unregister(language)`: Remove factory and dispose associated instances
+- `disposeAll()`: Cleanup all adapters and resources
+- Auto-dispose functionality with configurable timeouts
+- Event-driven monitoring ('factoryRegistered', 'adapterCreated', etc.)
 
-## Internal Organization & Data Flow
+## Internal Organization
 
-**Loading Chain** (AdapterLoader):
-1. Cache lookup for previously loaded factories
-2. Package name resolution using `@debugmcp/adapter-{language}` convention
-3. Progressive import: direct package → node_modules path → monorepo path → createRequire
-4. Factory class instantiation and validation
-5. Cache storage for future requests
+**Configuration Management**: Centralized defaults with environment-based overrides for dynamic loading, auto-dispose behavior, and instance limits.
 
-**Registry Management Flow**:
-1. Factory registration (manual or dynamic via loader)
-2. Adapter creation with dependency injection and instance limits
-3. Active instance tracking with state monitoring
-4. Auto-dispose setup on disconnect/error states
-5. Resource cleanup and event emission
+**Caching Strategy**: Multi-level caching including factory cache in AdapterLoader and active adapter tracking in AdapterRegistry to optimize performance and resource usage.
 
-**Configuration Integration**:
-- Dynamic loading enabled via configuration or `MCP_CONTAINER` environment variable
-- Configurable auto-dispose timeouts (default 5 minutes)
-- Per-language instance limits (default 10)
-- Validation and override controls for factory registration
+**Error Handling**: Comprehensive error categorization distinguishing installation issues from configuration problems, with user-friendly guidance and graceful degradation.
 
-## Key Patterns & Conventions
+**Naming Conventions**: Standardized package naming (`@debugmcp/adapter-{language}`) and factory class patterns (`{Language}AdapterFactory`) enabling predictable discovery.
 
-**Adapter Discovery**: Uses consistent naming patterns (`@debugmcp/adapter-{language}` packages, `{Language}AdapterFactory` classes) enabling predictable dynamic loading.
+## Important Patterns
 
-**Dependency Injection**: Registry creates production dependencies (logger, fileSystem, environment) for each adapter instance, promoting testability and modularity.
+**Plugin Architecture**: Supports both compile-time registration and runtime discovery of adapters, enabling extensibility without core system modification.
 
-**Event-Driven Architecture**: Registry emits lifecycle events (factoryRegistered, adapterCreated, etc.) enabling loose coupling and monitoring integration.
+**Resource Management**: Implements automatic cleanup patterns with dispose timers and instance tracking to prevent resource leaks in long-running services.
 
-**Resource Management**: Automatic disposal timers and instance limits prevent resource leaks, with graceful error handling during cleanup operations.
+**Environment Adaptation**: Handles various deployment scenarios including development monorepos, npm installations, and bundled distributions through flexible module loading strategies.
 
-**Singleton Pattern**: Registry uses singleton access pattern while supporting reset functionality for testing environments.
-
-## Integration Points
-
-**Shared Interfaces**: Leverages `@debugmcp/shared` for core adapter contracts (`IAdapterFactory`, `IAdapterRegistry`) ensuring consistent integration across the system.
-
-**Container Dependencies**: Integrates with dependency injection container to provide consistent service instances (logging, file system, environment) to adapters.
-
-**Error Handling**: Provides detailed error context distinguishing installation issues (MODULE_NOT_FOUND) from configuration problems, with specific user guidance.
+**Event-Driven Design**: Registry emits lifecycle events enabling integration with monitoring, logging, and management systems without tight coupling.

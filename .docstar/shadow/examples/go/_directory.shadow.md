@@ -1,57 +1,47 @@
 # examples\go/
-@generated: 2026-02-12T21:05:56Z
+@children-hash: 422b5c1e9c4e0cd8
+@generated: 2026-02-15T09:01:35Z
 
-## Overall Purpose
-The `examples/go` directory serves as a comprehensive educational collection demonstrating fundamental Go programming concepts, language features, and best practices. It functions as a hands-on learning resource progressing from basic syntax to advanced concurrency patterns, making it ideal for developers learning Go or exploring specific programming paradigms.
+## Purpose
+Comprehensive collection of educational Go programming examples designed to demonstrate fundamental language features, algorithmic concepts, and concurrency patterns. This directory serves as a learning resource and reference implementation for Go developers, progressing from basic syntax to advanced concurrent programming techniques.
 
-## Key Components & Organization
+## Key Components
 
-### Basic Language Fundamentals
-- **hello_world.go**: Simple demonstration of Go syntax, variables, functions, and console I/O
-- **hello_world/**: Extended Hello World example showcasing comprehensive Go language features including data structures, control flow, and formatted output
+### Basic Language Demonstrations
+- **hello_world.go**: Standalone Hello World example showcasing basic function definition, string formatting, and console output patterns
+- **hello_world/**: Extended educational example with comprehensive Go language feature demonstration, specifically designed for MCP Debugger tool integration
 
-### Algorithmic Programming
-- **fibonacci.go**: Basic recursive Fibonacci implementation for educational purposes
-- **fibonacci/**: Advanced algorithmic comparison study demonstrating optimization techniques from naive recursion (O(2^n)) to dynamic programming (O(n))
+### Algorithmic Examples  
+- **fibonacci.go**: Simple recursive Fibonacci implementation demonstrating basic algorithmic concepts with console output
+- **fibonacci/**: Advanced algorithmic complexity analysis comparing three Fibonacci implementations (recursive O(2^n), iterative O(n), and memoized O(n)) with performance benchmarking
 
 ### Concurrency Patterns
-- **goroutines/**: Comprehensive goroutine tutorial progressing through three complexity levels: basic synchronization, channel communication, and worker pools
+- **goroutines/**: Comprehensive concurrent programming tutorial demonstrating goroutine creation, channel communication, worker pools, and synchronization techniques using `sync.WaitGroup`
 
 ## Public API Surface
+Each component provides executable entry points through standard Go `main()` functions:
+- **Single-file examples**: Direct execution via `go run filename.go`
+- **Directory-based examples**: Execution via `go run main.go` from respective subdirectories
+- **Educational interfaces**: Programs designed for observation and learning rather than library integration
 
-### Main Entry Points
-Each component provides executable programs via standard Go `main()` functions:
-- **Hello World Programs**: Direct execution demonstrating basic Go syntax and language features
-- **Fibonacci Calculators**: Algorithm comparison with built-in benchmarking and performance analysis
-- **Concurrency Demonstrations**: Progressive goroutine pattern tutorials with real-time output
+## Internal Organization and Data Flow
+The examples follow a pedagogical progression from foundational to advanced concepts:
 
-### Educational Progression
-The directory follows a deliberate learning path:
-1. **Syntax & Basics**: Variable declarations, functions, I/O operations
-2. **Algorithm Implementation**: Recursive vs. iterative approaches with performance considerations
-3. **Concurrency Mastery**: From simple goroutines to production-ready worker pools
+1. **Language Basics**: Hello World examples establish fundamental Go syntax, function definition, and I/O operations
+2. **Algorithmic Thinking**: Fibonacci implementations demonstrate performance analysis and optimization techniques  
+3. **Concurrent Programming**: Goroutine examples showcase parallel processing and inter-process communication
 
-## Internal Data Flow & Patterns
+Data flows are primarily educational, moving from input demonstration through processing examples to formatted console output for learning observation.
 
-### Common Architectural Patterns
-- **Educational Structure**: Each example is self-contained with clear, descriptive function names
-- **Progressive Complexity**: Components build upon each other conceptually
-- **Practical Demonstration**: Real-world applicable patterns with performance measurements
-- **Best Practices**: Proper error handling, resource management, and Go idioms
+## Important Patterns and Conventions
+- **Educational Structure**: All examples prioritize clarity and learning over production efficiency
+- **Progressive Complexity**: Components build from simple concepts to sophisticated implementations
+- **Standard Library Focus**: Minimal external dependencies, relying primarily on Go's standard library (`fmt`, `sync`, `time`)
+- **Self-Contained Design**: Each example can be studied and executed independently
+- **Performance Awareness**: Advanced examples include benchmarking and complexity analysis for educational comparison
+- **Concurrency Safety**: Goroutine examples demonstrate proper synchronization and resource management patterns
 
-### Integration Points
-While each component is independent, they collectively demonstrate:
-- Go standard library usage (`fmt`, `time`, `sync`)
-- Memory management and performance optimization
-- Concurrent programming with channels and synchronization primitives
-- Clean code organization and function composition
-
-## Key Learning Outcomes
-This module enables developers to understand:
-- Go language fundamentals and syntax patterns
-- Algorithm complexity analysis and optimization techniques
-- Concurrent programming paradigms and goroutine management
-- Performance benchmarking and measurement methodologies
-- Production-ready Go code organization and best practices
-
-The directory serves as both a tutorial sequence for Go beginners and a reference implementation for experienced developers exploring specific patterns like algorithmic optimization or concurrency design.
+## Dependencies
+- **Core**: `fmt` package for formatted I/O across all examples
+- **Concurrency**: `sync` package for goroutine coordination and `time` package for work simulation
+- **Target Audience**: Designed for Go language learners, algorithm students, and developers exploring concurrent programming patterns

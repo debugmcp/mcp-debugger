@@ -1,40 +1,49 @@
 # scripts\experiments/
-@generated: 2026-02-12T21:05:37Z
+@children-hash: 531505392cda25a6
+@generated: 2026-02-15T09:01:20Z
 
 ## Purpose
-The `scripts/experiments` directory contains experimental testing utilities for debugging and development workflows. This module serves as a controlled environment for validating debugger behavior, protocol compliance, and attachment scenarios.
+Experimental testing utilities for debugging and development workflows. This directory contains specialized test targets and probes designed to validate debugger behavior and protocol interactions.
 
 ## Key Components
-**Test Targets:**
-- `probe-target.js` - Primary debugging test harness providing reliable breakpoint targets and process lifecycle management for DAP (Debug Adapter Protocol) validation
+
+**Debug Target Scripts:**
+- `probe-target.js` - Primary test harness for DAP (Debug Adapter Protocol) validation, providing reliable breakpoint targets and process lifecycle management for debugger attachment scenarios
 
 ## Public API Surface
+
 **Entry Points:**
-- `probe-target.js` - Executable test script designed to run with `--line 13` parameter for targeted debugging sessions
+- `probe-target.js` - Command-line executable test target, typically invoked with `--line 13` parameter for specific breakpoint testing
 
 **Key Testing Features:**
-- Forced breakpoint via `debugger` statement
-- Predictable breakpoint target (`probeVar` on line 13)
-- Process keep-alive functionality for debugger attachment
-- Simple arithmetic function for step-through testing
+- Forced breakpoint triggers via `debugger` statements
+- Predictable execution timing (500ms delays) for debugger attachment windows  
+- Process keep-alive mechanisms for adoption scenarios
+- Simple arithmetic functions for step-through debugging validation
 
-## Internal Organization & Data Flow
-The module follows a minimal test harness pattern:
-1. **Initialization** - Sets up debugging hooks and logging markers
-2. **Delayed Execution** - 500ms timeout window allows debugger attachment
-3. **Keep-Alive Loop** - Infinite interval prevents process termination for adoption scenarios
+## Internal Organization
+
+**Execution Flow:**
+1. Immediate debugging hooks and logging markers
+2. Timed execution delay allowing debugger attachment
+3. Simple computation functions for testing step-through behavior
+4. Infinite process preservation for external tool interaction
+
+**Data Flow:**
+- Console output provides execution state visibility
+- Breakpoint variables (`probeVar`) serve as inspection targets
+- Function calls generate stack frames for debugging validation
 
 ## Important Patterns & Conventions
-- **Debugger-First Design** - All components optimized for external debugger tool compatibility
-- **Predictable Timing** - Fixed delays ensure consistent test conditions
-- **Process Lifecycle Management** - Explicit control over process termination for reliable debugging sessions
-- **Minimal Dependencies** - Pure Node.js runtime requirements for maximum compatibility
 
-## Usage Context
-This experimental module is primarily used for:
-- DAP behavior validation and testing
-- Debugger attachment scenario verification  
-- Development tool integration testing
-- Protocol compliance validation
+**Debugger-First Design:**
+- Scripts prioritize debugger stability and predictable behavior over functionality
+- Explicit process lifecycle management prevents premature termination
+- Minimal dependencies ensure consistent runtime behavior across environments
 
-The directory represents a controlled testing environment separate from production code, allowing safe experimentation with debugging workflows and tooling.
+**Test Harness Architecture:**
+- Simple, focused test targets that isolate specific debugging scenarios
+- Timing-aware execution that accommodates external tool attachment
+- Self-contained validation points that don't require complex setup
+
+This module serves as a controlled testing environment for debugging tool development and validation, providing reliable targets for protocol testing and debugger behavior verification.

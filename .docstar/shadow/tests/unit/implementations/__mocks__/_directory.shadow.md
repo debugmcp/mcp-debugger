@@ -1,39 +1,44 @@
 # tests\unit\implementations\__mocks__/
-@generated: 2026-02-12T21:05:39Z
+@children-hash: 0cffb974d431f77f
+@generated: 2026-02-15T09:01:21Z
 
-## Overall Purpose
-Test mock directory providing manual mock implementations for external Node.js modules used in unit testing. Contains Jest and Vitest-compatible mocks that replace real module functionality with controllable test doubles, enabling isolated unit testing without external dependencies or side effects.
+## Purpose
 
-## Key Components
-- **`child_process.js`**: Jest manual mock for Node.js child process operations (`spawn`, `exec`)
-- **`fs-extra.js`**: Vitest manual mock for filesystem operations with comprehensive API coverage
+This directory contains Jest/Vitest manual mocks for Node.js built-in modules and external libraries, providing controlled replacements during unit testing to isolate tests from system dependencies and side effects.
 
-## Mock Architecture Pattern
-Both mocks follow the `__mocks__` directory convention used by Jest and Vitest testing frameworks:
-- **Automatic Resolution**: Test frameworks automatically substitute these mocks when the corresponding modules are imported in test files
-- **Isolation**: Prevents actual system calls (process spawning, filesystem operations) during testing
-- **Controllability**: Provides mock functions that can be programmatically controlled and asserted against
+## Architecture
 
-## Public API Surface
-The mocks expose the same interfaces as their target modules:
+Following Jest/Vitest `__mocks__` convention, this directory enables automatic mock resolution when the corresponding modules are imported in test files. The framework automatically substitutes these mocks for the real implementations during test execution.
 
-**Child Process Mock**:
-- `spawn`: Mock replacement for spawning child processes
-- `exec`: Mock replacement for executing shell commands
+### Mock Components
 
-**Filesystem Mock**:
-- **File Operations**: `readFile`, `writeFile`, `outputFile`
-- **Directory Operations**: `ensureDir`, `mkdir`, `rmdir`, `ensureDirSync`
-- **Path Utilities**: `access`, `pathExists`, `existsSync`, `stat`
-- **File Management**: `remove`, `unlink`, `copy`, `move`
-- **Stream Operations**: `createReadStream`, `createWriteStream`
-- **JSON Operations**: `outputJson`, `readJson`
-- **Directory Listing**: `readdir`
+- **child_process.js**: Manual mock for Node.js `child_process` module
+  - Replaces `spawn` and `exec` functions with Jest mock functions
+  - Prevents actual subprocess execution during testing
 
-## Internal Organization
-- **Framework Compatibility**: Mixed Jest (`vi.fn()`) and Vitest (`jest.fn()`) mock implementations
-- **Import Patterns**: `fs-extra` mock supports both named and default import styles through dual export pattern
-- **Mock Function Factory**: Utilizes testing framework mock function factories for consistent test behavior
+- **fs-extra.js**: Comprehensive mock for the `fs-extra` filesystem library
+  - Provides Vitest mock functions for all major filesystem operations
+  - Covers file I/O, directory management, path utilities, and JSON operations
+  - Supports both named and default import patterns
 
-## Testing Integration
-Integrates seamlessly with unit test suites by providing drop-in replacements for external dependencies. Tests can focus on application logic without managing actual system resources, while maintaining the ability to verify interaction patterns with mocked modules.
+## Key Features
+
+**Automatic Mock Resolution**: Mocks are automatically loaded when their corresponding modules are imported in test files, requiring no explicit mock setup in individual tests.
+
+**Comprehensive Coverage**: 
+- Process execution mocking (child_process)
+- Complete filesystem operation mocking (fs-extra)
+- Dual import pattern support for maximum compatibility
+
+**Testing Framework Agnostic**: Supports both Jest (`jest.fn()`) and Vitest (`vi.fn()`) mock function factories.
+
+## Usage Pattern
+
+Tests importing `child_process` or `fs-extra` will automatically receive these mock implementations instead of the real modules, enabling:
+- Predictable test behavior without external system dependencies
+- Prevention of actual file system modifications or process spawning
+- Controlled testing of error conditions and edge cases
+
+## Integration
+
+This mock directory integrates with the broader test suite by providing foundational infrastructure for unit tests that need to interact with system resources without causing side effects or depending on external system state.

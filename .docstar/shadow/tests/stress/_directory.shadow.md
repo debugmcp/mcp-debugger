@@ -1,62 +1,70 @@
 # tests\stress/
-@generated: 2026-02-12T21:05:44Z
+@children-hash: 38887d677bf7e56b
+@generated: 2026-02-15T09:01:23Z
 
-## Stress Testing Suite
+## Stress Testing Suite for MCP Transport Layer
 
-The `tests/stress` directory contains comprehensive stress testing infrastructure for validating MCP (Model Context Protocol) transport layer reliability and debug functionality under extreme conditions. These tests are conditionally executed based on the `RUN_STRESS_TESTS` environment variable.
+This directory contains comprehensive stress testing modules that validate the reliability, performance, and parity of MCP (Model Context Protocol) transport implementations under extreme conditions.
 
 ### Overall Purpose
 
-This module serves as a quality assurance layer for MCP transport implementations, focusing on:
-- **Transport Reliability**: Validating SSE and STDIO transports under high load
-- **Cross-Transport Parity**: Ensuring identical behavior across different transport mechanisms
-- **Stability Testing**: Verifying system resilience during extended operations and failure scenarios
-- **Performance Validation**: Monitoring memory usage, connection success rates, and timing metrics
+The stress testing suite serves three critical functions:
+1. **Transport Parity Validation**: Ensures identical behavior across different transport mechanisms (STDIO, SSE, Docker)
+2. **Reliability Under Load**: Tests transport resilience with rapid connections, burst traffic, and sustained operations
+3. **Failure Recovery**: Validates graceful handling of server failures and connection recovery scenarios
 
-### Key Components
+### Core Components
 
-**Cross-Transport Validation (`cross-transport-parity.test.ts`)**:
-- `TransportTester` class orchestrates debug operations across STDIO and SSE transports
-- Validates identical results from complex debug sequences (session creation, breakpoints, stack traces, variables)
-- Uses hardcoded test script (`examples/javascript/simple_test.js`) for consistent validation scenarios
+**Cross-Transport Parity Testing (`cross-transport-parity.test.ts`)**:
+- `TransportTester` class orchestrates identical debug operations across STDIO and SSE transports
+- Executes 6-step debug sequence: session creation, breakpoint setting, script execution, stack trace retrieval, variable inspection, and cleanup
+- Validates operational parity with tolerance for minor transport-specific variations (±1 stack frame difference)
 
 **SSE Stress Testing (`sse-stress.test.ts`)**:
 - `SSEStressTester` class manages server lifecycle and client connection pools
-- Executes four distinct stress scenarios: rapid connections, burst load, long-running stability, and server recovery
-- Tracks comprehensive metrics including success rates, memory usage, and error patterns
+- Implements four stress scenarios: rapid connect/disconnect cycles, burst connections, long-running stability, and server recovery
+- Collects comprehensive metrics on success rates, timing, memory usage, and error patterns
 
-### Test Architecture
+### Key Entry Points
 
-Both modules share common patterns:
-- **Server Process Management**: Spawning and lifecycle control of MCP servers
-- **Client Connection Orchestration**: Managing multiple concurrent client connections with proper cleanup
-- **Metrics Collection**: Tracking performance indicators and success/failure rates
-- **Health Checking**: Polling mechanisms for server readiness validation
+**Conditional Execution**: Both modules use `RUN_STRESS_TESTS` environment variable to enable stress testing, preventing resource-intensive tests during regular development.
 
-### Entry Points
+**Test Scenarios**:
+- Cross-transport debug parity validation with hardcoded breakpoint testing
+- Rapid connection cycling (20 cycles × 3 connections)
+- Burst load testing (10 simultaneous connections)
+- Long-running stability (15-second sustained operations)
+- Server failure and recovery validation
 
-1. **`describeStress`**: Conditional test wrapper that respects `RUN_STRESS_TESTS` environment variable
-2. **Transport Test Suites**: Main test functions that execute full stress scenarios
-3. **Configuration Constants**: `TEST_TIMEOUT` (60-120s), port ranges (4000-4999), success rate thresholds
+### Internal Organization
 
-### Data Flow
+**Shared Patterns**:
+- Promise-based async orchestration with comprehensive error handling
+- Process lifecycle management for server spawning and cleanup
+- Metrics collection and validation with configurable success thresholds
+- Port randomization for test isolation (4000-4999 range)
 
-1. **Setup Phase**: Environment validation, server spawning, port allocation
-2. **Execution Phase**: Concurrent client operations with metric collection
-3. **Validation Phase**: Success rate analysis, memory growth checks, result comparison
-4. **Cleanup Phase**: Graceful resource disposal with fallback termination
+**Data Flow**:
+1. Environment check determines test execution
+2. Server processes spawned with health checks
+3. Client connections established with metric tracking
+4. Debug operations or stress scenarios executed
+5. Results validated against success criteria
+6. Cleanup and resource deallocation
 
-### Integration Points
+### Transport Integration
 
-- **MCP SDK**: Leverages `StdioClientTransport` and `SSEClientTransport` for protocol implementation
-- **Debug Tools**: Integrates with MCP debug capabilities for breakpoint and variable inspection
-- **Test Framework**: Built on Vitest with custom timeout configurations and conditional execution
-- **Process Management**: Uses Node.js `child_process` for server orchestration and `net` for port management
+The suite validates the complete MCP transport stack:
+- **STDIO Transport**: Process-based communication via stdin/stdout
+- **SSE Transport**: HTTP-based Server-Sent Events with polling health checks
+- **Future Docker Support**: Framework ready for container-based transport testing
 
-### Quality Assurance Patterns
+### Performance Characteristics
 
-The module enforces strict reliability standards:
-- 80-90% minimum success rates for connection attempts
-- <50MB memory growth tolerance for long-running operations
-- Cross-transport result parity with ±1 tolerance for minor variations
-- Comprehensive error capturing and reporting for failure analysis
+- 120-second timeout for complex stress operations
+- 60-second timeout for cross-transport parity tests
+- Memory growth thresholds (<50MB for sustained operations)
+- Success rate requirements (80-90% under stress conditions)
+- 2-second delays for async operation stabilization
+
+This testing suite ensures MCP transport implementations maintain consistency, performance, and reliability across different deployment scenarios and operational conditions.

@@ -1,38 +1,47 @@
 # tests\adapters\rust/
-@generated: 2026-02-12T21:05:50Z
+@children-hash: 2d4d9e8a4e2ff8cf
+@generated: 2026-02-15T09:01:32Z
 
-## Purpose
-Integration testing suite for the Rust debugging adapter that validates core adapter functionality through comprehensive end-to-end testing without external process dependencies. This module ensures the Rust adapter correctly handles session management, command building, and launch configuration transformation across different platforms.
+## Overall Purpose and Responsibility
+
+This directory contains integration tests for the Rust debug adapter implementation, focusing on validating the adapter's core functionality through isolated smoke testing. The tests ensure that the Rust adapter can properly configure debug sessions, build correct commands for the CodeLLDB debugger, and transform launch configurations without requiring actual debug process execution.
 
 ## Key Components and Architecture
 
-**Testing Infrastructure**:
-- **Mock Dependency Framework**: Complete stubbing system for external dependencies (FileSystem, Logger, ProcessLauncher) enabling isolated adapter testing
-- **Environment Management System**: Controlled manipulation and cleanup of environment variables (CODELLDB_PATH, RUST_BACKTRACE) between test runs
-- **Cross-Platform Test Support**: Platform-aware testing infrastructure handling Windows vs Unix binary differences and environment variable behaviors
+The test suite is organized around a dependency injection pattern that enables comprehensive testing while maintaining isolation:
 
-**Core Test Coverage**:
-- **Adapter Factory Integration**: End-to-end validation of RustAdapterFactory creation and configuration processes
-- **Command Generation Testing**: Verification of CodeLLDB debugger command construction with proper executable paths, port configurations, and platform-specific flags
-- **Configuration Transformation Validation**: Testing of launch configuration normalization, path resolution, and output format standardization
+**Integration Test Framework**: Built on mock dependency injection to test the adapter's logic paths without external side effects. All filesystem operations, logging, and process launching are stubbed out while preserving the adapter's core behavior.
 
-## Testing Strategy
+**Session Management Testing**: Validates the adapter's ability to configure debug sessions with proper port assignments, host configuration, and session lifecycle management through the RustAdapterFactory.
 
-The directory implements a **smoke testing approach** that validates critical adapter functionality without spawning actual debugging processes:
+**Command Construction Validation**: Tests the adapter's ability to build correct CodeLLDB commands, ensuring proper executable paths, port arguments, and platform-specific flags are included in the generated debug commands.
 
-1. **Dependency Injection Pattern**: Mock implementations replace real file system operations and process launches while maintaining realistic test scenarios
-2. **Session Lifecycle Validation**: Tests cover adapter initialization, configuration processing, and command generation phases
-3. **Platform Compatibility Testing**: Ensures consistent adapter behavior across Windows and Unix environments with appropriate platform-specific assertions
+**Configuration Transformation Pipeline**: Verifies the adapter's launch configuration processing, including path resolution, platform-specific binary naming conventions, and environment variable handling.
 
-## Public API and Entry Points
+## Public API Surface
 
-- **Integration Test Suite**: Primary validation of RustAdapterFactory and core adapter functionality
-- **Mock Factory Functions**: Test utilities for creating controlled adapter dependencies
-- **Environment Setup/Teardown**: Test lifecycle management for consistent testing conditions
-- **Cross-Platform Test Scenarios**: Platform-specific test cases validating adapter behavior differences
+The primary entry point is the **RustAdapterFactory integration testing**, which exercises:
+- `createAdapter()` method with injected mock dependencies
+- Command building interfaces for CodeLLDB integration
+- Launch configuration transformation and normalization methods
+- Environment setup and session configuration APIs
+- Platform-aware debugging parameter handling
 
-## Internal Organization
+## Internal Organization and Data Flow
 
-The integration tests focus on **adapter contract validation** rather than external tool integration, using Vitest framework with proper test isolation through beforeEach/afterEach hooks. Tests validate command structure correctness (executable paths, arguments, flags) and environment configuration (RUST_BACKTRACE, LLDB settings) while maintaining clear separation between adapter logic testing and actual debugging process management.
+The test execution follows a structured pattern:
 
-This testing approach ensures the Rust adapter meets its contract obligations for debugging session setup while remaining independent of external CodeLLDB processes and file system state.
+1. **Setup Phase**: Mock dependencies are instantiated, test environment variables are configured, and platform-specific constants are established
+2. **Adapter Instantiation**: RustAdapterFactory creates the adapter with injected mock dependencies to isolate external interactions
+3. **Functionality Validation**: Core adapter capabilities are tested including command generation, configuration processing, and environment setup
+4. **Cleanup and Isolation**: Environment state is restored to ensure test independence and prevent cross-test contamination
+
+## Important Patterns and Conventions
+
+- **Dependency Injection Testing**: All external dependencies (filesystem, logger, process launcher) are mocked to enable pure integration testing without side effects
+- **Platform-Aware Testing**: Tests handle cross-platform differences including Windows binary extensions and Unix-specific LLDB configuration requirements
+- **Environment Isolation**: Each test manages its own environment variables with proper setup and teardown to maintain test independence
+- **Smoke Testing Strategy**: Focus on critical path validation and contract verification rather than exhaustive edge case coverage
+- **No-Process Validation**: Tests verify adapter logic and command generation without actually launching debug processes, enabling fast and reliable test execution
+
+This test directory serves as a critical validation layer ensuring the Rust debug adapter maintains proper integration with CodeLLDB while handling platform-specific requirements and configuration transformations correctly.

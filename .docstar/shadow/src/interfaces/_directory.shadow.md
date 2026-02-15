@@ -1,61 +1,76 @@
 # src\interfaces/
-@generated: 2026-02-12T21:05:42Z
+@children-hash: 1227cf10bd95fed5
+@generated: 2026-02-15T09:01:27Z
 
-## Purpose
-The `interfaces` directory defines the core contracts and abstractions for the system's process management, external dependency injection, and command resolution capabilities. This module serves as the foundational layer for dependency injection patterns, enabling testability, modularity, and clean architecture separation throughout the application.
+## Overall Purpose and Responsibility
 
-## Key Components and Architecture
+The `interfaces` directory defines the core abstraction layer for the system, providing TypeScript contracts for dependency injection, testability, and system integration. It establishes clean boundaries between business logic and external dependencies while enabling easy mocking and testing of system operations.
 
-### Core Abstraction Layers
-The directory contains three primary interface categories:
+## Key Components and Relationships
 
-**System Abstractions** (`external-dependencies.ts`):
-- **IFileSystem**: Abstracts fs/fs-extra operations for file and directory management
-- **IChildProcess, IProcessManager**: Low-level process spawning and management
-- **INetworkManager, IServer**: Network operations and server lifecycle
-- **ILogger**: Standardized logging interface
-- **IEnvironment**: Environment variable and working directory access
-
-**Process Management** (`process-interfaces.ts`):
-- **IProcess**: High-level domain-focused process abstraction extending EventEmitter
-- **IProcessLauncher**: General process spawning interface
-- **IDebugTargetLauncher**: Python debugging specialist with debug port management
-- **IProxyProcessLauncher**: Proxy process management with session tracking
-
-**Command Resolution** (`command-finder.ts`):
-- **CommandFinder**: Contract for resolving command names to executable paths
+### System Command Resolution
+- **CommandFinder**: Interface for resolving executable commands in system PATH
 - **CommandNotFoundError**: Specialized error handling for command resolution failures
+- Forms the foundation for discovering and validating external tools/executables
 
-### Data Flow and Component Relationships
-The interfaces work together in a layered architecture:
+### External Dependencies Abstraction
+- **Core System Interfaces**: IFileSystem, IChildProcess, IProcessManager abstract Node.js built-ins
+- **Network Interfaces**: INetworkManager, IServer for network operations
+- **Application Services**: ILogger, IEnvironment, IProxyManagerFactory for cross-cutting concerns
+- **Dependency Container**: IDependencies aggregates all interfaces for injection; PartialDependencies supports gradual adoption
 
-1. **External Dependencies** provide the foundational system abstractions
-2. **Process Interfaces** build upon these to provide domain-specific process management
-3. **Command Finder** enables discovery of executable commands in the system PATH
-4. **Factory Patterns** throughout enable dependency injection and testing
+### Process Management Hierarchy  
+- **IProcess**: High-level abstraction over Node.js ChildProcess with domain focus
+- **IProcessLauncher**: General process spawning interface
+- **Specialized Launchers**: 
+  - IDebugTargetLauncher for Python debugging workflows
+  - IProxyProcessLauncher for proxy process management
+- **Enhanced Process Types**: IDebugTarget and IProxyProcess extend base functionality
+- **Factory Pattern**: IProcessLauncherFactory centralizes creation of all launcher types
 
-### Public API Surface
-**Primary Entry Points**:
-- `IDependencies` - Complete dependency injection container
-- `IProcessLauncherFactory` - Central factory for all process launcher types
-- `CommandFinder` - Command resolution interface
-- `IDebugTargetLauncher` - Python debug session management
-- `IProxyProcessLauncher` - Proxy process operations
+## Public API Surface
 
-**Key Factory Interfaces**:
-- `ILoggerFactory`, `IChildProcessFactory` for instance creation
-- `IProxyManagerFactory` for proxy management
-- `PartialDependencies` for gradual migration support
+### Main Entry Points
+1. **IDependencies**: Primary dependency injection container
+2. **IProcessLauncherFactory**: Central factory for all process operations
+3. **CommandFinder**: System command resolution
+4. **ILogger**: Application logging interface
 
-### Internal Organization
-The module follows interface segregation principles with fine-grained contracts matching specific responsibilities. Each interface maintains compatibility with corresponding Node.js built-ins while adding domain-specific enhancements. The design supports both synchronous and asynchronous operations where appropriate.
+### Key Contracts
+- **System Integration**: IFileSystem, IProcessManager, INetworkManager
+- **Process Operations**: IProcessLauncher hierarchy with specialized variants
+- **Error Handling**: CommandNotFoundError and standard Promise rejection patterns
 
-### Important Patterns and Conventions
+## Internal Organization and Data Flow
+
+### Dependency Flow
+1. IDependencies container aggregates all system abstractions
+2. Factory interfaces (ILoggerFactory, IChildProcessFactory) create specialized instances
+3. Process launchers use system abstractions to spawn and manage processes
+4. Command finder resolves executables before process creation
+
+### Specialization Pattern
+- Base interfaces (IProcess, IProcessLauncher) provide common functionality
+- Specialized interfaces (IDebugTarget, IProxyProcess) extend for specific use cases
+- Factory pattern centralizes creation while maintaining interface segregation
+
+## Important Patterns and Conventions
+
+### Design Patterns
 - **Dependency Injection**: All interfaces designed for constructor injection
-- **Factory Pattern**: Centralized object creation with easy test substitution
-- **Promise-based APIs**: Consistent async patterns throughout
-- **EventEmitter Extension**: Stateful objects extend Node.js EventEmitter
-- **Gradual Migration Support**: PartialDependencies type enables incremental adoption
-- **Error Handling**: Specialized error classes (CommandNotFoundError) for domain-specific failures
+- **Factory Pattern**: Separate factory interfaces for complex object creation
+- **Interface Segregation**: Fine-grained interfaces matching specific responsibilities
+- **Composition over Inheritance**: Enhanced types wrap base interfaces rather than extending
 
-The interfaces directory serves as the contract layer enabling the entire system's testability and modularity while maintaining clean separation between infrastructure concerns and business logic.
+### API Conventions
+- **Async-First**: All I/O operations return Promises
+- **Node.js Compatibility**: Interfaces mirror Node.js built-in APIs
+- **EventEmitter Extension**: Stateful objects extend EventEmitter pattern
+- **Readonly Properties**: Immutable data uses readonly pattern (e.g., CommandNotFoundError.command)
+
+### Testing Support
+- **Mock-Friendly**: All external dependencies abstracted behind interfaces
+- **Gradual Migration**: PartialDependencies allows incremental adoption
+- **Error Boundaries**: Specialized error types for better test assertions
+
+The directory serves as the system's contract definition layer, enabling loose coupling, testability, and clean separation between business logic and system dependencies.

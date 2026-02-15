@@ -10,10 +10,11 @@
 import { JavascriptAdapterFactory } from '@debugmcp/adapter-javascript';
 import { PythonAdapterFactory } from '@debugmcp/adapter-python';
 import { MockAdapterFactory } from '@debugmcp/adapter-mock';
+import { GoAdapterFactory } from '@debugmcp/adapter-go';
 import type { IAdapterFactory } from '@debugmcp/shared';
 
 interface BundledAdapterEntry {
-  language: 'javascript' | 'python' | 'mock';
+  language: 'javascript' | 'python' | 'mock' | 'go';
   factoryCtor: new () => IAdapterFactory;
 }
 
@@ -22,7 +23,8 @@ const GLOBAL_KEY = '__DEBUG_MCP_BUNDLED_ADAPTERS__';
 const adapters: BundledAdapterEntry[] = [
   { language: 'javascript', factoryCtor: JavascriptAdapterFactory },
   { language: 'python', factoryCtor: PythonAdapterFactory },
-  { language: 'mock', factoryCtor: MockAdapterFactory }
+  { language: 'mock', factoryCtor: MockAdapterFactory },
+  { language: 'go', factoryCtor: GoAdapterFactory }
 ];
 
 const globalAdapters = (globalThis as unknown as Record<string, BundledAdapterEntry[] | undefined>)[GLOBAL_KEY];

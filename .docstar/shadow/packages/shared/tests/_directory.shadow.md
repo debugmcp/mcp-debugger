@@ -1,68 +1,68 @@
 # packages\shared\tests/
-@generated: 2026-02-12T21:05:56Z
+@children-hash: f0b43fe7b309e2dd
+@generated: 2026-02-15T09:01:40Z
 
-## Purpose and Scope
+## Shared Testing Infrastructure for Debug Adapter Framework
 
-This directory contains comprehensive test suites for the shared library's debug adapter policy implementations. It validates the critical translation and management layer that enables Debug Adapter Protocol (DAP) compliance across multiple programming languages, focusing on JavaScript/Node.js and Rust debugging environments.
+This directory houses the testing infrastructure for a multi-language debug adapter system that enables debugging across JavaScript/Node.js and Rust environments through the Debug Adapter Protocol (DAP). It serves as the quality assurance layer ensuring reliable debugging experiences across different programming languages and platforms.
 
-## Core Components and Organization
+## Overall Purpose and Responsibility
 
-### Unit Test Suite (`unit/`)
-The primary testing component containing language-specific adapter policy tests:
+The testing module validates the core debug adapter policy framework that bridges IDE debugging clients with language-specific debug engines. It ensures proper session management, protocol compliance, and resource handling across diverse debugging scenarios while maintaining cross-platform compatibility.
 
-- **JavaScript Debug Adapter Tests** (`adapter-policy-js.spec.ts`) - Validates `JsDebugAdapterPolicy` for Node.js debugging through js-debug adapter
-- **Rust Debug Adapter Tests** (`adapter-policy-rust.test.ts`) - Tests `RustAdapterPolicy` for Rust debugging via CodeLLDB integration
+## Key Components and Integration
 
-These tests work together to ensure consistent debugging experiences across different language ecosystems while maintaining strict DAP protocol compliance.
+### Unit Testing Suite (`unit/`)
+Contains comprehensive test coverage for debug adapter policies:
 
-## Key Testing Areas
+- **JavaScript Adapter Testing**: Validates `JsDebugAdapterPolicy` for Node.js debugging sessions, including child process management, stack frame filtering, and command queue orchestration
+- **Rust Adapter Testing**: Verifies `RustAdapterPolicy` for CodeLLDB-based debugging, focusing on executable resolution, platform-specific adapter spawning, and binary validation
 
-### Debug Adapter Protocol (DAP) Validation
-- Command sequencing and state management during debug session lifecycle
-- Proper handling of initialization flows (`initialize` → `launch` → `configurationDone`)
-- Reverse debugging capabilities and child session creation
-- Protocol compliance across language-specific implementations
+Both test suites work together to ensure consistent debugging behavior across language boundaries, sharing common testing patterns and validation strategies.
 
-### Language-Specific Adapter Logic
-- **JavaScript**: Internal frame filtering, variable scope management, adapter process detection
-- **Rust**: Executable resolution via `CARGO_PATH`, binary validation, CodeLLDB integration
-- Cross-platform compatibility and environment-specific behavior
+## Public API Surface
 
-### Core Debug Functionality
-- Stack frame processing and variable extraction
-- Filtering of internal/special debug variables
-- Session state transitions and error handling
-- Child process management and DAP communication
+### Core Testing Coverage
+- **Session Lifecycle Management**: Connection establishment, initialization sequences, and proper state transitions
+- **Protocol Compliance**: DAP command processing, response handling, and standard adherence validation  
+- **Variable and Stack Management**: Local variable extraction, stack frame filtering, and scope handling
+- **Cross-Platform Validation**: Platform-specific behavior testing and adapter detection mechanisms
 
-## Testing Infrastructure and Patterns
+### Entry Points for Testing
+- Language-specific adapter policy validation
+- Session management workflow testing
+- Protocol communication pattern verification
+- Error handling and fallback behavior validation
 
-### Mock-Based Architecture
-- Comprehensive file system operation mocking (`fs/promises`)
-- Child process simulation with event-driven testing
-- Platform simulation for cross-platform validation
-- Type-safe DAP protocol mock implementations
+## Internal Organization and Data Flow
 
-### Test Utilities and Helpers
-- Mock creation utilities for stack frames and debug variables
-- Cross-platform testing with environment manipulation
-- Test isolation through systematic mock reset patterns
-- Helper functions maintaining API contract compliance
+### Testing Architecture
+The module employs a unified testing approach using Vitest with extensive mocking capabilities:
 
-## Integration Role
+- **Mock Strategy**: Comprehensive simulation of file systems, child processes, and external dependencies
+- **Type Safety**: Maintains original API contracts while providing controllable test environments
+- **Event-Driven Testing**: Validates asynchronous debugging session workflows and state transitions
 
-This test suite validates the adapter policy layer that serves as the critical bridge between:
+### Common Testing Patterns
+- Setup/teardown workflows with proper mock cleanup
+- Shared utilities for mock data generation (stack frames, variables, processes)
+- Platform simulation for cross-platform compatibility testing
+- Edge case validation for robust error handling
 
-**Upstream**: Debug session management, IDE integration, and user debugging requests
-**Downstream**: Language-specific debug adapters (js-debug, CodeLLDB) and target application processes
+## Data Flow Validation
 
-The policies tested here handle the essential translation, filtering, and management logic that enables seamless multi-language debugging while abstracting away language-specific implementation details.
+The tests ensure proper communication flow between:
+1. **Debug Clients** (IDEs) sending DAP commands
+2. **Adapter Policy Layer** (the system under test) managing sessions and protocol translation
+3. **Language Debug Engines** (Node.js debugger, CodeLLDB) executing actual debugging operations
 
-## Key Testing Patterns
+## Important Patterns and Conventions
 
-- Event-driven asynchronous operation testing
-- State transition validation for complex debug flows
-- Platform-agnostic testing with environment simulation
-- Comprehensive edge case and error condition coverage
-- Type-safe mocking preserving original API semantics
+### Testing Standards
+- **Protocol Adherence**: Heavy use of `@vscode/debugprotocol` types for DAP compliance
+- **Isolation**: Each test suite maintains independent mock environments
+- **Comprehensive Coverage**: Tests cover happy paths, error conditions, and edge cases
+- **State-Based Validation**: Complex workflow testing through state transition verification
 
-This test directory ensures the reliability and consistency of the debug adapter policy layer, which is fundamental to providing a unified debugging experience across different programming languages and development environments.
+### Quality Assurance Focus
+The testing infrastructure prioritizes reliability, cross-platform consistency, and protocol compliance to ensure the debug adapter framework can handle real-world debugging scenarios across multiple programming languages and development environments.

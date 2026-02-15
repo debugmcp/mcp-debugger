@@ -1,65 +1,55 @@
 # tests\adapters\javascript/
-@generated: 2026-02-12T21:05:55Z
+@children-hash: 3bb98d24770f3262
+@generated: 2026-02-15T09:01:33Z
 
 ## Purpose and Responsibility
 
-The `tests/adapters/javascript` directory provides comprehensive integration testing for the JavaScript/TypeScript debug adapter, focusing on validating critical adapter functionality through smoke tests and ensuring cross-platform compatibility. This testing module serves as the primary validation layer for JavaScript adapter integration within the broader debug system.
+The `tests/adapters/javascript` directory serves as the integration testing suite for JavaScript/TypeScript debugging adapter functionality within the debugger system. It provides comprehensive validation of the JavaScript adapter's integration with the broader debugger architecture, ensuring reliable debugging support for JavaScript and TypeScript applications across different platforms and runtime configurations.
 
-## Key Components and Relationships
+## Key Components and Integration
 
-### Integration Test Suite
-The directory centers around integration smoke tests that validate end-to-end adapter functionality rather than isolated unit behaviors. The test suite focuses on three core integration areas that work together to ensure proper adapter operation:
+### Primary Test Suite
+- **Integration smoke tests** that validate end-to-end adapter functionality
+- **Session management testing** for JavaScript/TypeScript debugging sessions
+- **Launch configuration validation** with runtime-specific overrides (tsx, Node.js)
+- **Cross-platform compatibility verification** for Windows and Unix environments
 
-- **Session Management**: Validates adapter lifecycle, registry integration, and session isolation
-- **Configuration Transformation**: Tests TypeScript/JavaScript configuration handling and launch setup
-- **Command Generation**: Verifies debug server command construction and execution preparation
-
-### Cross-Platform Support Infrastructure
-A comprehensive platform compatibility layer ensures tests run reliably across Windows and Unix systems through:
-- Platform detection and path normalization utilities
-- Environment variable management for Node.js runtime configuration
-- Conditional path handling for consistent cross-platform assertions
+### Component Relationships
+The integration tests orchestrate interactions between:
+- **Adapter Registry System**: Validates proper registration and lifecycle management of JavaScript adapters
+- **JavaScript Adapter Factory**: Tests TypeScript-specific configuration handling and session creation
+- **js-debug Runtime**: Ensures correct command generation and communication with the underlying VS Code js-debug adapter
+- **Configuration Pipeline**: Validates transformation of launch configurations with runtime overrides
 
 ## Public API Surface
 
-### Primary Test Entry Points
-- **JavaScript Session Smoke Test**: Main integration validation covering complete adapter workflow from registration through command generation
-- **Platform Compatibility Layer**: Utilities for cross-platform path handling and environment management
+### Main Entry Points
+- **JavaScript Adapter Integration Validation**: End-to-end testing of adapter registration, configuration, and command generation
+- **TypeScript Runtime Support Testing**: Validation of tsx runtime integration and parameter handling
+- **Cross-Platform Command Building**: Verification of adapter commands across different operating systems
 
-### Validated Integration Points
-The tests validate key adapter API surfaces including:
-- `JavascriptAdapterFactory` registration and configuration patterns
-- `transformLaunchConfig` functionality for TypeScript session setup
-- `buildAdapterCommand` for debug server initialization
-- Adapter registry integration and session management
+### Test Interfaces
+- Integration testing framework for adapter factory registration
+- Launch configuration testing with TypeScript/JavaScript runtime support
+- Command validation for js-debug adapter integration
+- Environment isolation and mock management utilities
 
 ## Internal Organization and Data Flow
 
-### Test Execution Pipeline
-1. **Environment Setup**: Preserve system state, initialize adapter registry, configure test isolation
-2. **Adapter Integration**: Register JavaScript adapter factory, transform configurations, build debug commands
-3. **Validation**: Assert proper command generation, configuration transformation, and session handling
-4. **Cleanup**: Restore environment state, clear registry, reset mocks
-
-### Cross-Platform Strategy
-The testing infrastructure employs a multi-layered approach to ensure platform compatibility:
-- Runtime detection for appropriate Node.js executable selection
-- Path normalization for consistent file system interaction
-- Environment variable isolation to prevent test interference
+1. **Test Environment Setup**: Preserves system environment, initializes adapter registry, configures mocks
+2. **Adapter Factory Registration**: Registers JavaScript adapter factory with test-specific configurations
+3. **Session Configuration Testing**: Validates launch config transformation and runtime overrides
+4. **Command Generation Validation**: Tests end-to-end adapter command building with correct paths and ports
+5. **Integration Verification**: Ensures proper communication between adapter components
+6. **Environment Cleanup**: Restores system state and resets mocks for test isolation
 
 ## Important Patterns and Conventions
 
-### Integration Testing Philosophy
-- **Smoke Testing Approach**: Focus on critical integration points rather than exhaustive edge case coverage
-- **Real Component Usage**: Minimize mocking in favor of actual adapter factory and registry interaction
-- **End-to-End Validation**: Test complete workflows from adapter registration through debug command generation
+- **Smoke Testing Strategy**: Focuses on critical integration points and real-world usage scenarios
+- **Environment Isolation**: Comprehensive environment preservation and restoration for clean test execution
+- **Cross-Platform Design**: Handles platform-specific path normalization and environment differences
+- **Type Safety with Flexibility**: Uses strategic type assertions for adapter interface compatibility
+- **Standardized Configuration**: Consistent port/host setup (localhost:56789) and session identification patterns
+- **Runtime Flexibility**: Supports multiple JavaScript/TypeScript runtimes (Node.js, tsx) with proper configuration handling
 
-### Test Isolation and Reliability
-- Session-specific identifiers prevent cross-test interference
-- Environment preservation/restoration patterns ensure clean test state
-- Platform-aware assertions accommodate different operating system behaviors
-
-### Configuration and Runtime Management
-- TypeScript runtime detection with tsx fallback support
-- Debug server port configuration and endpoint validation
-- Absolute path resolution for reliable adapter command construction
+This directory ensures that JavaScript and TypeScript debugging capabilities integrate seamlessly with the debugger system, providing confidence in the adapter's ability to handle diverse development environments and runtime configurations.

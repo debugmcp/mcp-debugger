@@ -1,69 +1,73 @@
 # tests\unit\adapter-python/
-@generated: 2026-02-12T21:05:43Z
+@children-hash: c24d32457edc32ca
+@generated: 2026-02-15T09:01:23Z
 
-## Python Debug Adapter Unit Testing Module
+## Unit Test Suite for Python Debug Adapter
 
-This directory contains comprehensive unit tests for the Python debug adapter implementation, focusing on validating the core functionality that enables Python debugging within the larger debug system.
+This directory contains the comprehensive unit test suite for the Python language debug adapter implementation. It provides thorough testing coverage of the `PythonDebugAdapter` class, which serves as the bridge between VS Code's Debug Adapter Protocol (DAP) and Python's debugpy debugging framework.
 
-### Overall Purpose & Responsibility
+### Overall Purpose
 
-The module serves as the primary test suite for `PythonDebugAdapter`, ensuring the adapter can:
-- Validate Python runtime environments and dependencies
-- Transform debug configurations for Python-specific requirements
-- Manage debug session lifecycles and DAP (Debug Adapter Protocol) communication
-- Integrate with debugpy (Microsoft's Python debugger) for actual debugging capabilities
-- Provide user-friendly error handling and installation guidance
+The test suite validates the complete functionality of Python debugging capabilities within the VS Code extension environment, ensuring reliable debug session management, proper environment validation, and seamless integration with Python's debugging infrastructure.
 
 ### Key Components & Architecture
 
-#### Core Test Infrastructure
-- **Mock Management**: Comprehensive mocking of external dependencies (`child_process`, `python-utils`) for isolated testing
-- **Dependency Injection**: Factory pattern (`createDependencies()`) creates standardized mock dependencies with consistent logger interfaces
-- **State Machine Testing**: Validates adapter lifecycle transitions (initialization → connection → disposal)
+#### Test Infrastructure
+- **Mock Framework**: Utilizes Vitest with comprehensive mocking of external dependencies including `child_process`, file system operations, and Python utilities
+- **Dependency Injection Pattern**: Employs a standardized dependency factory for creating isolated test environments with consistent mock interfaces
+- **Event-Driven Testing**: Simulates EventEmitter patterns to test asynchronous debug adapter communication
 
-#### Primary Test Categories
+#### Core Testing Areas
 
-**Environment Validation Testing**
+**Environment & Prerequisites**
 - Python executable resolution and caching mechanisms
-- Version compatibility checks (Python 3.7+ requirement)
+- Version compatibility validation (Python 3.7+ requirements)
 - Debugpy installation detection and virtual environment handling
-- Graceful error handling for missing or incompatible environments
+- Graceful error handling for missing or invalid Python environments
 
-**Debug Adapter Protocol (DAP) Integration**
-- Command building for debugpy adapter invocation
-- Exception breakpoint filter validation
-- Event handling and thread tracking
-- Capabilities reporting to debug clients
+**Debug Adapter Protocol Integration**
+- DAP request/response handling and filtering
+- Exception breakpoint configuration and validation
+- Debug session lifecycle management (initialization, connection, disposal)
+- Event handling for thread tracking and state transitions
 
-**Configuration & Feature Management**
+**Configuration & Capabilities**
 - Launch configuration transformation with Python-specific defaults
-- Feature support detection and requirement specification
-- Error message translation for improved user experience
+- Feature detection and requirement reporting
+- DAP capabilities exposure including supported breakpoint types
+- Default configuration generation
+
+**Error Handling & User Experience**
+- Error message translation for common Python/debugpy issues
+- User-friendly installation guidance and troubleshooting
+- State management during error conditions
 
 ### Public API Surface
 
-The tests validate the main entry points of the Python debug adapter:
+The test suite validates the primary interface points of the `PythonDebugAdapter`:
 
-- `resolveExecutablePath()` - Environment validation and executable discovery
-- `buildAdapterCommand()` - Debug session command construction
-- `transformLaunchConfig()` - Configuration preprocessing
-- `supportsFeature()` / `getFeatureRequirements()` - Capability querying
-- `translateErrorMessage()` - User-friendly error handling
-- Lifecycle methods: `initialize()`, `connect()`, `disconnect()`, `dispose()`
+- **Environment Validation**: `resolveExecutablePath()`, environment checking methods
+- **Configuration Management**: `transformLaunchConfig()`, `getDefaultLaunchConfig()`
+- **Feature Support**: `supportsFeature()`, `getFeatureRequirements()`
+- **Lifecycle Methods**: Initialization, connection management, disposal
+- **DAP Communication**: Request filtering, event handling, capabilities reporting
+- **Error Handling**: `translateErrorMessage()`, installation helpers
 
-### Internal Organization & Data Flow
+### Internal Organization
 
-1. **Environment Phase**: Validates Python installation, version, and debugpy availability
-2. **Configuration Phase**: Transforms user configurations into debugpy-compatible format
-3. **Session Phase**: Manages debug adapter process lifecycle and DAP communication
-4. **Event Phase**: Handles debug events and maintains session state
+The test suite follows a logical progression from low-level environment validation through high-level debug session management:
+
+1. **Foundation Layer**: Environment detection, Python executable resolution, dependency validation
+2. **Configuration Layer**: Launch configuration processing, default value application
+3. **Protocol Layer**: DAP request handling, event processing, capabilities negotiation
+4. **Session Layer**: Debug session lifecycle, connection management, cleanup procedures
 
 ### Testing Patterns & Conventions
 
-- **Isolation**: Each test uses fresh mocks to prevent cross-contamination
-- **Event-Driven Testing**: EventEmitter patterns simulate real debug adapter communication
-- **Type Safety**: Strategic type casting to access private methods for internal state validation
-- **Error Simulation**: Comprehensive error scenario testing with mock process failures
-- **Caching Verification**: Ensures performance optimizations work correctly
+- **Isolation**: Each test uses fresh mock instances to prevent cross-test contamination
+- **State Validation**: Tests verify both public behavior and internal state transitions
+- **Error Simulation**: Comprehensive error scenario testing with various failure modes
+- **Async Handling**: Proper testing of Promise-based operations and event-driven communication
+- **Type Safety**: Strategic type casting to access private methods for thorough internal testing
 
-This test module ensures the Python debug adapter reliably integrates Python debugging capabilities into the broader multi-language debug system, with robust error handling and user experience considerations.
+This test suite ensures the Python debug adapter provides reliable, user-friendly debugging capabilities while maintaining robust error handling and clear user feedback throughout the debugging workflow.

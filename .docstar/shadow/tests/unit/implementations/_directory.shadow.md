@@ -1,74 +1,66 @@
 # tests\unit\implementations/
-@generated: 2026-02-12T21:06:00Z
+@children-hash: a56d8cf3ff332064
+@generated: 2026-02-15T09:01:40Z
 
-## Purpose and Responsibility
+## Unit Test Suite for Implementation Layer
 
-This directory contains comprehensive unit test suites for the core implementation classes of the system, providing validation for environment management, file system operations, network functionality, and process management capabilities. The tests ensure proper behavior, error handling, and API compliance for all implementation layer components.
+**Overall Purpose:** Comprehensive unit test coverage for the core implementation layer of the system, testing concrete classes that handle environment management, file system operations, network management, and process lifecycle management. This directory ensures implementation contracts are properly fulfilled and edge cases are handled correctly.
 
-## Key Components and Architecture
+**Architecture & Organization:**
 
-### Implementation Test Coverage
-- **`environment-impl.test.ts`**: Tests `ProcessEnvironment` class for environment variable snapshots, immutability guarantees, and working directory access
-- **`file-system-impl.test.ts`**: Comprehensive testing of `FileSystemImpl` with full file/directory operation coverage and fs-extra mocking
-- **`network-manager-impl.test.ts`**: Tests `NetworkManagerImpl` server creation and port discovery with net module mocking
-- **`process-launcher-impl-base.test.ts`**: Core process launching functionality and factory method validation
-- **`process-launcher-impl-debug.test.ts`**: Specialized debug target launching with debugpy integration testing
-- **`process-launcher-impl.test.ts`**: Process and proxy launcher signal handling and initialization coordination
-- **`process-manager-impl.test.ts`**: Process management with Node.js version compatibility testing
+The test suite follows a systematic approach to testing implementation classes:
+- **Implementation Classes Under Test**: `ProcessEnvironment`, `FileSystemImpl`, `NetworkManagerImpl`, `ProcessLauncherImpl`, `DebugTargetLauncherImpl`, `ProxyProcessLauncherImpl`, `ProcessManagerImpl`
+- **Mock Infrastructure**: Extensive mocking via `__mocks__/` directory providing controlled Node.js built-in replacements
+- **Test Isolation**: Each test file uses beforeEach/afterEach hooks for proper cleanup and mock reset
 
-### Mock Infrastructure (`__mocks__/`)
-Provides isolated test environment through manual mocks:
-- **`child_process.js`**: Jest-compatible mock for process spawning operations
-- **`fs-extra.js`**: Vitest-compatible mock for comprehensive filesystem operations
+**Key Test Categories:**
 
-## Testing Patterns and Organization
+### System Abstraction Layer Testing
+- **Environment Management**: Tests `ProcessEnvironment` for immutable environment variable snapshots and working directory access
+- **File System Operations**: Validates `FileSystemImpl` covering all fs-extra operations (read/write, directory management, path operations)
+- **Network Management**: Tests `NetworkManagerImpl` for server creation and free port discovery with comprehensive error handling
 
-### Common Testing Architecture
-- **Mock Isolation**: Extensive use of `beforeEach`/`afterEach` hooks with `vi.clearAllMocks()` for test isolation
-- **Error Path Coverage**: Each test suite covers both success scenarios and comprehensive error handling
-- **Framework Integration**: Consistent Vitest usage with describe/it/expect patterns and mock spying
-- **Resource Cleanup**: Systematic cleanup of processes, files, and mock state between tests
+### Process Management Testing  
+- **Base Process Launching**: Tests `ProcessLauncherImpl` for basic child process spawning, event forwarding, and signal handling
+- **Debug Target Support**: Validates `DebugTargetLauncherImpl` for Python debugpy integration with port allocation and timeout handling
+- **Proxy Process Management**: Tests `ProxyProcessLauncherImpl` for initialization coordination and environment scrubbing
+- **Process Manager Core**: Tests `ProcessManagerImpl` handling util.promisify variations across Node.js versions
+
+### Mock Infrastructure
+- **Automatic Mock Resolution**: `__mocks__/` directory provides Jest/Vitest-compatible mocks for `child_process` and `fs-extra`
+- **Test Isolation**: Prevents real filesystem operations and process spawning during unit tests
+- **Cross-Platform Support**: Handles platform-specific behaviors and environment differences
+
+**Testing Patterns & Conventions:**
+
+### Resource Management
+- Systematic cleanup using tracking arrays (`createdTargets`, process lists)
+- Mock state reset in beforeEach/afterEach hooks
+- Fake timer management for timeout testing
+
+### Error Handling Coverage
+- Comprehensive error path testing for all operations
+- Edge case validation (null returns, invalid parameters, race conditions)
+- Platform-specific behavior testing with conditional execution
 
 ### Mock Strategy
-- **Module-Level Mocking**: Complete replacement of external dependencies (fs-extra, child_process, net)
-- **Behavioral Simulation**: Realistic mock implementations with proper EventEmitter patterns and async behavior
-- **State Management**: Mock objects track internal state for realistic interaction testing
+- Complete interface mocking to prevent external dependencies
+- Realistic mock behavior simulating actual system responses
+- Event-driven testing using EventEmitter patterns
 
-## Key Test Categories
+**Public Testing API:**
 
-### Process Management Testing
-- **Lifecycle Management**: Process spawning, termination, and cleanup verification
-- **Event Forwarding**: Complete event propagation from child processes to wrapper classes
-- **Signal Handling**: SIGTERM/SIGKILL behavior with platform-specific considerations
-- **Debug Target Integration**: Python debugpy launching with port allocation and timeout handling
+The test suite validates the following key implementation contracts:
+- **Environment Interface**: Immutable snapshots and working directory access
+- **File System Interface**: Complete fs-extra operation coverage with error propagation
+- **Network Interface**: Server creation and port allocation with cleanup
+- **Process Management**: Spawning, signaling, IPC, and lifecycle management
+- **Debug Integration**: Python debugpy support with timeout and error handling
 
-### System Integration Testing  
-- **Environment Isolation**: Environment variable snapshot behavior and immutability
-- **File System Operations**: All CRUD operations with both sync and async variants
-- **Network Operations**: Server creation and port discovery with proper resource cleanup
-- **Inter-Process Communication**: Message passing and initialization coordination
+**Integration Points:**
 
-### Edge Case Coverage
-- **Race Conditions**: Process termination during operations, initialization failures
-- **Platform Differences**: Windows vs Unix path handling and process behavior
-- **Resource Constraints**: Port allocation failures, file system errors, permission issues
-- **Error Propagation**: Proper error handling and cleanup in failure scenarios
-
-## Internal Data Flow
-
-Tests validate the complete data flow from implementation classes through their dependencies:
-1. **Initialization**: Proper dependency injection and configuration
-2. **Operation Execution**: Method calls with parameter validation and option handling  
-3. **State Management**: Internal state consistency and immutability guarantees
-4. **Event Handling**: Asynchronous event propagation and error handling
-5. **Resource Cleanup**: Proper disposal of system resources and process cleanup
-
-## Public Testing API
-
-The test suites validate the public interfaces exposed by implementation classes:
-- **Environment**: `get()`, `getAll()`, `getCurrentWorkingDirectory()` methods
-- **File System**: Complete file/directory CRUD operations with encoding and option support
-- **Network**: Server creation and port discovery functionality
-- **Process Management**: Process launching, termination, and event handling capabilities
-
-This directory serves as the comprehensive validation layer ensuring all implementation components meet their interface contracts and handle edge cases properly, providing confidence in the system's reliability and robustness.
+These implementation tests ensure the concrete classes properly fulfill the abstract interfaces defined elsewhere in the system, providing confidence that the implementation layer correctly handles:
+- System resource management without side effects
+- Error conditions and edge cases across all operations  
+- Platform-specific behaviors and cross-compatibility
+- Resource cleanup and proper lifecycle management

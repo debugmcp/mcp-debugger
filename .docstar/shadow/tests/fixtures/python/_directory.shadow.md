@@ -1,53 +1,61 @@
 # tests\fixtures\python/
-@generated: 2026-02-12T21:05:43Z
+@children-hash: 7b3679dc8279a643
+@generated: 2026-02-15T09:01:21Z
 
 ## Purpose
 
-This directory contains test fixtures specifically designed for validating debugging workflow functionality in the MCP (Model Context Protocol) Server. It provides both client-side test targets and server-side debugging infrastructure needed to comprehensively test debugger integration capabilities.
+This directory serves as a Python test fixtures module for debugging workflow validation. It provides essential test components for verifying MCP Server debugging capabilities, including both debuggee targets and mock debugging infrastructure.
 
-## Key Components
+## Key Components and Relationships
 
-### Debug Target (`debug_test_simple.py`)
-- **Simple Python script** serving as a predictable debugging target
-- Contains strategically placed breakpoint locations and variable inspection opportunities
-- Implements both synchronous computation and timed operations for comprehensive debugging scenarios
-- Designed with minimal dependencies and clear execution flow for reliable test outcomes
+**Test Target (`debug_test_simple.py`)**
+- Simple Python script designed as a debuggee for breakpoint and inspection testing
+- Contains predictable execution flow with strategic breakpoint locations
+- Provides local variables, computation steps, and timed operations for comprehensive debugging scenario coverage
 
-### Debug Server (`debugpy_server.py`) 
-- **Mock debugpy server** implementing DAP (Debug Adapter Protocol) for testing server connections
-- Provides basic DAP command handling (initialize, launch, threads, disconnect) without actual debugging functionality
-- Uses standard debugpy port (5678) and protocol conventions for realistic testing environment
-
-## Integration & Data Flow
-
-The fixtures work together to create a complete debugging test environment:
-
-1. **`debugpy_server.py`** acts as the debugging backend, accepting DAP connections and responding to protocol commands
-2. **`debug_test_simple.py`** serves as the debugging target, providing a controlled script with known breakpoint locations and variable states
-3. Test harnesses can launch both components to validate end-to-end debugging workflows
+**Mock Debug Server (`debugpy_server.py`)**
+- Minimal DAP (Debug Adapter Protocol) server implementation
+- Simulates debugpy server behavior for testing MCP Server debugpy connections
+- Handles standard DAP commands (initialize, launch, threads, disconnect) without actual debugging functionality
 
 ## Public API Surface
 
-### Debug Target Entry Points
-- `sample_function()`: Primary function containing breakpoint targets and variable inspection points
-- `main()`: Orchestrates test execution with clear start/completion signaling
-- **Line 13**: Documented breakpoint location for consistent test targeting
+**Primary Entry Points:**
+- `debug_test_simple.py`: Standalone executable script via `if __name__ == "__main__"` pattern
+- `debugpy_server.py`: Command-line server with configurable port (default 5678)
 
-### Debug Server Entry Points
-- `main()`: Server startup with configurable port and wait behavior
-- **DAP Protocol**: Standard debugging protocol interface on localhost:5678
-- **Signal handling**: Graceful shutdown capability for test cleanup
+**Key Integration Points:**
+- Line 13 in `debug_test_simple.py` serves as documented breakpoint target
+- `debugpy_server.py` listens on standard debugpy port for protocol testing
+- Both components use minimal dependencies (standard library only) for test environment compatibility
 
-## Architectural Patterns
+## Internal Organization and Data Flow
 
-- **Minimal Dependencies**: Both fixtures use standard library only to reduce test environment complexity
-- **Protocol Compliance**: Server implements proper DAP message framing and response structures
-- **Predictable Execution**: Debug target designed for deterministic behavior across test runs
-- **Isolation**: Each fixture can operate independently while supporting integrated testing scenarios
+**Test Execution Flow:**
+1. `debug_test_simple.py` provides debuggee with predictable execution path
+2. `debugpy_server.py` can serve as mock debugging backend
+3. Together they enable end-to-end debugging workflow validation
 
-## Testing Conventions
+**Data Flow Patterns:**
+- Simple Python script executes linear computation and iteration loops
+- Mock server handles DAP protocol messages with proper framing and JSON responses
+- Both components designed for integration with test harnesses and automated validation
 
-- Clear separation between debugging infrastructure (server) and debugging targets (client scripts)
-- Standardized breakpoint locations and variable naming for consistent test assertions
-- Support for both automated and interactive debugging test scenarios
-- Graceful cleanup mechanisms for reliable test suite integration
+## Important Patterns and Conventions
+
+**Testing Architecture:**
+- Fixtures follow minimal dependency principle (standard library only)
+- Clear separation between debuggee target and debugging infrastructure
+- Predictable execution patterns for reliable test outcomes
+
+**Protocol Compliance:**
+- DAP message framing with Content-Length headers
+- Standard debugpy port usage (5678)
+- Graceful shutdown handling with signal management
+
+**Debugging Support:**
+- Strategic breakpoint placement with documentation
+- Multiple variable scopes for inspection testing
+- Both synchronous and asynchronous operations for step debugging scenarios
+
+This fixture module enables comprehensive testing of MCP Server debugging capabilities by providing both the target code to be debugged and the infrastructure to simulate debugging protocol interactions.
