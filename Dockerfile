@@ -24,6 +24,7 @@ COPY packages/adapter-mock/package.json ./packages/adapter-mock/package.json
 COPY packages/adapter-python/package.json ./packages/adapter-python/package.json
 COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/package.json
 COPY packages/adapter-rust/package.json ./packages/adapter-rust/package.json
+COPY packages/adapter-go/package.json ./packages/adapter-go/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
@@ -47,6 +48,7 @@ COPY packages/adapter-mock/tsconfig*.json ./packages/adapter-mock/
 COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
 COPY packages/adapter-javascript/tsconfig*.json ./packages/adapter-javascript/
 COPY packages/adapter-rust/tsconfig*.json ./packages/adapter-rust/
+COPY packages/adapter-go/tsconfig*.json ./packages/adapter-go/
 
 COPY src ./src
 COPY scripts ./scripts/
@@ -83,8 +85,8 @@ RUN rm -rf /app/node_modules/@debugmcp && \
 
 # Stage 2: Create runtime image with full LLDB dependencies
 FROM ubuntu:24.04
-ARG DISABLE_LANGUAGES
-ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
+# Disable Go at runtime too — Delve isn't installed in the container
+ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go
 
 # Set application directory
 WORKDIR /app

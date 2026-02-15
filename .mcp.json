@@ -9,6 +9,24 @@
       "env": {
         "JAVA_HOME": "C:\\Users\\johnf\\tools\\jdk-21.0.10+7"
       }
+    },
+    "mcp-debugger-npx": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "./packages/mcp-debugger/package/mcp-debugger-latest.tgz",
+        "stdio"
+      ]
+    },
+    "mcp-debugger-docker": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "docker run -i --rm -v \"%CD%:/workspace\" mcp-debugger:local stdio"
+      ]
     }
   }
 }
