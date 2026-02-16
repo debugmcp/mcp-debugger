@@ -285,6 +285,9 @@ export interface AdapterPolicy {
     requiresInitialStop?: boolean;
     /** Override default stopOnEntry when user hasn't explicitly set it */
     defaultStopOnEntry?: boolean;
+    /** Whether the adapter sends 'initialized' before receiving 'launch', requiring
+     *  the proxy to defer initialized handling and send launch before configurationDone. */
+    sendLaunchBeforeConfig?: boolean;
   };
 
   /**

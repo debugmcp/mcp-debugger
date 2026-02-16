@@ -359,6 +359,18 @@ export class DapProxyWorker {
         // Detect attach mode from launchConfig - needed to determine DAP sequence
         const isAttachMode = payload.launchConfig?.request === 'attach' ||
                              payload.launchConfig?.__attachMode === true;
+        const initBehavior = this.adapterPolicy.getInitializationBehavior();
+
+        // For adapters that send 'initialized' before launch/attach (Go/Delve, Java),
+        // set up deferred handling BEFORE sending 'initialize' to avoid a race where
+        // both the initialize response and initialized event arrive in the same TCP
+        // packet and the event is processed before the flag is set.
+        if (isAttachMode || initBehavior.sendLaunchBeforeConfig) {
+          this.deferInitializedHandling = true;
+          this.initializedEventPromise = new Promise<void>((resolve) => {
+            this.initializedEventResolver = resolve;
+          });
+        }
 
         // Initialize DAP session with correct adapterId
         await this.connectionManager!.initializeSession(
@@ -370,14 +382,9 @@ export class DapProxyWorker {
         if (isAttachMode) {
           // ATTACH MODE: Wait for "initialized" event BEFORE sending attach
           // Java/jdb sends "initialized" after initialize response, before attach
-          this.deferInitializedHandling = true;
-          this.initializedEventPromise = new Promise<void>((resolve) => {
-            this.initializedEventResolver = resolve;
-          });
-
           this.logger!.info('[Worker] Waiting for "initialized" event before sending attach');
           await Promise.race([
-            this.initializedEventPromise,
+            this.initializedEventPromise!,
             new Promise((_, reject) =>
               setTimeout(() => reject(new Error('Timeout waiting for initialized event')), 5000)
             )
@@ -387,6 +394,29 @@ export class DapProxyWorker {
           await this.connectionManager!.sendAttachRequest(
             this.dapClient,
             payload.launchConfig || {}
+          );
+
+          this.deferInitializedHandling = false;
+          await this.handleInitializedEvent();
+        } else if (initBehavior.sendLaunchBeforeConfig) {
+          // DEFERRED LAUNCH MODE (Go/Delve): Wait for "initialized" event BEFORE sending launch
+          // Delve sends "initialized" immediately after "initialize", before "launch"
+          this.logger!.info('[Worker] Waiting for "initialized" event before sending launch (sendLaunchBeforeConfig)');
+          await Promise.race([
+            this.initializedEventPromise!,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout waiting for initialized event')), 5000)
+            )
+          ]);
+
+          this.logger!.info('[Worker] "initialized" event received, sending launch request');
+          await this.connectionManager!.sendLaunchRequest(
+            this.dapClient,
+            payload.scriptPath,
+            payload.scriptArgs,
+            payload.stopOnEntry,
+            payload.justMyCode,
+            payload.launchConfig
           );
 
           this.deferInitializedHandling = false;

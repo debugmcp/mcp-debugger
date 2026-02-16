@@ -1,57 +1,77 @@
 # tests\proxy/
-@children-hash: 82ef5301495473b3
-@generated: 2026-02-15T09:01:27Z
+@children-hash: 73a2f8be97169138
+@generated: 2026-02-16T08:24:30Z
 
-## Tests Directory for DAP Proxy System
+## Test Suite for DAP Proxy System
 
-**Purpose:** Comprehensive test suite for the debugmcp proxy system, which implements a Debug Adapter Protocol (DAP) proxy with multi-session debugging capabilities and policy-driven adapter behavior management.
+**Purpose:** Comprehensive test coverage for the Debug Adapter Protocol (DAP) proxy system, validating the multi-session debugging architecture, adapter policy pattern, and session management infrastructure.
 
-### System Under Test
+### Key Components and Architecture
 
-The proxy system consists of three core components tested here:
+**DapProxyWorker Tests (`dap-proxy-worker.test.ts`):** Core proxy worker validation covering:
+- State management (UNINITIALIZED → INITIALIZING → TERMINATED transitions)
+- Adapter policy selection based on script paths and adapter types
+- Dry run mode execution with command generation
+- DAP command lifecycle from queueing through execution
+- Error handling for initialization failures, spawn errors, and connection failures
+- Shutdown behavior and cleanup mechanisms
 
-1. **DapProxyWorker** - Main orchestrator managing adapter lifecycle, policy selection, and message routing
-2. **ChildSessionManager** - Handles multi-session debugging scenarios with policy-driven child session management  
-3. **DapClientBehavior** - Policy implementations defining adapter-specific behaviors for JavaScript, Python, and other debuggers
+**ChildSessionManager Tests (`child-session-manager.test.ts`):** Multi-session debugging abstraction validation:
+- JavaScript policy: Child session creation, command routing, breakpoint mirroring, event forwarding
+- Python policy: Single-session behavior with no child routing
+- Policy-driven session lifecycle management and cleanup
+- Concurrent adoption handling with duplicate protection
 
-### Test Architecture & Coverage
+**DapClientBehavior Tests (`dap-client-behavior.test.ts`):** Adapter policy behavior validation:
+- Cross-policy comparison of reverse request handling (`startDebugging`, `runInTerminal`)
+- Command routing configuration (child-routed vs parent-only commands)
+- Adapter-specific settings (timeouts, session management flags)
+- Policy-specific behavioral patterns and constraints
 
-**State Management & Lifecycle Testing:**
-- Worker state transitions (UNINITIALIZED → INITIALIZING → TERMINATED)
-- Clean shutdown sequences with proper resource cleanup
-- Error handling during initialization and runtime failures
-- Hook integration for custom trace factories and exit handlers
+### Testing Infrastructure
 
-**Policy-Driven Behavior Validation:**
-- **JavaScript/Node.js Policy**: Multi-session support with child session creation, command routing, and breakpoint mirroring
-- **Python Policy**: Single-session debugging with limited reverse request handling
-- **Default/Fallback Policies**: Minimal behavior for unsupported adapters
-- Cross-policy comparison ensuring behavioral uniqueness
+**Mock Architecture:**
+- `MockMinimalDapClient`: EventEmitter-based DAP client simulation with request tracking
+- Comprehensive mock factories for logger, filesystem, process spawner, and message sender
+- Vitest-based mocking with fake timers for async behavior control
+- Policy-specific mock implementations for isolated testing
 
-**Multi-Session Debugging Features:**
-- Child session creation triggered by `startDebugging` reverse requests
-- Command routing logic separating parent commands (initialize, launch) from child commands (threads, evaluate)
-- Breakpoint synchronization across parent and child debugging sessions
-- Event forwarding between session hierarchies
+**Test Patterns:**
+- Event-driven testing with spies and listeners
+- State transition validation through lifecycle methods
+- Policy behavior comparison across adapter types
+- Mock request/response tracking for command verification
+- Async session creation with Promise handling
+- Error scenario simulation with process.exit mocking
 
-**DAP Protocol Integration:**
-- Request/response handling with proper error propagation
-- Command queueing for adapters requiring deferred initialization
-- Reverse request processing (runInTerminal, startDebugging)
-- Protocol message validation and state-aware command rejection
+### Public API Coverage
 
-### Key Testing Patterns
+**Core Entry Points Tested:**
+- `DapProxyWorker` - Main proxy worker with initialization, command handling, and shutdown
+- `ChildSessionManager` - Multi-session abstraction with policy-driven behavior
+- Adapter policies (`JsDebugAdapterPolicy`, `PythonAdapterPolicy`, `DefaultAdapterPolicy`) - Behavioral configuration
 
-**Mock Infrastructure:** Comprehensive mocking of external dependencies including file system, process spawning, DAP clients, and IPC message senders while preserving EventEmitter behavior for realistic event testing.
+**Key Interfaces Validated:**
+- DAP command routing and queueing mechanisms
+- Reverse request handling for session creation
+- Breakpoint mirroring and synchronization
+- Event propagation between parent and child sessions
+- Policy-specific timeout and configuration management
 
-**Async Workflow Testing:** Extensive use of fake timers for deterministic async operation testing, Promise-based session creation, and timeout handling validation.
+### Internal Organization
 
-**Policy Isolation:** Independent test suites for each adapter policy ensuring behavioral boundaries and preventing cross-contamination between debugging scenarios.
+**Data Flow Testing:**
+- Command queue management from pre-connection through execution
+- Event forwarding from adapter processes to parent sessions
+- Session lifecycle from creation through cleanup
+- Policy selection based on script analysis and adapter identification
+- Error propagation and graceful degradation handling
 
-**Error Resilience:** Systematic testing of failure modes including connection timeouts, spawn failures, file system errors, and protocol violations with proper error propagation verification.
+**Integration Points:**
+- Process spawner integration with adapter executable management
+- DAP client connection establishment and maintenance
+- IPC communication with message sender validation
+- File system integration for trace file management
+- Hook system for custom behavior injection
 
-### Integration Points
-
-The test suite validates the complete proxy workflow from adapter policy selection through DAP connection establishment, session management, command routing, and clean termination. Tests ensure the system properly handles both simple single-session debugging and complex multi-session scenarios with parent-child session hierarchies.
-
-The comprehensive coverage includes Windows-specific IPC handling, dry-run mode validation, and cross-platform compatibility patterns, ensuring the proxy system functions reliably across different development environments and debugging scenarios.
+This test suite provides comprehensive coverage of the proxy system's multi-session debugging capabilities, ensuring reliable policy-driven session management and robust error handling across different adapter types.

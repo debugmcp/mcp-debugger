@@ -24,10 +24,11 @@ import type {
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import type { AdapterPolicy } from '@debugmcp/shared';
-import { 
+import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
-  PythonAdapterPolicy
+  PythonAdapterPolicy,
+  GoAdapterPolicy
 } from '@debugmcp/shared';
 
 // Mock implementations
@@ -545,6 +546,108 @@ describe('DapProxyWorker', () => {
       );
       const statusCall = mockMessageSender.send.mock.calls.find(
         ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      );
+      expect(statusCall).toBeDefined();
+      expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it('startAdapterAndConnect should defer initialized and send launch before configurationDone when sendLaunchBeforeConfig is true', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'go-session',
+        executablePath: 'dlv',
+        adapterHost: 'localhost',
+        adapterPort: 12345,
+        logDir: '/logs',
+        scriptPath: '/path/to/main.go',
+        scriptArgs: [],
+        stopOnEntry: false,
+        justMyCode: false,
+        adapterCommand: {
+          command: 'dlv',
+          args: ['dap', '--listen', 'localhost:12345']
+        }
+      };
+
+      // Track the order of DAP operations
+      const callOrder: string[] = [];
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({
+          process: new EventEmitter() as unknown as ChildProcess,
+          pid: 789
+        }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onOutput) client.on('output', handlers.onOutput);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+          if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+        }),
+        // Delve sends 'initialized' immediately after 'initialize' (before launch)
+        initializeSession: vi.fn().mockImplementation(async () => {
+          callOrder.push('initializeSession');
+          // Delve fires initialized event right after initialize response
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
+        sendLaunchRequest: vi.fn().mockImplementation(async () => {
+          callOrder.push('sendLaunchRequest');
+        }),
+        setBreakpoints: vi.fn().mockImplementation(async () => {
+          callOrder.push('setBreakpoints');
+        }),
+        sendConfigurationDone: vi.fn().mockImplementation(async () => {
+          callOrder.push('sendConfigurationDone');
+        }),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = GoAdapterPolicy;
+      (worker as any).adapterState = GoAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Verify the correct DAP sequence for Go/Delve:
+      // initialize → (initialized event) → launch → configurationDone
+      expect(connectionStub.initializeSession).toHaveBeenCalledWith(
+        mockDapClient,
+        payload.sessionId,
+        'dlv-dap'
+      );
+      expect(connectionStub.sendLaunchRequest).toHaveBeenCalledWith(
+        mockDapClient,
+        payload.scriptPath,
+        payload.scriptArgs,
+        payload.stopOnEntry,
+        payload.justMyCode,
+        payload.launchConfig
+      );
+      expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+
+      // Verify ordering: launch MUST come before configurationDone
+      const launchIdx = callOrder.indexOf('sendLaunchRequest');
+      const configDoneIdx = callOrder.indexOf('sendConfigurationDone');
+      expect(launchIdx).toBeGreaterThan(-1);
+      expect(configDoneIdx).toBeGreaterThan(-1);
+      expect(launchIdx).toBeLessThan(configDoneIdx);
+
+      // Verify initialization happened first
+      const initIdx = callOrder.indexOf('initializeSession');
+      expect(initIdx).toBeLessThan(launchIdx);
+
+      // Verify final state
+      const statusCall = mockMessageSender.send.mock.calls.find(
+        ([message]: [StatusMessage]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
       );
       expect(statusCall).toBeDefined();
       expect(worker.getState()).toBe(ProxyState.CONNECTED);

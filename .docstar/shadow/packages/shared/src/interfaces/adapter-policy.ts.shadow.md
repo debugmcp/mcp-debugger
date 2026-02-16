@@ -1,71 +1,39 @@
-# packages/shared/src/interfaces/adapter-policy.ts
-@source-hash: cad2c41773f4519a
-@generated: 2026-02-10T00:41:20Z
+# packages\shared\src\interfaces\adapter-policy.ts
+@source-hash: e01a3cba740d740a
+@generated: 2026-02-16T08:23:57Z
 
-## Purpose
-Defines the `AdapterPolicy` interface and related types for managing Debug Adapter Protocol (DAP) behavior across different language adapters. Provides a pluggable policy system to handle adapter-specific quirks, multi-session strategies, and initialization behaviors while keeping the DAP transport core generic.
+**Purpose**: Defines the `AdapterPolicy` interface for abstracting debug adapter-specific behaviors in the DAP (Debug Adapter Protocol) transport layer. This allows the core DAP system to remain generic while handling adapter-specific quirks like multi-session debugging, reverse startDebugging, and initialization sequences.
 
-## Key Types & Interfaces
+**Key Types and Enums**:
+- `ChildSessionStrategy` (L21-25): Enum defining strategies for creating child debug sessions ('none', 'launchWithPendingTarget', 'attachByPort', 'adoptInParent')
+- `CommandHandling` (L30-34): Result interface for command queuing decisions with shouldQueue/shouldDefer flags
+- `AdapterSpecificState` (L39-43): Extensible state container with initialized/configurationDone flags
 
-### `ChildSessionStrategy` (L21-25)
-Union type defining strategies for creating child debug sessions:
-- `'none'` - No child session creation
-- `'launchWithPendingTarget'` - Launch using `__pendingTargetId` (js-debug style)
-- `'attachByPort'` - Attach via inspector port
-- `'adoptInParent'` - Adopt target in same parent session
+**Core Interface**:
+- `AdapterPolicy` (L45-322): Main interface with 20+ methods covering:
+  - **Multi-session support** (L52-82): Methods for reverse startDebugging, child session strategies, and readiness detection
+  - **Stack frame filtering** (L85-101): Optional methods for removing internal/framework frames
+  - **Variable extraction** (L103-126): Language-specific local variable extraction logic
+  - **Adapter configuration** (L129-159): DAP type configuration, executable resolution, debugger requirements
+  - **Handshake and initialization** (L161-194): Custom initialization sequences and executable validation
+  - **Command queueing** (L196-219): State-aware command queuing and processing
+  - **State management** (L222-249): Methods for creating and updating adapter-specific state
+  - **Connection status** (L252-270): Methods to check initialization and connection readiness
+  - **Behavior configuration** (L272-298): Grouped initialization and DAP client behavior flags
+  - **Adapter spawning** (L300-321): Optional configuration for spawning adapter processes
 
-### `CommandHandling` (L30-34)
-Result type for command processing decisions with `shouldQueue`, `shouldDefer` flags and optional reason.
+**Default Implementation**:
+- `DefaultAdapterPolicy` (L330-361): Placeholder implementation that throws errors for unsupported operations like child sessions. Used as fallback while determining the correct adapter policy to use.
 
-### `AdapterSpecificState` (L39-43)
-Extensible state interface tracking adapter initialization status with `initialized` and `configurationDone` booleans plus custom properties.
+**Key Dependencies**:
+- `@vscode/debugprotocol` for DAP types (L15)
+- Local models for `StackFrame`, `Variable` (L16)
+- `DapClientBehavior` interface (L17)
+- `SessionState` from shared package (L18)
+- `LanguageSpecificLaunchConfig` (L19)
 
-### `AdapterPolicy` (L45-319)
-Core interface defining adapter behavior contract with key methods:
-
-**Session Management:**
-- `supportsReverseStartDebugging` (L54) - Whether adapter initiates child sessions
-- `childSessionStrategy` (L59) - Strategy for child session creation
-- `buildChildStartArgs()` (L72-75) - Constructs child session launch/attach args
-- `isChildReadyEvent()` (L82) - Determines when child session is ready
-
-**Command & State Management:**
-- `requiresCommandQueueing()` (L200) - Whether commands need queuing before init
-- `shouldQueueCommand()` (L208) - Per-command queueing decisions
-- `createInitialState()` (L225) - Factory for adapter state
-- State update methods for commands (L233), responses (L241), events (L249)
-- `isInitialized()` (L256) and `isConnected()` (L263) - State checks
-
-**Language-Specific Features:**
-- `filterStackFrames()` (L92) - Optional frame filtering for internal/framework code
-- `extractLocalVariables()` (L113-118) - Language-specific variable extraction
-- `getLocalScopeName()` (L126) - Scope name patterns for locals
-- `resolveExecutablePath()` (L146) - Executable resolution logic
-- `validateExecutable()` (L177) - Optional executable validation
-
-**Adapter Configuration:**
-- `getDapAdapterConfiguration()` (L134-137) - DAP adapter type and config
-- `getDebuggerConfiguration()` (L154-159) - Debugger behavior flags
-- `getInitializationBehavior()` (L277-288) - Init behavior flags
-- `getDapClientBehavior()` (L295) - Client behavior configuration
-- `getAdapterSpawnConfig()` (L303-318) - Optional spawn configuration
-
-**Handshake & Lifecycle:**
-- `performHandshake()` (L186-194) - Optional post-connection initialization
-- `isSessionReady()` (L165-168) - Custom session readiness logic
-- `matchesAdapter()` (L270) - Adapter command matching
-
-## Default Implementation
-
-### `DefaultAdapterPolicy` (L327-358)
-Minimal placeholder implementation used during adapter policy selection. Provides safe defaults and throws errors for unsupported operations like child session creation (L332-336). All behavioral flags return false/empty to prevent accidental reliance.
-
-## Dependencies
-- `@vscode/debugprotocol` - DAP types
-- `../models/index.js` - StackFrame, Variable models
-- `./dap-client-behavior.js` - Client behavior types
-- `@debugmcp/shared` - SessionState
-- `./debug-adapter.js` - Language-specific launch config
-
-## Architecture Notes
-Policy pattern enables adapter-specific behaviors without polluting core DAP transport. Each language adapter (js-debug, debugpy, etc.) implements this interface to define its unique requirements for session management, command handling, and initialization sequences.
+**Architecture Notes**:
+- Policy pattern allows pluggable adapter-specific behaviors without modifying core DAP transport
+- Extensive optional methods enable incremental adapter implementation
+- State management is delegated to individual policies for maximum flexibility
+- Default policy serves as safe fallback preventing runtime errors during adapter selection

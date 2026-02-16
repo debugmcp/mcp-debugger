@@ -231,6 +231,9 @@ export const GoAdapterPolicy: AdapterPolicy = {
       // immediately after stopping on entry. Default to false so the program
       // runs until the first breakpoint instead.
       defaultStopOnEntry: false,
+      // Delve sends 'initialized' immediately after 'initialize', before 'launch'.
+      // The proxy must defer initialized handling and send launch before configurationDone.
+      sendLaunchBeforeConfig: true,
     };
   },
 
