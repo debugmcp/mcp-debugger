@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - _No changes yet._
 
+## [0.18.0] - 2026-02-16
+
+### Added
+- **Go debugging support** – full Delve DAP adapter with debug, test, exec, replay, and core modes, goroutine-aware stack traces, and automatic `dlv` detection (contributed by [@swinyx](https://github.com/swinyx))
+- **CI Go toolchain** – workflow now installs Go 1.21 and Delve for cross-platform E2E testing
+- **Dev proxy** – lightweight MCP proxy for hot-reloading mcp-debugger during development without restarting Claude Code
+
+### Removed
+- **Java adapter** – jdb text-parsing approach proved too fragile for reliable breakpoint handling
+
+### Fixed
+- Bundled Go adapter and mock-adapter-process for npx distribution
+- Resolved `workspace:*` dependency resolution during `pnpm pack`
+- Fixed cross-test pollution from `process.env.PATH` in Go/Python unit tests
+- Added Go adapter to Dockerfile and fixed Windows volume mount paths
+
 ## [0.17.0] - 2025-11-22
 
 ### Added

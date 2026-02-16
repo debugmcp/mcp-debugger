@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-python",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Python debug adapter for MCP debugger using debugpy",
   "type": "module",
   "main": "dist/index.js",

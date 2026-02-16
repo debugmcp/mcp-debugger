@@ -381,7 +381,7 @@ export class DapProxyWorker {
 
         if (isAttachMode) {
           // ATTACH MODE: Wait for "initialized" event BEFORE sending attach
-          // Java/jdb sends "initialized" after initialize response, before attach
+          // Some adapters send "initialized" after initialize response, before attach
           this.logger!.info('[Worker] Waiting for "initialized" event before sending attach');
           await Promise.race([
             this.initializedEventPromise!,

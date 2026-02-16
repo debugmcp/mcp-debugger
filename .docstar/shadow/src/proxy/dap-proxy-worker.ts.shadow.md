@@ -1,99 +1,98 @@
 # src\proxy\dap-proxy-worker.ts
-@source-hash: 5c75a74b5d182cf6
-@generated: 2026-02-16T08:24:12Z
+@source-hash: b7037e10477ec44d
+@generated: 2026-02-16T09:12:29Z
 
-**Purpose**: Core worker class implementing a language-agnostic DAP (Debug Adapter Protocol) proxy using the Adapter Policy pattern to eliminate hardcoded language-specific logic.
+## Core Functionality
 
-**Architecture**: Uses composition-based dependency injection with manager classes for process spawning (GenericAdapterManager), DAP connections (DapConnectionManager), and request tracking (CallbackRequestTracker). Supports multiple debug adapter types through interchangeable adapter policies.
+Main DAP (Debug Adapter Protocol) proxy worker that bridges debugging clients and debug adapters using the Adapter Policy pattern to eliminate language-specific hardcoding. Manages the complete lifecycle of debug sessions including adapter spawning, connection management, command queueing, and event handling.
 
 ## Key Classes & Components
 
 ### DapProxyWorker (L54-888)
-Main orchestrator class managing debug adapter lifecycle and DAP protocol communication.
+Primary orchestration class managing debug session lifecycle with state machine transitions (UNINITIALIZED → INITIALIZING → CONNECTED/TERMINATED).
 
-**Core State Management**:
-- `state: ProxyState` (L60) - tracks initialization/connection status
-- `adapterPolicy: AdapterPolicy` (L70) - configurable language-specific behavior
-- `adapterState: AdapterSpecificState` (L71) - policy-managed adapter state
-- `commandQueue` (L72) and `preConnectQueue` (L73) - command buffering
+**Key Properties:**
+- `adapterPolicy` (L70): Current adapter policy (DefaultAdapterPolicy, JsDebugAdapterPolicy, PythonAdapterPolicy, etc.)
+- `adapterState` (L71): Policy-specific state tracking
+- `commandQueue` (L72): Commands queued when adapter requires sequential processing  
+- `preConnectQueue` (L73): Commands queued before DAP connection established
+- `state` (L60): Current proxy state (ProxyState enum)
+- `dapClient` (L56): Active DAP client connection
+- `adapterProcess` (L57): Spawned debug adapter child process
 
-**Key Dependencies**:
-- `processManager: GenericAdapterManager` (L66) - adapter process lifecycle
-- `connectionManager: DapConnectionManager` (L67) - DAP client connections
-- `requestTracker: CallbackRequestTracker` (L65) - timeout handling for DAP requests
+**Core Methods:**
+- `handleCommand()` (L135-171): Main command dispatcher for init/dap/terminate commands
+- `handleInitCommand()` (L176-260): Initializes worker, spawns adapter, establishes connection
+- `handleDapCommand()` (L568-676): Routes DAP commands with policy-based queueing logic
+- `startAdapterAndConnect()` (L310-445): Spawns adapter process and establishes DAP connection
+- `setupDapEventHandlers()` (L450-513): Configures event forwarding (initialized, output, stopped, etc.)
+- `drainCommandQueue()` (L681-736): Processes queued commands sequentially
+- `shutdown()` (L811-842): Clean termination of adapter process and connections
 
 ### DapProxyWorkerHooks (L40-52)
-Configuration interface for customizing worker behavior:
-- `exit?: (code: number) => void` - custom termination handler
-- `createTraceFile?: (sessionId: string, logDir: string) => string` - DAP tracing setup
+Configuration interface for testing/customization:
+- `exit`: Custom process exit handler (defaults to process.exit)
+- `createTraceFile`: DAP trace file factory for diagnostics
 
-## Core Operations
+## Policy-Based Architecture
 
-### Initialization Flow (L176-260)
-1. Validates payload and selects adapter policy via `selectAdapterPolicy()` (L102-123)
-2. Sets up logging and tracing infrastructure
-3. Handles dry-run mode (L240-243) or proceeds to adapter startup
-4. Policy-driven adapter spawning and DAP connection establishment
+### Adapter Policy Selection (L102-123)
+`selectAdapterPolicy()` chooses appropriate policy based on adapter command using matcher functions:
+- JsDebugAdapterPolicy: Node.js/VS Code js-debug
+- PythonAdapterPolicy: Python debugpy  
+- RustAdapterPolicy: CodeLLDB for Rust
+- GoAdapterPolicy: Delve debugger
+- MockAdapterPolicy: Testing purposes
+- DefaultAdapterPolicy: Fallback
 
-### Policy Selection (L102-123)
-Matches adapter commands to policies using `matchesAdapter()` method:
-- JsDebugAdapterPolicy, PythonAdapterPolicy, RustAdapterPolicy, GoAdapterPolicy, MockAdapterPolicy
-- Falls back to DefaultAdapterPolicy for unknown adapters
+### Policy-Driven Behavior
+- **Command Queueing**: Some adapters require sequential command processing
+- **Initialization Sequences**: Different launch vs attach vs deferred launch patterns
+- **State Management**: Adapter-specific state tracking and updates
+- **Spawn Configuration**: Adapter-specific process spawning parameters
 
-### Command Handling (L135-171)
-Routes parent commands (`init`, `dap`, `terminate`) with comprehensive error handling and logging.
+## Connection Management Flow
 
-### DAP Protocol Management (L568-676)
-- Command queueing based on `adapterPolicy.shouldQueueCommand()` (L583)
-- State tracking via policy callbacks (`updateStateOnCommand`, `updateStateOnResponse`)
-- Request/response correlation with timeout handling
+### Standard Launch Mode (Python/debugpy):
+1. Initialize DAP session
+2. Send launch request
+3. Wait for "initialized" event
+4. Set breakpoints and send configurationDone
 
-### Initialization Sequencing (L310-445)
-Handles complex DAP initialization patterns:
-- **Attach Mode**: Wait for `initialized` event before `attach` request (L382-400)
-- **Deferred Launch Mode**: Wait for `initialized` before `launch` (Go/Delve) (L401-423)
-- **Standard Launch Mode**: Send `launch` first, then wait for `initialized` (L424-437)
+### Attach Mode:
+1. Initialize DAP session  
+2. Wait for "initialized" event
+3. Send attach request
+4. Set breakpoints and send configurationDone
 
-### Event Processing (L450-513)
-Sets up comprehensive DAP event handlers with policy-driven state updates:
-- `onInitialized` - triggers command queue drainage or deferred handling
-- Output, thread, breakpoint events - forwarded to parent
-- Termination events - trigger cleanup sequence
+### Deferred Launch Mode (Go/Delve):
+1. Initialize DAP session
+2. Wait for "initialized" event (sent immediately after initialize response)
+3. Send launch request
+4. Set breakpoints and send configurationDone
 
-### Command Queue Management (L681-736)
-- Policy-based command ordering via `processQueuedCommands()`
-- Silent command injection (e.g., `configurationDone`)
-- Error isolation per queued command
+## Dependencies
 
-### Process Lifecycle (L811-842)
-Coordinated shutdown sequence:
-1. Clear request tracking and reject in-flight requests
-2. Disconnect DAP client via connection manager
-3. Terminate adapter process via process manager
-4. Update state to TERMINATED
+- `@vscode/debugprotocol`: DAP protocol types
+- `@debugmcp/shared`: Adapter policy implementations
+- `CallbackRequestTracker` (L22): Request timeout management
+- `GenericAdapterManager` (L23): Process spawning and lifecycle
+- `DapConnectionManager` (L24): DAP client connection management
+- `validateProxyInitPayload` (L26): Input validation
 
-## Dependencies & Relationships
+## Critical Features
 
-**External Dependencies**:
-- `@vscode/debugprotocol` - DAP types and protocol definitions
-- `@debugmcp/shared` - adapter policy implementations
-- Child process management for adapter spawning
+### Command Queueing (L583-615)
+Policy-driven queueing prevents race conditions with adapters that require sequential processing. Supports silent commands (e.g., auto-injected configurationDone).
 
-**Internal Dependencies**:
-- `./dap-proxy-interfaces.js` - core type definitions
-- `./dap-proxy-request-tracker.js` - request timeout management
-- `./dap-proxy-adapter-manager.js` - process spawning abstraction
-- `./dap-proxy-connection-manager.js` - DAP client lifecycle
-- `../utils/type-guards.js` - payload validation
+### Request Tracking (L82-84, L787-790)
+Timeout management for DAP requests prevents hanging operations.
 
-## Critical Patterns
+### Dry Run Mode (L240-243, L266-305)  
+Testing mode that logs intended adapter command without execution. Includes Windows IPC message flushing fixes.
 
-**Adapter Policy Pattern**: Eliminates language-specific hardcoding by delegating adapter behavior to pluggable policy objects that define initialization sequences, command queueing rules, and state management.
+### State Synchronization (L61-64, L467-476)
+Complex event ordering with deferred "initialized" event handling to support different adapter initialization patterns.
 
-**Command Queueing**: Supports adapters requiring sequential command processing with policy-driven queue management and silent command injection.
-
-**State Machine**: Tracks proxy state (UNINITIALIZED → INITIALIZING → CONNECTED → SHUTTING_DOWN → TERMINATED) with guarded state transitions.
-
-**Timeout Management**: Tracks DAP requests with configurable timeouts to prevent hanging on unresponsive adapters.
-
-**IPC Message Flushing**: Uses `setImmediate` and `setTimeout` for reliable IPC message delivery before process termination, especially on Windows (L254-258, L295-304).
+### Error Handling & Recovery (L166-170, L247-259)
+Comprehensive error handling with graceful shutdown and proper IPC message flushing before process exit.

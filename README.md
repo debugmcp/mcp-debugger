@@ -434,12 +434,12 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.17.0 with Rust adapter (Alpha), richer stepping responses, and polished JavaScript distribution
-- ✅ **1019 tests** passing end-to-end
+- ✅ **Production Ready**: v0.18.0 with Go debugging support via Delve, Rust adapter (Alpha), and polished multi-language distribution
+- ✅ **1569 tests** passing end-to-end
 - ✅ **Clean architecture** with adapter pattern
 - 🟨 **JavaScript/Node.js**: Alpha support with full debugging loop
 - ✅ **Go**: Full debugging support via Delve DAP
-- 🚧 **Coming Soon**: Java, Ruby, C/C++, and more language adapters ([Java tracking issue](https://github.com/debugmcp/mcp-debugger/issues/14))
+- 🚧 **Coming Soon**: Ruby, C/C++, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
 
 See [Roadmap.md](./Roadmap.md) for planned features.

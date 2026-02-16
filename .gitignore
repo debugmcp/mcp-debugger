@@ -188,6 +188,7 @@ undefined/
 # Compiled Go binaries
 examples/go/**/*.exe
 examples/go/**/hello_world
+__debug_bin*
 
 # E2E test result artifacts
 tests/e2e/*-results.json

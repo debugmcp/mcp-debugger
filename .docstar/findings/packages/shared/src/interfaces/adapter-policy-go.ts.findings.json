@@ -1,6 +1,6 @@
 {
-  "source": "packages/shared/src/interfaces/adapter-policy-go.ts",
-  "source_hash": "95a7e73ebf544145",
-  "generated": "2026-02-10T00:41:13Z",
+  "source": "packages\\shared\\src\\interfaces\\adapter-policy-go.ts",
+  "source_hash": "0211ecc8e3d0bcbe",
+  "generated": "2026-02-16T08:23:59Z",
   "findings": []
 }

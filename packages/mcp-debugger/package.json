@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/mcp-debugger",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Step-through debugging MCP server for LLMs",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
   "repository": {

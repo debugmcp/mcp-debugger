@@ -50,12 +50,6 @@ jobs:
     - name: Install Delve debugger
       run: go install github.com/go-delve/delve/cmd/dlv@latest
 
-    - name: Setup Java
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-
     - name: Install Node dependencies
       run: pnpm install --frozen-lockfile
     
