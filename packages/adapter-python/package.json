@@ -16,7 +16,7 @@
     "test:watch": "vitest watch"
   },
   "dependencies": {
-    "@debugmcp/shared": "workspace:^0.17.0",
+    "@debugmcp/shared": "workspace:*",
     "@vscode/debugprotocol": "^1.68.0",
     "which": "^5.0.0"
   },
@@ -27,7 +27,7 @@
     "vitest": "^3.2.1"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.17.0"
+    "@debugmcp/shared": "0.18.0"
   },
   "publishConfig": {
     "access": "public"

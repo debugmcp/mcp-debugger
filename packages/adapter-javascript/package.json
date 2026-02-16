@@ -30,11 +30,11 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@debugmcp/shared": "workspace:^0.17.0",
+    "@debugmcp/shared": "workspace:*",
     "@vscode/debugprotocol": "^1.68.0"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.17.0"
+    "@debugmcp/shared": "0.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",
