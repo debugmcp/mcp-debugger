@@ -5,27 +5,27 @@
       "command": "node",
       "args": [
         "tools/dev-proxy/dev-proxy.mjs"
-      ],
-      "env": {
-        "JAVA_HOME": "C:\\Users\\johnf\\tools\\jdk-21.0.10+7"
-      }
+      ]
     },
     "mcp-debugger-npx": {
       "type": "stdio",
-      "command": "cmd",
+      "command": "npx",
       "args": [
-        "/c",
-        "npx",
-        "./packages/mcp-debugger/package/mcp-debugger-latest.tgz",
+        "@debugmcp/mcp-debugger",
         "stdio"
       ]
     },
     "mcp-debugger-docker": {
       "type": "stdio",
-      "command": "cmd",
+      "command": "docker",
       "args": [
-        "/c",
-        "docker run -i --rm -v \"%CD%:/workspace\" mcp-debugger:local stdio"
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "${PWD}:/workspace",
+        "mcp-debugger:local",
+        "stdio"
       ]
     }
   }

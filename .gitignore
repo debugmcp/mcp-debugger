@@ -64,6 +64,9 @@ bundled-adapters/
 .clinerules
 .claude/
 
+# MCP server configuration (contains local paths)
+.mcp.json
+
 # Environment variables
 .env
 .env.local
