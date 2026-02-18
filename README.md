@@ -101,7 +101,7 @@ cd mcp-debugger
 /home/ubuntu/.claude/local/claude mcp list
 ```
 
-**Important**: The `stdio` argument is required to prevent console output from corrupting the JSON-RPC protocol. See [CLAUDE.md](CLAUDE.md) for detailed setup and [docs/MCP_CLAUDE_CODE_INTEGRATION.md](docs/MCP_CLAUDE_CODE_INTEGRATION.md) for troubleshooting.
+**Important**: The `stdio` argument is required to prevent console output from corrupting the JSON-RPC protocol. See [CLAUDE.md](CLAUDE.md) for detailed setup and troubleshooting.
 
 ### Using Docker
 
