@@ -1,3 +1,13 @@
+# Disable set -e inherited from husky's sh -e wrapper.
+# Git hooks run with stdout as a closed/broken pipe, causing echo to fail
+# with "write error: Bad file descriptor". Under set -e this silently kills
+# the entire hook. This script has explicit exit 1 calls for real failures.
+set +e
+
+# Redirect stdout to stderr so user-facing messages reach the terminal
+# instead of git's closed stdout pipe.
+exec 1>&2
+
 echo "🧪 Running tests before push to ensure code quality..."
 echo "💡 This prevents broken code from being pushed to GitHub."
 echo ""
@@ -38,9 +48,7 @@ trap cleanup_log EXIT
 
 # Run linting first to catch syntax and style issues
 echo "🔎 Running ESLint to catch linting issues..."
-pnpm run lint > "$PRE_PUSH_LOG" 2>&1
-
-if [ $? -ne 0 ]; then
+if ! pnpm run lint > "$PRE_PUSH_LOG" 2>&1; then
     echo ""
     echo "❌ Lint failed! Push blocked to prevent broken code on GitHub."
     echo "💡 Run 'pnpm run lint' to see all errors, or 'pnpm run lint:fix' for auto-fixes."
@@ -54,10 +62,7 @@ echo ""
 
 # Clean build to ensure no stale artifacts
 echo "🔨 Running clean build to ensure fresh compilation..."
-npm run clean > "$PRE_PUSH_LOG" 2>&1
-npm run build >> "$PRE_PUSH_LOG" 2>&1
-
-if [ $? -ne 0 ]; then
+if ! (npm run clean > "$PRE_PUSH_LOG" 2>&1 && npm run build >> "$PRE_PUSH_LOG" 2>&1); then
     echo ""
     echo "❌ Build failed! Push blocked to prevent broken code on GitHub."
     echo "💡 Fix build errors before pushing."
@@ -103,7 +108,7 @@ else
 fi
 
 # Docstar shadow documentation check (optional — runs only if docstar is installed)
-if command -v docstar &> /dev/null; then
+if command -v docstar >/dev/null 2>&1; then
   echo "🔍 Docstar: Checking shadow documentation..."
   docstar check || true
 fi

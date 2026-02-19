@@ -1,39 +1,53 @@
-# src/utils/logger.ts
-@source-hash: 3a4a195c28bd0d21
-@generated: 2026-02-10T00:41:58Z
+# src\utils\logger.ts
+@source-hash: 260cc3323da692f6
+@generated: 2026-02-19T23:47:39Z
 
-Logger utility module for the Debug MCP Server that provides Winston-based logging with configurable transports and environment-specific behavior.
+## Purpose
+Provides winston-based logging infrastructure for the Debug MCP Server with namespaced loggers, configurable transports, and environment-aware output handling.
 
-## Core Interface
-- `LoggerOptions` (L13-18): Configuration interface accepting optional `level` and `file` path parameters
+## Key Components
 
-## Primary Functions
-- `createLogger(namespace, options)` (L29-126): Factory function that creates Winston logger instances with namespace-specific configuration. Handles console output silencing via `CONSOLE_OUTPUT_SILENCED` environment variable and container runtime detection via `MCP_CONTAINER`. Sets up both console and file transports with different formatting (colorized console vs JSON file).
-- `getLogger()` (L132-138): Singleton accessor that returns the default logger instance, creating a fallback if none exists
+### LoggerOptions Interface (L13-18)
+Configuration interface for logger creation:
+- `level`: Optional log level (error, warn, info, debug) 
+- `file`: Optional custom file path for log output
 
-## Key Architecture Decisions
-- **Console Silencing**: Critical pattern throughout the module - console output is completely suppressed when `CONSOLE_OUTPUT_SILENCED=1` to prevent transport corruption (L36-38, L83-87, L100-104, L114-118)
-- **Root Logger Detection**: Special handling for 'debug-mcp' namespace as default logger (L121-123)
-- **Path Resolution Strategy**: Multi-fallback approach for log file paths:
-  1. Uses `import.meta.url` with fileURLToPath conversion (L58-61)
-  2. Falls back to `process.cwd()` if import.meta unavailable (L63-68)
-  3. Container-specific path `/app/logs/debug-mcp-server.log` when `MCP_CONTAINER=true` (L72-74)
+### createLogger Function (L29-129)
+Core logger factory that creates winston logger instances with:
+- **Namespace support**: Each logger tagged with unique namespace for identification
+- **Environment-aware console output**: Respects `CONSOLE_OUTPUT_SILENCED=1` to prevent stdout corruption during transport operations
+- **Dual transport strategy**: Console (when not silenced) + file logging with rotation
+- **Smart file path resolution**: Handles import.meta.url availability, container environments (`MCP_CONTAINER=true`), and fallback scenarios
+- **File rotation**: 50MB per file, 3 rotated files maximum (150MB total)
+- **Error handling**: Graceful degradation when file system operations fail
+
+### getLogger Function (L135-141) 
+Singleton accessor for default logger instance with lazy initialization fallback.
+
+## Architecture Patterns
+
+### Environment Detection
+- `CONSOLE_OUTPUT_SILENCED=1`: Disables console transport to prevent stdout corruption
+- `DEBUG_MCP_LOG_LEVEL`: Global log level override
+- `MCP_CONTAINER=true`: Forces container-specific log path `/app/logs/`
+
+### Path Resolution Strategy (L56-75)
+1. Primary: Use import.meta.url to resolve relative to current file
+2. Fallback: Use process.cwd() for test environments 
+3. Container override: Force `/app/logs/` in containerized environments
+
+### Transport Configuration
+- **Console**: Colorized, timestamped format with namespace inclusion
+- **File**: JSON format with automatic rotation and tailable logs
+- **Error isolation**: File transport failures don't prevent logger creation
 
 ## Dependencies
-- Winston logging library with typed imports
-- Node.js built-ins: path, fs, url (fileURLToPath)
+- winston: Core logging framework
+- Node.js fs/path: File system operations
+- url.fileURLToPath: ES module path resolution
 
-## State Management
-- `defaultLogger` module-level singleton (L20) for shared logger instance
-
-## Error Handling
-- Graceful degradation for directory creation failures (L77-87)
-- File transport creation error handling (L99-104)
-- Winston internal error event handling (L113-118)
-- All error outputs respect console silencing constraint
-
-## Log Configuration
-- Level precedence: options.level > `DEBUG_MCP_LOG_LEVEL` env var > 'info' default (L31)
-- Default log path: `../../logs/debug-mcp-server.log` relative to module location
-- Console format: colorized with timestamp and namespace
-- File format: JSON with timestamp for structured logging
+## Critical Invariants
+- Console output must be completely suppressed when `CONSOLE_OUTPUT_SILENCED=1`
+- Root logger (namespace='debug-mcp') becomes the default singleton
+- Log directory creation is attempted but failure is non-fatal
+- All error reporting respects console silencing to prevent transport corruption

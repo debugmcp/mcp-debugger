@@ -1,3 +1,13 @@
+# Disable set -e inherited from husky's sh -e wrapper.
+# Git hooks run with stdout as a closed/broken pipe, causing echo to fail
+# with "write error: Bad file descriptor". Under set -e this silently kills
+# the entire hook. This script has explicit exit 1 calls for real failures.
+set +e
+
+# Redirect stdout to stderr so user-facing messages reach the terminal
+# instead of git's closed stdout pipe.
+exec 1>&2
+
 # Run existing personal info check
 node "$(dirname -- "$0")/../scripts/check-personal-paths.cjs"
 
@@ -43,7 +53,7 @@ fi
 echo "✅ No build artifacts found in staged files"
 
 # Docstar shadow documentation (optional — runs only if docstar is installed)
-if command -v docstar &> /dev/null; then
+if command -v docstar >/dev/null 2>&1; then
   echo "Docstar: Updating shadow documentation..."
   docstar shadow . 2>/dev/null || true
   # Stage any updated shadow docs

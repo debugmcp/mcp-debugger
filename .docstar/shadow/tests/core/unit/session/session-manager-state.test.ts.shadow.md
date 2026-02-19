@@ -1,44 +1,41 @@
-# tests/core/unit/session/session-manager-state.test.ts
-@source-hash: e235bed449d199c5
-@generated: 2026-02-10T00:41:19Z
+# tests\core\unit\session\session-manager-state.test.ts
+@source-hash: 8c120dea8bc0681a
+@generated: 2026-02-19T23:47:33Z
 
-## Purpose
-Unit test suite for SessionManager state machine integrity, ensuring proper state transitions and error handling in the debug session lifecycle.
+**Purpose**: Unit tests for SessionManager's state machine integrity, ensuring proper state transitions and error handling.
 
-## Test Structure
-- **Test suite** (L10): "SessionManager - State Machine Integrity" - validates state machine behavior
-- **Setup/teardown** (L15-33): Configures fake timers, mock dependencies, and SessionManager instance
-- **Mock dependencies** (L17): Uses `createMockDependencies()` for isolated testing
-- **Configuration** (L18-24): Test config with `/tmp/test-sessions` log directory and DAP launch args
+**Test Setup** (L10-33):
+- Uses vitest testing framework with mocked timers and dependencies
+- Creates SessionManager instance with mock dependencies for isolated testing
+- Configures test environment with fake timers and cleanup procedures
 
-## Key Test Cases
+**Key Test Cases**:
 
-### Valid State Transitions (L35-60)
-Tests the expected state flow:
-- CREATED → INITIALIZING (L42-43): Starting debugging triggers transition
-- INITIALIZING → PAUSED (L48-49): With `stopOnEntry=true` default
-- PAUSED → RUNNING (L51-55): Via `continue()` operation  
-- RUNNING → STOPPED (L58-59): Via `closeSession()`
+1. **Valid State Transitions Test** (L35-60):
+   - Tests complete lifecycle: CREATED → INITIALIZING → PAUSED → RUNNING → STOPPED
+   - Verifies stopOnEntry behavior causes immediate pause after initialization
+   - Simulates DAP events through mock proxy manager
+   - Confirms session removal from store after close
 
-### Invalid Operations (L62-86)
-Validates state-based operation restrictions:
-- **Pre-start operations** (L69): `stepOver()` throws `ProxyNotRunningError` when session not started
-- **Running state restrictions** (L78-80): `stepOver()` returns `{success: false, error: 'Not paused'}`
-- **Non-paused restrictions** (L83-85): `continue()` returns error when not paused
+2. **Invalid Operation Rejection Test** (L62-86):
+   - Tests that operations are properly rejected based on current state
+   - Validates ProxyNotRunningError thrown for operations on non-started sessions
+   - Checks error responses for invalid state operations (stepping when running, continuing when not paused)
+   - Uses both exception-based and result-based error handling patterns
 
-### Error State Handling (L88-106)
-Tests state consistency during failures:
-- **Error transition** (L101-104): Runtime errors transition session to ERROR state
-- **Resource cleanup** (L105): `proxyManager` becomes undefined in error state
+3. **State Consistency During Errors Test** (L88-106):
+   - Ensures state machine maintains integrity when runtime errors occur
+   - Verifies transition to ERROR state and cleanup of proxy manager reference
+   - Tests that continued events don't automatically change state without explicit transitions
 
-## Dependencies
-- **SessionManager** (L5): Main class under test from `../../../../src/session/session-manager.js`
-- **DebugLanguage, SessionState** (L6): Enums from `@debugmcp/shared`
-- **ProxyNotRunningError** (L8): Typed error from debug-errors module
-- **Mock utilities** (L7): Test helpers for dependency injection
+**Dependencies**:
+- SessionManager from main source (L5)
+- DebugLanguage and SessionState enums from shared package (L6)
+- Mock utilities for dependency injection (L7)
+- Custom error types for proper error handling (L8)
 
-## Testing Patterns
-- **Fake timers** (L16, 30): Controls async timing with `vi.useFakeTimers()`
-- **Mock simulation** (L52, 54, 75, 98): Uses `mockProxyManager` to simulate debug events
-- **State assertions** (L43, 49, 55, 59): Validates state transitions at each step
-- **Error validation** (L69, 78-80, 83-85): Tests both exceptions and error results
+**Testing Patterns**:
+- Comprehensive state machine validation with explicit state assertions
+- Event simulation through mock proxy manager
+- Timer-based async operation testing with fake timers
+- Mixed error handling validation (exceptions vs result objects)

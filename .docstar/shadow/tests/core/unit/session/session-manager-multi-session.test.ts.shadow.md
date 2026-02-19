@@ -1,51 +1,51 @@
-# tests/core/unit/session/session-manager-multi-session.test.ts
-@source-hash: edaf4a5de47f4b32
-@generated: 2026-02-10T00:41:12Z
-
-This is a comprehensive test suite for the SessionManager's multi-session management capabilities, ensuring concurrent debugging sessions are properly isolated and managed.
+# tests\core\unit\session\session-manager-multi-session.test.ts
+@source-hash: 1be2ee4d3a5a06b5
+@generated: 2026-02-19T23:47:38Z
 
 ## Purpose
-Tests the SessionManager's ability to handle multiple simultaneous debugging sessions with proper state isolation, resource management, and error handling.
+Test suite for SessionManager's multi-session management capabilities using vitest. Validates concurrent session handling, state isolation, and bulk operations.
 
-## Test Setup (L10-33)
-- Uses Vitest framework with mocked dependencies
-- Creates fresh SessionManager instance per test with mock configuration (L18-26)
-- Configures fake timers for controlled async behavior testing
-- Uses createMockDependencies() utility and MockProxyManager for isolation
+## Test Structure
+- **Test Suite** (L10-171): "SessionManager - Multi-Session Management" 
+- **Setup/Teardown** (L15-33): Mock dependencies, fake timers, and cleanup
+- **Core Variables** (L11-13): sessionManager, dependencies, config instances
 
 ## Key Test Cases
 
-### Concurrent Session Management (L35-70)
-Tests creation and simultaneous operation of multiple debug sessions:
-- Creates 3 separate debugging sessions with unique names
-- Validates concurrent startDebugging operations across all sessions
-- Verifies each session maintains independent PAUSED state
+### Multi-Session Concurrency (L35-70)
+Tests creation and management of 3 concurrent debug sessions:
+- Creates sessions with MOCK language and unique names
+- Starts debugging on different files (test1.py, test2.py, test3.py)
+- Validates all sessions reach PAUSED state independently
+- Uses `vi.runAllTimersAsync()` for async timer resolution
 
 ### Session State Isolation (L72-106)
-Critical test ensuring proper separation between sessions:
+Validates independent session state management:
 - Creates separate MockProxyManager instances per session (L74-80)
-- Tests that state changes in one session don't affect others
-- Validates continue operation affects only targeted session while others remain paused
+- Uses `proxyManagerFactory.create` mock with counter-based selection
+- Tests that continuing one session doesn't affect others
+- Simulates DAP events (`simulateStopped`, `simulateEvent`) on specific proxies
 
-### Bulk Session Management (L108-130)
-Tests closeAllSessions() functionality:
-- Creates multiple active sessions
-- Verifies all sessions transition to STOPPED state
-- Confirms proper cleanup through proxy manager stop calls
+### Bulk Session Management (L108-170)
+Tests `closeAllSessions()` functionality:
+- **Happy Path** (L108-130): Closes multiple active sessions, validates cleanup
+- **Empty List** (L132-142): Handles no active sessions gracefully
+- **Error Handling** (L144-170): Continues cleanup despite individual session failures
 
-### Edge Cases
-- Empty session list handling in closeAllSessions (L132-142)
-- Error resilience during bulk session closure (L144-170)
+## Dependencies
+- **SessionManager/Config** (L5): Main class under test from session-manager.js
+- **Shared Types** (L6): DebugLanguage.MOCK, SessionState.PAUSED
+- **Test Utils** (L7-8): MockProxyManager and createMockDependencies helper
+- **Vitest** (L4): Testing framework with timer mocking
 
-## Key Dependencies
-- SessionManager from `../../../../src/session/session-manager.js`
-- DebugLanguage, SessionState from `@debugmcp/shared`
-- MockProxyManager and createMockDependencies test utilities
+## Test Patterns
+- Fake timer usage with `vi.useFakeTimers({shouldAdvanceTime: true})` (L16)
+- Mock proxy manager factory injection for session isolation
+- Promise.all() for concurrent operation validation (L63)
+- Error injection via mock rejection (L162)
 
-## Testing Patterns
-- Extensive use of vi.runAllTimersAsync() for async operation completion
-- Promise.all() for concurrent operation testing
-- Mock proxy manager simulation for DAP events
-- State verification through SessionManager.getSession() calls
-
-The tests ensure the SessionManager can reliably handle multiple concurrent debugging contexts without state leakage or resource conflicts.
+## Critical Validations
+- Session count verification via `getAllSessions().length` 
+- Individual session state checks via `getSession(id)?.state`
+- Proxy manager method call counting (`stopCalls`, L129)
+- Logger message verification for operational feedback

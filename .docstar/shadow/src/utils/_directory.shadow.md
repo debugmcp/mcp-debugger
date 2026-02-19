@@ -1,81 +1,90 @@
 # src\utils/
-@children-hash: aea0393aa01950c1
-@generated: 2026-02-15T09:01:27Z
+@children-hash: 3e8aa56128a0cba3
+@generated: 2026-02-19T23:48:18Z
 
-## Overview
+## Purpose
 
-The `src/utils` directory provides foundational utilities for the Debug MCP Server, serving as the infrastructure layer that enables cross-environment operation, robust error handling, and reliable data processing. These utilities form the backbone supporting the debug server's core proxy and session management functionality.
+The `src/utils` directory provides core utility infrastructure for the Debug MCP Server, focusing on cross-environment compatibility, robust error handling, and runtime type safety. This module serves as the foundation layer supporting debugging operations across host and container deployment modes.
 
-## Core Responsibilities
+## Key Components & Relationships
 
-**Cross-Environment Compatibility**: Enables seamless operation between host and container deployment modes through centralized path resolution and environment detection.
+### Path Resolution & Environment Handling
+- **container-path-utils.ts**: Central authority for all path resolution, providing deterministic transformation between host mode (passthrough) and container mode (workspace-prefixed paths)
+- **simple-file-checker.ts**: File existence validation that delegates to container-path-utils for consistent path handling policy
+- **language-config.ts**: Runtime language adapter control via environment variables for debugging scenarios
 
-**Error Management**: Provides consistent, descriptive error messaging with contextual information for debugging timeout and operational failures.
+### Error Management & Messaging
+- **error-messages.ts**: Centralized factory for timeout-related error messages across DAP requests, proxy initialization, step operations, and adapter readiness
+- **logger.ts**: Winston-based logging infrastructure with namespaced loggers, environment-aware console output, and dual transport strategy (console + rotating files)
 
-**File System Operations**: Offers optimized file reading with caching, binary detection, and source code context extraction for debugging scenarios.
+### Source Code Operations
+- **line-reader.ts**: High-performance file reading utility with LRU caching for extracting line context in breakpoints and stack traces, includes binary file detection and size limits
 
-**Type Safety & Validation**: Ensures runtime type safety at critical boundaries like IPC communication and data serialization.
-
-**Configuration & Logging**: Supports environment-driven configuration and structured logging across the application.
-
-## Key Components & Integration
-
-### Path Resolution System
-- **container-path-utils.ts**: Single source of truth for path handling across host/container modes
-- **simple-file-checker.ts**: File existence validation using centralized path resolution
-- Works together to ensure debug adapters receive properly resolved file paths
-
-### Error & Logging Infrastructure  
-- **error-messages.ts**: Centralized timeout error message factory
-- **logger.ts**: Winston-based logging with environment-specific behavior and console silencing
-- **type-guards.ts**: Comprehensive validation logging for type safety failures
-- Provides consistent error reporting and diagnostic information across all modules
-
-### File Processing Pipeline
-- **line-reader.ts**: Optimized source code reading with LRU caching and binary detection
-- **language-config.ts**: Runtime language adapter control via environment variables
-- Enables source context extraction for breakpoints and selective language support
-
-### Data Validation Layer
-- **type-guards.ts**: Runtime type validation for AdapterCommand and ProxyInitPayload structures
-- Protects IPC boundaries and ensures data integrity in proxy communications
+### Type Safety & Validation
+- **type-guards.ts**: Runtime type validation for critical IPC boundaries, validating `AdapterCommand` and `ProxyInitPayload` structures with comprehensive error handling and serialization utilities
 
 ## Public API Surface
 
-### Primary Entry Points
-- `createLogger(namespace, options)` - Logger factory for module-specific logging
-- `resolvePathForRuntime(inputPath, environment)` - Core path resolution for cross-environment compatibility
-- `createSimpleFileChecker()` - File existence validation factory
-- `LineReader` class - Source code context extraction with caching
-- `validateAdapterCommand()` / `validateProxyInitPayload()` - Type validation at IPC boundaries
-- `isLanguageDisabled(language)` - Runtime language support control
+### Path Resolution Entry Points
+- `resolvePathForRuntime(inputPath, environment)`: Core path transformation logic
+- `isContainerMode(environment)`: Environment detection
+- `createSimpleFileChecker()`: Factory for file existence checking
 
-### Supporting Utilities
-- `ErrorMessages` object - Timeout error message factories
-- `getDisabledLanguages()` - Environment-based language configuration
-- Type guard functions for runtime safety
-- Serialization utilities for safe data transport
+### Error & Logging Entry Points  
+- `ErrorMessages`: Factory object for timeout error message generation
+- `createLogger(namespace, options?)`: Winston logger factory with environment-aware configuration
+- `getLogger()`: Default logger singleton accessor
+
+### Source Code Access
+- `LineReader` class: Cached file reading with context extraction
+- `getLineContext()`: Primary method for retrieving line content with surrounding context
+- `getMultiLineContext()`: Stack trace line range extraction
+
+### Type Safety Entry Points
+- `validateAdapterCommand()`, `validateProxyInitPayload()`: Core validation functions
+- `serializeAdapterCommand()`, `deserializeAdapterCommand()`: Safe JSON handling
+- `createAdapterCommand()`: Type-safe command factory
 
 ## Internal Organization & Data Flow
 
-**Environment Detection** → **Path Resolution** → **File Operations** → **Error Handling** → **Logging**
+### Environment Detection Flow
+1. Environment variables (`MCP_CONTAINER`, `DEBUG_MCP_DISABLE_LANGUAGES`) determine runtime mode
+2. container-path-utils provides centralized path resolution policy
+3. All file operations route through this resolution layer
+4. simple-file-checker enforces path validation rules
 
-1. Environment detection (container vs host mode) drives path resolution strategy
-2. Centralized path resolution ensures consistent file access across deployment modes
-3. File operations (existence checks, content reading) use resolved paths
-4. Validation guards protect data integrity at system boundaries
-5. Structured logging and error messages provide diagnostic feedback
+### Error Handling Hierarchy
+1. Type validation at entry points (type-guards)
+2. Centralized error message generation (error-messages)
+3. Structured logging with environment-aware output (logger)
+4. Graceful degradation with informative error context
 
-## Critical Patterns
+### Caching & Performance
+- LineReader maintains LRU cache (20 files, 5min TTL) for source code access
+- Logger instances are singletons per namespace
+- Path resolution results flow through without caching (stateless)
 
-**Centralization**: Single sources of truth for path resolution, error messages, and validation logic prevent inconsistencies across the codebase.
+## Important Patterns & Conventions
 
-**Environment Awareness**: All utilities respect deployment context (host vs container) and can be configured via environment variables.
+### Cross-Environment Compatibility
+- All path operations must use `resolvePathForRuntime()` for consistency
+- Host mode requires absolute paths; container mode auto-prefixes workspace root
+- Environment detection via boolean flags rather than heuristics
 
-**Defensive Programming**: Comprehensive error handling, graceful degradation, and null safety throughout all utilities.
+### Defensive Programming
+- Type guards at all external boundaries with rich error context
+- Graceful degradation rather than throwing (file operations, binary detection)
+- Comprehensive parameter validation with structured error reporting
 
-**Performance Optimization**: Strategic caching (file content, logger instances) with TTL and size limits to handle repeated operations efficiently.
+### Logging & Debugging
+- Namespace-based logger organization for component isolation
+- Console output silencing (`CONSOLE_OUTPUT_SILENCED=1`) to prevent transport corruption
+- Detailed validation logging with timestamps and context
 
-**Testability**: Clean separation of concerns with dependency injection patterns and environment parameter overrides for unit testing.
+### Performance Considerations
+- LRU caching for repeated file access operations
+- Binary file detection to avoid processing unsuitable content
+- Size limits (10MB default) to prevent memory issues
+- Lazy initialization patterns for singleton resources
 
-The utils directory serves as the foundational layer that enables the debug server's higher-level proxy and session management components to operate reliably across different deployment environments while maintaining consistent error handling and logging behavior.
+This utility layer serves as the foundational infrastructure enabling reliable debugging operations across different deployment environments while maintaining type safety and performance.

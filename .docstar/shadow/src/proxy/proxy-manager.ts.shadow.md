@@ -1,75 +1,100 @@
-# src/proxy/proxy-manager.ts
-@source-hash: 3ed8cde34cbdcccb
-@generated: 2026-02-10T21:25:43Z
+# src\proxy\proxy-manager.ts
+@source-hash: b5325b85040ceaac
+@generated: 2026-02-19T23:47:54Z
 
-## ProxyManager - Debug Proxy Process Orchestrator
+## Primary Purpose
+ProxyManager orchestrates the lifecycle of debug proxy processes for a Debug Adapter Protocol (DAP) system. It spawns and communicates with child proxy processes that manage debugger adapters, providing a bridge between debug clients and language-specific debug adapters.
 
-**Primary Purpose:** Manages spawning, communication, and lifecycle of debug proxy processes that bridge between the debug MCP server and actual debuggers. Handles DAP (Debug Adapter Protocol) message routing with timeout management and state synchronization.
+## Key Classes and Interfaces
 
-### Core Architecture
+### ProxyManagerEvents Interface (L30-46)
+Defines typed events emitted by ProxyManager:
+- DAP lifecycle: 'stopped', 'continued', 'terminated', 'exited'
+- Proxy lifecycle: 'initialized', 'error', 'exit'
+- Status events: 'dry-run-complete', 'adapter-configured', 'dap-event'
 
-- **ProxyManager Class (L125-1059)**: Main orchestrator extending EventEmitter for async proxy process management
-- **IProxyManager Interface (L51-73)**: Contract defining proxy lifecycle and DAP request handling capabilities
-- **ProxyManagerEvents Interface (L30-46)**: Typed event system for DAP events, lifecycle events, and status notifications
+### IProxyManager Interface (L51-73)
+Core interface defining proxy manager contract:
+- `start(config: ProxyConfig)`: Initializes and spawns proxy process
+- `stop()`: Gracefully terminates proxy
+- `sendDapRequest<T>()`: Sends DAP commands to adapter via proxy
+- Thread management and status methods
+- Typed EventEmitter methods
 
-### Key Components
+### ProxyManager Class (L125-1062)
+Main implementation managing proxy process lifecycle:
 
-**State Management:**
-- `dapState` (L141): Functional core state from `@debugmcp/shared` for DAP session tracking
-- `pendingDapRequests` (L129-133): Map of outstanding DAP requests with Promise resolution callbacks
-- `activeLaunchBarrier` (L152): Optional adapter-provided launch synchronization mechanism
+**Key State:**
+- `proxyProcess: IProxyProcess | null` (L126): Child process handle
+- `sessionId: string | null` (L127): Debug session identifier
+- `pendingDapRequests` (L129-133): Map tracking DAP request/response correlation
+- `dapState: DAPSessionState` (L141): Functional core state for DAP operations
+- `activeLaunchBarrier: AdapterLaunchBarrier` (L152): Adapter synchronization
 
-**Process Lifecycle:**
-- `start()` (L171-304): Spawns proxy process, validates environment, sends initialization commands with retry logic
-- `stop()` (L306-350): Graceful shutdown with timeout fallback to SIGKILL
-- `setupEventHandlers()` (L667-736): Registers IPC message, stderr, and exit event handlers
+**Critical Methods:**
+- `start(config)` (L171-304): Spawns proxy, sends init command, waits for ready
+- `stop()` (L306-351): Graceful shutdown with timeout fallback
+- `sendDapRequest<T>()` (L353-437): Async DAP command dispatch with barriers
+- `handleProxyMessage()` (L739-836): Core message routing from proxy process
 
-**Communication Layer:**
-- `sendDapRequest()` (L352-436): Routes DAP commands to proxy with Promise-based response handling and timeouts
-- `handleProxyMessage()` (L738-835): Processes incoming proxy messages, delegates to functional core, executes side effects
-- `sendCommand()` (L610-665): Low-level IPC command sending with connection state debugging
+## Message Types and Protocol
 
-### Message Protocol
+### Proxy Message Types (L76-110)
+- `ProxyStatusMessage`: Status updates (init, dry-run, adapter events)
+- `ProxyDapEventMessage`: DAP events forwarded from adapter
+- `ProxyDapResponseMessage`: DAP command responses with success/error
+- `ProxyErrorMessage`: Error notifications from proxy
 
-**ProxyMessage Union Type (L110)**: Discriminated union of:
-- `ProxyStatusMessage` (L76-82): Process lifecycle status updates
-- `ProxyDapEventMessage` (L84-90): DAP events from debugger (stopped, continued, etc.)
-- `ProxyDapResponseMessage` (L92-101): DAP request responses
-- `ProxyErrorMessage` (L103-108): Error notifications
+### Message Handling Strategy
+- Fast-path DAP events (L774-776): Immediate forwarding to prevent missed stops
+- Functional core integration (L784-836): Uses pure functions from dap-core for state transitions
+- Imperative request tracking (L838-877): Maps request IDs to Promise resolvers
 
-### Integration Points
+## Dependencies and Architecture
 
-**Dependencies:**
-- `IProxyProcessLauncher` (L158): Abstracts proxy process spawning
-- `IDebugAdapter` (L157): Optional language-specific adapter for environment validation
-- `IFileSystem` & `ILogger` (L159-160): Infrastructure services
-- DAP core functions from `../dap-core/index.js` (L14-22) for state management
+**Core Dependencies:**
+- `@debugmcp/shared`: Interfaces for adapters, file system, logging
+- `../dap-core/index.js`: Functional DAP state management
+- `../utils/error-messages.js`: Centralized error messages
+- `./proxy-config.js`: Configuration types
 
-**Runtime Environment:**
-- `ProxyRuntimeEnvironment` (L112-115): Configurable module resolution for proxy script location
-- `findProxyScript()` (L498-531): Locates `proxy-bootstrap.js` with fallback paths for dev/dist layouts
+**Key Patterns:**
+- **Hybrid Architecture**: Combines functional core (dap-core) with imperative shell
+- **Event-Driven**: Extensive use of EventEmitter for lifecycle communication
+- **Process Management**: Sophisticated child process lifecycle with retry logic
+- **Request/Response Correlation**: UUID-based tracking of async DAP operations
 
-### Critical Features
+## Critical Implementation Details
 
-**Retry Logic:**
-- `sendInitWithRetry()` (L533-608): Exponential backoff for proxy initialization with detailed error reporting
+### Initialization Flow (L171-304)
+1. Validates configuration and spawns proxy process
+2. Sends init command with exponential backoff retry (L534-609)
+3. Waits for 'initialized' or 'dry-run-complete' events
+4. Handles early exit scenarios with stderr capture
 
-**Dry Run Support:**
-- Special handling for command preview mode without actual debugger spawning
-- `hasDryRunCompleted()` & `getDryRunSnapshot()` (L1046-1058): Query dry run results
+### Adapter Launch Barriers (L361-391, L1025-1047)
+Language-specific adapters can provide synchronization barriers for launch commands:
+- Fire-and-forget mode: Commands that don't need response
+- Barrier coordination: Wait for adapter readiness signals
 
-**Error Handling:**
-- Comprehensive stderr capture during initialization (L704-707)
-- Exit detail tracking with stderr context for diagnostics (L143-150)
-- Graceful handling of late IPC messages during shutdown (L740-743)
+### Error Handling and Robustness
+- Stderr buffering during initialization (L142, L705-708)
+- Exit detail capture with timestamps (L143-150, L714-719)
+- Graceful shutdown with force-kill timeout (L331-350)
+- Late message filtering after stop() (L741-744)
 
-**Thread Management:**
-- Opportunistic thread ID capture from DAP responses (L860-871)
-- Current thread tracking for multi-threaded debugging sessions
+### Dry Run Mode
+Special mode for command validation without execution:
+- Captures command snapshots for reporting (L138-139, L932-941)
+- Synthetic completion events on early exit (L975-985)
 
-### Invariants
+## State Management
 
-- Only one proxy process active per manager instance
-- DAP requests must have proxy initialized (`isInitialized = true`)
-- Pending requests cleaned up on proxy exit to prevent memory leaks
-- Launch barriers disposed properly to avoid resource leaks
+The ProxyManager maintains both imperative state (request tracking, process handles) and mirrors functional state from dap-core for observability. State transitions are driven by proxy messages with command execution handled imperatively (L788-811).
+
+## Notable Constraints
+
+- Single proxy process per manager instance
+- 35-second timeout for DAP requests
+- 30-second initialization timeout
+- Process cleanup prevents "unknown request" warnings during shutdown

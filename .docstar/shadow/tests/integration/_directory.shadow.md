@@ -1,43 +1,57 @@
 # tests\integration/
-@children-hash: 38233963cc914f6c
-@generated: 2026-02-15T09:01:32Z
+@children-hash: dba87af57d6bf56e
+@generated: 2026-02-19T23:48:25Z
 
-## Purpose
-Integration testing directory that validates end-to-end functionality of the debugging system, with current focus on Rust language debugging capabilities. This module serves as the final validation layer ensuring that debugging adapters work correctly in production-like scenarios with real dependencies and file system interactions.
+## Purpose and Responsibility
 
-## Key Components
-- **rust/**: Comprehensive Rust debugging integration test suite that validates the complete workflow from session creation through cleanup
-- **Test Infrastructure**: Production-grade dependency injection setup with isolated environments and comprehensive error handling
-- **Sequential Test Patterns**: Structured test flows that maintain state across test scenarios to validate complete debugging lifecycles
+The `tests/integration` directory contains comprehensive integration tests for the DebugMCP framework's language-specific debugging adapters. It serves as the primary validation layer for end-to-end debugging workflows, ensuring that the complete debugging infrastructure functions correctly from session creation through breakpoint management to resource cleanup across different programming languages.
+
+## Key Components and Integration
+
+**Language-Specific Test Suites**: Currently contains Rust integration testing with a structured approach that can be extended to other languages:
+
+- **Rust Integration Tests** (`rust/`): Complete end-to-end testing of Rust debugging capabilities including Cargo project recognition, DAP adapter configuration, and source-level debugging
+
+**Core Integration Points**:
+- **Session Management Testing**: Validates `SessionManager` lifecycle and persistence across debugging operations
+- **Adapter Configuration Validation**: Tests language-specific debugging adapter setup and DAP communication
+- **Breakpoint System Integration**: Verifies breakpoint setting, status verification, and graceful error handling
+- **Project Detection**: Tests language-specific project recognition and configuration (e.g., Cargo for Rust)
 
 ## Public API Surface
-The integration tests validate the following system capabilities:
-- **Debug Session Management**: Creation, configuration, and termination of debugging sessions
-- **Language-Specific Adapters**: Rust debugging adapter functionality with Cargo project support
-- **Breakpoint Operations**: Setting and managing breakpoints across different file scenarios
-- **Project Detection**: Language-specific project validation and configuration
-- **Resource Lifecycle**: Proper setup, execution, and cleanup of debugging resources
 
-## Internal Organization & Data Flow
-Integration tests follow a hierarchical structure organized by language:
-1. **Environment Isolation**: Each test suite creates isolated temporary directories and logging
-2. **Dependency Injection**: Uses production dependency container for realistic testing scenarios  
-3. **Sequential Validation**: Tests progress through debugging workflow stages maintaining shared state
-4. **Error Resilience**: Graceful handling of missing files and optional scenarios
-5. **Resource Cleanup**: Comprehensive teardown ensuring no test pollution
+**Main Test Entry Points**:
+- Language-specific test suites (e.g., `Rust Adapter Integration`) that provide comprehensive coverage for each supported debugging language
+- Integration test scenarios covering session creation, persistence, breakpoint management, and cleanup
 
-## Integration Points
-- **SessionManager**: Core orchestration component for debug session lifecycle
-- **File System**: Validates against example projects and handles missing file scenarios
-- **Logging Infrastructure**: Integrates with temporary logging for test isolation
-- **DAP Configuration**: Tests Debug Adapter Protocol settings and capabilities
-- **Language Detection**: Validates project type identification and adapter selection
+**Key Test Coverage Areas**:
+- Session lifecycle management with production dependencies
+- Language adapter configuration and DAP integration
+- Breakpoint operations with fallback handling
+- Resource management and cleanup verification
 
-## Testing Patterns & Conventions
-- **Production Dependencies**: Uses real dependency injection rather than mocks for authentic validation
-- **State Management**: Sequential tests share context through maintained session identifiers
-- **Async Operations**: Comprehensive async/await patterns with proper error propagation
-- **Graceful Degradation**: Optional test scenarios handle missing resources without failing entire suite
-- **Isolation Strategy**: Temporary directories and log files prevent cross-test interference
+## Internal Organization and Data Flow
 
-This directory ensures that debugging functionality works correctly in real-world scenarios, providing confidence that individual unit tests translate to working end-to-end debugging experiences.
+**Integration Test Architecture**:
+1. **Production Environment Testing**: Uses actual production `SessionManager` and dependency injection rather than mocks for realistic validation
+2. **Graceful Degradation**: Tests designed to pass even when example projects or compiled binaries are unavailable
+3. **Resource Isolation**: Temporary directory management ensures test isolation and prevents filesystem conflicts
+4. **Cross-Operation State**: Maintains session references across test methods to verify persistent state and lifecycle management
+
+**Dependency Integration Flow**:
+- Integrates with production `SessionManager` and core debugging infrastructure
+- Leverages shared language constants and utilities from `@debugmcp/shared`
+- Uses Node.js filesystem utilities for temporary resource management
+- Configures debug logging with custom locations for troubleshooting
+
+## Important Patterns and Conventions
+
+**Production Integration Testing**: Emphasizes testing with real production dependencies rather than mocks to validate actual system behavior and catch integration issues.
+
+**Language Extension Pattern**: Structured to support adding new language-specific test suites following the established Rust integration model.
+
+**Graceful Error Handling**: Implements try-catch patterns for optional test scenarios, allowing tests to pass when external dependencies (example projects, compilers) are unavailable.
+
+**Resource Management**: Consistent setup/teardown patterns with temporary directories and proper session cleanup to ensure test reliability and isolation.
+
+This directory serves as the critical validation layer for DebugMCP's multi-language debugging capabilities, ensuring that language adapters correctly integrate with the core debugging infrastructure and handle language-specific requirements effectively.

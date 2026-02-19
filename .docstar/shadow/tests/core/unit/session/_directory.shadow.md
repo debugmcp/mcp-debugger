@@ -1,92 +1,89 @@
 # tests\core\unit\session/
-@children-hash: 2eda2672297e1e17
-@generated: 2026-02-15T09:01:27Z
+@children-hash: 1a9e3b31ae3f19b3
+@generated: 2026-02-19T23:48:16Z
 
 ## Purpose
-Unit test suite for the SessionManager module, comprehensively testing the debugMCP system's core session management capabilities. Validates session lifecycle management, DAP (Debug Adapter Protocol) operations, error recovery, memory management, and multi-session scenarios through isolated unit tests.
+Comprehensive unit test suite for the SessionManager component of the debugMCP system. Tests all aspects of debug session lifecycle management, from creation through termination, with emphasis on edge cases, error recovery, and multi-session scenarios.
 
-## Test Organization
-This directory contains 10 test files, each focusing on specific aspects of SessionManager functionality:
+## Test Organization and Coverage
 
-### Core Functionality Tests
-- **session-manager-workflow.test.ts**: End-to-end integration workflows testing complete debug session lifecycles
-- **session-manager-state.test.ts**: State machine integrity validation for proper state transitions (CREATED → INITIALIZING → PAUSED/RUNNING → STOPPED/ERROR)
-- **session-manager-dap.test.ts**: Debug Adapter Protocol operations including breakpoints, stepping, variable inspection, and stack traces
+### Core Functionality Testing
+- **models.test.ts**: Tests session state mapping functions and model definitions, focusing on backward compatibility between legacy SessionState enum and new dual-state model (lifecycle + execution states)
+- **session-manager-workflow.test.ts**: Integration tests for complete debug workflows including session creation, debugging start/stop, breakpoint management, and stepping operations
+- **session-manager-integration.test.ts**: Cross-component integration testing covering event handling, logging, and session persistence
 
-### Error Handling & Resilience
-- **session-manager-error-recovery.test.ts**: Proxy crash recovery and timeout handling scenarios
-- **session-manager-edge-cases.test.ts**: Boundary conditions, error propagation, and failure modes
-- **session-manager-dry-run.test.ts**: Race conditions and timing issues in dry run operations
+### Debug Adapter Protocol (DAP) Operations
+- **session-manager-dap.test.ts**: Comprehensive testing of DAP operations including breakpoint management, stepping operations, variable inspection, and stack trace retrieval
+- **session-manager-state.test.ts**: State machine integrity testing ensuring proper state transitions and error handling throughout debug lifecycle
 
-### System Integration & Resource Management
-- **session-manager-integration.test.ts**: Cross-component behavior including event handling, logging, and session persistence
-- **session-manager-memory-leak.test.ts**: Event listener cleanup and memory leak prevention
-- **session-manager-multi-session.test.ts**: Concurrent session management and state isolation
+### Error Handling and Edge Cases
+- **session-manager-error-recovery.test.ts**: Proxy crash recovery and timeout handling validation
+- **session-manager-edge-cases.test.ts**: Comprehensive error scenario testing for robustness and graceful degradation
+- **session-manager-dry-run.test.ts**: Race condition testing specific to dry run operations with timing-sensitive behavior
 
-### Platform & Configuration
-- **session-manager-paths.test.ts**: Path resolution across different operating systems and formats
-- **models.test.ts**: Session state mapping and model definitions, including backward compatibility
+### Resource Management and Performance
+- **session-manager-memory-leak.test.ts**: Event listener cleanup validation to prevent memory leaks
+- **session-manager-multi-session.test.ts**: Concurrent session handling, state isolation, and bulk operations testing
 
-## Key Components & Architecture
+### Platform Compatibility
+- **session-manager-paths.test.ts**: Path resolution testing across different operating systems and path formats
 
-### SessionManager Under Test
-The primary system under test is SessionManager, which orchestrates:
-- Debug session lifecycle management through state machine
-- DAP protocol communication via ProxyManager
-- Event handling and forwarding from debug adapters
-- Resource cleanup and memory management
-- Multi-session concurrency and isolation
+### Test Infrastructure
+- **session-manager-test-utils.ts**: Centralized mock dependencies and setup utilities ensuring consistent test isolation across all SessionManager test suites
 
-### Mock Infrastructure
-Centralized through **session-manager-test-utils.ts**:
-- `createMockDependencies()`: Provides complete mock environment including ProxyManager, file system, logger, network manager
-- MockProxyManager: Simulates debug adapter communication with controllable behavior
-- Fake timers and event simulation for deterministic testing
+## Key Testing Patterns
 
-### State Management Testing
-Tests validate the dual-state model transition from legacy SessionState enum to separate lifecycle/execution states:
-- **Lifecycle States**: CREATED, ACTIVE, TERMINATED
-- **Execution States**: INITIALIZING, RUNNING, PAUSED, TERMINATED, ERROR
-- Bidirectional mapping functions for backward compatibility
+### Mock-Based Testing
+All tests use comprehensive mock dependencies via `createMockDependencies()` utility, providing:
+- MockProxyManager for DAP protocol simulation
+- Mock file system, logger, and network components
+- Fake timers for precise timing control in async operations
+- Mock environment and configuration management
 
-## Testing Patterns
+### State Management Validation
+Tests extensively validate session state transitions:
+- CREATED → INITIALIZING → PAUSED/RUNNING → STOPPED/ERROR
+- Bidirectional state mapping compatibility
+- Edge case handling for invalid state transitions
 
-### Isolation & Control
-- Extensive use of Vitest fake timers (`vi.useFakeTimers()`) for controlled async testing
-- Mock dependency injection prevents real system dependencies
-- Event simulation through mock proxy managers for predictable behavior
-
-### Comprehensive Coverage
-- Happy path workflows and error scenarios
-- Race conditions and timing edge cases
-- Memory leak prevention and resource cleanup
-- Cross-platform compatibility (Windows/Unix paths)
-- Concurrent session management
-
-### Error Resilience
-- Proxy crash recovery and restart capabilities
-- Timeout handling with graceful degradation
-- Event listener cleanup on failures
-- Proper error state transitions
+### Event-Driven Architecture Testing
+Validates event handling between SessionManager and proxy components:
+- Event forwarding and propagation
+- Cleanup of event listeners to prevent memory leaks
+- Race condition handling in event timing
 
 ## Critical Test Scenarios
 
-### Session Lifecycle
-Complete debug session workflows from creation through termination, including breakpoint management, stepping operations, and variable inspection.
+### Error Recovery and Resilience
+- Proxy crashes and restart capability
+- DAP command timeouts and failures
+- Network errors and connection issues
+- Partial failure handling with continued operation
 
-### Error Recovery
-Proxy process crashes, network timeouts, DAP command failures, and cleanup after errors to ensure system stability.
+### Multi-Session Management
+- Concurrent session creation and management
+- Session state isolation
+- Bulk operations (closeAllSessions)
+- Resource cleanup across multiple sessions
 
-### Concurrency
-Multiple simultaneous debugging sessions with proper state isolation and resource management without conflicts.
+### Performance and Resource Management
+- Memory leak prevention through proper cleanup
+- Event listener management
+- Timer-based operation testing
+- Resource allocation and deallocation
 
-### Memory Management
-Event listener attachment/removal, cleanup on session close, and prevention of memory leaks during repeated session cycles.
+## Dependencies and Infrastructure
+- **Vitest**: Primary testing framework with fake timer support
+- **@debugmcp/shared**: Shared types and enums for state management
+- **Mock Utilities**: Centralized mocking infrastructure for consistent test isolation
+- **SessionManager**: Core class under test from session management module
 
-## Dependencies
-- **SessionManager**: Main class under test from `../../../../src/session/session-manager.js`
-- **@debugmcp/shared**: Provides enums (DebugLanguage, SessionState) and type definitions
-- **Vitest**: Test framework with comprehensive mocking and timing control
-- **Mock utilities**: Centralized test doubles for all external dependencies
+## Architectural Validation
+Tests validate key architectural decisions:
+- Separation of session lifecycle from execution state
+- DAP protocol abstraction and error handling
+- Event-driven communication patterns
+- Path resolution delegation to server level
+- Dependency injection for testability
 
-This test suite ensures SessionManager's reliability as the core orchestrator of debugging sessions in the debugMCP system, validating both normal operations and exceptional conditions across various usage patterns.
+This test suite ensures the SessionManager component is robust, performant, and reliable across all supported debugging scenarios and failure modes.

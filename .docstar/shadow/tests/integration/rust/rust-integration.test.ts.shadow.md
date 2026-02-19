@@ -1,35 +1,37 @@
-# tests/integration/rust/rust-integration.test.ts
-@source-hash: c0d7e30098b575a7
-@generated: 2026-02-10T01:18:53Z
+# tests\integration\rust\rust-integration.test.ts
+@source-hash: 5221791c32095f4f
+@generated: 2026-02-19T23:47:41Z
 
-## Purpose
-Integration test suite for the Rust debugging adapter, validating session management, breakpoint setting, and Cargo project handling using the vitest testing framework.
+**Purpose**: Integration test suite for the Rust debugging adapter, verifying session creation, breakpoint management, and session lifecycle for Rust projects using the DebugMCP framework.
 
-## Test Structure
-- **Main Test Suite** (L11-85): "Rust Adapter Integration" - comprehensive test suite for Rust debugging functionality
-- **Setup/Teardown** (L15-34): Creates production dependencies with temporary logging, initializes SessionManager with test configuration
-- **Session Creation Test** (L36-47): Validates basic Rust debug session creation and property verification
-- **Cargo Project Test** (L49-56): Verifies session retrieval and language validation for Cargo-based projects
-- **Breakpoint Test** (L58-76): Tests breakpoint setting in Rust source files with graceful failure handling
-- **Session Cleanup Test** (L78-84): Validates proper session closure and state management
+**Test Structure**:
+- **Main test suite** (L11-85): `Rust Adapter Integration` using Vitest framework
+- **Setup/teardown**: `beforeAll` (L15-30) initializes SessionManager with temp directories and debug logging; `afterAll` (L32-34) cleans up all sessions
+- **Session lifecycle tests**: Create session (L36-47), verify Cargo project handling (L49-56), test breakpoints (L58-76), close session (L78-84)
 
-## Key Dependencies
-- `SessionManager` from session management module - core debugging session orchestration
-- `createProductionDependencies` from dependency injection container
-- `DebugLanguage.RUST` from shared debugging constants
-- Standard Node.js modules: `path`, `os` for file system operations
+**Key Dependencies**:
+- `SessionManager` from `../../../src/session/session-manager.js` - Core debugging session management
+- `createProductionDependencies` from `../../../src/container/dependencies.js` - Dependency injection setup
+- `DebugLanguage.RUST` from `@debugmcp/shared` - Language constant for Rust debugging
+- Standard Node.js modules: `path`, `os` for temp directory handling
 
-## Test Configuration
-- **Logging**: Debug level with temporary log file (`rust-integration-test.log`)
-- **Session Storage**: Temporary directory for session data isolation
-- **DAP Settings**: Stop on entry and just-my-code debugging enabled
-- **Test File**: References `examples/rust/hello_world/src/main.rs` for breakpoint testing
+**Test Configuration**:
+- Uses temporary directories for logs and session data to avoid filesystem conflicts
+- Enables debug logging with custom log file location
+- Configures DAP launch args with `stopOnEntry: true` and `justMyCode: true`
 
-## Error Handling Patterns
-- Graceful degradation for missing test files (L62-75)
-- Proper async/await usage throughout
-- Resource cleanup via afterAll hook (L32-34)
-- Try-catch blocks for optional test scenarios
+**Notable Patterns**:
+- **Graceful degradation**: Breakpoint test (L63-75) uses try-catch to handle missing test files without failing the suite
+- **Session state tracking**: Stores `sessionId` (L13, 46) for cross-test session manipulation
+- **Example project reference**: Uses hardcoded path `examples/rust/hello_world/src/main.rs` for breakpoint testing
 
-## Test Flow Dependencies
-Tests maintain state through `sessionId` variable, creating a sequential dependency chain: creation → validation → breakpoint setting → cleanup.
+**Test Verification Points**:
+- Session creation with correct language and name assignment
+- Session retrieval and persistence across test methods
+- Breakpoint setting with verification status (when test files available)
+- Proper session cleanup and removal from manager
+
+**Architectural Notes**:
+- Tests focus on adapter integration rather than full Rust debugging workflow
+- Designed to work with or without compiled Rust binaries present
+- Uses production dependencies in test environment for realistic integration testing

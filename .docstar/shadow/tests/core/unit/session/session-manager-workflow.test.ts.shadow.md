@@ -1,50 +1,53 @@
-# tests/core/unit/session/session-manager-workflow.test.ts
-@source-hash: da0dc42352e65cec
-@generated: 2026-02-10T00:41:20Z
+# tests\core\unit\session\session-manager-workflow.test.ts
+@source-hash: 9aa0c653cbb79e6e
+@generated: 2026-02-19T23:47:37Z
 
 ## Purpose
-End-to-end integration test suite for SessionManager debug session workflows, validating complete debugging cycles including session creation, debugging start/stop, breakpoint management, and stepping operations.
+Unit test file for SessionManager debug session workflow integration testing. Tests complete debug cycles including session creation, debugging start/stop, breakpoint management, and stepping operations.
 
 ## Test Structure
-- **Main test suite** (L9-149): "SessionManager - Debug Session Workflow"
-- **Setup/teardown** (L14-32): Configures fake timers, mock dependencies, and SessionManager instance
-- **Complete Debug Cycle tests** (L34-148): Three workflow scenarios
+- Main test suite: `SessionManager - Debug Session Workflow` (L9-149)
+- Uses vitest framework with mocked dependencies via `createMockDependencies()` (L16)
+- Fake timers enabled for async operation control (L15, L58, L100, L139)
 
-## Key Test Scenarios
+## Key Test Components
 
-### Full Debug Workflow Test (L35-83)
-Tests complete debugging lifecycle:
-- Session creation with MOCK language (L37-47)
-- Debug start with stopOnEntry=true (L50-62)
-- Breakpoint setting and verification (L65-72)
-- Step over execution (L75-77)
-- Session cleanup and state verification (L80-82)
+### Setup/Teardown (L14-32)
+- `beforeEach`: Creates mock dependencies, configures SessionManager with test config including logDirBase and defaultDapLaunchArgs
+- `afterEach`: Resets timers, clears mocks, and resets proxy manager state
+
+### Complete Debug Cycle Test (L35-83)
+Primary integration test covering full workflow:
+1. Session creation with MOCK language (L37-47)
+2. Debug start with stopOnEntry=true (L50-62) 
+3. Breakpoint setting and verification (L65-72)
+4. Step over operation (L75-77)
+5. Session cleanup and closure (L80-82)
 
 ### Dry Run Workflow Test (L85-114)
-Validates dry run execution mode:
-- Creates session and starts debugging in dry run mode (L92-98)
-- Verifies dry run flag propagation (L104, L113)
-- Ensures no proxy initialization errors (L108-110)
+Tests dry run debugging mode:
+- Verifies dry run flag propagation to proxy manager (L113)
+- Confirms session ends in STOPPED state without initialization errors (L105, L108-110)
 
-### StopOnEntry=false Workflow Test (L116-147)
-Tests non-breaking execution start:
-- Custom mock configuration for continuous execution (L123-130)
-- Verifies RUNNING state instead of PAUSED (L143)
-- Confirms stopOnEntry parameter propagation (L146)
+### stopOnEntry=false Workflow Test (L116-147)
+Tests non-blocking debug start:
+- Mocks proxy behavior for continuous running (L123-130)
+- Verifies session reaches RUNNING state instead of PAUSED (L143)
+- Validates stopOnEntry parameter passing (L146)
 
 ## Dependencies
-- **SessionManager**: Primary class under test from session-manager.js
-- **Mock utilities**: createMockDependencies() provides test doubles
-- **Shared types**: DebugLanguage.MOCK, SessionState enums
-- **Vitest**: Test framework with timer mocking capabilities
+- SessionManager and SessionManagerConfig from session-manager.js
+- DebugLanguage, SessionState from @debugmcp/shared
+- Mock utilities from session-manager-test-utils.js
+- Vitest testing framework
 
-## Test Configuration
-- Base log directory: '/tmp/test-sessions' (L18)
-- Default DAP launch args: stopOnEntry=true, justMyCode=true (L19-22)
-- Mock language used throughout for predictable behavior
+## Test Patterns
+- Heavy use of mock proxy manager for DAP protocol simulation
+- Timer manipulation for async workflow control
+- State transition verification at each workflow step
+- Error condition validation (dry run error checking)
 
-## Key Assertions
-- State transitions: CREATED → PAUSED/RUNNING → STOPPED
-- Breakpoint verification and DAP command validation
-- Proxy manager interaction verification
-- Error condition absence validation
+## Architecture Notes
+- Tests integration between SessionManager and proxy manager layer
+- Validates DAP protocol request/response patterns
+- Ensures proper session state management throughout debug lifecycle
