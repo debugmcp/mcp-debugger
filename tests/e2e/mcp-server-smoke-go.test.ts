@@ -221,7 +221,7 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       console.log('[Go Smoke Test] Debug started, state:', startResponse.state);
 
       // Wait for execution
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // 4. Get stack trace
       console.log('[Go Smoke Test] Getting stack trace...');
@@ -237,7 +237,7 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       
       // Wait for script to complete
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
     } finally {
       // Clean up test binary
@@ -250,6 +250,6 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
         // Ignore cleanup errors
       }
     }
-  });
+  }, 60000); // Go build + Delve startup needs more than the default 30s timeout
 });
 
