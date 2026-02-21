@@ -15,7 +15,7 @@ The most critical aspect for successful integration was understanding the specif
     *   **Important**: Attempting to send `configurationDone` *before* the `launch` request (and subsequent `initialized` event) will result in a DAP error from `debugpy.adapter` stating that `configurationDone` is only allowed during the handling of a `launch` or `attach` request.
 7.  **Debugging Commences**: The debugging session is now fully active. The script might be paused (e.g., at `stopOnEntry` or an early breakpoint), and the client can send further DAP commands (step, continue, get variables, etc.).
 
-This sequence is implemented in `src/proxy/dap-proxy.ts` within the `startDebugpyAdapterAndSequence` and `setupDapEventHandlers` (specifically the `client.on('initialized', ...)` handler) functions.
+This sequence is implemented across the refactored proxy modules: `src/proxy/dap-proxy-worker.ts` handles the proxy worker lifecycle, `src/proxy/dap-proxy-core.ts` contains the core DAP message processing logic, and `src/proxy/dap-proxy-connection-manager.ts` manages the adapter connection. Event handling follows the policy-based approach via `AdapterPolicy` (defined in `packages/shared/src/interfaces/adapter-policy.ts`), where each language adapter provides a policy that governs initialization sequencing, command queueing, and state transitions.
 
 ## Scope Resolution and Variable Inspection
 

@@ -6,7 +6,7 @@ This guide will walk you through testing the Debug MCP Server locally with a sim
 
 1. Make sure you've completed installation:
    ```
-   npm install
+   pnpm install
    npm run build
    ```
 
@@ -41,7 +41,7 @@ In a new conversation with Claude, try these prompts:
    ```
    Set a breakpoint in examples/python/fibonacci.py at line 21
    ```
-   (Line 21 is inside the recursive fibonacci function)
+   (Line 21 is inside the `fibonacci_iterative` function)
 
 3. **Start debugging**:
    ```

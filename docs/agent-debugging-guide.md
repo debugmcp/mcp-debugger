@@ -91,6 +91,8 @@ session_id = create_debug_session(language="python")
 
 # 2. Set breakpoint
 set_breakpoint(sessionId=session_id, file="/path/to/test.py", line=3)
+# Note: Python breakpoints initially report as unverified; they are
+# verified asynchronously by debugpy once the module is loaded.
 
 # 3. Start debugging
 start_debugging(sessionId=session_id, scriptPath="/path/to/test.py")
@@ -109,9 +111,11 @@ if vars.get("variablesReference"):
     actual_vars = get_variables(sessionId=session_id, scope=vars["variablesReference"])
     # Now returns: [{"name":"a","value":"1"}, {"name":"b","value":"2"}, ...]
 
-# 7. Evaluate expressions
+# 7. Evaluate expressions (expression-only — statements are rejected by debugpy)
 evaluate_expression(sessionId=session_id, expression="a")  # Returns: "1"
 evaluate_expression(sessionId=session_id, expression="a + b")  # Returns: "3"
+# Note: Python eval only accepts expressions, not statements.
+# For example, "a + b" works but "a = 5" will be rejected.
 ```
 
 ## Common Issues and Solutions

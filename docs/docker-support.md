@@ -21,7 +21,7 @@ chmod +x docker-build.sh
 
 ### Building Manually
 ```bash
-docker build -t mcp-debugger:local .
+docker build -t debug-mcp-server .
 ```
 
 ## IMPORTANT: Mount Path Requirement
@@ -43,7 +43,7 @@ The Debug MCP Server uses a **TRUE HANDS-OFF** approach to path handling. When r
 Once the image is built, you can run the server with volume mounts:
 
 ```bash
-docker run -i --rm -v /path/to/your/project:/workspace:rw mcp-debugger:local
+docker run -i --rm -v /path/to/your/project:/workspace:rw debug-mcp-server
 ```
 
 ### Recommended Configuration for Claude
@@ -63,7 +63,7 @@ Here's the recommended configuration for your MCP settings file:
         "/path/to/your/project:/workspace:rw",
         "-v",
         "/path/to/temp:/tmp:rw",
-        "mcp-debugger:local",
+        "debug-mcp-server",
         "stdio",
         "--log-level",
         "debug",
@@ -72,17 +72,24 @@ Here's the recommended configuration for your MCP settings file:
       ],
       "autoApprove": [
         "create_debug_session",
-        "close_debug_session",
         "list_debug_sessions",
+        "list_supported_languages",
+        "close_debug_session",
+        "set_breakpoint",
         "start_debugging",
-        "get_stack_trace",
-        "get_variables",
-        "continue_execution",
-        "get_scopes",
+        "attach_to_process",
+        "detach_from_process",
         "step_over",
         "step_into",
         "step_out",
-        "set_breakpoint"
+        "continue_execution",
+        "pause_execution",
+        "get_variables",
+        "get_local_variables",
+        "get_stack_trace",
+        "get_scopes",
+        "evaluate_expression",
+        "get_source_context"
       ],
       "disabled": false,
       "timeout": 60
@@ -120,7 +127,7 @@ To use both servers together, configure them in your MCP settings:
         "-i",
         "-v",
         "/path/to/your/project:/workspace:rw",
-        "mcp-debugger:local",
+        "debug-mcp-server",
         "stdio"
       ],
       "disabled": false,
@@ -163,7 +170,7 @@ If you need to debug files from multiple locations, you can mount multiple direc
   "/path/to/project1:/workspace/project1:rw",
   "-v",
   "/path/to/project2:/workspace/project2:rw",
-  "mcp-debugger:local",
+  "debug-mcp-server",
   "stdio"
 ]
 ```
@@ -175,7 +182,7 @@ Then reference files as `project1/file.py` or `project2/script.js`.
 To expose the debugpy port for remote debugging:
 
 ```bash
-docker run -i --rm -p 5678:5678 -v /path/to/project:/workspace:rw mcp-debugger:local
+docker run -i --rm -p 5679:5679 -v /path/to/project:/workspace:rw debug-mcp-server
 ```
 
 In the MCP settings:
@@ -185,10 +192,10 @@ In the MCP settings:
   "-i",
   "--rm",
   "-p",
-  "5678:5678",
+  "5679:5679",
   "-v",
   "/path/to/project:/workspace:rw",
-  "mcp-debugger:local"
+  "debug-mcp-server"
 ]
 ```
 
@@ -198,7 +205,7 @@ The Dockerfile for the Debug MCP Server:
 
 1. Uses Node.js 20-slim for building
 2. Creates a bundled application in `/app`
-3. Uses Python 3.11-alpine for runtime (smaller image)
+3. Uses Ubuntu 24.04 for runtime
 4. Installs Python 3 and debugpy
 5. Sets necessary environment variables
 6. The application runs from `/app`, keeping `/workspace` free for user mounts
@@ -233,7 +240,7 @@ This ensures all dependencies needed for both Node.js execution and Python debug
 2. **Port already in use**:
    - If port 5678 is already in use, you can map to a different port:
    ```
-   docker run -i --rm -p 5679:5678 mcp-debugger:local
+   docker run -i --rm -p 5679:5678 debug-mcp-server
    ```
 
 3. **Build failures**:

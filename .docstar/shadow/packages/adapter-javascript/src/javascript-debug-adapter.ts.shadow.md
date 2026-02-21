@@ -1,101 +1,111 @@
-# packages/adapter-javascript/src/javascript-debug-adapter.ts
-@source-hash: e92d8d2d9baf2dce
-@generated: 2026-02-10T01:19:19Z
+# packages\adapter-javascript\src\javascript-debug-adapter.ts
+@source-hash: bf389ee512ea16e2
+@generated: 2026-02-21T08:28:28Z
 
-## JavascriptDebugAdapter
+## Primary Purpose
+JavaScript/TypeScript Debug Adapter implementation that integrates with the VS Code Debug Adapter Protocol (DAP) through the debugmcp framework. This adapter wraps Microsoft's js-debug adapter and provides JavaScript/TypeScript-specific debugging capabilities including TypeScript compilation, runtime detection, and configuration transformation.
 
-Primary JavaScript/TypeScript debug adapter implementation that wraps the vendored VS Code js-debug adapter in a standardized interface for the DebugMCP framework.
+## Key Classes & Functions
 
-### Core Architecture
+### JavascriptDebugAdapter (L35-806)
+Main adapter class extending EventEmitter and implementing IDebugAdapter interface. Manages the complete lifecycle of JavaScript/TypeScript debugging sessions.
 
-**JavascriptDebugAdapter class (L35-810)** extends EventEmitter and implements IDebugAdapter
-- Language: 'javascript' (cast to DebugLanguage due to type limitations)
-- Manages state transitions through AdapterState enum
-- Provides TCP-only transport mode for proxy infrastructure
-- Handles both JavaScript and TypeScript debugging with automatic runtime detection
+**Core State Management:**
+- `getState()` (L116): Returns current adapter state (UNINITIALIZED, READY, CONNECTED, etc.)
+- `isReady()` (L120): Checks if adapter is in operational state
+- `transitionTo()` (L139): Internal state transition with event emission
+- `initialize()` (L56): Validates environment and transitions to READY state
+- `dispose()` (L93): Cleanup method clearing caches and emitting lifecycle events
 
-### Key Components
+**Environment Validation:**
+- `validateEnvironment()` (L147): Checks for js-debug adapter availability at multiple possible paths
+- `getRequiredDependencies()` (L200): Returns Node.js dependency information
+- `resolveExecutablePath()` (L213): Finds and caches Node.js executable with memoization
 
-**State Management (L40-44, L117-144)**
-- `state`: Current adapter state (UNINITIALIZED → INITIALIZING → READY → CONNECTED → DEBUGGING)
-- `connected`: Connection status flag
-- `currentThreadId`: Active debugging thread tracking
-- `transitionTo()` (L140-144): State transition with event emission
+**Adapter Command Building:**
+- `buildAdapterCommand()` (L243): Constructs command to launch js-debug adapter in TCP mode
+- `getAdapterModuleName()` (L332): Returns 'js-debug' identifier
+- Searches multiple paths for vendored js-debug including container-specific locations
 
-**Caching Layer (L46-48)**
-- `cachedNodePath`: Memoized Node.js executable path
-- `cachedTsRunners`: Cached TypeScript runtime detection results
+**Launch Configuration Transformation:**
+- `transformLaunchConfig()` (L342): Converts generic config to js-debug-specific configuration
+- Handles TypeScript detection via file extensions (.ts, .tsx, .mts, .cts)
+- Manages runtime executable selection (node, tsx, ts-node)
+- Configures source maps, outFiles, and skip patterns
+- Processes environment variables and runtime arguments
 
-**Lifecycle Methods**
-- `initialize()` (L57-92): Environment validation, dependency checking, state transition
-- `dispose()` (L94-113): Cleanup runtime state, clear caches, emit lifecycle events
-- `validateEnvironment()` (L148-199): Checks for vendored js-debug adapter availability
+**DAP Protocol Handling:**
+- `sendDapRequest()` (L580): Stub for DAP requests (transport handled by ProxyManager)
+- `handleDapEvent()` (L611): Processes DAP events including 'stopped', 'output', 'terminated'
+- `handleDapResponse()` (L651): No-op response handler
+- Updates internal state based on debugging events
 
-**Executable Resolution (L213-241)**
-- `resolveExecutablePath()` (L214-231): Node.js path resolution with caching
-- `getExecutableSearchPaths()` (L237-240): PATH-based search locations
+**Connection Management:**
+- `connect()` (L657): Establishes connection state and emits events
+- `disconnect()` (L665): Cleans up connection state
+- `isConnected()` (L673): Returns connection status
 
-**Adapter Command Building (L244-331)**
-- `buildAdapterCommand()`: Constructs Node.js command to launch vendored js-debug
-- Searches multiple possible paths for vsDebugServer.cjs/js
-- Validates TCP port requirement (proxy infrastructure constraint)
-- Sets NODE_OPTIONS with memory limits
+**Feature Support:**
+- `supportsFeature()` (L711): Declares support for conditional breakpoints, function breakpoints, etc.
+- `getCapabilities()` (L742): Returns comprehensive DAP capabilities including exception filters
+- `getFeatureRequirements()` (L727): Provides requirements for specific features
 
-**Launch Configuration Transform (L343-553)**
-- `transformLaunchConfig()`: Converts generic config to js-debug specific format
-- Automatic TypeScript detection via file extensions (.ts, .tsx, .mts, .cts)
-- Runtime selection priority: user override → tsx → ts-node → node
-- Synchronous execution with fallbacks (cannot use async in interface)
-- ESM project detection and loader configuration
-- Source map and outFiles handling
-- Node inspector flag normalization
+## Key Dependencies & Relationships
 
-**Configuration Utilities (L555-798)**
-- `normalizeBinary()` (L555-564): Path normalization for cross-platform compatibility
-- `isNodeRuntime()` (L566-570): Runtime type detection
-- `normalizeAndDedupeArgs()` (L763-791): Argument deduplication for -r and --loader flags
-- `hasPairArgs()` (L793-798): Flag-value pair detection
+**External Dependencies:**
+- `@vscode/debugprotocol`: DAP protocol types
+- `@debugmcp/shared`: Core adapter interfaces and types
+- Node.js built-ins: events, path, fs, url
 
-**DAP Protocol Handling (L583-657)**
-- `sendDapRequest()` (L583-612): Request preprocessing with path resolution
-- `handleDapEvent()` (L614-652): Event processing for state management and thread tracking
-- Automatic output event category assignment
-- Thread ID extraction from 'stopped' events
+**Internal Utilities:**
+- `./utils/executable-resolver.js`: findNode() for Node.js discovery
+- `./utils/typescript-detector.js`: TypeScript runner detection (tsx, ts-node)
+- `./utils/config-transformer.js`: Configuration analysis (outFiles, ESM detection, tsconfig paths)
+- `./utils/js-debug-launch-barrier.js`: Launch synchronization
 
-**Connection Management (L660-678)**
-- `connect()` (L660-666): Mock connection with state transition
-- `disconnect()` (L668-674): Connection cleanup
-- Transport handled by external ProxyManager
+**Key Interfaces Implemented:**
+- `IDebugAdapter`: Core adapter contract
+- `EventEmitter`: Event-driven architecture for state changes
 
-**Feature Support (L714-761)**
-- Comprehensive DAP feature support including conditional breakpoints, log points, exception handling
-- Exception breakpoint filters for uncaught and user-unhandled exceptions
-- Conservative capability reporting
+## Notable Patterns & Architectural Decisions
 
-### Dependencies
+**Memoization Strategy:**
+- Caches Node.js executable path (`cachedNodePath`) and TypeScript runners (`cachedTsRunners`) per instance
+- Provides deterministic behavior with explicit cache invalidation in dispose()
 
-**External Imports**
-- `@vscode/debugprotocol`: DAP type definitions
-- `@debugmcp/shared`: Core framework types and enums
-- Local utilities: executable-resolver, typescript-detector, config-transformer, launch-barrier
+**Synchronous Configuration Transform:**
+- `transformLaunchConfig()` must be synchronous per interface contract
+- Uses `detectBinary()` for synchronous file system checks instead of async alternatives
+- Balances comprehensive configuration with interface constraints
 
-**Key Utilities**
-- `findNode()` (L30): Node.js executable discovery
-- `detectTsRunnersUtil()` (L31): TypeScript runtime detection
-- `determineOutFiles()`, `isESMProject()`, `hasTsConfigPaths()` (L32): Configuration analysis
-- `JsDebugLaunchBarrier` (L33): Launch coordination
+**Multi-Path Vendoring:**
+- Searches multiple locations for js-debug adapter to support different deployment scenarios
+- Handles development, container, and bundled distributions
 
-### Critical Constraints
+**Runtime Detection Hierarchy:**
+- Prioritizes user overrides → tsx detection → ts-node detection → Node.js fallback
+- Normalizes binary paths for cross-platform compatibility
 
-1. **TCP Transport Only**: Adapter port validation required for proxy infrastructure
-2. **Synchronous Config Transform**: Interface limitation prevents async detection in transformLaunchConfig
-3. **Vendored js-debug Dependency**: Must find vsDebugServer.cjs in specific paths
-4. **Container Mode Support**: Handles MCP_CONTAINER and MCP_WORKSPACE_ROOT environment variables
-5. **TypeScript Auto-Detection**: Automatic runtime and loader selection based on file extensions and project configuration
+**Idempotent Argument Processing:**
+- `normalizeAndDedupeArgs()` (L760): Prevents duplicate runtime arguments
+- `hasPairArgs()` (L790): Checks for existing flag-value pairs before addition
 
-### Error Handling
+## Critical Invariants & Constraints
 
-**Error Translation (L696-710)**
-- Maps common Node.js errors (ENOENT, EACCES) to user-friendly messages
-- TypeScript module detection for missing dependency guidance
-- Installation instructions with specific commands
+- TCP mode is required by proxy infrastructure (validates non-zero adapterPort)
+- js-debug must be vendored and accessible before adapter can function
+- TypeScript detection based purely on file extensions
+- State transitions must emit appropriate events for consumer synchronization
+- Environment validation must be recoverable to allow retry scenarios
+- All path operations must be cross-platform compatible
+
+## Private Helper Methods
+
+**Runtime Analysis:**
+- `normalizeBinary()` (L552): Cross-platform path normalization
+- `isNodeRuntime()` (L563): Identifies Node.js executables by basename
+- `detectTypeScriptRunners()` (L799): Async TypeScript runner discovery with caching
+
+**Error Translation:**
+- `translateErrorMessage()` (L693): Converts technical errors to user-friendly messages
+- `getMissingExecutableError()` (L689): Standard Node.js installation guidance

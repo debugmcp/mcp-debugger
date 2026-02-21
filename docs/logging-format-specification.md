@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the structured logging format used by mcp-debugger for visualization purposes. All logs are written to `logs/debug-mcp-server.log` in JSON format for easy parsing by the Terminal UI visualizer.
+This document defines the structured logging format used by mcp-debugger for visualization purposes. All logs are written to `logs/debug-mcp-server.log` in JSON format for easy parsing by the Terminal UI visualizer. In container mode (`MCP_CONTAINER=true`), logs are written to `/app/logs/debug-mcp-server.log` instead.
 
 ## Log Entry Types
 
@@ -313,7 +313,7 @@ To prevent excessively large log entries:
 
 2. **Batching**: Consider buffering logs for high-frequency events
 
-3. **File Rotation**: Implement log rotation to prevent unbounded growth
+3. **File Rotation**: File rotation is already implemented: 50MB per file, 3 rotated files maximum (150MB total). The newest logs are always in the base filename (`tailable: true`).
 
 ## Security Considerations
 

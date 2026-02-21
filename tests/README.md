@@ -54,14 +54,14 @@ act -W .github/workflows/release.yml -j build-and-test
 ### Act Configuration
 
 The project includes an `.actrc` file with optimized settings:
-- Uses full Docker-enabled runner images (`catthehacker/ubuntu:full-22.04`)
+- Uses Docker-enabled runner images (`catthehacker/ubuntu:act-latest`)
 - Enables `--bind` for proper volume mounting
 - Enables `--privileged` for Docker daemon access
 - Sets container architecture for cross-platform compatibility
 
 ## Running Tests Directly
 
-The project uses Jest/Vitest as the testing framework. There are several scripts available to run tests:
+The project uses Vitest as the testing framework. There are several scripts available to run tests:
 
 ### Run All Tests
 
@@ -123,11 +123,15 @@ tests/
 ├── integration/         # Integration tests
 ├── mocks/               # Mock implementations for testing
 ├── runners/             # Test runner scripts
+├── test-utils/          # Test utility functions and helpers
+│   ├── helpers/         # Helper scripts (port-manager, test-setup, etc.)
+│   ├── mocks/           # Mock implementations (dap-client, logger, etc.)
+│   └── fixtures/        # Test fixtures (python scripts, etc.)
 ├── unit/                # Unit tests
 │   ├── debugger/        # Tests for debugger components
 │   ├── session/         # Tests for session management
 │   └── utils/           # Tests for utility functions
-└── utils/               # Test utility functions
+└── vitest.setup.ts      # Vitest setup configuration
 ```
 
 ## Writing Tests
@@ -172,7 +176,7 @@ Tests requiring Python need the Python interpreter to be available. Ensure your 
 Many operations in the Debug MCP Server are asynchronous. When testing:
 
 - Always await async functions
-- Use Jest's async test support (async/await in test functions)
+- Use Vitest's async test support (async/await in test functions)
 - Be careful with timeouts
 
 ## Test Coverage
@@ -191,7 +195,7 @@ Focus on improving coverage in critical areas like:
 ## Debugging Tests
 
 For debugging failing tests:
-- Use the `--debug` flag with Jest/Vitest
+- Use the `--debug` flag with Vitest
 - Add console logs in tests (they will appear in test output)
 - Examine the log files in the `logs/` directory
 
@@ -214,7 +218,7 @@ When container tests fail:
    - For other tests, ensure proper PATH configuration
 
 3. **Docker command failures**: Docker not available in Act container
-   - Ensure using `catthehacker/ubuntu:full-*` images (not `act-*` variants)
+   - Ensure using `catthehacker/ubuntu:act-latest` images (as configured in `.actrc`)
    - Verify `--privileged` flag is set
 
 ## Alternative: Testcontainers

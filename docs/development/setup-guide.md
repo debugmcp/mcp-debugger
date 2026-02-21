@@ -6,12 +6,13 @@ This guide will help you set up your development environment for working on the 
 
 ### Required Software
 
-1. **Node.js** (v16.0.0 or higher)
+1. **Node.js** (v18.0.0 or higher, 20.x recommended)
    - Download from [nodejs.org](https://nodejs.org/)
    - Verify installation: `node --version`
 
-2. **npm** (v7.0.0 or higher, usually comes with Node.js)
-   - Verify installation: `npm --version`
+2. **pnpm** (required — the `workspace:*` protocol requires pnpm)
+   - Install: `npm install -g pnpm`
+   - Verify installation: `pnpm --version`
 
 3. **Git**
    - Download from [git-scm.com](https://git-scm.com/)
@@ -31,6 +32,13 @@ This guide will help you set up your development environment for working on the 
    - Download from [docker.com](https://www.docker.com/)
    - Verify installation: `docker --version`
 
+2. **Go** (1.18+) and **Delve** - For Go debugging
+   - Install Delve: `go install github.com/go-delve/delve/cmd/dlv@latest`
+
+3. **Rust toolchain** - For Rust debugging
+   - Install via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+   - CodeLLDB auto-downloads during `pnpm install`
+
 ## Initial Setup
 
 ### 1. Clone the Repository
@@ -43,10 +51,10 @@ cd debug-mcp-server
 ### 2. Install Dependencies
 
 ```bash
-npm install
+pnpm install
 ```
 
-This will install all required dependencies specified in `package.json`.
+This will install all required dependencies across the monorepo workspace.
 
 ### 3. Install Python debugpy
 
@@ -85,18 +93,27 @@ All tests should pass. If any fail, check the error messages for missing depende
 ### Directory Structure
 
 ```
-debug-mcp-server/
-├── src/                    # Source code
+mcp-debugger/
+├── packages/               # Monorepo workspace packages
+│   ├── shared/            # Shared interfaces, types, and utilities
+│   ├── adapter-python/    # Python debug adapter (debugpy)
+│   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
+│   ├── adapter-rust/      # Rust adapter (CodeLLDB)
+│   ├── adapter-go/        # Go adapter (Delve)
+│   ├── adapter-mock/      # Mock adapter for testing
+│   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
+├── src/                    # Core server source code
+│   ├── adapters/          # Adapter loading and registry
+│   ├── cli/               # CLI commands and setup
+│   ├── container/         # Dependency injection
+│   ├── proxy/             # DAP proxy components
 │   ├── session/           # Session management
-│   ├── proxy/             # Proxy management
-│   ├── dap-core/          # DAP protocol core
-│   ├── interfaces/        # TypeScript interfaces
-│   ├── implementations/   # Concrete implementations
 │   └── utils/             # Utilities
 ├── tests/                  # Test files
-│   ├── unit/              # Unit tests
-│   ├── integration/       # Integration tests
-│   └── e2e/               # End-to-end tests
+│   ├── core/             # Core unit and integration tests
+│   ├── adapters/         # Adapter-specific tests
+│   ├── e2e/              # End-to-end tests
+│   └── test-utils/       # Shared test utilities
 ├── docs/                   # Documentation
 ├── examples/               # Example scripts
 ├── dist/                   # Compiled output
@@ -139,20 +156,22 @@ npm run type-check
 #### STDIO Mode (Default)
 
 ```bash
-node dist/index.js
+node dist/index.js stdio
 ```
 
-#### TCP Mode
+#### SSE Mode
 
 ```bash
-node dist/index.js --transport tcp --port 6111
+node dist/index.js sse -p 3001
 ```
 
 #### With Debug Logging
 
 ```bash
-DEBUG=* node dist/index.js
+node dist/index.js sse -p 3001 --log-level debug --log-file ./logs/debug.log
 ```
+
+Note: In STDIO mode, console output is silenced to avoid corrupting JSON-RPC protocol communication. Use `--log-file` to capture logs.
 
 ## VS Code Setup
 
@@ -193,10 +212,10 @@ Create `.vscode/launch.json`:
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug Server (TCP)",
+      "name": "Debug Server (SSE)",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/dist/index.js",
-      "args": ["--transport", "tcp", "--port", "6111"],
+      "args": ["sse", "-p", "6111", "--log-level", "debug"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
       "preLaunchTask": "npm: build"
     },
@@ -281,7 +300,7 @@ TEST_TIMEOUT=30000
 | `LOG_LEVEL` | Logging level (error, warn, info, debug) | `info` |
 | `LOG_FILE` | Path to log file | None (console only) |
 | `PYTHON_PATH` | Path to Python executable | Auto-detected |
-| `MCP_SERVER_PORT` | TCP port for server | `6111` |
+| `MCP_SERVER_PORT` | SSE port for server | `3001` |
 | `DEBUG` | Enable debug output | `false` |
 
 ## Troubleshooting Setup Issues
@@ -345,8 +364,8 @@ set PYTHON_PATH=C:\Python39\python.exe
 **Solution**:
 ```bash
 # Clean and rebuild
-npm run clean
-npm install
+npm run build:clean
+pnpm install
 npm run build
 ```
 
@@ -358,8 +377,8 @@ npm run build
 npm cache clean --force
 
 # Reinstall dependencies
-rm -rf node_modules package-lock.json
-npm install
+rm -rf node_modules pnpm-lock.yaml
+pnpm install
 ```
 
 ## Development Best Practices

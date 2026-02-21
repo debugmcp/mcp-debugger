@@ -1,7 +1,7 @@
 # mcp-debugger Migration Guide
 
-> **📌 UPDATED DOCUMENTATION**  
-> This migration guide covers changes through v0.12.0, including the major UX improvements.
+> **📌 UPDATED DOCUMENTATION**
+> This migration guide covers changes through v0.15.0, including dynamic adapter loading and major UX improvements.
 
 ## What's New in v0.15.0
 
@@ -9,8 +9,11 @@
 This release introduces dynamic discovery and loading of language adapters at runtime. The core no longer statically imports adapters; instead, it uses a loader/registry to import packages by convention.
 
 - Adapters live in separate packages:
-  - `@debugmcp/adapter-mock`
   - `@debugmcp/adapter-python`
+  - `@debugmcp/adapter-javascript`
+  - `@debugmcp/adapter-rust`
+  - `@debugmcp/adapter-go`
+  - `@debugmcp/adapter-mock`
 - Adapters are treated as optional dependencies in consumers
 - The core discovers and loads adapters on demand:
   - Package naming: `@debugmcp/adapter-<language>`
@@ -140,8 +143,10 @@ enum DebugLanguage {
 ```typescript
 enum DebugLanguage {
   PYTHON = 'python',
+  JAVASCRIPT = 'javascript',
+  RUST = 'rust',
+  GO = 'go',
   MOCK = 'mock',  // For testing
-  // Future: NODE = 'node', GO = 'go', etc.
 }
 ```
 
@@ -150,9 +155,9 @@ enum DebugLanguage {
 #### Environment Variables
 
 No changes to environment variables. The following still work:
-- `MCP_DEBUGGER_SESSION_DIR` - Session storage directory
-- `MCP_DEBUGGER_LOG_LEVEL` - Logging level
-- `MCP_DEBUGGER_LOG_FILE` - Log file path
+- `DEBUG_MCP_LOG_LEVEL` - Logging level (default: `info`)
+- `MCP_CONTAINER` - Set to `true` in container mode (forces log path to `/app/logs/`)
+- `CONSOLE_OUTPUT_SILENCED` - Set to `1` to suppress console output (auto-set in stdio mode)
 
 #### Launch Configuration
 
@@ -227,17 +232,15 @@ If you want to add support for a new language:
 
 1. **Create an adapter** following the [Adapter Development Guide](./architecture/adapter-development-guide.md)
 
-2. **Register your adapter**:
-   ```typescript
-   import { MyLanguageAdapterFactory } from './my-language-adapter';
-   
-   registry.register('mylang', new MyLanguageAdapterFactory());
-   ```
+2. **Register your adapter**: Adapters are now dynamically loaded by convention. Place your adapter package at `packages/adapter-<language>/` and export a factory class named `<Language>AdapterFactory`. The `AdapterLoader` will discover and register it automatically at runtime.
 
-3. **Update language enum**:
+3. **Current language enum** (in `packages/shared/src/models/index.ts`):
    ```typescript
    enum DebugLanguage {
      PYTHON = 'python',
+     JAVASCRIPT = 'javascript',
+     RUST = 'rust',
+     GO = 'go',
      MOCK = 'mock',
      MYLANG = 'mylang'  // Add your language
    }
@@ -342,7 +345,7 @@ sessionManager.on('adapterConnected', handler);
 
 **Solution**: Check supported languages first:
 ```typescript
-const supported = await mcp.call('get_supported_languages');
+const supported = await mcp.call('list_supported_languages');
 if (!supported.includes('node')) {
   console.log('Node.js debugging not yet available');
 }
@@ -385,7 +388,7 @@ await mcp.startDebugging({
 ```typescript
 // Verify adapter is being used
 const languages = await mcp.getSupportedLanguages();
-console.log('Supported:', languages);  // Should include 'python', 'mock'
+console.log('Supported:', languages);  // Should include 'python', 'javascript', 'rust', 'go', 'mock'
 ```
 
 ### 3. Event Handling Test
@@ -407,8 +410,8 @@ sessionManager.on('stopped', (event) => {
    - [Adapter Development Guide](./architecture/adapter-development-guide.md)
 
 2. **Examples**:
-   - [Mock Adapter](../src/adapters/mock/mock-debug-adapter.ts) - Reference implementation
-   - [Python Adapter](../src/adapters/python/python-debug-adapter.ts) - Production example
+   - [Mock Adapter](../packages/adapter-mock/src/mock-debug-adapter.ts) - Reference implementation
+   - [Python Adapter](../packages/adapter-python/src/python-debug-adapter.ts) - Production example
 
 3. **Support**:
    - GitHub Issues: Report migration problems

@@ -70,8 +70,7 @@ node dist/index.js
 
 # Run with specific transport modes
 node dist/index.js                          # STDIO mode (default)
-node dist/index.js --transport tcp --port 6111  # TCP mode
-node dist/index.js --transport sse --port 3000  # SSE mode
+node dist/index.js sse -p 3001             # SSE mode (HTTP/Server-Sent Events)
 ```
 
 ### Testing
@@ -164,7 +163,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 1. **MCP Server Layer** (`src/server.ts`, `src/index.ts`)
    - Entry point for MCP protocol communication
    - Handles tool registration and routing
-   - Supports STDIO, TCP, and SSE transport modes
+   - Supports STDIO and SSE transport modes
    - Dynamically discovers available language adapters
 
 2. **Adapter System** (NEW)
@@ -188,7 +187,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`)
    - **ProxyCore**: Pure business logic, message processing
    - **ProxyWorker**: Core worker handling debugging operations
-   - **AdapterManager**: Manages language-specific adapter instances
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `MockAdapterPolicy`)
    - Implements full Debug Adapter Protocol (DAP) communication
 
 ### Key Patterns
@@ -219,7 +218,10 @@ The system supports dynamic adapter loading through:
 
 ### State Management
 
-Sessions progress through states: IDLE → INITIALIZING → READY → RUNNING → PAUSED → TERMINATED
+Sessions use a **dual-state model**:
+- **SessionLifecycleState**: `CREATED` → `ACTIVE` → `TERMINATED` (coarse lifecycle)
+- **ExecutionState**: `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `TERMINATED` | `ERROR` (fine-grained execution)
+- A legacy `SessionState` enum exists for backward compatibility but the dual-state model is canonical
 
 ## Important Files and Directories
 
@@ -405,15 +407,24 @@ After adding the MCP server:
 - **Status Check**: After restart, type `/mcp` in Claude Code to see connected servers
 
 ### Available Tools After Integration
-Once connected, the following MCP tools become available:
+Once connected, the following 19 MCP tools become available:
 - `create_debug_session` - Start a new debug session
+- `list_debug_sessions` - List active debug sessions
+- `list_supported_languages` - Show available language adapters
 - `set_breakpoint` - Set breakpoints in code
 - `start_debugging` - Begin debugging a script
+- `attach_to_process` - Attach debugger to a running process
+- `detach_from_process` - Detach debugger from a process
+- `close_debug_session` - Clean up sessions
 - `step_over`, `step_into`, `step_out` - Step through code
 - `continue_execution` - Continue running
-- `get_variables`, `get_stack_trace` - Inspect program state
+- `pause_execution` - Pause a running program
+- `get_variables` - Inspect variables in scope
+- `get_local_variables` - Get local variables in current frame
+- `get_stack_trace` - Inspect call stack
+- `get_scopes` - Get variable scopes for a stack frame
 - `evaluate_expression` - Evaluate expressions in debug context
-- `close_debug_session` - Clean up sessions
+- `get_source_context` - Get source code around current position
 
 **Dev proxy only** (available when using Option 5):
 - `dev_restart_debugger` - Restart the backend (pass `rebuild: true` to build first)

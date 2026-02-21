@@ -1,30 +1,32 @@
-# tests/manual/test_python_debugger_instantiation.ts
-@source-hash: 196c06e18deede90
-@generated: 2026-02-10T01:18:52Z
+# tests\manual\test_python_debugger_instantiation.ts
+@source-hash: eb843fd330952dea
+@generated: 2026-02-21T08:28:07Z
 
 ## Purpose
-Manual test file for validating PythonDebugger class instantiation. Tests basic constructor functionality without launching actual debugging sessions.
+Manual test file that validates basic instantiation of the PythonDebugger class from the debugpy module. This is a standalone test script that verifies the constructor works without throwing errors.
 
-## Key Components
-- **testInstantiation() function (L4-28)**: Main test function that attempts to create a PythonDebugger instance with minimal configuration and validates successful instantiation
-- **Test execution (L30)**: Immediately invokes the test function when file is run
+## Key Functions
+- `testInstantiation()` (L3-27): Main test function that creates a PythonDebugger instance with dummy configuration and validates successful instantiation through console logging and basic null checks.
 
 ## Dependencies
-- `PythonDebugger, PythonDebuggerConfig` from `../../src/debugger/python/debugpy.js` (L1)
-- `SessionConfig, DebugLanguage` from `../../src/session/models.js` (L2) - imported but unused
+- Imports `PythonDebugger` and `PythonDebuggerConfig` from `../../src/debugger/python/debugpy.js` (L1)
 
 ## Test Configuration
-- **dummyConfig (L8-11)**: Minimal PythonDebuggerConfig with hardcoded Windows Python path (`C:\Python313\python.exe`)
-- **sessionId**: Uses test-specific identifier `'test-instantiation-session'` (L7)
+- Uses hardcoded Windows Python path: `C:\Python313\python.exe` (L9)
+- Creates dummy session ID: `test-instantiation-session` (L6)
+- Minimal config object with only `sessionId` and `pythonPath` properties (L7-10)
 
-## Test Logic
-1. Creates PythonDebugger instance with basic config (L15)
-2. Validates instance is not null (L18-22)
-3. Comprehensive error handling with detailed logging (L24-26)
-4. Console logging throughout for debugging test execution
+## Test Flow
+1. Logs test start (L4)
+2. Creates dummy configuration object (L6-10) 
+3. Attempts PythonDebugger instantiation with try-catch error handling (L12-25)
+4. Validates instance is not null (L17-21)
+5. Logs completion status (L26)
 
-## Architectural Notes
-- Manual test (not part of automated test suite)
-- Platform-specific: hardcoded Windows Python path
-- Focused solely on constructor validation, no actual debugging operations
-- Defensive null checking despite constructor throwing on failure
+## Execution
+Auto-executes the test function on module load (L29)
+
+## Architecture Notes
+- Pure instantiation test - doesn't test any debugger functionality beyond constructor
+- Uses comprehensive console logging with `[INSTANTIATION_TEST]` prefix for easy identification
+- Error handling captures and logs any constructor exceptions

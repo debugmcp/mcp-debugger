@@ -7,8 +7,8 @@ Tests for the npx "no-install" distribution channel using npm pack.
 1. **Build the project** - Runs `pnpm build`
 2. **Create npm package** - Runs `npm pack` to create tarball
 3. **Install globally** - Installs the package from tarball
-4. **Test via npx** - Runs the MCP server using `npx @debugmcp/mcp-debugger`
-5. **Verify all adapters work** - Tests Python, JavaScript, and Mock adapters
+4. **Test via global install** - Runs the MCP server using global installation and direct Node.js invocation (not npx)
+5. **Verify all adapters work** - Tests Python and JavaScript adapters
 
 ## Why This Is Important
 
@@ -16,7 +16,7 @@ The npx distribution channel is how most users will interact with mcp-debugger. 
 - All adapters are bundled correctly ("batteries included")
 - The package works without building from source
 - JavaScript adapter is available (this was previously broken!)
-- Bundle size stays reasonable (<10MB)
+- Bundle size stays reasonable (8MB warn threshold / 15MB error threshold)
 
 ## Running the Tests
 
@@ -32,6 +32,7 @@ npx vitest run tests/e2e/npx/npx-smoke-javascript.test.ts
 ## Test Files
 
 - `npx-test-utils.ts` - Utilities for building, packing, installing, and testing
+- `../smoke-test-utils.ts` - Shared smoke test helper utilities (parent directory, imported by both test files)
 - `npx-smoke-python.test.ts` - Python debugging tests
 - `npx-smoke-javascript.test.ts` - JavaScript debugging tests (critical!)
 
@@ -54,9 +55,8 @@ These tests work on Windows, Linux, and macOS without modification.
 ✅ All tools are available
 
 ### Language Support
-✅ Python adapter works  
-✅ JavaScript adapter works (CRITICAL FIX)  
-✅ Mock adapter works  
+✅ Python adapter works
+✅ JavaScript adapter works (CRITICAL FIX)
 ✅ All debugging operations function correctly
 
 ## Cleanup

@@ -5,6 +5,7 @@ The MCP Debugger Server now supports language-specific stack trace filtering to 
 
 ## Features
 - **JavaScript/Node.js**: Filters out `<node_internals>` frames by default
+- **Go**: Filters out `/runtime/` and `/testing/` frames by default
 - **Python**: No filtering applied (shows all frames)
 - **Configurable**: Use `includeInternals: true` to see all frames
 
@@ -54,14 +55,19 @@ The filtering is implemented using the existing `AdapterPolicy` system:
    - Identifies internal frames by checking for `<node_internals>` in the file path
    - Always keeps at least one frame if all are filtered
 
-3. **SessionManagerData** (`src/session/session-manager-data.ts`)
-   - Applies filtering based on session language
-   - Only JavaScript sessions use filtering currently
+3. **GoAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-go.ts`)
+   - Implements filtering for Go
+   - Identifies internal frames by checking for `/runtime/` and `/testing/` in the file path
+   - Always keeps at least one frame if all are filtered
+
+4. **SessionManagerData** (`src/session/session-manager-data.ts`)
+   - Applies filtering based on session language via `selectPolicy()`
+   - Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied (currently JavaScript and Go)
 
 ### Edge Cases Handled
 - **All frames internal**: At least the first frame is retained
 - **No frames**: Returns empty array as before
-- **Python/Other languages**: No filtering applied
+- **Python/Other languages**: No filtering applied (only languages whose AdapterPolicy implements `filterStackFrames` are filtered)
 
 ## Benefits
 1. **Cleaner Stack Traces**: Users see their code immediately, not framework internals

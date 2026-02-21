@@ -4,7 +4,7 @@
 
 The SSE (Server-Sent Events) transport for MCP requires a two-part connection:
 1. **GET /sse** - Establishes the SSE connection and receives a session ID
-2. **POST /sse** - Sends requests with the session ID in the `X-Session-ID` header
+2. **POST /sse?sessionId=<uuid>** - Sends requests with the session ID as a query parameter
 
 ## Current Issue
 
@@ -20,8 +20,8 @@ Error POSTing to endpoint (HTTP 400): {"jsonrpc":"2.0","error":{"code":-32600,"m
    - Server creates a new session and sends `connection/established` message
    - Message format: `data: {"jsonrpc":"2.0","method":"connection/established","params":{"sessionId":"<uuid>"}}`
 
-2. **Subsequent Requests** (POST /sse)
-   - Client sends JSON-RPC requests with `X-Session-ID` header
+2. **Subsequent Requests** (POST /sse?sessionId=<uuid>)
+   - Client sends JSON-RPC requests with the session ID as a query parameter
    - Server processes the request and sends response via SSE stream
 
 ## Testing the Connection
@@ -54,7 +54,7 @@ $body = @{
     id = 1
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri http://localhost:3001/sse -Method POST -Headers @{"Content-Type"="application/json"; "X-Session-ID"=$sessionId} -Body $body
+Invoke-RestMethod -Uri "http://localhost:3001/sse?sessionId=$sessionId" -Method POST -Headers @{"Content-Type"="application/json"} -Body $body
 ```
 
 ## Cline Configuration

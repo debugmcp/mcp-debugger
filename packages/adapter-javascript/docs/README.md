@@ -1,36 +1,38 @@
-# @debugmcp/adapter-javascript (Task 1 — Scaffold)
+# @debugmcp/adapter-javascript
 
-This package provides the initial skeleton for a JavaScript/TypeScript debug adapter in the MCP Debugger monorepo. It is discoverable and compiles, but does not include functional js-debug integration yet. Later tasks will add behavior and wiring.
+This package provides a fully functional JavaScript/TypeScript debug adapter for the MCP Debugger monorepo, using Microsoft's js-debug (VSCode's built-in debugger) as the underlying DAP implementation.
 
 Key points
 - ESM TypeScript project with dist/ output and type declarations
-- Exports JavascriptAdapterFactory as the entry point for dynamic loading
-- Minimal JavascriptDebugAdapter that type-checks against @debugmcp/shared
-- Placeholder utils and types
-- Vendor folder placeholder for js-debug (populated in later tasks)
+- Exports `JavascriptAdapterFactory` as the entry point for dynamic loading
+- Full `JavascriptDebugAdapter` implementation (~810 lines) with comprehensive DAP integration
+- Real utilities: `detectTsRunners`, `transformConfig`, TypeScript detection
+- Vendor folder for js-debug (bundled `vsDebugServer.js` / `vsDebugServer.cjs`)
 - Uses .js suffix on relative TS imports to match ESM resolution
 
 Status and scope
-- This is a non-functional adapter stub for Task 1 only
-- Environment validation and adapter command building are trivial placeholders
-- DebugLanguage enum currently lacks a JAVASCRIPT member; a TODO is noted in the adapter
+- This is a fully implemented adapter supporting JavaScript and TypeScript debugging
+- Environment validation includes Node.js detection, vendor file verification, and optional TypeScript runner detection
+- `DebugLanguage.JAVASCRIPT` is a full member of the enum (5 languages: Python, JavaScript, Rust, Go, Mock)
 
 Build and test
 - Build: pnpm -w -F @debugmcp/adapter-javascript run build
 - Test:  pnpm -w -F @debugmcp/adapter-javascript run test
 
 Validation
-- Node.js 14+ required
-- Requires bundled js-debug vendor file at vendor/js-debug/vsDebugServer.js
+- Node.js 18+ required
+- Requires bundled js-debug vendor file at vendor/js-debug/vsDebugServer.js (or vsDebugServer.cjs)
 - Optional TypeScript runners: tsx or ts-node recommended; absence only results in a warning
 - The factory-level validation is fast and has no side effects; it does not spawn processes or touch network
 - To vendor js-debug, use the build:adapter script when available: pnpm -w -F @debugmcp/adapter-javascript run build:adapter
 
 Structure
-- src/index.ts exports the factory by name: JavascriptAdapterFactory
-- src/javascript-adapter-factory.ts extends the shared AdapterFactory
-- src/javascript-debug-adapter.ts provides stub methods and safe defaults
-- src/utils/* and src/types/* contain placeholders for later tasks
+- src/index.ts exports the factory by name: `JavascriptAdapterFactory`
+- src/javascript-adapter-factory.ts extends the shared BaseAdapterFactory
+- src/javascript-debug-adapter.ts provides full DAP integration (~810 lines)
+- src/utils/typescript-detector.ts — TypeScript detection and runner discovery (`detectTsRunners`)
+- src/utils/config-transformer.ts — Launch configuration transformation (`transformConfig`)
+- src/types/* — TypeScript types for adapter configuration
 
 Notes
 - No core registration is added in Task 1; that is handled in a later task

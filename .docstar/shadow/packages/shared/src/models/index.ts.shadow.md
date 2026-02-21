@@ -1,47 +1,50 @@
-# packages/shared/src/models/index.ts
-@source-hash: 7b495d7251f1ec83
-@generated: 2026-02-11T16:13:00Z
+# packages\shared\src\models\index.ts
+@source-hash: 3349ce0316048495
+@generated: 2026-02-21T08:28:22Z
 
-Primary purpose: Core data models and type definitions for debug session management, providing interfaces and enums for debugger operations, session state management, and DAP (Debug Adapter Protocol) integration.
+## Primary Purpose
+Core data models and type definitions for debug sessions, extending the VS Code Debug Adapter Protocol. Provides interfaces for session management, state tracking, breakpoints, and debugging constructs across multiple programming languages.
 
-## Key Interfaces
+## Key Interfaces & Types
 
-**CustomLaunchRequestArguments (L9-13)**: Extends VSCode's DebugProtocol.LaunchRequestArguments with additional debug-specific options (`stopOnEntry`, `justMyCode`). Designed for extensibility with placeholder comment for future arguments.
+### Debug Launch & Attach Configuration
+- `CustomLaunchRequestArguments` (L9-15): Extends DAP LaunchRequestArguments with custom debug flags (stopOnEntry, justMyCode, console, cwd, env)
+- `ProcessIdentifierType` (L20-27): Enum for attach methods - PID, NAME, or REMOTE
+- `GenericAttachConfig` (L32-71): Comprehensive attach configuration with process identification, remote debugging, and language-agnostic options
+- `LanguageSpecificAttachConfig` (L76): Type alias for language-specific extension properties
 
-**GenericAttachConfig (L30-69)**: Comprehensive interface for attaching to debug processes. Supports three attachment modes via `ProcessIdentifierType`: PID-based (L37-38), name-based (L40-41), and remote debugging (L43-47). Includes common debug options like source mapping, timeouts, and environment configuration. Uses index signature for language-specific extensions.
+### State Management
+- `SessionLifecycleState` (L92-99): Session existence states - CREATED, ACTIVE, TERMINATED
+- `ExecutionState` (L105-116): Debug execution states - INITIALIZING, RUNNING, PAUSED, TERMINATED, ERROR
+- `SessionState` (L122-137): **DEPRECATED** legacy state enum for backward compatibility
+- `mapLegacyState()` (L142-158): Converts legacy SessionState to new dual-state model
+- `mapToLegacyState()` (L163-185): Converts new state model back to legacy SessionState
 
-**DebugSession (L218-241)**: Central session data structure containing session metadata, dual state tracking (legacy `state` + new `sessionLifecycle`/`executionState`), current execution context (`currentFile`, `currentLine`), and active breakpoints as a Map.
+### Session & Debug Constructs
+- `DebugLanguage` (L81-87): Supported languages enum (Python, JavaScript, Rust, Go, Mock)
+- `SessionConfig` (L190-197): Basic session configuration with language and runtime path
+- `DebugSession` (L220-243): Complete session state including both legacy and new state models, breakpoints Map, timestamps
+- `DebugSessionInfo` (L248-255): Lightweight session info for list operations
+- `Breakpoint` (L202-215): Breakpoint definition with verification status and condition support
+- `Variable` (L261-272): Variable representation with hierarchical children support
+- `StackFrame` (L277-288): Stack frame with source location information
+- `DebugLocation` (L293-304): Source location with optional surrounding context lines
 
-**Breakpoint (L200-213)**: Represents debug breakpoints with verification status, conditional expressions, and validation messages from DAP adapters.
-
-## Key Enums
-
-**ProcessIdentifierType (L18-25)**: Defines attachment strategies for debuggers - PID, NAME, and REMOTE modes.
-
-**DebugLanguage (L79-85)**: Supported programming languages including MOCK for testing scenarios.
-
-**SessionLifecycleState (L90-97)**: High-level session existence states (CREATED, ACTIVE, TERMINATED).
-
-**ExecutionState (L103-114)**: Detailed execution states within active sessions (INITIALIZING, RUNNING, PAUSED, TERMINATED, ERROR).
-
-**SessionState (L120-135)**: Legacy state enum marked deprecated, maintained for backward compatibility.
-
-## State Management Functions
-
-**mapLegacyState() (L140-156)**: Converts deprecated SessionState values to new dual-state model (SessionLifecycleState + ExecutionState).
-
-**mapToLegacyState() (L161-183)**: Reverse mapping from new state model to legacy SessionState for backward compatibility.
-
-## Dependencies
-- `@vscode/debugprotocol`: VSCode Debug Adapter Protocol types (L4)
+## Key Dependencies
+- `@vscode/debugprotocol`: VS Code Debug Adapter Protocol types
 
 ## Architectural Decisions
-- **Dual State Model**: Separates session lifecycle (existence) from execution state (runtime status) for clearer state management
-- **Language Agnostic Design**: Generic interfaces with language-specific extension points
-- **DAP Integration**: Built on VSCode Debug Adapter Protocol standards
-- **Backward Compatibility**: Maintains deprecated SessionState with mapping functions
 
-## Critical Constraints
-- ExecutionState only meaningful when SessionLifecycleState is ACTIVE (L101)
-- Breakpoints stored as Map for efficient ID-based lookups
-- All timestamp fields use Date objects for consistency
+### Dual State Model
+The codebase implements a transition from a single `SessionState` enum to a dual-state model with `SessionLifecycleState` and `ExecutionState`. This separation distinguishes between session existence (created/active/terminated) and execution status (initializing/running/paused/etc.). Migration functions maintain backward compatibility.
+
+### Language Agnostic Design
+Uses generic configurations (`GenericAttachConfig`) with extensibility points (`[key: string]: unknown`) to support language-specific options while maintaining a common interface.
+
+### Breakpoint Management
+Breakpoints stored as `Map<string, Breakpoint>` on sessions, supporting verification status and conditional expressions from DAP.
+
+## Critical Invariants
+- ExecutionState only meaningful when SessionLifecycleState is ACTIVE
+- Legacy SessionState maintained for backward compatibility but new code should use dual-state model
+- Breakpoint verification status must be tracked for DAP compliance

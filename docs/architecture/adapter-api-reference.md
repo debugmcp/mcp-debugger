@@ -54,7 +54,7 @@ Launch coordination (optional)
   - Typical use: js-debug’s launch flow resolves when a `stopped` event or `adapter_connected` status arrives; the adapter signals readiness via the barrier without forcing `ProxyManager` to know about JavaScript specifics.
 
 Debug configuration
-- `transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig`
+- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async since v2.1.0)
 - `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
  
 ### AdapterLaunchBarrier helper
@@ -130,7 +130,7 @@ export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
   getAdapterModuleName() { return 'example.adapter'; }
   getAdapterInstallCommand() { return 'npm install -g example-adapter'; }
 
-  transformLaunchConfig(cfg) { return cfg; }
+  async transformLaunchConfig(cfg) { return cfg; }
   getDefaultLaunchConfig() { return { stopOnEntry: true }; }
 
   async sendDapRequest(command, args) { throw new Error('not implemented'); }

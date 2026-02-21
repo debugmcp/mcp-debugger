@@ -133,7 +133,7 @@ The visualizer can now connect to the MCP server's log file for real-time debugg
 - JSON parsing with error handling
 - Event-based state updates
 - Thread-safe operation
-- Automatic file creation if missing
+- Automatic log file creation if missing (handled by `live_visualizer.py`)
 - Handles file rotation gracefully
 - Partial line detection and handling
 - Position persistence for resume

@@ -9,7 +9,9 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
   stopOnEntry?: boolean;
   justMyCode?: boolean;
-  // Add other common custom arguments here if needed, e.g., console, cwd, env
+  console?: string;
+  cwd?: string;
+  env?: Record<string, string>;
 }
 
 /**

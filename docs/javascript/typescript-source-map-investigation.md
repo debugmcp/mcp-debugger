@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-TypeScript debugging with source maps is currently under development. While the JavaScript adapter successfully debugs compiled JavaScript files, automatic source map resolution to TypeScript source files is not yet fully functional.
+TypeScript debugging support is implemented. The JavaScript adapter supports TypeScript through runtime transpilers (tsx, ts-node) and compiled JavaScript with source maps. TypeScript runner detection is handled by `typescript-detector.ts` (`packages/adapter-javascript/src/utils/typescript-detector.ts`), which checks for local and PATH-available tsx/ts-node installations.
 
 ## Test Results
 
@@ -67,12 +67,12 @@ The issue lies in how the adapter processes the `program` parameter when startin
 
 ### Current Implementation
 ```javascript
-// In JavaScriptAdapter.transformLaunchConfig()
-const isTS = program.endsWith('.ts');
-if (isTS) {
-  result.sourceMaps = true;
-  result.outFiles = ['**/*.js', '!**/node_modules/**'];
-  result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
+// In JavascriptDebugAdapter.transformLaunchConfig() — async since v2.1.0
+// (packages/adapter-javascript/src/javascript-debug-adapter.ts)
+async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+  // TypeScript detection uses typescript-detector.ts utility
+  // which checks for tsx/ts-node availability (local + PATH)
+  // Source map and outFiles settings are applied based on detection results
 }
 ```
 
@@ -97,19 +97,11 @@ When `program` is a `.ts` file:
 2. If yes: Use `.js` as program with sourceMaps enabled
 3. If no: Warn user to compile first or suggest using tsx/ts-node
 
-**Implementation:**
-```javascript
-if (program.endsWith('.ts')) {
-  const jsPath = program.replace(/\.ts$/, '.js');
-  if (fs.existsSync(jsPath)) {
-    result.program = jsPath;
-    result.sourceMaps = true;
-    result.outFiles = ['**/*.js', '!**/node_modules/**'];
-  } else {
-    // Warn or fall back to runtime transpiler
-  }
-}
-```
+**Implementation:** TypeScript detection is handled by `packages/adapter-javascript/src/utils/typescript-detector.ts`, which:
+- Checks local `node_modules/.bin/` for tsx/ts-node (with Windows suffix handling)
+- Falls back to PATH lookup via `whichInPath`
+- Caches results module-wide for performance
+- Returns `{ tsx?: string; tsNode?: string }` with absolute paths
 
 ### Solution 2: Continue with Runtime Transpilers (Current Workaround)
 
@@ -234,7 +226,7 @@ Based on the current test results showing debugger initialization failures:
 
 3. **Review Recent Changes**
    - Check if recent changes to adapter configuration broke initialization
-   - Compare with the November 11, 2025 deployment tests (which showed success)
+   - Compare with the November 6, 2025 deployment tests (which showed success)
    - Investigate any environment differences between test environments
 
 ### Once Debugger Initialization is Fixed

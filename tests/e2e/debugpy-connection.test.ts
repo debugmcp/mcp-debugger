@@ -254,15 +254,6 @@ describe('MCP Server connecting to debugpy', () => {
     await cleanup();
   });
 
-  const parseSdkToolResult = (rawResult: ServerResult) => {
-    const contentArray = (rawResult as any).content;
-    if (!contentArray || !Array.isArray(contentArray) || contentArray.length === 0 || contentArray[0].type !== 'text') {
-      console.error("Invalid ServerResult structure received from SDK:", rawResult);
-      throw new Error('Invalid ServerResult structure from SDK or missing text content');
-    }
-    return JSON.parse(contentArray[0].text);
-  };
-  
   it('should create a debug session successfully', async () => {
     if (!mcpSdkClient) throw new Error("MCP SDK Client not initialized.");
     const createCall = await mcpSdkClient.callTool({

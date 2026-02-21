@@ -1,64 +1,71 @@
 # tests\manual/
-@children-hash: ddacd4406a6f401c
-@generated: 2026-02-15T09:01:23Z
+@children-hash: 75be3a1d9be975cf
+@generated: 2026-02-21T08:28:46Z
 
 ## Purpose
-Manual testing suite for validating core MCP SDK components and protocols. Contains standalone test scripts for debugging and verifying Server-Sent Events (SSE) communication, Python debugger integration, and bi-directional client-server communication flows.
+Manual testing directory containing standalone scripts for validating server communication protocols and debugger component instantiation. Provides hands-on testing utilities for SSE (Server-Sent Events) connections, JSON-RPC communication flows, and Python debugger module validation outside of automated test suites.
 
-## Key Components
+## Key Components and Organization
 
-### SSE Protocol Testing
-Three complementary scripts validate different aspects of SSE-based MCP communication:
-- **test-sse-connection.js**: High-level EventSource API testing with session management
-- **test-sse-protocol.js**: Low-level SSE protocol implementation with manual parsing
-- **test-sse-working.js**: Complete SSE handshake flow validation
+### SSE Connection Testing Suite
+Three complementary scripts test different aspects of SSE protocol implementation:
 
-These scripts test the critical MCP communication pattern:
-1. SSE connection establishment to `localhost:3001/sse`
-2. Session ID extraction from `connection/established` messages  
-3. Authenticated JSON-RPC requests via HTTP POST using `X-Session-ID` headers
-4. Bi-directional communication monitoring
+- **test-sse-connection.js**: Basic SSE connectivity test using EventSource API with session-based authentication
+- **test-sse-protocol.js**: Low-level SSE protocol implementation with manual chunk parsing and bi-directional communication
+- **test-sse-working.js**: Complete SSE handshake validation including session establishment and authenticated API calls
 
-### Python Debugger Testing
-Two scripts validate Python debugger integration:
-- **test_debugpy_launch.ts**: Full debugpy adapter process lifecycle testing
-- **test_python_debugger_instantiation.ts**: Basic constructor validation
+All SSE tests target `localhost:3001/sse` and validate the session-based communication pattern used by the MCP SDK.
 
-## Communication Architecture
+### Debugger Component Testing
+Two focused tests for Python debugger module validation:
 
-### Protocol Flow
-All SSE tests implement the same core communication pattern:
-```
-Client → SSE Connection (GET /sse)
-Server → connection/established event with session ID
-Client → Authenticated JSON-RPC POST with X-Session-ID header
-Server → Response handling and ongoing SSE monitoring
-```
+- **test_debugpy_launch.ts**: Full debugpy adapter process lifecycle testing with subprocess management
+- **test_python_debugger_instantiation.ts**: Basic constructor validation for PythonDebugger class
 
-### Session Management
-- Session-based authentication via extracted session IDs
-- Session correlation through custom `X-Session-ID` headers
-- Persistent SSE connections for server-to-client messaging
-- HTTP POST for client-to-server JSON-RPC calls
+## Communication Protocols Tested
+
+### SSE Protocol Flow
+1. **Connection Establishment**: HTTP GET to SSE endpoint with proper headers
+2. **Session Negotiation**: Extract session ID from `connection/established` or `endpoint` events
+3. **Authenticated Communication**: Use session ID in `X-Session-ID` header for JSON-RPC POST requests
+4. **Bi-directional Testing**: SSE for server-to-client, HTTP POST for client-to-server
+
+### JSON-RPC Integration
+- Implements JSON-RPC 2.0 format with `tools/list` method calls
+- Session correlation via custom headers
+- Response validation and error handling
+
+## Key Testing Patterns
+
+### Manual Execution Model
+- All scripts designed for manual execution with console logging
+- Use `process.stdin.resume()` or similar to keep scripts running for observation
+- Require manual termination (Ctrl+C) for interactive testing
+
+### Configuration Approach
+- Hardcoded test endpoints and paths for consistency
+- Windows-specific Python paths (`C:\Python313\python.exe`)
+- Localhost testing environment assumptions
+
+### Error Handling Strategy
+- Comprehensive logging with prefixed output for easy identification
+- Graceful error handling with fallback behaviors
+- Process lifecycle monitoring with proper cleanup
 
 ## Entry Points
-- **SSE Testing**: Execute any of the three SSE test scripts for different testing approaches
-- **Python Debugger Testing**: Run TypeScript tests for debugger component validation
-- **Manual Execution**: All scripts designed for direct execution with console output
-
-## Testing Patterns
-- **Manual Observation**: Scripts remain running for live monitoring
-- **Comprehensive Logging**: Detailed console output for debugging
-- **Error Resilience**: Graceful handling of connection failures and parsing errors  
-- **Platform Considerations**: Windows-specific paths in Python debugger tests
+- Each script is self-contained with direct function execution
+- No shared utilities or common entry point
+- Scripts can be run independently: `node test-sse-*.js` or `ts-node test_*.ts`
 
 ## Internal Organization
-- **Protocol Validation**: Multiple approaches to SSE testing provide comprehensive coverage
-- **Component Isolation**: Each test focuses on specific functionality without cross-dependencies
-- **Development Support**: Designed for developer debugging and protocol verification rather than automated CI/CD
+The directory focuses on two primary testing domains:
+1. **Network Communication**: SSE/HTTP protocol validation for server connectivity
+2. **Component Instantiation**: Debugger module constructor and lifecycle validation
 
-## Key Dependencies
-- EventSource polyfill for Node.js SSE testing
-- Node.js HTTP modules for low-level protocol implementation
-- fs-extra and child_process for Python debugger process management
-- MCP SDK components for integration testing
+## Dependencies
+- **Network Testing**: Node.js `http`, `eventsource` package, built-in `fetch`
+- **Debugger Testing**: Node.js `child_process`, `fs-extra`, internal debugger modules
+- **Common**: Standard Node.js modules (`path`, `os`) and TypeScript execution environment
+
+## Testing Philosophy
+Emphasizes manual, observable testing over automated assertions. Provides detailed logging and keeps processes alive for human inspection of real-time behavior, making it ideal for debugging integration issues and protocol validation during development.

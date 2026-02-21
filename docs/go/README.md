@@ -7,7 +7,7 @@ The Debug MCP Server provides support for Go debugging through [Delve](https://g
 Before using the Go debugging features, ensure you have:
 
 1. **Go 1.18 or higher** installed from [go.dev/dl](https://go.dev/dl/)
-2. **Delve** installed with DAP support:
+2. **Delve 0.17.0+** installed with DAP support:
    ```bash
    go install github.com/go-delve/delve/cmd/dlv@latest
    ```

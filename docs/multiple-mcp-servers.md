@@ -9,11 +9,11 @@ Both servers can be configured in the same MCP settings file. The configuration 
 ```json
 {
   "mcpServers": {
-    "debug-mcp-server": {
+    "mcp-debugger": {
       "autoApprove": [],
       "disabled": false,
       "timeout": 60,
-      "command": "c:/path/to/debug-mcp-server/simple-run.cmd",
+      "command": "c:/path/to/mcp-debugger/simple-run.cmd",
       "transportType": "stdio"
     },
     "github": {
@@ -40,7 +40,7 @@ Both servers can be configured in the same MCP settings file. The configuration 
 ## Prerequisites
 
 1. **For Debug MCP Server**:
-   - Node.js 16.0.0 or higher
+   - Node.js 18.0.0 or higher
    - Python 3.7 or higher (for Python debugging)
 
 2. **For GitHub MCP Server**:
@@ -89,7 +89,7 @@ When using both servers with Claude in VS Code:
 2. Debug the code using Debug MCP Server:
    ```
    use_mcp_tool(
-     server_name="debug-mcp-server",
+     server_name="mcp-debugger",
      tool_name="create_debug_session",
      arguments={
        "language": "python",

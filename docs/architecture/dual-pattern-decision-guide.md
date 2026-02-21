@@ -50,9 +50,9 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
 
 Use AdapterPolicy when you need:
 - **Language-specific session behaviors**
-- **Lightweight validation logic**
+- **Validation logic and environment checks**
 - **Data filtering or transformation**
-- **Stateless policy methods**
+- **Policy methods with managed state** (20+ methods including state management via `createInitialState`, `updateStateOnCommand`, `updateStateOnEvent`, etc.)
 - **Quick language-specific decisions**
 
 ### AdapterPolicy Example: Adding Go Support
@@ -74,8 +74,15 @@ export const GoAdapterPolicy: AdapterPolicy = {
   
   filterStackFrames(frames: StackFrame[], includeInternals = false): StackFrame[] {
     if (includeInternals) return frames;
-    // Filter Go runtime frames
-    return frames.filter(f => !f.file?.includes('runtime/'));
+    // Filter Go runtime and testing framework frames
+    return frames.filter(f =>
+      !f.file?.includes('runtime/') && !f.file?.includes('/testing/')
+    );
+  },
+
+  resolveExecutablePath(providedPath?: string): string | undefined {
+    // Priority: provided path > DLV_PATH env var > default 'dlv'
+    return providedPath || process.env.DLV_PATH || 'dlv';
   }
 };
 ```
@@ -199,14 +206,13 @@ SessionManager
 ❌ Skip environment validation
 
 ### DO: AdapterPolicy
-✅ Keep methods stateless
+✅ Use the state management hooks (`createInitialState`, `updateStateOnCommand`, `updateStateOnEvent`) for adapter-specific state tracking
 ✅ Make methods optional when sensible
 ✅ Return sensible defaults
-✅ Keep logic simple and focused
+✅ Keep logic focused on adapter-specific concerns
 ✅ Test policies independently
 
 ### DON'T: AdapterPolicy
-❌ Add complex state management
 ❌ Depend on external services
 ❌ Handle DAP protocol directly
 ❌ Make methods too granular
@@ -280,8 +286,8 @@ describe('GoAdapterPolicy', () => {
 
 ## Summary
 
-- **IDebugAdapter**: Core debugging infrastructure (heavyweight, stateful)
-- **AdapterPolicy**: Session management behaviors (lightweight, stateless)
+- **IDebugAdapter**: Core debugging infrastructure (heavyweight, stateful, process management)
+- **AdapterPolicy**: Session management behaviors (20+ methods with state management hooks for adapter-specific tracking)
 - **Both needed**: For complete language support
 - **Start simple**: Begin with AdapterPolicy for quick wins
 - **Grow as needed**: Add IDebugAdapter for full support

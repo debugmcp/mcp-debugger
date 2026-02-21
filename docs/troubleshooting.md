@@ -133,9 +133,12 @@ This guide provides solutions for common issues you might encounter when setting
    Note: Relative paths are resolved from: C:\Users\user\AppData\Local\Programs\Microsoft VS Code
    ```
 
-3. **Container Mode**: When running in Docker, paths are prefixed with `/workspace/`:
+3. **Container Mode**: When running in Docker, paths are prefixed with the workspace root:
+   - The workspace root is configurable via `MCP_WORKSPACE_ROOT` environment variable (defaults to `/workspace/`)
    - Host: `test.py` → Container: `/workspace/test.py`
    - The debugger handles this translation automatically
+
+4. **Host Mode**: Relative paths are rejected — always use absolute paths when running outside Docker
 
 ## Debugging Session Issues
 
@@ -171,7 +174,7 @@ This guide provides solutions for common issues you might encounter when setting
    - Make sure Python is in PATH or specified via PYTHON_PATH
 
 3. Ensure debugpy communication works:
-   - Port conflicts can cause issues (default: 5678)
+   - Port conflicts can cause issues (default: 5679)
    - Check if another process is using the same port
 
 ## Communication Issues

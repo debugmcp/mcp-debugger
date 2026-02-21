@@ -1,58 +1,60 @@
 # packages\shared\src\models/
-@children-hash: 2a5d792935b4036c
-@generated: 2026-02-15T09:01:24Z
+@children-hash: e1c596b0bf00f865
+@generated: 2026-02-21T08:28:44Z
 
 ## Overall Purpose
 
-The `packages/shared/src/models` directory serves as the central type definition hub for a debug session management system. It provides core data models, interfaces, and enums that enable standardized debugging operations across multiple programming languages through the Debug Adapter Protocol (DAP).
+The `packages/shared/src/models` directory serves as the central data model layer for a multi-language debug session management system. It provides TypeScript interfaces, types, and utilities that extend the VS Code Debug Adapter Protocol (DAP) to support comprehensive debugging across multiple programming languages including Python, JavaScript, Rust, Go, and Mock environments.
 
-## Key Components and Relationships
+## Key Components & Architecture
 
 ### Core Data Models
-- **DebugSession**: The central data structure that orchestrates all debugging activities, maintaining session metadata, dual-state tracking, execution context (current file/line), and active breakpoints
-- **Breakpoint**: Represents debug breakpoints with verification status and conditional logic support
-- **GenericAttachConfig**: Comprehensive configuration interface supporting three attachment modes (PID, process name, remote debugging)
-- **CustomLaunchRequestArguments**: Extends VSCode's launch arguments with debug-specific options
+The module is built around several interconnected model categories:
 
-### State Management System
-The module implements a sophisticated dual-state model:
+**Session Management**: Complete lifecycle tracking through `DebugSession` and `DebugSessionInfo` interfaces, providing both detailed session state and lightweight listing capabilities.
+
+**Configuration Models**: Language-agnostic debug configuration through `GenericAttachConfig` and `CustomLaunchRequestArguments`, with extensibility points for language-specific options via `LanguageSpecificAttachConfig`.
+
+**State Management**: Dual-state architecture separating session lifecycle (`SessionLifecycleState`) from execution status (`ExecutionState`), with backward compatibility maintained through deprecated `SessionState` and mapping utilities.
+
+**Debug Constructs**: Standard debugging elements including `Breakpoint` with verification tracking, hierarchical `Variable` representations, `StackFrame` with source locations, and `DebugLocation` with contextual line information.
+
+### State Model Evolution
+The architecture implements a sophisticated transition from legacy single-state to a modern dual-state model:
 - **SessionLifecycleState**: Tracks session existence (CREATED → ACTIVE → TERMINATED)
-- **ExecutionState**: Manages runtime status within active sessions (INITIALIZING → RUNNING → PAUSED → TERMINATED/ERROR)
-- **Legacy Support**: Maintains backward compatibility through SessionState enum and bidirectional mapping functions
-
-### Language and Process Support
-- **DebugLanguage enum**: Defines supported programming languages including a MOCK mode for testing
-- **ProcessIdentifierType enum**: Enables flexible debugger attachment strategies (PID, name-based, remote)
+- **ExecutionState**: Tracks debug execution status (INITIALIZING → RUNNING ⟷ PAUSED → TERMINATED/ERROR)
+- Migration functions (`mapLegacyState`, `mapToLegacyState`) ensure backward compatibility
 
 ## Public API Surface
 
-### Main Entry Points
-- **DebugSession interface**: Primary session management contract
-- **GenericAttachConfig interface**: Standard attachment configuration
-- **State management functions**: `mapLegacyState()` and `mapToLegacyState()` for state transitions
-- **All enums**: ProcessIdentifierType, DebugLanguage, SessionLifecycleState, ExecutionState, SessionState (deprecated)
+**Primary Entry Point**: `index.ts` exports all interfaces and types as the main API surface.
 
-### Extension Points
-- GenericAttachConfig uses index signatures to allow language-specific extensions
-- CustomLaunchRequestArguments designed for future argument additions
+**Key Interfaces for Consumers**:
+- `DebugSession`: Complete session state management
+- `GenericAttachConfig`/`CustomLaunchRequestArguments`: Debug configuration
+- `Breakpoint`, `Variable`, `StackFrame`: Debug runtime constructs
+- `DebugLanguage`: Supported language enumeration
 
-## Internal Organization and Data Flow
+**State Management Utilities**:
+- Dual-state model types (`SessionLifecycleState`, `ExecutionState`)
+- Legacy compatibility functions for state transitions
 
-1. **Session Initialization**: DebugSession created with initial lifecycle state
-2. **Attachment/Launch**: GenericAttachConfig or CustomLaunchRequestArguments specify connection method
-3. **State Transitions**: Dual-state model tracks both session existence and execution status
-4. **Breakpoint Management**: Map-based storage for efficient breakpoint operations
-5. **Legacy Compatibility**: Mapping functions bridge old and new state models
+## Internal Organization & Data Flow
 
-## Important Patterns and Conventions
+The models follow a hierarchical organization:
+1. **Configuration Layer**: Launch/attach parameters and language selection
+2. **Session Layer**: Session lifecycle and state management with dual-state tracking
+3. **Runtime Layer**: Active debugging constructs (breakpoints, variables, stack frames)
+4. **Compatibility Layer**: Legacy state mapping and migration support
 
-- **DAP Integration**: Built on VSCode Debug Adapter Protocol standards for interoperability
-- **Language Agnostic Design**: Generic interfaces with specific language extension capabilities
-- **Efficient Data Structures**: Uses Map for breakpoint storage to enable O(1) ID-based lookups
-- **Type Safety**: Comprehensive TypeScript interfaces with clear constraints (e.g., ExecutionState only valid when SessionLifecycleState is ACTIVE)
-- **Temporal Consistency**: All timestamp fields standardized on Date objects
+Data flows from configuration → session creation → runtime state management, with breakpoints stored as Maps on sessions and variables supporting hierarchical child relationships.
 
-## Dependencies
-- `@vscode/debugprotocol`: Provides foundation DAP types for VSCode integration
+## Design Patterns & Conventions
 
-This module forms the foundational layer for any debugging system requiring multi-language support, flexible attachment strategies, and robust state management with backward compatibility guarantees.
+**Language Agnostic Extension**: Generic base interfaces with `[key: string]: unknown` extension points allow language-specific customization without breaking the common API.
+
+**DAP Compliance**: All interfaces extend or align with VS Code Debug Adapter Protocol types, ensuring standard debugging tool compatibility.
+
+**Backward Compatibility**: Deprecated interfaces are maintained with clear migration paths, allowing gradual system evolution.
+
+**Type Safety**: Strong TypeScript typing throughout with enums for discrete states and comprehensive interface definitions for complex data structures.

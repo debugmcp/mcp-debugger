@@ -7,7 +7,7 @@ This directory contains authentic screenshots demonstrating the mcp-debugger vis
 ### debugging-session.png
 - **Description**: Active debugging session paused at a breakpoint
 - **Key Features**: 
-  - Breakpoint marker (●) at line 4 of swap_vars.py
+  - Breakpoint marker (●) at lines 10-11 of swap_vars.py
   - Current line indicator (→) showing where execution is paused
   - Stack trace visible in the tool panel
   - Real debugpy session communicating through MCP protocol
@@ -17,7 +17,7 @@ This directory contains authentic screenshots demonstrating the mcp-debugger vis
 ### variable-inspection.png
 - **Description**: Variable inspection revealing the swap bug
 - **Key Features**: 
-  - Variables panel showing the bug: both a=20, b=20 after line 4
+  - Variables panel showing the bug: both a=20, b=20 after lines 10-11
   - This is the actual bug in swap_vars.py (not a mock)
   - get_variables tool response with real data
   - Tool activity log showing the debugging flow

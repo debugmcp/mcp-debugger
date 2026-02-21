@@ -152,7 +152,7 @@ export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
   getAdapterModuleName(): string { return 'example.adapter'; }
   getAdapterInstallCommand(): string { return 'npm install -g example-adapter'; }
 
-  transformLaunchConfig(config: any): any { return config; }
+  async transformLaunchConfig(config: any): Promise<any> { return config; }
   getDefaultLaunchConfig() { return { stopOnEntry: true }; }
 
   async sendDapRequest<T extends DebugProtocol.Response>(_command: string, _args?: unknown): Promise<T> {
@@ -349,7 +349,7 @@ Common errors & fixes
 
 Debugging dynamic loading
 - Increase server logging (debug level) and watch loader logs
-- Use `DEBUG=mcp:*` in your client to get verbose MCP logs (if supported)
+- Note: `DEBUG=mcp:*` is misleading in STDIO mode because console output is silenced to protect JSON-RPC framing. Use `--log-file <path>` instead to capture verbose logs to disk
 - Confirm default export shape in the compiled `dist/index.js`
 - Validate `@debugmcp/shared` peer version compatibility with the core
 

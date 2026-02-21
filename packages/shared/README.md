@@ -37,6 +37,20 @@ npm install @debugmcp/shared
 - `AdapterDependencies` - Dependencies required by adapters
 - `AdapterMetadata` - Metadata about adapter implementations
 
+#### Adapter Policies
+- `AdapterPolicy` - Interface for language-specific adapter behavior
+- `PythonAdapterPolicy` - Python/debugpy adapter policy
+- `JsDebugAdapterPolicy` - JavaScript/js-debug adapter policy
+- `RustAdapterPolicy` - Rust/CodeLLDB adapter policy
+- `GoAdapterPolicy` - Go/Delve adapter policy
+- `MockAdapterPolicy` - Mock adapter policy for testing
+- `DefaultAdapterPolicy` - Lightweight placeholder used during initialization
+- `DapClientBehavior` - DAP client behavior configuration
+
+#### Process Interfaces
+- `IProxyProcess` - Process abstraction for debug proxies
+- `IChildProcessFactory` - Factory for creating child processes
+
 ### Types
 
 #### Session Types
@@ -55,13 +69,13 @@ npm install @debugmcp/shared
 
 ### Base Classes
 
-- `AdapterFactory` - Abstract base class for adapter factories
+- `BaseAdapterFactory` - Abstract base class for adapter factories
 
 ### Enumerations
 
-- `DebugLanguage` - Supported debug languages (Python, Mock, etc.)
+- `DebugLanguage` - Supported debug languages (Python, JavaScript, Rust, Go, Mock)
 - `AdapterState` - Adapter lifecycle states
-- `SessionState` - Session states
+- `SessionState` - Session states (legacy, deprecated — use `SessionLifecycleState` + `ExecutionState` dual-state model)
 - `AdapterErrorCode` - Error codes for adapter operations
 
 ## Usage Examples
@@ -95,15 +109,15 @@ export class MyDebugAdapter implements IDebugAdapter {
 ### Creating an Adapter Factory
 
 ```typescript
-import { 
-  AdapterFactory, 
+import {
+  BaseAdapterFactory,
   IDebugAdapter,
   AdapterDependencies,
   AdapterMetadata,
-  DebugLanguage 
+  DebugLanguage
 } from '@debugmcp/shared';
 
-export class MyAdapterFactory extends AdapterFactory {
+export class MyAdapterFactory extends BaseAdapterFactory {
   createAdapter(dependencies: AdapterDependencies): IDebugAdapter {
     return new MyDebugAdapter(dependencies);
   }

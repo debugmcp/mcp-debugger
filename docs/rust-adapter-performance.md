@@ -68,4 +68,4 @@ Based on comprehensive testing with real-world Rust examples:
 The Rust adapter is functional and performant for production use with the GNU toolchain. MSVC toolchain support remains limited due to upstream CodeLLDB constraints. Active development focuses on improving Windows-specific behaviors and path handling.
 
 ---
-*Performance metrics based on testing with Windows 11, Rust 1.91.1, and CodeLLDB 1.11.0*
+*Performance metrics based on testing with Windows 11, Rust 1.91.1, and CodeLLDB 1.11.8*

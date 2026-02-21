@@ -6,7 +6,7 @@ This document describes how to use the mcp-debugger with Large Language Models (
 
 ### Prerequisites
 
-- Node.js 16+ 
+- Node.js 18+
 - Python 3.7+ with debugpy (for Python debugging)
 
 ### Installing from NPM

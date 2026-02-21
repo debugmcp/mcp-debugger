@@ -1,5 +1,4 @@
 import { PythonDebugger, PythonDebuggerConfig } from '../../src/debugger/python/debugpy.js';
-import { SessionConfig, DebugLanguage } from '../../src/session/models.js';
 
 async function testInstantiation() {
   console.log('[INSTANTIATION_TEST] Starting PythonDebugger instantiation test...');

@@ -195,9 +195,9 @@ Enable detailed logging to troubleshoot issues:
 
 ## Known Limitations
 
-### TypeScript Source Mapping (In Development)
+### TypeScript Source Mapping
 
-TypeScript debugging with source maps is currently under active development. While you can debug compiled JavaScript files, automatic source map resolution to TypeScript source files is not yet fully functional.
+TypeScript debugging is functional. The adapter supports TypeScript through runtime transpilers (tsx, ts-node) which are auto-detected, and through compiled JavaScript files with source maps.
 
 **Current Workaround Options:**
 
@@ -235,7 +235,7 @@ See `/examples/javascript/` for complete examples:
 The JavaScript adapter uses:
 - **Vendor**: Microsoft's `js-debug` from VSCode
 - **Protocol**: Debug Adapter Protocol (DAP)
-- **Transport**: Stdio communication with adapter
+- **Transport**: TCP for DAP communication between the proxy and the js-debug adapter process
 - **Version**: Compatible with Node.js 14+
 
 For adapter development details, see the [Adapter Development Guide](../architecture/adapter-development-guide.md).

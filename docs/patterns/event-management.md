@@ -14,35 +14,36 @@ The event management system is designed to:
 
 ### 1. Typed Event Interfaces
 
-**Location**: `src/proxy/proxy-manager.ts` (lines 48-67)
+**Location**: `src/proxy/proxy-manager.ts`
 
 ```typescript
 export interface ProxyManagerEvents {
   // DAP events
-  'stopped': (threadId: number, reason: string, data?: any) => void;
+  'stopped': (threadId: number, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
   'continued': () => void;
   'terminated': () => void;
   'exited': () => void;
-  
+
   // Proxy lifecycle events
   'initialized': () => void;
   'error': (error: Error) => void;
   'exit': (code: number | null, signal?: string) => void;
-  
+
   // Status events
   'dry-run-complete': (command: string, script: string) => void;
   'adapter-configured': () => void;
+  'dap-event': (event: string, body: unknown) => void;
 }
 
-// Typed event emitter methods
+// Typed event emitter methods (subset of IProxyManager)
 export interface IProxyManager extends EventEmitter {
   on<K extends keyof ProxyManagerEvents>(
-    event: K, 
+    event: K,
     listener: ProxyManagerEvents[K]
   ): this;
-  
+
   emit<K extends keyof ProxyManagerEvents>(
-    event: K, 
+    event: K,
     ...args: Parameters<ProxyManagerEvents[K]>
   ): boolean;
 }
@@ -55,7 +56,9 @@ This pattern provides:
 
 ### 2. WeakMap Pattern for Handler Tracking
 
-**Location**: `src/session/session-manager.ts` (lines 121-122, 184-310)
+**Location**: `src/session/session-manager-core.ts`
+
+> **Note**: `SessionManager` is now a thin facade. Core logic including event handler setup lives in `SessionManagerCore` (in `session-manager-core.ts`).
 
 ```typescript
 // WeakMap to store event handlers for cleanup
@@ -111,7 +114,7 @@ Benefits of WeakMap:
 
 ### 3. Comprehensive Cleanup Pattern
 
-**Location**: `src/session/session-manager.ts` (lines 313-344)
+**Location**: `src/session/session-manager-core.ts`
 
 ```typescript
 private cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
@@ -157,7 +160,7 @@ Key aspects:
 
 ### IPC Message Events
 
-**Location**: `src/proxy/proxy-manager.ts` (lines 331-358)
+**Location**: `src/proxy/proxy-manager.ts`
 
 ```typescript
 private setupEventHandlers(): void {
@@ -190,7 +193,7 @@ private setupEventHandlers(): void {
 
 ### Message-Based Event Forwarding
 
-**Location**: `src/proxy/proxy-manager.ts` (lines 485-509)
+**Location**: `src/proxy/proxy-manager.ts`
 
 ```typescript
 private handleDapEvent(message: ProxyDapEventMessage): void {
@@ -229,7 +232,7 @@ private handleDapEvent(message: ProxyDapEventMessage): void {
 
 ### State Transitions via Events
 
-**Location**: `src/session/session-manager.ts` (lines 195-207)
+**Location**: `src/session/session-manager-core.ts` (within `setupProxyEventHandlers`)
 
 ```typescript
 // Named function for stopped event
@@ -250,7 +253,7 @@ const handleStopped = (threadId: number, reason: string) => {
 
 ### Event-Based Lifecycle Management
 
-**Location**: `src/proxy/proxy-manager.ts` (lines 225-252)
+**Location**: `src/proxy/proxy-manager.ts`
 
 ```typescript
 const cleanup = () => {
@@ -292,7 +295,7 @@ const handleExit = (code: number | null, signal?: string) => {
 
 ### One-Time Event Promises
 
-**Location**: `src/session/session-manager.ts` (lines 616-643)
+**Location**: `src/session/session-manager-operations.ts`
 
 ```typescript
 // Wait for stopped event
@@ -316,7 +319,7 @@ return new Promise((resolve) => {
 
 ### Event Race Conditions
 
-**Location**: `src/session/session-manager.ts` (lines 450-473)
+**Location**: `src/session/session-manager-operations.ts`
 
 ```typescript
 // Wait for adapter to be configured or first stop event

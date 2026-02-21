@@ -68,7 +68,7 @@ debug-mcp-server --help
 ## Requirements
 
 ### For npm/npx mode:
-- Node.js 16+ installed
+- Node.js 18+ installed
 - The launcher will automatically download the server package via npx
 
 ### For Docker mode:

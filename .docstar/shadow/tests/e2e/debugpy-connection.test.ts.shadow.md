@@ -1,87 +1,70 @@
-# tests/e2e/debugpy-connection.test.ts
-@source-hash: 7093f3fab5503db7
-@generated: 2026-02-10T01:19:09Z
+# tests\e2e\debugpy-connection.test.ts
+@source-hash: 5a3fb0e229785513
+@generated: 2026-02-21T08:28:15Z
 
-## Purpose
-End-to-end test suite for MCP (Model Context Protocol) server's debugpy integration, validating the complete debugging workflow from connection establishment through execution control.
+## Primary Purpose
 
-## Architecture & Dependencies
-- **Testing Framework**: Vitest with Jest environment (L12)
-- **Core Dependencies**: 
-  - MCP SDK client with SSE transport (L20-21)
-  - Node.js child processes for spawning debugpy/MCP servers (L13)
-  - Native filesystem operations (L18-19)
-- **Test Environment**: Uses real Python discovery without mocking (L23)
+E2E test file validating MCP server's debugpy integration capabilities. Tests the complete debugging workflow: connecting to debugpy as a DAP client, setting breakpoints, controlling execution, and retrieving runtime data.
 
-## Key Components
+## Key Test Infrastructure
 
-### Global State & Configuration (L28-32)
-- `mcpSdkClient`: MCP SDK client instance for tool calls
-- `debugpyProcess`/`mcpProcess`: Child process handles for cleanup
-- `serverPort`: Dynamically allocated port for MCP server
-- `TEST_TIMEOUT`: 60-second timeout for long-running operations
+**Test Configuration (L1-33)**
+- Jest environment configured for Node.js execution
+- Timeout set to 60 seconds (`TEST_TIMEOUT = 60000`)
+- Global state tracking: `mcpSdkClient`, `debugpyProcess`, `mcpProcess`, `serverPort`
 
-### Core Functions
+**Cleanup Function (L35-104)**
+- Centralized cleanup handling all process termination and resource deallocation
+- Closes debug sessions via MCP tools before terminating processes
+- Handles graceful shutdown of SDK client, MCP server, and debugpy processes
+- Includes 500ms delay for socket cleanup on Windows
 
-**`cleanup()` (L35-104)**
-- Centralized teardown function handling graceful shutdown sequence
-- Closes debug sessions → SDK client → MCP process → debugpy process
-- Includes 500ms socket close delay for proper cleanup
+**Utility Functions**
+- `parseSdkToolResult()` (L107-114): Extracts JSON from MCP ServerResult structure
+- `findAvailablePort()` (L119-154): Random port selection with availability testing
+- `startDebugpyServer()` (L156-190): Spawns Python debugpy server process
+- `startMcpServer()` (L192-199): Launches MCP server in SSE mode
 
-**`parseSdkToolResult()` (L107-114, L257-264)**
-- Parses ServerResult responses from MCP SDK tool calls
-- Extracts JSON content from nested structure: `result.content[0].text`
-- Critical for interpreting tool responses throughout tests
+## Test Suite Structure
 
-**`findAvailablePort()` (L119-154)**
-- Dynamically finds available ports in range 49152-65535
-- Uses net server binding with retry logic (max 10 attempts)
-- Includes Windows-specific 200ms delay for port release
+**Setup (beforeAll, L202-250)**
+1. Validates build artifacts exist (`dist/index.js`)
+2. Starts debugpy server on random port
+3. Starts MCP server with SSE transport
+4. Polls `/health` endpoint for readiness
+5. Establishes MCP SDK client connection
 
-**`startDebugpyServer()` (L156-190)**
-- Spawns Python debugpy server using platform-specific executable
-- Windows: `python`, Unix: `python3` (L169)
-- Waits for "Debugpy server is listening!" confirmation message
-- 5-second startup timeout with error handling
+**Test Cases**
+1. **Debug Session Management** (L257-280): Creates, lists, and closes debug sessions
+2. **Complete Python Debugging** (L282-418): Full debugging workflow with temporary script
 
-**`startMcpServer()` (L192-199)**
-- Launches MCP server in SSE mode with debug logging
-- Uses built dist/index.js with dynamic port allocation
-- 3-second startup delay before returning process handle
+## Key Dependencies
 
-## Test Structure
+- **MCP SDK**: `@modelcontextprotocol/sdk` for client communication
+- **Test Framework**: Vitest for test execution
+- **Process Management**: Node.js `child_process` for spawning debugpy/MCP servers
+- **File System**: Native Node.js `fs/promises` for temp file handling
 
-### Setup (L202-250)
-1. Validates `dist/index.js` exists (build artifact check)
-2. Starts debugpy server on default port 5679
-3. Allocates random port and starts MCP server
-4. Health check polling with 10-second timeout
-5. Establishes MCP SDK client connection via SSE
+## Architecture Patterns
 
-### Test Cases
+**Process Orchestration**: Manages multiple external processes (debugpy server, MCP server) with proper lifecycle management and cleanup.
 
-**Session Management Test (L266-289)**
-- Creates/lists/closes debug sessions
-- Validates session metadata (ID, name)
-- Tests basic MCP tool functionality
+**Port Management**: Dynamic port allocation to avoid conflicts in test environments.
 
-**Full Debugging Workflow Test (L291-427)**
-- Creates temporary Python script with fibonacci implementation
-- Establishes debug session with `stopOnEntry: true`
-- Sets breakpoint at line 4 (after sleep statement)
-- Executes step-over and continue operations
-- Validates stack trace inspection with frame details
-- Ensures proper cleanup of temporary files
+**Error Handling**: Defensive programming with comprehensive try-catch blocks and cleanup in finally blocks.
 
-## Critical Patterns
-- **Error Handling**: Comprehensive try-catch with detailed logging
-- **Resource Management**: Always uses centralized cleanup in finally blocks
-- **Timing**: Strategic delays for process synchronization (debugger readiness)
-- **Platform Compatibility**: Windows/Unix executable path handling
-- **Port Management**: Dynamic allocation to avoid conflicts in CI environments
+**Async Coordination**: Uses polling and timeouts to synchronize with external processes rather than relying on deterministic startup times.
 
-## Test Constraints
-- Requires Python runtime with debugpy package
-- Depends on built MCP server (`dist/index.js`)
-- Uses real network sockets and child processes
-- 60-second timeout for complex debugging operations
+## Critical Test Invariants
+
+- All debug sessions must be explicitly closed before process termination
+- Temporary test files must be cleaned up regardless of test outcome  
+- Port availability must be verified before server startup
+- Health endpoint must report "ok" status before running tests
+- Build artifacts (`dist/index.js`) must exist before test execution
+
+## Platform Considerations
+
+- Python executable selection: `python` on Windows, `python3` on Unix systems (L169)
+- Windows-specific socket cleanup delays (L145, L102)
+- Cross-platform path handling for test fixtures and temporary files

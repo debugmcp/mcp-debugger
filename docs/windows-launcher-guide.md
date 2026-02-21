@@ -21,7 +21,7 @@ We've created several alternative launchers to address potential issues. Here's 
 @echo off
 REM Simple wrapper script that changes to the correct directory first
 cd /d "%~dp0"
-node dist\index.js
+node dist\index.js stdio
 ```
 
 **Benefits**:
@@ -62,7 +62,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $indexPath = Join-Path -Path $scriptDir -ChildPath "dist\index.js"
 # Run the server
 try {
-    & node $indexPath
+    & node $indexPath stdio
 } catch {
     Write-Error "Error running node: $_"
     exit 1
@@ -85,7 +85,7 @@ IF %SCRIPT_DIR:~-1%==\ SET SCRIPT_DIR=%SCRIPT_DIR:~0,-1%
 ECHO Starting Debug MCP Server...
 ECHO Using script path: %INDEX_PATH%
 REM Run the server with any arguments passed to this script
-node "%INDEX_PATH%" %*
+node "%INDEX_PATH%" stdio %*
 ```
 
 **Benefits**:
@@ -99,7 +99,7 @@ When configuring your MCP settings file:
 
 1. **Simple Path (Recommended)**:
 ```json
-"command": "C:\\path\\to\\debug-mcp-server\\simple-run.cmd"
+"command": "C:\\path\\to\\mcp-debugger\\simple-run.cmd"
 ```
 
 2. **With Quotes (For complex paths)**:
@@ -109,7 +109,7 @@ When configuring your MCP settings file:
 
 3. **Direct node invocation**:
 ```json
-"command": "node \"C:\\workspace\\debug-mcp-server\\direct-launch.js\""
+"command": "node \"C:\\workspace\\mcp-debugger\\direct-launch.js\""
 ```
 
 ## Troubleshooting Approach
@@ -117,7 +117,7 @@ When configuring your MCP settings file:
 If you encounter "spawn EINVAL" or similar errors:
 
 1. Test each launcher manually in a command prompt before using it in MCP settings
-2. Try running the server directly: `node dist/index.js`
+2. Try running the server directly: `node dist/index.js stdio`
 3. Use backslashes instead of forward slashes in your paths
 4. Try different quoting styles
 5. Check your current working directory with `echo %cd%`

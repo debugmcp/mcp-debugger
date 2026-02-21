@@ -1,81 +1,95 @@
 # tests\core\unit/
-@children-hash: d5179e82e54e32c6
-@generated: 2026-02-19T23:48:38Z
+@children-hash: dd64b9723c73a62a
+@generated: 2026-02-21T08:29:08Z
 
-## Purpose and Responsibility
+## Overall Purpose and Responsibility
 
-The `tests/core/unit` directory provides comprehensive unit test coverage for the core components of the DebugMCP system. This test suite validates the foundational architecture that enables AI agents to manage debugging sessions through the Model Context Protocol (MCP). The tests ensure type safety, protocol compliance, error resilience, and proper component integration across the entire debugging framework.
+The `tests/core/unit` directory provides comprehensive unit test coverage for all core components of the debugMCP system. It serves as the primary validation layer ensuring type safety, protocol compliance, and functional correctness across the entire debug adapter ecosystem. This test suite acts as both quality assurance and living documentation for the system's architectural contracts.
 
 ## Key Components and Integration
 
-### Architectural Validation
-- **adapters/**: Tests the shared debug adapter interface contracts, validating protocol compliance, state management, and feature coverage across 20+ debug protocol features
-- **server/**: Comprehensive MCP Debug Server testing including 14 debugging tools, lifecycle management, and AI agent interaction through structured JSON responses
-- **session/**: Complete SessionManager testing covering debug session lifecycle, state transitions, DAP operations, error recovery, and multi-session scenarios
-- **factories/**: Factory pattern validation for dependency injection and component creation with comprehensive mock testing infrastructure
-- **utils/**: Core utility testing for runtime type safety, API migration compliance, and data validation at system boundaries
+### Multi-Layer Testing Architecture
 
-### Component Integration Flow
-The test components work together to validate the complete debugging system:
+The directory is organized into five specialized testing domains that collectively validate the entire core system:
 
-1. **Protocol Layer**: `adapters/` tests ensure interface contracts are properly defined and enforced
-2. **Service Layer**: `server/` tests validate MCP tool implementations and AI agent interactions  
-3. **Session Layer**: `session/` tests ensure robust session management and DAP protocol handling
-4. **Infrastructure Layer**: `factories/` and `utils/` tests validate dependency injection and runtime safety
+1. **Protocol Foundation (`adapters/`)** - Tests the foundational debug adapter interface contracts, ensuring type safety and protocol compliance across 20+ debug features
+2. **Dependency Injection (`factories/`)** - Validates factory patterns for creating proxy managers and session stores with mock infrastructure for test isolation
+3. **MCP Server Layer (`server/`)** - Comprehensive end-to-end testing of the DebugMcpServer including tool execution, session management, and server lifecycle
+4. **Session Management (`session/`)** - Complete validation of SessionManager workflows, state transitions, error recovery, and multi-session scenarios
+5. **Runtime Safety (`utils/`)** - Tests critical utility functions providing type guards, API migration compliance, and data validation at system boundaries
 
-## Public API Surface Testing
+### Component Interdependencies
 
-### MCP Debug Server Tools (14 total)
-- **Session Management**: `create_debug_session`, `list_debug_sessions`, `close_debug_session`
-- **Debug Control**: `set_breakpoint`, `start_debugging`, stepping operations, `continue_execution`  
-- **Inspection**: `get_variables`, `get_stack_trace`, `get_scopes`, `evaluate_expression`
-- **Discovery**: Language detection and adapter registry integration
+The test suites work together to validate the complete data flow:
+- **Adapters** define the protocol contracts that **Session** components must implement
+- **Factories** provide the dependency injection patterns that **Server** components rely on
+- **Server** orchestrates the **Session** management through validated **Utils** safety mechanisms
+- **Utils** provide the runtime type safety that protects all other components at system boundaries
 
-### Core Factory Interfaces
-- `IProxyManagerFactory.create()`: Proxy manager instantiation with dependency injection
-- `ISessionStoreFactory.create()`: Session store creation with debug language support
+## Public API Surface and Entry Points
 
-### Runtime Safety Utilities
-- Type guards for `AdapterCommand` and `ProxyInitPayload` validation
-- Serialization/deserialization with round-trip consistency
-- Session parameter migration (`pythonPath` → `executablePath`) validation
+### Core Testing Entry Points
 
-## Testing Architecture Patterns
+**Protocol Validation**
+- Debug adapter interface contract testing (AdapterState, AdapterErrorCode, DebugFeature enums)
+- Error handling patterns and recovery mechanisms
+- Type safety enforcement across debug protocol features
 
-### Mock Infrastructure
-- **Centralized Mocking**: Shared mock factories across all test suites using `createMockDependencies()`
-- **State Tracking**: Mock implementations maintain call history and instance tracking
-- **Isolation**: Each test maintains independent mock state for reliable testing
+**Factory Pattern Testing** 
+- `IProxyManagerFactory.create()` and `ISessionStoreFactory.create()` validation
+- Mock infrastructure for isolated component testing
+- Dependency injection integrity verification
 
-### Quality Assurance Focus
-- **Protocol Compliance**: Validates MCP request/response structures and error codes
-- **Error Resilience**: Comprehensive error scenario testing with graceful degradation
-- **State Management**: Session lifecycle and debug state transition validation
-- **Memory Safety**: Event listener cleanup and resource management testing
-- **Cross-Platform**: Path resolution and environment compatibility testing
+**MCP Server Operations**
+- 14 core MCP tools including session management, debugging control, and runtime inspection
+- Dynamic language discovery and adapter registry integration  
+- Server lifecycle management (startup, shutdown, cleanup)
 
-### Coverage Areas
-- **Interface Contracts**: All debug adapter definitions properly structured and type-safe
-- **Lifecycle Management**: Complete session creation through termination workflows
-- **Protocol Operations**: DAP command handling, breakpoints, variable inspection, stack traces
-- **Multi-Session**: Concurrent session handling with proper state isolation
-- **Error Recovery**: Proxy crashes, timeouts, and network failure scenarios
+**Session Lifecycle Management**
+- Complete debug workflow testing (creation → debugging → termination)
+- Multi-session concurrency and state isolation
+- DAP protocol operations and error recovery
 
-## Internal Organization
+**Runtime Safety Utilities**
+- Type guards for critical data structures (`isValidAdapterCommand`, `validateProxyInitPayload`)
+- API migration compliance (deprecated `pythonPath` to `executablePath`)
+- Serialization safety and performance validation
 
-The test directory follows a hierarchical validation approach:
-1. **Foundation**: Type safety and interface validation (`adapters/`, `utils/`)
-2. **Core Services**: Session management and factory pattern validation (`session/`, `factories/`)
-3. **Integration**: Complete system testing through MCP server tools (`server/`)
+## Internal Organization and Data Flow
 
-Each component provides comprehensive mock utilities and follows consistent testing patterns using Vitest framework with fake timers, console spying, and dependency injection mocking.
+### Testing Strategy Patterns
 
-## Key Testing Conventions
+**Mock-First Architecture**: All test suites use comprehensive mock dependencies for isolation, enabling focused unit testing without external system dependencies.
 
-- **Consistent Setup**: Standardized `beforeEach/afterEach` lifecycle with mock creation and cleanup
-- **Error Response Evolution**: Tests show migration from exception throwing to graceful error responses
-- **Environment Agnostic**: Cross-platform compatibility validation
-- **Performance Validation**: Large dataset testing and memory leak prevention
-- **Type Safety**: Runtime type checking with TypeScript compiler integration
+**Contract-Driven Testing**: Tests validate interface contracts first, then implementation behavior, ensuring consistent API adherence across components.
 
-This comprehensive unit test suite ensures the DebugMCP system provides reliable, type-safe, and performant debugging capabilities for AI agents through the MCP protocol.
+**State Machine Validation**: Extensive testing of state transitions, particularly in session management, ensuring robust lifecycle handling.
+
+**Error Resilience**: Systematic validation of error scenarios, timeout handling, and graceful degradation patterns.
+
+### Cross-Component Validation Flow
+
+1. **Foundation Layer**: Adapter interface tests ensure protocol contracts are sound
+2. **Creation Layer**: Factory tests validate dependency injection and instance management  
+3. **Orchestration Layer**: Server tests verify MCP protocol implementation and tool execution
+4. **Management Layer**: Session tests validate complete debug workflows and state management
+5. **Safety Layer**: Utils tests ensure runtime type safety and API consistency
+
+## Important Patterns and Conventions
+
+### Consistent Testing Infrastructure
+- Vitest framework with fake timers and comprehensive mocking
+- Centralized mock utilities (`server-test-helpers.ts`, `session-manager-test-utils.ts`)
+- Proper test isolation with `beforeEach/afterEach` cleanup patterns
+
+### Error Handling Standards
+- Two-tier error response patterns (MCP protocol errors vs operational errors)
+- Comprehensive edge case coverage with graceful degradation
+- Memory leak prevention through proper cleanup validation
+
+### Platform Compatibility
+- Environment-agnostic testing for cross-platform support
+- Path resolution testing across different operating systems
+- Dynamic language discovery and adapter integration
+
+This unit test directory ensures the debugMCP core system is robust, type-safe, and maintains consistent behavior across all supported debugging scenarios and failure modes. It serves as the definitive validation layer for system reliability and protocol compliance.

@@ -25,7 +25,9 @@ High-level modules depend on abstractions, not concrete implementations.
 
 ### SessionManager Dependency Injection
 
-**Location**: `src/session/session-manager.ts` (lines 48-56, 124-136)
+**Location**: `src/session/session-manager-core.ts`
+
+> **Note**: `SessionManager` is a thin facade class (in `session-manager.ts`) that extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`.
 
 ```typescript
 // Define dependencies interface
@@ -36,9 +38,11 @@ export interface SessionManagerDependencies {
   proxyManagerFactory: IProxyManagerFactory;
   sessionStoreFactory: ISessionStoreFactory;
   debugTargetLauncher: IDebugTargetLauncher;
+  environment: IEnvironment;
+  adapterRegistry: IAdapterRegistry;
 }
 
-// Constructor injection
+// Constructor injection (in SessionManagerCore)
 constructor(
   config: SessionManagerConfig,
   dependencies: SessionManagerDependencies
@@ -46,10 +50,12 @@ constructor(
   this.logger = dependencies.logger;
   this.fileSystem = dependencies.fileSystem;
   this.networkManager = dependencies.networkManager;
+  this.environment = dependencies.environment;
   this.proxyManagerFactory = dependencies.proxyManagerFactory;
   this.sessionStoreFactory = dependencies.sessionStoreFactory;
   this.debugTargetLauncher = dependencies.debugTargetLauncher;
-  
+  this.adapterRegistry = dependencies.adapterRegistry;
+
   // Use injected dependencies
   this.sessionStore = this.sessionStoreFactory.create();
   this.fileSystem.ensureDirSync(this.logDirBase);
@@ -58,11 +64,12 @@ constructor(
 
 ### ProxyManager Dependency Injection
 
-**Location**: `src/proxy/proxy-manager.ts` (lines 137-145)
+**Location**: `src/proxy/proxy-manager.ts`
 
 ```typescript
 export class ProxyManager extends EventEmitter implements IProxyManager {
   constructor(
+    private adapter: IDebugAdapter | null,  // Optional adapter for language-agnostic support
     private proxyProcessLauncher: IProxyProcessLauncher,
     private fileSystem: IFileSystem,
     private logger: ILogger
@@ -83,7 +90,7 @@ Benefits:
 
 ```typescript
 export interface IProxyManagerFactory {
-  create(): IProxyManager;
+  create(adapter?: IDebugAdapter): IProxyManager;
 }
 
 export class ProxyManagerFactory implements IProxyManagerFactory {
@@ -93,8 +100,9 @@ export class ProxyManagerFactory implements IProxyManagerFactory {
     private logger: ILogger
   ) {}
 
-  create(): IProxyManager {
+  create(adapter?: IDebugAdapter): IProxyManager {
     return new ProxyManager(
+      adapter || null,  // Pass adapter or null if not provided
       this.proxyProcessLauncher,
       this.fileSystem,
       this.logger
@@ -150,14 +158,10 @@ export interface ILogger {
 **Location**: `src/interfaces/process-interfaces.ts`
 
 ```typescript
-export interface IProxyProcess extends EventEmitter {
-  pid?: number;
-  killed: boolean;
-  kill(signal?: string): boolean;
-  sendCommand(command: any): void;
-  stdin: NodeJS.WritableStream | null;
-  stdout: NodeJS.ReadableStream | null;
-  stderr: NodeJS.ReadableStream | null;
+export interface IProxyProcess extends IProcess {
+  sessionId: string;
+  sendCommand(command: object): void;
+  waitForInitialization(timeout?: number): Promise<void>;
 }
 
 export interface IProxyProcessLauncher {
@@ -176,44 +180,93 @@ export interface IProxyProcessLauncher {
 **Location**: `src/container/dependencies.ts`
 
 ```typescript
-import { FileSystemImpl } from '../implementations/file-system-impl.js';
-import { ProcessManagerImpl } from '../implementations/process-manager-impl.js';
-import { NetworkManagerImpl } from '../implementations/network-manager-impl.js';
+import { FileSystemImpl, ProcessManagerImpl, NetworkManagerImpl, ... } from '../implementations/index.js';
 import { createLogger } from '../utils/logger.js';
 
-export function createProductionDependencies(): IDependencies {
+export function createProductionDependencies(config: ContainerConfig = {}): Dependencies {
+  const logger = createLogger('debug-mcp', { level: config.logLevel, ... });
+  const environment = new ProcessEnvironment();
+  const fileSystem = new FileSystemImpl();
+  const processManager = new ProcessManagerImpl();
+  const networkManager = new NetworkManagerImpl();
+
+  // Process launchers
+  const processLauncher = new ProcessLauncherImpl(processManager);
+  const proxyProcessLauncher = new ProxyProcessLauncherImpl(processLauncher, processManager);
+  const debugTargetLauncher = new DebugTargetLauncherImpl(processLauncher, networkManager);
+
+  // Factories
+  const proxyManagerFactory = new ProxyManagerFactory(proxyProcessLauncher, fileSystem, logger);
+  const sessionStoreFactory = new SessionStoreFactory();
+
+  // Adapter registry (with dynamic loading enabled)
+  const adapterRegistry = new AdapterRegistry({ validateOnRegister: false, ... });
+
   return {
-    fileSystem: new FileSystemImpl(),
-    processManager: new ProcessManagerImpl(),
-    networkManager: new NetworkManagerImpl(),
-    logger: createLogger('mcp-debug-server')
+    fileSystem, processManager, networkManager, logger, environment,
+    processLauncher, proxyProcessLauncher, debugTargetLauncher,
+    proxyManagerFactory, sessionStoreFactory, adapterRegistry
   };
 }
 ```
 
 ### Test Container Configuration
 
-**Location**: `tests/utils/test-utils.ts`
+**Location**: `tests/test-utils/helpers/test-dependencies.ts`
 
 ```typescript
-export function createTestDependencies(): Partial<IDependencies> {
+export async function createTestDependencies(): Promise<Dependencies> {
+  const logger = createMockLogger();
+  const fileSystem = createMockFileSystem();
+  const processManager = createMockProcessManager();
+  const networkManager = createMockNetworkManager();
+
+  const processLauncher = new FakeProcessLauncher();
+  const proxyProcessLauncher = new FakeProxyProcessLauncher();
+  const debugTargetLauncher = new FakeDebugTargetLauncher();
+
+  const proxyManagerFactory = new MockProxyManagerFactory();
+  proxyManagerFactory.createFn = () => new MockProxyManager();
+  const sessionStoreFactory = new MockSessionStoreFactory();
+
+  return {
+    fileSystem, processManager, networkManager, logger,
+    processLauncher, proxyProcessLauncher, debugTargetLauncher,
+    proxyManagerFactory, sessionStoreFactory
+  };
+}
+
+// There is also a synchronous helper for SessionManager-specific tests:
+export function createMockSessionManagerDependencies(): SessionManagerDependencies {
   return {
     fileSystem: createMockFileSystem(),
-    processManager: createMockProcessManager(),
     networkManager: createMockNetworkManager(),
-    logger: createMockLogger()
+    logger: createMockLogger(),
+    proxyManagerFactory: new MockProxyManagerFactory(),
+    sessionStoreFactory: new MockSessionStoreFactory(),
+    debugTargetLauncher: createMockDebugTargetLauncher(),
+    environment: createMockEnvironment(),
+    adapterRegistry: createMockAdapterRegistry()
   };
 }
 
 export function createMockFileSystem(): IFileSystem {
   return {
-    readFile: vi.fn().mockResolvedValue(''),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    exists: vi.fn().mockResolvedValue(true),
-    ensureDir: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    exists: vi.fn(),
+    existsSync: vi.fn(),
+    mkdir: vi.fn(),
+    readdir: vi.fn(),
+    stat: vi.fn(),
+    unlink: vi.fn(),
+    rmdir: vi.fn(),
+    ensureDir: vi.fn(),
     ensureDirSync: vi.fn(),
-    pathExists: vi.fn().mockResolvedValue(true),
-    // ... implement all methods
+    pathExists: vi.fn(),
+    remove: vi.fn(),
+    copy: vi.fn(),
+    outputFile: vi.fn()
   };
 }
 ```

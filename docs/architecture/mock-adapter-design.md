@@ -61,10 +61,15 @@ class MockDebugAdapter {
     if (bp) {
       bp.hitCount++;
       this.programCounter = { file: bp.file, line: bp.line };
-      this.emit('stopped', {
-        reason: 'breakpoint',
-        threadId: 1,
-        allThreadsStopped: true
+      // Events are delegated through ProxyManager rather than emitted directly.
+      // ProxyManager forwards DAP events to the session layer.
+      this.proxyManager.handleDapEvent({
+        event: 'stopped',
+        body: {
+          reason: 'breakpoint',
+          threadId: 1,
+          allThreadsStopped: true
+        }
       });
     }
   }
@@ -86,8 +91,20 @@ interface MockVariable {
 
 const MOCK_VARIABLES: MockVariable[] = [
   {
-    name: 'localVar',
-    value: '42',
+    name: 'x',
+    value: '10',
+    type: 'int',
+    variablesReference: 0
+  },
+  {
+    name: 'y',
+    value: '20',
+    type: 'int',
+    variablesReference: 0
+  },
+  {
+    name: 'result',
+    value: '30',
     type: 'int',
     variablesReference: 0
   },
@@ -318,15 +335,17 @@ const mockAdapter = new MockDebugAdapter({
 
 ## Mock Adapter Process
 
-The mock adapter includes a separate process script that simulates a real debug adapter:
+The mock adapter includes a separate process script that simulates a real debug adapter. The default mode is stdio (matching the server default); TCP mode is also supported via `--session` and port arguments:
 
 ```typescript
-// src/adapters/mock/mock-adapter-process.ts
+// packages/adapter-mock/src/mock-adapter-process.ts
+// Supports both stdio (default) and TCP transport modes.
+// Usage: node mock-adapter-process.js [--session <id>] [--port <port>]
 import { createServer } from 'net';
 
 const server = createServer((socket) => {
   const protocol = new MockDebugProtocol(socket);
-  
+
   protocol.on('initialize', async (args) => {
     await simulateDelay(10);
     protocol.sendResponse({
@@ -337,12 +356,12 @@ const server = createServer((socket) => {
       }
     });
   });
-  
+
   protocol.on('launch', async (args) => {
     // Simulate launching a program
     await simulateDelay(50);
     protocol.sendEvent('initialized');
-    
+
     if (args.stopOnEntry) {
       protocol.sendEvent('stopped', {
         reason: 'entry',

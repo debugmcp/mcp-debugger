@@ -389,8 +389,8 @@ server.addTool({
 ### 3. Health Checks
 
 ```typescript
-// Add health endpoint for TCP mode
-if (transport === 'tcp') {
+// Add health endpoint for SSE mode
+if (transport === 'sse') {
   const healthServer = http.createServer((req, res) => {
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

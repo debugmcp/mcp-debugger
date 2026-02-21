@@ -41,11 +41,12 @@ This note documents a recurring startup failure with the JavaScript debug adapte
 Applies to our vendoring script at:
 - `packages/adapter-javascript/scripts/build-js-debug.js`
 
-After extracting the js-debug artifact and selecting the server entry (e.g., `vsDebugServer.cjs`):
+After extracting the js-debug artifact and selecting the server entry (the primary vendor file is `vsDebugServer.js` in the dist directory; `vsDebugServer.cjs` is also produced as a CommonJS mirror):
 
 1) Search for support files in the extraction tree:
    - Look for filenames exactly:
      - `bootloader.js` (REQUIRED)
+     - `hash.js` (REQUIRED — used by bootloader at runtime)
      - `watchdog.js` (OPTIONAL but recommended to copy if present)
 
 2) Copy to vendor root (next to the launcher):
@@ -99,7 +100,7 @@ await fsp.copyFile(found.abs, VENDOR_FILE);
 try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch { /* optional CJS mirror */ }
 
 // NEW: Search-and-copy support JS sidecars from anywhere in the extracted tree
-const supportTargets = new Set(['bootloader.js', 'watchdog.js']);
+const supportTargets = new Set(['bootloader.js', 'hash.js', 'watchdog.js']);
 const supportFiles = await findAllByBasename(path.dirname(found.abs), supportTargets);
 
 // Copy any found support files to the vendor root, preserving basename
@@ -108,9 +109,16 @@ for (const supportSrc of supportFiles) {
   await fsp.copyFile(supportSrc, path.join(VENDOR_DIR, base));
 }
 
-// Build-time hard check for bootloader.js
+// Create a package.json CommonJS boundary so Node resolves CJS requires correctly
+await fsp.writeFile(
+  path.join(VENDOR_DIR, 'package.json'),
+  JSON.stringify({ type: 'commonjs' }, null, 2) + '\n'
+);
+
+// Build-time hard check for bootloader.js and hash.js
 const bootloaderPath = path.join(VENDOR_DIR, 'bootloader.js');
-if (!fs.existsSync(bootloaderPath)) {
+const hashPath = path.join(VENDOR_DIR, 'hash.js');
+if (!fs.existsSync(bootloaderPath) || !fs.existsSync(hashPath)) {
   throw new Error(
     'Vendoring error: bootloader.js was not found in the js-debug artifact. ' +
     'This release layout may have changed. ' +
@@ -160,8 +168,11 @@ If upstream packaging changes and the simple search-and-copy cannot find the sup
 
 - Post-vendoring verification:
   - Vendor dir should contain at least:
-    - `vendor/js-debug/vsDebugServer.cjs` (CJS entry, if using CJS path)
+    - `vendor/js-debug/vsDebugServer.js` (primary entry)
+    - `vendor/js-debug/vsDebugServer.cjs` (CJS mirror)
     - `vendor/js-debug/bootloader.js` (critical)
+    - `vendor/js-debug/hash.js` (critical -- required by bootloader)
+    - `vendor/js-debug/package.json` (CommonJS boundary)
     - (optional) `vendor/js-debug/watchdog.js`
     - plus any binary sidecars (`.node`, `.wasm`, `.json`, `.map`) copied per existing logic.
 

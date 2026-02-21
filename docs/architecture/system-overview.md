@@ -192,7 +192,7 @@ sequenceDiagram
 ## Technology Stack
 
 ### Core Technologies
-- **Runtime**: Node.js 16+ with ES modules
+- **Runtime**: Node.js 18+ with ES modules
 - **Language**: TypeScript 5.x with strict mode
 - **Protocol**: Model Context Protocol (MCP) over stdio/TCP
 - **Debugging**: Debug Adapter Protocol (DAP) 1.51.0
@@ -227,13 +227,13 @@ npx @debugmcp/mcp-debugger tcp --port 6111  # TCP mode
 
 ### 2. Local Node.js
 ```bash
-npm install && npm run build
-node dist/index.js  # stdio mode
-node dist/index.js --transport tcp --port 6111  # TCP mode
+pnpm install && npm run build
+node dist/index.js stdio              # stdio mode
+node dist/index.js sse -p 3001       # SSE mode
 ```
 
 ### 3. Docker Container
-- Dockerfile configured for both stdio and TCP modes
+- Dockerfile configured for both stdio and SSE modes
 - Python and debugpy pre-installed in image
 - Volume mounting for workspace access
 - Uses bundled versions for minimal image size

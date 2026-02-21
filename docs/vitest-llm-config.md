@@ -45,7 +45,7 @@ Added console filtering and reporter configuration:
 #### test-results-analyzer.js
 - Analyzes existing JSON results
 - Three detail levels: summary, failures, detailed
-- Usage: `node tests/utils/test-results-analyzer.js --level=summary`
+- Usage: `node tests/test-utils/helpers/test-results-analyzer.js --level=summary`
 
 ## Usage Examples
 
@@ -64,7 +64,7 @@ npm run test:verbose  # Full output when needed
 ### For Programmatic Analysis
 ```bash
 npm run test:json  # Generate JSON
-node tests/utils/test-results-analyzer.js --level=detailed
+node tests/test-utils/helpers/test-results-analyzer.js --level=detailed
 ```
 
 ## Console Filtering

@@ -110,11 +110,17 @@ This works because:
 1. **Root `src/` → Root `dist/`**: Main server TypeScript files compile to root dist
 2. **Packages `src/` → Packages `dist/`**: Each package has its own TypeScript compilation
 
-### Bundling with tsup
-The project uses **tsup** for bundling (replaced esbuild for better dependency handling):
+### Bundling
+The project uses two bundling tools for different purposes:
+
+**tsup** (for the `@debugmcp/mcp-debugger` distribution package):
 - **`noExternal: [/./]`**: Bundles all dependencies, including workspace packages
 - **ESM output**: CLI bundle uses `.mjs` extension for ESM compatibility
 - **CJS output**: Proxy bundle uses `.cjs` for CommonJS (required by child process)
+
+**esbuild** (for root-level bundles):
+- Used by `scripts/bundle.js` to create `dist/bundle.cjs` (main server) and `dist/proxy-bundle.cjs` (proxy)
+- These root bundles are used in Docker builds and direct execution scenarios
 
 ### Build Artifacts Management
 Build artifacts are properly managed via `.gitignore`:

@@ -137,20 +137,20 @@ Constructs the command to launch the debug adapter process.
 #### `getAdapterModuleName(): string`
 Debug adapter module identifier.
 
-**Returns**: e.g., `'debugpy.adapter'`, `'node-debug2'`
+**Returns**: e.g., `'debugpy.adapter'`, `'js-debug'`
 
 #### `getAdapterInstallCommand(): string`
 Command to install the debug adapter.
 
-**Returns**: e.g., `'pip install debugpy'`, `'npm install -g node-debug2'`
+**Returns**: e.g., `'pip install debugpy'`, `'bundled with @debugmcp/adapter-javascript'`
 
 ### Debug Configuration Methods
 
-#### `transformLaunchConfig(config: GenericLaunchConfig): LanguageSpecificLaunchConfig`
-Converts generic config to language-specific format.
+#### `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>`
+Converts generic config to language-specific format (async since v2.1.0).
 
-**Parameters**: Generic launch configuration  
-**Returns**: Language-specific configuration with additional fields
+**Parameters**: Generic launch configuration
+**Returns**: Promise resolving to language-specific configuration with additional fields
 
 #### `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
 Default configuration values for the language.

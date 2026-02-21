@@ -14,7 +14,7 @@ The MCP Debugger ships without auto-installing optional adapters. Only required 
 
 - Package name: `@debugmcp/adapter-javascript`
 - Factory export: `JavascriptAdapterFactory`
-- Vendor dependency: `packages/adapter-javascript/vendor/js-debug/vsDebugServer.js`
+- Vendor dependency: `packages/adapter-javascript/vendor/js-debug/vsDebugServer.js` (primary entry; `vsDebugServer.cjs` is also produced as a CJS mirror)
 
 There is no automatic install/build on first use. This keeps the core lightweight and reduces unexpected network operations.
 
@@ -58,7 +58,7 @@ The shared model defines:
 - Default executable: `node` (resolved via utility logic in the adapter)
 
 Unit tests were updated to reflect the addition:
-- `tests/core/unit/session/models.test.ts` now expects three languages and verifies inclusion of `javascript`.
+- `tests/core/unit/session/models.test.ts` now expects five languages (python, javascript, rust, go, mock) and verifies inclusion of `javascript`.
 
 ## Verification steps
 
@@ -102,6 +102,8 @@ Adapter exports include:
 - `JavascriptAdapterFactory` (factory used by the loader)
 - `JavascriptDebugAdapter` (internal class)
 - Utility re-exports include:
-  - `resolveNodeExecutable` → resolves the Node runtime path in a cross-platform, deterministic manner.
+  - `resolveNodeExecutable` -- resolves the Node runtime path in a cross-platform, deterministic manner.
+  - `detectTsRunners` -- detects available TypeScript runners (ts-node, tsx, etc.) in the environment.
+  - `transformConfig` -- transforms generic launch config into js-debug-specific configuration.
 
 Ensure `packages/adapter-javascript/package.json` points `main/types/exports` to `dist` and includes `vendor/js-debug` in the `files` array for publishing.

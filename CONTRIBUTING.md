@@ -22,8 +22,11 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 
 ### Prerequisites
 
-- Node.js 20.x or higher
+- Node.js 18+ (20.x recommended)
+- pnpm (required — `workspace:*` protocol needs pnpm, not npm)
 - Python 3.7+ (for debugging Python code)
+- Go 1.18+ and Delve (for debugging Go code, optional)
+- Rust toolchain (for debugging Rust code, optional — CodeLLDB auto-downloads during install)
 - Docker (optional, for containerized development)
 - Git
 
@@ -41,7 +44,7 @@ This project adheres to a Code of Conduct that all contributors are expected to 
    ```
 4. **Install dependencies**:
    ```bash
-   npm install
+   pnpm install
    ```
 5. **Build the project**:
    ```bash
@@ -163,26 +166,23 @@ The project includes a comprehensive test suite. Please ensure all tests pass be
 
 ### Running Tests
 
-The easiest way to run tests is using our consolidated test runner script (located in `tests/runners/`). Note that `.cmd` scripts are for Windows and you might need to adapt or use a shell script for macOS/Linux if available.
+The project uses **Vitest** as its test runner:
 
 ```bash
-# On Windows:
 # Run all tests
-tests\\runners\\run-tests.cmd all
+npm test
 
-# Run only unit tests
-tests\\runners\\run-tests.cmd unit
+# Run specific test suites
+npm run test:unit         # Unit tests only
+npm run test:integration  # Integration tests only
+npm run test:e2e         # End-to-end tests only
 
-# Run only integration tests
-tests\\runners\\run-tests.cmd integration
+# Run tests with coverage
+npm run test:coverage
 
-# Run only end-to-end tests
-tests\\runners\\run-tests.cmd e2e
-
-# Run a specific test file (example)
-tests\\runners\\run-tests.cmd unit tests/unit/session/session-manager.test.ts
+# Run a specific test file
+npx vitest run tests/unit/session/session-manager.test.ts
 ```
-*(For macOS/Linux, if a `run-tests.sh` is provided, usage would be similar, e.g. `bash tests/runners/run-tests.sh all`)*
 
 ### Test Architecture
 
@@ -277,19 +277,26 @@ could leave the session in an invalid state.
 
 ```
 mcp-debugger/
-├── src/                    # Source code
+├── packages/               # Monorepo workspace packages
+│   ├── shared/            # Shared interfaces, types, and utilities
+│   ├── adapter-python/    # Python debug adapter (debugpy)
+│   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
+│   ├── adapter-rust/      # Rust adapter (CodeLLDB)
+│   ├── adapter-go/        # Go adapter (Delve)
+│   ├── adapter-mock/      # Mock adapter for testing
+│   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
+├── src/                    # Core server source code
+│   ├── adapters/          # Adapter loading and registry
 │   ├── cli/               # CLI commands and setup
 │   ├── container/         # Dependency injection
-│   ├── dap-core/         # Debug Adapter Protocol core
-│   ├── debugger/         # Debugger implementations
-│   ├── proxy/            # DAP proxy components
-│   ├── session/          # Session management
-│   ├── tools/            # MCP tools
-│   └── utils/            # Utility functions
+│   ├── proxy/             # DAP proxy components
+│   ├── session/           # Session management
+│   └── utils/             # Utility functions
 ├── tests/                 # Test files
-│   ├── unit/             # Unit tests
-│   ├── integration/      # Integration tests
-│   └── e2e/              # End-to-end tests
+│   ├── core/             # Core unit and integration tests
+│   ├── adapters/         # Adapter-specific tests
+│   ├── e2e/              # End-to-end tests
+│   └── test-utils/       # Shared test utilities
 ├── examples/              # Example scripts
 ├── docs/                  # Documentation
 └── .github/               # GitHub templates and workflows
@@ -297,10 +304,11 @@ mcp-debugger/
 
 ### Key Components
 
-- **Session Manager**: Manages debugging sessions lifecycle
-- **DAP Proxy**: Handles communication with debugpy
-- **MCP Tools**: Implements the MCP protocol tools
-- **Debugger Providers**: Language-specific debugging logic
+- **Session Manager**: Manages debugging session lifecycle
+- **DAP Proxy**: Handles communication with debug adapters via DAP protocol
+- **Adapter Registry**: Dynamically loads and manages language-specific adapters
+- **Adapter Policies**: Language-specific behavior via policy pattern
+- **MCP Tools**: Implements the 19 MCP protocol tools
 
 ## 🏃 Running the Demo
 
@@ -313,11 +321,11 @@ To see mcp-debugger in action:
 
 2. **Run with a demo script**:
    ```bash
-   # Start the server
-   node dist/index.js
-   
-   # In another terminal, use an MCP client to debug
-   # the example swap_vars.py script
+   # Start the server in STDIO mode
+   node dist/index.js stdio
+
+   # Or start in SSE mode for web clients
+   node dist/index.js sse -p 3001
    ```
 
 3. **Example debugging session**:

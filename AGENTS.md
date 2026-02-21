@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - `src/` contains the TypeScript CLI and server core that power the Debug MCP runtime.
-- `packages/` hosts workspace modules (`@debugmcp/shared`, `adapter-mock`, `adapter-python`, `adapter-javascript`) with their own `src/` trees.
+- `packages/` hosts workspace modules (`@debugmcp/shared`, `adapter-mock`, `adapter-python`, `adapter-javascript`, `adapter-rust`, `adapter-go`, `mcp-debugger`) with their own `src/` trees.
 - `tests/` is grouped by scope: `core/`, `adapters/*/`, `e2e/`, plus shared utilities in `tests/test-utils/` and fixtures under `tests/fixtures/`.
 - `docs/` covers design notes; `examples/` hosts adapter recipes; `scripts/` stores CI helpers.
 - Build artifacts land in `dist/`; recorded assets and Docker helpers live in `assets/` and `docker/`.
@@ -29,6 +29,6 @@
 
 ## Commit & Pull Request Guidelines
 - Follow the existing history: short present-tense subject lines (`feat(scope): ...`, `chore: ...`) with details in the body when needed.
-- Run `scripts/safe-commit.sh` (or the `pnpm commit:safe` alias) before pushing to ensure builds, lint, and smoke tests succeed locally.
+- Run `scripts/safe-commit.sh` (or the `pnpm commit:safe` alias) before pushing — this runs a mandatory personal information check and then commits (use `--skip-tests` to bypass other pre-commit hooks while keeping the personal info check).
 - PRs should describe behavior changes, reference GitHub issues or roadmap items, link relevant artifacts (logs, screenshots), and highlight test commands executed.
 - Update affected docs or examples alongside code so downstream agents stay in sync.
