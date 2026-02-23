@@ -1,6 +1,23 @@
 {
-  "source": "tests/integration/rust/rust-integration.test.ts",
-  "source_hash": "c0d7e30098b575a7",
-  "generated": "2026-02-10T01:18:53Z",
-  "findings": []
+  "source": "tests\\integration\\rust\\rust-integration.test.ts",
+  "source_hash": "5221791c32095f4f",
+  "generated": "2026-02-19T23:47:41Z",
+  "findings": [
+    {
+      "category": "stale_comment",
+      "line_start": 50,
+      "line_end": 50,
+      "severity": "warning",
+      "description": "Comment suggests the test only verifies session creation, but the test also verifies session retrieval and language property",
+      "suggestion": "Update comment to reflect that the test verifies both session persistence and Rust language assignment"
+    },
+    {
+      "category": "stale_comment",
+      "line_start": 73,
+      "line_end": 74,
+      "severity": "warning",
+      "description": "Comment mentions test files 'aren't set up yet' but this appears to be a permanent condition rather than a temporary setup issue",
+      "suggestion": "Clarify that this is expected behavior when example Rust projects are not available, not a temporary setup issue"
+    }
+  ]
 }

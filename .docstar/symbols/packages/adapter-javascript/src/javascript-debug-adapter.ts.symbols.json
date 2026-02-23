@@ -2,5 +2,12 @@
   "source": "packages\\adapter-javascript\\src\\javascript-debug-adapter.ts",
   "source_hash": "bf389ee512ea16e2",
   "generated": "2026-02-21T08:28:28Z",
-  "findings": []
+  "symbols": [
+    {
+      "name": "JavascriptDebugAdapter",
+      "kind": "class",
+      "line_start": 35,
+      "line_end": 806
+    }
+  ]
 }

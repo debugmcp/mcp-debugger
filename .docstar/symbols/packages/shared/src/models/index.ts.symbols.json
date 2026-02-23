@@ -1,0 +1,108 @@
+{
+  "source": "packages\\shared\\src\\models\\index.ts",
+  "source_hash": "3349ce0316048495",
+  "generated": "2026-02-21T08:28:22Z",
+  "symbols": [
+    {
+      "name": "CustomLaunchRequestArguments",
+      "kind": "interface",
+      "line_start": 9,
+      "line_end": 15
+    },
+    {
+      "name": "ProcessIdentifierType",
+      "kind": "constant",
+      "line_start": 20,
+      "line_end": 27
+    },
+    {
+      "name": "GenericAttachConfig",
+      "kind": "interface",
+      "line_start": 32,
+      "line_end": 71
+    },
+    {
+      "name": "LanguageSpecificAttachConfig",
+      "kind": "constant",
+      "line_start": 76
+    },
+    {
+      "name": "DebugLanguage",
+      "kind": "constant",
+      "line_start": 81,
+      "line_end": 87
+    },
+    {
+      "name": "SessionLifecycleState",
+      "kind": "constant",
+      "line_start": 92,
+      "line_end": 99
+    },
+    {
+      "name": "ExecutionState",
+      "kind": "constant",
+      "line_start": 105,
+      "line_end": 116
+    },
+    {
+      "name": "SessionState",
+      "kind": "constant",
+      "line_start": 122,
+      "line_end": 137
+    },
+    {
+      "name": "mapLegacyState",
+      "kind": "function",
+      "line_start": 142,
+      "line_end": 158
+    },
+    {
+      "name": "mapToLegacyState",
+      "kind": "function",
+      "line_start": 163,
+      "line_end": 185
+    },
+    {
+      "name": "SessionConfig",
+      "kind": "interface",
+      "line_start": 190,
+      "line_end": 197
+    },
+    {
+      "name": "Breakpoint",
+      "kind": "interface",
+      "line_start": 202,
+      "line_end": 215
+    },
+    {
+      "name": "DebugSession",
+      "kind": "interface",
+      "line_start": 220,
+      "line_end": 243
+    },
+    {
+      "name": "DebugSessionInfo",
+      "kind": "interface",
+      "line_start": 248,
+      "line_end": 255
+    },
+    {
+      "name": "Variable",
+      "kind": "interface",
+      "line_start": 261,
+      "line_end": 272
+    },
+    {
+      "name": "StackFrame",
+      "kind": "interface",
+      "line_start": 277,
+      "line_end": 288
+    },
+    {
+      "name": "DebugLocation",
+      "kind": "interface",
+      "line_start": 293,
+      "line_end": 304
+    }
+  ]
+}

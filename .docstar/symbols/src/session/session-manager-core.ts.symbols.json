@@ -1,0 +1,37 @@
+{
+  "source": "src\\session\\session-manager-core.ts",
+  "source_hash": "1b9b667a88344c97",
+  "generated": "2026-02-23T15:26:04Z",
+  "symbols": [
+    {
+      "name": "CustomLaunchRequestArguments",
+      "kind": "constant",
+      "line_start": 25,
+      "line_end": 28
+    },
+    {
+      "name": "DebugResult",
+      "kind": "constant",
+      "line_start": 31,
+      "line_end": 40
+    },
+    {
+      "name": "SessionManagerDependencies",
+      "kind": "constant",
+      "line_start": 45,
+      "line_end": 54
+    },
+    {
+      "name": "SessionManagerConfig",
+      "kind": "constant",
+      "line_start": 59,
+      "line_end": 63
+    },
+    {
+      "name": "SessionManagerCore",
+      "kind": "class",
+      "line_start": 68,
+      "line_end": 406
+    }
+  ]
+}

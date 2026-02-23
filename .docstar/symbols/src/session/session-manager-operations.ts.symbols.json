@@ -1,0 +1,20 @@
+{
+  "source": "src\\session\\session-manager-operations.ts",
+  "source_hash": "86e21304c1feff7d",
+  "generated": "2026-02-23T19:00:06Z",
+  "file_role": "service",
+  "symbols": [
+    {
+      "name": "EvaluateResult",
+      "kind": "class",
+      "line_start": 35,
+      "line_end": 44
+    },
+    {
+      "name": "SessionManagerOperations",
+      "kind": "class",
+      "line_start": 49,
+      "line_end": 1529
+    }
+  ]
+}

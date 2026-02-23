@@ -1,6 +1,6 @@
 {
-  "source": "src/proxy/proxy-manager.ts",
-  "source_hash": "3ed8cde34cbdcccb",
-  "generated": "2026-02-10T21:25:43Z",
+  "source": "src\\proxy\\proxy-manager.ts",
+  "source_hash": "b5325b85040ceaac",
+  "generated": "2026-02-19T23:47:54Z",
   "findings": []
 }

@@ -1,0 +1,32 @@
+{
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "results": [
+    {
+      "name": "3.1 NPX: list supported languages",
+      "status": "PASS",
+      "duration": 29
+    },
+    {
+      "name": "3.2 NPX: Python debug workflow",
+      "status": "PASS",
+      "duration": 8795
+    },
+    {
+      "name": "3.3 NPX: JavaScript debug workflow",
+      "status": "PASS",
+      "duration": 7389
+    },
+    {
+      "name": "3.4 NPX: verify server output is clean",
+      "status": "PASS",
+      "duration": 0
+    },
+    {
+      "name": "3.5 NPX: tool schema verification",
+      "status": "PASS",
+      "duration": 9
+    }
+  ]
+}

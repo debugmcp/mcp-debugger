@@ -1,0 +1,34 @@
+{
+  "total": 5,
+  "passed": 3,
+  "failed": 2,
+  "results": [
+    {
+      "name": "2.1 Docker: list supported languages",
+      "status": "PASS",
+      "duration": 15
+    },
+    {
+      "name": "2.2 Docker: Python debug workflow with /workspace/ paths",
+      "status": "FAIL",
+      "error": "MCP error -32602: MCP error -32602: Breakpoint file not found: '/workspace/examples/python/simple_test.py'\nLooked for: '/workspace//workspace/examples/python/simple_test.py'",
+      "duration": 15
+    },
+    {
+      "name": "2.3 Docker: JavaScript debug workflow",
+      "status": "FAIL",
+      "error": "MCP error -32602: MCP error -32602: Breakpoint file not found: '/workspace/examples/javascript/simple_test.js'\nLooked for: '/workspace//workspace/examples/javascript/simple_test.js'",
+      "duration": 13
+    },
+    {
+      "name": "2.4 Docker: breakpoint on file outside /workspace",
+      "status": "PASS",
+      "duration": 11
+    },
+    {
+      "name": "2.5 Docker: multiple simultaneous sessions",
+      "status": "PASS",
+      "duration": 17
+    }
+  ]
+}

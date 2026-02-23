@@ -1,6 +1,6 @@
 {
-  "source": "tests/core/unit/session/session-manager-workflow.test.ts",
-  "source_hash": "da0dc42352e65cec",
-  "generated": "2026-02-10T00:41:20Z",
+  "source": "tests\\core\\unit\\session\\session-manager-workflow.test.ts",
+  "source_hash": "9aa0c653cbb79e6e",
+  "generated": "2026-02-19T23:47:37Z",
   "findings": []
 }

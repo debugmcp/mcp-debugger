@@ -1,6 +1,6 @@
 {
-  "source": "src/session/session-manager-operations.ts",
-  "source_hash": "d4dd17e80877865e",
-  "generated": "2026-02-11T16:13:01Z",
+  "source": "src\\session\\session-manager-operations.ts",
+  "source_hash": "86e21304c1feff7d",
+  "generated": "2026-02-23T19:00:06Z",
   "findings": []
 }

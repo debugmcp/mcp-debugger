@@ -1,0 +1,19 @@
+{
+  "source": "src\\server.ts",
+  "source_hash": "c0e8fb52d26c50d1",
+  "generated": "2026-02-23T15:26:13Z",
+  "symbols": [
+    {
+      "name": "DebugMcpServerOptions",
+      "kind": "constant",
+      "line_start": 54,
+      "line_end": 57
+    },
+    {
+      "name": "DebugMcpServer",
+      "kind": "class",
+      "line_start": 105,
+      "line_end": 1438
+    }
+  ]
+}

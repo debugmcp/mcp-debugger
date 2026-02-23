@@ -1,0 +1,31 @@
+{
+  "source": "src\\utils\\container-path-utils.ts",
+  "source_hash": "e072b8b97f6f0bbd",
+  "generated": "2026-02-23T15:25:59Z",
+  "symbols": [
+    {
+      "name": "isContainerMode",
+      "kind": "function",
+      "line_start": 17,
+      "line_end": 19
+    },
+    {
+      "name": "getWorkspaceRoot",
+      "kind": "function",
+      "line_start": 25,
+      "line_end": 40
+    },
+    {
+      "name": "resolvePathForRuntime",
+      "kind": "function",
+      "line_start": 52,
+      "line_end": 69
+    },
+    {
+      "name": "getPathDescription",
+      "kind": "function",
+      "line_start": 75,
+      "line_end": 89
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
-  "source": "tests/unit/session-manager-operations-coverage.test.ts",
-  "source_hash": "b28c3e685d29da85",
-  "generated": "2026-02-10T21:25:43Z",
+  "source": "tests\\unit\\session-manager-operations-coverage.test.ts",
+  "source_hash": "0985f00c617b770a",
+  "generated": "2026-02-19T23:47:50Z",
   "findings": []
 }

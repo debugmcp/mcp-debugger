@@ -1,0 +1,6 @@
+{
+  "source": "tests\\e2e\\docker\\docker-entrypoint.test.ts",
+  "source_hash": "18113ac79ba05773",
+  "generated": "2026-02-23T15:26:00Z",
+  "findings": []
+}

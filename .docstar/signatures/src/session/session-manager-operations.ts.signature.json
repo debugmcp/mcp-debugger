@@ -1,0 +1,18 @@
+{
+  "path": "src/session/session-manager-operations.ts",
+  "kind": "source",
+  "purpose": "Orchestrates debug session operations including startup, stepping, breakpoints, and expression evaluation through DAP integration.",
+  "topics": [
+    "debug session lifecycle",
+    "DAP step operations",
+    "breakpoint management",
+    "expression evaluation",
+    "process attachment",
+    "proxy manager coordination",
+    "adapter configuration"
+  ],
+  "public_surface": [
+    "EvaluateResult",
+    "SessionManagerOperations"
+  ]
+}

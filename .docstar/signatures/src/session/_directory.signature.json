@@ -1,0 +1,14 @@
+{
+  "path": "src/session",
+  "kind": "directory",
+  "purpose": "Provides comprehensive debug session management including lifecycle, state persistence, data retrieval, and debug operations orchestration.",
+  "topics": [
+    "session lifecycle management",
+    "debug adapter protocol integration",
+    "data retrieval operations",
+    "breakpoint and stepping control",
+    "process attachment handling",
+    "language-specific policy framework",
+    "event-driven architecture"
+  ]
+}

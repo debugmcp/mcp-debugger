@@ -1,0 +1,82 @@
+{
+  "total": 15,
+  "passed": 15,
+  "failed": 0,
+  "results": [
+    {
+      "name": "1.1 List tools and verify count",
+      "status": "PASS",
+      "duration": 39
+    },
+    {
+      "name": "1.2 List supported languages",
+      "status": "PASS",
+      "duration": 4
+    },
+    {
+      "name": "1.3 List debug sessions (should be empty)",
+      "status": "PASS",
+      "duration": 2
+    },
+    {
+      "name": "1.4 Python: full debug workflow",
+      "status": "PASS",
+      "duration": 11692
+    },
+    {
+      "name": "1.5 JavaScript: full debug workflow",
+      "status": "PASS",
+      "duration": 10377
+    },
+    {
+      "name": "1.6 Go: full debug workflow",
+      "status": "PASS",
+      "duration": 13256
+    },
+    {
+      "name": "1.7 Edge: breakpoint on non-existent file",
+      "status": "PASS",
+      "duration": 4
+    },
+    {
+      "name": "1.8 Edge: get_variables before debugging started",
+      "status": "PASS",
+      "duration": 4
+    },
+    {
+      "name": "1.9 Edge: evaluate_expression with syntax error",
+      "status": "PASS",
+      "duration": 7282
+    },
+    {
+      "name": "1.10 Edge: multiple simultaneous sessions",
+      "status": "PASS",
+      "duration": 13
+    },
+    {
+      "name": "1.11 Edge: step_over after program terminated",
+      "status": "PASS",
+      "duration": 37964
+    },
+    {
+      "name": "1.12 get_source_context for Python file",
+      "status": "PASS",
+      "duration": 5
+    },
+    {
+      "name": "1.13 Session cleanup after close",
+      "status": "PASS",
+      "duration": 1010
+    },
+    {
+      "name": "1.14 Edge: operations on closed/invalid session",
+      "status": "PASS",
+      "duration": 1020
+    },
+    {
+      "name": "1.15 Path handling: project path contains spaces",
+      "status": "PASS",
+      "duration": 7369
+    }
+  ]
+}
