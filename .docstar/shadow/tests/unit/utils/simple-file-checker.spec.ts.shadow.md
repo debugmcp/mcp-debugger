@@ -1,44 +1,41 @@
-# tests/unit/utils/simple-file-checker.spec.ts
-@source-hash: d147bd04f1c94c94
-@generated: 2026-02-11T16:12:52Z
+# tests\unit\utils\simple-file-checker.spec.ts
+@source-hash: 08d6d896cd5c3ccb
+@generated: 2026-02-23T15:25:59Z
 
-Unit test suite for the SimpleFileChecker utility class - a path-checking component with dual operation modes (host vs container).
+## Primary Purpose
+Comprehensive unit tests for the `SimpleFileChecker` utility class, validating file existence checking behavior in both host and container environments with path manipulation logic.
 
-## Core Test Structure
+## Test Structure & Dependencies
+- Uses Vitest testing framework (L4)
+- Tests `SimpleFileChecker` class and `createSimpleFileChecker` factory from `../../../src/utils/simple-file-checker.js` (L5)
+- Mocks `IFileSystem` and `IEnvironment` interfaces from external dependencies (L6)
+- Sets up comprehensive mocks for file system operations and environment variables (L14-48)
 
-**Main Test Suite Setup (L8-48)**: Comprehensive test harness with mocked dependencies:
-- `mockFileSystem` (L16-32): Mock IFileSystem interface with all standard file operations
-- `mockEnvironment` (L35-39): Mock IEnvironment with environment variable access
-- `mockLogger` (L42-44): Mock logger with debug method
-- Test instance creation using constructor (L47)
+## Key Test Suites
 
-## Test Scenarios
+### Host Mode Tests (L50-115)
+- **File Existence Check (L56-69)**: Validates basic file existence checking without path manipulation
+- **Non-existent Files (L71-83)**: Tests handling of missing files
+- **System Errors (L85-99)**: Validates error handling for file system failures (permission denied)
+- **Relative Path Rejection (L101-114)**: Ensures relative paths are rejected with helpful error messages
 
-**Host Mode Tests (L50-115)**: Tests behavior when not running in container:
-- Environment mock setup returns `undefined` for container detection (L52-54)
-- File existence checking without path manipulation (L56-69)
-- Non-existent file handling (L71-83) 
-- System error handling with error message formatting (L85-99)
-- Relative path rejection with validation error (L101-114)
+### Container Mode Tests (L117-172)
+- **Workspace Prefixing (L127-140)**: Tests automatic `/workspace/` prefix for relative paths in container mode
+- **Idempotent Behavior (L142-155)**: Ensures paths already under workspace root aren't double-prefixed
+- **Path Format Agnostic (L157-171)**: Validates simple prefix approach without path interpretation (including Windows-style paths)
 
-**Container Mode Tests (L117-172)**: Tests container-specific path handling:
-- Environment mock returns `MCP_CONTAINER='true'` and `MCP_WORKSPACE_ROOT='/workspace'` (L119-125)
-- Relative path transformation by prepending `/workspace/` (L127-140)
-- Always prepends workspace root, even to absolute paths (L142-155)
-- Raw path handling without interpretation for Windows-like paths (L157-171)
+### Factory Function Test (L174-179)
+- Validates `createSimpleFileChecker` factory returns proper instance
 
-**Factory Function Test (L174-179)**: Validates the `createSimpleFileChecker` factory function.
+## Mock Setup Pattern
+Comprehensive mock objects created for:
+- **File System (L16-32)**: All file operations with proper TypeScript typing
+- **Environment (L34-39)**: Environment variable access and working directory
+- **Logger (L41-44)**: Debug logging functionality
 
-## Key Testing Patterns
-
-The tests demonstrate a "hands-off" approach with simple path manipulation rules:
-- Host mode: No path transformation, absolute paths required
-- Container mode: Always prepend workspace root regardless of input path format
-- No intelligent path parsing or OS-specific handling
-
-## Dependencies
-
-Imports from:
-- `vitest` testing framework (L4)
-- Main implementation: `SimpleFileChecker`, `createSimpleFileChecker` (L5)
-- Interface definitions: `IFileSystem`, `IEnvironment` (L6)
+## Critical Test Scenarios
+- Container mode detection via `MCP_CONTAINER` environment variable (L121)
+- Workspace root configuration via `MCP_WORKSPACE_ROOT` (L122)
+- Error propagation with descriptive messages
+- Path validation and transformation logic
+- Hands-off approach to path interpretation (no Windows/Unix path conversion)

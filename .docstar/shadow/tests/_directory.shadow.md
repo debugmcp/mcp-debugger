@@ -1,124 +1,133 @@
 # tests/
-@children-hash: eafe62d90a77fbcd
-@generated: 2026-02-21T20:49:05Z
+@children-hash: a159187179e8b1ec
+@generated: 2026-02-23T15:27:26Z
 
 ## Overall Purpose and Responsibility
 
-The `tests` directory serves as the comprehensive test infrastructure for the Debug MCP Server ecosystem, providing validation coverage from unit tests through end-to-end integration across multiple programming languages, transport protocols, and deployment scenarios. This directory ensures the reliable operation of a sophisticated debugging system that bridges the Model Context Protocol (MCP) with language-specific debug adapters, enabling AI agents to perform debugging operations across JavaScript, TypeScript, Python, Rust, and Go codebases.
+The `tests` directory serves as the comprehensive testing infrastructure for the Debug MCP (Model Context Protocol) Server, providing complete validation coverage across unit tests, integration tests, end-to-end scenarios, stress testing, and manual validation utilities. This directory ensures the reliability, performance, and correctness of multi-language debugging capabilities through sophisticated testing patterns, mock infrastructures, and real-world scenario validation.
 
 ## Key Components and Integration Architecture
 
-### Multi-Layer Testing Framework
+### Multi-Layer Testing Strategy
 
-The directory implements a hierarchical testing strategy with five primary validation layers:
+The directory implements a **five-tier testing architecture** that provides comprehensive coverage from individual components to full system integration:
 
-**Foundation Layer (`core/`, `unit/`)**
-- Protocol contract validation and debug adapter interface compliance
-- Comprehensive unit testing of 19 MCP tools and core debugging operations
-- Session management, factory patterns, and dependency injection testing
-- Runtime type safety and API migration compliance validation
+**1. Unit Testing Foundation (`unit/`)**
+- Core component testing with extensive mocking and dependency injection
+- Protocol compliance validation (Debug Adapter Protocol, MCP tools)
+- Error path coverage and edge case handling
+- Language adapter testing across Python, JavaScript, Rust, Go, and Mock adapters
 
-**Language Adapter Layer (`adapters/`)**
-- Cross-platform validation of Go, JavaScript/TypeScript, Python, and Rust debug adapters
-- Unified testing patterns for adapter factories, configuration processing, and command generation
-- Integration testing with language-specific debugging backends (Delve, js-debug, debugpy, CodeLLDB)
+**2. Integration Testing Layer (`integration/`)**
+- End-to-end debugging workflows with production dependencies
+- Language-specific adapter integration with real debugging backends
+- Session lifecycle and state persistence validation
+- Cross-component interaction testing
 
-**Transport and Protocol Layer (`proxy/`, `stress/`)**
-- Debug Adapter Protocol (DAP) proxy system testing with multi-session debugging support
-- Cross-transport parity validation (STDIO, SSE, Docker) under stress conditions
-- Connection resilience, failure recovery, and performance validation
+**3. End-to-End Validation (`e2e/`)**
+- Complete debugging scenarios across multiple transport mechanisms (STDIO, SSE)
+- Docker containerization and NPM distribution testing
+- Multi-language debugging matrix validation (19 MCP tools × 5 languages)
+- Real-world deployment scenario testing
 
-**Integration and E2E Layer (`integration/`, `e2e/`)**
-- End-to-end workflow validation across all supported languages and deployment scenarios
-- Docker containerization, npm distribution, and production deployment testing
-- Complete debugging lifecycle validation from session creation through cleanup
+**4. Stress and Performance Testing (`stress/`)**
+- Transport layer reliability under extreme conditions
+- Cross-transport parity validation
+- Connection pooling and server recovery testing
+- Memory usage and performance characteristics validation
 
-**Infrastructure and Support Layer (`test-utils/`, `implementations/`, `fixtures/`)**
-- Comprehensive mock infrastructure and test double implementations
-- Multi-language debugging fixtures and controlled test environments
-- Resource management, port allocation, and process lifecycle utilities
+**5. Specialized Testing Modules**
+- **Adapter Testing (`adapters/`)** - Language-specific debugger integration validation
+- **Core Systems (`core/`)** - Protocol contracts, session management, and server orchestration
+- **Proxy Systems (`proxy/`)** - Multi-session debugging architecture and DAP proxy validation
+- **Manual Testing (`manual/`)** - Interactive validation utilities for development and troubleshooting
 
-### Component Integration Flow
+### Supporting Infrastructure Integration
 
-The testing architecture follows the production system's data flow:
-1. **CLI Interface** → Transport handlers (STDIO/SSE) → MCP Server
-2. **MCP Server** → Session Management → Debug Adapter Selection
-3. **Debug Adapters** → Language-specific debugging backends → Target applications
-4. **Communication Flow** → DAP Protocol → Proxy System → Multi-session coordination
+**Test Utilities Ecosystem (`test-utils/`)**
+- Comprehensive mocking framework with type-safe mock generation
+- Resource management (ports, processes, sessions) with automatic cleanup
+- Test fixture generation and debugging scenario templates
+- Promise tracking for memory leak detection
+
+**Fixture and Mock Systems (`fixtures/`, `implementations/`)**
+- Multi-language debugging targets with predictable execution patterns
+- Complete fake implementations for process management and system integration
+- Mock DAP servers and protocol simulation infrastructure
+- Cross-platform compatibility testing data
+
+**Validation Framework (`validation/`)**
+- Breakpoint message testing and debugging behavior validation
+- Specification-by-example testing with inline documentation
+- Systematic coverage of Python language constructs and error conditions
 
 ## Public API Surface and Entry Points
 
 ### Primary Test Execution Points
 
+**Framework Integration**
+- Vitest-based test execution with comprehensive setup (`vitest.setup.ts`)
+- Jest compatibility layer for legacy E2E tests (`jest-register.js`)
+- TypeScript runtime compilation support across the test suite
+
 **Language-Specific Testing**
-- Adapter test suites for each supported language with factory validation and integration testing
-- Language-specific E2E workflows with complete debugging lifecycle coverage
-- Cross-platform compatibility testing with environment validation
+- Complete adapter test suites for Python, JavaScript/TypeScript, Rust, and Go debugging
+- Transport mechanism validation (STDIO, Server-Sent Events, Docker)
+- Cross-language debugging workflow verification
 
-**Protocol and Transport Testing**
-- MCP tool validation across 19 core debugging operations
-- DAP proxy system testing with multi-session debugging scenarios
-- Transport parity validation (STDIO vs SSE) with stress testing capabilities
+**System Integration Testing**
+- MCP server lifecycle and tool execution validation
+- Session management across multiple concurrent debugging sessions
+- Debug Adapter Protocol compliance and message handling
 
-**Infrastructure Validation**
-- Session management lifecycle testing with state persistence and cleanup
-- Resource allocation testing with port management and process tracking
-- Mock infrastructure validation enabling isolated unit testing
+### Key Testing Capabilities
 
-### Test Infrastructure APIs
+**Multi-Transport Validation**
+- STDIO transport testing for command-line integration
+- SSE transport testing for web-based debugging clients
+- Docker containerization testing for isolated deployment scenarios
 
-**Resource Management**
-- `portManager`, `processTracker` singletons for global test coordination
-- `createTestDependencies()`, `createTestSessionManager()` factory functions
-- Environment detection utilities for runtime availability validation
-
-**Mock and Fixture Systems**
-- Comprehensive mock factories for all system dependencies
-- Multi-language debugging fixtures with predictable execution flows
-- Test double implementations replacing real processes and network operations
+**Debugging Feature Coverage**
+- Breakpoint management (setting, verification, removal)
+- Step operations (step over, step into, step out, continue)
+- Variable inspection and expression evaluation
+- Stack trace analysis and navigation
+- Error handling and exception debugging
 
 ## Internal Organization and Data Flow
 
-### Testing Strategy Patterns
+### Test Execution Architecture
 
-**Progressive Complexity Model**
-- Unit tests → Integration tests → E2E tests → Stress tests
-- Simple fixtures → Complex scenarios → Real-world applications
-- Isolated mocks → Controlled environments → Production-like deployments
+**Resource Management Flow**
+1. **Setup Phase** - Port allocation, process spawning, session initialization
+2. **Execution Phase** - Test scenario execution with controlled environments
+3. **Validation Phase** - Result verification and behavior assertion
+4. **Cleanup Phase** - Resource deallocation and state reset
 
-**Cross-Platform Validation**
-- Consistent testing across Windows, Linux, and macOS environments
-- Platform-specific toolchain detection and compatibility validation
-- Container-based testing for deployment scenario verification
+**Mock and Integration Strategy**
+- **Unit Level** - Comprehensive mocking with fake implementations
+- **Integration Level** - Production dependencies with controlled environments  
+- **E2E Level** - Real system integration with external tool dependencies
+- **Stress Level** - Load testing with performance metric collection
 
-**Resource Management Architecture**
-- Systematic test isolation preventing resource conflicts and pollution
-- Automated cleanup patterns ensuring reliable test execution
-- Memory leak detection and promise tracking across test sessions
+### Quality Assurance Patterns
 
-### Quality Assurance Framework
+**Test Isolation and Reliability**
+- Unique resource allocation (ports 4000-4999 for stress tests, dedicated ranges per test type)
+- Comprehensive cleanup hooks preventing resource leaks
+- Cross-platform compatibility with Windows/Unix-specific handling
+- Deterministic test data and predictable execution flows
 
-**Error Resilience Testing**
-- Comprehensive error path coverage with graceful degradation validation
-- Timeout handling, connection failures, and resource exhaustion scenarios
-- Mock-driven error injection for robust failure mode testing
+**Error Scenario Coverage**
+- Systematic validation of failure modes and error conditions
+- Graceful degradation testing for missing dependencies
+- Timeout handling and recovery mechanism validation
+- Protocol-level error handling and user-friendly error messages
 
-**Performance and Scalability**
-- Stress testing with rapid connections, burst traffic, and sustained operations
-- Memory usage monitoring and performance threshold validation
-- Cross-transport performance parity ensuring consistent user experience
+**Performance and Scalability Testing**
+- Memory usage monitoring with leak detection
+- Connection pooling and concurrent operation validation
+- Transport performance characteristics and reliability metrics
+- Sustained operation testing with resource usage tracking
 
-## Framework Integration and Dependencies
-
-### Core Testing Technologies
-- **Vitest**: Primary testing framework with comprehensive mocking capabilities
-- **Jest**: E2E test environment with TypeScript runtime support
-- **MCP SDK**: Protocol communication libraries for integration testing
-- **Docker**: Containerized testing environments for production scenario validation
-
-### Language-Specific Integration
-- **Debug Adapter Protocol**: Standardized debugging communication across all adapters
-- **Language Toolchains**: Integration with Go, Rust, Python, and Node.js debugging ecosystems
-- **Platform Services**: Process management, filesystem operations, and network communication
-
-This comprehensive test directory ensures the Debug MCP Server provides reliable, cross-platform debugging capabilities while maintaining high code quality, robust error handling, and consistent performance across all supported programming languages and deployment scenarios. The extensive validation coverage serves as both quality assurance and living documentation of the system's capabilities and architectural contracts.
+This comprehensive testing directory ensures the Debug MCP Server maintains high reliability, performance, and functionality across all supported programming languages, deployment scenarios, and integration patterns while providing developers with robust tools for validation, debugging, and quality assurance.

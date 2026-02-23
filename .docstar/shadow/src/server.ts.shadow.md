@@ -1,54 +1,81 @@
-# src/server.ts
-@source-hash: 7b017e2dfe342221
-@generated: 2026-02-11T16:12:55Z
+# src\server.ts
+@source-hash: c0e8fb52d26c50d1
+@generated: 2026-02-23T15:26:13Z
 
-**Primary Purpose:**
-Main MCP (Model Context Protocol) server implementation for debugging functionality. Provides a bridge between AI agents and debug adapters, exposing debug operations as MCP tools.
+## Debug MCP Server - Main Server Implementation
 
-**Key Architecture:**
-- **DebugMcpServer class (L103-1429)**: Core server that wraps SessionManager and exposes debug operations as MCP tools
-- **Tool-based interface**: 16 MCP tools for debug operations (create session, set breakpoints, step execution, etc.)
-- **Dynamic language discovery**: Runtime detection of available debug adapters via adapter registry
-- **Container-aware**: Special handling for containerized environments (Python debugging priority)
+Primary purpose: Main server class for a Model Context Protocol (MCP) debug server that provides debugging capabilities across multiple programming languages. Handles debug session lifecycle, breakpoints, stepping, variable inspection, and expression evaluation.
 
-**Core Dependencies:**
-- `SessionManager` from `./session/session-manager.js` - handles debug session lifecycle
-- `@modelcontextprotocol/sdk` - MCP protocol implementation
-- `SimpleFileChecker` and `LineReader` utilities for file validation and source context
-- Debug adapter registry for language support discovery
+### Key Components
 
-**Key Methods:**
-- **Constructor (L358-401)**: Sets up MCP server, dependencies, and tool registration
-- **createDebugSession (L208-240)**: Creates new debug sessions with language validation
-- **startDebugging (L242-271)**: Launches debug sessions with file validation
-- **registerTools (L439-1102)**: Registers all 16 MCP tools with schemas and handlers
-- **Tool handlers**: Each MCP tool maps to corresponding SessionManager operations
+**DebugMcpServer Class (L105-1438)**
+- Main server class implementing MCP protocol for debugging
+- Manages multiple concurrent debug sessions via SessionManager
+- Provides file validation and container path resolution
+- Handles 18 debug tools including session management, breakpoints, stepping, and variable inspection
 
-**Language Support:**
-- **Dynamic discovery (L113-150)**: Queries adapter registry for available languages
-- **Default languages (L36)**: Python and mock adapters as fallback
-- **Container mode**: Ensures Python is always available in containerized environments
-- **Language metadata (L153-191)**: Provides display names and requirements for each language
+**Configuration Interfaces**
+- `DebugMcpServerOptions` (L54-57): Server configuration with logging options
+- `LanguageMetadata` (L62-68): Language metadata including executables and display names  
+- `ToolArguments` (L73-100): Comprehensive tool parameter interface supporting launch/attach modes
 
-**Error Handling:**
-- Custom error types: `SessionNotFoundError`, `SessionTerminatedError`, `UnsupportedLanguageError`
-- Session validation before operations (L196-205)
-- Graceful error responses in JSON format for tool calls
+**Language Support System**
+- Dynamic language discovery via `getSupportedLanguagesAsync()` (L116-153)
+- Container environment support with Python defaults
+- Language filtering for disabled languages
+- Metadata mapping for Python, JavaScript, and Mock languages (L156-194)
 
-**File Path Handling:**
-- **SimpleFileChecker integration**: Validates file existence before operations
-- **Container path resolution**: Handles path mapping between host and container
-- **LineReader integration**: Provides source code context for debugging operations
+### Core Functionality
 
-**Tool Categories:**
-1. **Session Management**: create_debug_session, list_debug_sessions, close_debug_session
-2. **Debugging Control**: start_debugging, attach_to_process, detach_from_process
-3. **Execution Control**: step_over, step_into, step_out, continue_execution, pause_execution
-4. **Inspection**: get_variables, get_local_variables, get_stack_trace, get_scopes
-5. **Evaluation**: evaluate_expression, get_source_context
-6. **Discovery**: list_supported_languages
+**Session Management**
+- `createDebugSession()` (L211-243): Creates sessions with language validation
+- `startDebugging()` (L245-273): Launches debug sessions with file validation
+- Session lifecycle validation via `validateSession()` (L199-208)
 
-**Logging Strategy:**
-- Structured logging with event types (tool:call, session:created, debug:breakpoint)
-- Request sanitization for security (removes absolute paths, truncates large data)
-- Session context tracking in all log entries
+**Debug Operations**
+- Breakpoint management: `setBreakpoint()` (L279-292)
+- Execution control: `stepOver/Into/Out()`, `continueExecution()` (L323-357)
+- Variable inspection: `getVariables()`, `getLocalVariables()`, `getStackTrace()` (L294-321)
+- Expression evaluation and source context retrieval
+
+**File System Integration**
+- Uses SimpleFileChecker for existence validation with container path resolution
+- LineReader for source context retrieval around breakpoints/current execution
+- Container-aware path handling for Docker environments
+
+**Tool Registration (L451-1113)**
+Registers 18 MCP tools with comprehensive input schemas:
+- Session management: create_debug_session, list_debug_sessions, close_debug_session
+- Debug control: start_debugging, attach_to_process, detach_from_process
+- Execution: step_over, step_into, step_out, continue_execution, pause_execution
+- Inspection: get_variables, get_local_variables, get_stack_trace, get_scopes
+- Advanced: evaluate_expression, get_source_context, set_breakpoint
+- Discovery: list_supported_languages
+
+### Dependencies & Integration
+
+**External Dependencies**
+- SessionManager: Core debug session orchestration
+- SimpleFileChecker & LineReader: File system operations
+- AdapterRegistry: Language-specific debug adapter management
+- MCP SDK: Protocol implementation and error handling
+
+**Container Support**
+- Environment detection via `isContainerMode()`
+- Workspace root resolution for Docker volume mounts
+- Path translation between host and container contexts
+
+**Error Handling**
+- Comprehensive error categorization (session state, file validation, proxy errors)
+- Structured logging with sanitized request data
+- Graceful degradation for missing features
+
+### Architectural Patterns
+
+- Dependency injection via createProductionDependencies()
+- Factory pattern for language adapters
+- Command pattern for tool execution
+- Observer pattern for session state tracking
+- Strategy pattern for container vs native path handling
+
+The server supports both launch mode (starting new processes) and attach mode (connecting to running processes) with language-agnostic debugging capabilities.

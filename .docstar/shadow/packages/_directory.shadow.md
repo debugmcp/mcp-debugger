@@ -1,88 +1,98 @@
 # packages/
-@children-hash: 1c745d8d117536ab
-@generated: 2026-02-21T08:29:44Z
+@children-hash: 0d1796b47f03315e
+@generated: 2026-02-23T15:27:30Z
 
 ## Overall Purpose and Responsibility
 
-The `packages` directory contains the complete MCP (Model Context Protocol) debugger ecosystem - a comprehensive multi-language debugging platform that enables interactive debugging of MCP servers across JavaScript, Python, Go, Rust, and other languages. This directory houses both the foundational shared architecture and specialized language-specific debug adapters, culminating in a batteries-included CLI tool that provides seamless debugging capabilities through the Debug Adapter Protocol (DAP).
+The `packages` directory contains the complete MCP Debugger ecosystem - a comprehensive multi-language debugging framework built on the Model Context Protocol. This monorepo structure provides a batteries-included debugging solution with native support for JavaScript/TypeScript, Python, Go, and Rust, along with a shared foundation layer and testing infrastructure. The system enables interactive debugging of MCP servers across different programming languages while maintaining protocol compliance and cross-platform compatibility.
 
-## Key Components and System Integration
+## Key Components and Integration
 
-### **Shared Foundation Layer (`shared/`)**
-The architectural foundation providing:
-- **Type-safe DAP abstraction layer** with comprehensive interface contracts (`IDebugAdapter`, `IAdapterFactory`, `IAdapterRegistry`)
-- **Plugin-based architecture** enabling language-specific adapters through policy-driven design patterns
-- **Dual-state session management** tracking both lifecycle and execution states
-- **Dependency injection framework** with complete service abstractions for testing and production environments
+### Core Framework Architecture
+- **shared/**: Foundational shared library providing type-safe abstractions, interfaces, and common patterns
+  - Defines `IDebugAdapter`, `IAdapterRegistry`, and `IAdapterFactory` core contracts
+  - Implements policy-driven architecture with dependency injection for language-specific behaviors
+  - Extends VS Code's Debug Adapter Protocol (DAP) with comprehensive session lifecycle management
+  - Provides factory patterns, event-driven architecture, and cross-platform abstractions
 
-### **Language-Specific Adapters**
-Production-ready debug adapters for multiple ecosystems:
+### Language-Specific Debug Adapters
+- **adapter-javascript/**: Complete JavaScript/TypeScript debugging via Microsoft's vscode-js-debug
+  - Intelligent environment detection and configuration management
+  - Automated vendoring system with multi-strategy dependency acquisition
+  - Support for ESM/CommonJS, TypeScript runners, and modern JavaScript environments
+  
+- **adapter-python/**: Python debugging adapter with debugpy integration
+  - Cross-platform Python executable discovery with Windows Store filtering
+  - Virtual environment handling and multi-version Python support
+  - Django/Flask debugging capabilities and subprocess debugging
 
-**`adapter-javascript/`**: Complete JavaScript/TypeScript debugging with intelligent environment detection, ESM/CommonJS support, and automated `vscode-js-debug` integration
+- **adapter-go/**: Go debugging adapter leveraging native Delve DAP support
+  - Support for applications, tests, executables, core dumps, and replay sessions
+  - Sophisticated toolchain discovery with platform-specific optimizations
+  - Goroutine filtering and comprehensive Go-specific debugging features
 
-**`adapter-python/`**: Comprehensive Python debugging via debugpy with virtual environment detection, framework support (Django/Flask), and cross-platform executable discovery
+- **adapter-rust/**: Rust debugging solution through CodeLLDB integration
+  - Cargo workspace integration with binary analysis and toolchain compatibility
+  - Automated CodeLLDB vendoring across 5 supported platforms
+  - Windows MSVC/GNU toolchain detection and cross-platform binary analysis
 
-**`adapter-go/`**: Native Go debugging through Delve DAP integration, supporting applications, tests, executables, core dumps, and replay sessions with comprehensive toolchain validation
+- **adapter-mock/**: Testing and development mock implementation
+  - Complete DAP protocol simulation for validation and testing
+  - Configurable error scenarios and deterministic behavior
+  - Reference implementation for DAP compliance
 
-**`adapter-rust/`**: Full Rust debugging capabilities via CodeLLDB with cargo integration, binary analysis, cross-platform toolchain detection, and automated vendoring system
+### Distribution and CLI
+- **mcp-debugger/**: Batteries-included CLI tool and distribution package
+  - Protocol-compliant MCP server implementation
+  - Global adapter registry with all language adapters bundled
+  - Multi-format build pipeline (executable bundles, npm packages, platform-specific distributions)
+  - Graceful degradation for missing platform components
 
-**`adapter-mock/`**: Complete DAP mock implementation for testing and development with configurable error scenarios and protocol compliance validation
+## Component Integration and Data Flow
 
-### **Distribution and CLI (`mcp-debugger/`)**
-The batteries-included CLI orchestrator that:
-- **Bundles all adapters** into a single deployable tool eliminating runtime dependencies
-- **Provides multiple distribution formats** (CLI executables, npm packages, platform-specific builds)
-- **Ensures MCP protocol compliance** with comprehensive stdout protection and transport mode detection
-- **Enables immediate debugging** across all supported languages without additional setup
+The packages follow a layered integration model:
 
-## Public API Surface and Entry Points
+1. **Foundation Layer**: `shared/` provides core interfaces, type definitions, and architectural patterns used by all adapters
+2. **Adapter Layer**: Language-specific adapters implement the shared interfaces while handling toolchain discovery, environment validation, and protocol-specific behaviors
+3. **Distribution Layer**: `mcp-debugger/` bundles all adapters into a cohesive CLI tool with protocol compliance and runtime coordination
+4. **Build Coordination**: Each package includes sophisticated build automation for dependency vendoring, cross-platform compatibility, and artifact generation
 
-### **Primary CLI Interface**
-- **`npx @mcp-debugger/debugger`**: Main CLI entry point supporting stdio/SSE transport modes
-- **Global adapter registry**: `__DEBUG_MCP_BUNDLED_ADAPTERS__` providing access to all language adapters
-- **Multi-language support**: Immediate debugging for JavaScript, Python, Go, Rust, and mock scenarios
+## Public API Surface
 
-### **Shared Architecture APIs**
-- **`IDebugAdapter`**: Core contract for implementing language-specific debugging
-- **`AdapterPolicy`**: Interface for encapsulating language-specific behaviors
-- **`DebugSession`**: Complete session state management with lifecycle tracking
-- **Factory patterns**: `IAdapterFactory` and registry system for dynamic adapter discovery
+### Primary Entry Points
+- **Global Adapter Registry**: `__DEBUG_MCP_BUNDLED_ADAPTERS__` providing access to all language adapters
+- **CLI Interface**: `npx @modelcontextprotocol/debugger` for interactive debugging workflows
+- **Factory Pattern**: Language-specific adapter factories (`JavascriptAdapterFactory`, `PythonAdapterFactory`, etc.)
+- **Shared Contracts**: `IDebugAdapter`, `IAdapterRegistry`, `IAdapterFactory` for extensibility
 
-### **Language-Specific Entry Points**
-Each adapter package exports:
-- **Adapter factory classes** with environment validation and dependency injection
-- **Configuration interfaces** tailored to language-specific debugging requirements
-- **Utility functions** for toolchain discovery and project analysis
-- **Integration helpers** for seamless framework incorporation
+### Language Support APIs
+- **JavaScript/TypeScript**: Automatic project detection, TypeScript runner support, ESM/CommonJS handling
+- **Python**: Multi-version support, virtual environment detection, Django/Flask debugging
+- **Go**: Delve integration, goroutine management, multiple debug modes (test, exec, core, replay)
+- **Rust**: Cargo integration, binary analysis, CodeLLDB orchestration
+- **Mock**: Complete DAP simulation for testing and development
 
-## System Architecture and Data Flow
+### Configuration Interfaces
+- **Generic Configuration**: Base launch/attach configurations extended by language-specific adapters
+- **Language-Specific Configs**: `JsDebugConfig`, `PythonLaunchConfig`, `GoLaunchConfig`, `RustLaunchConfig`
+- **Environment Detection**: Automatic toolchain discovery and version validation across all supported languages
 
-### **Development to Runtime Pipeline**
-1. **Shared Foundation**: Common interfaces and abstractions enable consistent adapter development
-2. **Language Adapters**: Specialized implementations leveraging native debugging tools (Delve, debugpy, js-debug, CodeLLDB)
-3. **Build Integration**: Automated vendoring and bundling systems acquire external dependencies
-4. **CLI Assembly**: Build orchestration creates batteries-included distribution with all adapters
-5. **Runtime Bootstrap**: CLI establishes protocol compliance and populates adapter registry
-6. **Debug Sessions**: Interactive debugging workflows access appropriate language adapters
+## Key Architectural Patterns
 
-### **Cross-Platform Excellence**
-- **Environment Detection**: Sophisticated multi-tier discovery for language toolchains and debuggers
-- **Platform Abstraction**: Unified APIs hiding OS-specific complexity (Windows, macOS, Linux)
+### Multi-Language Debugging Strategy
+- **Unified Interface**: All adapters implement consistent `IDebugAdapter` contract while supporting language-specific features
+- **Protocol Delegation**: Native DAP implementations (Delve, debugpy, vscode-js-debug, CodeLLDB) rather than custom protocol translation
+- **Environment Intelligence**: Sophisticated toolchain discovery with caching, fallback strategies, and cross-platform compatibility
+
+### Distribution and Deployment
+- **Self-Contained Packaging**: Vendored dependencies eliminate runtime requirements
 - **Graceful Degradation**: Missing components generate warnings rather than failures
-- **Self-Contained Distribution**: Vendored dependencies ensure consistent behavior across environments
+- **Protocol Safety**: Comprehensive stdout protection ensures MCP protocol compliance
+- **Multi-Format Artifacts**: Single build process produces multiple consumption patterns
 
-## Key Design Patterns and Conventions
+### Quality and Testing
+- **Comprehensive Test Coverage**: All packages include extensive unit and integration testing
+- **Mock Infrastructure**: Sophisticated mocking for reliable cross-platform testing
+- **Performance Optimization**: Caching strategies, lazy evaluation, and efficient resource utilization
 
-### **Architecture Patterns**
-- **Plugin Architecture**: Language adapters integrate through shared interfaces enabling extensibility
-- **Factory Pattern**: Centralized adapter creation with dependency injection and validation
-- **Event-Driven Design**: EventEmitter-based communication for lifecycle management
-- **Proxy Delegation**: Native debugging tool integration rather than custom protocol implementations
-
-### **Quality and Reliability**
-- **Comprehensive Testing**: Unit, integration, and cross-platform validation across all packages
-- **Type Safety**: Extensive TypeScript usage with DAP protocol compliance
-- **Error Handling**: Defensive programming with user-friendly error messages and troubleshooting guidance
-- **Performance Optimization**: Caching strategies, lazy evaluation, and efficient resource management
-
-The packages directory delivers a complete, production-ready multi-language debugging ecosystem that abstracts away toolchain complexity while providing robust, standards-compliant debugging capabilities through a unified interface. The batteries-included approach ensures immediate usability across development environments while maintaining extensibility for additional language support.
+This packages directory delivers a complete, production-ready multi-language debugging ecosystem that abstracts away environmental complexity while providing robust, standards-compliant debugging capabilities through a unified interface and distribution model.

@@ -19,19 +19,21 @@ import {
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import { createProductionDependencies } from './container/dependencies.js';
 import { ContainerConfig } from './container/types.js';
-import { 
-    DebugSessionInfo, 
-    Variable, 
-    StackFrame, 
+import {
+    DebugSessionInfo,
+    Variable,
+    StackFrame,
     DebugLanguage,
     Breakpoint,
-    SessionLifecycleState 
+    SessionLifecycleState,
+    IEnvironment
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
-import { SimpleFileChecker, createSimpleFileChecker } from './utils/simple-file-checker.js';
+import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
+import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
 
 const DEFAULT_LANGUAGES = Object.freeze(['python', 'mock'] as const);
 
@@ -108,6 +110,7 @@ export class DebugMcpServer {
   private supportedLanguages: string[] = [];
   private fileChecker: SimpleFileChecker;
   private lineReader: LineReader;
+  private environment: IEnvironment;
 
   // Get supported languages from adapter registry
   private async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -252,8 +255,7 @@ export class DebugMcpServer {
     // Check script file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(scriptPath);
     if (!fileCheck.exists) {
-      throw new McpError(McpErrorCode.InvalidParams, 
-        `Script file not found: '${scriptPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
+      throw this.fileNotFoundError('Script file', scriptPath, fileCheck);
     }
     
     this.logger.info(`[DebugMcpServer.startDebugging] Script file exists: ${fileCheck.effectivePath} (original: ${scriptPath})`);
@@ -280,8 +282,7 @@ export class DebugMcpServer {
     // Check file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(file);
     if (!fileCheck.exists) {
-      throw new McpError(McpErrorCode.InvalidParams, 
-        `Breakpoint file not found: '${file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
+      throw this.fileNotFoundError('Breakpoint file', file, fileCheck);
     }
     
     this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${fileCheck.effectivePath} (original: ${file})`);
@@ -367,6 +368,7 @@ export class DebugMcpServer {
     const dependencies = createProductionDependencies(containerConfig);
     
     this.logger = dependencies.logger;
+    this.environment = dependencies.environment;
     this.logger.info('[DebugMcpServer Constructor] Main server logger instance assigned.');
 
     // Create simple file checker for existence validation only
@@ -428,12 +430,21 @@ export class DebugMcpServer {
   }
 
   private getPathDescription(parameterName: string): string {
-    // Hands-off approach: provide simple, generic path guidance
-    // Let OS/containers/debug adapters handle paths naturally
+    if (isContainerMode(this.environment)) {
+      return `Path to the ${parameterName}. Use paths relative to the project root (e.g., examples/python/script.py). The server resolves these against the workspace mount.`;
+    }
     if (parameterName === 'script') {
       return `Path to the script to debug. Use absolute paths or paths relative to your current working directory`;
     }
     return `Path to the ${parameterName}. Use absolute paths or paths relative to your current working directory`;
+  }
+
+  private fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): McpError {
+    const containerHint = isContainerMode(this.environment)
+      ? `\nHint: Ensure the Docker volume mount maps your project root to ${getWorkspaceRoot(this.environment)} (e.g., -v /path/to/project:${getWorkspaceRoot(this.environment)})`
+      : '';
+    return new McpError(McpErrorCode.InvalidParams,
+      `${label} not found: '${originalPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}${containerHint}`);
   }
 
   private registerTools(): void {
@@ -1205,8 +1216,7 @@ export class DebugMcpServer {
       // Check file exists for immediate feedback
       const fileCheck = await this.fileChecker.checkExists(args.file);
       if (!fileCheck.exists) {
-        throw new McpError(McpErrorCode.InvalidParams, 
-          `Line context file not found: '${args.file}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}`);
+        throw this.fileNotFoundError('Source file', args.file, fileCheck);
       }
       
       this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${fileCheck.effectivePath}, line: ${args.line}`);

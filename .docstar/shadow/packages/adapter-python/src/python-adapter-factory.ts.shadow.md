@@ -1,36 +1,42 @@
-# packages/adapter-python/src/python-adapter-factory.ts
-@source-hash: a0e8fba357d3f75c
-@generated: 2026-02-10T00:41:21Z
+# packages\adapter-python\src\python-adapter-factory.ts
+@source-hash: 2a3884da1c057c9d
+@generated: 2026-02-23T15:25:59Z
 
-**Primary Purpose**: Factory class that creates and validates Python debug adapter instances within the mcp-debugger framework. Implements dependency injection pattern for Python debugger instantiation.
+## Primary Purpose
+Factory implementation for creating Python debug adapter instances within the mcp-debugger system. Handles environment validation, Python installation detection, and dependency injection for Python debugging capabilities.
 
-**Key Components**:
+## Key Components
 
-- **PythonAdapterFactory** (L19-110): Main factory class implementing `IAdapterFactory` interface
-  - `createAdapter()` (L23-25): Simple factory method returning new `PythonDebugAdapter` instance
-  - `getMetadata()` (L30-42): Returns static metadata including language info, version, file extensions (.py, .pyw), and embedded Python SVG icon
-  - `validate()` (L47-90): Comprehensive environment validation checking Python executable, version (≥3.7), and debugpy installation
-  - `checkDebugpyInstalled()` (L95-109): Private method using child process to verify debugpy module availability
+### PythonAdapterFactory Class (L19-111)
+Main factory class implementing `IAdapterFactory` interface. Provides three core methods:
+- `createAdapter()` (L23-25): Instantiates new `PythonDebugAdapter` with provided dependencies
+- `getMetadata()` (L30-42): Returns static metadata including language type, version, file extensions, and embedded Python icon
+- `validate()` (L47-91): Performs comprehensive environment validation for Python debugging prerequisites
 
-**Dependencies**:
-- `@debugmcp/shared`: Core interfaces (`IDebugAdapter`, `IAdapterFactory`, `AdapterDependencies`, etc.)
-- `./python-debug-adapter.js`: The actual adapter implementation being created
-- `./utils/python-utils.js`: Utility functions for Python executable discovery and version detection
-- Node.js `child_process.spawn`: Used for debugpy verification
+### Private Methods
+- `checkDebugpyInstalled()` (L96-110): Spawns Python process to verify debugpy module availability using import test
 
-**Key Behaviors**:
-- Validates Python 3.7+ requirement during environment checks
-- Uses platform-specific Python detection (py launcher on Windows, python3 elsewhere)
-- Returns detailed validation results with errors, warnings, and environment details
-- Spawns Python subprocess to test debugpy import and version extraction
+## Dependencies
+- `@debugmcp/shared`: Core interfaces (`IDebugAdapter`, `IAdapterFactory`, `AdapterDependencies`, `FactoryValidationResult`)
+- `./python-debug-adapter.js`: Concrete Python adapter implementation
+- `./utils/python-utils.js`: Python executable detection utilities
+- `child_process`: Node.js spawn for subprocess execution
 
-**Architectural Patterns**:
+## Validation Logic
+The `validate()` method performs multi-stage checks:
+1. Python executable detection via `findPythonExecutable()`
+2. Version validation (requires Python 3.7+)
+3. Debugpy availability check (warning-level only for virtualenv compatibility)
+4. Returns structured result with errors/warnings and environment details
+
+## Architectural Patterns
 - Factory pattern implementation for adapter creation
 - Dependency injection through `AdapterDependencies` parameter
-- Async validation with comprehensive error handling
-- Platform-aware Python executable detection strategy
+- Promise-based async validation with comprehensive error handling
+- Platform-aware detection (Windows py launcher vs python3)
 
-**Critical Constraints**:
-- Requires Python 3.7 or higher for operation
-- Depends on debugpy package installation in target Python environment
-- Validation provides both blocking errors and non-blocking warnings
+## Critical Details
+- Debugpy validation is warning-only to support virtualenv workflows (issue #16 reference)
+- Embedded base64 Python icon in metadata
+- Version requirement: Python 3.7+ minimum
+- Supports .py and .pyw file extensions

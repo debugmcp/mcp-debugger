@@ -54,13 +54,18 @@ export function resolvePathForRuntime(inputPath: string, environment: IEnvironme
   if (!isContainerMode(environment)) {
     return inputPath;
   }
-  
-  // Container mode: simple prefix with workspace root
+
+  // Container mode: resolve relative paths against workspace root
   const workspaceRoot = getWorkspaceRoot(environment);
-  
-  // Simply prepend the workspace root to any path
-  // No validation, no rejection, no smart handling
-  return `${workspaceRoot}/${inputPath}`;
+
+  // Already an absolute container path under workspace root — use as-is (idempotent)
+  if (inputPath.startsWith(workspaceRoot + '/') || inputPath === workspaceRoot) {
+    return inputPath;
+  }
+
+  // Strip leading slash(es) from relative-looking paths to avoid double-slash
+  const cleanInput = inputPath.replace(/^\/+/, '');
+  return `${workspaceRoot}/${cleanInput}`;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { IEnvironment } from '@debugmcp/shared';
 import {
   isContainerMode,
   getWorkspaceRoot,
@@ -62,6 +63,11 @@ describe('container-path-utils', () => {
   });
 
   describe('resolvePathForRuntime', () => {
+    const containerEnv = new MockEnvironment({
+      MCP_CONTAINER: 'true',
+      MCP_WORKSPACE_ROOT: '/workspace',
+    });
+
     it('returns original path when not in container mode', () => {
       const env = new MockEnvironment();
       expect(resolvePathForRuntime('examples/python/simple.py', env)).toBe(
@@ -69,13 +75,39 @@ describe('container-path-utils', () => {
       );
     });
 
-    it('prefixes workspace root when in container mode', () => {
-      const env = new MockEnvironment({
-        MCP_CONTAINER: 'true',
-        MCP_WORKSPACE_ROOT: '/workspace',
-      });
-      expect(resolvePathForRuntime('python/simple.py', env)).toBe(
+    it('prefixes workspace root for relative paths in container mode', () => {
+      expect(resolvePathForRuntime('python/simple.py', containerEnv)).toBe(
         '/workspace/python/simple.py',
+      );
+    });
+
+    it('returns path as-is when already starting with workspace root (idempotent)', () => {
+      expect(resolvePathForRuntime('/workspace/examples/python/simple.py', containerEnv)).toBe(
+        '/workspace/examples/python/simple.py',
+      );
+    });
+
+    it('returns workspace root as-is when path equals workspace root', () => {
+      expect(resolvePathForRuntime('/workspace', containerEnv)).toBe(
+        '/workspace',
+      );
+    });
+
+    it('strips leading slash from relative-looking paths to avoid double-slash', () => {
+      expect(resolvePathForRuntime('/examples/python/simple.py', containerEnv)).toBe(
+        '/workspace/examples/python/simple.py',
+      );
+    });
+
+    it('strips multiple leading slashes', () => {
+      expect(resolvePathForRuntime('///examples/python/simple.py', containerEnv)).toBe(
+        '/workspace/examples/python/simple.py',
+      );
+    });
+
+    it('handles bare filename', () => {
+      expect(resolvePathForRuntime('script.py', containerEnv)).toBe(
+        '/workspace/script.py',
       );
     });
   });

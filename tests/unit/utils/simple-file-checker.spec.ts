@@ -139,7 +139,7 @@ describe('SimpleFileChecker', () => {
       expect(mockFileSystem.pathExists).toHaveBeenCalledWith('/workspace/src/file.ts');
     });
 
-    it('should always prepend /workspace/ in container mode', async () => {
+    it('should not double-prefix paths already under workspace root (idempotent)', async () => {
       const testPath = '/workspace/src/file.ts';
       (mockFileSystem.pathExists as MockedFunction<(path: string) => Promise<boolean>>)
         .mockResolvedValue(true);
@@ -149,9 +149,9 @@ describe('SimpleFileChecker', () => {
       expect(result).toEqual({
         exists: true,
         originalPath: testPath,
-        effectivePath: '/workspace//workspace/src/file.ts' // Always prepends in container mode
+        effectivePath: '/workspace/src/file.ts' // Idempotent: already under workspace root
       });
-      expect(mockFileSystem.pathExists).toHaveBeenCalledWith('/workspace//workspace/src/file.ts');
+      expect(mockFileSystem.pathExists).toHaveBeenCalledWith('/workspace/src/file.ts');
     });
 
     it('should handle any path format (no interpretation)', async () => {

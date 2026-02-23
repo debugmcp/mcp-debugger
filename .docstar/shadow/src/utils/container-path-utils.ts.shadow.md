@@ -1,30 +1,33 @@
-# src/utils/container-path-utils.ts
-@source-hash: a5ae1c3b7b4015ba
-@generated: 2026-02-10T00:41:50Z
+# src\utils\container-path-utils.ts
+@source-hash: e072b8b97f6f0bbd
+@generated: 2026-02-23T15:25:59Z
 
-**Primary Purpose**: Centralized path resolution utilities for container and host deployment modes. Provides deterministic path handling without OS-specific transformations or validation heuristics.
+**Purpose**: Centralized path resolution utilities for handling container vs host runtime environments in the DebugMCP application. Implements deterministic path transformation logic with clear error handling and policy enforcement.
 
 **Key Functions**:
-- `isContainerMode(environment)` (L17-19): Environment mode detection based on `MCP_CONTAINER` env var
-- `getWorkspaceRoot(environment)` (L25-40): Container workspace root retrieval with validation and normalization (removes trailing slashes)
-- `resolvePathForRuntime(inputPath, environment)` (L52-64): Core path resolution - passthrough for host mode, workspace prefix for container mode
-- `getPathDescription(originalPath, resolvedPath, environment)` (L70-84): Debug-friendly path display for error messages
 
-**Architecture & Policy**:
-- Single source of truth for all path resolution across the application
-- Container mode requires `MCP_WORKSPACE_ROOT` environment variable (mount point)
-- No smart heuristics or OS transformations - simple prefix-based resolution
-- Clear separation between host mode (unchanged paths) and container mode (workspace-prefixed paths)
+- `isContainerMode(environment)` (L17-19): Detects container mode by checking `MCP_CONTAINER=true` environment variable
+- `getWorkspaceRoot(environment)` (L25-40): Retrieves and normalizes workspace root from `MCP_WORKSPACE_ROOT`, throws descriptive errors if missing in container mode
+- `resolvePathForRuntime(inputPath, environment)` (L52-69): Core path resolution logic - passes through unchanged in host mode, prefixes with workspace root in container mode with idempotent handling
+- `getPathDescription(originalPath, resolvedPath, environment)` (L75-89): Generates debugging-friendly path descriptions showing original→resolved transformation
 
-**Dependencies**:
-- `IEnvironment` from `@debugmcp/shared` - environment variable abstraction
+**Dependencies**: 
+- `@debugmcp/shared` for `IEnvironment` interface (L12)
 
-**Runtime Behavior**:
-- Host mode: Input paths returned unchanged
-- Container mode: All paths prefixed with normalized workspace root (`/workspace/inputPath`)
-- Strict error handling when required environment variables missing
+**Architecture**: 
+- Stateless utility functions following functional programming patterns
+- Single source of truth for path resolution across deployment modes
+- Environment-driven behavior switching without OS-specific logic
+- Defensive programming with clear error messages and validation
 
-**Critical Constraints**:
-- Container mode detection relies solely on `MCP_CONTAINER=true`
-- Workspace root normalization ensures no trailing slashes for consistency
-- No path validation or rejection - simple deterministic transformation
+**Key Policies** (L4-10):
+- No smart heuristics or OS transformations
+- Container mode strictly requires `MCP_WORKSPACE_ROOT` 
+- Deterministic behavior across all scenarios
+- Centralized path resolution to avoid inconsistencies
+
+**Critical Logic**:
+- Container path detection uses exact string matching on workspace root prefix (L62)
+- Leading slash normalization prevents double-slash artifacts (L67)
+- Trailing slash removal ensures consistent workspace root format (L39)
+- Idempotent resolution - already-resolved paths pass through unchanged (L62-64)

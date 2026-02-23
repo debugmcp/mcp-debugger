@@ -1,58 +1,64 @@
 # tests\unit\utils/
-@children-hash: d5870913c6d4876d
-@generated: 2026-02-15T09:01:26Z
+@children-hash: 2b19eca1cfc92953
+@generated: 2026-02-23T15:26:29Z
 
 ## Overall Purpose
-This directory contains comprehensive unit tests for core utility modules that handle path resolution, error handling, logging, file operations, and language configuration in a containerized MCP (Model Context Protocol) environment. The tests validate utilities that bridge between host and container execution modes, providing essential infrastructure for the debug MCP server.
+This directory contains comprehensive unit tests for utility modules used throughout the MCP (Model Context Protocol) debug system. The tests validate core infrastructure components including path resolution, error handling, logging, file operations, and language configuration management.
 
-## Key Testing Components
+## Key Test Components
 
-### Container-Aware Path Management
-- **container-path-utils.spec.ts**: Tests the foundation of container/host path resolution, including workspace root detection, path normalization, and runtime-specific path handling
-- **simple-file-checker.spec.ts & simple-file-checker.test.ts**: Dual test coverage for file existence checking with container-aware path resolution, validating both mock-based and integration scenarios
+### Path & Container Management Tests
+- **container-path-utils.spec.ts**: Tests container mode detection, workspace root resolution, and path transformation for runtime execution
+- **simple-file-checker.spec.ts & simple-file-checker.test.ts**: Dual test coverage for file existence checking with container-aware path resolution
 
-### Error Handling & Logging Infrastructure  
-- **error-messages.test.ts**: Tests standardized error message generation for timeout scenarios (DAP requests, proxy initialization, step operations, adapter readiness)
-- **logger.test.ts**: Comprehensive winston-based logger testing including transport configuration, container-specific log paths, error handling, and environment-based behavior
+### Error & Message Handling Tests  
+- **error-messages.test.ts**: Validates timeout message generation for DAP operations and error message extraction utilities
+- **line-reader.spec.ts**: Tests file reading, line context extraction, caching behavior, and binary file detection
 
-### File System Operations
-- **line-reader.spec.ts**: Tests advanced file reading capabilities including line context extraction, caching, binary file detection, size limits, and multi-line range operations
-
-### Configuration Management
-- **language-config.test.ts**: Tests environment-based language disabling functionality, parsing comma-separated language lists from `DEBUG_MCP_DISABLE_LANGUAGES`
+### System Configuration Tests
+- **language-config.test.ts**: Tests environment-based language disabling functionality via `DEBUG_MCP_DISABLE_LANGUAGES`
+- **logger.test.ts**: Validates winston-based logger creation, transport configuration, and environment-specific behaviors
 
 ## Testing Patterns & Architecture
 
 ### Mock Strategy
-- **Environment Isolation**: All tests preserve and restore `process.env` state
-- **Comprehensive Mocking**: File systems, loggers, and external dependencies are fully mocked using Vitest
-- **Type-Safe Mocking**: Consistent use of `vi.mocked()` for TypeScript compatibility
+All tests employ comprehensive mocking of external dependencies:
+- File system operations via `IFileSystem` interface mocks
+- Environment variables via `IEnvironment` interface mocks  
+- Logger functionality for debug output capture
+- Winston transport layer for logging tests
 
 ### Container Mode Testing
-- **Dual Environment Support**: Tests validate behavior in both host and container modes
-- **Environment Variable Driven**: Uses `MCP_CONTAINER` and `MCP_WORKSPACE_ROOT` for runtime detection
-- **Path Resolution**: Container mode tests ensure proper workspace root prefixing
+Multiple test suites validate container vs host mode behavior:
+- Path resolution with workspace prefixing in container mode
+- Environment variable detection (`MCP_CONTAINER`, `MCP_WORKSPACE_ROOT`)
+- Different file access patterns between environments
 
 ### Error Handling Validation
-- **Graceful Degradation**: Tests verify utilities handle missing files, invalid inputs, and system errors
-- **Consistent Error Messages**: Validates standardized error message formats across utilities
-- **Boundary Conditions**: Comprehensive edge case testing (file size limits, line boundaries, empty inputs)
+Consistent testing of error conditions across utilities:
+- File system access failures
+- Missing environment variables
+- Invalid input validation
+- Graceful degradation scenarios
 
-## Public API Testing Coverage
+## Test Infrastructure
 
-The test suite validates these key utility interfaces:
-- **Path Resolution**: `resolvePathForRuntime()`, `getWorkspaceRoot()`, `getPathDescription()`
-- **File Operations**: `LineReader.getLineContext()`, `SimpleFileChecker.checkPath()`
-- **Error Handling**: `ErrorMessages` static methods, `getErrorMessage()`
-- **Configuration**: `getDisabledLanguages()`, `isLanguageDisabled()`
-- **Logging**: `createLogger()`, `getLogger()` with transport configuration
+### Common Dependencies
+- **Vitest framework**: Primary test runner with mocking capabilities
+- **Shared interfaces**: `IEnvironment`, `IFileSystem` from `@debugmcp/shared`
+- **Container path utilities**: Cross-cutting path resolution logic
 
-## Internal Organization
+### Test Isolation
+- Environment variable preservation/restoration in `beforeEach`/`afterEach` hooks
+- Mock cleanup and reset patterns
+- Consistent spy usage for function call verification
 
-Tests follow a consistent structure:
-1. **Mock Setup**: Hoisted mocks and dependency injection
-2. **Environment Management**: beforeEach/afterEach hooks for isolation
-3. **Scenario Testing**: Positive cases, error conditions, and edge cases
-4. **Assertion Patterns**: Type-safe verification of function calls and return values
+## Integration Points
+These utility tests validate the foundational layer that supports:
+- Debug adapter protocol (DAP) request handling
+- File system operations in containerized environments  
+- Language-specific debug configuration
+- Error reporting and logging across the system
+- Line-by-line code inspection and context extraction
 
-The test suite ensures these utilities work reliably across different execution environments while providing proper error handling and logging for debugging scenarios.
+The tests ensure robust operation across different deployment modes (host vs container) and provide confidence in the utility layer that higher-level MCP debug functionality depends upon.

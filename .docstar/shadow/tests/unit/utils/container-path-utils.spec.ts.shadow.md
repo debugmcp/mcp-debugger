@@ -1,43 +1,47 @@
-# tests/unit/utils/container-path-utils.spec.ts
-@source-hash: fa5b82e665d0eb94
-@generated: 2026-02-10T00:41:34Z
+# tests\unit\utils\container-path-utils.spec.ts
+@source-hash: b3a6f7cff98ad93d
+@generated: 2026-02-23T15:26:02Z
 
-**Purpose:** Test suite for container path utilities, providing comprehensive coverage for path resolution functionality in both container and non-container environments.
+## Purpose
+Unit tests for container path resolution utilities. Tests functionality for detecting container mode, workspace root resolution, path transformation for runtime execution, and path description formatting.
 
-**Key Components:**
+## Key Test Structure
 
-- **MockEnvironment (L9-29):** Test double implementing `IEnvironment` interface with configurable environment variables and current working directory. Supports setting arbitrary env vars via constructor and provides standard environment interface methods.
+**MockEnvironment Class (L10-30)**: Test double implementing `IEnvironment` interface
+- Simulates environment variables and working directory
+- Constructor accepts custom env vars and cwd (defaults to '/app')
+- Provides `get()`, `getAll()`, and `getCurrentWorkingDirectory()` methods
 
-- **isContainerMode tests (L32-42):** Validates container mode detection based on `MCP_CONTAINER` environment variable, testing both true and false scenarios.
+## Test Suites
 
-- **getWorkspaceRoot tests (L44-62):** Tests workspace root resolution with error conditions:
-  - Throws when not in container mode (L45-48)
-  - Throws when `MCP_WORKSPACE_ROOT` missing (L50-53)  
-  - Normalizes paths by removing trailing slashes (L55-61)
+**isContainerMode Tests (L33-43)**: Validates container mode detection
+- Checks MCP_CONTAINER='true' returns true
+- Verifies non-true values return false
 
-- **resolvePathForRuntime tests (L64-81):** Validates path resolution behavior:
-  - Returns original path in non-container mode (L65-70)
-  - Prefixes workspace root in container mode (L72-80)
+**getWorkspaceRoot Tests (L45-63)**: Tests workspace root extraction
+- Validates error when not in container mode (L46-49)
+- Validates error when MCP_WORKSPACE_ROOT missing (L51-54) 
+- Tests trailing slash removal (L56-62)
 
-- **getPathDescription tests (L83-100):** Tests path description generation:
-  - Returns original path in non-container mode (L84-87)
-  - Returns original when resolved equals original (L89-92)
-  - Returns descriptive format when paths differ (L94-99)
+**resolvePathForRuntime Tests (L65-113)**: Core path resolution logic
+- Uses shared containerEnv fixture with MCP_CONTAINER='true' and MCP_WORKSPACE_ROOT='/workspace'
+- Tests passthrough behavior in non-container mode (L71-76)
+- Tests workspace prefix addition for relative paths (L78-82)
+- Tests idempotent behavior for already-prefixed paths (L84-88)
+- Tests edge cases: workspace root path (L90-94), leading slash stripping (L96-100), multiple slashes (L102-106), bare filenames (L108-112)
 
-**Testing Patterns:**
-- Uses Vitest framework with describe/it structure
-- Employs mock environment for isolated testing
-- Tests both positive and negative scenarios
-- Validates error conditions with appropriate error messages
-- Tests edge cases like trailing slash normalization
+**getPathDescription Tests (L115-132)**: Path display formatting
+- Tests passthrough in non-container mode (L116-119)
+- Tests original path return when resolved matches original (L121-124)
+- Tests descriptive format when paths differ in container mode (L126-131)
 
-**Dependencies:** 
-- Vitest testing framework (L1)
-- Container path utilities under test (L2-7)
-- Assumes `IEnvironment` interface exists (referenced but not imported)
+## Dependencies
+- vitest testing framework
+- `@debugmcp/shared` for IEnvironment interface
+- Container path utilities from `../../../src/utils/container-path-utils.js`
 
-**Critical Test Coverage:**
-- Container mode detection logic
-- Workspace root validation and normalization  
-- Path resolution with workspace prefixing
-- Descriptive path formatting for user feedback
+## Test Patterns
+- Uses MockEnvironment for isolated testing
+- Comprehensive edge case coverage for path resolution
+- Clear separation of container vs non-container behavior
+- Validates both success and error conditions

@@ -1,47 +1,46 @@
-# packages/adapter-python/tests/unit/python-adapter-factory.test.ts
-@source-hash: 28a0bb6940aeaa3c
-@generated: 2026-02-10T00:41:09Z
+# packages\adapter-python\tests\unit\python-adapter-factory.test.ts
+@source-hash: 5267f58c9c0967e8
+@generated: 2026-02-23T15:26:01Z
 
-## Test Suite: PythonAdapterFactory
+**Purpose:** Comprehensive unit test suite for the PythonAdapterFactory class, validating factory pattern implementation, environment validation, and error handling for Python debugging capabilities.
 
-**Primary Purpose:** Unit tests for `PythonAdapterFactory` class, validating factory pattern implementation, adapter creation, metadata retrieval, and environment validation functionality.
+## Key Test Components
 
-### Key Test Components
-
-**Test Setup & Mocking (L11-26):**
-- Mocks `python-utils.js` functions (`findPythonExecutable`, `getPythonVersion`)
-- Mocks `child_process.spawn` for simulating Python process execution
+### Mock Setup (L11-26)
+- Mocks `python-utils.js` functions (`findPythonExecutable`, `getPythonVersion`) 
+- Mocks Node.js `child_process.spawn` while preserving other exports
 - Creates typed mock references for test assertions
 
-**Test Utilities:**
-- `createDependencies()` (L28-43): Factory function creating mock `AdapterDependencies` with stubbed logger, environment, fileSystem, and processLauncher
-- `simulateSpawn()` (L45-66): Helper simulating child process spawn behavior with configurable output, exit codes, and error conditions
+### Test Utilities (L28-66)
+- `createDependencies()` (L28-43): Factory function creating mock `AdapterDependencies` with minimal logger, filesystem, process launcher, and environment implementations
+- `simulateSpawn()` (L45-66): Mock helper simulating child process spawn behavior with configurable output, exit codes, and error conditions using EventEmitter patterns
 
-### Test Scenarios
+### Core Test Coverage
 
 **Factory Functionality (L76-96):**
-- Validates adapter instance creation returns `PythonDebugAdapter`
-- Verifies metadata structure matches expected Python adapter configuration (language, version, file extensions)
+- Validates `PythonDebugAdapter` instance creation
+- Verifies metadata accuracy (language, version, file extensions, documentation URL)
 
-**Environment Validation (L98-173):**
-- **Success path (L98-114):** Tests valid environment with Python 3.10.1 and debugpy 1.8.1
-- **Python detection failures (L116-124):** Handles missing Python executable
-- **Version validation (L126-136):** Rejects Python versions below 3.7 requirement
-- **Version detection issues (L138-149):** Gracefully handles undeterminable Python versions with warnings
-- **debugpy validation (L151-173):** Detects missing debugpy via exit codes and spawn errors
+**Environment Validation Success Cases (L98-149):**
+- Happy path: Python 3.10.1 + debugpy 1.8.1 available
+- Graceful degradation: Missing Python version (warns but validates)
 
-### Dependencies & Patterns
+**Environment Validation Failure Cases (L116-175):**
+- Python executable not found (validation fails)
+- Python version below 3.7 requirement (validation fails) 
+- debugpy detection failures (warns but doesn't fail validation)
 
-**External Dependencies:**
-- Uses Vitest testing framework with mocking capabilities
-- Imports shared types from `@debugmcp/shared` package
-- Tests integration with Node.js `child_process` and `events` modules
+**Critical Edge Case (L177-197):**
+- **Issue #16 scenario**: System Python found but debugpy missing (virtualenv case)
+- Must return `valid: true` with warnings to allow adapter registration
+- Addresses real-world deployment where debugpy exists in project virtualenv but not system-wide
 
-**Testing Patterns:**
-- Comprehensive mock setup with cleanup in `beforeEach` (L69-74)
-- Async validation testing with simulated subprocess behavior
-- Error boundary testing for various failure scenarios
-- Metadata validation ensuring consistent adapter configuration
+## Dependencies
+- **Test Framework:** Vitest with mocking capabilities
+- **Source Modules:** PythonAdapterFactory, python-utils, shared types
+- **External:** Node.js child_process, events modules
 
-### Critical Validation Logic
-Environment validation tests Python version >= 3.7 requirement and debugpy package availability through subprocess execution simulation, providing comprehensive error reporting and warning mechanisms for development environment issues.
+## Architecture Patterns
+- **Factory Pattern Testing:** Validates adapter instance creation and metadata provision
+- **Environment Validation Strategy:** Distinguishes between hard failures (missing Python, wrong version) and soft failures (missing debugpy)
+- **Async Mock Simulation:** Uses `queueMicrotask()` to simulate realistic async spawn behavior

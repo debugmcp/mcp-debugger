@@ -1,96 +1,66 @@
-# src/session/session-manager-operations.ts
-@source-hash: d4dd17e80877865e
-@generated: 2026-02-11T16:13:01Z
+# src\session\session-manager-operations.ts
+@source-hash: 7077a49f505313eb
+@generated: 2026-02-23T15:26:08Z
 
 ## Purpose
-SessionManagerOperations provides core debugging operations for managing debug sessions including starting/stopping, stepping, breakpoints, expression evaluation, and process attachment. It extends SessionManagerData and acts as the primary interface for debug protocol interactions.
+Core debug operations implementation extending SessionManagerData to provide debug session management including starting/stepping/continuing debugging, breakpoint management, expression evaluation, and process attach/detach operations.
 
-## Key Classes & Interfaces
+## Architecture
+Abstract class SessionManagerOperations (L49) extends SessionManagerData, implementing debug lifecycle management through ProxyManager coordination with language-specific debug adapters.
 
-**SessionManagerOperations (L49-1478)** - Abstract class providing debug operations
-- Manages debug session lifecycle and proxy communication
-- Handles DAP (Debug Adapter Protocol) requests and responses
-- Coordinates language-specific adapter behavior through policies
-- Implements stepping, breakpoint management, and expression evaluation
+## Key Classes & Functions
 
-**EvaluateResult (L35-44)** - Interface for expression evaluation results
-- Contains evaluation success status, result value, type information
-- Includes variable references for complex objects with children
-- Used for REPL-style debugging interactions
+### Main Class
+- **SessionManagerOperations** (L49): Abstract class providing debug operations
+  - **startProxyManager** (L50-295): Complex session initialization with adapter creation, proxy setup, and toolchain validation
+  - **startDebugging** (L358-743): Primary debug session start with dry-run support and comprehensive error handling
+  - **waitForDryRunCompletion** (L300-356): Helper for dry-run timeout management with event cleanup
 
-## Core Operations
+### Debug Control Operations
+- **stepOver** (L832-872): Step over operation with thread validation
+- **stepInto** (L874-914): Step into operation with thread validation  
+- **stepOut** (L916-956): Step out operation with thread validation
+- **_executeStepOperation** (L958-1075): Common step operation implementation with timeout and location capture
+- **continue** (L1077-1130): Continue execution from paused state
 
-**startDebugging (L358-695)** - Main entry point for starting debug sessions
-- Creates session log directories and validates toolchain compatibility
-- Handles both normal and dry-run execution modes
-- Sets up proxy managers and performs language-specific handshakes
-- Returns DebugResult with session state and metadata
+### Breakpoint Management
+- **setBreakpoint** (L747-830): Add breakpoint with verification and live session sync
 
-**startProxyManager (L50-295)** - Creates and configures proxy for debug adapter communication
-- Resolves executable paths through language adapters
-- Builds adapter commands and launch configurations
-- Handles attach vs launch mode detection
-- Sets up initial breakpoints and event handlers
+### Expression Evaluation
+- **evaluateExpression** (L1152-1328): Evaluate expressions in debug context with comprehensive validation and structured logging
 
-**Step Operations (L783-1026)**
-- stepOver (L783-823), stepInto (L825-865), stepOut (L867-907)
-- All delegate to _executeStepOperation for consistent behavior
-- Handle thread ID validation and state transitions
-- Capture location information after stepping
+### Process Attach/Detach
+- **attachToProcess** (L1334-1422): Attach to running process for debugging
+- **detachFromProcess** (L1427-1486): Detach from process with optional termination
 
-**Breakpoint Management (L698-781)**
-- setBreakpoint creates and sends breakpoints to active sessions
-- Validates session state and handles verification responses
-- Maintains breakpoint map for session persistence
+### Utility Methods
+- **truncateForLog** (L1136-1139): String truncation for logging
+- **waitForInitialBreakpointPause** (L1491-1527): Wait for initial breakpoint pause
 
-**Expression Evaluation (L1103-1280)**
-- evaluateExpression supports watch, repl, hover, and variables contexts
-- Requires paused session state for safe evaluation
-- Automatically resolves current frame if not specified
-- Returns structured results with type and reference information
+## Key Dependencies
+- Debug adapters via AdapterRegistry for language-specific operations
+- ProxyManager for DAP communication  
+- SessionStore for session state persistence
+- ErrorMessages utility for consistent error handling
+- Various debug-specific error types (SessionTerminatedError, ProxyNotRunningError, etc.)
 
-## Process Attachment
+## Data Flow
+1. startDebugging creates adapter config, resolves executable, builds launch config
+2. startProxyManager initializes ProxyManager with adapter command and configuration
+3. Debug operations (step/continue) send DAP requests through ProxyManager
+4. Session state updates propagated through _updateSessionState calls
+5. Breakpoints synchronized between session store and active debug adapter
 
-**attachToProcess (L1285-1373)** - Attaches to running processes
-- Supports remote debugging via host/port or process ID
-- Handles stopOnEntry behavior for different attachment scenarios
-- Uses special __attachMode flag for adapter configuration
+## Error Handling Patterns
+- Session termination checks before operations
+- Comprehensive error capture with proxy log tails for debugging
+- Toolchain validation with continuation policies
+- Timeout management for async operations (dry-run, step operations)
+- Graceful degradation with detailed error reporting
 
-**detachFromProcess (L1378-1437)** - Cleanly detaches from processes
-- Optional process termination vs clean disconnect
-- Sends DAP disconnect requests before cleanup
-
-## Dependencies & Architecture
-
-**Core Dependencies:**
-- @debugmcp/shared for types and enums
-- @vscode/debugprotocol for DAP types
-- SessionManagerData base class for data operations
-- ProxyConfig and ProxyManager for adapter communication
-
-**Adapter Integration:**
-- Uses adapter registry to create language-specific adapters
-- Delegates executable resolution and command building to adapters
-- Applies language policies for initialization and handshake behavior
-
-**Error Handling:**
-- Comprehensive error capture with proxy log tails for diagnostics
-- Language-specific error conversion (e.g., PythonNotFoundError)
-- Toolchain validation with continue/warn/error behaviors
-
-## Key Patterns
-
-**State Management:**
-- Consistent state transitions through _updateSessionState
-- Session lifecycle tracking (CREATED → ACTIVE → TERMINATED)
-- Proxy event handlers for state synchronization
-
-**Async Operation Handling:**
-- Promise-based operations with timeout mechanisms
-- Event listener cleanup patterns in finally blocks
-- Race condition handling for step operations and dry runs
-
-**Logging Strategy:**
-- Structured logging for debugging events with timestamps
-- Comprehensive error details capture for CI debugging
-- Log truncation for large evaluation results
+## Critical Invariants
+- Session must be PAUSED for step operations and expression evaluation
+- ProxyManager must be running for debug operations
+- Thread ID required for step/continue operations
+- File paths must be validated before breakpoint setting
+- Lifecycle state transitions coordinated with session state updates
