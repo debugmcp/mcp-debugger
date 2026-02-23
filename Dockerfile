@@ -145,8 +145,9 @@ COPY --from=builder /app/scripts/stdio-silencer.cjs /app/scripts/stdio-silencer.
 # Create logs directory with proper permissions for any user
 RUN mkdir -p /app/logs && chmod 777 /app/logs
 
-# Create an entrypoint wrapper that logs early startup context and preloads the silencer, then execs the server
-RUN printf '#!/bin/sh\n# Log directory already exists with proper permissions\n{\n  echo \"==== entry.sh ====\";\n  date;\n  echo \"argv: $*\";\n} >> /app/logs/entry.log 2>&1\nexport MCP_WORKSPACE_ROOT="${MCP_WORKSPACE_ROOT:-/workspace}"\nexec node --no-warnings -r /app/scripts/stdio-silencer.cjs dist/bundle.cjs \"$@\"\n' > /app/entry.sh && chmod +x /app/entry.sh
+# Copy entrypoint wrapper (version-controlled script avoids shell quoting pitfalls)
+COPY scripts/docker-entry.sh /app/entry.sh
+RUN sed -i 's/\r$//' /app/entry.sh && chmod +x /app/entry.sh
 
 # Use tini as PID1 to properly handle signals, then run our wrapper
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/entry.sh"]
