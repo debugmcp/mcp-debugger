@@ -148,7 +148,7 @@ describe('PythonAdapterFactory', () => {
     expect(result.warnings).toContain('Could not determine Python version');
   });
 
-  it('reports missing debugpy when detection fails with exit code', async () => {
+  it('warns (not errors) when debugpy detection fails with exit code', async () => {
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
     getPythonVersionMock.mockResolvedValue('3.10.1');
     simulateSpawn({ output: '', exitCode: 1 });
@@ -156,11 +156,12 @@ describe('PythonAdapterFactory', () => {
     const factory = new PythonAdapterFactory();
     const result = await factory.validate();
 
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('debugpy not installed. Run: pip install debugpy');
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.some(w => w.includes('debugpy'))).toBe(true);
   });
 
-  it('reports missing debugpy when spawn emits an error', async () => {
+  it('warns (not errors) when debugpy spawn emits an error', async () => {
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
     getPythonVersionMock.mockResolvedValue('3.10.1');
     simulateSpawn({ emitError: true });
@@ -168,7 +169,30 @@ describe('PythonAdapterFactory', () => {
     const factory = new PythonAdapterFactory();
     const result = await factory.validate();
 
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('debugpy not installed. Run: pip install debugpy');
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.some(w => w.includes('debugpy'))).toBe(true);
+  });
+
+  it('passes validation when Python exists but debugpy is missing (virtualenv scenario, issue #16)', async () => {
+    // Scenario: System Python is found and is a valid version, but debugpy
+    // is only installed in a virtualenv (not system-wide). validate() should
+    // return valid:true with a warning, NOT block adapter registration.
+    findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
+    getPythonVersionMock.mockResolvedValue('3.11.0');
+    simulateSpawn({ output: '', exitCode: 1 }); // debugpy not installed
+
+    const factory = new PythonAdapterFactory();
+    const result = await factory.validate();
+
+    // Must be valid so AdapterRegistry.register() succeeds
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    // The missing-debugpy message should be a warning, not an error
+    expect(result.warnings.some(w => w.includes('debugpy'))).toBe(true);
+    expect(result.details).toMatchObject({
+      pythonPath: '/usr/bin/python3',
+      pythonVersion: '3.11.0'
+    });
   });
 });

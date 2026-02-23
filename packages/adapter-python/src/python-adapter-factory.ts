@@ -65,10 +65,11 @@ export class PythonAdapterFactory implements IAdapterFactory {
         warnings.push('Could not determine Python version');
       }
       
-      // Check debugpy installation
+      // Check debugpy installation (warning only — debugpy may be available in the
+      // user's virtualenv even if missing from system Python. See issue #16.)
       const hasDebugpy = await this.checkDebugpyInstalled(pythonPath);
       if (!hasDebugpy) {
-        errors.push('debugpy not installed. Run: pip install debugpy');
+        warnings.push('debugpy not found in system Python. If using a virtualenv, debugpy will be checked at launch time. Otherwise run: pip install debugpy');
       }
       
     } catch (error) {

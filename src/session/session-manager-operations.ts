@@ -507,13 +507,25 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         : sessionStateAfterHandshake === SessionState.PAUSED;
 
       if (!alreadyReady) {
-        // Wait for adapter to be configured or first stop event
+        // Wait for adapter to be configured, first stop event, or termination
         const waitForReady = new Promise<void>((resolve) => {
           let resolved = false;
+          // eslint-disable-next-line prefer-const -- assigned after cleanup/handlers are defined
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+          const cleanup = () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            session.proxyManager?.removeListener('stopped', handleStopped);
+            session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+            session.proxyManager?.removeListener('terminated', handleTerminated);
+            session.proxyManager?.removeListener('exited', handleExited);
+            session.proxyManager?.removeListener('exit', handleExit);
+          };
 
           const handleStopped = () => {
             if (!resolved) {
               resolved = true;
+              cleanup();
               this.logger.info(`[SessionManager] Session ${sessionId} stopped on entry`);
               resolve();
             }
@@ -525,6 +537,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
               : !dapLaunchArgs?.stopOnEntry;
             if (!resolved && readyOnRunning) {
               resolved = true;
+              cleanup();
               this.logger.info(
                 `[SessionManager] Session ${sessionId} running (stopOnEntry=${dapLaunchArgs?.stopOnEntry ?? false})`
               );
@@ -532,8 +545,38 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             }
           };
 
+          const handleTerminated = () => {
+            if (!resolved) {
+              resolved = true;
+              cleanup();
+              this.logger.info(`[SessionManager] Session ${sessionId} terminated during startup`);
+              resolve();
+            }
+          };
+
+          const handleExited = () => {
+            if (!resolved) {
+              resolved = true;
+              cleanup();
+              this.logger.info(`[SessionManager] Session ${sessionId} exited during startup`);
+              resolve();
+            }
+          };
+
+          const handleExit = () => {
+            if (!resolved) {
+              resolved = true;
+              cleanup();
+              this.logger.info(`[SessionManager] Session ${sessionId} proxy exited during startup`);
+              resolve();
+            }
+          };
+
           session.proxyManager?.once('stopped', handleStopped);
           session.proxyManager?.once('adapter-configured', handleConfigured);
+          session.proxyManager?.once('terminated', handleTerminated);
+          session.proxyManager?.once('exited', handleExited);
+          session.proxyManager?.once('exit', handleExit);
 
           // In case the adapter already reached the desired state before listeners were attached,
           // perform a synchronous state check to avoid waiting for an event that already fired.
@@ -543,18 +586,25 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             : currentState === SessionState.PAUSED;
           if (readyNow) {
             resolved = true;
-            session.proxyManager?.removeListener('stopped', handleStopped);
-            session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+            cleanup();
+            resolve();
+            return;
+          }
+
+          // Also check if already terminated/stopped
+          if (currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
+            resolved = true;
+            cleanup();
+            this.logger.info(`[SessionManager] Session ${sessionId} already ${currentState} - skipping readiness wait`);
             resolve();
             return;
           }
 
           // Timeout after 30 seconds
-          setTimeout(() => {
+          timeoutId = setTimeout(() => {
             if (!resolved) {
               resolved = true;
-              session.proxyManager?.removeListener('stopped', handleStopped);
-              session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+              cleanup();
               this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
               resolve();
             }

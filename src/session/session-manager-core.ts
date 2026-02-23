@@ -339,7 +339,12 @@ export abstract class SessionManagerCore {
       this.logger.debug(`[SessionManager] 'exit' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}`);
       if (session.state !== SessionState.STOPPED && session.state !== SessionState.ERROR) {
-        this._updateSessionState(session, SessionState.ERROR);
+        // Clean exit (code 0 or null with no signal) is normal termination, not an error
+        if (code === 0 || (code === null && !signal)) {
+          this._updateSessionState(session, SessionState.STOPPED);
+        } else {
+          this._updateSessionState(session, SessionState.ERROR);
+        }
       }
       
       // Clean up listeners since proxy is gone
