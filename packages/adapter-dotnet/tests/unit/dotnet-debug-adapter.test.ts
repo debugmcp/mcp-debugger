@@ -13,10 +13,16 @@ vi.mock('../../src/utils/dotnet-utils.js', () => ({
   findDotnetBackend: vi.fn(),
   findVsdbgExecutable: vi.fn(),
   findNetcoredbgExecutable: vi.fn(),
-  listDotnetProcesses: vi.fn()
+  listDotnetProcesses: vi.fn(),
+  findVsdaNode: vi.fn(),
+  findPdb2PdbExecutable: vi.fn()
 }));
 
+import { findVsdaNode, findPdb2PdbExecutable } from '../../src/utils/dotnet-utils.js';
+
 const findDotnetBackendMock = vi.mocked(findDotnetBackend);
+const findVsdaNodeMock = vi.mocked(findVsdaNode);
+const findPdb2PdbExecutableMock = vi.mocked(findPdb2PdbExecutable);
 
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {} as unknown,
@@ -208,6 +214,9 @@ describe('DotnetDebugAdapter', () => {
 
   describe('adapter configuration', () => {
     it('builds adapter command using bridge script', () => {
+      findVsdaNodeMock.mockReturnValue(null);
+      findPdb2PdbExecutableMock.mockReturnValue(null);
+
       const config = {
         sessionId: 'test-session',
         executablePath: '/path/to/vsdbg.exe',
@@ -227,6 +236,139 @@ describe('DotnetDebugAdapter', () => {
       expect(command.args).toContain('127.0.0.1');
       expect(command.args).toContain('--port');
       expect(command.args).toContain('12345');
+    });
+
+    it('includes --vsda when vsda.node is found', () => {
+      findVsdaNodeMock.mockReturnValue('/vscode/vsda.node');
+      findPdb2PdbExecutableMock.mockReturnValue(null);
+
+      const config = {
+        sessionId: 'test-session',
+        executablePath: '/path/to/vsdbg.exe',
+        adapterHost: '127.0.0.1',
+        adapterPort: 12345,
+        logDir: '/tmp/logs',
+        scriptPath: '/path/to/app.dll',
+        launchConfig: {}
+      };
+
+      const command = adapter.buildAdapterCommand(config);
+
+      expect(command.args).toContain('--vsda');
+      expect(command.args).toContain('/vscode/vsda.node');
+    });
+
+    it('omits --vsda when vsda.node is not found', () => {
+      findVsdaNodeMock.mockReturnValue(null);
+      findPdb2PdbExecutableMock.mockReturnValue(null);
+
+      const config = {
+        sessionId: 'test-session',
+        executablePath: '/path/to/vsdbg.exe',
+        adapterHost: '127.0.0.1',
+        adapterPort: 12345,
+        logDir: '/tmp/logs',
+        scriptPath: '/path/to/app.dll',
+        launchConfig: {}
+      };
+
+      const command = adapter.buildAdapterCommand(config);
+
+      expect(command.args).not.toContain('--vsda');
+    });
+
+    it('includes --pdb2pdb and --convert-pdbs when available with symbolOptions', () => {
+      findVsdaNodeMock.mockReturnValue(null);
+      findPdb2PdbExecutableMock.mockReturnValue('/tools/Pdb2Pdb.exe');
+
+      const config = {
+        sessionId: 'test-session',
+        executablePath: '/path/to/vsdbg.exe',
+        adapterHost: '127.0.0.1',
+        adapterPort: 12345,
+        logDir: '/tmp/logs',
+        scriptPath: '/path/to/app.dll',
+        launchConfig: {
+          symbolOptions: {
+            searchPaths: ['/symbols/dir1', '/symbols/dir2']
+          }
+        }
+      };
+
+      const command = adapter.buildAdapterCommand(config);
+
+      expect(command.args).toContain('--pdb2pdb');
+      expect(command.args).toContain('/tools/Pdb2Pdb.exe');
+      expect(command.args).toContain('--convert-pdbs');
+      expect(command.args).toContain('/symbols/dir1,/symbols/dir2');
+    });
+
+    it('includes program directory in --convert-pdbs', () => {
+      findVsdaNodeMock.mockReturnValue(null);
+      findPdb2PdbExecutableMock.mockReturnValue('/tools/Pdb2Pdb.exe');
+
+      const config = {
+        sessionId: 'test-session',
+        executablePath: '/path/to/vsdbg.exe',
+        adapterHost: '127.0.0.1',
+        adapterPort: 12345,
+        logDir: '/tmp/logs',
+        scriptPath: '/path/to/app.dll',
+        launchConfig: {
+          program: '/app/bin/MyApp.dll'
+        }
+      };
+
+      const command = adapter.buildAdapterCommand(config);
+
+      expect(command.args).toContain('--convert-pdbs');
+      // Should include the program's directory
+      const convertIdx = command.args.indexOf('--convert-pdbs');
+      expect(command.args[convertIdx + 1]).toContain('/app/bin');
+    });
+
+    it('omits --convert-pdbs when pdb2pdb is not found', () => {
+      findVsdaNodeMock.mockReturnValue(null);
+      findPdb2PdbExecutableMock.mockReturnValue(null);
+
+      const config = {
+        sessionId: 'test-session',
+        executablePath: '/path/to/vsdbg.exe',
+        adapterHost: '127.0.0.1',
+        adapterPort: 12345,
+        logDir: '/tmp/logs',
+        scriptPath: '/path/to/app.dll',
+        launchConfig: {
+          symbolOptions: {
+            searchPaths: ['/symbols/dir1']
+          }
+        }
+      };
+
+      const command = adapter.buildAdapterCommand(config);
+
+      expect(command.args).not.toContain('--pdb2pdb');
+      expect(command.args).not.toContain('--convert-pdbs');
+    });
+
+    it('omits --convert-pdbs when no PDB directories available', () => {
+      findVsdaNodeMock.mockReturnValue(null);
+      findPdb2PdbExecutableMock.mockReturnValue('/tools/Pdb2Pdb.exe');
+
+      const config = {
+        sessionId: 'test-session',
+        executablePath: '/path/to/vsdbg.exe',
+        adapterHost: '127.0.0.1',
+        adapterPort: 12345,
+        logDir: '/tmp/logs',
+        scriptPath: '/path/to/app.dll',
+        launchConfig: {}
+      };
+
+      const command = adapter.buildAdapterCommand(config);
+
+      expect(command.args).toContain('--pdb2pdb');
+      expect(command.args).not.toContain('--convert-pdbs');
     });
 
     it('returns vsdbg as adapter module name', () => {

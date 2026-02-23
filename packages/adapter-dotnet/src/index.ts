@@ -12,5 +12,8 @@ export {
   findNetcoredbgExecutable,
   findDotnetBackend,
   listDotnetProcesses,
+  findVsdaNode,
+  isPortablePdb,
+  findPdb2PdbExecutable,
   CommandNotFoundError
 } from './utils/dotnet-utils.js';

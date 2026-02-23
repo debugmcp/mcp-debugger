@@ -8,6 +8,7 @@
 import { spawn } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import which from 'which';
 
 interface Logger {
@@ -296,4 +297,123 @@ export async function listDotnetProcesses(
       resolve(processes);
     });
   });
+}
+
+/**
+ * Find the vsda.node native module (VS Code's handshake signer).
+ *
+ * vsdbg sends a cryptographic handshake challenge that must be signed
+ * with the vsda signer bundled inside the VS Code installation.
+ *
+ * @param logger Optional logger for diagnostics
+ * @returns Absolute path to vsda.node, or null if not found
+ */
+export function findVsdaNode(logger: Logger = noopLogger): string | null {
+  // 1. Environment variable
+  if (process.env.VSDA_PATH) {
+    const envPath = process.env.VSDA_PATH;
+    if (fs.existsSync(envPath)) {
+      logger.debug?.(`[Dotnet Detection] Using VSDA_PATH: ${envPath}`);
+      return envPath;
+    }
+    logger.debug?.(`[Dotnet Detection] VSDA_PATH set but not found: ${envPath}`);
+  }
+
+  // 2. Scan VS Code installation directories
+  const codePaths: string[] = [];
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || '';
+    if (localAppData) {
+      codePaths.push(path.join(localAppData, 'Programs', 'Microsoft VS Code'));
+    }
+    codePaths.push('C:\\Program Files\\Microsoft VS Code');
+  } else if (process.platform === 'darwin') {
+    codePaths.push('/Applications/Visual Studio Code.app/Contents');
+  } else {
+    codePaths.push('/usr/share/code');
+    codePaths.push('/usr/lib/code');
+  }
+
+  for (const codeDir of codePaths) {
+    if (!fs.existsSync(codeDir)) continue;
+
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(codeDir).filter(e => !e.startsWith('.'));
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const candidate = path.join(codeDir, entry, 'resources', 'app',
+        'node_modules.asar.unpacked', 'vsda', 'build', 'Release', 'vsda.node');
+      if (fs.existsSync(candidate)) {
+        logger.debug?.(`[Dotnet Detection] Found vsda.node: ${candidate}`);
+        return candidate;
+      }
+    }
+  }
+
+  logger.debug?.('[Dotnet Detection] vsda.node not found');
+  return null;
+}
+
+/**
+ * Check whether a PDB file is in Portable PDB format.
+ *
+ * Portable PDBs start with the magic bytes "BSJB" (0x42 0x53 0x4A 0x42).
+ * Windows-format PDBs have a different signature ("Microsoft C/C++ MSF 7.00").
+ *
+ * @param pdbPath Absolute path to the PDB file
+ * @returns true if the file is a Portable PDB, false if Windows-format or on error
+ */
+export function isPortablePdb(pdbPath: string): boolean {
+  try {
+    const fd = fs.openSync(pdbPath, 'r');
+    try {
+      const buf = Buffer.alloc(4);
+      const bytesRead = fs.readSync(fd, buf, 0, 4, 0);
+      if (bytesRead < 4) return false;
+      // Portable PDB magic: "BSJB" = 0x42 0x53 0x4A 0x42
+      return buf[0] === 0x42 && buf[1] === 0x53 && buf[2] === 0x4A && buf[3] === 0x42;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Find the Pdb2Pdb.exe converter tool.
+ *
+ * Priority:
+ * 1. PDB2PDB_PATH environment variable
+ * 2. Bundled with this package at tools/pdb2pdb/Pdb2Pdb.exe
+ * 3. Fallback at /tmp/pdb2pdb-tool/Pdb2Pdb.exe
+ *
+ * @returns Absolute path to Pdb2Pdb.exe, or null if not found
+ */
+export function findPdb2PdbExecutable(): string | null {
+  // 1. Environment variable
+  if (process.env.PDB2PDB_PATH) {
+    if (fs.existsSync(process.env.PDB2PDB_PATH)) {
+      return process.env.PDB2PDB_PATH;
+    }
+  }
+
+  // 2. Bundled with this package
+  const thisFile = fileURLToPath(import.meta.url);
+  const bundled = path.resolve(path.dirname(thisFile), '..', '..', 'tools', 'pdb2pdb', 'Pdb2Pdb.exe');
+  if (fs.existsSync(bundled)) {
+    return bundled;
+  }
+
+  // 3. Fallback temp location
+  const fallback = '/tmp/pdb2pdb-tool/Pdb2Pdb.exe';
+  if (fs.existsSync(fallback)) {
+    return fallback;
+  }
+
+  return null;
 }

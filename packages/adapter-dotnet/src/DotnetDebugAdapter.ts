@@ -35,7 +35,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { findVsdbgExecutable, findDotnetBackend } from './utils/dotnet-utils.js';
+import { findVsdbgExecutable, findDotnetBackend, findVsdaNode, findPdb2PdbExecutable } from './utils/dotnet-utils.js';
 
 /**
  * Cache entry for debugger executable paths
@@ -260,14 +260,51 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
       ? bridgeScript.slice(1)
       : bridgeScript;
 
+    const args = [
+      bridgePath,
+      '--vsdbg', config.executablePath,
+      '--host', config.adapterHost,
+      '--port', config.adapterPort.toString()
+    ];
+
+    // vsda.node for handshake signing
+    const vsdaPath = findVsdaNode(
+      this.dependencies.logger as { error: (msg: string) => void; debug?: (msg: string) => void } | undefined
+    );
+    if (vsdaPath) {
+      args.push('--vsda', vsdaPath);
+    }
+
+    // Pdb2Pdb.exe for PDB conversion
+    const pdb2pdbPath = findPdb2PdbExecutable();
+    if (pdb2pdbPath) {
+      args.push('--pdb2pdb', pdb2pdbPath);
+
+      // Collect PDB search directories
+      const pdbDirs: string[] = [];
+
+      // From symbolOptions.searchPaths in launch config
+      const launchConfig = config.launchConfig as DotnetLaunchConfig | undefined;
+      if (launchConfig?.symbolOptions?.searchPaths) {
+        pdbDirs.push(...launchConfig.symbolOptions.searchPaths);
+      }
+
+      // From program path directory (launch mode)
+      if (launchConfig?.program) {
+        const programDir = path.dirname(launchConfig.program);
+        if (!pdbDirs.includes(programDir)) {
+          pdbDirs.push(programDir);
+        }
+      }
+
+      if (pdbDirs.length > 0) {
+        args.push('--convert-pdbs', pdbDirs.join(','));
+      }
+    }
+
     return {
       command: 'node',
-      args: [
-        bridgePath,
-        '--vsdbg', config.executablePath,
-        '--host', config.adapterHost,
-        '--port', config.adapterPort.toString()
-      ],
+      args,
       env: {
         ...process.env as Record<string, string>
       }
