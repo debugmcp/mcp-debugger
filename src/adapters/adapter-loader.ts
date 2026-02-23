@@ -141,6 +141,7 @@ export class AdapterLoader {
       { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug' },
       { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB' },
       { name: 'go', packageName: '@debugmcp/adapter-go', description: 'Go debugger using Delve' },
+      { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using vsdbg' },
     ];
 
     const results: AdapterMetadata[] = [];
