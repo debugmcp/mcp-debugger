@@ -1,9 +1,13 @@
 /**
  * End-to-end test: Attach to a .NET process via vsdbg-bridge, set breakpoint, inspect variables.
  *
+ * The bridge now handles vsda handshake signing and PDB conversion transparently —
+ * this test client is a plain DAP client with no vsdbg-specific workarounds.
+ *
  * Configuration via environment variables:
  *   VSDBG_PATH    - path to vsdbg-ui.exe (auto-discovered from VS Code extensions if unset)
  *   VSDA_PATH     - path to vsda.node for handshake signing (auto-discovered if unset)
+ *   PDB2PDB_PATH  - path to Pdb2Pdb.exe for PDB conversion (auto-discovered if unset)
  *   SOURCE_FILE   - full path to .cs source file for breakpoint
  *   BP_LINE       - line number for breakpoint (default: 1)
  *   TARGET_PID    - PID of the .NET process to attach to
@@ -44,7 +48,6 @@ function findVsda() {
   ];
   for (const codeDir of codePaths) {
     if (!fs.existsSync(codeDir)) continue;
-    // Look for vsda.node in nested resource dirs
     const entries = fs.readdirSync(codeDir).filter(e => !e.startsWith('.'));
     for (const entry of entries) {
       const candidate = path.join(codeDir, entry, 'resources', 'app',
@@ -55,10 +58,20 @@ function findVsda() {
   return null;
 }
 
+// Auto-discover Pdb2Pdb.exe
+function findPdb2Pdb() {
+  const bundled = path.resolve(__dirname, '..', 'tools', 'pdb2pdb', 'Pdb2Pdb.exe');
+  if (fs.existsSync(bundled)) return bundled;
+  const fallback = '/tmp/pdb2pdb-tool/Pdb2Pdb.exe';
+  if (fs.existsSync(fallback)) return fallback;
+  return null;
+}
+
 // Configuration — from env vars with auto-discovery fallbacks
 const VSDBG = process.env.VSDBG_PATH || findVsdbg();
 const SOURCE_FILE = process.env.SOURCE_FILE;
 const VSDA_RESOLVED = process.env.VSDA_PATH || findVsda();
+const PDB2PDB_RESOLVED = process.env.PDB2PDB_PATH || findPdb2Pdb();
 const BP_LINE = parseInt(process.env.BP_LINE || '1');
 const NT_PID = parseInt(process.env.TARGET_PID || '0');
 const PORT = parseInt(process.env.BRIDGE_PORT || '4713');
@@ -70,23 +83,8 @@ if (!NT_PID) { console.error('ERROR: TARGET_PID env var required.'); process.exi
 console.log('[config] vsdbg:', VSDBG);
 console.log('[config] source:', SOURCE_FILE, 'line:', BP_LINE);
 console.log('[config] target PID:', NT_PID);
-console.log('[config] vsda:', VSDA_RESOLVED || '(not found — handshake will fail)');
-
-// Load VS Code's vsda signer for the vsdbg handshake
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-let vsda;
-if (VSDA_RESOLVED) {
-  try {
-    vsda = require(VSDA_RESOLVED);
-    console.log('[test] Loaded vsda.node for handshake signing');
-  } catch (e) {
-    console.error('[test] WARNING: Could not load vsda.node:', e.message);
-    console.error('[test] Handshake signing will fail — configurationDone will be rejected');
-  }
-} else {
-  console.error('[test] WARNING: vsda.node not found. Handshake signing will fail.');
-}
+console.log('[config] vsda:', VSDA_RESOLVED || '(not found — bridge handshake will send empty signature)');
+console.log('[config] pdb2pdb:', PDB2PDB_RESOLVED || '(not found — no PDB conversion)');
 
 let seq = 0;
 function encodeDap(obj) {
@@ -113,15 +111,25 @@ function parseDapMessages(str) {
   return { messages, remaining: str };
 }
 
-// Start bridge
+// Start bridge — handshake and PDB conversion are now handled by the bridge
 const bridgePath = path.resolve(__dirname, '..', 'dist', 'utils', 'vsdbg-bridge.js');
+const bridgeArgs = [bridgePath, '--vsdbg', VSDBG, '--host', HOST, '--port', String(PORT)];
+if (VSDA_RESOLVED) {
+  bridgeArgs.push('--vsda', VSDA_RESOLVED);
+}
+if (PDB2PDB_RESOLVED) {
+  bridgeArgs.push('--pdb2pdb', PDB2PDB_RESOLVED);
+  // Convert PDBs in the source file's directory
+  const symbolDir = path.dirname(SOURCE_FILE);
+  bridgeArgs.push('--convert-pdbs', symbolDir);
+}
 console.log('[test] Starting vsdbg-bridge on port', PORT);
-const bridge = spawn('node', [bridgePath, '--vsdbg', VSDBG, '--host', HOST, '--port', String(PORT)], {
+const bridge = spawn('node', bridgeArgs, {
   stdio: ['pipe', 'pipe', 'pipe']
 });
 bridge.stderr.on('data', (d) => {
   const s = d.toString().trim();
-  if (s.includes('Listening')) console.log('[bridge]', s);
+  if (s) console.log('[bridge]', s);
 });
 bridge.on('exit', (code) => console.log('[bridge] exited code', code));
 
@@ -199,31 +207,8 @@ setTimeout(() => {
       }
 
       // === Handle reverse requests from vsdbg ===
+      // Note: handshake is intercepted by the bridge — client never sees it.
 
-      if (msg.type === 'request' && msg.command === 'handshake') {
-        const challenge = msg.arguments?.value || '';
-        console.log('[test] vsdbg handshake challenge:', challenge);
-        let signature = '';
-        if (vsda) {
-          try {
-            const signer = new vsda.signer();
-            signature = signer.sign(challenge);
-            console.log('[test] Signed handshake successfully');
-          } catch (e) {
-            console.error('[test] Failed to sign handshake:', e.message);
-          }
-        }
-        socket.write(encodeDap({
-          type: 'response',
-          request_seq: msg.seq,
-          command: 'handshake',
-          success: true,
-          body: { signature }
-        }));
-        continue;
-      }
-
-      // Respond to any other reverse requests
       if (msg.type === 'request') {
         console.log('[test] Got reverse request:', msg.command);
         socket.write(encodeDap({
