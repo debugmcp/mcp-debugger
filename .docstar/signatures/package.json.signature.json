@@ -1,0 +1,15 @@
+{
+  "path": "package.json",
+  "kind": "source",
+  "purpose": "Monorepo configuration for mcp-debugger, a runtime debugging tool for LLM agents with DAP support.",
+  "topics": [
+    "monorepo workspace configuration",
+    "multi-stage build pipeline",
+    "comprehensive testing infrastructure",
+    "debug adapter protocol integration",
+    "language adapter plugins",
+    "Docker containerization",
+    "CI/CD automation"
+  ],
+  "public_surface": []
+}

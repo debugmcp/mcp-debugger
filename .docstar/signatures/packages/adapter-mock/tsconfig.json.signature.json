@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-mock/tsconfig.json",
+  "kind": "source",
+  "purpose": "TypeScript compilation configuration for mock adapter package in monorepo with project references.",
+  "topics": [
+    "TypeScript compilation",
+    "project references",
+    "monorepo configuration",
+    "module path mapping",
+    "declaration generation",
+    "incremental builds"
+  ],
+  "public_surface": []
+}

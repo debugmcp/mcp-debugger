@@ -1,0 +1,14 @@
+{
+  "path": "examples",
+  "kind": "directory",
+  "purpose": "Comprehensive demonstration and testing suite for MCP debugging capabilities across multiple programming languages with visualization tools.",
+  "topics": [
+    "MCP debugging workflows",
+    "multi-language test scenarios",
+    "autonomous debugging agents",
+    "real-time visualization",
+    "educational examples",
+    "integration testing",
+    "documentation generation"
+  ]
+}

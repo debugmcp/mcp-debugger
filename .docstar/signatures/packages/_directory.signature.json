@@ -1,0 +1,14 @@
+{
+  "path": "packages",
+  "kind": "directory",
+  "purpose": "Multi-language debug adapter ecosystem providing unified debugging through Debug Adapter Protocol for JavaScript, Python, Go, and Rust development.",
+  "topics": [
+    "Debug Adapter Protocol implementation",
+    "Language-specific adapter factories",
+    "Cross-platform toolchain integration",
+    "Shared debugging interfaces",
+    "CLI distribution and vendoring",
+    "Testing and mock infrastructure",
+    "Environment validation and discovery"
+  ]
+}

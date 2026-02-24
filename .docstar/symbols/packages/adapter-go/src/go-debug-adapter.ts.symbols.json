@@ -1,0 +1,14 @@
+{
+  "source": "packages\\adapter-go\\src\\go-debug-adapter.ts",
+  "source_hash": "22344b4ddc0d7102",
+  "generated": "2026-02-24T01:54:20Z",
+  "file_role": "adapter",
+  "symbols": [
+    {
+      "name": "GoDebugAdapter",
+      "kind": "class",
+      "line_start": 69,
+      "line_end": 651
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "path": "docker-compose.test.yml",
+  "kind": "source",
+  "purpose": "Docker Compose configuration for testing MCP debugger service with development-friendly settings.",
+  "topics": [
+    "container orchestration",
+    "development environment",
+    "MCP debugger service",
+    "volume mounting",
+    "resource limits",
+    "interactive debugging",
+    "log persistence"
+  ],
+  "public_surface": []
+}

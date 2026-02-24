@@ -1,0 +1,18 @@
+{
+  "path": "src/utils/env-sanitizer.ts",
+  "kind": "source",
+  "purpose": "Sanitizes sensitive environment variables from logs and error outputs to prevent credential leakage.",
+  "topics": [
+    "environment variable redaction",
+    "sensitive data patterns",
+    "log sanitization",
+    "stderr filtering",
+    "credential protection",
+    "MCP security"
+  ],
+  "public_surface": [
+    "sanitizeEnvForLogging",
+    "sanitizePayloadForLogging",
+    "sanitizeStderr"
+  ]
+}

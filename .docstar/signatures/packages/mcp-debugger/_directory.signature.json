@@ -1,0 +1,14 @@
+{
+  "path": "packages/mcp-debugger",
+  "kind": "directory",
+  "purpose": "Provides a standalone CLI debugging tool for MCP servers with bundled adapters and protocol-compliant entry points.",
+  "topics": [
+    "CLI debugger distribution",
+    "adapter bundling system",
+    "build orchestration",
+    "protocol compliance",
+    "standalone executable",
+    "cross-language debugging",
+    "npm packaging"
+  ]
+}

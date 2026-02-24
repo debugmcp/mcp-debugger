@@ -1,0 +1,14 @@
+{
+  "path": "examples/rust/async_example",
+  "kind": "directory",
+  "purpose": "Educational example demonstrating comprehensive asynchronous programming patterns and concurrency models in Rust using Tokio runtime.",
+  "topics": [
+    "async/await patterns",
+    "concurrent task management",
+    "tokio runtime integration",
+    "parallel vs sequential execution",
+    "task synchronization",
+    "debugging async code",
+    "error handling in concurrency"
+  ]
+}

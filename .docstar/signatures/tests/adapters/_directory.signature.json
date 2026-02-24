@@ -1,0 +1,14 @@
+{
+  "path": "tests/adapters",
+  "kind": "directory",
+  "purpose": "Comprehensive testing infrastructure validating debugger adapter implementations for Go, JavaScript, Python, and Rust across platforms.",
+  "topics": [
+    "multi-layered testing strategy",
+    "cross-platform adapter validation",
+    "debug session lifecycle testing",
+    "command generation verification",
+    "toolchain integration testing",
+    "mock dependency injection",
+    "environment management"
+  ]
+}

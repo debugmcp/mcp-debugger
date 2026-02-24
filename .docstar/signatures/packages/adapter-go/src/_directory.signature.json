@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-go/src",
+  "kind": "directory",
+  "purpose": "Provides complete Go debugging solution through Delve DAP integration for the MCP debugger system.",
+  "topics": [
+    "Go debug adapter implementation",
+    "Delve DAP protocol integration",
+    "Cross-platform toolchain discovery",
+    "Environment validation",
+    "Debug configuration management",
+    "Factory pattern implementation",
+    "Debugging lifecycle management"
+  ]
+}

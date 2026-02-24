@@ -1,0 +1,13 @@
+{
+  "path": "tests/manual",
+  "kind": "directory",
+  "purpose": "Manual test scripts for validating SSE connectivity, Python debugger functionality, and real-time communication protocols.",
+  "topics": [
+    "SSE protocol testing",
+    "Session-based authentication",
+    "JSON-RPC communication",
+    "Python debugger validation",
+    "Process lifecycle management",
+    "Manual testing workflows"
+  ]
+}

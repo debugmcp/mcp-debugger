@@ -1,0 +1,14 @@
+{
+  "path": "examples/javascript/tsconfig.json",
+  "kind": "source",
+  "purpose": "Configures TypeScript compilation for JavaScript example code with ES2020 target and strict type checking.",
+  "topics": [
+    "TypeScript configuration",
+    "ES2020 compilation",
+    "CommonJS modules",
+    "source maps",
+    "strict type checking",
+    "file inclusion patterns"
+  ],
+  "public_surface": []
+}

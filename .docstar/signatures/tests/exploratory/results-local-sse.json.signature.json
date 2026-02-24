@@ -1,0 +1,14 @@
+{
+  "path": "tests/exploratory/results-local-sse.json",
+  "kind": "source",
+  "purpose": "Records test execution results for local SSE debugging tool validation with 15 test cases.",
+  "topics": [
+    "test results",
+    "debugging workflows",
+    "session management",
+    "edge case validation",
+    "multi-language support",
+    "performance metrics"
+  ],
+  "public_surface": []
+}

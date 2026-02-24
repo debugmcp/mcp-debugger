@@ -1,0 +1,13 @@
+{
+  "path": "mcp_debugger_launcher/pyproject.toml",
+  "kind": "source",
+  "purpose": "Defines Python package configuration for MCP debugger launcher with dependencies and CLI entry point.",
+  "topics": [
+    "package metadata",
+    "debugpy dependency",
+    "CLI entry point",
+    "build system",
+    "setuptools configuration"
+  ],
+  "public_surface": []
+}

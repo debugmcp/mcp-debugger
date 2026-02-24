@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-mock",
+  "kind": "directory",
+  "purpose": "Provides mock Debug Adapter Protocol implementation for testing MCP debugger functionality without external dependencies.",
+  "topics": [
+    "Mock Debug Adapter Protocol implementation",
+    "Debug session lifecycle management",
+    "Configurable error scenario testing",
+    "DAP message protocol handling",
+    "Factory pattern integration",
+    "Testing infrastructure and validation",
+    "Breakpoint and variable simulation"
+  ]
+}

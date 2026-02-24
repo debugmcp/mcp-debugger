@@ -1,0 +1,26 @@
+{
+  "source": "src\\utils\\env-sanitizer.ts",
+  "source_hash": "5abd16b1e57a4dd7",
+  "generated": "2026-02-24T01:54:05Z",
+  "file_role": "utility",
+  "symbols": [
+    {
+      "name": "sanitizeEnvForLogging",
+      "kind": "function",
+      "line_start": 24,
+      "line_end": 34
+    },
+    {
+      "name": "sanitizePayloadForLogging",
+      "kind": "function",
+      "line_start": 40,
+      "line_end": 55
+    },
+    {
+      "name": "sanitizeStderr",
+      "kind": "function",
+      "line_start": 66,
+      "line_end": 72
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "path": "packages/adapter-go/src/go-adapter-factory.ts",
+  "kind": "source",
+  "purpose": "Factory for creating Go debug adapter instances with environment validation and metadata.",
+  "topics": [
+    "adapter factory pattern",
+    "Go debug adapter creation",
+    "environment validation",
+    "dependency injection",
+    "Go/Delve installation checks",
+    "metadata configuration",
+    "DAP support verification"
+  ],
+  "public_surface": [
+    "GoAdapterFactory"
+  ]
+}

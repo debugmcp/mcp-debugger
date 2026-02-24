@@ -1,0 +1,14 @@
+{
+  "path": "tsconfig.src.json",
+  "kind": "source",
+  "purpose": "TypeScript build configuration for compiling source code to production output with declarations and source maps.",
+  "topics": [
+    "TypeScript compilation",
+    "project references",
+    "declaration generation",
+    "source maps",
+    "NodeNext modules",
+    "build configuration"
+  ],
+  "public_surface": []
+}

@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-javascript",
+  "kind": "directory",
+  "purpose": "Provides a JavaScript/TypeScript debug adapter that integrates Microsoft's js-debug with the Debug Adapter Protocol for debugging JS/TS applications.",
+  "topics": [
+    "Debug Adapter Protocol implementation",
+    "JavaScript/TypeScript runtime detection",
+    "Project configuration transformation",
+    "Vendor dependency management",
+    "Cross-platform executable resolution",
+    "TypeScript compilation support",
+    "Environment validation"
+  ]
+}

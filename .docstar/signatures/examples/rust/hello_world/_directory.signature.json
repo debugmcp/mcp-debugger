@@ -1,0 +1,14 @@
+{
+  "path": "examples/rust/hello_world",
+  "kind": "directory",
+  "purpose": "A complete Rust hello world application designed as an educational debugging demonstration for learning Rust syntax and development workflows.",
+  "topics": [
+    "debugging demonstration",
+    "Rust language features",
+    "educational tool",
+    "standard library usage",
+    "development environment setup",
+    "variable inspection",
+    "control structures"
+  ]
+}

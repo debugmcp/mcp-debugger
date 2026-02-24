@@ -1,0 +1,14 @@
+{
+  "path": "packages/mcp-debugger/package.json",
+  "kind": "source",
+  "purpose": "Package configuration for MCP debugger CLI tool with multi-language adapter dependencies.",
+  "topics": [
+    "MCP debugging",
+    "CLI binary",
+    "workspace dependencies",
+    "language adapters",
+    "ES modules",
+    "build configuration"
+  ],
+  "public_surface": []
+}

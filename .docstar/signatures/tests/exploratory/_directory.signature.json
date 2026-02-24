@@ -1,0 +1,14 @@
+{
+  "path": "tests/exploratory",
+  "kind": "directory",
+  "purpose": "Archives exploratory test execution results validating debugging infrastructure across Docker, local SSE, and NPX environments.",
+  "topics": [
+    "Test results archival",
+    "Multi-environment debugging validation",
+    "Docker containerized testing",
+    "Local SSE service validation",
+    "NPX package distribution testing",
+    "Debug workflow verification",
+    "Performance metrics collection"
+  ]
+}

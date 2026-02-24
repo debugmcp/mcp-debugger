@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-python",
+  "kind": "directory",
+  "purpose": "Implements a complete Python debugging adapter for the MCP debugger ecosystem using the Debug Adapter Protocol.",
+  "topics": [
+    "Python Debug Adapter",
+    "Environment Discovery",
+    "DAP Protocol Implementation",
+    "Debugpy Integration",
+    "Cross-platform Compatibility",
+    "Factory Pattern",
+    "Configuration Management"
+  ]
+}

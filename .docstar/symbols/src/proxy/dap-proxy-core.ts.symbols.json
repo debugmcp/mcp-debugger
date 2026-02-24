@@ -1,0 +1,32 @@
+{
+  "source": "src\\proxy\\dap-proxy-core.ts",
+  "source_hash": "059cb76ccd7c4807",
+  "generated": "2026-02-24T01:54:18Z",
+  "file_role": "service",
+  "symbols": [
+    {
+      "name": "ProxyRunnerOptions",
+      "kind": "constant",
+      "line_start": 20,
+      "line_end": 35
+    },
+    {
+      "name": "ProxyRunner",
+      "kind": "class",
+      "line_start": 41,
+      "line_end": 348
+    },
+    {
+      "name": "detectExecutionMode",
+      "kind": "function",
+      "line_start": 353,
+      "line_end": 366
+    },
+    {
+      "name": "shouldAutoExecute",
+      "kind": "function",
+      "line_start": 371,
+      "line_end": 372
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "path": "tests/adapters/go",
+  "kind": "directory",
+  "purpose": "Comprehensive test suite validating Go debugger adapter functionality through unit and integration testing layers.",
+  "topics": [
+    "unit testing",
+    "integration testing",
+    "mock infrastructure",
+    "cross-platform validation",
+    "adapter lifecycle testing",
+    "toolchain discovery",
+    "DAP protocol validation"
+  ]
+}

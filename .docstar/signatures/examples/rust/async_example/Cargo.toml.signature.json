@@ -1,0 +1,13 @@
+{
+  "path": "examples/rust/async_example/Cargo.toml",
+  "kind": "source",
+  "purpose": "Defines Rust package configuration for async programming example using Tokio runtime.",
+  "topics": [
+    "package metadata",
+    "tokio dependency",
+    "async runtime",
+    "cargo manifest",
+    "rust 2021 edition"
+  ],
+  "public_surface": []
+}

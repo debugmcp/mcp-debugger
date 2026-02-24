@@ -1,0 +1,14 @@
+{
+  "path": "tsconfig.json",
+  "kind": "source",
+  "purpose": "Root TypeScript configuration coordinating compilation across a multi-package monorepo with adapter packages.",
+  "topics": [
+    "TypeScript project references",
+    "monorepo configuration",
+    "ES2022 compilation",
+    "adapter pattern architecture",
+    "path mapping aliases",
+    "incremental builds"
+  ],
+  "public_surface": []
+}

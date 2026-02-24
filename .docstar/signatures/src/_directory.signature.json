@@ -1,14 +1,14 @@
 {
   "path": "src",
   "kind": "directory",
-  "purpose": "Main implementation of Debug MCP Server providing multi-language step-through debugging capabilities for LLMs through Model Context Protocol.",
+  "purpose": "Main source code for Debug MCP Server providing multi-language debugging capabilities through Model Context Protocol with standardized tooling interfaces.",
   "topics": [
-    "MCP protocol integration",
-    "Multi-language debug adapters",
-    "Session lifecycle management",
-    "DAP proxy architecture",
-    "Container-aware deployment",
-    "Dependency injection system",
-    "CLI transport modes"
+    "MCP server implementation",
+    "Multi-language debugging",
+    "Debug Adapter Protocol proxy",
+    "Session management",
+    "Transport layer (stdio/SSE)",
+    "Dependency injection",
+    "Container-aware deployment"
   ]
 }

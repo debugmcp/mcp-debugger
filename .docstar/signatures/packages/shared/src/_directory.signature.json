@@ -1,0 +1,14 @@
+{
+  "path": "packages/shared/src",
+  "kind": "directory",
+  "purpose": "Provides foundational contract layer and shared abstractions for multi-language debug adapter system with type-safe interfaces and data models.",
+  "topics": [
+    "Debug adapter interfaces",
+    "Language-specific policies",
+    "Session state management",
+    "Factory patterns",
+    "Data models",
+    "Dependency injection",
+    "DAP protocol abstractions"
+  ]
+}

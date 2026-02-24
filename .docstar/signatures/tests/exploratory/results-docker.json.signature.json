@@ -1,0 +1,14 @@
+{
+  "path": "tests/exploratory/results-docker.json",
+  "kind": "source",
+  "purpose": "Contains structured test execution results for Docker-based debugging functionality validation.",
+  "topics": [
+    "test results",
+    "Docker debugging",
+    "workspace path resolution",
+    "breakpoint management",
+    "concurrent sessions",
+    "language support"
+  ],
+  "public_surface": []
+}

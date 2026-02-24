@@ -1,0 +1,17 @@
+{
+  "path": "src/proxy/dap-proxy-worker.ts",
+  "kind": "source",
+  "purpose": "Orchestrates DAP debugging sessions with pluggable adapter policies for multiple programming languages.",
+  "topics": [
+    "DAP protocol handling",
+    "adapter process management",
+    "command queueing",
+    "state machine lifecycle",
+    "policy-based configuration",
+    "session orchestration",
+    "error recovery"
+  ],
+  "public_surface": [
+    "DapProxyWorker"
+  ]
+}

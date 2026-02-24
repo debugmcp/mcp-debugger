@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-javascript/tsconfig.json",
+  "kind": "source",
+  "purpose": "TypeScript configuration for JavaScript adapter package with workspace dependencies and composite builds.",
+  "topics": [
+    "TypeScript configuration",
+    "workspace project references",
+    "path mapping",
+    "composite builds",
+    "declaration generation",
+    "ES module interop"
+  ],
+  "public_surface": []
+}

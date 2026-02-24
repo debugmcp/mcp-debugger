@@ -1,0 +1,17 @@
+{
+  "path": "packages/adapter-go/src/go-debug-adapter.ts",
+  "kind": "source",
+  "purpose": "Implements Go debug adapter using Delve DAP for Go program debugging through Debug Adapter Protocol.",
+  "topics": [
+    "Delve DAP integration",
+    "Go environment validation",
+    "debug configuration transformation",
+    "DAP protocol handling",
+    "executable path caching",
+    "debugging capability reporting",
+    "goroutine debugging"
+  ],
+  "public_surface": [
+    "GoDebugAdapter"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "path": "src/proxy/proxy-manager.ts",
+  "kind": "source",
+  "purpose": "Manages debug adapter proxy process lifecycle, handling spawn/communication/cleanup and DAP message bridging.",
+  "topics": [
+    "proxy process management",
+    "DAP request/response handling",
+    "event-driven communication",
+    "initialization and retry logic",
+    "adapter integration",
+    "error handling and observability",
+    "functional/imperative hybrid architecture"
+  ],
+  "public_surface": [
+    "ProxyManagerEvents",
+    "IProxyManager",
+    "ProxyManager"
+  ]
+}

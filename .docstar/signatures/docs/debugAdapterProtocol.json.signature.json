@@ -1,0 +1,16 @@
+{
+  "path": "docs/debugAdapterProtocol.json",
+  "kind": "source",
+  "purpose": "JSON Schema definition for the complete Debug Adapter Protocol specification with runtime validation.",
+  "topics": [
+    "protocol message types",
+    "request-response patterns",
+    "debugging session management",
+    "breakpoint operations",
+    "execution control",
+    "state inspection",
+    "memory operations",
+    "capability negotiation"
+  ],
+  "public_surface": []
+}

@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-python/package.json",
+  "kind": "source",
+  "purpose": "Package configuration for Python debug adapter enabling debugpy integration in MCP debugger ecosystem.",
+  "topics": [
+    "package metadata",
+    "TypeScript build configuration",
+    "dependency management",
+    "Python debugging",
+    "VSCode Debug Protocol",
+    "workspace architecture"
+  ],
+  "public_surface": []
+}

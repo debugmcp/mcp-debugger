@@ -1,0 +1,14 @@
+{
+  "path": "examples/javascript",
+  "kind": "directory",
+  "purpose": "Comprehensive JavaScript/TypeScript debugging test suite for MCP debugger validation and functionality testing.",
+  "topics": [
+    "debugging test scripts",
+    "breakpoint scenarios",
+    "variable inspection testing",
+    "stack trace validation",
+    "TypeScript source mapping",
+    "async operation debugging",
+    "recursive function testing"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "path": "examples/rust",
+  "kind": "directory",
+  "purpose": "Provides comprehensive educational examples for learning Rust programming from basic syntax to advanced async patterns.",
+  "topics": [
+    "Rust fundamentals",
+    "Debugging workflows",
+    "Asynchronous programming",
+    "Tokio runtime",
+    "Educational code examples",
+    "Progressive learning path"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "path": "examples/rust/hello_world/Cargo.toml",
+  "kind": "source",
+  "purpose": "Rust package configuration defining metadata and dependencies for hello_world application.",
+  "topics": [
+    "package metadata",
+    "version specification",
+    "Rust edition",
+    "dependency management",
+    "Cargo configuration"
+  ],
+  "public_surface": []
+}

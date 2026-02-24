@@ -1,0 +1,17 @@
+{
+  "path": "packages/shared/src/interfaces/adapter-policy-go.ts",
+  "kind": "source",
+  "purpose": "Configures adapter policy for debugging Go applications using Delve debugger in DAP mode.",
+  "topics": [
+    "Delve debugger configuration",
+    "variable extraction and filtering",
+    "stack frame filtering",
+    "adapter spawn configuration",
+    "session state management",
+    "executable path resolution",
+    "Go runtime frame handling"
+  ],
+  "public_surface": [
+    "GoAdapterPolicy"
+  ]
+}

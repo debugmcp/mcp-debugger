@@ -1,6 +1,6 @@
 {
-  "source": "packages/adapter-go/src/go-adapter-factory.ts",
-  "source_hash": "913958a35b56d847",
-  "generated": "2026-02-10T00:41:20Z",
+  "source": "packages\\adapter-go\\src\\go-adapter-factory.ts",
+  "source_hash": "ac440ee53e7b99ef",
+  "generated": "2026-02-24T01:54:09Z",
   "findings": []
 }

@@ -1,0 +1,44 @@
+{
+  "source": "packages\\adapter-go\\src\\utils\\go-utils.ts",
+  "source_hash": "e60211af072a9900",
+  "generated": "2026-02-24T01:54:14Z",
+  "file_role": "utility",
+  "symbols": [
+    {
+      "name": "findGoExecutable",
+      "kind": "function",
+      "line_start": 19,
+      "line_end": 57
+    },
+    {
+      "name": "findDelveExecutable",
+      "kind": "function",
+      "line_start": 62,
+      "line_end": 102
+    },
+    {
+      "name": "getGoVersion",
+      "kind": "function",
+      "line_start": 107,
+      "line_end": 127
+    },
+    {
+      "name": "getDelveVersion",
+      "kind": "function",
+      "line_start": 132,
+      "line_end": 152
+    },
+    {
+      "name": "checkDelveDapSupport",
+      "kind": "function",
+      "line_start": 158,
+      "line_end": 176
+    },
+    {
+      "name": "getGoSearchPaths",
+      "kind": "function",
+      "line_start": 181,
+      "line_end": 214
+    }
+  ]
+}

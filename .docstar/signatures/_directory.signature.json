@@ -1,0 +1,14 @@
+{
+  "path": "(root)",
+  "kind": "directory",
+  "purpose": "Production-ready MCP server enabling multi-language debugging through Debug Adapter Protocol with comprehensive tooling infrastructure.",
+  "topics": [
+    "MCP protocol server implementation",
+    "Multi-language debug adapter framework",
+    "Debug Adapter Protocol integration",
+    "TypeScript/Node.js development tooling",
+    "Docker containerization support",
+    "Cross-platform testing infrastructure",
+    "CI/CD automation and deployment"
+  ]
+}

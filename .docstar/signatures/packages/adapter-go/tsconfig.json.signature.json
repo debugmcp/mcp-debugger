@@ -1,0 +1,14 @@
+{
+  "path": "packages/adapter-go/tsconfig.json",
+  "kind": "source",
+  "purpose": "TypeScript compilation configuration for adapter-go package with modern Node.js settings and project references.",
+  "topics": [
+    "TypeScript compilation",
+    "NodeNext module resolution",
+    "project references",
+    "declaration generation",
+    "source maps",
+    "ES2022 target"
+  ],
+  "public_surface": []
+}
