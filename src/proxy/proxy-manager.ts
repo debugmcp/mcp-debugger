@@ -21,6 +21,7 @@ import {
   clearPendingRequests
 } from '../dap-core/index.js';
 import { ErrorMessages } from '../utils/error-messages.js';
+import { sanitizePayloadForLogging, sanitizeStderr } from '../utils/env-sanitizer.js';
 import { ProxyConfig } from './proxy-config.js';
 import { IDebugAdapter, AdapterLaunchBarrier } from '@debugmcp/shared';
 
@@ -638,7 +639,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       } requestId=${requestId ?? 'n/a'}`
     );
 
-    this.logger.info(`[ProxyManager] Sending command to proxy: ${JSON.stringify(command).substring(0, 500)}`);
+    this.logger.info(`[ProxyManager] Sending command to proxy: ${JSON.stringify(sanitizePayloadForLogging(command)).substring(0, 500)}`);
 
     try {
       this.proxyProcess.sendCommand(command);
@@ -700,10 +701,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Handle stderr
     this.proxyProcess.stderr?.on('data', (data: Buffer | string) => {
       const output = data.toString().trim();
-      this.logger.error(`[ProxyManager STDERR] ${output}`);
-      // Capture stderr for error reporting during initialization
+      // Sanitize before logging and storing — stderr may contain env vars
+      const sanitizedLines = sanitizeStderr([output]);
+      this.logger.error(`[ProxyManager STDERR] ${sanitizedLines[0]}`);
+      // Capture sanitized stderr for error reporting during initialization
       if (!this.isInitialized) {
-        this.stderrBuffer.push(output);
+        this.stderrBuffer.push(sanitizedLines[0]);
       }
     });
 

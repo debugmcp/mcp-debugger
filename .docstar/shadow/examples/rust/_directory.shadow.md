@@ -1,38 +1,54 @@
 # examples\rust/
-@children-hash: b31ffbc9efc57457
-@generated: 2026-02-15T09:01:43Z
+@children-hash: d89c47dc7790789b
+@generated: 2026-02-24T01:55:07Z
 
 ## Overall Purpose and Responsibility
-This directory serves as a comprehensive educational resource and practical demonstration suite for Rust programming concepts, specifically designed for developers learning core language features and debugging workflows. It provides two complementary learning paths: fundamental Rust syntax and concepts through a simple "hello world" application, and advanced asynchronous programming patterns using the Tokio runtime.
+
+The `examples/rust` directory serves as a comprehensive educational resource and reference collection for Rust programming concepts. It provides hands-on demonstrations of fundamental Rust development patterns, from basic syntax to advanced asynchronous programming, designed specifically for learning, debugging, and understanding modern Rust application development.
 
 ## Key Components and How They Relate
-The directory contains two self-contained example projects that demonstrate different aspects of Rust development:
 
-- **hello_world** - A foundational learning module that introduces core Rust language features, data types, control structures, and debugging practices using only the standard library
-- **async_example** - An advanced demonstration of concurrent programming patterns, async/await syntax, and task management using the Tokio runtime
+**hello_world/** - Foundational Rust learning module that establishes basic development patterns, syntax understanding, and debugging workflows using only the standard library. Serves as the entry point for Rust newcomers.
 
-These components work together as a progressive learning curriculum, where developers can start with basic Rust concepts in the hello_world example and advance to sophisticated concurrency patterns in the async_example.
+**async_example/** - Advanced asynchronous programming demonstration that builds upon fundamental Rust knowledge to showcase modern concurrent programming patterns using the Tokio runtime. Represents the progression from basic synchronous code to production-ready async applications.
+
+These modules work together as a progressive learning path, moving from essential language features to sophisticated runtime concepts while maintaining consistent educational and debugging-focused design principles.
 
 ## Public API Surface
-Both examples are structured as standalone executable applications rather than libraries:
 
-- **Entry Points**: Each subdirectory contains a `main()` function serving as the primary execution point
-- **Educational Interface**: The examples expose their functionality through console output, debug prints, and runtime behavior rather than programmatic APIs
-- **Debugging-Optimized Design**: Both applications are specifically structured to facilitate IDE debugging, breakpoint placement, and step-through execution
+**Primary Entry Points:**
+- `hello_world/src/main.rs` - Basic Rust application demonstrating core language features, variables, control flow, and standard library usage
+- `async_example/src/main.rs` - Comprehensive async/await demonstration with Tokio runtime integration
+
+**Execution Interfaces:**
+- Both modules provide standard Rust binary applications executable via `cargo run`
+- Self-contained examples requiring no external configuration or setup
+- Designed for immediate compilation and execution in any Rust development environment
 
 ## Internal Organization and Data Flow
-The directory follows a modular educational structure:
 
-1. **Foundational Level (hello_world)**: Linear progression through basic Rust concepts including variable types, function calls, collections, and control structures
-2. **Advanced Level (async_example)**: Three-phase demonstration of async patterns from sequential operations through parallel task spawning to synchronized concurrent execution
+The directory follows a **progressive complexity model** where each example builds conceptual understanding:
 
-Data flow in both examples is designed for maximum educational value, with explicit output, variable assignments, and timing patterns that highlight key language and runtime characteristics.
+1. **Foundation Layer** (hello_world): Establishes Rust syntax, basic data types, control structures, and standard library patterns
+2. **Advanced Layer** (async_example): Demonstrates concurrent programming, task coordination, and modern async runtime usage
+
+**Educational Data Flow:**
+- Linear progression from synchronous to asynchronous programming concepts
+- Debugging-optimized structure with strategic breakpoint placement throughout
+- Variable inspection and runtime behavior analysis capabilities in both modules
 
 ## Important Patterns and Conventions
-- **Educational-First Design**: Both examples prioritize learning and debugging accessibility over production-ready code patterns
-- **Progressive Complexity**: Clear advancement path from basic syntax to advanced concurrency concepts
-- **Debugging Integration**: Strategic code organization optimized for IDE debugging tools and breakpoint-based learning
-- **Self-Contained Examples**: Each subdirectory is completely independent with its own dependencies and can be run standalone
-- **Comprehensive Coverage**: Combined examples cover fundamental language features, standard library usage, external crate integration (Tokio), and real-world async programming patterns
 
-This directory serves as a complete Rust learning laboratory, providing hands-on experience with both core language fundamentals and advanced runtime concepts in a debugging-friendly environment.
+**Consistent Educational Design:**
+- **Debugging-First Approach**: All examples structured for IDE step-through debugging and variable inspection
+- **Zero-to-Minimal Dependencies**: hello_world uses no external crates; async_example uses only essential Tokio features
+- **Progressive Learning**: Each module introduces concepts that build upon previous understanding
+- **Production-Relevant Patterns**: Examples demonstrate real-world development practices, not just toy scenarios
+
+**Development Workflow Support:**
+- Comprehensive commenting and print statements for runtime observation
+- Strategic function separation for breakpoint testing and code inspection
+- Standard Rust project structure and conventions throughout
+- Immediate executability without complex setup requirements
+
+This collection serves as both a learning curriculum for Rust development and a reference implementation for common programming patterns, supporting developers from initial language exposure through advanced concurrent programming concepts.

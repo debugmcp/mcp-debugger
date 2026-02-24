@@ -15,6 +15,7 @@ import {
   ProxyState 
 } from './dap-proxy-interfaces.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
+import { sanitizePayloadForLogging } from '../utils/env-sanitizer.js';
 
 export interface ProxyRunnerOptions {
   /**
@@ -228,8 +229,8 @@ export class ProxyRunner {
       this.logger.debug(
         `[ProxyRunner] IPC listener count=${process.listenerCount('message')}`
       );
-      this.logger.debug(`[ProxyRunner] Raw message snapshot:`, message);
-      this.logger.debug('[ProxyRunner] IPC message received (raw):', JSON.stringify(message).substring(0, 200));
+      this.logger.debug(`[ProxyRunner] Raw message snapshot:`, sanitizePayloadForLogging(message));
+      this.logger.debug('[ProxyRunner] IPC message received (raw):', JSON.stringify(sanitizePayloadForLogging(message)).substring(0, 200));
       this.logger.debug(`[ProxyRunner] IPC channel status on receive: connected=${process.connected}`);
       if (typeof process.send === 'function') {
         try {

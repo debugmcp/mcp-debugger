@@ -1,88 +1,93 @@
 # examples/
-@children-hash: d885a613f9405606
-@generated: 2026-02-15T09:02:08Z
+@children-hash: 60392fae0ac30dd2
+@generated: 2026-02-24T01:55:43Z
 
 ## Overall Purpose and Responsibility
 
-The `examples` directory serves as a comprehensive demonstration and testing suite for MCP (Model Context Protocol) debugging capabilities across multiple programming languages and use cases. It provides both educational resources for developers learning debugging techniques and validation infrastructure for ensuring MCP debugging tools work correctly across different scenarios and environments.
+The `examples` directory serves as a comprehensive demonstration and testing suite for the MCP (Model Context Protocol) debugging system. It provides educational examples, integration tests, debugging scenarios, and visualization tools across multiple programming languages to validate and showcase debugging capabilities. This module acts as both a quality assurance framework and a user education resource for MCP debugging functionality.
 
-## Key Components and How They Relate
+## Key Components and Integration
 
-### Core Demonstration Scripts
-- **agent_demo.py**: Autonomous LLM agent that executes complete debugging workflows, demonstrating MCP server integration patterns and session management
-- **pause_test.py** & **test_evaluate_expression.py**: Simple Python debugging targets with strategic breakpoints for testing variable inspection and expression evaluation
+### Demonstration Infrastructure
+- **agent_demo.py**: Autonomous LLM agent demonstrating end-to-end debugging workflows with predefined action sequences
+- **demo/**: Theatrical debugging simulation with automated recording infrastructure for creating documentation materials
+- **asciinema_demo/**: Rich terminal UI demonstration combining buggy code with interactive debugger frontend for live presentations
 
-### Multi-Language Test Suites
-- **python/**: Comprehensive Python debugging scenarios from simple variable swaps to complex algorithmic testing (fibonacci, factorial, data processing)
-- **javascript/**: Complete JavaScript/TypeScript debugging validation including recursive functions, async operations, and source map support
-- **go/**: Educational Go examples progressing from basic syntax to advanced concurrency patterns with goroutines
-- **rust/**: Foundational and advanced Rust examples covering standard library usage and async programming with Tokio
+### Language-Specific Test Suites
+- **python/**: Comprehensive Python debugging scenarios including algorithms, data structures, and intentional bug injection
+- **javascript/**: JavaScript and TypeScript debugging validation with source maps, async operations, and complex data structures
+- **go/**: Go language examples progressing from basic syntax to advanced concurrency patterns
+- **rust/**: Educational Rust programming examples covering synchronous and asynchronous patterns
 
-### Specialized Demonstration Modules
-- **python_simple_swap/**: End-to-end MCP debugging workflow with intentional bugs for educational purposes
-- **debugging/**: Integration testing framework that validates SSE timing fixes and cross-language debugging functionality
-- **asciinema_demo/**: Rich terminal UI demonstration combining buggy code with interactive debugger frontend for recording purposes
+### Specialized Testing Scenarios
+- **debugging/**: Cross-language integration tests validating MCP debugging functionality and timing-sensitive operations
+- **python_simple_swap/**: Complete MCP debugging workflow demonstration with deliberate variable swap bug
+- **visualizer/**: Terminal User Interface (TUI) for real-time debugging session visualization with log monitoring
 
-### Visualization and Documentation Tools
-- **visualizer/**: Complete TUI application for real-time debugging session visualization with log monitoring, syntax highlighting, and state tracking
-- **demo/**: Automated recording infrastructure that creates visual documentation materials (SVG animations, GIFs) for README integration
+### Utility Components
+- **pause_test.py** and **test_evaluate_expression.py**: Standalone testing utilities for manual debugging and expression evaluation validation
 
-## Public API Surface
+## Public API Surface and Entry Points
 
-### Primary Entry Points
-- **Direct Execution**: Most scripts can be run independently via `python filename.py`, `node filename.js`, `go run filename.go`, or `cargo run`
-- **Demo Orchestration**: `demo_runner.py`, `run_rich_demo.py` for complete demonstration workflows
-- **Agent Simulation**: `agent_demo.py` for autonomous debugging workflow demonstration
-- **Recording Infrastructure**: `record_demo.sh` and recording tools for documentation generation
+### Primary Demonstration Interfaces
+- **Agent Simulation**: `agent_demo.py` - Autonomous debugging agent with HTTP MCP communication
+- **Interactive Demos**: `asciinema_demo/run_rich_demo.py` - Rich UI debugging demonstration
+- **Recording Infrastructure**: `demo/record_demo.sh` - Automated demo recording and conversion pipeline
+- **Real-time Visualization**: `visualizer/live_visualizer.py` - TUI for debugging session monitoring
 
-### Integration APIs
-- **MCP Client Patterns**: JSON-RPC 2.0 communication examples with session management and tool invocation
-- **Debugging Workflows**: Breakpoint management, variable inspection, stack trace analysis, and execution control
-- **Multi-Language Support**: Consistent debugging patterns across Python, JavaScript, Go, and Rust environments
+### Language Test Execution
+- **Python**: Multiple standalone test scripts (`python/*.py`) for various debugging scenarios
+- **JavaScript**: Comprehensive test suite (`javascript/*.js`) including TypeScript integration
+- **Go**: Educational examples (`go/*/main.go`) with progressive complexity
+- **Rust**: Binary applications (`rust/*/src/main.rs`) demonstrating async and sync patterns
+
+### Integration Testing
+- **Cross-language validation**: `debugging/test-sse-js-debug-fix.js` for critical integration testing
+- **MCP workflow testing**: `python_simple_swap/debug_swap_demo.py` for complete debugging lifecycle
 
 ## Internal Organization and Data Flow
 
-### Educational Progression
-The directory follows a structured learning path:
-1. **Simple Examples**: Basic debugging scenarios in individual language directories
-2. **Comprehensive Testing**: Full-featured test suites exercising all debugging capabilities
-3. **Advanced Integration**: Complete workflows combining multiple tools and visualization
-4. **Documentation Generation**: Automated recording and conversion for user-facing materials
+### Progressive Learning Architecture
+The directory follows an educational progression from simple examples to complex scenarios:
+1. **Basic Examples**: Simple variable operations and arithmetic (`pause_test.py`, language-specific simple tests)
+2. **Comprehensive Scenarios**: Full debugging workflows with multiple languages and features
+3. **Advanced Integration**: Real-time visualization, automated agents, and production-ready demonstrations
 
 ### Communication Patterns
-- **MCP Protocol**: JSON-RPC 2.0 over HTTP with session management and tool-based APIs
-- **Real-time Monitoring**: Log file watching with event parsing for live visualization
-- **Process Orchestration**: Subprocess management for server lifecycle and demo coordination
+- **MCP Protocol**: JSON-RPC 2.0 communication with session management and tool invocation
+- **Session Management**: Dual session tracking (MCP HTTP + debug session) across multiple implementations
+- **Real-time Updates**: Event-driven UI updates and log monitoring for live debugging visualization
 
-### Validation Strategy
-- **Cross-Language Coverage**: Ensures debugging works consistently across programming languages
-- **Scenario Diversity**: From simple breakpoints to complex concurrent programming patterns
-- **Integration Testing**: End-to-end workflow validation including timing-sensitive operations
+### Testing and Validation Flow
+1. **Unit Testing**: Individual language examples validate basic debugging operations
+2. **Integration Testing**: Cross-component tests ensure MCP protocol compliance
+3. **End-to-End Validation**: Complete workflows from session creation through cleanup
+4. **Documentation Generation**: Automated recording and conversion for user-facing materials
 
 ## Important Patterns and Conventions
 
 ### Debugging-Optimized Design
-- Strategic breakpoint placement with explicit comments indicating intended debug locations
-- Extensive logging and console output for trace visibility
-- Self-contained examples with minimal external dependencies
+- Strategic breakpoint placement with explicit comment markers
+- Comprehensive console logging for trace visibility
+- Self-contained examples requiring minimal external dependencies
 - Predictable execution flows suitable for step-through debugging
 
-### MCP Integration Standards
-- Consistent session management with proper cleanup in finally blocks
-- Standardized error handling with server response validation
-- UUID-based request tracking for JSON-RPC communication
-- HTTP session persistence for MCP server state management
-
 ### Educational Structure
-- Progressive complexity from basic syntax to advanced programming patterns
-- Intentional bug injection for realistic debugging scenarios
-- Comprehensive documentation through both code comments and visual demonstrations
-- Multi-modal learning support (terminal output, rich UI, recorded demos)
+- Progressive complexity from basic syntax to advanced patterns
+- Multiple implementation approaches for comparative learning
+- Intentional bug injection for realistic debugging practice
+- Comprehensive language feature coverage
 
-### Resource Management
-- Graceful shutdown patterns with signal handling
-- Proper subprocess lifecycle management
-- File encoding fallbacks for cross-platform compatibility
-- Memory-bounded data structures for long-running visualizations
+### Production Readiness
+- Robust error handling with graceful degradation
+- Resource cleanup guarantees across all scenarios
+- Cross-platform compatibility and path normalization
+- Performance optimizations for real-time visualization
 
-This directory serves as both a comprehensive testing framework for MCP debugging infrastructure and an educational resource for developers learning debugging techniques across multiple programming languages and environments.
+### Protocol Compliance
+- Standardized JSON-RPC 2.0 communication patterns
+- Consistent session lifecycle management
+- Error propagation with context preservation
+- Tool parameter validation and state tracking
+
+This directory serves as the definitive reference for MCP debugging capabilities, providing everything from basic debugging scenarios to sophisticated real-time visualization tools, ensuring comprehensive validation and education for debugging functionality across multiple programming languages.

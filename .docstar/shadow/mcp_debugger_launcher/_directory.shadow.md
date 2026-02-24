@@ -1,92 +1,77 @@
 # mcp_debugger_launcher/
-@children-hash: 2d0e98cd4a3e5d2d
-@generated: 2026-02-15T09:01:43Z
+@children-hash: d827b2f48de20697
+@generated: 2026-02-24T01:54:57Z
 
 ## Overall Purpose and Responsibility
 
-The `mcp_debugger_launcher` directory is a complete Python package providing intelligent runtime detection and management for launching the MCP (Model Context Protocol) debugging server. It serves as a unified CLI tool and library that abstracts the complexity of multi-runtime deployment by automatically selecting the optimal execution environment (Node.js/npx or Docker) and managing the complete server lifecycle.
+The `mcp_debugger_launcher` is a Python package that provides intelligent runtime detection and process management for launching MCP (Model Context Protocol) debugging servers across multiple execution environments. It serves as a universal launcher that abstracts the complexity of running debug servers in either Node.js/npx or Docker environments through a unified CLI interface.
 
-## Key Components and System Architecture
+## Key Components and Relationships
 
-The package follows a clean three-layer architecture with comprehensive testing:
+### Core Architecture
+The module is organized around three primary components working in concert:
 
-### Core Package Structure
+1. **Project Configuration (`pyproject.toml`)**: Defines the package metadata, dependencies, and CLI entry point `debug-mcp-server`
+2. **Launcher Package (`mcp_debugger_launcher/`)**: Core implementation with runtime detection, process management, and CLI interface
+3. **Test Suite (`tests/`)**: Manual integration tests for system-level validation
+
+### Component Interaction Flow
 ```
-mcp_debugger_launcher/
-├── __init__.py          # Package entry point and imports
-├── cli.py               # Click-based CLI interface and orchestration
-├── detectors.py         # Runtime environment detection utilities
-├── launcher.py          # Server process lifecycle management
-└── tests/               # Manual integration test suite
+CLI Entry → Runtime Detection → Server Launcher → Process Management
+    ↓             ↓                ↓                ↓
+User Commands → Environment → Command Building → Subprocess Control
 ```
 
-### Component Interactions and Data Flow
-1. **CLI Layer** (`cli.py`) serves as the primary orchestrator, providing user-facing commands and coordinating between detection and launch components
-2. **Detection Layer** (`detectors.py`) performs comprehensive environment scanning to identify available runtimes (Node.js, Docker) and their capabilities
-3. **Launch Layer** (`launcher.py`) manages the actual server process execution with proper signal handling and resource cleanup
-4. **Testing Layer** (`tests/`) provides manual integration validation for real-world deployment scenarios
-
-The data flow follows: `User Input → Runtime Detection → Optimal Runtime Selection → Process Launch → Lifecycle Management`
+The launcher package orchestrates between its three internal modules:
+- **`cli.py`**: Click-based command-line interface for user interaction
+- **`detectors.py`**: Static utility class for discovering Node.js and Docker availability
+- **`launcher.py`**: Core process lifecycle management with graceful shutdown
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **CLI Command**: Main user interface accessible via command line with `stdio` and `sse` modes
-- **Package Import**: Programmatic access through standard Python imports
-- **Main Function**: `main()` in cli.py serves as the primary entry point
+- **CLI Command**: `debug-mcp-server` (via setuptools entry point)
+- **Package Import**: Direct Python module access through standard `__init__.py`
+- **Main Function**: `mcp_debugger_launcher.cli:main` as the core orchestrator
 
-### Key CLI Interface
-- **Server Modes**: `stdio` (default) and `sse` with configurable port (default: 3001)
-- **Runtime Selection**: Automatic detection with manual override options (`--docker`, `--npm`)
-- **Diagnostics**: Built-in status reporting and installation guidance
-- **Process Control**: Dry-run capabilities and graceful shutdown handling
+### CLI Interface Features
+- **Operation Modes**: stdio (default) and SSE server communication modes
+- **Runtime Selection**: Automatic detection with manual override flags (`--docker`, `--npm`)
+- **Configuration**: Configurable SSE port (default 3001), dry-run capability
+- **Diagnostics**: Built-in runtime status reporting and installation guidance
 
-### Configuration Constants
-- NPM package: "@debugmcp/mcp-debugger"
-- Docker image: "debugmcp/mcp-debugger:latest"  
-- Package version: "0.11.1"
-- Default SSE port: 3001
+### Key Dependencies and Configuration
+- **Core Runtime Dependencies**: debugpy ≥1.8.14, click ≥8.0.0
+- **Target Package**: "@debugmcp/mcp-debugger" (NPM) / "debugmcp/mcp-debugger:latest" (Docker)
+- **Python Compatibility**: 3.8 through 3.11
+- **Package Version**: 0.17.0
 
-## Internal Organization and System Design
+## Internal Organization and Data Flow
 
-### Runtime Detection Strategy
-The `RuntimeDetector` uses a priority-based selection system:
-1. **NPX Detection**: Checks Node.js availability, version compatibility, and package access
-2. **Docker Detection**: Validates Docker daemon status and image availability
-3. **Recommendation Engine**: Prioritizes npx over Docker for optimal performance
+### Detection and Launch Pipeline
+1. **Environment Assessment**: `RuntimeDetector` scans for Node.js/npx and Docker availability
+2. **Runtime Recommendation**: Intelligent selection prioritizing npx over Docker
+3. **Command Construction**: Runtime-specific command building with shared configuration
+4. **Process Execution**: Subprocess management with signal handling and graceful shutdown
 
-### Process Lifecycle Management
-The `DebugMCPLauncher` implements robust process control:
-- **Command Construction**: Runtime-specific command building with shared configuration
-- **Signal Handling**: Graceful shutdown with 5-second timeout before force termination
-- **Output Streaming**: Real-time process output forwarding
-- **Resource Cleanup**: Guaranteed cleanup via try/finally blocks
-
-### Testing Philosophy
-The test suite employs **manual integration testing** focused on:
-- Real system dependency validation
-- Command generation verification without execution
-- CLI packaging and distribution validation
-- Human-readable output for complex scenarios
+### Error Handling and Robustness
+- **Defensive Programming**: Comprehensive try/except blocks with timeouts for external calls
+- **Graceful Degradation**: Continues operation with helpful error messages when dependencies are missing
+- **Resource Management**: Guaranteed cleanup via finally blocks and 5-second termination timeouts
+- **Exit Code Standards**: Proper code propagation for scripting integration
 
 ## Important Patterns and Conventions
 
 ### Design Patterns
-- **Static Utility Pattern**: Stateless detection operations using static methods
-- **Process Builder Pattern**: Runtime-specific command construction with unified interface
-- **Lifecycle Management**: Consistent subprocess handling across all runtimes
-- **Defensive Programming**: Comprehensive error handling with timeout protection
+- **Static Utility Pattern**: `RuntimeDetector` provides stateless detection operations
+- **Process Lifecycle Management**: Consistent subprocess handling across runtime environments
+- **Command Builder Pattern**: Runtime-agnostic configuration with environment-specific execution
+- **Manual Integration Testing**: Human-verified console output testing for complex system scenarios
 
-### Error Handling Strategy
-- Graceful degradation with actionable error messages
-- Timeout-protected external system calls
-- Structured error reporting with installation guidance
-- Exit code standardization for scripting integration
+### Development and Deployment
+- **Build System**: Standard setuptools configuration with wheel support
+- **Packaging**: Single package with LICENSE inclusion and MIT licensing
+- **Development Status**: Alpha stage with focus on AI agent debugging workflows
+- **Repository**: Hosted at github.com/debugmcp/mcp-debugger
 
-### Key System Invariants
-- Single active process per launcher instance
-- 5-second graceful termination timeout
-- Runtime detection performed before launch attempts
-- Consistent logging and output patterns
-
-The `mcp_debugger_launcher` serves as a production-ready, intelligent launcher that eliminates the complexity of multi-runtime MCP server deployment while providing comprehensive diagnostics, robust error handling, and flexible deployment options for development and production environments.
+The module provides a production-ready, intelligent launcher that bridges Python debugging infrastructure with external MCP server implementations, offering comprehensive diagnostics and multi-runtime support for development and production environments.

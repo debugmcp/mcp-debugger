@@ -72,9 +72,10 @@ export class GoAdapterFactory implements IAdapterFactory {
         dlvPath = await findDelveExecutable();
         dlvVersion = await getDelveVersion(dlvPath) || undefined;
         
-        const hasDapSupport = await checkDelveDapSupport(dlvPath);
-        if (!hasDapSupport) {
-          errors.push('Delve does not support DAP mode. Update with: go install github.com/go-delve/delve/cmd/dlv@latest');
+        const dapCheck = await checkDelveDapSupport(dlvPath);
+        if (!dapCheck.supported) {
+          const stderrHint = dapCheck.stderr ? ` (stderr: ${dapCheck.stderr})` : '';
+          errors.push(`Delve does not support DAP mode. Update with: go install github.com/go-delve/delve/cmd/dlv@latest${stderrHint}`);
         }
       } catch {
         errors.push('Delve (dlv) not found. Install with: go install github.com/go-delve/delve/cmd/dlv@latest');

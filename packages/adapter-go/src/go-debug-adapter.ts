@@ -188,11 +188,12 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
       // Check Delve installation
       try {
         const dlvPath = await findDelveExecutable(undefined, this.dependencies.logger);
-        const hasDapSupport = await checkDelveDapSupport(dlvPath);
-        if (!hasDapSupport) {
+        const dapCheck = await checkDelveDapSupport(dlvPath);
+        if (!dapCheck.supported) {
+          const stderrHint = dapCheck.stderr ? ` (stderr: ${dapCheck.stderr})` : '';
           errors.push({
             code: 'DELVE_DAP_NOT_SUPPORTED',
-            message: 'Delve does not support DAP. Update with: go install github.com/go-delve/delve/cmd/dlv@latest',
+            message: `Delve does not support DAP. Update with: go install github.com/go-delve/delve/cmd/dlv@latest${stderrHint}`,
             recoverable: true
           });
         }

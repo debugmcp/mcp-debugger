@@ -1,64 +1,69 @@
 # tests\fixtures/
-@children-hash: 76290f14a111711a
-@generated: 2026-02-15T09:01:40Z
+@children-hash: e42ac37552ca0ba4
+@generated: 2026-02-24T01:55:07Z
 
 ## Overall Purpose
 
-The `tests\fixtures` directory serves as a comprehensive test fixtures repository for validating debugging functionality across multiple programming languages and debugging scenarios. It provides controlled, predictable test environments for testing debugger capabilities, breakpoint behavior, variable inspection, error handling, and debugging protocol interactions.
+The `tests/fixtures` directory provides a comprehensive collection of test fixtures and debugging targets for validating MCP Server debugging capabilities across multiple programming languages and scenarios. It serves as a controlled test environment for verifying debugger functionality, protocol implementations, and debugging workflows.
 
 ## Key Components and Relationships
 
 **Language-Specific Debug Targets:**
-- **debug-scripts/**: Multi-language fixtures (JavaScript/Python) for basic debugging workflow validation
-- **javascript-e2e/**: TypeScript-specific fixtures with source map support for E2E testing
-- **python/**: Python-focused fixtures including both debuggee targets and mock debugging infrastructure
+- **Debug Scripts (`debug-scripts/`)**: Simple, predictable scripts in JavaScript and Python for basic debugging workflow validation, including mock adapters, breakpoint testing, error handling, and variable inspection
+- **Python Fixtures (`python/`)**: Comprehensive Python debugging test environment with both debuggee targets and mock DAP server infrastructure
+- **JavaScript/TypeScript E2E (`javascript-e2e/`)**: End-to-end testing fixture for TypeScript debugging with source map validation and mixed JS/TS environment support
 
-**Testing Categories Coverage:**
-- **Basic Debugging**: Simple scripts with predictable execution flows and breakpoint locations
-- **Error Handling**: Controlled exception scenarios for testing error debugging capabilities
-- **Variable Inspection**: Comprehensive coverage of data types, scopes, and variable states
-- **Protocol Testing**: Mock DAP server implementation for debugging protocol validation
-- **Source Maps**: TypeScript compilation testing for advanced debugging features
+**Testing Infrastructure Components:**
+- Mock debug servers implementing DAP (Debug Adapter Protocol)
+- Build configurations optimized for debugging scenarios
+- Strategic breakpoint markers and predictable execution flows
+- Multi-language coverage spanning JavaScript, TypeScript, and Python
 
 ## Public API Surface
 
 **Primary Entry Points:**
-- `debug-scripts/simple.py` and `debug-scripts/simple-mock.js`: Basic debugging workflow validation
-- `debug-scripts/with-errors.py`: Exception handling testing with guaranteed ZeroDivisionError
-- `debug-scripts/with-variables.py`: Variable inspection across multiple data types and scopes
-- `javascript-e2e/app.ts`: TypeScript debugging with source map support and strategic breakpoint placement
-- `python/debug_test_simple.py`: Comprehensive Python debuggee with documented breakpoint locations
-- `python/debugpy_server.py`: Mock DAP server for debugging protocol testing (port 5678)
+- `debug-scripts/simple.py`: Basic Python debugging workflow with marked breakpoint locations
+- `debug-scripts/with-errors.py`: Exception handling and error debugging validation
+- `debug-scripts/with-variables.py`: Variable inspection across data types and scopes
+- `debug-scripts/simple-mock.js`: JavaScript fixture for mock adapter and path validation
+- `python/debug_test_simple.py`: Comprehensive Python debuggee with predictable execution flow
+- `python/debugpy_server.py`: Mock DAP server for protocol testing (default port 5678)
+- `javascript-e2e/app.ts`: TypeScript debugging target with source map support
 
 **Integration Patterns:**
-- All scripts follow standard execution patterns with `main()` functions or `if __name__ == "__main__"` guards
-- Strategic comment markers (`// BREAK_HERE`, line number documentation) for automated test targeting
-- Minimal external dependencies ensuring reliable test environment compatibility
+- All fixtures follow minimal dependency principle (standard library only)
+- Consistent breakpoint marking with comment annotations (`// BREAK_HERE`, line documentation)
+- Command-line execution patterns with standard guards (`if __name__ == "__main__"`)
 
 ## Internal Organization and Data Flow
 
-**Test Execution Architecture:**
-1. **Fixture Selection**: Choose appropriate fixture based on testing scenario (language, feature, complexity)
-2. **Debuggee Execution**: Run target scripts with predictable execution paths and breakpoint opportunities
-3. **Protocol Interaction**: Utilize mock servers for DAP protocol testing and validation
-4. **Validation**: Verify debugging tool functionality against known, controlled outcomes
+**Testing Architecture Layers:**
+1. **Debug Targets**: Simple, predictable programs designed to be debugged
+2. **Protocol Infrastructure**: Mock servers and adapters for testing debugging protocols
+3. **Build/Configuration**: TypeScript compilation and source map generation for debugging verification
 
-**Cross-Language Testing Flow:**
-- JavaScript fixtures validate mock adapters and basic debugging workflows
-- Python fixtures provide comprehensive debugging scenario coverage including error conditions
-- TypeScript fixtures enable source map and compilation testing scenarios
+**Test Scenario Coverage:**
+- **Breakpoint Testing**: Strategic placement and automated verification
+- **Variable Inspection**: Multiple data types, scopes, and state changes
+- **Exception Handling**: Controlled error generation and debugging
+- **Source Map Validation**: TypeScript-to-JavaScript debugging workflows
+- **Protocol Compliance**: DAP message handling and debugging server interactions
+
+**Cross-Language Integration:**
+The fixtures collectively enable end-to-end testing of debugging capabilities across JavaScript, TypeScript, and Python environments, with mock infrastructure supporting protocol-level testing and validation.
 
 ## Important Patterns and Conventions
 
-**Fixture Design Principles:**
-- **Minimal Complexity**: All fixtures intentionally simple to avoid side effects and ensure predictable behavior
-- **Self-Contained**: No external dependencies beyond standard libraries for maximum test environment compatibility
-- **Strategic Instrumentation**: Explicit breakpoint markers, variable state documentation, and execution path predictability
-- **Multi-Scenario Coverage**: Comprehensive testing across normal execution, error conditions, and variable inspection scenarios
+**Test Design Principles:**
+- **Minimal Complexity**: All fixtures intentionally simple to focus testing on debugging capabilities
+- **Predictable Behavior**: Known outputs and execution paths for reliable automated testing
+- **Automation-Friendly**: Comment markers, designated breakpoints, and consistent execution patterns
+- **Self-Contained**: No external dependencies to minimize test environment complexity
 
-**Testing Integration:**
-- Fixtures designed for integration with automated testing frameworks and CI/CD pipelines
-- Standardized entry points and execution patterns across all languages
-- Mock infrastructure supports both unit testing and end-to-end debugging workflow validation
+**Protocol and Standards Compliance:**
+- DAP (Debug Adapter Protocol) message framing with Content-Length headers
+- Standard debugpy port usage and graceful shutdown handling
+- Source map generation and TypeScript debugging workflow support
+- Multi-environment compatibility for mixed JavaScript/TypeScript projects
 
-This directory provides a complete testing foundation for debugging tools, enabling comprehensive validation of debugger functionality across multiple languages, debugging scenarios, and integration patterns.
+This fixture directory provides the essential testing infrastructure for validating comprehensive debugging capabilities across multiple languages and debugging scenarios within the MCP Server ecosystem.

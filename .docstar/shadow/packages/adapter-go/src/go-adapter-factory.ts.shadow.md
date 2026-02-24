@@ -1,39 +1,44 @@
-# packages/adapter-go/src/go-adapter-factory.ts
-@source-hash: 913958a35b56d847
-@generated: 2026-02-10T00:41:20Z
+# packages\adapter-go\src\go-adapter-factory.ts
+@source-hash: ac440ee53e7b99ef
+@generated: 2026-02-24T01:54:09Z
 
-## Primary Purpose
-Factory implementation for creating Go debug adapter instances. Implements dependency injection pattern through `IAdapterFactory` interface, providing environment validation and metadata for Go debugging capabilities using Delve debugger.
+## Purpose
+Factory implementation for creating Go debug adapter instances with environment validation. Implements the adapter factory interface pattern for dependency injection in the MCP debugger system.
 
 ## Key Components
 
-### GoAdapterFactory (L18-102)
-Main factory class implementing `IAdapterFactory` interface with three core responsibilities:
+### GoAdapterFactory Class (L18-102)
+- Implements `IAdapterFactory` interface for Go language debugging
+- Provides adapter creation, metadata, and environment validation
+- Central factory for instantiating Go debug adapters with proper dependencies
 
-- **createAdapter()** (L22-24): Creates new `GoDebugAdapter` instances with injected dependencies
-- **getMetadata()** (L29-42): Returns static metadata including language info, file extensions (.go), version requirements (Go 1.18+, Delve 0.17.0+), and embedded Go gopher icon
-- **validate()** (L47-101): Comprehensive environment validation checking Go/Delve installation, versions, and DAP support
+### Core Methods
+- **createAdapter** (L22-24): Instantiates `GoDebugAdapter` with injected dependencies
+- **getMetadata** (L29-42): Returns Go adapter metadata including language, version, file extensions, and embedded gopher icon
+- **validate** (L47-102): Performs comprehensive environment validation for Go and Delve installation
 
-### Dependencies
-- `@debugmcp/shared`: Core interfaces (`IDebugAdapter`, `IAdapterFactory`, `AdapterDependencies`, `AdapterMetadata`, `FactoryValidationResult`, `DebugLanguage`)
-- `./go-debug-adapter.js`: Concrete adapter implementation
-- `./utils/go-utils.js`: Utility functions for executable discovery and version checking
+## Dependencies
+- Imports from `@debugmcp/shared`: Core interfaces, types, and enums
+- Uses `GoDebugAdapter` from local module (L11)
+- Utilizes Go-specific utilities from `./utils/go-utils.js` (L13)
 
-## Validation Logic (L47-101)
-Performs sequential checks:
-1. **Go executable detection** (L56-68): Finds Go binary and validates version ≥1.18
-2. **Delve validation** (L70-81): Locates dlv executable and verifies DAP protocol support
-3. **Error aggregation**: Distinguishes between blocking errors and warnings
+## Validation Logic (L47-102)
+Performs multi-step environment checks:
+1. **Go executable detection** - finds Go binary in PATH
+2. **Version verification** - requires Go 1.18+ (L62-65)
+3. **Delve installation** - locates dlv debugger binary
+4. **DAP support check** - verifies Delve supports Debug Adapter Protocol (L75-79)
 
-Returns structured result with validation status, error/warning messages, and system details (paths, versions, platform info).
+Returns structured validation result with errors, warnings, and system details including platform info.
 
-## Architecture Patterns
-- **Factory Pattern**: Encapsulates adapter creation logic
-- **Dependency Injection**: Accepts external dependencies for adapter construction
-- **Validation Strategy**: Environment pre-flight checks before adapter instantiation
-- **Metadata Provider**: Static configuration for debugger integration
+## Metadata Configuration (L30-41)
+- Language: Go (DebugLanguage.GO)
+- File extensions: ['.go']
+- Minimum debugger version: '0.17.0'
+- Embedded SVG icon (base64 encoded Go gopher)
+- Documentation URL and version information
 
-## Critical Constraints
-- Requires Go 1.18+ for compatibility
-- Delve must support DAP (Debug Adapter Protocol) mode
-- Platform-agnostic design using process.platform/arch detection
+## Error Handling
+- Graceful fallback for missing tools with installation instructions
+- Clear error messages for version incompatibilities
+- Distinguishes between critical errors and warnings for better UX

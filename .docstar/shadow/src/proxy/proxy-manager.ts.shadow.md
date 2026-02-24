@@ -1,100 +1,66 @@
 # src\proxy\proxy-manager.ts
-@source-hash: b5325b85040ceaac
-@generated: 2026-02-19T23:47:54Z
+@source-hash: 28506805173f4ca4
+@generated: 2026-02-24T01:54:20Z
 
-## Primary Purpose
-ProxyManager orchestrates the lifecycle of debug proxy processes for a Debug Adapter Protocol (DAP) system. It spawns and communicates with child proxy processes that manage debugger adapters, providing a bridge between debug clients and language-specific debug adapters.
+**Purpose**: Manages lifecycle of debug adapter proxy processes, handling spawn/communication/cleanup and bridging DAP messages between clients and debug adapters.
 
-## Key Classes and Interfaces
+## Core Components
 
-### ProxyManagerEvents Interface (L30-46)
-Defines typed events emitted by ProxyManager:
-- DAP lifecycle: 'stopped', 'continued', 'terminated', 'exited'
-- Proxy lifecycle: 'initialized', 'error', 'exit'
-- Status events: 'dry-run-complete', 'adapter-configured', 'dap-event'
+### ProxyManager Class (L126-1065)
+Main orchestrator class that extends EventEmitter and implements IProxyManager interface. Manages proxy process lifecycle, message handling, and DAP request/response flow.
 
-### IProxyManager Interface (L51-73)
-Core interface defining proxy manager contract:
-- `start(config: ProxyConfig)`: Initializes and spawns proxy process
-- `stop()`: Gracefully terminates proxy
-- `sendDapRequest<T>()`: Sends DAP commands to adapter via proxy
-- Thread management and status methods
-- Typed EventEmitter methods
+**Key State**:
+- `proxyProcess` (L127): IProxyProcess instance for child process communication
+- `sessionId` (L128): Unique session identifier
+- `pendingDapRequests` (L130): Map tracking outstanding DAP requests with promises
+- `dapState` (L142): Functional core state mirror for observability
+- `activeLaunchBarrier` (L153): Adapter-provided launch synchronization
 
-### ProxyManager Class (L125-1062)
-Main implementation managing proxy process lifecycle:
+**Core Methods**:
+- `start(config)` (L172-305): Spawns proxy process, sends init command, waits for initialization
+- `stop()` (L307-352): Graceful shutdown with terminate command and force kill fallback
+- `sendDapRequest<T>()` (L354-438): Sends DAP commands to proxy with promise-based response handling
+- `sendInitWithRetry()` (L535-610): Robust initialization with exponential backoff retry logic
 
-**Key State:**
-- `proxyProcess: IProxyProcess | null` (L126): Child process handle
-- `sessionId: string | null` (L127): Debug session identifier
-- `pendingDapRequests` (L129-133): Map tracking DAP request/response correlation
-- `dapState: DAPSessionState` (L141): Functional core state for DAP operations
-- `activeLaunchBarrier: AdapterLaunchBarrier` (L152): Adapter synchronization
+### Event Handling System
 
-**Critical Methods:**
-- `start(config)` (L171-304): Spawns proxy, sends init command, waits for ready
-- `stop()` (L306-351): Graceful shutdown with timeout fallback
-- `sendDapRequest<T>()` (L353-437): Async DAP command dispatch with barriers
-- `handleProxyMessage()` (L739-836): Core message routing from proxy process
+**ProxyManagerEvents Interface** (L31-47): Defines typed event signatures for DAP events (stopped, continued, terminated), proxy lifecycle (initialized, error, exit), and status events (dry-run-complete, adapter-configured).
 
-## Message Types and Protocol
+**Message Processing** (L742-839):
+- `handleProxyMessage()`: Central message dispatcher that validates, routes to functional core, and executes side effects
+- Fast-path forwarding for DAP events to avoid missing critical stops/output
+- Integration with functional `dap-core` for state management and command generation
 
-### Proxy Message Types (L76-110)
-- `ProxyStatusMessage`: Status updates (init, dry-run, adapter events)
-- `ProxyDapEventMessage`: DAP events forwarded from adapter
-- `ProxyDapResponseMessage`: DAP command responses with success/error
-- `ProxyErrorMessage`: Error notifications from proxy
+### Proxy Communication
 
-### Message Handling Strategy
-- Fast-path DAP events (L774-776): Immediate forwarding to prevent missed stops
-- Functional core integration (L784-836): Uses pure functions from dap-core for state transitions
-- Imperative request tracking (L838-877): Maps request IDs to Promise resolvers
+**Message Types** (L77-111): Union types defining proxy IPC protocol:
+- `ProxyStatusMessage`: Process lifecycle and initialization status
+- `ProxyDapEventMessage`: Debug adapter events forwarded from proxy
+- `ProxyDapResponseMessage`: Responses to DAP requests with success/error handling
+- `ProxyErrorMessage`: Error reporting from proxy process
 
-## Dependencies and Architecture
+**Command Sending** (L612-667): Robust IPC with detailed logging, connection state tracking, and error handling for child process communication failures.
 
-**Core Dependencies:**
-- `@debugmcp/shared`: Interfaces for adapters, file system, logging
-- `../dap-core/index.js`: Functional DAP state management
-- `../utils/error-messages.js`: Centralized error messages
-- `./proxy-config.js`: Configuration types
+### Initialization & Environment Setup
 
-**Key Patterns:**
-- **Hybrid Architecture**: Combines functional core (dap-core) with imperative shell
-- **Event-Driven**: Extensive use of EventEmitter for lifecycle communication
-- **Process Management**: Sophisticated child process lifecycle with retry logic
-- **Request/Response Correlation**: UUID-based tracking of async DAP operations
+**Environment Preparation** (L452-533):
+- `prepareSpawnContext()`: Resolves executable paths via adapter or config
+- `findProxyScript()`: Locates proxy bootstrap script across build layouts
+- Environment validation and cloning
 
-## Critical Implementation Details
+**Adapter Integration**: Optional language-specific adapter support for executable resolution, environment validation, and launch barriers for synchronization.
 
-### Initialization Flow (L171-304)
-1. Validates configuration and spawns proxy process
-2. Sends init command with exponential backoff retry (L534-609)
-3. Waits for 'initialized' or 'dry-run-complete' events
-4. Handles early exit scenarios with stderr capture
+### Error Handling & Observability
 
-### Adapter Launch Barriers (L361-391, L1025-1047)
-Language-specific adapters can provide synchronization barriers for launch commands:
-- Fire-and-forget mode: Commands that don't need response
-- Barrier coordination: Wait for adapter readiness signals
+**Comprehensive Logging**: Detailed debug/info/error logging throughout lifecycle with message sanitization for sensitive data.
 
-### Error Handling and Robustness
-- Stderr buffering during initialization (L142, L705-708)
-- Exit detail capture with timestamps (L143-150, L714-719)
-- Graceful shutdown with force-kill timeout (L331-350)
-- Late message filtering after stop() (L741-744)
+**Exit Tracking** (L144-151): Captures exit details including code, signal, timestamp, and stderr for detailed error reporting.
 
-### Dry Run Mode
-Special mode for command validation without execution:
-- Captures command snapshots for reporting (L138-139, L932-941)
-- Synthetic completion events on early exit (L975-985)
+**Retry Logic**: Exponential backoff for init commands, timeout handling for DAP requests, graceful degradation on communication failures.
 
-## State Management
+## Architecture Notes
 
-The ProxyManager maintains both imperative state (request tracking, process handles) and mirrors functional state from dap-core for observability. State transitions are driven by proxy messages with command execution handled imperatively (L788-811).
-
-## Notable Constraints
-
-- Single proxy process per manager instance
-- 35-second timeout for DAP requests
-- 30-second initialization timeout
-- Process cleanup prevents "unknown request" warnings during shutdown
+- **Functional/Imperative Hybrid**: Uses functional `dap-core` for state management while maintaining imperative shell for I/O and side effects
+- **Event-Driven**: Heavy use of EventEmitter pattern for loose coupling between components
+- **Defensive Programming**: Extensive null checks, error boundaries, and cleanup to handle process lifecycle edge cases
+- **Language Agnostic**: Optional adapter pattern allows supporting multiple debug adapter types

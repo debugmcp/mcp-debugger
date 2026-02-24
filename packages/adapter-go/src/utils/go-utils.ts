@@ -152,18 +152,25 @@ export async function getDelveVersion(dlvPath: string): Promise<string | null> {
 }
 
 /**
- * Check if Delve supports DAP
+ * Check if Delve supports DAP.
+ * Returns an object with `supported` flag and optional `stderr` for diagnostics.
  */
-export async function checkDelveDapSupport(dlvPath: string): Promise<boolean> {
+export async function checkDelveDapSupport(dlvPath: string): Promise<{ supported: boolean; stderr?: string }> {
   return new Promise((resolve) => {
     const child = spawn(dlvPath, ['dap', '--help'], {
       stdio: ['ignore', 'pipe', 'pipe']
     });
 
-    child.on('error', () => resolve(false));
+    let stderrOutput = '';
+    child.stderr?.on('data', (data) => { stderrOutput += data.toString(); });
+
+    child.on('error', (err) => resolve({ supported: false, stderr: err.message }));
     child.on('exit', (code) => {
       // If dlv dap --help returns 0 or shows help, DAP is supported
-      resolve(code === 0);
+      resolve({
+        supported: code === 0,
+        stderr: stderrOutput.trim() || undefined
+      });
     });
   });
 }

@@ -1,59 +1,58 @@
 # packages\mcp-debugger/
-@children-hash: ff13a11ad53d4220
-@generated: 2026-02-15T09:01:41Z
+@children-hash: 9e4c9d5466342440
+@generated: 2026-02-24T01:54:56Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/mcp-debugger` directory contains the complete MCP (Model Context Protocol) debugger CLI tool - a batteries-included debugging solution that enables interactive debugging of MCP servers across multiple programming languages. This module serves as both a standalone CLI application and a protocol-compliant MCP server, providing comprehensive debugging capabilities with bundled adapters for JavaScript, Python, Go, and mock testing scenarios.
+The `mcp-debugger` package provides a complete, standalone CLI tool for step-through debugging of MCP (Model Context Protocol) servers across multiple programming languages. This module serves as the primary distribution point for a "batteries-included" debugging solution that bundles all necessary adapters and maintains strict MCP protocol compliance.
 
 ## Key Components and Integration
 
-### Build Infrastructure (`scripts/`)
-- **bundle-cli.js**: Primary build orchestrator that transforms TypeScript sources into deployable CLI tools
-- Creates ESM bundles with Node.js compatibility, executable wrappers, and npm-ready distribution packages
-- Handles platform-specific debug adapter integration and graceful degradation for missing components
-- Produces multiple artifact formats (bundles, packages, tarballs) for different deployment scenarios
+### Core Application Infrastructure
+- **CLI Entry Point** (`src/cli-entry.ts`): Protocol-safe bootstrapping that silences console output before any imports to prevent MCP protocol corruption
+- **Adapter Bundling System** (`src/batteries-included.ts`): Global registry that statically includes all debugging adapters (JavaScript, Python, Go, Mock) in the final distribution
+- **Build Orchestration** (`scripts/bundle-cli.js`): Production build pipeline that assembles multi-component CLI bundles with platform-specific vendor adapters
 
-### Core Application (`src/`)
-- **cli-entry.ts**: Protocol-compliant CLI entry point with critical console silencing to prevent MCP protocol corruption
-- **batteries-included.ts**: Global adapter registry system that ensures all debugging adapters are bundled in the final distribution
-- Implements bootstrapping coordination and transport detection (stdio/SSE modes)
+### Distribution and Packaging
+- **NPM Package Configuration**: Self-contained ES module with no runtime dependencies, published as `@debugmcp/mcp-debugger`
+- **TypeScript Build System**: Composite project setup with incremental compilation and declaration file generation
+- **Multi-Artifact Generation**: Creates bundles, npm packages, and tarballs for different deployment scenarios
 
 ## Public API Surface
 
 ### Primary Entry Points
-- **CLI Command**: Main npx-accessible debugger interface supporting multiple transport modes
-- **Adapter Registry**: Global `__DEBUG_MCP_BUNDLED_ADAPTERS__` registry providing access to JavaScript, Python, Go, and Mock debugging adapters
-- **Build Pipeline**: `bundleCLI()` function that produces complete distribution artifacts
+- **`mcp-debugger` CLI Command**: Main executable accessible via npx, supporting stdio/SSE transport modes
+- **Global Adapter Registry**: `__DEBUG_MCP_BUNDLED_ADAPTERS__` provides access to all bundled debugging adapters
+- **Build Pipeline**: `bundleCLI()` function orchestrates complete artifact generation
 
 ### Supported Debugging Targets
 - JavaScript/Node.js applications via js-debug adapter
-- Python applications with specialized debugging capabilities  
-- Go applications through integrated adapters
-- Mock scenarios for testing and development
-- Platform-specific native debugging (CodeLLDB) where available
+- Python applications via Python adapter  
+- Go applications via CodeLLDB adapter
+- Mock/testing scenarios via Mock adapter
 
 ## Internal Organization and Data Flow
 
-### Build-to-Runtime Pipeline
-1. **Development Phase**: TypeScript sources developed across multiple adapter packages
-2. **Build Assembly**: Scripts bundle TypeScript sources, copy runtime assets, and integrate vendor adapters
-3. **Distribution Generation**: Multiple output formats created (executable bundles, npm packages, platform-specific builds)
-4. **Runtime Bootstrap**: CLI entry point establishes protocol compliance and populates adapter registry
-5. **Debug Session**: Main application accesses bundled adapters for interactive debugging workflows
+### CLI Execution Flow
+1. **Bootstrap Phase**: `cli-entry.ts` immediately silences console output based on transport detection
+2. **Adapter Loading**: Static imports populate the global adapter registry with all available debuggers
+3. **Main Delegation**: Dynamic import prevents premature loading while maintaining protocol safety
+4. **Runtime Debugging**: Core implementation accesses bundled adapters for cross-language debugging
 
-### Critical Architectural Patterns
+### Build and Distribution Pipeline
+1. **Source Compilation**: TypeScript sources bundled into optimized ESM format with Node.js compatibility
+2. **Asset Assembly**: Runtime components and vendor adapters copied from workspace packages
+3. **Package Generation**: npm-compatible structure created with proper entry points and metadata
+4. **Artifact Finalization**: Multiple output formats (standalone, package, tarball) generated for different use cases
 
-**Batteries-Included Distribution**: All debugging adapters are statically bundled to eliminate runtime dependency issues and provide immediate debugging capabilities across multiple languages.
+## Important Patterns and Conventions
 
-**Protocol Safety First**: Comprehensive stdout protection mechanisms ensure MCP protocol compliance by preventing console contamination during initialization and operation.
+**Protocol Safety First**: All console operations carefully managed to maintain MCP protocol compliance, with immediate silencing before any module imports.
 
-**Multi-Format Artifacts**: Single build process produces multiple consumption patterns - from direct CLI execution to npm package distribution to platform-specific bundles.
+**Batteries-Included Distribution**: Complete debugging solution bundled as single CLI tool, eliminating external dependency management for end users.
 
-**Graceful Adaptation**: Missing platform-specific components generate warnings rather than failures, enabling partial builds and cross-platform compatibility.
+**Graceful Platform Handling**: Optional platform-specific components (like CodeLLDB) included when available but don't break builds when missing.
 
-## System Role and Dependencies
+**Workspace Integration**: Leverages monorepo structure for adapter development while producing standalone distribution artifacts.
 
-This module serves as the primary distribution mechanism for MCP debugging capabilities, consolidating distributed adapter packages into a cohesive, deployable CLI tool. It depends on pre-built adapter packages from the broader monorepo while providing the packaging and bootstrapping infrastructure necessary for end-user consumption.
-
-The debugger acts as both a development tool for MCP server authors and a runtime component that can be embedded in debugging workflows, supporting both interactive CLI usage and programmatic integration scenarios.
+This package serves as the primary end-user interface to the MCP debugging ecosystem, transforming a complex multi-package development environment into a simple, installable CLI tool that "just works" across different programming languages and deployment scenarios.

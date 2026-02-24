@@ -247,8 +247,18 @@ export class DapProxyWorker {
     } catch (error) {
       this.state = ProxyState.UNINITIALIZED;
       const message = error instanceof Error ? error.message : String(error);
-      this.logger?.error(`[Worker] Critical initialization error: ${message}`, error);
-      this.sendError(`Critical initialization error: ${message}`);
+
+      // Include adapter spawn config (command + args only, NOT env) for diagnostics
+      const adapterCmd = payload.adapterCommand;
+      const spawnInfo = adapterCmd
+        ? `Adapter command: ${adapterCmd.command} ${(adapterCmd.args ?? []).join(' ')}`
+        : `Executable: ${payload.executablePath ?? 'unknown'}`;
+      const adapterPid = this.adapterProcess?.pid ?? 'none';
+      const adapterExitCode = this.adapterProcess?.exitCode;
+      const diagnostics = `${spawnInfo} | adapter PID=${adapterPid} exitCode=${adapterExitCode ?? 'n/a'}`;
+
+      this.logger?.error(`[Worker] Critical initialization error: ${message} [${diagnostics}]`, error);
+      this.sendError(`Critical initialization error: ${message} [${diagnostics}]`);
       await this.shutdown();
       // Use setImmediate/setTimeout to allow IPC message to flush before exit
       setImmediate(() => {
@@ -399,17 +409,21 @@ export class DapProxyWorker {
           this.deferInitializedHandling = false;
           await this.handleInitializedEvent();
         } else if (initBehavior.sendLaunchBeforeConfig) {
-          // DEFERRED LAUNCH MODE (Go/Delve): Wait for "initialized" event BEFORE sending launch
-          // Delve sends "initialized" immediately after "initialize", before "launch"
-          this.logger!.info('[Worker] Waiting for "initialized" event before sending launch (sendLaunchBeforeConfig)');
-          await Promise.race([
-            this.initializedEventPromise!,
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout waiting for initialized event')), 5000)
-            )
+          // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve
+          // Phase 1: Brief wait — some adapters send initialized immediately after initialize
+          this.logger!.info('[Worker] Phase 1: Waiting briefly for "initialized" event before launch');
+          const receivedBeforeLaunch = await Promise.race([
+            this.initializedEventPromise!.then(() => true as const),
+            new Promise<false>(resolve => setTimeout(() => resolve(false), 2000))
           ]);
 
-          this.logger!.info('[Worker] "initialized" event received, sending launch request');
+          if (receivedBeforeLaunch) {
+            this.logger!.info('[Worker] "initialized" event received before launch');
+          } else {
+            this.logger!.warn('[Worker] "initialized" event not received within 2s — falling back to launch-first flow');
+          }
+
+          // Send launch request (either after initialized or as fallback)
           await this.connectionManager!.sendLaunchRequest(
             this.dapClient,
             payload.scriptPath,
@@ -418,6 +432,18 @@ export class DapProxyWorker {
             payload.justMyCode,
             payload.launchConfig
           );
+
+          if (!receivedBeforeLaunch) {
+            // Phase 2: Wait for initialized after launch
+            this.logger!.info('[Worker] Phase 2: Waiting for "initialized" event after launch');
+            await Promise.race([
+              this.initializedEventPromise!,
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout waiting for initialized event (after launch fallback)')), 10000)
+              )
+            ]);
+            this.logger!.info('[Worker] "initialized" event received after launch (fallback succeeded)');
+          }
 
           this.deferInitializedHandling = false;
           await this.handleInitializedEvent();

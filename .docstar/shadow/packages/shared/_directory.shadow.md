@@ -1,81 +1,81 @@
 # packages\shared/
-@children-hash: e98ee685e0e3924e
-@generated: 2026-02-21T08:29:18Z
+@children-hash: 41c6c4e435d61acb
+@generated: 2026-02-24T01:55:51Z
 
-## Overall Purpose and Responsibility
+## Shared Components Package for MCP Debug Adapter Framework
 
-The `packages/shared` directory serves as the foundational shared library for the MCP Debugger, providing a comprehensive type-safe abstraction layer that enables multi-language debugging capabilities across JavaScript, Python, Go, Rust, and other languages. This module implements a plugin-based architecture built on the Debug Adapter Protocol (DAP), allowing language-specific debug adapters to integrate seamlessly while maintaining consistent interfaces and behaviors.
+The `packages/shared` directory provides the foundational type definitions, interfaces, and utilities for a multi-language debug adapter system built on the Debug Adapter Protocol (DAP). This package serves as the central contract layer that enables extensible debugging across Python, JavaScript, Rust, Go, and other languages within the MCP (Model Control Protocol) debugger ecosystem.
 
-## Key Components and Integration
+## Core Architecture and Components
 
-### Core Architecture Components
+### Main Source Module (`src/`)
+The heart of the package containing the complete abstraction framework:
 
-**Source Library (`src/`)**
-- **Interface Abstraction Layer**: Defines primary contracts through `IDebugAdapter`, `IAdapterRegistry`, and `IAdapterFactory`
-- **Policy-Driven Architecture**: Implements `AdapterPolicy` for language-specific behaviors with dependency injection support
-- **Data Model Foundation**: Extends VS Code DAP with comprehensive session lifecycle management and dual-state architecture
-- **Factory Pattern Implementation**: Provides extensible adapter creation with validation and semantic versioning
+- **Interface Definitions**: Type-safe contracts implementing policy patterns for language-specific behaviors, including core `IDebugAdapter` interface, language-specific `AdapterPolicy` implementations, and registry patterns for dynamic adapter discovery
+- **Data Models**: Comprehensive state management layer with session lifecycle tracking, configuration models, and runtime constructs (breakpoints, variables, stack frames)
+- **Factory Foundation**: Abstract factory patterns ensuring consistent adapter creation with metadata validation and version compatibility
+- **Unified Export Hub**: Facade pattern providing single entry point with over 200 exported types and utilities
 
-**Testing Infrastructure (`tests/`)**  
-- **Unit Testing Suite**: Comprehensive validation of debug adapter policies for JavaScript and Rust environments
-- **Protocol Compliance Testing**: Ensures DAP adherence and cross-platform compatibility
-- **Mock-Based Validation**: Simulates file systems, processes, and external dependencies for isolated testing
+### Testing Infrastructure (`tests/`)
+Comprehensive validation suite ensuring reliability across language implementations:
 
-**Build Configuration (`vitest.config.ts`)**
-- **Test Environment Setup**: Configures Vitest with Node.js environment and global test functions
-- **Coverage Reporting**: Istanbul-based coverage with multiple output formats
-- **Module Resolution**: TypeScript support with path aliases for clean imports
+- **Unit Test Coverage**: Language-specific adapter policy validation for JavaScript/Node.js and Rust/CodeLLDB debugging
+- **Protocol Compliance**: DAP command processing and response handling verification
+- **Cross-Platform Testing**: Platform-specific behavior validation with extensive mocking capabilities
 
-## Component Relationships and Data Flow
+### Build Configuration
+Modern TypeScript toolchain optimized for monorepo ESM development:
 
-The shared module follows a layered architecture pattern:
+- **ES2022/NodeNext**: Modern JavaScript features with full Node.js ESM compatibility
+- **Dual Exports**: CJS/ESM support with TypeScript declaration generation
+- **Testing Framework**: Vitest with Istanbul coverage and comprehensive path alias resolution
 
-1. **Configuration Phase**: Generic launch/attach configs are transformed via adapter policies to language-specific formats
-2. **Registration**: Factory pattern enables dynamic adapter discovery through the registry system  
-3. **Session Management**: Debug sessions track both lifecycle state and execution state through the dual-state model
-4. **Runtime Coordination**: Launch barriers synchronize adapter initialization while DAP client behaviors handle multi-session scenarios
-5. **Protocol Operations**: Adapters execute DAP commands through policy-defined behaviors with dependency injection
-6. **Quality Assurance**: Comprehensive testing validates the entire flow from IDE clients to language debug engines
-
-## Public API Surface
+## Public API Surface and Integration
 
 ### Primary Entry Points
-- **`IDebugAdapter`**: Main contract for implementing language-specific debug support
-- **`IAdapterRegistry`**: Central registry for adapter discovery and factory management  
-- **`AdapterPolicy`**: Interface for encapsulating language-specific debugging behaviors
-- **`DebugSession`**: Complete session state management with lifecycle tracking
 
-### Factory and Creation APIs
-- **`IAdapterFactory`** and `AdapterFactory`: Base interfaces and classes for adapter instantiation with validation
-- **`IProcessLauncherFactory`**: Process management factory for debug target launching
+**Package Interface**: Published as `@debugmcp/shared` with main entry at `./dist/index.js`, providing unified access to:
+- Debug adapter abstractions and language-specific policies
+- Session management and data models
+- Factory and registry patterns for dynamic adapter loading
+- External dependency abstractions for testability
+- Complete VS Code Debug Protocol re-exports
 
-### Data Models and Configuration
-- **Configuration Types**: `GenericAttachConfig`, `CustomLaunchRequestArguments`, `LanguageSpecificAttachConfig`
-- **Runtime State Models**: `SessionLifecycleState`, `ExecutionState`, `Breakpoint`, `Variable`, `StackFrame`
-- **Language Support**: `DebugLanguage` enum with comprehensive language-specific policy implementations
+**Core Dependencies**: Built on `@vscode/debugprotocol` for DAP compliance, ensuring standard tooling compatibility across the debugging ecosystem.
 
-### Dependency Abstractions
-- **`IDependencies`**: Complete dependency injection container
-- **Service Interfaces**: `IFileSystem`, `IProcessManager`, `INetworkManager`, `ILogger`, `IServer`
+### Integration Architecture
 
-## Internal Organization and Design Patterns
+The package enables a layered debugging architecture where:
+1. **Configuration Layer**: Validates and transforms debug parameters
+2. **Policy Layer**: Applies language-specific behaviors through pluggable adapters
+3. **Session Layer**: Manages dual-state tracking (lifecycle + execution status)
+4. **Transport Layer**: Handles DAP protocol communication with debug clients
 
-**Strategy Pattern**: Language-specific behaviors are encapsulated in adapter policies, enabling generic core system while accommodating language-specific requirements like Go's Delve debugging or JavaScript's multi-session child process handling.
+## Internal Organization and Data Flow
 
-**Factory Pattern**: Comprehensive factory system with dependency injection and validation supports both built-in and extensible language implementations.
+### Component Relationships
+- **Interfaces** define contracts and extensible behaviors
+- **Models** provide immutable data structures and state management
+- **Factories** enable consistent instantiation with dependency injection
+- **Tests** validate cross-language compatibility and protocol compliance
 
-**Dependency Injection**: Complete abstraction of external dependencies enables comprehensive unit testing while maintaining production implementations.
+### Key Data Flow Patterns
+- **Session Lifecycle**: Configuration → Validation → Factory Creation → Policy Application → Runtime Management
+- **Adapter Integration**: Registry → Factory → Policy → Adapter instance with full dependency injection
+- **State Management**: Dual-state model separating session lifecycle from execution status
 
-**Event-Driven Architecture**: Debug adapters extend EventEmitter for lifecycle management and DAP event coordination.
+## Design Patterns and Conventions
 
-**Backward Compatibility**: Legacy state management interfaces with clear migration paths enable gradual system evolution.
+### Extensibility Framework
+- Language-agnostic base interfaces with clear extension points
+- Policy pattern enabling customization without breaking common APIs
+- Comprehensive TypeScript definitions with runtime validation
+- Backward compatibility through deprecated interface maintenance
 
-## Important Patterns and Conventions
+### Quality Assurance
+- Defensive programming with immutable metadata access
+- Comprehensive error handling and fallback behaviors
+- Cross-platform compatibility through system abstractions
+- Strict DAP compliance for standard IDE integration
 
-- **Type Safety**: Extensive use of TypeScript for compile-time validation and IntelliSense support
-- **Protocol Adherence**: Heavy reliance on `@vscode/debugprotocol` types for DAP compliance
-- **Modular Design**: Clear separation between interfaces, models, and implementations
-- **Testing Standards**: Mock-based isolation with comprehensive coverage of happy paths and edge cases
-- **Cross-Platform Support**: Platform-agnostic abstractions with specific adapter implementations
-
-This shared module serves as the critical foundation enabling the MCP Debugger to support multiple programming languages through a consistent, extensible, and type-safe architecture while maintaining compatibility with standard debugging tools and VS Code's debugging infrastructure.
+This shared package forms the foundation that enables the MCP debugger to support multiple programming languages through a unified, type-safe, and extensible architecture while maintaining clear separation between generic DAP transport logic and language-specific implementation details.

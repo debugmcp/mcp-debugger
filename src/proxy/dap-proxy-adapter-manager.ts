@@ -63,7 +63,7 @@ export class GenericAdapterManager {
     // Spawn options - no cwd manipulation, inherit from parent
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Need dynamic cwd property
     const spawnOptions: any = {
-      stdio: ['ignore', 'inherit', 'inherit', 'ipc'] as ('ignore' | 'pipe' | 'inherit' | 'ipc' | number)[],
+      stdio: ['ignore', 'pipe', 'pipe'] as ('ignore' | 'pipe' | 'inherit' | 'ipc' | number)[],
       env: env || process.env,
       detached: true,
       windowsHide: true
@@ -120,7 +120,7 @@ export class GenericAdapterManager {
     // Spawned adapter process; hide console on Windows and keep attached for lifecycle management
     this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
-    // Set up error handlers
+    // Set up error handlers and stderr capture
     this.setupProcessHandlers(adapterProcess);
 
     return {
@@ -132,12 +132,22 @@ export class GenericAdapterManager {
   /**
    * Set up process event handlers
    */
-  private setupProcessHandlers(process: ChildProcess): void {
-    process.on('error', (err: Error) => {
+  private setupProcessHandlers(adapterProcess: ChildProcess): void {
+    adapterProcess.on('error', (err: Error) => {
       this.logger.error('[AdapterManager] Adapter process spawn error:', err);
     });
 
-    process.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+    // Capture stderr for diagnostics (when stdio is piped or inherited, stderr may be available)
+    if (adapterProcess.stderr) {
+      adapterProcess.stderr.on('data', (data: Buffer | string) => {
+        const output = data.toString().trim();
+        if (output) {
+          this.logger.error(`[AdapterManager STDERR] ${output}`);
+        }
+      });
+    }
+
+    adapterProcess.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       this.logger.info(`[AdapterManager] Adapter process exited. Code: ${code}, Signal: ${signal}`);
     });
   }

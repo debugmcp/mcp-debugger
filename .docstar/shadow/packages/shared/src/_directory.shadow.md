@@ -1,81 +1,80 @@
 # packages\shared\src/
-@children-hash: 7da72022061175f4
-@generated: 2026-02-21T08:29:04Z
+@children-hash: 34bfc72542b18143
+@generated: 2026-02-24T01:55:28Z
 
 ## Overall Purpose and Responsibility
 
-The `packages/shared/src` directory serves as the foundational shared library for the MCP Debugger, providing a comprehensive type-safe abstraction layer that enables multi-language debugging capabilities across JavaScript, Python, Go, Rust, and other languages. This module implements a plugin-based architecture built on the Debug Adapter Protocol (DAP), allowing language-specific debug adapters to integrate seamlessly while maintaining consistent interfaces and behaviors.
+The `packages/shared/src` directory serves as the foundational contract layer for a multi-language debug adapter system, providing comprehensive TypeScript interfaces, data models, and utilities that enable extensible debugging across Python, JavaScript, Rust, Go, and other languages. This module acts as the central abstraction layer between the Debug Adapter Protocol (DAP) transport mechanism and language-specific debugging implementations.
 
-## Key Components and Integration
+## Key Components and Architecture
 
-### Core Architecture Layers
+### Core Architectural Layers
 
-**Interface Abstraction Layer** (`interfaces/`)
-- Defines the primary contracts through `IDebugAdapter`, `IAdapterRegistry`, and `IAdapterFactory`
-- Implements policy-driven architecture via `AdapterPolicy` for language-specific behaviors
-- Provides dependency injection interfaces for external services (filesystem, process management, networking)
-- Handles DAP client behavior customization and multi-session coordination
+**Interface Definitions** (`interfaces/`): Defines the type-safe contract layer implementing policy patterns for language-specific behaviors. Key interfaces include:
+- `IDebugAdapter`: Main adapter contract with lifecycle, DAP operations, and configuration transformation
+- `AdapterPolicy` with language-specific implementations (Go/Delve, JS/js-debug, Python/debugpy, Rust/CodeLLDB)
+- `IAdapterRegistry` and `IAdapterFactory`: Registry pattern for dynamic adapter discovery and management
+- External dependency abstractions for filesystem, processes, and networking to enable testing
 
-**Data Model Foundation** (`models/`)
-- Extends VS Code DAP with comprehensive session lifecycle management
-- Implements dual-state architecture separating session lifecycle from execution state
-- Provides debug runtime constructs (breakpoints, variables, stack frames)
-- Maintains backward compatibility through legacy state mapping utilities
+**Data Models** (`models/`): Comprehensive data model layer extending VS Code DAP with:
+- Session management through `DebugSession` and `DebugSessionInfo` interfaces
+- Dual-state architecture separating session lifecycle from execution status
+- Configuration models supporting generic and language-specific debug parameters
+- Runtime constructs including breakpoints, variables, stack frames, and debug locations
+- Backward compatibility layer for legacy state management
 
-**Factory Pattern Implementation** (`factories/`)
-- Provides `AdapterFactory` base class for consistent adapter creation
-- Implements template method pattern with validation and compatibility checking
-- Supports semantic versioning and prerequisite validation
-- Enables extensible factory registration across language implementations
+**Factory Foundation** (`factories/`): Abstract factory pattern implementation ensuring consistent adapter creation across languages:
+- `AdapterFactory` base class with template method pattern
+- Metadata management and version compatibility validation
+- Extensible validation framework with defensive programming patterns
 
-**Unified API Surface** (`index.ts`)
-- Acts as central facade consolidating all interfaces, models, and utilities
-- Provides type-safe exports organized by functional area
-- Re-exports DAP protocol types for convenience
-- Serves as the primary integration point for consuming applications
+**Central Export Hub** (`index.ts`): Facade pattern providing unified access to all shared abstractions, from core interfaces to utility services and external dependencies.
 
-## Component Relationships and Data Flow
+## Public API Surface and Integration Points
+
+### Primary Entry Points
+
+**Main Module Interface**: The `index.ts` serves as the single entry point, exporting over 200 types, interfaces, and utilities organized into logical groups:
+- Debug adapter abstractions and policies
+- Session management and data models
+- Factory and registry patterns
+- External dependency abstractions
+- VSCode Debug Protocol re-exports
+
+**Language Adapter Integration**: Language-specific policy implementations allow pluggable behaviors while maintaining unified DAP transport:
+- Multi-session coordination for complex debugging scenarios
+- Custom initialization sequences and command queueing
+- Variable extraction and stack frame filtering
+- Child session management and reverse request handling
+
+**Dependency Injection System**: Comprehensive abstraction layer enabling:
+- Testable implementations through mock interfaces
+- Service composition through `IDependencies` containers
+- Cross-platform compatibility through system abstractions
+
+## Internal Organization and Data Flow
+
+### Component Relationships
 
 The architecture follows a layered approach where:
 
-1. **Configuration Phase**: Generic launch/attach configs are transformed via adapter policies to language-specific formats
-2. **Registration**: Factory pattern enables dynamic adapter discovery and instantiation through the registry system
-3. **Session Management**: Debug sessions track both lifecycle state and execution state through the dual-state model
-4. **Runtime Coordination**: Launch barriers synchronize adapter initialization while DAP client behaviors handle multi-session scenarios
-5. **Protocol Operations**: Adapters execute DAP commands through policy-defined behaviors with dependency injection for external services
+1. **Interfaces Layer** defines contracts and behaviors
+2. **Models Layer** provides data structures and state management
+3. **Factories Layer** enables consistent instantiation patterns
+4. **Index Layer** orchestrates exports and provides unified access
 
-## Public API Surface
+### Key Data Flow Patterns
 
-### Primary Entry Points
-- **`IDebugAdapter`**: Main contract for implementing language-specific debug support
-- **`IAdapterRegistry`**: Central registry for adapter discovery and factory management
-- **`AdapterPolicy`**: Interface for encapsulating language-specific debugging behaviors
-- **`DebugSession`**: Complete session state management with lifecycle tracking
+**Session Lifecycle**: Configuration → Validation → Factory Creation → Policy Application → Runtime State Management
+**State Management**: Dual-state model tracking both session lifecycle (CREATED → ACTIVE → TERMINATED) and execution status (RUNNING ⟷ PAUSED)
+**Adapter Integration**: Registry → Factory → Policy → Adapter instance with full dependency injection
 
-### Factory and Creation APIs
-- **`IAdapterFactory`**: Base factory interface for adapter instantiation
-- **`AdapterFactory`**: Abstract base class with validation and compatibility checking
-- **`IProcessLauncherFactory`**: Process management factory for debug target launching
+## Design Patterns and Conventions
 
-### Data Models
-- **Configuration**: `GenericAttachConfig`, `CustomLaunchRequestArguments`, `LanguageSpecificAttachConfig`
-- **Runtime State**: `SessionLifecycleState`, `ExecutionState`, `Breakpoint`, `Variable`, `StackFrame`
-- **Language Support**: `DebugLanguage` enum with comprehensive language-specific policy implementations
+**Extensibility Framework**: Language-agnostic base interfaces with extension points enable customization without breaking common APIs
+**Type Safety**: Comprehensive TypeScript definitions with runtime validation through type guards
+**Backward Compatibility**: Deprecated interfaces maintained with clear migration paths
+**DAP Compliance**: All interfaces align with VS Code Debug Adapter Protocol for standard tooling compatibility
+**Defensive Programming**: Immutable metadata access, fallback behaviors, and comprehensive error handling
 
-### Dependency Abstractions
-- **`IDependencies`**: Complete dependency injection container
-- **Service Interfaces**: `IFileSystem`, `IProcessManager`, `INetworkManager`, `ILogger`, `IServer`
-
-## Internal Organization and Design Patterns
-
-**Strategy Pattern**: Language-specific behaviors are encapsulated in adapter policies, allowing the core system to remain generic while accommodating language quirks like Go's Delve debugging specifics or JavaScript's multi-session child process debugging.
-
-**Factory Pattern**: Comprehensive factory system enables dynamic adapter creation with dependency injection and validation, supporting both built-in and extensible language implementations.
-
-**Dependency Injection**: Complete abstraction of external dependencies enables comprehensive unit testing while maintaining production implementations for Node.js environments.
-
-**Event-Driven Architecture**: Debug adapters extend EventEmitter for lifecycle management and DAP event coordination.
-
-**Backward Compatibility**: Legacy state management interfaces are maintained with clear migration paths, enabling gradual system evolution without breaking existing integrations.
-
-This shared module serves as the critical foundation enabling the MCP Debugger to support multiple programming languages through a consistent, extensible, and type-safe architecture while maintaining compatibility with standard debugging tools and protocols.
+This shared module enables the debug adapter system to support multiple programming languages through a unified, type-safe, and extensible architecture while maintaining strict separation between generic DAP transport logic and language-specific implementation details.

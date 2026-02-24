@@ -276,7 +276,7 @@ describe('go-utils', () => {
   });
 
   describe('checkDelveDapSupport', () => {
-    it('should return true if dlv dap --help succeeds', async () => {
+    it('should return supported=true if dlv dap --help succeeds', async () => {
       mockSpawn.mockImplementation(() => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
@@ -286,10 +286,10 @@ describe('go-utils', () => {
       });
 
       const result = await checkDelveDapSupport('/home/user/go/bin/dlv');
-      expect(result).toBe(true);
+      expect(result.supported).toBe(true);
     });
 
-    it('should return false if dlv dap --help fails', async () => {
+    it('should return supported=false if dlv dap --help fails', async () => {
       mockSpawn.mockImplementation(() => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
@@ -299,10 +299,10 @@ describe('go-utils', () => {
       });
 
       const result = await checkDelveDapSupport('/home/user/go/bin/dlv');
-      expect(result).toBe(false);
+      expect(result.supported).toBe(false);
     });
 
-    it('should return false on spawn error', async () => {
+    it('should return supported=false with stderr on spawn error', async () => {
       mockSpawn.mockImplementation(() => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
@@ -312,7 +312,8 @@ describe('go-utils', () => {
       });
 
       const result = await checkDelveDapSupport('/home/user/go/bin/dlv');
-      expect(result).toBe(false);
+      expect(result.supported).toBe(false);
+      expect(result.stderr).toBe('spawn failed');
     });
   });
 
