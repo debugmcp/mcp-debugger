@@ -1,0 +1,27 @@
+{
+  "path": "src/index.ts",
+  "kind": "source",
+  "purpose": "Entry point for Debug MCP Server with console silencing and CLI setup for LLM debugging.",
+  "topics": [
+    "console silencing",
+    "MCP protocol transport",
+    "CLI command setup",
+    "server factory pattern",
+    "stdio/SSE modes",
+    "container diagnostics",
+    "module detection"
+  ],
+  "public_surface": [
+    "ServerOptions",
+    "createDebugMcpServer",
+    "main",
+    "setupErrorHandlers",
+    "createCLI",
+    "setupStdioCommand",
+    "setupSSECommand",
+    "setupCheckRustBinaryCommand",
+    "handleStdioCommand",
+    "handleSSECommand",
+    "handleCheckRustBinaryCommand"
+  ]
+}

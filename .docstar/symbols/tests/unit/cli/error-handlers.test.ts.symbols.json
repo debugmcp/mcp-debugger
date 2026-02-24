@@ -2,5 +2,6 @@
   "source": "tests\\unit\\cli\\error-handlers.test.ts",
   "source_hash": "18fa95f287f2cedf",
   "generated": "2026-02-24T18:26:33Z",
-  "findings": []
+  "file_role": "test",
+  "symbols": []
 }

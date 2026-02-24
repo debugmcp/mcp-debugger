@@ -1,6 +1,6 @@
 {
-  "source": "src/cli/error-handlers.ts",
-  "source_hash": "c90bdd6371d3cd4f",
-  "generated": "2026-02-10T00:41:43Z",
+  "source": "src\\cli\\error-handlers.ts",
+  "source_hash": "a33fbbcfbf8f3a43",
+  "generated": "2026-02-24T18:26:31Z",
   "findings": []
 }

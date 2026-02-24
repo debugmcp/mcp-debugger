@@ -1,0 +1,15 @@
+{
+  "path": "tests/unit/index.test.ts",
+  "kind": "source",
+  "purpose": "Unit tests for main entry point module covering CLI setup and command orchestration.",
+  "topics": [
+    "CLI initialization",
+    "command setup",
+    "server factory",
+    "handler integration",
+    "dependency injection",
+    "module execution guard",
+    "export verification"
+  ],
+  "public_surface": []
+}

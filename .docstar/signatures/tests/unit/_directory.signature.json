@@ -1,0 +1,15 @@
+{
+  "path": "tests/unit",
+  "kind": "directory",
+  "purpose": "Comprehensive unit test suite for the Debug MCP Server, providing complete coverage of all system components through isolated testing with extensive mocking infrastructure.",
+  "topics": [
+    "Main entry point orchestration testing",
+    "Debug server lifecycle management",
+    "Adapter system and registry testing",
+    "CLI and transport layer validation",
+    "Proxy communication and DAP protocol",
+    "Session management and operations",
+    "Dependency injection container",
+    "Testing utilities and mock infrastructure"
+  ]
+}

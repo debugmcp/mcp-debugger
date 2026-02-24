@@ -1,0 +1,20 @@
+{
+  "path": "src/cli/sse-command.ts",
+  "kind": "source",
+  "purpose": "Implements SSE transport layer for MCP server with persistent HTTP connections and session management.",
+  "topics": [
+    "Server-Sent Events",
+    "MCP transport",
+    "session management",
+    "Express endpoints",
+    "graceful shutdown",
+    "connection pooling",
+    "health monitoring"
+  ],
+  "public_surface": [
+    "ServerFactoryOptions",
+    "SSECommandDependencies",
+    "createSSEApp",
+    "handleSSECommand"
+  ]
+}

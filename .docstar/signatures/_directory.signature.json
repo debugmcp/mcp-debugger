@@ -1,14 +1,14 @@
 {
   "path": "(root)",
   "kind": "directory",
-  "purpose": "Production-ready MCP server enabling multi-language debugging through Debug Adapter Protocol with comprehensive tooling infrastructure.",
+  "purpose": "Multi-language debugging platform enabling AI agents to perform step-through debugging across Python, JavaScript, Go, and Rust through Model Context Protocol.",
   "topics": [
-    "MCP protocol server implementation",
-    "Multi-language debug adapter framework",
-    "Debug Adapter Protocol integration",
-    "TypeScript/Node.js development tooling",
-    "Docker containerization support",
-    "Cross-platform testing infrastructure",
-    "CI/CD automation and deployment"
+    "MCP debug server",
+    "multi-language adapters",
+    "Debug Adapter Protocol",
+    "monorepo architecture",
+    "container deployment",
+    "AI agent integration",
+    "cross-platform debugging"
   ]
 }

@@ -1,14 +1,14 @@
 {
   "path": "tests",
   "kind": "directory",
-  "purpose": "Comprehensive test suite validating MCP debugger functionality across multiple languages, transports, and deployment environments with extensive mocking infrastructure.",
+  "purpose": "Comprehensive testing infrastructure for MCP debugger system validation across languages, transports, and deployment environments.",
   "topics": [
-    "Multi-language debugging validation",
-    "Transport protocol testing",
-    "Cross-platform compatibility",
-    "Mock infrastructure",
-    "Integration testing",
-    "Performance validation",
-    "Resource management"
+    "multi-layered testing strategy",
+    "language-specific debug adapters",
+    "transport mechanism validation",
+    "end-to-end workflow testing",
+    "mock infrastructure",
+    "protocol compliance verification",
+    "cross-platform compatibility"
   ]
 }

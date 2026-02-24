@@ -1,0 +1,20 @@
+{
+  "source": "src\\cli\\error-handlers.ts",
+  "source_hash": "a33fbbcfbf8f3a43",
+  "generated": "2026-02-24T18:26:31Z",
+  "file_role": "service",
+  "symbols": [
+    {
+      "name": "ErrorHandlerDependencies",
+      "kind": "constant",
+      "line_start": 3,
+      "line_end": 6
+    },
+    {
+      "name": "setupErrorHandlers",
+      "kind": "function",
+      "line_start": 8,
+      "line_end": 26
+    }
+  ]
+}

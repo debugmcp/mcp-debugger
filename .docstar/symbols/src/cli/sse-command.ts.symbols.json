@@ -1,0 +1,32 @@
+{
+  "source": "src\\cli\\sse-command.ts",
+  "source_hash": "c6dca3cddff348f0",
+  "generated": "2026-02-24T18:26:36Z",
+  "file_role": "service",
+  "symbols": [
+    {
+      "name": "ServerFactoryOptions",
+      "kind": "constant",
+      "line_start": 8,
+      "line_end": 11
+    },
+    {
+      "name": "SSECommandDependencies",
+      "kind": "constant",
+      "line_start": 13,
+      "line_end": 17
+    },
+    {
+      "name": "createSSEApp",
+      "kind": "function",
+      "line_start": 24,
+      "line_end": 176
+    },
+    {
+      "name": "handleSSECommand",
+      "kind": "function",
+      "line_start": 178,
+      "line_end": 233
+    }
+  ]
+}
