@@ -1,67 +1,45 @@
-# src/cli/sse-command.ts
-@source-hash: 2729e94f6af76321
-@generated: 2026-02-10T00:41:54Z
+# src\cli\sse-command.ts
+@source-hash: c6dca3cddff348f0
+@generated: 2026-02-24T18:26:36Z
 
-## SSE Command Handler for Debug MCP Server
+## Purpose
+Implements Server-Sent Events (SSE) transport layer for MCP (Model Context Protocol) server, enabling bidirectional communication through HTTP with persistent connections.
 
-**Primary Purpose**: Implements Server-Sent Events (SSE) transport for the Model Context Protocol (MCP) debug server, enabling HTTP-based bi-directional communication through SSE for server-to-client messages and POST for client-to-server messages.
+## Core Architecture
 
-### Key Interfaces & Types
+### Express Application Factory
+**`createSSEApp` (L24-176)** - Creates Express app with SSE endpoints and shared MCP server instance. Key features:
+- Single shared `DebugMcpServer` instance serves all connections (L32-36)
+- Session-based transport management via `Map<string, SessionData>` (L39)
+- CORS middleware for cross-origin requests (L42-51)
 
-- **ServerFactoryOptions (L8-11)**: Configuration for server creation with optional logging parameters
-- **SSECommandDependencies (L13-17)**: Dependency injection interface containing logger, server factory, and optional exit function  
-- **SessionData (L19-22)**: Internal session management structure tracking SSE transport and closing state
+### SSE Protocol Implementation
+**GET `/sse` endpoint (L54-116)** - Establishes server-to-client event stream:
+- Creates `SSEServerTransport` and connects to shared MCP server (L57-60)
+- Implements periodic ping mechanism every 30 seconds (L70-76)
+- Robust connection cleanup with recursion guards (L79-97)
 
-### Core Functions
+**POST `/sse` endpoint (L119-159)** - Handles client-to-server messages:
+- Session validation via query parameter `sessionId` (L122-140)
+- Routes messages through existing transport instance (L142-145)
+- JSON-RPC error responses for invalid sessions (L131-138)
 
-**createSSEApp() (L24-176)**
-- Creates Express application with SSE transport capabilities
-- Establishes single shared DebugMcpServer instance (L32-35) for all connections 
-- Implements session management via Map<string, SessionData> (L39)
-- Configures CORS middleware (L42-51) allowing cross-origin requests
-- Exposes sseTransports and sharedDebugServer on app object for shutdown access (L172-173)
+### Command Handler
+**`handleSSECommand` (L178-233)** - Main entry point that:
+- Configures logging and starts HTTP server on specified port (L184-201)
+- Implements graceful shutdown with SIGINT handling (L204-227)
+- Properly cleans up all SSE connections and shared server instance
 
-**handleSSECommand() (L178-228)**  
-- Main entry point for SSE mode execution
-- Configures logging level and starts Express server on specified port
-- Implements graceful shutdown with SIGINT handler (L199-222)
-- Coordinates cleanup of SSE connections and shared server
+## Key Dependencies
+- `@modelcontextprotocol/sdk/server/sse.js` - SSE transport implementation
+- `../server.js` - DebugMcpServer for MCP protocol handling
+- `./setup.js` - SSEOptions configuration interface
 
-### HTTP Endpoints
+## Critical Design Patterns
+1. **Shared Server Architecture** - Single MCP server instance handles all concurrent SSE connections, improving resource efficiency
+2. **Session Management** - Each SSE connection gets unique session ID for message routing
+3. **Connection Persistence** - Ping mechanism and proper cleanup prevent zombie connections
+4. **Graceful Shutdown** - Orderly cleanup of all resources during process termination
 
-**GET /sse (L54-116)**
-- Establishes SSE connection using SSEServerTransport
-- Connects shared server to new transport instance
-- Implements ping mechanism (30s intervals) for connection keepalive (L70-76)
-- Handles connection cleanup with recursion protection via isClosing flag (L79-97)
-- Manages multiple close event sources (transport.onclose, req close/end)
-
-**POST /sse (L119-159)**
-- Handles client-to-server messages
-- Validates sessionId from query parameters
-- Routes messages through appropriate SSE transport
-- Returns JSON-RPC error responses for invalid sessions or errors
-
-**GET /health (L162-169)**
-- Health check endpoint exposing connection count and active sessions
-
-### Architectural Patterns
-
-- **Shared Server Model**: Single DebugMcpServer instance serves multiple SSE connections
-- **Session-based Transport Management**: Each SSE connection gets unique session ID with dedicated transport
-- **Dependency Injection**: Dependencies passed through SSECommandDependencies interface
-- **Graceful Shutdown**: Coordinated cleanup of transports and server on SIGINT
-
-### Key Dependencies
-
-- Express.js for HTTP server functionality
-- @modelcontextprotocol/sdk/server/sse.js for SSE transport implementation  
-- Winston logger for structured logging
-- DebugMcpServer from ../server.js as the core MCP server implementation
-
-### Critical Invariants
-
-- Session IDs must be unique and validated before message processing
-- Shared server persists across individual SSE connection lifecycles
-- Transport cleanup must happen before server shutdown
-- isClosing flag prevents infinite recursion in connection cleanup
+## Health Monitoring
+**`/health` endpoint (L162-169)** provides connection status and active session count for operational monitoring.

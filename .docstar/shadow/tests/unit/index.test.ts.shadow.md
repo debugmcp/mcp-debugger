@@ -1,45 +1,33 @@
-# tests/unit/index.test.ts
-@source-hash: c1f475e2f859e171
-@generated: 2026-02-10T00:42:00Z
+# tests\unit\index.test.ts
+@source-hash: 89a890d3aa629fc8
+@generated: 2026-02-24T18:26:33Z
 
-## Purpose
-Comprehensive unit test suite for the main entry point module (`src/index.js`), validating CLI setup, command handling, and server factory functionality using Vitest testing framework.
+## Test Suite for Main Entry Point Module
 
-## Test Structure
-- **Main Test Suite (L19-159)**: Tests for `index.ts` module with comprehensive mock setup
-- **Mock Setup (L11-17, L23-52)**: Extensive mocking of all external dependencies including logger, server, CLI components, and command handlers
-- **Test Categories**:
-  - `createDebugMcpServer` factory function tests (L54-65)
-  - `main` function CLI initialization tests (L67-135)
-  - Module execution guard validation (L137-142)
-  - Export availability verification (L144-158)
+Comprehensive unit tests for the `src/index.js` module, covering CLI initialization, command setup, and server factory function. Uses Vitest framework with extensive mocking to isolate the main function's orchestration logic.
 
-## Key Test Scenarios
+### Test Structure
 
-### Server Factory Tests (L54-65)
-- **Factory Function Test (L55-64)**: Validates `createDebugMcpServer` correctly instantiates `DebugMcpServer` with provided options
-- Verifies constructor call and return value
+**Test Setup (L23-52)**: Configures mocks for all dependencies including logger, CLI program, command handlers, and version utilities. Creates mock objects with spy functions for verification.
 
-### Main Function Tests (L67-135)
-- **CLI Setup Test (L68-90)**: Validates complete CLI initialization sequence including logger creation, error handler setup, command registration, and argument parsing
-- **STDIO Command Handler Test (L92-112)**: Captures and validates the handler function passed to `setupStdioCommand`, ensuring correct dependency injection
-- **SSE Command Handler Test (L114-134)**: Similar validation for SSE command handler with port and logging options
+**createDebugMcpServer Tests (L54-65)**: Verifies the server factory function correctly instantiates `DebugMcpServer` with provided options and returns the instance.
 
-## Mock Infrastructure
-- **Logger Mock (L28-34)**: Complete logger interface with error, warn, info, debug methods
-- **Program Mock (L37-39)**: CLI program with parse method
-- **Dependency Mocks (L42-51)**: All CLI setup functions, version getter, and command handlers mocked to return expected values
+**main Function Tests (L67-135)**: 
+- **Basic Flow (L68-90)**: Tests complete CLI setup sequence including logger creation, error handler setup, CLI creation with metadata, command registration, and argument parsing
+- **STDIO Handler Integration (L92-112)**: Captures and tests the handler function passed to `setupStdioCommand`, verifying it calls `handleStdioCommand` with correct dependencies 
+- **SSE Handler Integration (L114-134)**: Similar test for SSE command handler, ensuring proper dependency injection
 
-## Test Dependencies
-- **External Modules**: Tests integration with logger utils, server class, CLI components, error handlers, and command handlers
-- **Vitest Framework**: Uses describe/it/expect/vi/beforeEach pattern with comprehensive mocking capabilities
+**Module Execution Guard (L137-142)**: Ensures the main function doesn't execute when the module is imported (vs run directly).
 
-## Validation Points
-- Proper CLI configuration with name, description, and version
-- Command handler dependency injection (logger and serverFactory)
-- Module import behavior (no automatic execution)
-- Export availability of all public functions
+**Export Verification (L144-158)**: Confirms all expected functions are properly exported and accessible.
 
-## Mock Reset Strategy
-- `beforeEach` hook (L23-52) clears all mocks and establishes fresh mock state for each test
-- Ensures test isolation and prevents cross-test contamination
+### Testing Patterns
+
+- **Comprehensive Mocking**: All external dependencies mocked using `vi.mock()` (L11-17)
+- **Handler Capture Pattern**: Tests capture callback functions passed to setup methods to verify their behavior independently
+- **Dependency Injection Testing**: Verifies that handlers receive correct logger and serverFactory dependencies
+- **Import-time Safety**: Tests that importing the module doesn't trigger side effects
+
+### Key Dependencies Mocked
+
+- Logger utilities, server classes, error handlers, CLI setup functions, command handlers, and version utilities - enabling isolated testing of the main orchestration logic.

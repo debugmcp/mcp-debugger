@@ -190,6 +190,11 @@ export async function handleSSECommand(
 
   try {
     const app = createSSEApp(options, dependencies);
+
+    // Start the shared debug server (mirrors stdio-command.ts:57)
+    const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer; // eslint-disable-line @typescript-eslint/no-explicit-any
+    await sharedDebugServer.start();
+
     const server = app.listen(port, () => {
       logger.info(`Debug MCP Server (SSE) listening on port ${port}`);
       logger.info(`SSE endpoint available at http://localhost:${port}/sse`);

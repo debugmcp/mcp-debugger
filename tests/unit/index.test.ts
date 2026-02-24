@@ -35,7 +35,7 @@ describe('index.ts', () => {
 
     // Mock program
     mockProgram = {
-      parse: vi.fn()
+      parseAsync: vi.fn().mockResolvedValue(undefined)
     };
 
     // Mock CLI setup functions
@@ -86,7 +86,7 @@ describe('index.ts', () => {
       expect(setup.setupSSECommand).toHaveBeenCalledWith(mockProgram, expect.any(Function));
 
       // Verify parse was called
-      expect(mockProgram.parse).toHaveBeenCalled();
+      expect(mockProgram.parseAsync).toHaveBeenCalled();
     });
 
     it('should pass correct handlers to setupStdioCommand', async () => {
@@ -137,7 +137,7 @@ describe('index.ts', () => {
   describe('Module execution guard', () => {
     it('should not execute main when imported as a module', async () => {
       // The import at the top of this file should not trigger main execution
-      expect(mockProgram.parse).not.toHaveBeenCalled();
+      expect(mockProgram.parseAsync).not.toHaveBeenCalled();
     });
   });
 

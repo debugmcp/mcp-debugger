@@ -109,7 +109,7 @@ export async function main(): Promise<void> {
   );
   
   // Parse command line arguments
-  program.parse();
+  await program.parseAsync();
 }
 
 // Only execute if this is the main module

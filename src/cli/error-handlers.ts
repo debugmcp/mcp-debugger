@@ -20,6 +20,7 @@ export function setupErrorHandlers(dependencies: ErrorHandlerDependencies): void
   process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
     logger.error('[Server UNHANDLED_REJECTION] Reason:', { reason });
     logger.error('[Server UNHANDLED_REJECTION] Promise:', { promise });
-    exitProcess(1);
+    // Do not exit: in a long-running server (SSE mode), stray rejections
+    // should not kill the process. Fatal errors surface as uncaughtExceptions.
   });
 }

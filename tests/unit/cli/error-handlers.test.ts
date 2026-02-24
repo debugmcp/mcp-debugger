@@ -80,18 +80,18 @@ describe('Error Handlers', () => {
     expect(mockExitProcess).toHaveBeenCalledWith(1);
   });
 
-  it('should handle unhandledRejection by logging and exiting', async () => {
+  it('should handle unhandledRejection by logging without exiting', async () => {
     setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess });
 
     const reason = 'Test rejection reason';
     const promise = Promise.reject(reason);
-    
+
     // Catch the rejection to prevent unhandled rejection warning
     promise.catch(() => {});
 
     // Get the unhandledRejection handler
     const unhandledRejectionHandler = processListeners.get('unhandledRejection')![0] as (reason: any, promise: Promise<unknown>) => void;
-    
+
     // Trigger the handler
     unhandledRejectionHandler(reason, promise);
 
@@ -99,8 +99,8 @@ describe('Error Handlers', () => {
     expect(mockLogger.error).toHaveBeenCalledWith('[Server UNHANDLED_REJECTION] Reason:', { reason });
     expect(mockLogger.error).toHaveBeenCalledWith('[Server UNHANDLED_REJECTION] Promise:', { promise });
 
-    // Verify process exit was called with code 1
-    expect(mockExitProcess).toHaveBeenCalledWith(1);
+    // Verify process exit was NOT called - stray rejections should not kill a long-running server
+    expect(mockExitProcess).not.toHaveBeenCalled();
   });
 
   it('should use process.exit by default if exitProcess is not provided', () => {

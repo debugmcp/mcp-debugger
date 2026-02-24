@@ -1,48 +1,51 @@
-# src/index.ts
-@source-hash: 9465c92b70be787c
-@generated: 2026-02-10T00:42:03Z
+# src\index.ts
+@source-hash: 58fb33d95769a637
+@generated: 2026-02-24T18:26:36Z
 
-## Primary Purpose
+## Debug MCP Server Entry Point
 
-Entry point for Debug MCP Server - a step-through debugging server for LLMs using the Model Context Protocol (MCP). Handles critical initialization sequence, console output silencing, and CLI command routing.
+Main entry point for the Debug MCP Server that provides step-through debugging capabilities for LLMs via MCP protocol.
 
-## Critical Architecture
+### Critical Console Silencing (L12-34)
+The file immediately silences all console output via an IIFE to prevent stdout pollution that could:
+- Break MCP protocol in stdio mode  
+- Corrupt IPC channels in SSE mode with proxy processes
 
-**Console Silencing (L12-34)**: IIFE that must execute first to prevent stdout pollution that can corrupt MCP protocol in stdio mode and IPC channels in SSE mode. Silences all console methods and process warnings.
+Sets `process.env.CONSOLE_OUTPUT_SILENCED = '1'` and overrides all console methods with no-ops. Also suppresses process warnings.
 
-**Argument Processing (L36-39)**: Strips quotes from command-line arguments before any code processes them.
+### Argument Processing (L36-39)
+Cleans `process.argv` by stripping quotes from all arguments before any code processes them.
 
-**Container Diagnostics (L71-86)**: Emits file-based startup breadcrumbs when `MCP_CONTAINER=true` to enable debugging in Docker environments without console output.
+### Core Exports
 
-## Key Functions
+**ServerOptions Interface (L57-60)**: Configuration options with optional `logLevel` and `logFile` properties.
 
-- **createDebugMcpServer** (L63-65): Factory function for server instances, accepts ServerOptions
-- **main** (L89-113): Primary execution function that sets up logger, error handlers, CLI commands, and parses arguments
-- **isMainModule detection** (L118-135): Complex logic to determine if script is running directly vs imported, handles both ESM and CJS contexts
+**createDebugMcpServer() (L63-65)**: Factory function that creates `DebugMcpServer` instances from options.
 
-## Dependencies & Relationships
+**main() (L89-113)**: Primary execution function that:
+- Creates logger and sets up error handlers
+- Initializes CLI with commands (stdio, SSE, check-rust-binary)
+- Parses command line arguments
 
-- **Core Server**: `DebugMcpServer` from `./server.js`
-- **CLI Framework**: Command setup from `./cli/setup.js`, handlers from `./cli/stdio-command.js`, `./cli/sse-command.js`
-- **Utilities**: Logger from `./utils/logger.js`, error handlers from `./cli/error-handlers.js`
-- **Version**: `getVersion()` from `./cli/version.js`
+### Container Diagnostics (L71-86)
+When `MCP_CONTAINER=true`, writes early startup breadcrumbs to `/app/logs/bundle-start.log` for container debugging without console output.
 
-## Command Structure
+### Module Detection & Auto-Start (L118-146)
+Complex logic to detect if running as main module in both ESM and CJS contexts:
+- Checks `require.main === module` for CJS (bundled)
+- Compares `import.meta.url` with `process.argv[1]` for ESM
+- Falls back to assuming main module if detection fails
 
-Sets up three main CLI commands:
-1. **stdio**: Handles MCP protocol over stdio transport
-2. **sse**: Handles MCP protocol over Server-Sent Events transport  
-3. **check-rust-binary**: Validates Rust binary availability
+Auto-starts `main()` unless `DEBUG_MCP_SKIP_AUTO_START=1` environment variable is set.
 
-## Critical Constraints
+### Dependencies
+- `DebugMcpServer` from `./server.js`
+- CLI setup utilities from `./cli/setup.js`
+- Command handlers for stdio, SSE, and Rust binary checking
+- Logger utilities
 
-- Console output is permanently silenced to prevent protocol corruption
-- Main execution only occurs when `DEBUG_MCP_SKIP_AUTO_START !== '1'`
-- Container mode enables special file-based logging for diagnostics
-- Error handling routes through logger instead of console
-
-## Interface Exports
-
-- **ServerOptions**: Interface for server configuration (logLevel, logFile)
-- **Factory function**: `createDebugMcpServer`
-- **CLI components**: All setup and handler functions for testing/reuse
+### Architecture Notes
+- Prioritizes protocol integrity over debugging convenience by silencing all console output
+- Supports both stdio and SSE transport modes
+- Handles both bundled (CJS) and native ESM execution contexts
+- Provides factory pattern for server instantiation
