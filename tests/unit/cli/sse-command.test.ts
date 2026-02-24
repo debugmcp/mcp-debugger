@@ -581,7 +581,8 @@ describe('SSE Command Handler', () => {
 
     beforeEach(() => {
       mockServer = {
-        close: vi.fn()
+        close: vi.fn(),
+        on: vi.fn()
       };
     });
 

@@ -1,75 +1,76 @@
 # tests\unit\cli/
-@children-hash: 1f173f9d666ee016
-@generated: 2026-02-24T18:26:53Z
+@children-hash: 486a6c5690d3e625
+@generated: 2026-02-24T21:14:56Z
 
-## Overall Purpose
+## Purpose
 
-This directory contains comprehensive unit tests for the CLI (Command Line Interface) module of the Debug MCP Server application. It validates all CLI functionality including command setup, transport modes (stdio/SSE), error handling, and utility functions through isolated unit tests with extensive mocking.
+The `tests/unit/cli` directory contains comprehensive unit tests for the Debug MCP CLI application's command-line interface components. These tests validate all major CLI functionality including binary analysis, error handling, server startup, and transport layer operations across both STDIO and SSE modes.
 
-## Key Components and Organization
+## Test Architecture
 
-### Command Testing
-- **setup.test.ts**: Tests CLI command creation and configuration for both stdio and SSE transport modes
-- **stdio-command.test.ts**: Validates stdio transport command handler with dependency injection patterns
-- **sse-command.test.ts**: Comprehensive testing of SSE (Server-Sent Events) transport with Express app creation and WebSocket-like communication
+### Core CLI Framework Testing
+- **setup.test.ts**: Tests CLI command structure, option parsing, and command handler registration for both STDIO and SSE transport modes
+- **version.test.ts**: Validates version utility function with error handling and fallback behavior
 
-### Utility Testing
-- **check-rust-binary.test.ts**: Tests binary analysis CLI command with file system validation and output formatting
-- **version.test.ts**: Tests version extraction utility with error handling and fallback scenarios
-- **error-handlers.test.ts**: Validates global error handling setup for uncaught exceptions and unhandled rejections
+### Command Handler Testing
+- **stdio-command.test.ts**: Tests STDIO transport mode server startup, configuration handling, and error scenarios with dependency injection patterns
+- **sse-command.test.ts**: Comprehensive testing of SSE transport including Express app setup, connection management, route handling, and graceful shutdown procedures
 
-## Testing Architecture Patterns
+### Specialized Functionality
+- **check-rust-binary.test.ts**: Tests binary analysis CLI command with mock file system operations and binary format detection
+- **error-handlers.test.ts**: Validates global error handling setup for uncaught exceptions and unhandled promise rejections
+
+## Testing Patterns & Dependencies
 
 ### Mock Strategy
-- **Dependency Injection**: All tests use injectable dependencies (loggers, server factories, exit functions) for isolation
-- **Module Mocking**: Comprehensive mocking of external dependencies (fs, express, MCP SDK components)
-- **Process Mocking**: Custom process event handling and exit mocking to prevent test interference
+All tests use extensive mocking to isolate components:
+- **Process mocking**: Prevents actual process termination and captures signal handlers
+- **File system mocking**: Simulates file operations for binary analysis and version reading
+- **Network mocking**: Mock Express servers and HTTP connections for SSE testing
+- **Logger mocking**: Winston-compatible mock loggers for output verification
 
-### Coverage Areas
-- **Transport Modes**: Both stdio and SSE server transport functionality
-- **Error Scenarios**: Exception handling, file system errors, server startup failures
-- **Configuration**: Command option parsing, logging setup, port configuration
-- **Output Validation**: JSON and human-readable output formatting
-- **Lifecycle Management**: Server startup, graceful shutdown, connection cleanup
+### Test Infrastructure
+- **Vitest framework**: Primary testing framework with built-in mocking capabilities
+- **Dependency injection**: All external dependencies are injectable for isolation
+- **Output capture**: Intercepts stdout/stderr for assertion verification
+- **Event simulation**: Mock event emitters for connection lifecycle testing
 
-## Key Testing Utilities
+## Key Components Tested
 
-### Common Patterns
-- **Winston Logger Mocking**: Standardized mock logger setup across test files
-- **Async/Await Testing**: Proper Promise-based operation testing
-- **Event Simulation**: Custom event emitters for testing connection lifecycle
-- **Output Capture**: stdout/stderr interception for CLI output validation
+### Transport Modes
+- **STDIO Mode**: Standard input/output transport with logging configuration
+- **SSE Mode**: Server-Sent Events with Express server, CORS handling, and connection management
 
-### Integration Points
-- **Commander.js**: Command-line interface library testing
-- **Express.js**: HTTP server functionality for SSE transport
-- **MCP SDK**: Server transport layer integration testing
-- **File System**: Binary analysis and configuration file handling
+### Error Handling
+- **Global handlers**: Process-level exception and rejection handling
+- **Transport errors**: Connection failures and cleanup procedures
+- **Graceful shutdown**: SIGINT handling with proper resource cleanup
 
-## Critical Behaviors Validated
+### Configuration Management
+- Command-line option parsing and validation
+- Log level configuration and file output
+- Port configuration for SSE mode
+- Environment variable handling
 
-### CLI Command Functionality
-- Command creation with proper options and defaults
-- Transport mode selection and configuration
-- Error propagation and user feedback
+## Test Coverage Areas
 
-### Server Management
-- Server factory pattern implementation
-- Connection lifecycle management
-- Graceful shutdown procedures
+### Happy Path Scenarios
+- Successful server startup in both transport modes
+- Proper command parsing and option handling
+- Binary analysis with valid files
+- Health endpoint responses and connection tracking
 
-### Error Resilience
-- Global error handler registration
-- Process event handling without termination
-- Fallback behavior for missing dependencies
+### Error Scenarios
+- Server startup failures and recovery
+- Invalid command-line arguments
+- File system errors and JSON parsing failures
+- Network connection errors and transport failures
+- Process signal handling and cleanup
 
-## Dependencies
+### Edge Cases
+- Missing configuration values with sensible defaults
+- Concurrent connection management
+- Session validation and cleanup
+- Console output suppression via environment variables
 
-The test suite relies on:
-- **Vitest**: Primary testing framework with mocking capabilities
-- **Winston**: Logger type definitions for mock creation
-- **Commander**: CLI framework being tested
-- **Express**: Web server framework for SSE transport
-- **MCP SDK**: Model Context Protocol implementation
-
-This comprehensive test suite ensures the CLI module provides reliable command-line interface functionality with proper error handling, multiple transport options, and robust configuration management.
+This test suite ensures robust CLI functionality across all supported transport modes and provides comprehensive error handling validation for production deployment.

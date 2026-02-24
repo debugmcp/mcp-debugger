@@ -200,6 +200,15 @@ export async function handleSSECommand(
       logger.info(`SSE endpoint available at http://localhost:${port}/sse`);
     });
 
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        logger.error(`Port ${port} is already in use. Another instance may be running.`);
+      } else {
+        logger.error(`Server error: ${err.message}`);
+      }
+      exitProcess(1);
+    });
+
     // Handle graceful shutdown
     process.on('SIGINT', () => {
       logger.info('Shutting down SSE server...');

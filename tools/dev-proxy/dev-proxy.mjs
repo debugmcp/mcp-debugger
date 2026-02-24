@@ -158,6 +158,9 @@ class BackendManager {
       // SSE mode: we spawn the child manually, wait for health, then connect
       log(`Starting backend on port ${BACKEND_PORT}...`);
 
+      // Kill any orphan process holding the port from a previous crash
+      await this._ensurePortFree();
+
       this.child = spawn(command, args, {
         cwd: PROJECT_ROOT,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -177,11 +180,18 @@ class BackendManager {
         this._onChildExit();
       });
 
-      // Wait for /health to respond
-      await this._waitForHealth();
-
-      // Connect MCP Client over SSE
-      await this._connectClient();
+      // Wait for /health to respond, then connect MCP Client over SSE
+      // If either fails, kill the child so it doesn't become an orphan holding the port
+      try {
+        await this._waitForHealth();
+        await this._connectClient();
+      } catch (err) {
+        log(`SSE backend failed during startup: ${err.message}`);
+        await this._killChild();
+        this.state = 'stopped';
+        this.startedAt = null;
+        throw err;
+      }
     }
 
     this.startedAt = Date.now();
@@ -352,6 +362,8 @@ class BackendManager {
         if (this.state === 'running') {
           this.state = 'stopped';
           this.startedAt = null;
+          log('Killing orphaned child process after SSE transport close');
+          this._killChild().catch(() => {});
         }
       };
 
@@ -402,10 +414,10 @@ class BackendManager {
         resolve();
       });
 
-      // Graceful kill
+      // Graceful kill (on Windows, use /F immediately — WM_CLOSE is ignored by console Node processes)
       try {
         if (process.platform === 'win32') {
-          execSync(`taskkill /pid ${child.pid} /T`, { stdio: 'ignore' });
+          execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' });
         } else {
           child.kill('SIGTERM');
         }
@@ -431,6 +443,42 @@ class BackendManager {
       }
     } catch {
       // Process already dead — expected
+    }
+  }
+
+  async _ensurePortFree() {
+    // Only needed for SSE mode — check if BACKEND_PORT is held by an orphan and kill it
+    if (this.backendTransport !== 'sse') return;
+
+    try {
+      let pid = null;
+
+      if (process.platform === 'win32') {
+        // Use netstat to find the PID holding the port
+        const output = execSync(
+          `netstat -ano | findstr ":${BACKEND_PORT}" | findstr "LISTENING"`,
+          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+        );
+        // Parse last column (PID) from first matching line
+        const match = output.trim().split('\n')[0]?.match(/\s(\d+)\s*$/);
+        if (match) pid = parseInt(match[1], 10);
+      } else {
+        // Use lsof on Unix
+        const output = execSync(
+          `lsof -ti tcp:${BACKEND_PORT} -sTCP:LISTEN`,
+          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+        );
+        pid = parseInt(output.trim().split('\n')[0], 10);
+      }
+
+      if (pid && pid > 0) {
+        log(`Port ${BACKEND_PORT} is held by PID ${pid} — killing orphan`);
+        await this._forceKillPid(pid);
+        // Give OS a moment to release the port
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    } catch {
+      // No process holding the port, or command not available — proceed
     }
   }
 }
