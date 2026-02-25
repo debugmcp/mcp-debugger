@@ -12,7 +12,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
   executeDebugSequence,
-  waitForPort
+  waitForPort,
+  SKIP_PYTHON
 } from './smoke-test-utils.js';
 
 const execAsync = promisify(execCallback);
@@ -24,7 +25,7 @@ let serverPort: number | null = null;
 const projectRoot = process.cwd();
 let distReady = false;
 
-describe('MCP Server E2E SSE Smoke Test', () => {
+describe.skipIf(SKIP_PYTHON)('MCP Server E2E SSE Smoke Test', () => {
   // Ensure server is killed even if test fails
   afterEach(async () => {
     console.log('[SSE Smoke Test] Cleaning up...');

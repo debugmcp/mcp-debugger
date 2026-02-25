@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { parseSdkToolResult, callToolSafely, hasPythonWithDebugpy } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +63,7 @@ function hasCommand(cmd: string): boolean {
   }
 }
 
+const hasPython = hasPythonWithDebugpy();
 const hasRust = hasCommand('rustc --version');
 const hasGo = hasCommand('go version');
 /* ---------- language definitions ---------- */
@@ -76,7 +77,7 @@ interface LangDef {
 }
 
 const LANGUAGES: LangDef[] = [
-  { language: 'python', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: true },
+  { language: 'python', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: hasPython, skipReason: hasPython ? undefined : 'Python with debugpy not installed' },
   { language: 'javascript', script: JS_SCRIPT, bpLine: JS_BP_LINE, available: true },
   { language: 'mock', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: true },
   { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed' },

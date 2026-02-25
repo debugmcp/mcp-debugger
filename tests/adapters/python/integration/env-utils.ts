@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 
 /**
  * Check if a Python installation has debugpy installed.
@@ -38,6 +38,22 @@ function installDebugpy(pythonExe: string): { installed: boolean; log: string } 
     };
   }
 }
+
+/**
+ * Check if Python with debugpy is available on the system.
+ */
+export function hasPythonWithDebugpy(): boolean {
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  try {
+    execSync(`${pythonCmd} -m debugpy --version`, { stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when Python + debugpy are NOT available (for use with describe.skipIf). */
+export const SKIP_PYTHON = !hasPythonWithDebugpy();
 
 /**
  * Ensure the spawned MCP server inherits a PATH that includes a valid Python installation

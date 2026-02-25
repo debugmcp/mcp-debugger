@@ -15,13 +15,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { parseSdkToolResult, callToolSafely, SKIP_PYTHON } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../..');
 
-describe('MCP Server Python Debugging Smoke Test', () => {
+describe.skipIf(SKIP_PYTHON)('MCP Server Python Debugging Smoke Test', () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
   let sessionId: string | null = null;

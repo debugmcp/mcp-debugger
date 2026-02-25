@@ -8,14 +8,14 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildAndPackNpmPackage, installPackageGlobally, createNpxMcpClient, cleanupGlobalInstall, getPackageSize } from './npx-test-utils.js';
-import { parseSdkToolResult } from '../smoke-test-utils.js';
+import { parseSdkToolResult, SKIP_PYTHON } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../../..');
 
-describe.sequential('NPX: Python Debugging Smoke Tests', () => {
+describe.sequential.skipIf(SKIP_PYTHON)('NPX: Python Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;
