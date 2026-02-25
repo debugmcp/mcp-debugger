@@ -35,7 +35,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { findVsdbgExecutable, findDotnetBackend, findVsdaNode, findPdb2PdbExecutable } from './utils/dotnet-utils.js';
+import { findDotnetBackend, findVsdaNode, findPdb2PdbExecutable } from './utils/dotnet-utils.js';
 
 /**
  * Cache entry for debugger executable paths
