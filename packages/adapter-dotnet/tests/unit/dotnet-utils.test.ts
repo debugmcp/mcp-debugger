@@ -382,7 +382,8 @@ describe('findVsdaNode', () => {
     expect(result).toBeNull();
   });
 
-  it('discovers vsda.node in VS Code installation on Windows', () => {
+  // path.join uses platform-native separators, so the mock paths only match on Windows
+  it.skipIf(process.platform !== 'win32')('discovers vsda.node in VS Code installation on Windows', () => {
     const originalPlatform = process.platform;
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     process.env.LOCALAPPDATA = 'C:\\Users\\Test\\AppData\\Local';
