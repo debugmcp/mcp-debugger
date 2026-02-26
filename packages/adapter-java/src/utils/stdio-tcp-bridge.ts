@@ -17,7 +17,7 @@
 import * as net from 'net';
 import { spawn, ChildProcess } from 'child_process';
 
-const DAP_HEADER_PATTERN = /Content-Length:\s*(\d+)\r\n\r\n/;
+const _DAP_HEADER_PATTERN = /Content-Length:\s*(\d+)\r\n\r\n/;
 
 interface BridgeOptions {
   port: number;
