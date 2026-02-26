@@ -1,0 +1,54 @@
+{
+  "name": "@debugmcp/adapter-java",
+  "version": "0.18.0",
+  "description": "Java debug adapter for MCP Debugger using kotlin-debug-adapter",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "vendor"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "tsc -p tsconfig.json",
+    "build:adapter": "node scripts/vendor-kotlin-debug-adapter.js",
+    "clean": "rimraf dist vendor",
+    "clean:vendor": "rimraf vendor",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@debugmcp/shared": "workspace:*",
+    "@vscode/debugprotocol": "^1.65.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "extract-zip": "^2.0.1",
+    "node-fetch": "^2.7.0",
+    "progress": "^2.0.3",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "debugger",
+    "java",
+    "jvm",
+    "kotlin-debug-adapter",
+    "dap"
+  ],
+  "author": "mcp-debugger team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/debugmcp/mcp-debugger.git",
+    "directory": "packages/adapter-java"
+  }
+}

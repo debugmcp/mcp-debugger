@@ -34,6 +34,7 @@ import {
   PythonAdapterPolicy,
   RustAdapterPolicy,
   GoAdapterPolicy,
+  JavaAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 
@@ -114,6 +115,8 @@ export class DapProxyWorker {
       return RustAdapterPolicy;
     } else if (GoAdapterPolicy.matchesAdapter(adapterCommand)) {
       return GoAdapterPolicy;
+    } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return JavaAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
       return MockAdapterPolicy;
     }
