@@ -476,6 +476,13 @@ async function findAllByBasename(rootDir, targetNames) {
 }
 
 async function main() {
+  // Allow skipping vendoring entirely (e.g., in CI where it's handled separately)
+  if ((process.env.SKIP_ADAPTER_VENDOR || '').trim().toLowerCase() === 'true') {
+    logInfo('Skipping vendoring (SKIP_ADAPTER_VENDOR=true)');
+    process.exitCode = 0;
+    return;
+  }
+
   // Idempotent skip only if artifact AND required sidecars exist
   const bootloaderRequired = path.join(VENDOR_DIR, 'bootloader.js');
   const hashRequired = path.join(VENDOR_DIR, 'hash.js');
