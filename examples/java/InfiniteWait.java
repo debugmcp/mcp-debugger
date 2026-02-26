@@ -17,9 +17,13 @@ public class InfiniteWait {
 
     public static void main(String[] args) throws Exception {
         System.out.println("Waiting for debugger...");
-        int x = 42;                      // line 20
-        int y = 58;                      // line 21
-        int sum = compute(x, y);         // line 22 — breakpoint line
+        // Sleep to allow time for debugger to re-set breakpoints after class loading.
+        // With suspend=y, KDA sets breakpoints before class loading (deferred);
+        // after VM resume + class load, breakpoints may need to be re-sent.
+        Thread.sleep(2000);               // line 22 — pause for breakpoint setup
+        int x = 42;                       // line 23
+        int y = 58;                       // line 24
+        int sum = compute(x, y);          // line 25 — calls compute
         System.out.println("Sum: " + sum);
     }
 }

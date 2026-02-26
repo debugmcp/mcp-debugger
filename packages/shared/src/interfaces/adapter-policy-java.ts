@@ -52,7 +52,7 @@ export const JavaAdapterPolicy: AdapterPolicy = {
   },
 
   getLocalScopeName: (): string[] => {
-    return ['Local Variables', 'Local'];
+    return ['Local Variables', 'Local', 'Locals'];
   },
 
   getDapAdapterConfiguration: () => {
@@ -161,7 +161,9 @@ export const JavaAdapterPolicy: AdapterPolicy = {
     return {
       deferConfigDone: false,
       defaultStopOnEntry: true,
-      sendLaunchBeforeConfig: false,
+      sendLaunchBeforeConfig: true,
+      sendConfigDoneWithAttach: true,
+      sendConfigDoneWithLaunch: true,
     };
   },
 

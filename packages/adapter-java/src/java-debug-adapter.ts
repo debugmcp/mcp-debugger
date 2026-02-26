@@ -296,6 +296,12 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       javaConfig.args = config.args;
     }
 
+    // KDA requires projectRoot — use explicit value, cwd, or current directory
+    if (!(javaConfig as Record<string, unknown>).projectRoot) {
+      (javaConfig as Record<string, unknown>).projectRoot =
+        (config as Record<string, unknown>).projectRoot || config.cwd || process.cwd();
+    }
+
     return javaConfig;
   }
 
@@ -318,6 +324,10 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       request: 'attach',
       hostName: config.host || 'localhost',
       port: config.port,
+      // KDA requires projectRoot — use explicit value, sourcePaths[0], cwd, or current directory
+      projectRoot: (config as Record<string, unknown>).projectRoot
+        || (config.sourcePaths?.length ? config.sourcePaths[0] : undefined)
+        || config.cwd || process.cwd(),
     };
 
     if (config.sourcePaths) {
@@ -332,9 +342,8 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     if (config.env) {
       attachConfig.env = config.env;
     }
-    if (config.timeout !== undefined) {
-      attachConfig.timeout = config.timeout;
-    }
+    // KDA requires timeout — always include with a default
+    attachConfig.timeout = config.timeout ?? 30000;
 
     return attachConfig;
   }

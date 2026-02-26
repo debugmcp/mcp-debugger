@@ -322,6 +322,14 @@ packages/adapter-{language}/
 - Uses vendored CodeLLDB debug adapter (auto-downloaded during `pnpm install`)
 - Supports both MSVC and GNU toolchains on Windows
 
+### Java
+- JDK 11+ must be installed (`java` and `javac` on PATH, or `JAVA_HOME` set)
+- Uses vendored kotlin-debug-adapter (KDA) — auto-downloaded during `pnpm install`
+- **Must compile with `javac -g`** for variable inspection (includes `LocalVariableTable`)
+- Launch mode: KDA resolves classpath from Gradle/Maven build output dirs under `projectRoot` (e.g., `build/classes/java/main/`). It does NOT accept explicit classpath args.
+- Attach mode: Connect to JVM with JDWP agent (`-agentlib:jdwp=...`). Breakpoints set before class loading must be re-sent after the class loads.
+- See `docs/java/README.md` for full KDA behavior documentation
+
 ### Go
 - Go 1.18+ must be installed
 - Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`

@@ -1,8 +1,24 @@
 /**
  * Java Attach-Mode Smoke Tests via MCP Interface
  *
- * Tests Java attach debugging: spawn a JVM with JDWP agent,
+ * Tests Java attach debugging: spawn a JVM with JDWP agent (suspend=y),
  * then use attach_to_process to connect the debugger.
+ *
+ * Hard assertions (every step must succeed):
+ * - Session creation returns valid sessionId
+ * - Breakpoint on line 14 (compute method) returns success
+ * - Attach succeeds and returns paused state
+ * - Continue execution resumes the suspended VM
+ * - Breakpoints re-sent after class loading (KDA deferred breakpoints don't fire)
+ * - Breakpoint fires: non-empty stack frames with top frame in compute()
+ * - Local variables a=42, b=58 with correct values
+ * - Continue after breakpoint hit succeeds
+ *
+ * Prerequisites:
+ * - JDK installed (java + javac on PATH)
+ * - javac -g for LocalVariableTable (JDI requires it for variable access)
+ * - InfiniteWait.java has Thread.sleep(2000) before compute() to allow
+ *   breakpoint re-send after class loading
  *
  * Skips gracefully when JDK is not installed.
  */
@@ -38,6 +54,26 @@ function getFreePort(): Promise<number> {
     });
     srv.on('error', reject);
   });
+}
+
+/**
+ * Poll for non-empty stack frames (breakpoint hit).
+ * Returns the stack response once frames appear, or null after exhausting attempts.
+ */
+async function waitForPausedState(
+  client: Client,
+  sessionId: string,
+  maxAttempts = 20,
+  intervalMs = 500
+): Promise<{ stackFrames?: Array<{ file?: string; name?: string; line?: number }> } | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = await callToolSafely(client, 'get_stack_trace', { sessionId });
+    if (result.stackFrames && (result.stackFrames as any[]).length > 0) {
+      return result as { stackFrames: Array<{ file?: string; name?: string; line?: number }> };
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return null;
 }
 
 describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
@@ -108,26 +144,12 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
     }
   });
 
-  it('should attach to a running JVM and debug', async () => {
+  it('should attach to a running JVM and debug with verified stack and variables', async () => {
     // Skip if java/javac not available
-    let javaAvailable = false;
-    let javacAvailable = false;
-
     try {
       execSync('java -version', { stdio: 'ignore' });
-      javaAvailable = true;
-    } catch {
-      console.log('[Java Attach Test] Java not available, skipping');
-    }
-
-    try {
       execSync('javac -version', { stdio: 'ignore' });
-      javacAvailable = true;
     } catch {
-      console.log('[Java Attach Test] javac not available, skipping');
-    }
-
-    if (!javaAvailable || !javacAvailable) {
       console.log('[Java Attach Test] Skipping — JDK not installed');
       return;
     }
@@ -135,14 +157,9 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
     const testJavaFile = path.resolve(ROOT, 'examples', 'java', 'InfiniteWait.java');
     const testClassDir = path.resolve(ROOT, 'examples', 'java');
 
-    // Compile
-    try {
-      execSync(`javac "${testJavaFile}"`, { cwd: testClassDir, stdio: 'pipe' });
-      console.log('[Java Attach Test] Compiled InfiniteWait.java');
-    } catch (error) {
-      console.log('[Java Attach Test] Failed to compile, skipping');
-      return;
-    }
+    // Compile with full debug info (-g) so JDI can access local variables
+    execSync(`javac -g "${testJavaFile}"`, { cwd: testClassDir, stdio: 'pipe' });
+    console.log('[Java Attach Test] Compiled InfiniteWait.java');
 
     try {
       // Pick a free port
@@ -160,7 +177,6 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       });
 
       // Wait for "Listening for transport" on stdout or stderr
-      // (JDK 21+ prints this to stdout, older JDKs use stderr)
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Timeout waiting for JDWP agent')), 15000);
         let outputData = '';
@@ -210,19 +226,20 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       sessionId = createResponse.sessionId as string;
       console.log(`[Java Attach Test] Session created: ${sessionId}`);
 
-      // 2. Set breakpoint on the compute() call line (line 22)
-      console.log('[Java Attach Test] Setting breakpoint...');
+      // 2. Set breakpoint on line 14 (int result = a + b; inside compute())
+      console.log('[Java Attach Test] Setting breakpoint on line 14...');
       const bpResult = await mcpClient!.callTool({
         name: 'set_breakpoint',
         arguments: {
           sessionId,
           file: testJavaFile,
-          line: 22
+          line: 14
         }
       });
 
       const bpResponse = parseSdkToolResult(bpResult);
-      console.log('[Java Attach Test] Breakpoint response:', bpResponse);
+      expect(bpResponse.success).toBe(true);
+      console.log('[Java Attach Test] Breakpoint set successfully');
 
       // 3. Attach to the running JVM
       console.log(`[Java Attach Test] Attaching to JVM on port ${jdwpPort}...`);
@@ -231,41 +248,103 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
         arguments: {
           sessionId,
           port: jdwpPort,
-          host: '127.0.0.1'
+          host: '127.0.0.1',
+          sourcePaths: [testClassDir]
         }
       });
 
       const attachResponse = parseSdkToolResult(attachResult);
-      expect(attachResponse.state).toBeDefined();
-      console.log('[Java Attach Test] Attach response state:', attachResponse.state);
+      expect(attachResponse.success).toBe(true);
+      expect(attachResponse.state).toBe('paused');
+      console.log('[Java Attach Test] Attached successfully, state:', attachResponse.state);
 
-      // Wait for breakpoint hit — the JVM resumes from suspend=y once configurationDone is sent
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 4. Continue execution — VM was suspended at startup (suspend=y).
+      //    configurationDone already resumed the VM, but session state is PAUSED.
+      //    Continue sets session to RUNNING and resumes all threads.
+      console.log('[Java Attach Test] Continuing execution to start program...');
+      const continueResult = parseSdkToolResult(
+        await mcpClient!.callTool({
+          name: 'continue_execution',
+          arguments: { sessionId }
+        })
+      );
+      expect(continueResult.success).toBe(true);
 
-      // 4. Get stack trace
-      console.log('[Java Attach Test] Getting stack trace...');
-      const stackResult = await callToolSafely(mcpClient!, 'get_stack_trace', { sessionId });
+      // 5. Wait for class loading, then re-send breakpoints.
+      //    KDA doesn't reliably implement JDI deferred breakpoints: breakpoints
+      //    set before the class is loaded (suspend=y) report verified:true but
+      //    don't fire. After the VM resumes and loads InfiniteWait, re-setting
+      //    the breakpoint ensures KDA can resolve the class and set a real JDI
+      //    breakpoint. InfiniteWait.main() has Thread.sleep(2000) to give us time.
+      console.log('[Java Attach Test] Waiting for class loading, then re-sending breakpoints...');
+      await new Promise(r => setTimeout(r, 500));
 
-      if (stackResult.stackFrames) {
-        const frames = stackResult.stackFrames as any[];
-        console.log(`[Java Attach Test] Stack has ${frames.length} frames`);
-        expect(frames.length).toBeGreaterThan(0);
-        if (frames.length > 0) {
-          console.log('[Java Attach Test] Top frame:', frames[0].name, 'line:', frames[0].line);
+      const bpRetryResult = await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: {
+          sessionId,
+          file: testJavaFile,
+          line: 14
         }
+      });
+      const bpRetryResponse = parseSdkToolResult(bpRetryResult);
+      console.log('[Java Attach Test] Breakpoint re-set, verified:', bpRetryResponse.verified);
+
+      // 6. Poll for breakpoint hit (non-empty stack frames)
+      //    InfiniteWait.main() sleeps 2s then calls compute() — breakpoint should fire.
+      console.log('[Java Attach Test] Waiting for breakpoint hit...');
+      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 15, 500);
+
+      // HARD ASSERTION: Breakpoint must fire
+      expect(stackResponse).not.toBeNull();
+      expect(stackResponse!.stackFrames).toBeDefined();
+      const frames = stackResponse!.stackFrames!;
+      expect(frames.length).toBeGreaterThan(0);
+      console.log(`[Java Attach Test] Stack has ${frames.length} frames`);
+
+      // HARD ASSERTION: Top frame is compute() at line 14
+      const topFrame = frames[0];
+      console.log('[Java Attach Test] Top frame:', topFrame.name, 'line:', topFrame.line);
+      expect(topFrame.name?.toLowerCase()).toContain('compute');
+      // KDA may report line 0 (no source mapping) — assert only when present
+      if (typeof topFrame.line === 'number' && topFrame.line > 0) {
+        expect(topFrame.line).toBe(14);
       }
 
-      // 5. Get local variables
+      // Get local variables and verify runtime values
       console.log('[Java Attach Test] Getting local variables...');
-      const varsResult = await callToolSafely(mcpClient!, 'get_local_variables', { sessionId });
-      console.log('[Java Attach Test] Variables result:', JSON.stringify(varsResult).slice(0, 300));
+      const localsRaw = await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      });
+      const localsResponse = parseSdkToolResult(localsRaw) as {
+        success?: boolean;
+        variables?: Array<{ name: string; value: string }>;
+        count?: number;
+      };
 
-      // 6. Continue execution
+      expect(localsResponse.success).toBe(true);
+      expect(Array.isArray(localsResponse.variables)).toBe(true);
+      expect(localsResponse.variables!.length).toBeGreaterThan(0);
+
+      const localsByName = new Map(
+        (localsResponse.variables ?? []).map(v => [v.name, v.value])
+      );
+      console.log('[Java Attach Test] Variables:', Object.fromEntries(localsByName));
+
+      // HARD ASSERTION: a=42, b=58 in compute()
+      expect(localsByName.get('a')).toBe('42');
+      expect(localsByName.get('b')).toBe('58');
+
+      // HARD ASSERTION: Continue execution after breakpoint hit
       console.log('[Java Attach Test] Continuing execution...');
-      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-
-      // Wait for program to finish
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const finalContinue = parseSdkToolResult(
+        await mcpClient!.callTool({
+          name: 'continue_execution',
+          arguments: { sessionId }
+        })
+      );
+      expect(finalContinue.success).toBe(true);
 
     } finally {
       // Clean up compiled class files

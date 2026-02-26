@@ -61,6 +61,7 @@ export class DapProxyWorker {
   private state: ProxyState = ProxyState.UNINITIALIZED;
   private initializedEventPending: boolean = false;
   private deferInitializedHandling: boolean = false;
+  private initializedEventHandled: boolean = false;
   private initializedEventPromise: Promise<void> | null = null;
   private initializedEventResolver: (() => void) | null = null;
   private requestTracker: CallbackRequestTracker;
@@ -404,15 +405,64 @@ export class DapProxyWorker {
           ]);
 
           this.logger!.info('[Worker] "initialized" event received, sending attach request');
-          await this.connectionManager!.sendAttachRequest(
-            this.dapClient,
-            payload.launchConfig || {}
-          );
 
-          this.deferInitializedHandling = false;
-          await this.handleInitializedEvent();
+          if (initBehavior.sendConfigDoneWithAttach) {
+            // KDA requires configurationDone before it responds to attach, but KDA
+            // does NOT send a DAP response for configurationDone — it just unblocks
+            // the attach handler internally. So we:
+            //   1. Send attach (non-blocking)
+            //   2. Send breakpoints (awaited)
+            //   3. Fire configurationDone (no await — KDA won't respond)
+            //   4. Await attach response
+            this.logger!.info('[Worker] sendConfigDoneWithAttach: sending attach + configurationDone concurrently');
+            this.deferInitializedHandling = false;
+            this.initializedEventHandled = true;
+
+            const attachPromise = this.connectionManager!.sendAttachRequest(
+              this.dapClient,
+              payload.launchConfig || {}
+            );
+
+            // Set initial breakpoints
+            if (payload.initialBreakpoints?.length) {
+              this.logger!.info('[Worker] Initial breakpoints payload:', payload.initialBreakpoints);
+              const groupedBreakpoints = new Map<string, { line: number; condition?: string }[]>();
+              for (const breakpoint of payload.initialBreakpoints) {
+                const filePath = path.resolve(breakpoint.file);
+                if (!groupedBreakpoints.has(filePath)) {
+                  groupedBreakpoints.set(filePath, []);
+                }
+                groupedBreakpoints.get(filePath)!.push({
+                  line: breakpoint.line,
+                  condition: breakpoint.condition
+                });
+              }
+              for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
+                await this.connectionManager!.setBreakpoints(this.dapClient, filePath, breakpoints);
+              }
+            }
+
+            // Fire configurationDone without awaiting response (KDA won't send one)
+            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for KDA)');
+            this.dapClient.sendRequest('configurationDone', {}).catch((err: Error) => {
+              this.logger!.warn('[Worker] configurationDone response error (expected for KDA):', err.message);
+            });
+
+            // Await the attach response
+            await attachPromise;
+            this.state = ProxyState.CONNECTED;
+            this.sendStatus('adapter_configured_and_launched');
+          } else {
+            await this.connectionManager!.sendAttachRequest(
+              this.dapClient,
+              payload.launchConfig || {}
+            );
+
+            this.deferInitializedHandling = false;
+            await this.handleInitializedEvent();
+          }
         } else if (initBehavior.sendLaunchBeforeConfig) {
-          // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve
+          // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve, Java/KDA
           // Phase 1: Brief wait — some adapters send initialized immediately after initialize
           this.logger!.info('[Worker] Phase 1: Waiting briefly for "initialized" event before launch');
           const receivedBeforeLaunch = await Promise.race([
@@ -426,30 +476,81 @@ export class DapProxyWorker {
             this.logger!.warn('[Worker] "initialized" event not received within 2s — falling back to launch-first flow');
           }
 
-          // Send launch request (either after initialized or as fallback)
-          await this.connectionManager!.sendLaunchRequest(
-            this.dapClient,
-            payload.scriptPath,
-            payload.scriptArgs,
-            payload.stopOnEntry,
-            payload.justMyCode,
-            payload.launchConfig
-          );
+          if (initBehavior.sendConfigDoneWithLaunch) {
+            // KDA blocks the launch response until configurationDone arrives.
+            // Same pattern as sendConfigDoneWithAttach:
+            //   1. Send launch (non-blocking)
+            //   2. Set breakpoints (awaited)
+            //   3. Fire configurationDone (no await — KDA won't respond)
+            //   4. Await launch response
+            this.logger!.info('[Worker] sendConfigDoneWithLaunch: sending launch + configurationDone concurrently');
+            this.deferInitializedHandling = false;
+            this.initializedEventHandled = true;
 
-          if (!receivedBeforeLaunch) {
-            // Phase 2: Wait for initialized after launch
-            this.logger!.info('[Worker] Phase 2: Waiting for "initialized" event after launch');
-            await Promise.race([
-              this.initializedEventPromise!,
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout waiting for initialized event (after launch fallback)')), 10000)
-              )
-            ]);
-            this.logger!.info('[Worker] "initialized" event received after launch (fallback succeeded)');
+            const launchPromise = this.connectionManager!.sendLaunchRequest(
+              this.dapClient,
+              payload.scriptPath,
+              payload.scriptArgs,
+              payload.stopOnEntry,
+              payload.justMyCode,
+              payload.launchConfig
+            );
+
+            // Set initial breakpoints
+            if (payload.initialBreakpoints?.length) {
+              this.logger!.info('[Worker] Initial breakpoints payload:', payload.initialBreakpoints);
+              const groupedBreakpoints = new Map<string, { line: number; condition?: string }[]>();
+              for (const breakpoint of payload.initialBreakpoints) {
+                const filePath = path.resolve(breakpoint.file);
+                if (!groupedBreakpoints.has(filePath)) {
+                  groupedBreakpoints.set(filePath, []);
+                }
+                groupedBreakpoints.get(filePath)!.push({
+                  line: breakpoint.line,
+                  condition: breakpoint.condition
+                });
+              }
+              for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
+                await this.connectionManager!.setBreakpoints(this.dapClient, filePath, breakpoints);
+              }
+            }
+
+            // Fire configurationDone without awaiting response (KDA won't send one)
+            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for KDA launch)');
+            this.dapClient.sendRequest('configurationDone', {}).catch((err: Error) => {
+              this.logger!.warn('[Worker] configurationDone response error (expected for KDA):', err.message);
+            });
+
+            // Await the launch response
+            await launchPromise;
+            this.state = ProxyState.CONNECTED;
+            this.sendStatus('adapter_configured_and_launched');
+          } else {
+            // Standard two-phase: send launch, wait for response, then configurationDone
+            await this.connectionManager!.sendLaunchRequest(
+              this.dapClient,
+              payload.scriptPath,
+              payload.scriptArgs,
+              payload.stopOnEntry,
+              payload.justMyCode,
+              payload.launchConfig
+            );
+
+            if (!receivedBeforeLaunch) {
+              // Phase 2: Wait for initialized after launch
+              this.logger!.info('[Worker] Phase 2: Waiting for "initialized" event after launch');
+              await Promise.race([
+                this.initializedEventPromise!,
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('Timeout waiting for initialized event (after launch fallback)')), 10000)
+                )
+              ]);
+              this.logger!.info('[Worker] "initialized" event received after launch (fallback succeeded)');
+            }
+
+            this.deferInitializedHandling = false;
+            await this.handleInitializedEvent();
           }
-
-          this.deferInitializedHandling = false;
-          await this.handleInitializedEvent();
         } else {
           // LAUNCH MODE: Send launch request FIRST, then wait for "initialized"
           // Python/debugpy sends "initialized" AFTER receiving the launch request
@@ -508,8 +609,21 @@ export class DapProxyWorker {
         this.logger!.debug('[Worker] DAP event: output', body);
         this.sendDapEvent('output', body);
       },
-      onStopped: (body) => {
+      onStopped: async (body) => {
         this.logger!.info('[Worker] DAP event: stopped', body);
+        // KDA (Java adapter) needs a 'threads' request after stopped to refresh
+        // its internal thread list, otherwise stackTrace returns empty frames.
+        // We MUST await this before forwarding the stopped event so that
+        // getStackTrace has thread data available.
+        if (this.dapClient && this.adapterPolicy?.name === 'java') {
+          try {
+            const resp = await this.dapClient.sendRequest('threads', {});
+            this.logger!.info('[Worker] Pre-fetched threads after stopped event', resp);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger!.warn('[Worker] Failed to pre-fetch threads:', msg);
+          }
+        }
         this.sendDapEvent('stopped', body);
       },
       onContinued: (body) => {
@@ -545,6 +659,11 @@ export class DapProxyWorker {
    * Handle DAP initialized event
    */
   private async handleInitializedEvent(): Promise<void> {
+    if (this.initializedEventHandled) {
+      this.logger!.info('[Worker] DAP "initialized" event already handled, skipping duplicate.');
+      return;
+    }
+    this.initializedEventHandled = true;
     this.logger!.info('[Worker] DAP "initialized" event received.');
 
     if (!this.currentInitPayload || !this.dapClient || !this.connectionManager) {
