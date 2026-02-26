@@ -547,7 +547,7 @@ describe('JavaDebugAdapter', () => {
       expect(config.stopOnEntry).toBeUndefined();
       expect(config.cwd).toBeUndefined();
       expect(config.env).toBeUndefined();
-      expect(config.timeout).toBeUndefined();
+      expect(config.timeout).toBe(30000); // KDA requires timeout — always defaulted
     });
   });
 
