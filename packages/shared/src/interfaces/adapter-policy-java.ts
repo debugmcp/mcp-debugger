@@ -1,8 +1,8 @@
 /**
- * JavaAdapterPolicy - policy for Java Debug Adapter (kotlin-debug-adapter / KDA)
+ * JavaAdapterPolicy - policy for Java Debug Adapter (JDI bridge / JdiDapServer)
  *
- * Encodes KDA-specific behaviors for Java debugging.
- * KDA is a JDI-based DAP server; the stdio-tcp bridge exposes it on a TCP port.
+ * JdiDapServer speaks DAP over TCP natively using JDI. No special initialization
+ * hacks are needed — standard DAP flow like Python/debugpy.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
@@ -39,9 +39,9 @@ export const JavaAdapterPolicy: AdapterPolicy = {
       return [];
     }
 
-    // KDA uses "Local Variables" for the local scope
+    // JDI bridge uses "Locals" for the local scope
     const localScope = frameScopes.find(scope =>
-      scope.name === 'Local Variables' || scope.name === 'Local' || scope.name === 'Locals'
+      scope.name === 'Locals' || scope.name === 'Local'
     );
 
     if (!localScope) {
@@ -52,7 +52,7 @@ export const JavaAdapterPolicy: AdapterPolicy = {
   },
 
   getLocalScopeName: (): string[] => {
-    return ['Local Variables', 'Local', 'Locals'];
+    return ['Locals'];
   },
 
   getDapAdapterConfiguration: () => {
@@ -149,21 +149,18 @@ export const JavaAdapterPolicy: AdapterPolicy = {
     const commandStr = adapterCommand.command.toLowerCase();
     const argsStr = adapterCommand.args.join(' ').toLowerCase();
 
-    return commandStr.includes('kotlin-debug-adapter') ||
-           commandStr.includes('kda') ||
-           commandStr.includes('stdio-tcp-bridge') ||
-           argsStr.includes('kotlin-debug-adapter') ||
-           argsStr.includes('kda') ||
+    return commandStr.includes('jdidapserver') ||
+           argsStr.includes('jdidapserver') ||
+           argsStr.includes('jdi-bridge') ||
            argsStr.includes('java-debug');
   },
 
+  // JdiDapServer sends "initialized" during initialize (before launch).
+  // sendLaunchBeforeConfig tells the proxy to wait for initialized first,
+  // then send launch, then breakpoints + configurationDone.
   getInitializationBehavior: () => {
     return {
-      deferConfigDone: false,
-      defaultStopOnEntry: true,
-      sendLaunchBeforeConfig: true,
-      sendConfigDoneWithAttach: true,
-      sendConfigDoneWithLaunch: true,
+      sendLaunchBeforeConfig: true
     };
   },
 
@@ -225,11 +222,12 @@ export const JavaAdapterPolicy: AdapterPolicy = {
       };
     }
 
-    // Default: launch the stdio-tcp bridge which wraps kotlin-debug-adapter
+    // Default: launch JdiDapServer directly
     return {
-      command: 'node',
+      command: 'java',
       args: [
-        'stdio-tcp-bridge.js',
+        '-cp', 'java/out',
+        'JdiDapServer',
         '--port', String(payload.adapterPort)
       ],
       host: payload.adapterHost,

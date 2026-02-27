@@ -4,12 +4,14 @@
  * Tests Java attach debugging: spawn a JVM with JDWP agent (suspend=y),
  * then use attach_to_process to connect the debugger.
  *
+ * JDI bridge handles deferred breakpoints natively via ClassPrepareRequest,
+ * so no breakpoint re-sends are needed (unlike KDA).
+ *
  * Hard assertions (every step must succeed):
  * - Session creation returns valid sessionId
  * - Breakpoint on line 14 (compute method) returns success
  * - Attach succeeds and returns paused state
  * - Continue execution resumes the suspended VM
- * - Breakpoints re-sent after class loading (KDA deferred breakpoints don't fire)
  * - Breakpoint fires: non-empty stack frames with top frame in compute()
  * - Local variables a=42, b=58 with correct values
  * - Continue after breakpoint hit succeeds
@@ -17,8 +19,6 @@
  * Prerequisites:
  * - JDK installed (java + javac on PATH)
  * - javac -g for LocalVariableTable (JDI requires it for variable access)
- * - InfiniteWait.java has Thread.sleep(2000) before compute() to allow
- *   breakpoint re-send after class loading
  *
  * Skips gracefully when JDK is not installed.
  */
@@ -259,8 +259,8 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       console.log('[Java Attach Test] Attached successfully, state:', attachResponse.state);
 
       // 4. Continue execution — VM was suspended at startup (suspend=y).
-      //    configurationDone already resumed the VM, but session state is PAUSED.
-      //    Continue sets session to RUNNING and resumes all threads.
+      //    JDI bridge handles deferred breakpoints via ClassPrepareRequest,
+      //    so no breakpoint re-sends needed.
       console.log('[Java Attach Test] Continuing execution to start program...');
       const continueResult = parseSdkToolResult(
         await mcpClient!.callTool({
@@ -270,30 +270,10 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       );
       expect(continueResult.success).toBe(true);
 
-      // 5. Wait for class loading, then re-send breakpoints.
-      //    KDA doesn't reliably implement JDI deferred breakpoints: breakpoints
-      //    set before the class is loaded (suspend=y) report verified:true but
-      //    don't fire. After the VM resumes and loads InfiniteWait, re-setting
-      //    the breakpoint ensures KDA can resolve the class and set a real JDI
-      //    breakpoint. InfiniteWait.main() has Thread.sleep(2000) to give us time.
-      console.log('[Java Attach Test] Waiting for class loading, then re-sending breakpoints...');
-      await new Promise(r => setTimeout(r, 500));
-
-      const bpRetryResult = await mcpClient!.callTool({
-        name: 'set_breakpoint',
-        arguments: {
-          sessionId,
-          file: testJavaFile,
-          line: 14
-        }
-      });
-      const bpRetryResponse = parseSdkToolResult(bpRetryResult);
-      console.log('[Java Attach Test] Breakpoint re-set, verified:', bpRetryResponse.verified);
-
-      // 6. Poll for breakpoint hit (non-empty stack frames)
+      // 5. Poll for breakpoint hit (non-empty stack frames)
       //    InfiniteWait.main() sleeps 2s then calls compute() — breakpoint should fire.
       console.log('[Java Attach Test] Waiting for breakpoint hit...');
-      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 15, 500);
+      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 20, 500);
 
       // HARD ASSERTION: Breakpoint must fire
       expect(stackResponse).not.toBeNull();
@@ -306,7 +286,6 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       const topFrame = frames[0];
       console.log('[Java Attach Test] Top frame:', topFrame.name, 'line:', topFrame.line);
       expect(topFrame.name?.toLowerCase()).toContain('compute');
-      // KDA may report line 0 (no source mapping) — assert only when present
       if (typeof topFrame.line === 'number' && topFrame.line > 0) {
         expect(topFrame.line).toBe(14);
       }

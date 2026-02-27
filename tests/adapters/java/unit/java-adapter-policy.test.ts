@@ -18,24 +18,17 @@ describe('JavaAdapterPolicy', () => {
   });
 
   describe('matchesAdapter', () => {
-    it('should match kotlin-debug-adapter in command', () => {
+    it('should match JdiDapServer in args', () => {
       expect(JavaAdapterPolicy.matchesAdapter({
-        command: '/path/to/kotlin-debug-adapter',
-        args: []
+        command: 'java',
+        args: ['-cp', 'java/out', 'JdiDapServer', '--port', '38000']
       })).toBe(true);
     });
 
-    it('should match kda in command', () => {
+    it('should match jdi-bridge in args', () => {
       expect(JavaAdapterPolicy.matchesAdapter({
-        command: '/path/to/kda',
-        args: []
-      })).toBe(true);
-    });
-
-    it('should match stdio-tcp-bridge in command', () => {
-      expect(JavaAdapterPolicy.matchesAdapter({
-        command: 'node',
-        args: ['stdio-tcp-bridge.js', '--command', '/path/to/kotlin-debug-adapter']
+        command: 'java',
+        args: ['jdi-bridge', '--port', '38000']
       })).toBe(true);
     });
 
@@ -62,10 +55,9 @@ describe('JavaAdapterPolicy', () => {
   });
 
   describe('getLocalScopeName', () => {
-    it('should return Java scope names', () => {
+    it('should return Locals scope name', () => {
       const scopeNames = JavaAdapterPolicy.getLocalScopeName();
-      expect(scopeNames).toContain('Local Variables');
-      expect(scopeNames).toContain('Local');
+      expect(scopeNames).toContain('Locals');
     });
   });
 
@@ -211,14 +203,13 @@ describe('JavaAdapterPolicy', () => {
   });
 
   describe('getInitializationBehavior', () => {
-    it('should not defer configDone', () => {
+    it('should use sendLaunchBeforeConfig (JDI sends initialized before launch)', () => {
       const behavior = JavaAdapterPolicy.getInitializationBehavior();
-      expect(behavior.deferConfigDone).toBe(false);
-    });
-
-    it('should default to stopOnEntry true', () => {
-      const behavior = JavaAdapterPolicy.getInitializationBehavior();
-      expect(behavior.defaultStopOnEntry).toBe(true);
+      expect(behavior.sendLaunchBeforeConfig).toBe(true);
+      expect(behavior.deferConfigDone).toBeUndefined();
+      expect(behavior.defaultStopOnEntry).toBeUndefined();
+      expect(behavior.sendConfigDoneWithAttach).toBeUndefined();
+      expect(behavior.sendConfigDoneWithLaunch).toBeUndefined();
     });
   });
 

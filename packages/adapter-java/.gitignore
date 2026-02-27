@@ -5,8 +5,8 @@ dist/
 # Dependencies
 node_modules/
 
-# Vendored binaries
-vendor/kotlin-debug-adapter/
+# Compiled JDI bridge classes
+java/out/
 
 # Test coverage
 coverage/

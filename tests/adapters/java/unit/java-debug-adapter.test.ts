@@ -70,7 +70,7 @@ describe('JavaDebugAdapter', () => {
     });
 
     it('should have correct name', () => {
-      expect(adapter.name).toBe('Java Debug Adapter (KDA)');
+      expect(adapter.name).toBe('Java Debug Adapter (JDI)');
     });
 
     it('should start in UNINITIALIZED state', () => {
@@ -207,13 +207,11 @@ describe('JavaDebugAdapter', () => {
   });
 
   describe('getRequiredDependencies', () => {
-    it('should return JDK and KDA as dependencies', () => {
+    it('should return JDK as dependency', () => {
       const deps = adapter.getRequiredDependencies();
-      expect(deps).toHaveLength(2);
+      expect(deps).toHaveLength(1);
       expect(deps[0].name).toBe('JDK');
       expect(deps[0].required).toBe(true);
-      expect(deps[1].name).toBe('kotlin-debug-adapter');
-      expect(deps[1].required).toBe(true);
     });
   });
 
@@ -222,8 +220,8 @@ describe('JavaDebugAdapter', () => {
       expect(adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)).toBe(true);
     });
 
-    it('should support function breakpoints', () => {
-      expect(adapter.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(true);
+    it('should not support function breakpoints', () => {
+      expect(adapter.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(false);
     });
 
     it('should support exception breakpoints', () => {
@@ -252,10 +250,10 @@ describe('JavaDebugAdapter', () => {
       const caps = adapter.getCapabilities();
 
       expect(caps.supportsConfigurationDoneRequest).toBe(true);
-      expect(caps.supportsFunctionBreakpoints).toBe(true);
+      expect(caps.supportsFunctionBreakpoints).toBe(false);
       expect(caps.supportsConditionalBreakpoints).toBe(true);
       expect(caps.supportsEvaluateForHovers).toBe(true);
-      expect(caps.supportsSetVariable).toBe(true);
+      expect(caps.supportsSetVariable).toBe(false);
       expect(caps.supportsTerminateRequest).toBe(true);
       expect(caps.supportsStepBack).toBe(false);
       expect(caps.supportsLogPoints).toBe(false);
@@ -272,10 +270,10 @@ describe('JavaDebugAdapter', () => {
   });
 
   describe('translateErrorMessage', () => {
-    it('should translate KDA not found error', () => {
-      const error = new Error('kotlin-debug-adapter not found');
+    it('should translate JDI bridge not compiled error', () => {
+      const error = new Error('JDI bridge not compiled');
       const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('kotlin-debug-adapter');
+      expect(translated).toContain('JDI bridge not compiled');
       expect(translated).toContain('build:adapter');
     });
 
@@ -322,9 +320,8 @@ describe('JavaDebugAdapter', () => {
   });
 
   describe('buildAdapterCommand', () => {
-    it('should throw when KDA is not vendored', () => {
-      // KDA may or may not be vendored depending on environment
-      // If vendored, the command should succeed; if not, it should throw
+    it('should throw when JDI bridge is not compiled', () => {
+      // JDI bridge may or may not be compiled depending on environment
       const fn = () => adapter.buildAdapterCommand({
         sessionId: 'test-session',
         executablePath: 'java',
@@ -338,17 +335,18 @@ describe('JavaDebugAdapter', () => {
 
       try {
         const result = fn();
-        // KDA is vendored — verify we got a valid command back
+        // JDI bridge is compiled — verify we got a valid command back
         expect(result.command).toBeTruthy();
         expect(result.args).toBeDefined();
+        // Should launch java with JdiDapServer
+        expect(result.args).toContain('JdiDapServer');
       } catch (error) {
-        // KDA is not vendored — verify the error message
-        expect((error as Error).message).toMatch(/kotlin-debug-adapter not found/);
+        // JDI bridge not compiled — verify the error message
+        expect((error as Error).message).toMatch(/JDI bridge not compiled/);
       }
     });
 
     it('should throw when port is 0', () => {
-      // Port 0 should be rejected (or KDA not found — either is valid)
       expect(() => adapter.buildAdapterCommand({
         sessionId: 'test-session',
         executablePath: 'java',
@@ -358,7 +356,7 @@ describe('JavaDebugAdapter', () => {
         scriptPath: '/app/Main.java',
         scriptArgs: [],
         launchConfig: {}
-      })).toThrow(/kotlin-debug-adapter not found|Valid TCP port/);
+      })).toThrow(/JDI bridge not compiled|Valid TCP port/);
     });
   });
 
@@ -496,7 +494,7 @@ describe('JavaDebugAdapter', () => {
   });
 
   describe('transformAttachConfig', () => {
-    it('should map host to hostName and set request to attach', () => {
+    it('should set host and request to attach', () => {
       const config = adapter.transformAttachConfig({
         request: 'attach',
         host: '192.168.1.10',
@@ -505,17 +503,17 @@ describe('JavaDebugAdapter', () => {
 
       expect(config.type).toBe('java');
       expect(config.request).toBe('attach');
-      expect(config.hostName).toBe('192.168.1.10');
+      expect(config.host).toBe('192.168.1.10');
       expect(config.port).toBe(5005);
     });
 
-    it('should default hostName to localhost when host is not provided', () => {
+    it('should default host to localhost when not provided', () => {
       const config = adapter.transformAttachConfig({
         request: 'attach',
         port: 5005,
       });
 
-      expect(config.hostName).toBe('localhost');
+      expect(config.host).toBe('localhost');
     });
 
     it('should pass through sourcePaths, stopOnEntry, cwd, env, timeout', () => {
@@ -547,7 +545,8 @@ describe('JavaDebugAdapter', () => {
       expect(config.stopOnEntry).toBeUndefined();
       expect(config.cwd).toBeUndefined();
       expect(config.env).toBeUndefined();
-      expect(config.timeout).toBe(30000); // KDA requires timeout — always defaulted
+      // No mandatory timeout — JDI bridge doesn't require it
+      expect(config.timeout).toBeUndefined();
     });
   });
 
@@ -556,7 +555,7 @@ describe('JavaDebugAdapter', () => {
       const defaults = adapter.getDefaultAttachConfig();
       expect(defaults.request).toBe('attach');
       expect(defaults.host).toBe('localhost');
-      expect(defaults.timeout).toBe(30000);
+      // No mandatory timeout default
     });
   });
 

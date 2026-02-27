@@ -2,7 +2,7 @@
  * Java Adapter Smoke Tests via MCP Interface (Launch Mode)
  *
  * Tests core Java debugging in launch mode through MCP tools.
- * KDA (kotlin-debug-adapter) spawns the JVM and manages the debug session.
+ * JdiDapServer spawns the JVM via JDI and manages the debug session.
  *
  * Hard assertions (every step must succeed):
  * - Session creation returns valid sessionId
@@ -16,8 +16,6 @@
  * Prerequisites:
  * - JDK installed (java + javac on PATH)
  * - javac -g for LocalVariableTable (JDI requires it for variable access)
- * - Compiled into build/classes/java/main/ (KDA resolves classpath from
- *   Gradle/Maven build output directories, not from the project root)
  *
  * Skips gracefully when JDK is not installed.
  */
@@ -145,15 +143,12 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
     const testClassDir = path.resolve(ROOT, 'examples', 'java');
 
     // Compile with full debug info (-g) so JDI can access local variables.
-    // KDA resolves classpath from Gradle/Maven build output directories under projectRoot.
-    // Compile into build/classes/java/main/ so KDA's ProjectClassesResolver finds the class.
-    const buildClassDir = path.resolve(testClassDir, 'build', 'classes', 'java', 'main');
-    fs.mkdirSync(buildClassDir, { recursive: true });
-    execSync(`javac -g -d "${buildClassDir}" "${testJavaFile}"`, {
+    // JDI bridge accepts classpath directly — no Gradle build dir hack needed.
+    execSync(`javac -g -d "${testClassDir}" "${testJavaFile}"`, {
       cwd: testClassDir,
       stdio: 'pipe'
     });
-    console.log('[Java Smoke Test] Compiled HelloWorld.java into', buildClassDir);
+    console.log('[Java Smoke Test] Compiled HelloWorld.java into', testClassDir);
 
     try {
       // 1. Create Java debug session
@@ -186,7 +181,7 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       expect(bpResponse.success).toBe(true);
       console.log('[Java Smoke Test] Breakpoint set successfully');
 
-      // 3. Start debugging
+      // 3. Start debugging — JDI bridge launches the JVM and connects via JDI
       console.log('[Java Smoke Test] Starting debugging...');
       const startResult = await mcpClient!.callTool({
         name: 'start_debugging',
@@ -196,9 +191,8 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
           args: [],
           dapLaunchArgs: {
             mainClass: 'HelloWorld',
-            classPaths: [testClassDir],
+            classpath: testClassDir,
             cwd: testClassDir,
-            projectRoot: testClassDir,
             stopOnEntry: false
           }
         }
@@ -210,10 +204,8 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       console.log('[Java Smoke Test] Debug started, state:', startResponse.state);
 
       // 4. Poll for breakpoint hit (non-empty stack frames)
-      //    In launch mode, KDA finds the class via the Gradle-style build directory,
-      //    so initial breakpoints set during initialization fire correctly.
       console.log('[Java Smoke Test] Waiting for breakpoint hit...');
-      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 15, 500);
+      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 20, 500);
 
       // HARD ASSERTION: Breakpoint must fire
       expect(stackResponse).not.toBeNull();
@@ -226,12 +218,11 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       const topFrame = frames[0];
       console.log('[Java Smoke Test] Top frame:', topFrame.name, 'line:', topFrame.line);
       expect(topFrame.name?.toLowerCase()).toContain('add');
-      // KDA may report line 0 (no source mapping) — assert only when present
       if (typeof topFrame.line === 'number' && topFrame.line > 0) {
         expect(topFrame.line).toBe(10);
       }
 
-      // 6. Get local variables and verify values
+      // 5. Get local variables and verify values
       console.log('[Java Smoke Test] Getting local variables...');
       const localsRaw = await mcpClient!.callTool({
         name: 'get_local_variables',
@@ -256,7 +247,7 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       expect(localsByName.get('a')).toBe('10');
       expect(localsByName.get('b')).toBe('20');
 
-      // 7. Step over
+      // 6. Step over
       console.log('[Java Smoke Test] Stepping over...');
       const stepResult = await callToolSafely(mcpClient!, 'step_over', { sessionId });
       expect(stepResult.success).toBe(true);
@@ -264,17 +255,17 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       // Wait briefly for step to complete
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // 8. Continue execution to let program finish
+      // 7. Continue execution to let program finish
       console.log('[Java Smoke Test] Continuing execution...');
       const finalContinue = await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       expect(finalContinue.success).toBe(true);
 
     } finally {
-      // Clean up compiled class files (Gradle-style build directory)
+      // Clean up compiled class file
       try {
-        const buildDir = path.resolve(testClassDir, 'build');
-        if (fs.existsSync(buildDir)) {
-          fs.rmSync(buildDir, { recursive: true, force: true });
+        const classFile = path.resolve(testClassDir, 'HelloWorld.class');
+        if (fs.existsSync(classFile)) {
+          fs.unlinkSync(classFile);
         }
       } catch {
         // Ignore cleanup errors

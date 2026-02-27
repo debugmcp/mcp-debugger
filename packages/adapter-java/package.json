@@ -1,7 +1,7 @@
 {
   "name": "@debugmcp/adapter-java",
   "version": "0.18.0",
-  "description": "Java debug adapter for MCP Debugger using kotlin-debug-adapter",
+  "description": "Java debug adapter for MCP Debugger using JDI bridge",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,14 +13,13 @@
   },
   "files": [
     "dist",
-    "vendor"
+    "java"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:ci": "tsc -p tsconfig.json",
-    "build:adapter": "node scripts/vendor-kotlin-debug-adapter.js",
-    "clean": "rimraf dist vendor",
-    "clean:vendor": "rimraf vendor",
+    "build:adapter": "node scripts/compile-jdi-bridge.js",
+    "clean": "rimraf dist java/out",
     "test": "vitest run"
   },
   "dependencies": {
@@ -29,9 +28,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "extract-zip": "^2.0.1",
-    "node-fetch": "^2.7.0",
-    "progress": "^2.0.3",
     "rimraf": "^5.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.0.0"
@@ -41,7 +37,8 @@
     "debugger",
     "java",
     "jvm",
-    "kotlin-debug-adapter",
+    "jdi",
+    "jdi-bridge",
     "dap"
   ],
   "author": "mcp-debugger team",

@@ -1,9 +1,9 @@
 /**
- * Java Debug Adapter implementation using kotlin-debug-adapter (KDA)
+ * Java Debug Adapter implementation using JDI bridge (JdiDapServer)
  *
- * KDA is a JDI-based DAP server that communicates over stdio.
- * This adapter uses a stdio-tcp bridge to expose KDA on a TCP port
- * for the mcp-debugger proxy infrastructure.
+ * JdiDapServer is a single-file Java program that implements a minimal DAP
+ * server using JDI (com.sun.jdi.*) directly. It speaks DAP over TCP natively,
+ * eliminating the need for the stdio-tcp bridge that KDA required.
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -31,7 +31,7 @@ import {
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { findJavaExecutable, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
-import { resolveKDAExecutable } from './utils/kda-resolver.js';
+import { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled } from './utils/jdi-resolver.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,10 +41,10 @@ const __dirname = path.dirname(__filename);
  */
 interface JavaLaunchConfig extends LanguageSpecificLaunchConfig {
   mainClass?: string;
-  classPaths?: string[];
-  modulePaths?: string[];
+  classpath?: string;
+  sourcePath?: string;
   vmArgs?: string;
-  projectName?: string;
+  javaPath?: string;
   [key: string]: unknown;
 }
 
@@ -53,7 +53,7 @@ interface JavaLaunchConfig extends LanguageSpecificLaunchConfig {
  */
 export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.JAVA;
-  readonly name = 'Java Debug Adapter (KDA)';
+  readonly name = 'Java Debug Adapter (JDI)';
 
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
@@ -151,12 +151,12 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
         }
       }
 
-      // Check KDA
-      const kdaPath = resolveKDAExecutable();
-      if (!kdaPath) {
+      // Check JDI bridge
+      const bridgeDir = resolveJdiBridgeClassDir();
+      if (!bridgeDir) {
         warnings.push({
-          code: 'KDA_NOT_FOUND',
-          message: 'kotlin-debug-adapter not vendored. Run: pnpm --filter @debugmcp/adapter-java run build:adapter'
+          code: 'JDI_BRIDGE_NOT_COMPILED',
+          message: 'JDI bridge not compiled. Run: pnpm --filter @debugmcp/adapter-java run build:adapter'
         });
       }
 
@@ -182,12 +182,6 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
         version: '11+',
         required: true,
         installCommand: 'Download from https://adoptium.net/'
-      },
-      {
-        name: 'kotlin-debug-adapter',
-        version: '0.4.4+',
-        required: true,
-        installCommand: 'pnpm --filter @debugmcp/adapter-java run build:adapter'
       }
     ];
   }
@@ -209,11 +203,15 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Adapter Configuration =====
 
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
-    const kdaPath = resolveKDAExecutable();
+    // Try to find compiled bridge, or compile on demand
+    let bridgeDir = resolveJdiBridgeClassDir();
+    if (!bridgeDir) {
+      bridgeDir = ensureJdiBridgeCompiled();
+    }
 
-    if (!kdaPath) {
+    if (!bridgeDir) {
       throw new AdapterError(
-        'kotlin-debug-adapter not found. Run: pnpm --filter @debugmcp/adapter-java run build:adapter',
+        'JDI bridge not compiled. Run: pnpm --filter @debugmcp/adapter-java run build:adapter',
         AdapterErrorCode.ENVIRONMENT_INVALID
       );
     }
@@ -225,33 +223,29 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       );
     }
 
-    // Resolve the bridge script path
-    const bridgeScript = path.resolve(__dirname, 'utils', 'stdio-tcp-bridge.js');
+    // Find java executable
+    const javaCmd = process.env.JAVA_HOME
+      ? path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java')
+      : 'java';
 
     const env: Record<string, string> = { ...process.env as Record<string, string> };
 
-    // Ensure JAVA_HOME is propagated
-    if (process.env.JAVA_HOME) {
-      env.JAVA_HOME = process.env.JAVA_HOME;
-    }
-
-    this.dependencies.logger?.info(`[JavaDebugAdapter] Using KDA at: ${kdaPath}`);
-    this.dependencies.logger?.info(`[JavaDebugAdapter] Bridge on port: ${config.adapterPort}`);
+    this.dependencies.logger?.info(`[JavaDebugAdapter] Using JDI bridge at: ${bridgeDir}`);
+    this.dependencies.logger?.info(`[JavaDebugAdapter] Listening on port: ${config.adapterPort}`);
 
     return {
-      command: process.execPath, // node
+      command: javaCmd,
       args: [
-        bridgeScript,
+        '-cp', bridgeDir,
+        'JdiDapServer',
         '--port', String(config.adapterPort),
-        '--host', config.adapterHost || '127.0.0.1',
-        '--command', kdaPath,
       ],
       env
     };
   }
 
   getAdapterModuleName(): string {
-    return 'kotlin-debug-adapter';
+    return 'jdi-bridge';
   }
 
   getAdapterInstallCommand(): string {
@@ -271,17 +265,23 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     // If a .java source file is provided as 'program', determine mainClass
     const program = (config as Record<string, unknown>).program as string | undefined;
     if (program) {
-      const programPath = program;
-
-      if (programPath.endsWith('.java')) {
-        // Extract main class name from file path
-        // e.g., src/com/example/Main.java -> com.example.Main
-        const baseName = path.basename(programPath, '.java');
-        javaConfig.mainClass = baseName;
+      if (program.endsWith('.java')) {
+        javaConfig.mainClass = path.basename(program, '.java');
       } else {
-        // Assume it's already a class name or classpath
-        javaConfig.mainClass = programPath;
+        javaConfig.mainClass = program;
       }
+    }
+
+    // Pass through classpath if provided
+    const classpath = (config as Record<string, unknown>).classpath as string | undefined;
+    if (classpath) {
+      javaConfig.classpath = classpath;
+    }
+
+    // Pass through sourcePath if provided
+    const sourcePath = (config as Record<string, unknown>).sourcePath as string | undefined;
+    if (sourcePath) {
+      javaConfig.sourcePath = sourcePath;
     }
 
     if (config.cwd) {
@@ -294,12 +294,6 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
 
     if (config.args) {
       javaConfig.args = config.args;
-    }
-
-    // KDA requires projectRoot — use explicit value, cwd, or current directory
-    if (!(javaConfig as Record<string, unknown>).projectRoot) {
-      (javaConfig as Record<string, unknown>).projectRoot =
-        (config as Record<string, unknown>).projectRoot || config.cwd || process.cwd();
     }
 
     return javaConfig;
@@ -322,12 +316,8 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     const attachConfig: LanguageSpecificAttachConfig = {
       type: 'java',
       request: 'attach',
-      hostName: config.host || 'localhost',
+      host: config.host || 'localhost',
       port: config.port,
-      // KDA requires projectRoot — use explicit value, sourcePaths[0], cwd, or current directory
-      projectRoot: (config as Record<string, unknown>).projectRoot
-        || (config.sourcePaths?.length ? config.sourcePaths[0] : undefined)
-        || config.cwd || process.cwd(),
     };
 
     if (config.sourcePaths) {
@@ -342,8 +332,9 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     if (config.env) {
       attachConfig.env = config.env;
     }
-    // KDA requires timeout — always include with a default
-    attachConfig.timeout = config.timeout ?? 30000;
+    if (config.timeout !== undefined) {
+      attachConfig.timeout = config.timeout;
+    }
 
     return attachConfig;
   }
@@ -352,7 +343,6 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     return {
       request: 'attach',
       host: 'localhost',
-      timeout: 30000,
     };
   }
 
@@ -436,7 +426,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
    - Ubuntu: sudo apt install openjdk-17-jdk
    - Windows: Download from https://adoptium.net/
 
-2. Vendor kotlin-debug-adapter:
+2. Compile the JDI bridge:
    cd packages/adapter-java
    pnpm run build:adapter
 
@@ -462,8 +452,8 @@ After installation:
   translateErrorMessage(error: Error): string {
     const message = error.message.toLowerCase();
 
-    if (message.includes('kotlin-debug-adapter') && message.includes('not found')) {
-      return 'kotlin-debug-adapter is not installed. Run: pnpm --filter @debugmcp/adapter-java run build:adapter';
+    if (message.includes('jdi') && message.includes('not compiled')) {
+      return 'JDI bridge not compiled. Run: pnpm --filter @debugmcp/adapter-java run build:adapter';
     }
 
     if (message.includes('java') && message.includes('not found')) {
@@ -486,12 +476,9 @@ After installation:
   supportsFeature(feature: DebugFeature): boolean {
     const supportedFeatures = [
       DebugFeature.CONDITIONAL_BREAKPOINTS,
-      DebugFeature.FUNCTION_BREAKPOINTS,
       DebugFeature.EXCEPTION_BREAKPOINTS,
       DebugFeature.EVALUATE_FOR_HOVERS,
-      DebugFeature.SET_VARIABLE,
       DebugFeature.TERMINATE_REQUEST,
-      DebugFeature.STEP_IN_TARGETS_REQUEST
     ];
 
     return supportedFeatures.includes(feature);
@@ -504,7 +491,7 @@ After installation:
       case DebugFeature.CONDITIONAL_BREAKPOINTS:
         requirements.push({
           type: 'dependency',
-          description: 'kotlin-debug-adapter 0.4.0+',
+          description: 'JDK 11+ with JDI support',
           required: true
         });
         break;
@@ -524,7 +511,7 @@ After installation:
   getCapabilities(): AdapterCapabilities {
     return {
       supportsConfigurationDoneRequest: true,
-      supportsFunctionBreakpoints: true,
+      supportsFunctionBreakpoints: false,
       supportsConditionalBreakpoints: true,
       supportsHitConditionalBreakpoints: false,
       supportsEvaluateForHovers: true,
@@ -545,20 +532,19 @@ After installation:
         }
       ],
       supportsStepBack: false,
-      supportsSetVariable: true,
+      supportsSetVariable: false,
       supportsRestartFrame: false,
       supportsGotoTargetsRequest: false,
-      supportsStepInTargetsRequest: true,
-      supportsCompletionsRequest: true,
-      completionTriggerCharacters: ['.'],
+      supportsStepInTargetsRequest: false,
+      supportsCompletionsRequest: false,
       supportsModulesRequest: false,
       supportsRestartRequest: false,
-      supportsExceptionOptions: true,
+      supportsExceptionOptions: false,
       supportsValueFormattingOptions: false,
-      supportsExceptionInfoRequest: true,
+      supportsExceptionInfoRequest: false,
       supportTerminateDebuggee: true,
       supportSuspendDebuggee: false,
-      supportsDelayedStackTraceLoading: true,
+      supportsDelayedStackTraceLoading: false,
       supportsLoadedSourcesRequest: false,
       supportsLogPoints: false,
       supportsTerminateThreadsRequest: false,

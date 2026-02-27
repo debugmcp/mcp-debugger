@@ -81,8 +81,8 @@ describe('JavaAdapterFactory', () => {
 
       expect(metadata.language).toBe(DebugLanguage.JAVA);
       expect(metadata.displayName).toBe('Java');
-      expect(metadata.version).toBe('0.1.0');
-      expect(metadata.description).toContain('kotlin-debug-adapter');
+      expect(metadata.version).toBe('0.2.0');
+      expect(metadata.description).toContain('JDI');
       expect(metadata.fileExtensions).toContain('.java');
     });
 
@@ -140,7 +140,7 @@ describe('JavaAdapterFactory', () => {
       }
     });
 
-    it('should warn when KDA is not vendored', async () => {
+    it('should warn when JDI bridge is not compiled', async () => {
       mockSpawn.mockImplementation(() => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
@@ -154,10 +154,9 @@ describe('JavaAdapterFactory', () => {
 
       const result = await factory.validate();
 
-      // KDA may or may not be vendored depending on environment
-      // If vendored, no warning; if not vendored, expect a warning
-      const hasKdaWarning = result.warnings?.some(w => w.includes('kotlin-debug-adapter'));
-      expect(typeof hasKdaWarning).toBe('boolean'); // just verify the check ran
+      // JDI bridge may or may not be compiled depending on environment
+      const hasJdiBridgeWarning = result.warnings?.some(w => w.includes('JDI bridge'));
+      expect(typeof hasJdiBridgeWarning).toBe('boolean'); // just verify the check ran
     });
 
     it('should include platform info in details', async () => {

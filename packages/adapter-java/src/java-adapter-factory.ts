@@ -2,14 +2,14 @@
  * Java Adapter Factory
  *
  * Factory for creating Java debug adapter instances.
- * Uses kotlin-debug-adapter (KDA) as the underlying DAP server.
+ * Uses JDI bridge (JdiDapServer) as the underlying DAP server.
  */
 import { IDebugAdapter } from '@debugmcp/shared';
 import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
 import { JavaDebugAdapter } from './java-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { findJavaExecutable, getJavaVersion } from './utils/java-utils.js';
-import { resolveKDAExecutable } from './utils/kda-resolver.js';
+import { resolveJdiBridgeClassDir } from './utils/jdi-resolver.js';
 
 /**
  * Factory for creating Java debug adapters
@@ -29,9 +29,9 @@ export class JavaAdapterFactory implements IAdapterFactory {
     return {
       language: DebugLanguage.JAVA,
       displayName: 'Java',
-      version: '0.1.0',
+      version: '0.2.0',
       author: 'mcp-debugger team',
-      description: 'Debug Java applications using kotlin-debug-adapter (JDI)',
+      description: 'Debug Java applications using JDI bridge (JdiDapServer)',
       documentationUrl: 'https://github.com/debugmcp/mcp-debugger/docs/java',
       minimumDebuggerVersion: '0.18.0',
       fileExtensions: ['.java'],
@@ -46,14 +46,14 @@ export class JavaAdapterFactory implements IAdapterFactory {
     const warnings: string[] = [];
     let javaPath: string | undefined;
     let javaVersion: string | undefined;
-    let kdaPath: string | undefined;
+    let jdiBridgeDir: string | undefined;
 
-    // Check kotlin-debug-adapter
-    const resolvedKDA = resolveKDAExecutable();
-    if (!resolvedKDA) {
-      warnings.push('kotlin-debug-adapter not found. Run: pnpm --filter @debugmcp/adapter-java run build:adapter');
+    // Check JDI bridge
+    const resolvedBridge = resolveJdiBridgeClassDir();
+    if (!resolvedBridge) {
+      warnings.push('JDI bridge not compiled. Run: pnpm --filter @debugmcp/adapter-java run build:adapter');
     } else {
-      kdaPath = resolvedKDA;
+      jdiBridgeDir = resolvedBridge;
     }
 
     // Check Java
@@ -82,7 +82,7 @@ export class JavaAdapterFactory implements IAdapterFactory {
       details: {
         javaPath,
         javaVersion,
-        kdaPath,
+        jdiBridgeDir,
         platform: process.platform,
         arch: process.arch,
         timestamp: new Date().toISOString()
