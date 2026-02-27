@@ -385,10 +385,8 @@ export class DapProxyWorker {
           });
         }
 
-        // Initialize DAP session with correct adapterId
-        // Allow launch config to override the adapter ID (e.g., 'clr' for .NET Framework)
-        const policyAdapterId = this.adapterPolicy.getDapAdapterConfiguration().type;
-        const adapterId = (payload.launchConfig as Record<string, unknown>)?.type as string || policyAdapterId;
+        // Initialize DAP session with correct adapterId from the policy
+        const adapterId = this.adapterPolicy.getDapAdapterConfiguration().type;
         await this.connectionManager!.initializeSession(
           this.dapClient,
           payload.sessionId,

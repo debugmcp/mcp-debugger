@@ -7,7 +7,7 @@
  * connects to a port and exchanges DAP JSON messages. Most adapters (debugpy,
  * js-debug, CodeLLDB, Delve) natively support a TCP or socket transport.
  *
- * vsdbg is different — it only speaks DAP via stdio (stdin/stdout) when
+ * vsdbg is different -- it only speaks DAP via stdio (stdin/stdout) when
  * launched with `--interpreter=vscode`. There is no built-in TCP mode.
  *
  * This bridge process solves the mismatch:
@@ -27,16 +27,7 @@
  * `handshake` request in vsdbg's stdout, loads vsda.node via createRequire,
  * calls `vsda.createNewKeyPair()` and `signer.sign(challenge)`, and sends
  * the signed response back to vsdbg's stdin. The DAP client on the TCP side
- * never sees the handshake — it's fully handled by the bridge.
- *
- * ## PDB Conversion (launch mode fallback)
- *
- * For launch mode, the bridge can optionally convert Windows PDBs to Portable
- * PDBs before spawning vsdbg. This is a fallback — for attach mode, PDB
- * conversion is handled earlier in the pipeline by DotnetDebugAdapter's
- * transformAttachConfig(), which uses a copy-to-temp strategy (see
- * dotnet-utils.ts). The bridge's in-place conversion only works when the
- * PDB files are not locked by a running process.
+ * never sees the handshake -- it's fully handled by the bridge.
  *
  * ## Console Window Suppression
  *
@@ -44,15 +35,12 @@
  * console window from appearing on the desktop.
  *
  * Usage: node vsdbg-bridge.js --vsdbg <path> --host <host> --port <port>
- *          [--vsda <path>] [--pdb2pdb <path>] [--convert-pdbs <dir1,dir2,...>]
+ *          [--vsda <path>]
  */
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { createRequire } from 'module';
-import * as fs from 'fs';
 import * as net from 'net';
-import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { isPortablePdb } from './dotnet-utils.js';
 
 // ===== Types =====
 
@@ -61,13 +49,6 @@ interface BridgeArgs {
   host: string;
   port: number;
   vsdaPath: string | null;
-  pdb2pdbPath: string | null;
-  convertPdbDirs: string[];
-}
-
-interface PdbBackup {
-  original: string;
-  backup: string;
 }
 
 // ===== DAP Frame Parser =====
@@ -161,116 +142,12 @@ export function signHandshake(challenge: string, vsdaPath: string | null): strin
   }
 }
 
-// ===== PDB Conversion =====
-
 /**
  * Encode a DAP message with Content-Length header.
  */
 function encodeDapFrame(body: Buffer): Buffer {
   const header = `Content-Length: ${body.length}\r\n\r\n`;
   return Buffer.concat([Buffer.from(header, 'ascii'), body]);
-}
-
-/**
- * Convert Windows-format PDBs to Portable PDBs in the given directories.
- *
- * @param dirs Directories to scan for .pdb files
- * @param pdb2pdbPath Path to Pdb2Pdb.exe
- * @returns Array of backup records for restoration on cleanup
- */
-export function convertPdbs(dirs: string[], pdb2pdbPath: string): PdbBackup[] {
-  const backups: PdbBackup[] = [];
-
-  for (const dir of dirs) {
-    if (!fs.existsSync(dir)) {
-      process.stderr.write(`[vsdbg-bridge] PDB scan dir not found: ${dir}\n`);
-      continue;
-    }
-
-    let entries: string[];
-    try {
-      entries = fs.readdirSync(dir);
-    } catch {
-      continue;
-    }
-
-    const pdbFiles = entries.filter(e => e.toLowerCase().endsWith('.pdb'));
-
-    for (const pdbFile of pdbFiles) {
-      const pdbPath = path.join(dir, pdbFile);
-
-      // Skip if already portable
-      if (isPortablePdb(pdbPath)) {
-        process.stderr.write(`[vsdbg-bridge] Already portable: ${pdbPath}\n`);
-        continue;
-      }
-
-      // Find matching DLL
-      const baseName = pdbFile.replace(/\.pdb$/i, '');
-      const dllPath = path.join(dir, baseName + '.dll');
-      if (!fs.existsSync(dllPath)) {
-        process.stderr.write(`[vsdbg-bridge] No matching DLL for ${pdbFile}, skipping\n`);
-        continue;
-      }
-
-      // Create backup
-      const backupPath = pdbPath + '.backup';
-      try {
-        fs.copyFileSync(pdbPath, backupPath);
-        backups.push({ original: pdbPath, backup: backupPath });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`[vsdbg-bridge] WARNING: Failed to backup ${pdbPath}: ${message}\n`);
-        continue;
-      }
-
-      // Convert: Pdb2Pdb.exe <dll> /pdb <original.pdb> /out <original.pdb>
-      try {
-        const result = spawnSync(pdb2pdbPath, [dllPath, '/pdb', pdbPath, '/out', pdbPath], {
-          timeout: 30000,
-          stdio: ['ignore', 'pipe', 'pipe']
-        });
-
-        if (result.status === 0) {
-          process.stderr.write(`[vsdbg-bridge] Converted ${pdbPath} to Portable PDB\n`);
-        } else {
-          const stderr = result.stderr ? result.stderr.toString().trim() : '';
-          process.stderr.write(`[vsdbg-bridge] WARNING: Pdb2Pdb failed for ${pdbPath}: exit ${result.status} ${stderr}\n`);
-          // Restore from backup since conversion failed
-          try {
-            fs.copyFileSync(backupPath, pdbPath);
-          } catch { /* best effort */ }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`[vsdbg-bridge] WARNING: Pdb2Pdb spawn failed for ${pdbPath}: ${message}\n`);
-        // Restore from backup since conversion failed
-        try {
-          fs.copyFileSync(backupPath, pdbPath);
-        } catch { /* best effort */ }
-      }
-    }
-  }
-
-  return backups;
-}
-
-/**
- * Restore original PDB files from backups.
- */
-export function restorePdbBackups(backups: PdbBackup[]): void {
-  for (const { original, backup } of backups) {
-    try {
-      if (fs.existsSync(backup)) {
-        fs.copyFileSync(backup, original);
-        fs.unlinkSync(backup);
-        process.stderr.write(`[vsdbg-bridge] Restored ${original}\n`);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`[vsdbg-bridge] WARNING: Failed to restore ${original}: ${message}\n`);
-    }
-  }
 }
 
 // ===== Argument Parsing =====
@@ -280,8 +157,6 @@ function parseArgs(argv: string[]): BridgeArgs {
   let host = '127.0.0.1';
   let port = 0;
   let vsdaPath: string | null = null;
-  let pdb2pdbPath: string | null = null;
-  let convertPdbDirs: string[] = [];
 
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
@@ -297,45 +172,21 @@ function parseArgs(argv: string[]): BridgeArgs {
       case '--vsda':
         vsdaPath = argv[++i] || null;
         break;
-      case '--pdb2pdb':
-        pdb2pdbPath = argv[++i] || null;
-        break;
-      case '--convert-pdbs':
-        convertPdbDirs = (argv[++i] || '').split(',').filter(Boolean);
-        break;
     }
   }
 
   if (!vsdbg || !port) {
-    console.error('Usage: node vsdbg-bridge.js --vsdbg <path> --host <host> --port <port> [--vsda <path>] [--pdb2pdb <path>] [--convert-pdbs <dir1,dir2,...>]');
+    console.error('Usage: node vsdbg-bridge.js --vsdbg <path> --host <host> --port <port> [--vsda <path>]');
     process.exit(1);
   }
 
-  return { vsdbg, host, port, vsdaPath, pdb2pdbPath, convertPdbDirs };
+  return { vsdbg, host, port, vsdaPath };
 }
 
 // ===== Main =====
 
 function main(): void {
   const args = parseArgs(process.argv);
-
-  // --- PDB conversion (before spawning vsdbg) ---
-  let pdbBackups: PdbBackup[] = [];
-  if (args.pdb2pdbPath && args.convertPdbDirs.length > 0) {
-    process.stderr.write(`[vsdbg-bridge] Converting PDBs in: ${args.convertPdbDirs.join(', ')}\n`);
-    pdbBackups = convertPdbs(args.convertPdbDirs, args.pdb2pdbPath);
-    process.stderr.write(`[vsdbg-bridge] PDB conversion complete (${pdbBackups.length} files backed up)\n`);
-  }
-
-  // Register cleanup for PDB restoration
-  let pdbsRestored = false;
-  const doRestore = () => {
-    if (!pdbsRestored && pdbBackups.length > 0) {
-      pdbsRestored = true;
-      restorePdbBackups(pdbBackups);
-    }
-  };
-  process.on('exit', doRestore);
 
   // --- TCP server ---
   const server = net.createServer((socket) => {
@@ -344,10 +195,6 @@ function main(): void {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true
     });
-
-    // Register additional cleanup triggers
-    child.on('exit', doRestore);
-    socket.on('close', doRestore);
 
     // --- Handshake interception on vsdbg stdout ---
     let handshakeHandled = false;

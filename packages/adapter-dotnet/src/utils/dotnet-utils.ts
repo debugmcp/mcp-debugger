@@ -1,47 +1,16 @@
 /**
- * .NET debugger executable detection and PDB conversion utilities.
+ * .NET debugger executable detection utilities.
  *
  * ## Debugger Backends
  *
  * Two DAP-compatible .NET debuggers exist:
  *
  * - **vsdbg** (Microsoft, proprietary, bundled with VS Code C# extension):
- *   Supports both .NET Framework 4.x and .NET Core/.NET 5+. Required for
- *   Framework debugging. Found under ~/.vscode/extensions/ms-dotnettools.csharp-{version}/.debugger/
+ *   Found under ~/.vscode/extensions/ms-dotnettools.csharp-{version}/.debugger/
  *
  * - **netcoredbg** (Samsung, open-source, https://github.com/Samsung/netcoredbg):
- *   Supports .NET Core/.NET 5+ only. Does NOT support .NET Framework 4.x.
- *   Simpler to install (single binary) but less capable than vsdbg.
- *
- * ## PDB Conversion (convertPdbsToTemp)
- *
- * .NET debug symbols come in two incompatible formats:
- *
- * - **Windows PDB** (aka "full" or "native" PDB): The legacy format produced
- *   by .NET Framework compilers (csc.exe), NinjaTrader's NinjaScript compiler,
- *   Unity, and any tool using the older Roslyn pipeline. These PDBs use a
- *   proprietary Microsoft format and are typically large.
- *
- * - **Portable PDB**: The modern, cross-platform format used by .NET Core/.NET 5+
- *   by default. Smaller, standardized, and the only format vsdbg can read for
- *   symbol loading and breakpoint resolution.
- *
- * When debugging a .NET Framework 4.x application (or any app with Windows PDBs),
- * vsdbg cannot load the symbols --breakpoints silently fail with "No symbols loaded."
- *
- * **Pdb2Pdb.exe** (from Microsoft's `Microsoft.DiaSymReader.Converter` NuGet package)
- * converts Windows PDBs to Portable PDBs. It reads the DLL's metadata plus the
- * Windows PDB and produces an equivalent Portable PDB.
- *
- * The conversion uses a **copy-to-temp** strategy because the target process
- * (e.g., NinjaTrader) holds a file lock on the original PDB. We:
- * 1. Copy the DLL and PDB to a temp directory
- * 2. Run Pdb2Pdb on the temp copies
- * 3. Return the temp dir path for use as `symbolOptions.searchPaths`
- *
- * Pdb2Pdb may emit PDB0016 warnings ("Invalid scope IL offset range") for
- * certain compiler-generated scopes. These warnings are non-fatal --the output
- * Portable PDB is still valid and usable for debugging.
+ *   Supports .NET Core/.NET 5+ only. Simpler to install (single binary) but
+ *   less capable than vsdbg.
  *
  * ## vsda Handshake (findVsdaNode)
  *
@@ -51,11 +20,9 @@
  * Without a valid signature, vsdbg prints a telemetry event and exits.
  * findVsdaNode() locates this native module in the C# extension directory.
  */
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import which from 'which';
 
 interface Logger {
@@ -405,163 +372,3 @@ export function findVsdaNode(logger: Logger = noopLogger): string | null {
   return null;
 }
 
-/**
- * Check whether a PDB file is in Portable PDB format.
- *
- * Portable PDBs start with the magic bytes "BSJB" (0x42 0x53 0x4A 0x42).
- * Windows-format PDBs have a different signature ("Microsoft C/C++ MSF 7.00").
- *
- * @param pdbPath Absolute path to the PDB file
- * @returns true if the file is a Portable PDB, false if Windows-format or on error
- */
-export function isPortablePdb(pdbPath: string): boolean {
-  try {
-    const fd = fs.openSync(pdbPath, 'r');
-    try {
-      const buf = Buffer.alloc(4);
-      const bytesRead = fs.readSync(fd, buf, 0, 4, 0);
-      if (bytesRead < 4) return false;
-      // Portable PDB magic: "BSJB" = 0x42 0x53 0x4A 0x42
-      return buf[0] === 0x42 && buf[1] === 0x53 && buf[2] === 0x4A && buf[3] === 0x42;
-    } finally {
-      fs.closeSync(fd);
-    }
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Find the Pdb2Pdb.exe converter tool.
- *
- * Priority:
- * 1. PDB2PDB_PATH environment variable
- * 2. Bundled with this package at tools/pdb2pdb/Pdb2Pdb.exe
- * 3. Fallback at /tmp/pdb2pdb-tool/Pdb2Pdb.exe
- *
- * @returns Absolute path to Pdb2Pdb.exe, or null if not found
- */
-export function findPdb2PdbExecutable(): string | null {
-  // 1. Environment variable
-  if (process.env.PDB2PDB_PATH) {
-    if (fs.existsSync(process.env.PDB2PDB_PATH)) {
-      return process.env.PDB2PDB_PATH;
-    }
-  }
-
-  // 2. Bundled with this package
-  const thisFile = fileURLToPath(import.meta.url);
-  const bundled = path.resolve(path.dirname(thisFile), '..', '..', 'tools', 'pdb2pdb', 'Pdb2Pdb.exe');
-  if (fs.existsSync(bundled)) {
-    return bundled;
-  }
-
-  // 3. Fallback temp location
-  const fallback = '/tmp/pdb2pdb-tool/Pdb2Pdb.exe';
-  if (fs.existsSync(fallback)) {
-    return fallback;
-  }
-
-  return null;
-}
-
-/**
- * Convert Windows PDB files to Portable PDB format using a copy-to-temp strategy.
- *
- * Copies DLL+PDB pairs to a temp directory and runs Pdb2Pdb.exe on the copies,
- * leaving the originals untouched (important when the debuggee has them locked).
- *
- * @param sourceDirs Directories to scan for .pdb files
- * @param pdb2pdbPath Path to Pdb2Pdb.exe
- * @returns Temp directory containing converted PDBs, or null if no conversions were made
- */
-export function convertPdbsToTemp(sourceDirs: string[], pdb2pdbPath: string): string | null {
-  const tempDir = path.join(os.tmpdir(), `mcp-debugger-pdbs-${Date.now()}`);
-  let converted = 0;
-
-  console.error(`[convertPdbsToTemp] Scanning ${sourceDirs.length} dirs: ${sourceDirs.join(', ')}`);
-
-  for (const dir of sourceDirs) {
-    if (!fs.existsSync(dir)) {
-      console.error(`[convertPdbsToTemp] Dir not found, skipping: ${dir}`);
-      continue;
-    }
-
-    let entries: string[];
-    try {
-      entries = fs.readdirSync(dir);
-    } catch (err) {
-      console.error(`[convertPdbsToTemp] Failed to read dir ${dir}: ${err instanceof Error ? err.message : String(err)}`);
-      continue;
-    }
-
-    const pdbFiles = entries.filter(e => e.toLowerCase().endsWith('.pdb'));
-    console.error(`[convertPdbsToTemp] Found ${pdbFiles.length} PDB files in ${dir}`);
-
-    for (const pdbFile of pdbFiles) {
-      const pdbPath = path.join(dir, pdbFile);
-
-      // Skip if already portable
-      if (isPortablePdb(pdbPath)) {
-        console.error(`[convertPdbsToTemp] Already portable, skipping: ${pdbFile}`);
-        continue;
-      }
-
-      // Find matching DLL
-      const baseName = pdbFile.replace(/\.pdb$/i, '');
-      const dllFile = baseName + '.dll';
-      const dllPath = path.join(dir, dllFile);
-      if (!fs.existsSync(dllPath)) {
-        console.error(`[convertPdbsToTemp] No matching DLL for ${pdbFile}, skipping`);
-        continue;
-      }
-
-      console.error(`[convertPdbsToTemp] Converting Windows PDB: ${pdbFile}`);
-
-      // Ensure temp dir exists
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-
-      // Copy both DLL and PDB to temp
-      try {
-        fs.copyFileSync(dllPath, path.join(tempDir, dllFile));
-        fs.copyFileSync(pdbPath, path.join(tempDir, pdbFile));
-        console.error(`[convertPdbsToTemp] Copied DLL+PDB to ${tempDir}`);
-      } catch (err) {
-        console.error(`[convertPdbsToTemp] Copy failed for ${pdbFile}: ${err instanceof Error ? err.message : String(err)}`);
-        continue;
-      }
-
-      // Convert: Pdb2Pdb.exe <dll> --it auto-finds the adjacent PDB and outputs <name>.pdb2
-      const result = spawnSync(pdb2pdbPath, [path.join(tempDir, dllFile)], {
-        timeout: 30000,
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-
-      const stderr = result.stderr ? result.stderr.toString().trim() : '';
-      console.error(`[convertPdbsToTemp] Pdb2Pdb exit code: ${result.status}${stderr ? ', stderr: ' + stderr.substring(0, 200) : ''}`);
-
-      // Pdb2Pdb outputs to <name>.pdb2, rename to .pdb
-      const pdb2Path = path.join(tempDir, baseName + '.pdb2');
-      if (fs.existsSync(pdb2Path)) {
-        try {
-          fs.renameSync(pdb2Path, path.join(tempDir, pdbFile));
-          converted++;
-          console.error(`[convertPdbsToTemp] Successfully converted: ${pdbFile}`);
-        } catch (err) {
-          console.error(`[convertPdbsToTemp] Rename .pdb2 failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      } else if (result.status === 0) {
-        // Some versions overwrite in-place
-        converted++;
-        console.error(`[convertPdbsToTemp] Pdb2Pdb succeeded (in-place): ${pdbFile}`);
-      } else {
-        console.error(`[convertPdbsToTemp] No .pdb2 output and non-zero exit for: ${pdbFile}`);
-      }
-    }
-  }
-
-  console.error(`[convertPdbsToTemp] Done. Converted ${converted} PDBs. Temp dir: ${converted > 0 ? tempDir : 'none'}`);
-  return converted > 0 ? tempDir : null;
-}

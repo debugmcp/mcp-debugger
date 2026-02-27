@@ -24,15 +24,10 @@
  *    flag tells the proxy worker to use this reversed sequence. Without it,
  *    the proxy deadlocks waiting for an event that never comes.
  *
- * 4. **Adapter ID matters**: vsdbg's `initialize` request requires the correct
- *    `adapterID` — `'coreclr'` for .NET 5+ or `'clr'` for .NET Framework 4.x.
- *    The wrong value causes a cryptic rejection. We default to `'coreclr'` and
- *    allow callers to override via `dapLaunchArgs.type = 'clr'` for Framework.
- *
- * 5. **Scope naming**: vsdbg uses `'Locals'` (capital L) for the local
+ * 4. **Scope naming**: vsdbg uses `'Locals'` (capital L) for the local
  *    variables scope, unlike Python's `'Locals'` or JavaScript's `'Local'`.
  *
- * 6. **Compiler-generated variables**: C# compilers generate variables with
+ * 5. **Compiler-generated variables**: C# compilers generate variables with
  *    names like `<>c__DisplayClass`, `CS$<>`, `<>t__builder` for closures,
  *    async state machines, and display classes. These are filtered out by
  *    `extractLocalVariables` unless `includeSpecial` is true.
@@ -132,9 +127,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
 
   /**
    * Returns the DAP adapter configuration.
-   * Defaults to 'coreclr' for .NET Core / .NET 5+.
-   * For .NET Framework 4.x (e.g., NinjaTrader), callers should pass
-   * dapLaunchArgs.type = 'clr' to override.
+   * Uses 'coreclr' for .NET Core / .NET 5+.
    */
   getDapAdapterConfiguration: () => {
     return {

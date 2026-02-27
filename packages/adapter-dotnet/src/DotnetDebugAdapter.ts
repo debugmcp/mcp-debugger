@@ -3,74 +3,15 @@
  *
  * Provides .NET/C#-specific debugging functionality using vsdbg (or netcoredbg).
  * Encapsulates all .NET-specific logic including executable discovery,
- * environment validation, PDB conversion, and vsdbg integration.
- *
- * ## .NET Runtime Landscape and Why This Is Complex
- *
- * There are two fundamentally different .NET runtimes in the wild:
- *
- * - **.NET Core / .NET 5+** (modern, cross-platform): Uses the `coreclr` runtime.
- *   Produces **Portable PDB** debug symbols by default. Both vsdbg and netcoredbg
- *   work out of the box.
- *
- * - **.NET Framework 4.x** (Windows-only, legacy but widely deployed): Uses the
- *   `clr` runtime. Produces **Windows PDB** debug symbols (also called "full" or
- *   "native" PDBs). Only vsdbg supports this runtime — netcoredbg does not.
- *   Many large applications still run on Framework 4.8 (e.g., NinjaTrader 8,
- *   Unity Editor, legacy enterprise apps).
- *
- * ## PDB Format Problem
- *
- * vsdbg requires **Portable PDB** format for symbol loading, even when debugging
- * .NET Framework 4.x applications. But .NET Framework compilers (csc.exe, and
- * tools like NinjaTrader's built-in NinjaScript compiler) only produce
- * **Windows PDB** format. This means:
- *
- * 1. The PDB files exist and contain valid debug information
- * 2. vsdbg cannot read them because they're the wrong format
- * 3. Breakpoints show "No symbols loaded" even though everything looks correct
- *
- * The solution is **Pdb2Pdb.exe** (from Microsoft's `Microsoft.DiaSymReader.Converter`
- * NuGet package), which converts Windows PDBs to Portable PDBs. We bundle it in
- * `packages/adapter-dotnet/tools/pdb2pdb/`.
- *
- * ## PDB File Locking Problem
- *
- * When attaching to a running process, the target application holds a file lock
- * on its PDB files. Pdb2Pdb cannot write to a locked file. In-place conversion
- * fails with "The process cannot access the file because it is being used by
- * another process."
- *
- * The solution is a **copy-to-temp** strategy:
- * 1. Copy the DLL and PDB to a temporary directory
- * 2. Run Pdb2Pdb on the temp copies (originals are untouched)
- * 3. Pass the temp directory as `symbolOptions.searchPaths` in the DAP attach
- *    config, so vsdbg finds the converted Portable PDBs there
- *
- * This is implemented in `convertPdbsToTemp()` in `dotnet-utils.ts` and called
- * from `transformAttachConfig()` in this file.
- *
- * ## Adapter ID: `clr` vs `coreclr`
- *
- * vsdbg's DAP `initialize` request requires an `adapterID` field that tells it
- * which runtime to target:
- * - `adapterID: 'coreclr'` — for .NET Core / .NET 5/6/7/8+
- * - `adapterID: 'clr'` — for .NET Framework 4.x
- *
- * Using the wrong one causes vsdbg to reject the initialize request with a
- * cryptic error (ErrorCode: -2147467259, AdapterId: "unknown").
- *
- * The default is `coreclr` (set in DotnetAdapterPolicy.getDapAdapterConfiguration).
- * Callers targeting .NET Framework must pass `dapLaunchArgs: { type: 'clr' }` in
- * the `attach_to_process` or `start_debugging` MCP tool call to override.
+ * environment validation, and vsdbg integration.
  *
  * ## DAP Handshake Order: `sendAttachBeforeInitialized`
  *
  * Most DAP adapters (debugpy, js-debug, CodeLLDB, Delve) follow this sequence:
- *   initialize → response → initialized event → attach/launch → configurationDone
+ *   initialize -> response -> initialized event -> attach/launch -> configurationDone
  *
  * vsdbg follows a different sequence for attach mode:
- *   initialize → response → attach → initialized event → configurationDone
+ *   initialize -> response -> attach -> initialized event -> configurationDone
  *
  * vsdbg does NOT send the `initialized` event until AFTER it processes the
  * `attach` request. Waiting for `initialized` before sending `attach` is a
@@ -87,11 +28,11 @@
  *
  * ## Critical Safety: terminateDebuggee
  *
- * When attaching to a process (especially long-running ones like NinjaTrader),
- * terminateDebuggee is always set to false on disconnect. The proxy worker's
- * handleTerminate() auto-detaches with terminateDebuggee=false for attach-mode
- * sessions, so even if close_debug_session is called without an explicit
- * detach_from_process, the target process survives.
+ * When attaching to a process, terminateDebuggee is always set to false on
+ * disconnect. The proxy worker's handleTerminate() auto-detaches with
+ * terminateDebuggee=false for attach-mode sessions, so even if
+ * close_debug_session is called without an explicit detach_from_process,
+ * the target process survives.
  *
  * @since 0.1.0
  */
@@ -121,7 +62,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { findDotnetBackend, findVsdaNode, findPdb2PdbExecutable, convertPdbsToTemp } from './utils/dotnet-utils.js';
+import { findDotnetBackend, findVsdaNode } from './utils/dotnet-utils.js';
 
 /**
  * Cache entry for debugger executable paths
@@ -146,10 +87,6 @@ interface DotnetLaunchConfig extends LanguageSpecificLaunchConfig {
   stopOnEntry?: boolean;
   console?: 'internalConsole' | 'integratedTerminal' | 'externalTerminal';
   sourceFileMap?: Record<string, string>;
-  symbolOptions?: {
-    searchPaths?: string[];
-    searchMicrosoftSymbolServer?: boolean;
-  };
   [key: string]: unknown;
 }
 
@@ -359,43 +296,6 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
       args.push('--vsda', vsdaPath);
     }
 
-    // Pdb2Pdb.exe for PDB conversion
-    const pdb2pdbPath = findPdb2PdbExecutable();
-    if (pdb2pdbPath) {
-      args.push('--pdb2pdb', pdb2pdbPath);
-
-      // Collect PDB search directories
-      const pdbDirs: string[] = [];
-
-      // From symbolOptions.searchPaths in launch config
-      const launchConfig = config.launchConfig as DotnetLaunchConfig | undefined;
-      if (launchConfig?.symbolOptions?.searchPaths) {
-        pdbDirs.push(...launchConfig.symbolOptions.searchPaths);
-      }
-
-      // From program path directory (launch mode)
-      if (launchConfig?.program) {
-        const programDir = path.dirname(launchConfig.program);
-        if (!pdbDirs.includes(programDir)) {
-          pdbDirs.push(programDir);
-        }
-      }
-
-      // From sourcePaths (attach mode — buildAdapterCommand runs before transformAttachConfig)
-      const rawConfig = config.launchConfig as Record<string, unknown> | undefined;
-      if (rawConfig?.sourcePaths && Array.isArray(rawConfig.sourcePaths)) {
-        for (const dir of rawConfig.sourcePaths as string[]) {
-          if (!pdbDirs.includes(dir)) {
-            pdbDirs.push(dir);
-          }
-        }
-      }
-
-      if (pdbDirs.length > 0) {
-        args.push('--convert-pdbs', pdbDirs.join(','));
-      }
-    }
-
     return {
       command: 'node',
       args,
@@ -451,23 +351,8 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
     console.error(`[DotnetDebugAdapter] transformAttachConfig called, sourcePaths=${JSON.stringify(config.sourcePaths || null)}`);
 
-    // Convert Windows PDBs to Portable PDB format in a temp directory
-    // (originals may be locked by the debuggee process)
-    const symbolSearchPaths: string[] = [];
-    if (config.sourcePaths) {
-      const pdb2pdbPath = findPdb2PdbExecutable();
-      console.error(`[DotnetDebugAdapter] Pdb2Pdb path: ${pdb2pdbPath || 'null (not found)'}`);
-      if (pdb2pdbPath) {
-        const tempDir = convertPdbsToTemp(config.sourcePaths, pdb2pdbPath);
-        console.error(`[DotnetDebugAdapter] convertPdbsToTemp result: ${tempDir || 'null (no conversions)'}`);
-        if (tempDir) {
-          symbolSearchPaths.push(tempDir);
-        }
-      }
-    }
-
     const attachConfig = {
-      type: 'clr',
+      type: 'coreclr',
       request: 'attach',
       name: '.NET: Attach',
       processId: config.processId ? Number(config.processId) : undefined,
@@ -476,13 +361,10 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
       terminateDebuggee: false,
       sourceFileMap: config.sourcePaths ? Object.fromEntries(
         config.sourcePaths.map(p => [p, p])
-      ) : undefined,
-      symbolOptions: symbolSearchPaths.length > 0
-        ? { searchPaths: symbolSearchPaths, searchMicrosoftSymbolServer: false }
-        : undefined
+      ) : undefined
     };
 
-    console.error(`[DotnetDebugAdapter] Returning attach config: symbolOptions=${attachConfig.symbolOptions ? JSON.stringify(attachConfig.symbolOptions) : 'absent'}, type=${attachConfig.type}`);
+    console.error(`[DotnetDebugAdapter] Returning attach config: type=${attachConfig.type}`);
     return attachConfig;
   }
 
