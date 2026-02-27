@@ -343,4 +343,165 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       }
     }
   }, 60000);
+
+  it('should hit a breakpoint added while paused after attach', async () => {
+    // Skip if java/javac not available
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Java Attach BP-While-Paused] Skipping — JDK not installed');
+      return;
+    }
+
+    const testJavaFile = path.resolve(ROOT, 'examples', 'java', 'InfiniteWait.java');
+    const testClassDir = path.resolve(ROOT, 'examples', 'java');
+
+    // Compile with full debug info
+    execSync(`javac -g "${testJavaFile}"`, { cwd: testClassDir, stdio: 'pipe' });
+
+    try {
+      // Pick a free port and spawn JVM with JDWP (suspend=y)
+      const jdwpPort = await getFreePort();
+      console.log(`[Attach BP-While-Paused] Using JDWP port: ${jdwpPort}`);
+
+      jvmProcess = spawn('java', [
+        `-agentlib:jdwp=transport=dt_socket,server=y,address=${jdwpPort},suspend=y`,
+        '-cp', testClassDir,
+        'InfiniteWait'
+      ], {
+        cwd: testClassDir,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      // Wait for JDWP agent to be ready
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timeout waiting for JDWP agent')), 15000);
+        let outputData = '';
+        let resolved = false;
+
+        const checkOutput = (chunk: Buffer) => {
+          if (resolved) return;
+          outputData += chunk.toString();
+          if (outputData.includes('Listening for transport')) {
+            resolved = true;
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+
+        jvmProcess!.stdout!.on('data', checkOutput);
+        jvmProcess!.stderr!.on('data', checkOutput);
+        jvmProcess!.on('error', (err) => { if (!resolved) { clearTimeout(timeout); reject(err); } });
+        jvmProcess!.on('exit', (code) => { if (!resolved) { clearTimeout(timeout); reject(new Error(`JVM exited ${code}`)); } });
+      });
+
+      // 1. Create session
+      const createResult = await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'java', name: 'java-attach-bp-paused' }
+      });
+      const createResponse = parseSdkToolResult(createResult);
+      expect(createResponse.sessionId).toBeDefined();
+      sessionId = createResponse.sessionId as string;
+
+      // 2. Set FIRST breakpoint on line 14 (compute: int result = a + b)
+      console.log('[Attach BP-While-Paused] Setting first breakpoint on line 14 (compute)...');
+      const bp1Result = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: testJavaFile, line: 14 }
+      }));
+      expect(bp1Result.success).toBe(true);
+
+      // 3. Attach to JVM
+      console.log(`[Attach BP-While-Paused] Attaching to JVM on port ${jdwpPort}...`);
+      const attachResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'attach_to_process',
+        arguments: { sessionId, port: jdwpPort, host: '127.0.0.1', sourcePaths: [testClassDir] }
+      }));
+      expect(attachResult.success).toBe(true);
+
+      // 4. Continue (VM starts suspended with suspend=y)
+      console.log('[Attach BP-While-Paused] Continuing to start program...');
+      const cont1 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(cont1.success).toBe(true);
+
+      // 5. Wait for FIRST breakpoint hit at compute():14
+      console.log('[Attach BP-While-Paused] Waiting for first breakpoint (line 14)...');
+      const stack1 = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+      expect(stack1).not.toBeNull();
+      const frames1 = stack1!.stackFrames!;
+      expect(frames1.length).toBeGreaterThan(0);
+      expect(frames1[0].name?.toLowerCase()).toContain('compute');
+      expect(frames1[0].line).toBe(14);
+      console.log('[Attach BP-While-Paused] Hit first breakpoint at compute():14');
+
+      // 6. While PAUSED, set SECOND breakpoint on line 19 (format: String text = ...)
+      console.log('[Attach BP-While-Paused] Setting second breakpoint on line 19 (format) while paused...');
+      const bp2Result = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: testJavaFile, line: 19 }
+      }));
+      expect(bp2Result.success).toBe(true);
+
+      // 7. Continue — should finish compute(), then hit format() at line 19
+      console.log('[Attach BP-While-Paused] Continuing to second breakpoint...');
+      const cont2 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(cont2.success).toBe(true);
+
+      // 8. Wait for SECOND breakpoint hit at format():19
+      console.log('[Attach BP-While-Paused] Waiting for second breakpoint (line 19)...');
+      const stack2 = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+
+      // HARD ASSERTION: Second breakpoint must fire
+      expect(stack2).not.toBeNull();
+      const frames2 = stack2!.stackFrames!;
+      expect(frames2.length).toBeGreaterThan(0);
+      expect(frames2[0].name?.toLowerCase()).toContain('format');
+      expect(frames2[0].line).toBe(19);
+      console.log('[Attach BP-While-Paused] Hit second breakpoint at format():19');
+
+      // 9. Verify variables in format() — label="Sum", value=100
+      const localsRaw = await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      });
+      const localsResponse = parseSdkToolResult(localsRaw) as {
+        success?: boolean;
+        variables?: Array<{ name: string; value: string }>;
+      };
+      expect(localsResponse.success).toBe(true);
+      const localsByName = new Map(
+        (localsResponse.variables ?? []).map(v => [v.name, v.value])
+      );
+      console.log('[Attach BP-While-Paused] Variables:', Object.fromEntries(localsByName));
+      expect(localsByName.get('label')).toBe('"Sum"');
+      expect(localsByName.get('value')).toBe('100');
+
+      // 10. Continue to finish
+      const cont3 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(cont3.success).toBe(true);
+
+      console.log('[Attach BP-While-Paused] TEST PASSED — breakpoint added while paused was hit');
+
+    } finally {
+      try {
+        const classFile = path.resolve(testClassDir, 'InfiniteWait.class');
+        if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
+      } catch { /* ignore */ }
+      if (jvmProcess && !jvmProcess.killed) {
+        jvmProcess.kill('SIGKILL');
+        jvmProcess = null;
+      }
+    }
+  }, 60000);
 });

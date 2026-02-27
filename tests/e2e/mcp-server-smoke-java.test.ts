@@ -272,4 +272,134 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       }
     }
   }, 60000);
+
+  it('should hit a breakpoint added while the application is paused', async () => {
+    // Check for java and javac
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Java Smoke Test] Skipping — JDK not installed');
+      return;
+    }
+
+    const testJavaFile = path.resolve(ROOT, 'examples', 'java', 'HelloWorld.java');
+    const testClassDir = path.resolve(ROOT, 'examples', 'java');
+
+    // Compile with full debug info
+    execSync(`javac -g -d "${testClassDir}" "${testJavaFile}"`, {
+      cwd: testClassDir,
+      stdio: 'pipe'
+    });
+
+    try {
+      // 1. Create session
+      const createResult = await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'java', name: 'java-bp-while-paused' }
+      });
+      const createResponse = parseSdkToolResult(createResult);
+      expect(createResponse.sessionId).toBeDefined();
+      sessionId = createResponse.sessionId as string;
+
+      // 2. Set FIRST breakpoint on line 10 (add method: int result = a + b)
+      console.log('[BP While Paused] Setting breakpoint on line 10 (add)...');
+      const bp1Result = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: testJavaFile, line: 10 }
+      }));
+      expect(bp1Result.success).toBe(true);
+
+      // 3. Start debugging
+      console.log('[BP While Paused] Starting debugging...');
+      const startResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: testJavaFile,
+          args: [],
+          dapLaunchArgs: {
+            mainClass: 'HelloWorld',
+            classpath: testClassDir,
+            cwd: testClassDir,
+            stopOnEntry: false
+          }
+        }
+      }));
+      expect(startResult.success).toBe(true);
+
+      // 4. Wait for FIRST breakpoint hit at line 10
+      console.log('[BP While Paused] Waiting for first breakpoint (line 10)...');
+      const stack1 = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+      expect(stack1).not.toBeNull();
+      const frames1 = stack1!.stackFrames!;
+      expect(frames1.length).toBeGreaterThan(0);
+      expect(frames1[0].name?.toLowerCase()).toContain('add');
+      expect(frames1[0].line).toBe(10);
+      console.log('[BP While Paused] Hit first breakpoint at add():10');
+
+      // 5. While PAUSED at line 10, set a SECOND breakpoint on line 15 (greet method)
+      //    greet() hasn't been called yet, so line 15 should be reachable after continue.
+      console.log('[BP While Paused] Setting second breakpoint on line 15 (greet) while paused...');
+      const bp2Result = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: testJavaFile, line: 15 }
+      }));
+      expect(bp2Result.success).toBe(true);
+      console.log('[BP While Paused] Second breakpoint set');
+
+      // 6. Continue execution — should run through add(), then hit greet() at line 15
+      console.log('[BP While Paused] Continuing execution...');
+      const contResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(contResult.success).toBe(true);
+
+      // 7. Wait for SECOND breakpoint hit at line 15
+      console.log('[BP While Paused] Waiting for second breakpoint (line 15)...');
+      const stack2 = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+
+      // HARD ASSERTION: Second breakpoint must fire
+      expect(stack2).not.toBeNull();
+      const frames2 = stack2!.stackFrames!;
+      expect(frames2.length).toBeGreaterThan(0);
+      expect(frames2[0].name?.toLowerCase()).toContain('greet');
+      expect(frames2[0].line).toBe(15);
+      console.log('[BP While Paused] Hit second breakpoint at greet():15');
+
+      // 8. Verify variables in greet() — name should be "World"
+      const localsRaw = await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      });
+      const localsResponse = parseSdkToolResult(localsRaw) as {
+        success?: boolean;
+        variables?: Array<{ name: string; value: string }>;
+      };
+
+      expect(localsResponse.success).toBe(true);
+      const localsByName = new Map(
+        (localsResponse.variables ?? []).map(v => [v.name, v.value])
+      );
+      console.log('[BP While Paused] Variables:', Object.fromEntries(localsByName));
+      expect(localsByName.get('name')).toBe('"World"');
+
+      // 9. Continue to finish
+      console.log('[BP While Paused] Continuing to finish...');
+      const finalContinue = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(finalContinue.success).toBe(true);
+
+      console.log('[BP While Paused] TEST PASSED — breakpoint added while paused was hit');
+
+    } finally {
+      try {
+        const classFile = path.resolve(testClassDir, 'HelloWorld.class');
+        if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
+      } catch { /* ignore */ }
+    }
+  }, 60000);
 });

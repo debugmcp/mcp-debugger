@@ -15,15 +15,21 @@ public class InfiniteWait {
         return result;        // line 15
     }
 
+    static String format(String label, int value) {
+        String text = label + ": " + value;  // line 19 — second breakpoint target
+        return text;                          // line 20
+    }
+
     public static void main(String[] args) throws Exception {
         System.out.println("Waiting for debugger...");
-        // Sleep to allow time for debugger to re-set breakpoints after class loading.
-        // With suspend=y, KDA sets breakpoints before class loading (deferred);
-        // after VM resume + class load, breakpoints may need to be re-sent.
-        Thread.sleep(2000);               // line 22 — pause for breakpoint setup
-        int x = 42;                       // line 23
-        int y = 58;                       // line 24
-        int sum = compute(x, y);          // line 25 — calls compute
-        System.out.println("Sum: " + sum);
+        // Sleep to allow time for debugger attach and class loading.
+        // With suspend=y, JDI bridge sets breakpoints via ClassPrepareRequest;
+        // after VM resume + class load, deferred breakpoints resolve automatically.
+        Thread.sleep(2000);               // line 27 — pause for breakpoint setup
+        int x = 42;                       // line 28
+        int y = 58;                       // line 29
+        int sum = compute(x, y);          // line 30 — calls compute
+        String msg = format("Sum", sum);  // line 31 — calls format
+        System.out.println(msg);
     }
 }
