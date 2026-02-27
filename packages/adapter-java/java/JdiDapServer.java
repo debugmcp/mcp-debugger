@@ -27,8 +27,8 @@ public class JdiDapServer {
     private final AtomicInteger seq = new AtomicInteger(1);
 
     // --- JDI state ---
-    private VirtualMachine vm;
-    private Process launchedProcess; // non-null only in launch mode
+    private volatile VirtualMachine vm;
+    private volatile Process launchedProcess; // non-null only in launch mode
 
     // --- Variable references ---
     // All variable references (scopes, expandable objects) use sequential IDs
@@ -47,11 +47,11 @@ public class JdiDapServer {
     private final ConcurrentHashMap<String, String> sourcePathMap = new ConcurrentHashMap<>();
 
     // --- IO ---
-    private OutputStream clientOut;
+    private volatile OutputStream clientOut;
     private volatile boolean running = true;
-    private boolean configurationDone = false;
-    private boolean launchSuspended = false; // true if we launched with suspend=y
-    private boolean stopOnEntry = true; // whether to stop on entry in launch mode
+    private volatile boolean configurationDone = false;
+    private volatile boolean launchSuspended = false; // true if we launched with suspend=y
+    private volatile boolean stopOnEntry = true; // whether to stop on entry in launch mode
 
     // --- Logging ---
     private static boolean debug = false;
@@ -80,17 +80,21 @@ public class JdiDapServer {
             Socket client = serverSocket.accept();
             log("Client connected");
 
-            InputStream in = client.getInputStream();
-            clientOut = client.getOutputStream();
+            try {
+                InputStream in = client.getInputStream();
+                clientOut = client.getOutputStream();
 
-            // Read DAP messages
-            while (running) {
-                Map<String, Object> msg = readDapMessage(in);
-                if (msg == null) {
-                    log("Client disconnected (EOF)");
-                    break;
+                // Read DAP messages
+                while (running) {
+                    Map<String, Object> msg = readDapMessage(in);
+                    if (msg == null) {
+                        log("Client disconnected (EOF)");
+                        break;
+                    }
+                    handleMessage(msg);
                 }
-                handleMessage(msg);
+            } finally {
+                client.close();
             }
         } catch (SocketException e) {
             if (running) log("Socket error: " + e.getMessage());
@@ -193,7 +197,7 @@ public class JdiDapServer {
                 case "source": sendResponse(reqSeq, command, true, mapOf("content", "")); break;
                 default:
                     log("Unhandled command: " + command);
-                    sendResponse(reqSeq, command, true, new HashMap<>());
+                    sendErrorResponse(reqSeq, command, "Unsupported command: " + command);
                     break;
             }
         } catch (Exception e) {
@@ -659,16 +663,18 @@ public class JdiDapServer {
         int threadId = frameId / 100000;
         int frameIndex = frameId % 100000;
 
-        // Allocate a scope reference and track what it points to
-        int scopeRef = nextVarRef.getAndIncrement();
-        scopeRefMap.put(scopeRef, new long[]{threadId, frameIndex});
+        synchronized (threadFrameCache) {
+            // Allocate a scope reference and track what it points to
+            int scopeRef = nextVarRef.getAndIncrement();
+            scopeRefMap.put(scopeRef, new long[]{threadId, frameIndex});
 
-        // Locals scope
-        Map<String, Object> locals = new HashMap<>();
-        locals.put("name", "Locals");
-        locals.put("variablesReference", scopeRef);
-        locals.put("expensive", false);
-        scopes.add(locals);
+            // Locals scope
+            Map<String, Object> locals = new HashMap<>();
+            locals.put("name", "Locals");
+            locals.put("variablesReference", scopeRef);
+            locals.put("expensive", false);
+            scopes.add(locals);
+        }
 
         sendResponse(reqSeq, "scopes", true, mapOf("scopes", scopes));
     }
@@ -679,25 +685,27 @@ public class JdiDapServer {
 
         if (vm != null) {
             try {
-                // Check if this is a scope reference (locals for a frame)
-                long[] scopeInfo = scopeRefMap.get(varRef);
-                if (scopeInfo != null) {
-                    int threadId = (int) scopeInfo[0];
-                    int frameIndex = (int) scopeInfo[1];
+                synchronized (threadFrameCache) {
+                    // Check if this is a scope reference (locals for a frame)
+                    long[] scopeInfo = scopeRefMap.get(varRef);
+                    if (scopeInfo != null) {
+                        int threadId = (int) scopeInfo[0];
+                        int frameIndex = (int) scopeInfo[1];
 
-                    ThreadReference thread = findThread(threadId);
-                    if (thread != null) {
-                        List<StackFrame> cachedFrames = threadFrameCache.get(thread.uniqueID());
-                        if (cachedFrames != null && frameIndex < cachedFrames.size()) {
-                            StackFrame sf = cachedFrames.get(frameIndex);
-                            variables = getFrameVariables(sf);
+                        ThreadReference thread = findThread(threadId);
+                        if (thread != null) {
+                            List<StackFrame> cachedFrames = threadFrameCache.get(thread.uniqueID());
+                            if (cachedFrames != null && frameIndex < cachedFrames.size()) {
+                                StackFrame sf = cachedFrames.get(frameIndex);
+                                variables = getFrameVariables(sf);
+                            }
                         }
-                    }
-                } else {
-                    // Expandable object reference
-                    ObjectReference objRef = varRefMap.get(varRef);
-                    if (objRef != null) {
-                        variables = getObjectFields(objRef);
+                    } else {
+                        // Expandable object reference
+                        ObjectReference objRef = varRefMap.get(varRef);
+                        if (objRef != null) {
+                            variables = getObjectFields(objRef);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -791,12 +799,14 @@ public class JdiDapServer {
 
     private void handleContinue(int reqSeq, Map<String, Object> args) {
         clearFrameCache();
-        if (vm != null) {
-            try {
-                vm.resume();
-            } catch (VMDisconnectedException e) {
-                // VM already gone
-            }
+        if (vm == null) {
+            sendErrorResponse(reqSeq, "continue", "No active debug session");
+            return;
+        }
+        try {
+            vm.resume();
+        } catch (VMDisconnectedException e) {
+            // VM already gone
         }
         Map<String, Object> body = new HashMap<>();
         body.put("allThreadsContinued", true);
@@ -805,24 +815,31 @@ public class JdiDapServer {
 
     private void handleStep(int reqSeq, Map<String, Object> args, int depth) {
         int threadId = intVal(args, "threadId");
+        String cmdName = stepCommandName(depth);
         clearFrameCache();
 
-        if (vm != null) {
-            try {
-                ThreadReference thread = findThread(threadId);
-                if (thread != null) {
-                    EventRequestManager erm = vm.eventRequestManager();
-                    StepRequest stepReq = erm.createStepRequest(thread, StepRequest.STEP_LINE, depth);
-                    stepReq.addCountFilter(1);
-                    stepReq.setSuspendPolicy(EventRequest.SUSPEND_ALL);
-                    stepReq.enable();
-                    vm.resume();
-                }
-            } catch (Exception e) {
-                log("Step error: " + e.getMessage());
-            }
+        if (vm == null) {
+            sendErrorResponse(reqSeq, cmdName, "No active debug session");
+            return;
         }
-        sendResponse(reqSeq, stepCommandName(depth), true, new HashMap<>());
+
+        try {
+            ThreadReference thread = findThread(threadId);
+            if (thread == null) {
+                sendErrorResponse(reqSeq, cmdName, "Thread not found: " + threadId);
+                return;
+            }
+            EventRequestManager erm = vm.eventRequestManager();
+            StepRequest stepReq = erm.createStepRequest(thread, StepRequest.STEP_LINE, depth);
+            stepReq.addCountFilter(1);
+            stepReq.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+            stepReq.enable();
+            vm.resume();
+        } catch (Exception e) {
+            sendErrorResponse(reqSeq, cmdName, "Step error: " + e.getMessage());
+            return;
+        }
+        sendResponse(reqSeq, cmdName, true, new HashMap<>());
     }
 
     private void handleDisconnect(int reqSeq, Map<String, Object> args) {
@@ -997,6 +1014,12 @@ public class JdiDapServer {
                 log("Event loop interrupted");
             } catch (Exception e) {
                 log("Event loop error: " + e.getMessage());
+                try {
+                    sendEvent("terminated", new HashMap<>());
+                } catch (Exception ex) {
+                    log("Failed to send terminated event: " + ex.getMessage());
+                }
+                running = false;
             }
         }, "jdi-event-loop");
         eventThread.setDaemon(true);
@@ -1110,10 +1133,12 @@ public class JdiDapServer {
     }
 
     private void clearFrameCache() {
-        threadFrameCache.clear();
-        varRefMap.clear();
-        scopeRefMap.clear();
-        nextVarRef.set(1);
+        synchronized (threadFrameCache) {
+            threadFrameCache.clear();
+            varRefMap.clear();
+            scopeRefMap.clear();
+            nextVarRef.set(1);
+        }
     }
 
     private void cleanup() {
@@ -1556,9 +1581,13 @@ public class JdiDapServer {
         private Value parseOr() {
             Value left = parseAnd();
             while (match(TT.OR)) {
-                Value right = parseAnd();
-                boolean l = toBoolean(left), r = toBoolean(right);
-                left = vm.mirrorOf(l || r);
+                boolean l = toBoolean(left);
+                Value right = parseAnd(); // always parse to consume tokens
+                if (l) {
+                    left = vm.mirrorOf(true); // short-circuit: left is truthy
+                } else {
+                    left = vm.mirrorOf(toBoolean(right));
+                }
             }
             return left;
         }
@@ -1566,9 +1595,13 @@ public class JdiDapServer {
         private Value parseAnd() {
             Value left = parseEquality();
             while (match(TT.AND)) {
-                Value right = parseEquality();
-                boolean l = toBoolean(left), r = toBoolean(right);
-                left = vm.mirrorOf(l && r);
+                boolean l = toBoolean(left);
+                Value right = parseEquality(); // always parse to consume tokens
+                if (!l) {
+                    left = vm.mirrorOf(false); // short-circuit: left is falsy
+                } else {
+                    left = vm.mirrorOf(toBoolean(right));
+                }
             }
             return left;
         }
