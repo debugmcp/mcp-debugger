@@ -309,7 +309,8 @@ function main(): void {
   const server = net.createServer((socket) => {
     // Spawn vsdbg with DAP interpreter mode
     const child = spawn(args.vsdbg, ['--interpreter=vscode'], {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     // Register additional cleanup triggers

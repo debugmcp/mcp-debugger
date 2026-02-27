@@ -1411,7 +1411,8 @@ export class DebugMcpServer {
    */
   public async start(): Promise<void> {
     // For MCP servers, start is handled by transport
-    this.logger.info('Debug MCP Server started');
+    const buildTime = new Date().toISOString();
+    this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${process.env.npm_package_version || 'dev'}`);
   }
 
   public async stop(): Promise<void> {

@@ -34,6 +34,7 @@ import {
   PythonAdapterPolicy,
   RustAdapterPolicy,
   GoAdapterPolicy,
+  DotnetAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 
@@ -114,6 +115,8 @@ export class DapProxyWorker {
       return RustAdapterPolicy;
     } else if (GoAdapterPolicy.matchesAdapter(adapterCommand)) {
       return GoAdapterPolicy;
+    } else if (DotnetAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return DotnetAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
       return MockAdapterPolicy;
     }
@@ -383,14 +386,39 @@ export class DapProxyWorker {
         }
 
         // Initialize DAP session with correct adapterId
+        // Allow launch config to override the adapter ID (e.g., 'clr' for .NET Framework)
+        const policyAdapterId = this.adapterPolicy.getDapAdapterConfiguration().type;
+        const adapterId = (payload.launchConfig as Record<string, unknown>)?.type as string || policyAdapterId;
         await this.connectionManager!.initializeSession(
           this.dapClient,
           payload.sessionId,
-          this.adapterPolicy.getDapAdapterConfiguration().type
+          adapterId
         );
 
-        if (isAttachMode) {
-          // ATTACH MODE: Wait for "initialized" event BEFORE sending attach
+        if (isAttachMode && initBehavior.sendAttachBeforeInitialized) {
+          // ATTACH-FIRST MODE (vsdbg): Send attach immediately, then wait for initialized
+          // vsdbg only sends 'initialized' AFTER processing the attach request
+          const attachPayload = payload.launchConfig || {};
+          const payloadKeys = Object.keys(attachPayload);
+          const hasSymbolOpts = 'symbolOptions' in (attachPayload as Record<string, unknown>);
+          this.logger!.info(`[Worker] Attach-first mode — sending attach. Keys: ${payloadKeys.join(', ')}, symbolOptions: ${hasSymbolOpts ? JSON.stringify((attachPayload as Record<string, unknown>).symbolOptions) : 'absent'}`);
+          await this.connectionManager!.sendAttachRequest(
+            this.dapClient,
+            attachPayload
+          );
+
+          this.logger!.info('[Worker] Attach sent, waiting for "initialized" event');
+          await Promise.race([
+            this.initializedEventPromise!,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout waiting for initialized event after attach')), 15000)
+            )
+          ]);
+
+          this.deferInitializedHandling = false;
+          await this.handleInitializedEvent();
+        } else if (isAttachMode) {
+          // STANDARD ATTACH MODE: Wait for "initialized" event BEFORE sending attach
           // Some adapters send "initialized" after initialize response, before attach
           this.logger!.info('[Worker] Waiting for "initialized" event before sending attach');
           await Promise.race([

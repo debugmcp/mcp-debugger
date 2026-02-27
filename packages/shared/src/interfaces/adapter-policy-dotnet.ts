@@ -95,9 +95,15 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
     return ['Locals'];
   },
 
+  /**
+   * Returns the DAP adapter configuration.
+   * Defaults to 'coreclr' for .NET Core / .NET 5+.
+   * For .NET Framework 4.x (e.g., NinjaTrader), callers should pass
+   * dapLaunchArgs.type = 'clr' to override.
+   */
   getDapAdapterConfiguration: () => {
     return {
-      type: 'vsdbg'
+      type: 'coreclr'
     };
   },
 
@@ -202,7 +208,11 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   },
 
   getInitializationBehavior: () => {
-    return {};
+    return {
+      // vsdbg sends 'initialized' only AFTER processing the 'attach' request.
+      // The proxy must NOT wait for 'initialized' before sending 'attach'.
+      sendAttachBeforeInitialized: true
+    };
   },
 
   getDapClientBehavior: (): DapClientBehavior => {

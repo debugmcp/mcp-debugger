@@ -13,6 +13,7 @@
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   IDebugAdapter,
   AdapterState,
@@ -35,7 +36,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { findDotnetBackend, findVsdaNode, findPdb2PdbExecutable } from './utils/dotnet-utils.js';
+import { findDotnetBackend, findVsdaNode, findPdb2PdbExecutable, convertPdbsToTemp } from './utils/dotnet-utils.js';
 
 /**
  * Cache entry for debugger executable paths
@@ -254,11 +255,9 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
 
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     // Resolve the bridge script path relative to this package's dist directory
-    const bridgeScript = path.join(path.dirname(new URL(import.meta.url).pathname), 'utils', 'vsdbg-bridge.js');
-    // On Windows, remove leading slash from /C:/...
-    const bridgePath = process.platform === 'win32' && bridgeScript.startsWith('/')
-      ? bridgeScript.slice(1)
-      : bridgeScript;
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const bridgePath = path.join(__dirname, 'utils', 'vsdbg-bridge.js');
 
     const args = [
       bridgePath,
@@ -294,6 +293,16 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
         const programDir = path.dirname(launchConfig.program);
         if (!pdbDirs.includes(programDir)) {
           pdbDirs.push(programDir);
+        }
+      }
+
+      // From sourcePaths (attach mode — buildAdapterCommand runs before transformAttachConfig)
+      const rawConfig = config.launchConfig as Record<string, unknown> | undefined;
+      if (rawConfig?.sourcePaths && Array.isArray(rawConfig.sourcePaths)) {
+        for (const dir of rawConfig.sourcePaths as string[]) {
+          if (!pdbDirs.includes(dir)) {
+            pdbDirs.push(dir);
+          }
         }
       }
 
@@ -355,7 +364,24 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
-    return {
+    console.error(`[DotnetDebugAdapter] transformAttachConfig called, sourcePaths=${JSON.stringify(config.sourcePaths || null)}`);
+
+    // Convert Windows PDBs to Portable PDB format in a temp directory
+    // (originals may be locked by the debuggee process)
+    const symbolSearchPaths: string[] = [];
+    if (config.sourcePaths) {
+      const pdb2pdbPath = findPdb2PdbExecutable();
+      console.error(`[DotnetDebugAdapter] Pdb2Pdb path: ${pdb2pdbPath || 'null (not found)'}`);
+      if (pdb2pdbPath) {
+        const tempDir = convertPdbsToTemp(config.sourcePaths, pdb2pdbPath);
+        console.error(`[DotnetDebugAdapter] convertPdbsToTemp result: ${tempDir || 'null (no conversions)'}`);
+        if (tempDir) {
+          symbolSearchPaths.push(tempDir);
+        }
+      }
+    }
+
+    const attachConfig = {
       type: 'clr',
       request: 'attach',
       name: '.NET: Attach',
@@ -365,8 +391,14 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
       terminateDebuggee: false,
       sourceFileMap: config.sourcePaths ? Object.fromEntries(
         config.sourcePaths.map(p => [p, p])
-      ) : undefined
+      ) : undefined,
+      symbolOptions: symbolSearchPaths.length > 0
+        ? { searchPaths: symbolSearchPaths, searchMicrosoftSymbolServer: false }
+        : undefined
     };
+
+    console.error(`[DotnetDebugAdapter] Returning attach config: symbolOptions=${attachConfig.symbolOptions ? JSON.stringify(attachConfig.symbolOptions) : 'absent'}, type=${attachConfig.type}`);
+    return attachConfig;
   }
 
   getDefaultAttachConfig(): Partial<GenericAttachConfig> {

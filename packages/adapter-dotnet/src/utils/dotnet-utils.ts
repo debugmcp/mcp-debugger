@@ -5,8 +5,9 @@
  * - vsdbg (Microsoft, ships with VS Code C# extension) — required for .NET Framework 4.8
  * - netcoredbg (Samsung, open-source) — alternative for .NET Core/.NET 5+
  */
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import which from 'which';
@@ -416,4 +417,105 @@ export function findPdb2PdbExecutable(): string | null {
   }
 
   return null;
+}
+
+/**
+ * Convert Windows PDB files to Portable PDB format using a copy-to-temp strategy.
+ *
+ * Copies DLL+PDB pairs to a temp directory and runs Pdb2Pdb.exe on the copies,
+ * leaving the originals untouched (important when the debuggee has them locked).
+ *
+ * @param sourceDirs Directories to scan for .pdb files
+ * @param pdb2pdbPath Path to Pdb2Pdb.exe
+ * @returns Temp directory containing converted PDBs, or null if no conversions were made
+ */
+export function convertPdbsToTemp(sourceDirs: string[], pdb2pdbPath: string): string | null {
+  const tempDir = path.join(os.tmpdir(), `mcp-debugger-pdbs-${Date.now()}`);
+  let converted = 0;
+
+  console.error(`[convertPdbsToTemp] Scanning ${sourceDirs.length} dirs: ${sourceDirs.join(', ')}`);
+
+  for (const dir of sourceDirs) {
+    if (!fs.existsSync(dir)) {
+      console.error(`[convertPdbsToTemp] Dir not found, skipping: ${dir}`);
+      continue;
+    }
+
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch (err) {
+      console.error(`[convertPdbsToTemp] Failed to read dir ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+
+    const pdbFiles = entries.filter(e => e.toLowerCase().endsWith('.pdb'));
+    console.error(`[convertPdbsToTemp] Found ${pdbFiles.length} PDB files in ${dir}`);
+
+    for (const pdbFile of pdbFiles) {
+      const pdbPath = path.join(dir, pdbFile);
+
+      // Skip if already portable
+      if (isPortablePdb(pdbPath)) {
+        console.error(`[convertPdbsToTemp] Already portable, skipping: ${pdbFile}`);
+        continue;
+      }
+
+      // Find matching DLL
+      const baseName = pdbFile.replace(/\.pdb$/i, '');
+      const dllFile = baseName + '.dll';
+      const dllPath = path.join(dir, dllFile);
+      if (!fs.existsSync(dllPath)) {
+        console.error(`[convertPdbsToTemp] No matching DLL for ${pdbFile}, skipping`);
+        continue;
+      }
+
+      console.error(`[convertPdbsToTemp] Converting Windows PDB: ${pdbFile}`);
+
+      // Ensure temp dir exists
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      // Copy both DLL and PDB to temp
+      try {
+        fs.copyFileSync(dllPath, path.join(tempDir, dllFile));
+        fs.copyFileSync(pdbPath, path.join(tempDir, pdbFile));
+        console.error(`[convertPdbsToTemp] Copied DLL+PDB to ${tempDir}`);
+      } catch (err) {
+        console.error(`[convertPdbsToTemp] Copy failed for ${pdbFile}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+
+      // Convert: Pdb2Pdb.exe <dll> — it auto-finds the adjacent PDB and outputs <name>.pdb2
+      const result = spawnSync(pdb2pdbPath, [path.join(tempDir, dllFile)], {
+        timeout: 30000,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      const stderr = result.stderr ? result.stderr.toString().trim() : '';
+      console.error(`[convertPdbsToTemp] Pdb2Pdb exit code: ${result.status}${stderr ? ', stderr: ' + stderr.substring(0, 200) : ''}`);
+
+      // Pdb2Pdb outputs to <name>.pdb2, rename to .pdb
+      const pdb2Path = path.join(tempDir, baseName + '.pdb2');
+      if (fs.existsSync(pdb2Path)) {
+        try {
+          fs.renameSync(pdb2Path, path.join(tempDir, pdbFile));
+          converted++;
+          console.error(`[convertPdbsToTemp] Successfully converted: ${pdbFile}`);
+        } catch (err) {
+          console.error(`[convertPdbsToTemp] Rename .pdb2 failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else if (result.status === 0) {
+        // Some versions overwrite in-place
+        converted++;
+        console.error(`[convertPdbsToTemp] Pdb2Pdb succeeded (in-place): ${pdbFile}`);
+      } else {
+        console.error(`[convertPdbsToTemp] No .pdb2 output and non-zero exit for: ${pdbFile}`);
+      }
+    }
+  }
+
+  console.error(`[convertPdbsToTemp] Done. Converted ${converted} PDBs. Temp dir: ${converted > 0 ? tempDir : 'none'}`);
+  return converted > 0 ? tempDir : null;
 }
