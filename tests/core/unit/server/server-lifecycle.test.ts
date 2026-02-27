@@ -50,7 +50,7 @@ describe('Server Lifecycle Tests', () => {
       
       await debugServer.start();
       
-      expect(mockDependencies.logger.info).toHaveBeenCalledWith('Debug MCP Server started');
+      expect(mockDependencies.logger.info).toHaveBeenCalledWith(expect.stringContaining('[MCP Server] Started at'));
     });
 
     it('should start server successfully on second invocation', async () => {
@@ -58,7 +58,7 @@ describe('Server Lifecycle Tests', () => {
 
       await debugServer.start();
 
-      expect(mockDependencies.logger.info).toHaveBeenCalledWith('Debug MCP Server started');
+      expect(mockDependencies.logger.info).toHaveBeenCalledWith(expect.stringContaining('[MCP Server] Started at'));
     });
   });
 
