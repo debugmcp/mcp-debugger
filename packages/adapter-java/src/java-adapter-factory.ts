@@ -67,12 +67,12 @@ export class JavaAdapterFactory implements IAdapterFactory {
         const major = parseInt(parts[0], 10);
         const effectiveMajor = major === 1 ? parseInt(parts[1], 10) : major;
 
-        if (effectiveMajor < 11) {
-          warnings.push(`Java 11+ recommended. Current version: ${javaVersion}`);
+        if (effectiveMajor < 21) {
+          warnings.push(`Java 21+ recommended. Current version: ${javaVersion}`);
         }
       }
     } catch {
-      errors.push('Java not found. Install JDK 11+ from https://adoptium.net/');
+      errors.push('Java not found. Install JDK 21+ from https://adoptium.net/');
     }
 
     return {

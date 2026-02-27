@@ -420,7 +420,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   getInstallationInstructions(): string {
     return `Java Debugging Setup:
 
-1. Install JDK 11 or higher:
+1. Install JDK 21 or higher:
    - All platforms: Download from https://adoptium.net/
    - macOS: brew install openjdk
    - Ubuntu: sudo apt install openjdk-17-jdk
@@ -432,14 +432,14 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
 
 3. Verify installation:
    java -version
-   # Should show JDK 11+
+   # Should show JDK 21+
 
 4. Ensure JAVA_HOME is set (optional but recommended):
    export JAVA_HOME=/path/to/jdk`;
   }
 
   getMissingExecutableError(): string {
-    return `Java not found. Please ensure JDK 11+ is installed and available in PATH.
+    return `Java not found. Please ensure JDK 21+ is installed and available in PATH.
 
 Download from: https://adoptium.net/
 
@@ -491,7 +491,7 @@ After installation:
       case DebugFeature.CONDITIONAL_BREAKPOINTS:
         requirements.push({
           type: 'dependency',
-          description: 'JDK 11+ with JDI support',
+          description: 'JDK 21+ with JDI support',
           required: true
         });
         break;

@@ -4,11 +4,12 @@
  * Tests the ExprEvaluator in JdiDapServer through evaluate_expression MCP tool.
  * Uses ExprTest.java which has instance fields, arrays, methods, and boxed types.
  *
- * Breakpoint on line 31 of ExprTest.java (inside run()) where:
+ * Breakpoint on line 37 of ExprTest.java (inside run()) where:
  *   int x = 10; double pi = 3.14; String msg = "hello"; Integer boxed = 42;
  * Instance fields: instanceField=42, name="test", numbers={10,20,30},
- *   matrix={{1,2},{3,4}}, flag=true
+ *   matrix={{1,2},{3,4}}, flag=true, greeterRef=this
  * Methods: add(int,int), greet(String)
+ * Interfaces: ExprTest implements FormalGreeter extends Greeter
  *
  * Prerequisites:
  * - JDK installed (java + javac on PATH)
@@ -171,13 +172,13 @@ describe('MCP Server Java Expression Evaluation Smoke Test @requires-java', () =
       sessionId = createResponse.sessionId as string;
       console.log(`[Java Eval Test] Session created: ${sessionId}`);
 
-      // 2. Set breakpoint on line 31 (println in run(), after all locals assigned)
+      // 2. Set breakpoint on line 37 (println in run(), after all locals are assigned)
       const bpResult = parseSdkToolResult(await mcpClient!.callTool({
         name: 'set_breakpoint',
-        arguments: { sessionId, file: testJavaFile, line: 31 }
+        arguments: { sessionId, file: testJavaFile, line: 37 }
       }));
       expect(bpResult.success).toBe(true);
-      console.log('[Java Eval Test] Breakpoint set on line 31');
+      console.log('[Java Eval Test] Breakpoint set on line 37');
 
       // 3. Start debugging
       const startResult = parseSdkToolResult(await mcpClient!.callTool({
@@ -305,6 +306,15 @@ describe('MCP Server Java Expression Evaluation Smoke Test @requires-java', () =
       expect(await evalExpr(mcpClient!, sessionId, '-x')).toBe('-10');
       expect(await evalExpr(mcpClient!, sessionId, '-42')).toBe('-42');
       console.log('[Java Eval Test] Unary minus OK');
+
+      // --- instanceof with interface hierarchies (Issue 14) ---
+      console.log('[Java Eval Test] Testing instanceof with interface hierarchies...');
+      expect(await evalExpr(mcpClient!, sessionId, 'this instanceof ExprTest')).toBe('true');
+      expect(await evalExpr(mcpClient!, sessionId, 'this instanceof Greeter')).toBe('true');
+      expect(await evalExpr(mcpClient!, sessionId, 'this instanceof FormalGreeter')).toBe('true');
+      expect(await evalExpr(mcpClient!, sessionId, 'greeterRef instanceof FormalGreeter')).toBe('true');
+      expect(await evalExpr(mcpClient!, sessionId, 'msg instanceof String')).toBe('true');
+      console.log('[Java Eval Test] instanceof OK');
 
       // 5. Continue execution to finish
       console.log('[Java Eval Test] Continuing execution...');

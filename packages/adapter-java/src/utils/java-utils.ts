@@ -34,7 +34,7 @@ export async function findJavaExecutable(preferredPath?: string): Promise<string
   }
 
   throw new Error(
-    'Java not found. Install JDK 11+ and ensure java is in PATH or set JAVA_HOME.'
+    'Java not found. Install JDK 21+ and ensure java is in PATH or set JAVA_HOME.'
   );
 }
 

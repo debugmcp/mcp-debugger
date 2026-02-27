@@ -17,16 +17,16 @@ JdiDapServer is a ~1000-line Java program that:
 - Uses JDI to launch or attach to a target JVM
 - Handles deferred breakpoints via `ClassPrepareRequest` for classes not yet loaded
 - Maps JDI events (breakpoints, steps, thread events) to DAP events
-- Compiles with `javac --release 11` (no external dependencies)
+- Compiles with `javac --release 21` (no external dependencies)
 
 ## Prerequisites
 
-1. **JDK 11 or higher** installed from [adoptium.net](https://adoptium.net/) or your OS package manager
+1. **JDK 21 or higher** installed from [adoptium.net](https://adoptium.net/) or your OS package manager
 2. **`java` and `javac` on your PATH**, or `JAVA_HOME` set
 
 Verify your installation:
 ```bash
-java -version    # Should show JDK 11+
+java -version    # Should show JDK 21+
 javac -version   # Should show matching version
 ```
 
@@ -244,7 +244,7 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 - In attach mode with `suspend=y`, you must `continue_execution` after attaching to let the program run to the breakpoint
 
 ### "Java not found" error
-- Ensure JDK 11+ is installed: `java -version`
+- Ensure JDK 21+ is installed: `java -version`
 - Set `JAVA_HOME` or ensure `java` is on your PATH
 
 ### Connection timeout (attach mode)

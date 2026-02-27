@@ -40,6 +40,13 @@ public class JdiDapServer {
     // Cache stack frames per thread for variable lookup
     private final ConcurrentHashMap<Long, List<StackFrame>> threadFrameCache = new ConcurrentHashMap<>();
 
+    // --- Frame ID encoding (lookup table instead of arithmetic) ---
+    private final AtomicInteger nextFrameId = new AtomicInteger(1);
+    private final ConcurrentHashMap<Integer, long[]> frameIdMap = new ConcurrentHashMap<>();
+
+    // --- Breakpoint IDs ---
+    private final AtomicInteger nextBreakpointId = new AtomicInteger(1);
+
     // --- Deferred breakpoints (class not yet loaded) ---
     // Map: source path basename (e.g. "HelloWorld.java") -> list of line numbers
     private final ConcurrentHashMap<String, Map<String, Object>> deferredBreakpoints = new ConcurrentHashMap<>();
@@ -192,6 +199,7 @@ public class JdiDapServer {
                 case "stepIn": handleStep(reqSeq, args, StepRequest.STEP_INTO); break;
                 case "stepOut": handleStep(reqSeq, args, StepRequest.STEP_OUT); break;
                 case "disconnect": handleDisconnect(reqSeq, args); break;
+                case "terminate": handleTerminate(reqSeq, args); break;
                 case "evaluate": handleEvaluate(reqSeq, args); break;
                 case "setExceptionBreakpoints": handleSetExceptionBreakpoints(reqSeq, args); break;
                 case "source": sendResponse(reqSeq, command, true, mapOf("content", "")); break;
@@ -377,11 +385,25 @@ public class JdiDapServer {
             if (found != null) {
                 // Class already loaded — set breakpoints directly
                 log("Setting pending breakpoints on already-loaded " + found.name());
+                boolean hasUnresolved = false;
                 for (Object bpObj : breakpointSpecs) {
                     Map<String, Object> bpSpec = asMap(bpObj);
                     int line = intVal(bpSpec, "line");
                     String condition = str(bpSpec, "condition");
-                    setBreakpointOnClass(found, line, condition, sourcePath);
+                    Map<String, Object> bp = setBreakpointOnClass(found, line, condition, sourcePath);
+                    if (!Boolean.TRUE.equals(bp.get("verified"))) {
+                        hasUnresolved = true;
+                    }
+                }
+                // Some breakpoints may be on inner class lines — register CPR for inner classes
+                if (hasUnresolved) {
+                    EventRequestManager erm = vm.eventRequestManager();
+                    ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
+                    innerCpr.addClassFilter(className + "$*");
+                    innerCpr.putProperty("jdi-bp-class", className);
+                    innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+                    innerCpr.enable();
+                    log("Registered ClassPrepareRequest for inner classes " + className + "$* (some breakpoints unresolved)");
                 }
             } else {
                 // Not loaded — register ClassPrepareRequest
@@ -392,6 +414,14 @@ public class JdiDapServer {
                 cpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
                 cpr.enable();
                 log("Registered deferred ClassPrepareRequest for *" + className);
+
+                // Also register for inner classes (e.g. Outer$Inner)
+                ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
+                innerCpr.addClassFilter(className + "$*");
+                innerCpr.putProperty("jdi-bp-class", className);
+                innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+                innerCpr.enable();
+                log("Registered deferred ClassPrepareRequest for " + className + "$*");
             }
         }
     }
@@ -480,6 +510,7 @@ public class JdiDapServer {
 
         // Try to set breakpoints on already-loaded classes
         boolean classLoaded = false;
+        boolean hasUnresolvedBreakpoints = false;
         if (vm != null) {
             ReferenceType refType = findLoadedClass(className, fileName);
 
@@ -491,6 +522,9 @@ public class JdiDapServer {
                     String condition = str(bpSpec, "condition");
                     Map<String, Object> bp = setBreakpointOnClass(refType, line, condition, sourcePath);
                     results.add(bp);
+                    if (!Boolean.TRUE.equals(bp.get("verified"))) {
+                        hasUnresolvedBreakpoints = true;
+                    }
                 }
             }
         }
@@ -505,6 +539,14 @@ public class JdiDapServer {
                 cpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
                 cpr.enable();
                 log("Registered ClassPrepareRequest for *" + className);
+
+                // Also register for inner classes (e.g. Outer$Inner)
+                ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
+                innerCpr.addClassFilter(className + "$*");
+                innerCpr.putProperty("jdi-bp-class", className);
+                innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+                innerCpr.enable();
+                log("Registered ClassPrepareRequest for " + className + "$*");
             }
 
             // Return unverified breakpoints
@@ -512,12 +554,24 @@ public class JdiDapServer {
                 Map<String, Object> bpSpec = asMap(bpObj);
                 int line = intVal(bpSpec, "line");
                 Map<String, Object> bp = new HashMap<>();
+                bp.put("id", nextBreakpointId.getAndIncrement());
                 bp.put("verified", false);
                 bp.put("line", line);
                 bp.put("message", "Class not yet loaded, breakpoint pending");
                 bp.put("source", mapOf("path", sourcePath));
                 results.add(bp);
             }
+        } else if (hasUnresolvedBreakpoints && vm != null) {
+            // Outer class is loaded but some breakpoints couldn't be set on it
+            // (e.g. breakpoints on lines inside inner classes). Register a
+            // ClassPrepareRequest for inner classes so they resolve when loaded.
+            EventRequestManager erm = vm.eventRequestManager();
+            ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
+            innerCpr.addClassFilter(className + "$*");
+            innerCpr.putProperty("jdi-bp-class", className);
+            innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+            innerCpr.enable();
+            log("Registered ClassPrepareRequest for inner classes " + className + "$* (some breakpoints unresolved on outer class)");
         }
 
         sendResponse(reqSeq, "setBreakpoints", true, mapOf("breakpoints", results));
@@ -525,6 +579,7 @@ public class JdiDapServer {
 
     private Map<String, Object> setBreakpointOnClass(ReferenceType refType, int line, String condition, String sourcePath) {
         Map<String, Object> bp = new HashMap<>();
+        bp.put("id", nextBreakpointId.getAndIncrement());
         try {
             List<Location> locs = refType.locationsOfLine(line);
             if (locs.isEmpty()) {
@@ -595,7 +650,7 @@ public class JdiDapServer {
             try {
                 for (ThreadReference tr : vm.allThreads()) {
                     Map<String, Object> t = new HashMap<>();
-                    t.put("id", (int) tr.uniqueID());
+                    t.put("id", tr.uniqueID());
                     t.put("name", tr.name());
                     threads.add(t);
                 }
@@ -607,7 +662,7 @@ public class JdiDapServer {
     }
 
     private void handleStackTrace(int reqSeq, Map<String, Object> args) {
-        int threadId = intVal(args, "threadId");
+        long threadId = longVal(args, "threadId");
         List<Map<String, Object>> frames = new ArrayList<>();
 
         if (vm != null) {
@@ -660,8 +715,13 @@ public class JdiDapServer {
         List<Map<String, Object>> scopes = new ArrayList<>();
 
         // Decode frameId to get threadId and frameIndex
-        int threadId = frameId / 100000;
-        int frameIndex = frameId % 100000;
+        long[] decoded = decodeFrameId(frameId);
+        if (decoded == null) {
+            sendResponse(reqSeq, "scopes", true, mapOf("scopes", scopes));
+            return;
+        }
+        long threadId = decoded[0];
+        int frameIndex = (int) decoded[1];
 
         synchronized (threadFrameCache) {
             // Allocate a scope reference and track what it points to
@@ -689,7 +749,7 @@ public class JdiDapServer {
                     // Check if this is a scope reference (locals for a frame)
                     long[] scopeInfo = scopeRefMap.get(varRef);
                     if (scopeInfo != null) {
-                        int threadId = (int) scopeInfo[0];
+                        long threadId = scopeInfo[0];
                         int frameIndex = (int) scopeInfo[1];
 
                         ThreadReference thread = findThread(threadId);
@@ -814,7 +874,7 @@ public class JdiDapServer {
     }
 
     private void handleStep(int reqSeq, Map<String, Object> args, int depth) {
-        int threadId = intVal(args, "threadId");
+        long threadId = longVal(args, "threadId");
         String cmdName = stepCommandName(depth);
         clearFrameCache();
 
@@ -848,6 +908,11 @@ public class JdiDapServer {
         running = false;
     }
 
+    private void handleTerminate(int reqSeq, Map<String, Object> args) {
+        cleanup();
+        sendResponse(reqSeq, "terminate", true, new HashMap<>());
+    }
+
     private void handleEvaluate(int reqSeq, Map<String, Object> args) {
         String expression = str(args, "expression");
         Integer frameIdObj = intValOrNull(args, "frameId");
@@ -862,8 +927,13 @@ public class JdiDapServer {
                 sendErrorResponse(reqSeq, "evaluate", "frameId required for evaluation");
                 return;
             }
-            int threadId = frameIdObj / 100000;
-            int frameIndex = frameIdObj % 100000;
+            long[] decoded = decodeFrameId(frameIdObj);
+            if (decoded == null) {
+                sendErrorResponse(reqSeq, "evaluate", "Invalid frame ID: " + frameIdObj);
+                return;
+            }
+            long threadId = decoded[0];
+            int frameIndex = (int) decoded[1];
             ThreadReference thread = findThread(threadId);
             if (thread == null) {
                 sendErrorResponse(reqSeq, "evaluate", "Thread not found: " + threadId);
@@ -972,11 +1042,11 @@ public class JdiDapServer {
 
                         } else if (event instanceof ThreadStartEvent) {
                             ThreadStartEvent tse = (ThreadStartEvent) event;
-                            sendThreadEvent("started", (int) tse.thread().uniqueID());
+                            sendThreadEvent("started", tse.thread().uniqueID());
 
                         } else if (event instanceof ThreadDeathEvent) {
                             ThreadDeathEvent tde = (ThreadDeathEvent) event;
-                            sendThreadEvent("exited", (int) tde.thread().uniqueID());
+                            sendThreadEvent("exited", tde.thread().uniqueID());
 
                         } else if (event instanceof VMDeathEvent) {
                             log("VM death event");
@@ -995,7 +1065,7 @@ public class JdiDapServer {
                             log("Exception: " + ee.exception().referenceType().name() + " at " + ee.location());
                             Map<String, Object> body = new HashMap<>();
                             body.put("reason", "exception");
-                            body.put("threadId", (int) ee.thread().uniqueID());
+                            body.put("threadId", ee.thread().uniqueID());
                             body.put("text", ee.exception().referenceType().name());
                             body.put("allThreadsStopped", true);
                             sendEvent("stopped", body);
@@ -1033,6 +1103,15 @@ public class JdiDapServer {
 
         Map<String, Object> bpInfo = deferredBreakpoints.get(simpleName);
         if (bpInfo == null) bpInfo = deferredBreakpoints.get(className);
+        // For inner classes (e.g. "Outer$Inner"), strip "$..." and retry
+        if (bpInfo == null && simpleName.contains("$")) {
+            String outerName = simpleName.substring(0, simpleName.indexOf('$'));
+            bpInfo = deferredBreakpoints.get(outerName);
+        }
+        if (bpInfo == null && className.contains("$")) {
+            String outerFqn = className.substring(0, className.indexOf('$'));
+            bpInfo = deferredBreakpoints.get(outerFqn);
+        }
         if (bpInfo == null) return;
 
         String sourcePath = str(bpInfo, "sourcePath");
@@ -1051,6 +1130,7 @@ public class JdiDapServer {
                 Map<String, Object> bpEvent = new HashMap<>();
                 bpEvent.put("reason", "changed");
                 Map<String, Object> bpBody = new HashMap<>();
+                bpBody.put("id", bp.get("id"));
                 bpBody.put("verified", true);
                 bpBody.put("line", bp.get("line"));
                 if (sourcePath != null) {
@@ -1096,7 +1176,7 @@ public class JdiDapServer {
         throw new RuntimeException("SocketAttach connector not found");
     }
 
-    private ThreadReference findThread(int threadId) {
+    private ThreadReference findThread(long threadId) {
         if (vm == null) return null;
         try {
             for (ThreadReference tr : vm.allThreads()) {
@@ -1106,8 +1186,14 @@ public class JdiDapServer {
         return null;
     }
 
-    private int encodeFrameId(int threadId, int frameIndex) {
-        return threadId * 100000 + frameIndex;
+    private int encodeFrameId(long threadId, int frameIndex) {
+        int id = nextFrameId.getAndIncrement();
+        frameIdMap.put(id, new long[]{threadId, frameIndex});
+        return id;
+    }
+
+    private long[] decodeFrameId(int frameId) {
+        return frameIdMap.get(frameId);
     }
 
     private String resolveSourcePath(Location loc) {
@@ -1138,6 +1224,8 @@ public class JdiDapServer {
             varRefMap.clear();
             scopeRefMap.clear();
             nextVarRef.set(1);
+            frameIdMap.clear();
+            nextFrameId.set(1);
         }
     }
 
@@ -1217,12 +1305,12 @@ public class JdiDapServer {
     private void sendStoppedEvent(String reason, long threadId) {
         Map<String, Object> body = new HashMap<>();
         body.put("reason", reason);
-        body.put("threadId", (int) threadId);
+        body.put("threadId", threadId);
         body.put("allThreadsStopped", true);
         sendEvent("stopped", body);
     }
 
-    private void sendThreadEvent(String reason, int threadId) {
+    private void sendThreadEvent(String reason, long threadId) {
         Map<String, Object> body = new HashMap<>();
         body.put("reason", reason);
         body.put("threadId", threadId);
@@ -1950,9 +2038,7 @@ public class JdiDapServer {
                     List<ReferenceType> paramTypes = vm.classesByName(paramTypeName);
                     if (!paramTypes.isEmpty()) {
                         ReferenceType paramRefType = paramTypes.get(0);
-                        if (argRefType instanceof ClassType) {
-                            return isSubtypeOf((ClassType) argRefType, paramRefType);
-                        }
+                        return isSubtypeOf(argRefType, paramRefType);
                     }
                 } catch (Exception e) { /* fall through */ }
             }
@@ -1960,15 +2046,23 @@ public class JdiDapServer {
             return false;
         }
 
-        private boolean isSubtypeOf(ClassType sub, ReferenceType sup) {
+        private boolean isSubtypeOf(ReferenceType sub, ReferenceType sup) {
             if (sub.equals(sup)) return true;
-            // Check interfaces
-            for (InterfaceType iface : sub.interfaces()) {
-                if (iface.equals(sup)) return true;
+            if (sub instanceof ClassType) {
+                ClassType ct = (ClassType) sub;
+                // Check interfaces (recurse to cover interface-extends-interface)
+                for (InterfaceType iface : ct.interfaces()) {
+                    if (isSubtypeOf(iface, sup)) return true;
+                }
+                // Check superclass
+                ClassType superClass = ct.superclass();
+                if (superClass != null) return isSubtypeOf(superClass, sup);
+            } else if (sub instanceof InterfaceType) {
+                InterfaceType it = (InterfaceType) sub;
+                for (InterfaceType superIface : it.superinterfaces()) {
+                    if (isSubtypeOf(superIface, sup)) return true;
+                }
             }
-            // Check superclass
-            ClassType superClass = sub.superclass();
-            if (superClass != null) return isSubtypeOf(superClass, sup);
             return false;
         }
 
@@ -2105,10 +2199,7 @@ public class JdiDapServer {
                 }
             }
             if (targetTypes.isEmpty()) return false;
-            if (objType instanceof ClassType) {
-                return isSubtypeOf((ClassType) objType, targetTypes.get(0));
-            }
-            return false;
+            return isSubtypeOf(objType, targetTypes.get(0));
         }
 
         // ---- Unboxing ----
@@ -2403,6 +2494,14 @@ public class JdiDapServer {
         if (v instanceof Number) return ((Number) v).intValue();
         if (v instanceof String) try { return Integer.parseInt((String) v); } catch (NumberFormatException e) { /* */ }
         return 0;
+    }
+
+    private static long longVal(Map<String, Object> m, String key) {
+        if (m == null) return 0L;
+        Object v = m.get(key);
+        if (v instanceof Number) return ((Number) v).longValue();
+        if (v instanceof String) try { return Long.parseLong((String) v); } catch (NumberFormatException e) { /* */ }
+        return 0L;
     }
 
     private static Integer intValOrNull(Map<String, Object> m, String key) {

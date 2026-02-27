@@ -27,7 +27,7 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 - Python 3.7+ (for debugging Python code)
 - Go 1.18+ and Delve (for debugging Go code, optional)
 - Rust toolchain (for debugging Rust code, optional — CodeLLDB auto-downloads during install)
-- JDK 11+ (for debugging Java code, optional — JDI bridge compiles on first use; compile target code with `javac -g` for variable inspection)
+- JDK 21+ (for debugging Java code, optional — JDI bridge compiles on first use; compile target code with `javac -g` for variable inspection)
 - Docker (optional, for containerized development)
 - Git
 

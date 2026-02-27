@@ -110,7 +110,7 @@ export function ensureJdiBridgeCompiled(): string | null {
   // Compile
   try {
     mkdirSync(outDir, { recursive: true });
-    execFileSync(javac, ['--release', '11', sourceFile, '-d', outDir], {
+    execFileSync(javac, ['--release', '21', sourceFile, '-d', outDir], {
       stdio: 'inherit',
       cwd: sourceDir
     });

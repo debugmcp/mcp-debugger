@@ -68,7 +68,7 @@ function main() {
   const javac = findJavac();
   if (!javac) {
     console.warn('[compile-jdi-bridge] javac not found. JDI bridge will not be available.');
-    console.warn('[compile-jdi-bridge] Install JDK 11+ and ensure javac is on PATH or set JAVA_HOME.');
+    console.warn('[compile-jdi-bridge] Install JDK 21+ and ensure javac is on PATH or set JAVA_HOME.');
     // Don't fail hard — adapter will report the error at runtime
     return;
   }
@@ -79,7 +79,7 @@ function main() {
   console.log(`[compile-jdi-bridge] Compiling JdiDapServer.java with ${javac}`);
   try {
     execFileSync(javac, [
-      '--release', '11',
+      '--release', '21',
       SOURCE_FILE,
       '-d', OUT_DIR
     ], {

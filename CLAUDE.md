@@ -323,7 +323,7 @@ packages/adapter-{language}/
 - Supports both MSVC and GNU toolchains on Windows
 
 ### Java
-- JDK 11+ must be installed (`java` and `javac` on PATH, or `JAVA_HOME` set)
+- JDK 21+ must be installed (`java` and `javac` on PATH, or `JAVA_HOME` set)
 - Uses JDI bridge (`JdiDapServer.java`) — a single Java file compiled on first use via `javac`
 - **Must compile target code with `javac -g`** for variable inspection (includes `LocalVariableTable`)
 - Launch mode: Pass `mainClass` and `classpath` directly — JDI bridge spawns the JVM and connects via JDI
