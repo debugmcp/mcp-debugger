@@ -841,80 +841,35 @@ public class JdiDapServer {
         }
 
         try {
-            // Try to evaluate as a local variable name or simple field access
-            if (frameIdObj != null) {
-                int frameId = frameIdObj;
-                int threadId = frameId / 100000;
-                int frameIndex = frameId % 100000;
-
-                ThreadReference thread = findThread(threadId);
-                if (thread != null) {
-                    List<StackFrame> cachedFrames = threadFrameCache.get(thread.uniqueID());
-                    if (cachedFrames != null && frameIndex < cachedFrames.size()) {
-                        StackFrame sf = cachedFrames.get(frameIndex);
-
-                        // Simple variable lookup
-                        try {
-                            LocalVariable lv = sf.visibleVariableByName(expression);
-                            if (lv != null) {
-                                Value val = sf.getValue(lv);
-                                Map<String, Object> result = makeVariable(expression, lv.typeName(), val);
-                                Map<String, Object> body = new HashMap<>();
-                                body.put("result", str(result, "value"));
-                                body.put("type", str(result, "type"));
-                                body.put("variablesReference", result.get("variablesReference"));
-                                sendResponse(reqSeq, "evaluate", true, body);
-                                return;
-                            }
-                        } catch (AbsentInformationException e) { /* fall through */ }
-
-                        // Try 'this' reference
-                        if ("this".equals(expression)) {
-                            try {
-                                ObjectReference thisObj = sf.thisObject();
-                                if (thisObj != null) {
-                                    Map<String, Object> result = makeVariable("this", thisObj.referenceType().name(), thisObj);
-                                    Map<String, Object> body = new HashMap<>();
-                                    body.put("result", str(result, "value"));
-                                    body.put("type", str(result, "type"));
-                                    body.put("variablesReference", result.get("variablesReference"));
-                                    sendResponse(reqSeq, "evaluate", true, body);
-                                    return;
-                                }
-                            } catch (Exception e) { /* fall through */ }
-                        }
-
-                        // Simple field access: expr.field
-                        int dot = expression.lastIndexOf('.');
-                        if (dot > 0) {
-                            String objName = expression.substring(0, dot);
-                            String fieldName = expression.substring(dot + 1);
-                            try {
-                                LocalVariable lv = sf.visibleVariableByName(objName);
-                                if (lv != null) {
-                                    Value objVal = sf.getValue(lv);
-                                    if (objVal instanceof ObjectReference) {
-                                        ObjectReference objRef = (ObjectReference) objVal;
-                                        Field field = objRef.referenceType().fieldByName(fieldName);
-                                        if (field != null) {
-                                            Value fieldVal = objRef.getValue(field);
-                                            Map<String, Object> result = makeVariable(expression, field.typeName(), fieldVal);
-                                            Map<String, Object> body = new HashMap<>();
-                                            body.put("result", str(result, "value"));
-                                            body.put("type", str(result, "type"));
-                                            body.put("variablesReference", result.get("variablesReference"));
-                                            sendResponse(reqSeq, "evaluate", true, body);
-                                            return;
-                                        }
-                                    }
-                                }
-                            } catch (AbsentInformationException e) { /* fall through */ }
-                        }
-                    }
-                }
+            if (frameIdObj == null) {
+                sendErrorResponse(reqSeq, "evaluate", "frameId required for evaluation");
+                return;
+            }
+            int threadId = frameIdObj / 100000;
+            int frameIndex = frameIdObj % 100000;
+            ThreadReference thread = findThread(threadId);
+            if (thread == null) {
+                sendErrorResponse(reqSeq, "evaluate", "Thread not found: " + threadId);
+                return;
+            }
+            List<StackFrame> frames = threadFrameCache.get(thread.uniqueID());
+            if (frames == null || frameIndex >= frames.size()) {
+                sendErrorResponse(reqSeq, "evaluate", "Invalid frame index");
+                return;
             }
 
-            sendErrorResponse(reqSeq, "evaluate", "Cannot evaluate expression: " + expression);
+            StackFrame sf = frames.get(frameIndex);
+            ExprEvaluator evaluator = new ExprEvaluator(expression, vm, thread, sf);
+            Value result = evaluator.evaluate();
+
+            String typeName = result != null ? result.type().name() : "null";
+            Map<String, Object> varInfo = makeVariable(expression, typeName, result);
+            Map<String, Object> body = new HashMap<>();
+            body.put("result", str(varInfo, "value"));
+            body.put("type", str(varInfo, "type"));
+            body.put("variablesReference", varInfo.get("variablesReference"));
+            sendResponse(reqSeq, "evaluate", true, body);
+
         } catch (Exception e) {
             sendErrorResponse(reqSeq, "evaluate", "Evaluation error: " + e.getMessage());
         }
@@ -1090,19 +1045,11 @@ public class JdiDapServer {
             if (frames.isEmpty()) return true;
             StackFrame sf = frames.get(0);
 
-            // Simple variable comparison: "x == 5", "name.equals(\"foo\")"
-            // For now, just evaluate as variable name and check truthiness
-            try {
-                LocalVariable lv = sf.visibleVariableByName(condition);
-                if (lv != null) {
-                    Value val = sf.getValue(lv);
-                    return isTruthy(val);
-                }
-            } catch (AbsentInformationException e) { /* fall through */ }
-
-            // Can't evaluate complex conditions without a full expression parser
-            return true; // default: break
+            ExprEvaluator evaluator = new ExprEvaluator(condition, vm, thread, sf);
+            Value result = evaluator.evaluate();
+            return isTruthy(result);
         } catch (Exception e) {
+            log("Condition evaluation error: " + e.getMessage());
             return true; // default: break on error
         }
     }
@@ -1339,6 +1286,938 @@ public class JdiDapServer {
             sb.append('"');
             sb.append(obj.toString().replace("\"", "\\\""));
             sb.append('"');
+        }
+    }
+
+    // ========== Expression Evaluator ==========
+
+    /**
+     * Recursive descent expression evaluator using JDI.
+     * Evaluates Java-like expressions in the context of a suspended thread.
+     *
+     * Supported: literals, variables, this, chained field access, method calls,
+     * array indexing, arithmetic (+,-,*,/,%), string concat, comparisons,
+     * boolean operators (&&, ||, !), unary (-, !), grouping.
+     */
+    private static class ExprEvaluator {
+
+        // --- Token types ---
+        enum TT {
+            INTEGER, LONG, FLOAT, DOUBLE, STRING, CHAR,
+            TRUE, FALSE, NULL, THIS, INSTANCEOF,
+            IDENT,
+            PLUS, MINUS, STAR, SLASH, PERCENT,
+            EQ, NEQ, LT, GT, LEQ, GEQ,
+            AND, OR, NOT,
+            DOT, LPAREN, RPAREN, LBRACKET, RBRACKET, COMMA,
+            EOF
+        }
+
+        static class Token {
+            final TT type;
+            final String text;
+            final int pos;
+            Token(TT type, String text, int pos) {
+                this.type = type; this.text = text; this.pos = pos;
+            }
+        }
+
+        private final String source;
+        private final List<Token> tokens;
+        private int current;
+        private final VirtualMachine vm;
+        private final ThreadReference thread;
+        private final StackFrame frame;
+
+        ExprEvaluator(String expression, VirtualMachine vm, ThreadReference thread, StackFrame frame) {
+            this.source = expression;
+            this.vm = vm;
+            this.thread = thread;
+            this.frame = frame;
+            this.tokens = tokenize(expression);
+            this.current = 0;
+        }
+
+        /** Evaluate the expression and return a JDI Value (null for Java null). */
+        Value evaluate() {
+            Value result = parseExpression();
+            if (peek().type != TT.EOF) {
+                throw error("Unexpected token after expression: " + peek().text);
+            }
+            return result;
+        }
+
+        // ---- Tokenizer ----
+
+        private List<Token> tokenize(String src) {
+            List<Token> toks = new ArrayList<>();
+            int i = 0;
+            int len = src.length();
+
+            while (i < len) {
+                char c = src.charAt(i);
+
+                // Skip whitespace
+                if (Character.isWhitespace(c)) { i++; continue; }
+
+                // Numbers
+                if (Character.isDigit(c) || (c == '.' && i + 1 < len && Character.isDigit(src.charAt(i + 1)))) {
+                    int start = i;
+                    boolean isFloat = false;
+                    // Hex or binary prefix
+                    if (c == '0' && i + 1 < len && (src.charAt(i + 1) == 'x' || src.charAt(i + 1) == 'X')) {
+                        i += 2;
+                        while (i < len && isHexDigit(src.charAt(i))) i++;
+                    } else if (c == '0' && i + 1 < len && (src.charAt(i + 1) == 'b' || src.charAt(i + 1) == 'B')) {
+                        i += 2;
+                        while (i < len && (src.charAt(i) == '0' || src.charAt(i) == '1')) i++;
+                    } else {
+                        while (i < len && Character.isDigit(src.charAt(i))) i++;
+                        if (i < len && src.charAt(i) == '.') {
+                            isFloat = true; i++;
+                            while (i < len && Character.isDigit(src.charAt(i))) i++;
+                        }
+                        // Scientific notation
+                        if (i < len && (src.charAt(i) == 'e' || src.charAt(i) == 'E')) {
+                            isFloat = true; i++;
+                            if (i < len && (src.charAt(i) == '+' || src.charAt(i) == '-')) i++;
+                            while (i < len && Character.isDigit(src.charAt(i))) i++;
+                        }
+                    }
+                    // Suffix
+                    if (i < len && (src.charAt(i) == 'L' || src.charAt(i) == 'l')) {
+                        i++;
+                        toks.add(new Token(TT.LONG, src.substring(start, i), start));
+                    } else if (i < len && (src.charAt(i) == 'f' || src.charAt(i) == 'F')) {
+                        i++;
+                        toks.add(new Token(TT.FLOAT, src.substring(start, i), start));
+                    } else if (i < len && (src.charAt(i) == 'd' || src.charAt(i) == 'D')) {
+                        i++;
+                        toks.add(new Token(TT.DOUBLE, src.substring(start, i), start));
+                    } else if (isFloat) {
+                        toks.add(new Token(TT.DOUBLE, src.substring(start, i), start));
+                    } else {
+                        toks.add(new Token(TT.INTEGER, src.substring(start, i), start));
+                    }
+                    continue;
+                }
+
+                // Strings
+                if (c == '"') {
+                    int start = i; i++;
+                    StringBuilder sb = new StringBuilder();
+                    while (i < len && src.charAt(i) != '"') {
+                        if (src.charAt(i) == '\\' && i + 1 < len) {
+                            i++;
+                            switch (src.charAt(i)) {
+                                case 'n': sb.append('\n'); break;
+                                case 't': sb.append('\t'); break;
+                                case 'r': sb.append('\r'); break;
+                                case '\\': sb.append('\\'); break;
+                                case '"': sb.append('"'); break;
+                                case '\'': sb.append('\''); break;
+                                default: sb.append(src.charAt(i));
+                            }
+                        } else {
+                            sb.append(src.charAt(i));
+                        }
+                        i++;
+                    }
+                    if (i < len) i++; // consume closing "
+                    toks.add(new Token(TT.STRING, sb.toString(), start));
+                    continue;
+                }
+
+                // Chars
+                if (c == '\'') {
+                    int start = i; i++;
+                    char ch;
+                    if (i < len && src.charAt(i) == '\\' && i + 1 < len) {
+                        i++;
+                        switch (src.charAt(i)) {
+                            case 'n': ch = '\n'; break;
+                            case 't': ch = '\t'; break;
+                            case 'r': ch = '\r'; break;
+                            case '\\': ch = '\\'; break;
+                            case '\'': ch = '\''; break;
+                            default: ch = src.charAt(i);
+                        }
+                    } else if (i < len) {
+                        ch = src.charAt(i);
+                    } else {
+                        throw new RuntimeException("Unterminated char literal at " + start);
+                    }
+                    i++;
+                    if (i < len && src.charAt(i) == '\'') i++; // consume closing '
+                    toks.add(new Token(TT.CHAR, String.valueOf(ch), start));
+                    continue;
+                }
+
+                // Identifiers and keywords
+                if (Character.isJavaIdentifierStart(c)) {
+                    int start = i;
+                    while (i < len && Character.isJavaIdentifierPart(src.charAt(i))) i++;
+                    String word = src.substring(start, i);
+                    TT type;
+                    switch (word) {
+                        case "true": type = TT.TRUE; break;
+                        case "false": type = TT.FALSE; break;
+                        case "null": type = TT.NULL; break;
+                        case "this": type = TT.THIS; break;
+                        case "instanceof": type = TT.INSTANCEOF; break;
+                        default: type = TT.IDENT;
+                    }
+                    toks.add(new Token(type, word, start));
+                    continue;
+                }
+
+                // Two-char operators
+                if (i + 1 < len) {
+                    String two = src.substring(i, i + 2);
+                    TT tt = null;
+                    switch (two) {
+                        case "==": tt = TT.EQ; break;
+                        case "!=": tt = TT.NEQ; break;
+                        case "<=": tt = TT.LEQ; break;
+                        case ">=": tt = TT.GEQ; break;
+                        case "&&": tt = TT.AND; break;
+                        case "||": tt = TT.OR; break;
+                    }
+                    if (tt != null) {
+                        toks.add(new Token(tt, two, i));
+                        i += 2;
+                        continue;
+                    }
+                }
+
+                // Single-char operators
+                TT tt = null;
+                switch (c) {
+                    case '+': tt = TT.PLUS; break;
+                    case '-': tt = TT.MINUS; break;
+                    case '*': tt = TT.STAR; break;
+                    case '/': tt = TT.SLASH; break;
+                    case '%': tt = TT.PERCENT; break;
+                    case '<': tt = TT.LT; break;
+                    case '>': tt = TT.GT; break;
+                    case '!': tt = TT.NOT; break;
+                    case '.': tt = TT.DOT; break;
+                    case '(': tt = TT.LPAREN; break;
+                    case ')': tt = TT.RPAREN; break;
+                    case '[': tt = TT.LBRACKET; break;
+                    case ']': tt = TT.RBRACKET; break;
+                    case ',': tt = TT.COMMA; break;
+                }
+                if (tt != null) {
+                    toks.add(new Token(tt, String.valueOf(c), i));
+                    i++;
+                    continue;
+                }
+
+                throw new RuntimeException("Unexpected character '" + c + "' at position " + i);
+            }
+
+            toks.add(new Token(TT.EOF, "", len));
+            return toks;
+        }
+
+        private boolean isHexDigit(char c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        }
+
+        // ---- Token helpers ----
+
+        private Token peek() { return tokens.get(current); }
+        private Token advance() { return tokens.get(current++); }
+        private boolean check(TT type) { return peek().type == type; }
+
+        private boolean match(TT... types) {
+            for (TT t : types) {
+                if (check(t)) { advance(); return true; }
+            }
+            return false;
+        }
+
+        private Token expect(TT type, String msg) {
+            if (check(type)) return advance();
+            throw error(msg + ", got '" + peek().text + "'");
+        }
+
+        private RuntimeException error(String msg) {
+            Token t = current < tokens.size() ? tokens.get(current) : null;
+            int pos = t != null ? t.pos : source.length();
+            return new RuntimeException(msg + " (at position " + pos + " in: " + source + ")");
+        }
+
+        // ---- Parser (one method per precedence level) ----
+
+        private Value parseExpression() { return parseOr(); }
+
+        private Value parseOr() {
+            Value left = parseAnd();
+            while (match(TT.OR)) {
+                Value right = parseAnd();
+                boolean l = toBoolean(left), r = toBoolean(right);
+                left = vm.mirrorOf(l || r);
+            }
+            return left;
+        }
+
+        private Value parseAnd() {
+            Value left = parseEquality();
+            while (match(TT.AND)) {
+                Value right = parseEquality();
+                boolean l = toBoolean(left), r = toBoolean(right);
+                left = vm.mirrorOf(l && r);
+            }
+            return left;
+        }
+
+        private Value parseEquality() {
+            Value left = parseComparison();
+            while (check(TT.EQ) || check(TT.NEQ)) {
+                TT op = advance().type;
+                Value right = parseComparison();
+                left = vm.mirrorOf(performEquality(left, op, right));
+            }
+            return left;
+        }
+
+        private Value parseComparison() {
+            Value left = parseAddition();
+            while (check(TT.LT) || check(TT.GT) || check(TT.LEQ) || check(TT.GEQ) || check(TT.INSTANCEOF)) {
+                if (check(TT.INSTANCEOF)) {
+                    advance();
+                    // Read type name (may be dotted: java.lang.String)
+                    StringBuilder typeName = new StringBuilder();
+                    typeName.append(expect(TT.IDENT, "Expected type name after instanceof").text);
+                    while (check(TT.DOT)) {
+                        advance();
+                        typeName.append('.').append(expect(TT.IDENT, "Expected type name").text);
+                    }
+                    left = vm.mirrorOf(performInstanceof(left, typeName.toString()));
+                } else {
+                    TT op = advance().type;
+                    Value right = parseAddition();
+                    left = vm.mirrorOf(performComparison(left, op, right));
+                }
+            }
+            return left;
+        }
+
+        private Value parseAddition() {
+            Value left = parseMultiplication();
+            while (check(TT.PLUS) || check(TT.MINUS)) {
+                TT op = advance().type;
+                Value right = parseMultiplication();
+                left = performArithmetic(left, op, right);
+            }
+            return left;
+        }
+
+        private Value parseMultiplication() {
+            Value left = parseUnary();
+            while (check(TT.STAR) || check(TT.SLASH) || check(TT.PERCENT)) {
+                TT op = advance().type;
+                Value right = parseUnary();
+                left = performArithmetic(left, op, right);
+            }
+            return left;
+        }
+
+        private Value parseUnary() {
+            if (match(TT.NOT)) {
+                Value v = parseUnary();
+                return vm.mirrorOf(!toBoolean(v));
+            }
+            if (match(TT.MINUS)) {
+                Value v = parseUnary();
+                v = unbox(v);
+                if (v instanceof IntegerValue) return vm.mirrorOf(-((IntegerValue) v).value());
+                if (v instanceof LongValue) return vm.mirrorOf(-((LongValue) v).value());
+                if (v instanceof FloatValue) return vm.mirrorOf(-((FloatValue) v).value());
+                if (v instanceof DoubleValue) return vm.mirrorOf(-((DoubleValue) v).value());
+                throw error("Cannot negate non-numeric value");
+            }
+            return parsePostfix();
+        }
+
+        private Value parsePostfix() {
+            Value result = parsePrimary();
+
+            while (true) {
+                if (match(TT.DOT)) {
+                    Token name = expect(TT.IDENT, "Expected field or method name after '.'");
+                    if (check(TT.LPAREN)) {
+                        advance(); // consume '('
+                        List<Value> args = parseArgList();
+                        expect(TT.RPAREN, "Expected ')' after method arguments");
+                        result = invokeMethod(result, name.text, args);
+                    } else {
+                        result = accessField(result, name.text);
+                    }
+                } else if (match(TT.LBRACKET)) {
+                    Value index = parseExpression();
+                    expect(TT.RBRACKET, "Expected ']' after array index");
+                    result = arrayAccess(result, index);
+                } else {
+                    break;
+                }
+            }
+            return result;
+        }
+
+        private Value parsePrimary() {
+            Token t = peek();
+            switch (t.type) {
+                case INTEGER: {
+                    advance();
+                    String text = t.text;
+                    if (text.startsWith("0x") || text.startsWith("0X")) {
+                        return vm.mirrorOf(Integer.parseUnsignedInt(text.substring(2), 16));
+                    } else if (text.startsWith("0b") || text.startsWith("0B")) {
+                        return vm.mirrorOf(Integer.parseUnsignedInt(text.substring(2), 2));
+                    }
+                    return vm.mirrorOf(Integer.parseInt(text));
+                }
+                case LONG: {
+                    advance();
+                    String text = t.text;
+                    // Strip L/l suffix
+                    text = text.substring(0, text.length() - 1);
+                    return vm.mirrorOf(Long.parseLong(text));
+                }
+                case FLOAT: {
+                    advance();
+                    return vm.mirrorOf(Float.parseFloat(t.text));
+                }
+                case DOUBLE: {
+                    advance();
+                    return vm.mirrorOf(Double.parseDouble(t.text));
+                }
+                case STRING: {
+                    advance();
+                    return vm.mirrorOf(t.text);
+                }
+                case CHAR: {
+                    advance();
+                    return vm.mirrorOf(t.text.charAt(0));
+                }
+                case TRUE: { advance(); return vm.mirrorOf(true); }
+                case FALSE: { advance(); return vm.mirrorOf(false); }
+                case NULL: { advance(); return null; }
+                case THIS: {
+                    advance();
+                    ObjectReference thisObj = frame.thisObject();
+                    if (thisObj == null) throw error("'this' not available in static context");
+                    return thisObj;
+                }
+                case IDENT: {
+                    advance();
+                    String name = t.text;
+                    if (check(TT.LPAREN)) {
+                        // Bare method call: this.method() or static method
+                        advance(); // consume '('
+                        List<Value> args = parseArgList();
+                        expect(TT.RPAREN, "Expected ')'");
+                        ObjectReference thisRef = frame.thisObject();
+                        if (thisRef != null) {
+                            return invokeMethod(thisRef, name, args);
+                        } else {
+                            return invokeStaticMethod(
+                                frame.location().declaringType().name(), name, args);
+                        }
+                    }
+                    return resolveVariable(name);
+                }
+                case LPAREN: {
+                    advance();
+                    Value val = parseExpression();
+                    expect(TT.RPAREN, "Expected ')'");
+                    return val;
+                }
+                default:
+                    throw error("Unexpected token: " + t.text);
+            }
+        }
+
+        private List<Value> parseArgList() {
+            List<Value> args = new ArrayList<>();
+            if (!check(TT.RPAREN)) {
+                args.add(parseExpression());
+                while (match(TT.COMMA)) {
+                    args.add(parseExpression());
+                }
+            }
+            return args;
+        }
+
+        // ---- JDI helpers ----
+
+        private Value resolveVariable(String name) {
+            // 1. Local variable
+            try {
+                LocalVariable lv = frame.visibleVariableByName(name);
+                if (lv != null) return frame.getValue(lv);
+            } catch (AbsentInformationException e) { /* fall through */ }
+
+            // 2. 'this' field
+            ObjectReference thisObj = frame.thisObject();
+            if (thisObj != null) {
+                Field f = thisObj.referenceType().fieldByName(name);
+                if (f != null) return thisObj.getValue(f);
+            }
+
+            // 3. Static field of enclosing class
+            ReferenceType enclosing = frame.location().declaringType();
+            Field sf = enclosing.fieldByName(name);
+            if (sf != null && sf.isStatic()) return enclosing.getValue(sf);
+
+            throw error("Cannot resolve variable: " + name);
+        }
+
+        private Value accessField(Value target, String fieldName) {
+            if (target == null) throw error("Cannot access field '" + fieldName + "' on null");
+
+            // array.length
+            if (target instanceof ArrayReference && "length".equals(fieldName)) {
+                return vm.mirrorOf(((ArrayReference) target).length());
+            }
+
+            if (!(target instanceof ObjectReference)) {
+                throw error("Cannot access field '" + fieldName + "' on primitive value");
+            }
+
+            ObjectReference obj = (ObjectReference) target;
+
+            // String.length() is common but 'length' is not a field — handle as special case
+            Field field = obj.referenceType().fieldByName(fieldName);
+            if (field == null) {
+                throw error("No field '" + fieldName + "' on type " + obj.referenceType().name());
+            }
+            return obj.getValue(field);
+        }
+
+        private Value invokeMethod(Value target, String methodName, List<Value> args) {
+            if (target == null) throw error("Cannot invoke '" + methodName + "()' on null");
+            if (!(target instanceof ObjectReference)) {
+                throw error("Cannot invoke method on primitive value");
+            }
+
+            ObjectReference obj = (ObjectReference) target;
+            ReferenceType type = obj.referenceType();
+            List<Method> candidates = type.methodsByName(methodName);
+
+            if (candidates.isEmpty()) {
+                throw error("No method '" + methodName + "' on type " + type.name());
+            }
+
+            // Filter by argument count
+            List<Method> matching = new ArrayList<>();
+            for (Method m : candidates) {
+                try {
+                    if (m.argumentTypeNames().size() == args.size()) {
+                        matching.add(m);
+                    }
+                } catch (Exception e) { /* skip */ }
+            }
+
+            if (matching.isEmpty()) {
+                throw error("No method '" + methodName + "' on " + type.name()
+                    + " accepting " + args.size() + " argument(s)");
+            }
+
+            // If multiple matches, try best-effort type matching
+            Method method = matching.size() == 1 ? matching.get(0) : bestMatch(matching, args);
+
+            try {
+                return obj.invokeMethod(thread, method, args, ObjectReference.INVOKE_SINGLE_THREADED);
+            } catch (InvocationException ie) {
+                ObjectReference ex = ie.exception();
+                throw error("Method '" + methodName + "' threw " + ex.referenceType().name());
+            } catch (Exception e) {
+                throw error("Error invoking '" + methodName + "': " + e.getMessage());
+            }
+        }
+
+        private Value invokeStaticMethod(String className, String methodName, List<Value> args) {
+            List<ReferenceType> types = vm.classesByName(className);
+            if (types.isEmpty()) {
+                throw error("Class not found: " + className);
+            }
+            ReferenceType type = types.get(0);
+            List<Method> candidates = type.methodsByName(methodName);
+            List<Method> matching = new ArrayList<>();
+            for (Method m : candidates) {
+                try {
+                    if (m.isStatic() && m.argumentTypeNames().size() == args.size()) {
+                        matching.add(m);
+                    }
+                } catch (Exception e) { /* skip */ }
+            }
+            if (matching.isEmpty()) {
+                throw error("No static method '" + methodName + "' on " + className
+                    + " accepting " + args.size() + " argument(s)");
+            }
+            Method method = matching.size() == 1 ? matching.get(0) : bestMatch(matching, args);
+            try {
+                if (type instanceof ClassType) {
+                    return ((ClassType) type).invokeMethod(thread, method, args, ObjectReference.INVOKE_SINGLE_THREADED);
+                }
+                throw error("Cannot invoke static method on non-class type: " + type.name());
+            } catch (InvocationException ie) {
+                throw error("Static method '" + methodName + "' threw " + ie.exception().referenceType().name());
+            } catch (Exception e) {
+                throw error("Error invoking static '" + methodName + "': " + e.getMessage());
+            }
+        }
+
+        /** Best-effort overload resolution: pick the first method whose arg types are compatible. */
+        private Method bestMatch(List<Method> methods, List<Value> args) {
+            for (Method m : methods) {
+                try {
+                    List<String> paramTypes = m.argumentTypeNames();
+                    boolean compatible = true;
+                    for (int i = 0; i < args.size(); i++) {
+                        if (!isAssignable(args.get(i), paramTypes.get(i))) {
+                            compatible = false;
+                            break;
+                        }
+                    }
+                    if (compatible) return m;
+                } catch (Exception e) { /* skip */ }
+            }
+            return methods.get(0); // fallback: just try the first
+        }
+
+        private boolean isAssignable(Value arg, String paramTypeName) {
+            if (arg == null) {
+                // null is assignable to any reference type
+                return !isPrimitiveTypeName(paramTypeName);
+            }
+            String argType = arg.type().name();
+            if (argType.equals(paramTypeName)) return true;
+
+            // Primitive widening
+            if (arg instanceof PrimitiveValue) {
+                return isWidenable(argType, paramTypeName);
+            }
+
+            // Auto-boxing
+            String boxed = boxedName(paramTypeName);
+            if (boxed != null && argType.equals(boxed)) return true;
+            String unboxed = unboxedName(paramTypeName);
+            if (unboxed != null && argType.equals(unboxed)) return true;
+
+            // Subtype check
+            if (arg instanceof ObjectReference) {
+                ReferenceType argRefType = ((ObjectReference) arg).referenceType();
+                try {
+                    // Check if arg's type can be assigned to param type
+                    List<ReferenceType> paramTypes = vm.classesByName(paramTypeName);
+                    if (!paramTypes.isEmpty()) {
+                        ReferenceType paramRefType = paramTypes.get(0);
+                        if (argRefType instanceof ClassType) {
+                            return isSubtypeOf((ClassType) argRefType, paramRefType);
+                        }
+                    }
+                } catch (Exception e) { /* fall through */ }
+            }
+
+            return false;
+        }
+
+        private boolean isSubtypeOf(ClassType sub, ReferenceType sup) {
+            if (sub.equals(sup)) return true;
+            // Check interfaces
+            for (InterfaceType iface : sub.interfaces()) {
+                if (iface.equals(sup)) return true;
+            }
+            // Check superclass
+            ClassType superClass = sub.superclass();
+            if (superClass != null) return isSubtypeOf(superClass, sup);
+            return false;
+        }
+
+        private Value arrayAccess(Value target, Value index) {
+            if (target == null) throw error("Cannot index null");
+            if (!(target instanceof ArrayReference)) {
+                throw error("Cannot index non-array type: " + target.type().name());
+            }
+            index = unbox(index);
+            if (!(index instanceof IntegerValue || index instanceof LongValue
+                  || index instanceof ShortValue || index instanceof ByteValue)) {
+                throw error("Array index must be an integer");
+            }
+            int i = (int) toLong(index);
+            ArrayReference arr = (ArrayReference) target;
+            if (i < 0 || i >= arr.length()) {
+                throw error("Array index out of bounds: " + i + " (length " + arr.length() + ")");
+            }
+            return arr.getValue(i);
+        }
+
+        // ---- Arithmetic ----
+
+        private Value performArithmetic(Value left, TT op, Value right) {
+            // Unbox if needed
+            Value ul = unbox(left), ur = unbox(right);
+
+            // String concatenation
+            if (op == TT.PLUS && (isStringLike(left) || isStringLike(right))) {
+                return vm.mirrorOf(valueToString(left) + valueToString(right));
+            }
+
+            if (!isNumeric(ul) || !isNumeric(ur)) {
+                throw error("Arithmetic requires numeric operands");
+            }
+
+            if (isFloatingPoint(ul) || isFloatingPoint(ur)) {
+                double l = toDouble(ul), r = toDouble(ur);
+                double res;
+                switch (op) {
+                    case PLUS: res = l + r; break;
+                    case MINUS: res = l - r; break;
+                    case STAR: res = l * r; break;
+                    case SLASH: res = l / r; break;
+                    case PERCENT: res = l % r; break;
+                    default: throw error("Unknown arithmetic operator");
+                }
+                return vm.mirrorOf(res);
+            } else {
+                long l = toLong(ul), r = toLong(ur);
+                long res;
+                switch (op) {
+                    case PLUS: res = l + r; break;
+                    case MINUS: res = l - r; break;
+                    case STAR: res = l * r; break;
+                    case SLASH:
+                        if (r == 0) throw error("Division by zero");
+                        res = l / r; break;
+                    case PERCENT:
+                        if (r == 0) throw error("Division by zero");
+                        res = l % r; break;
+                    default: throw error("Unknown arithmetic operator");
+                }
+                // Preserve int type if both operands were int-sized
+                if (ul instanceof IntegerValue && ur instanceof IntegerValue) {
+                    return vm.mirrorOf((int) res);
+                }
+                return vm.mirrorOf(res);
+            }
+        }
+
+        private boolean performEquality(Value left, TT op, Value right) {
+            boolean eq;
+            if (left == null && right == null) {
+                eq = true;
+            } else if (left == null || right == null) {
+                eq = false;
+            } else {
+                Value ul = unbox(left), ur = unbox(right);
+                if (isNumeric(ul) && isNumeric(ur)) {
+                    if (isFloatingPoint(ul) || isFloatingPoint(ur)) {
+                        eq = toDouble(ul) == toDouble(ur);
+                    } else {
+                        eq = toLong(ul) == toLong(ur);
+                    }
+                } else if (ul instanceof BooleanValue && ur instanceof BooleanValue) {
+                    eq = ((BooleanValue) ul).value() == ((BooleanValue) ur).value();
+                } else if (ul instanceof CharValue && ur instanceof CharValue) {
+                    eq = ((CharValue) ul).value() == ((CharValue) ur).value();
+                } else if (left instanceof ObjectReference && right instanceof ObjectReference) {
+                    // Reference equality (Java == semantics)
+                    eq = ((ObjectReference) left).uniqueID() == ((ObjectReference) right).uniqueID();
+                } else {
+                    eq = false;
+                }
+            }
+            return op == TT.EQ ? eq : !eq;
+        }
+
+        private boolean performComparison(Value left, TT op, Value right) {
+            Value ul = unbox(left), ur = unbox(right);
+            if (!isNumeric(ul) || !isNumeric(ur)) {
+                throw error("Comparison requires numeric operands");
+            }
+            int cmp;
+            if (isFloatingPoint(ul) || isFloatingPoint(ur)) {
+                cmp = Double.compare(toDouble(ul), toDouble(ur));
+            } else {
+                cmp = Long.compare(toLong(ul), toLong(ur));
+            }
+            switch (op) {
+                case LT: return cmp < 0;
+                case GT: return cmp > 0;
+                case LEQ: return cmp <= 0;
+                case GEQ: return cmp >= 0;
+                default: throw error("Unknown comparison operator");
+            }
+        }
+
+        private boolean performInstanceof(Value left, String typeName) {
+            if (left == null) return false;
+            if (!(left instanceof ObjectReference)) return false;
+            ReferenceType objType = ((ObjectReference) left).referenceType();
+            // Check by name match or subtype
+            if (objType.name().equals(typeName)) return true;
+            List<ReferenceType> targetTypes = vm.classesByName(typeName);
+            if (targetTypes.isEmpty()) {
+                // Try simple name match against loaded classes
+                for (ReferenceType rt : vm.allClasses()) {
+                    if (rt.name().endsWith("." + typeName) || rt.name().equals(typeName)) {
+                        targetTypes = Collections.singletonList(rt);
+                        break;
+                    }
+                }
+            }
+            if (targetTypes.isEmpty()) return false;
+            if (objType instanceof ClassType) {
+                return isSubtypeOf((ClassType) objType, targetTypes.get(0));
+            }
+            return false;
+        }
+
+        // ---- Unboxing ----
+
+        private Value unbox(Value v) {
+            if (v == null || v instanceof PrimitiveValue) return v;
+            if (!(v instanceof ObjectReference)) return v;
+            ObjectReference obj = (ObjectReference) v;
+            String typeName = obj.referenceType().name();
+            String method;
+            switch (typeName) {
+                case "java.lang.Integer": method = "intValue"; break;
+                case "java.lang.Long": method = "longValue"; break;
+                case "java.lang.Float": method = "floatValue"; break;
+                case "java.lang.Double": method = "doubleValue"; break;
+                case "java.lang.Boolean": method = "booleanValue"; break;
+                case "java.lang.Character": method = "charValue"; break;
+                case "java.lang.Short": method = "shortValue"; break;
+                case "java.lang.Byte": method = "byteValue"; break;
+                default: return v;
+            }
+            List<Method> methods = obj.referenceType().methodsByName(method);
+            if (methods.isEmpty()) return v;
+            try {
+                return obj.invokeMethod(thread, methods.get(0),
+                    Collections.emptyList(), ObjectReference.INVOKE_SINGLE_THREADED);
+            } catch (Exception e) {
+                return v;
+            }
+        }
+
+        // ---- Type helpers ----
+
+        private boolean isNumeric(Value v) {
+            return v instanceof IntegerValue || v instanceof LongValue
+                || v instanceof FloatValue || v instanceof DoubleValue
+                || v instanceof ShortValue || v instanceof ByteValue;
+        }
+
+        private boolean isFloatingPoint(Value v) {
+            return v instanceof FloatValue || v instanceof DoubleValue;
+        }
+
+        private boolean isStringLike(Value v) {
+            return v instanceof StringReference;
+        }
+
+        private boolean toBoolean(Value v) {
+            if (v == null) return false;
+            v = unbox(v);
+            if (v instanceof BooleanValue) return ((BooleanValue) v).value();
+            if (v instanceof IntegerValue) return ((IntegerValue) v).value() != 0;
+            if (v instanceof LongValue) return ((LongValue) v).value() != 0;
+            return true; // objects are truthy
+        }
+
+        private long toLong(Value v) {
+            if (v instanceof IntegerValue) return ((IntegerValue) v).value();
+            if (v instanceof LongValue) return ((LongValue) v).value();
+            if (v instanceof ShortValue) return ((ShortValue) v).value();
+            if (v instanceof ByteValue) return ((ByteValue) v).value();
+            if (v instanceof CharValue) return ((CharValue) v).value();
+            throw error("Cannot convert to long: " + (v != null ? v.type().name() : "null"));
+        }
+
+        private double toDouble(Value v) {
+            if (v instanceof DoubleValue) return ((DoubleValue) v).value();
+            if (v instanceof FloatValue) return ((FloatValue) v).value();
+            return (double) toLong(v);
+        }
+
+        private String valueToString(Value v) {
+            if (v == null) return "null";
+            if (v instanceof StringReference) return ((StringReference) v).value();
+            if (v instanceof PrimitiveValue) return v.toString();
+            if (v instanceof ObjectReference) {
+                ObjectReference obj = (ObjectReference) v;
+                try {
+                    List<Method> methods = obj.referenceType().methodsByName("toString");
+                    for (Method m : methods) {
+                        if (m.argumentTypeNames().isEmpty()) {
+                            Value result = obj.invokeMethod(thread, m,
+                                Collections.emptyList(), ObjectReference.INVOKE_SINGLE_THREADED);
+                            if (result instanceof StringReference) {
+                                return ((StringReference) result).value();
+                            }
+                        }
+                    }
+                } catch (Exception e) { /* fallback */ }
+                return obj.referenceType().name() + "@" + obj.uniqueID();
+            }
+            return String.valueOf(v);
+        }
+
+        private boolean isPrimitiveTypeName(String name) {
+            switch (name) {
+                case "int": case "long": case "float": case "double":
+                case "boolean": case "char": case "short": case "byte":
+                    return true;
+                default: return false;
+            }
+        }
+
+        private boolean isWidenable(String from, String to) {
+            // Java primitive widening conversions
+            switch (from) {
+                case "byte": return "short".equals(to) || "int".equals(to) || "long".equals(to) || "float".equals(to) || "double".equals(to);
+                case "short": return "int".equals(to) || "long".equals(to) || "float".equals(to) || "double".equals(to);
+                case "char": return "int".equals(to) || "long".equals(to) || "float".equals(to) || "double".equals(to);
+                case "int": return "long".equals(to) || "float".equals(to) || "double".equals(to);
+                case "long": return "float".equals(to) || "double".equals(to);
+                case "float": return "double".equals(to);
+                default: return false;
+            }
+        }
+
+        private String boxedName(String primitive) {
+            switch (primitive) {
+                case "int": return "java.lang.Integer";
+                case "long": return "java.lang.Long";
+                case "float": return "java.lang.Float";
+                case "double": return "java.lang.Double";
+                case "boolean": return "java.lang.Boolean";
+                case "char": return "java.lang.Character";
+                case "short": return "java.lang.Short";
+                case "byte": return "java.lang.Byte";
+                default: return null;
+            }
+        }
+
+        private String unboxedName(String boxed) {
+            switch (boxed) {
+                case "java.lang.Integer": return "int";
+                case "java.lang.Long": return "long";
+                case "java.lang.Float": return "float";
+                case "java.lang.Double": return "double";
+                case "java.lang.Boolean": return "boolean";
+                case "java.lang.Character": return "char";
+                case "java.lang.Short": return "short";
+                case "java.lang.Byte": return "byte";
+                default: return null;
+            }
         }
     }
 

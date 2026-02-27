@@ -402,4 +402,106 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       } catch { /* ignore */ }
     }
   }, 60000);
+
+  it('should support conditional breakpoints', async () => {
+    // Check for java and javac
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Java Smoke Test] Skipping — JDK not installed');
+      return;
+    }
+
+    const testJavaFile = path.resolve(ROOT, 'examples', 'java', 'HelloWorld.java');
+    const testClassDir = path.resolve(ROOT, 'examples', 'java');
+
+    // Compile with full debug info
+    execSync(`javac -g -d "${testClassDir}" "${testJavaFile}"`, {
+      cwd: testClassDir,
+      stdio: 'pipe'
+    });
+
+    try {
+      // 1. Create session
+      const createResult = await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'java', name: 'java-conditional-bp' }
+      });
+      const createResponse = parseSdkToolResult(createResult);
+      expect(createResponse.sessionId).toBeDefined();
+      sessionId = createResponse.sessionId as string;
+
+      // 2. Set conditional breakpoint on line 10 (add method) with condition "a > 5"
+      //    Since add(10, 20) is called, a=10 > 5 is true → breakpoint should fire
+      console.log('[Conditional BP] Setting conditional breakpoint: a > 5 on line 10...');
+      const bpResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: testJavaFile, line: 10, condition: 'a > 5' }
+      }));
+      expect(bpResult.success).toBe(true);
+
+      // 3. Start debugging
+      console.log('[Conditional BP] Starting debugging...');
+      const startResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: testJavaFile,
+          args: [],
+          dapLaunchArgs: {
+            mainClass: 'HelloWorld',
+            classpath: testClassDir,
+            cwd: testClassDir,
+            stopOnEntry: false
+          }
+        }
+      }));
+      expect(startResult.success).toBe(true);
+
+      // 4. Wait for breakpoint hit — condition a > 5 is true (a=10), so it should fire
+      console.log('[Conditional BP] Waiting for conditional breakpoint hit...');
+      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+
+      // HARD ASSERTION: Conditional breakpoint must fire
+      expect(stackResponse).not.toBeNull();
+      const frames = stackResponse!.stackFrames!;
+      expect(frames.length).toBeGreaterThan(0);
+      expect(frames[0].name?.toLowerCase()).toContain('add');
+      expect(frames[0].line).toBe(10);
+      console.log('[Conditional BP] Breakpoint hit at add():10');
+
+      // 5. Verify a=10 (which satisfies a > 5)
+      const localsRaw = await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      });
+      const localsResponse = parseSdkToolResult(localsRaw) as {
+        success?: boolean;
+        variables?: Array<{ name: string; value: string }>;
+      };
+      expect(localsResponse.success).toBe(true);
+      const localsByName = new Map(
+        (localsResponse.variables ?? []).map(v => [v.name, v.value])
+      );
+      console.log('[Conditional BP] Variables:', Object.fromEntries(localsByName));
+      expect(localsByName.get('a')).toBe('10');
+
+      // 6. Continue to finish
+      console.log('[Conditional BP] Continuing execution...');
+      const contResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(contResult.success).toBe(true);
+
+      console.log('[Conditional BP] TEST PASSED — conditional breakpoint worked');
+
+    } finally {
+      try {
+        const classFile = path.resolve(testClassDir, 'HelloWorld.class');
+        if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
+      } catch { /* ignore */ }
+    }
+  }, 60000);
 });
