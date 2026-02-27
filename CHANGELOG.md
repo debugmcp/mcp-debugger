@@ -8,16 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Java debugging support** – full KDA (kotlin-debug-adapter) integration with launch and attach modes, JDI-based variable inspection, and automatic KDA vendoring
+- **Java debugging support** – JDI bridge (`JdiDapServer.java`) with launch and attach modes, variable inspection, and deferred breakpoints via ClassPrepareRequest
 - **Java attach mode** – connect to running JVMs via JDWP agent for debugging servers and complex applications
-- **Java documentation** – `docs/java/README.md` user guide covering prerequisites, KDA behaviors, and troubleshooting; `docs/java/ASSESSMENT.md` evaluating current state and alternative backends
+- **Java documentation** – `docs/java/README.md` user guide covering prerequisites, JDI bridge architecture, and troubleshooting
+
+### Changed
+- **Java backend** – replaced KDA (kotlin-debug-adapter) and stdio-tcp-bridge with a single JDI bridge (`JdiDapServer.java`) using `com.sun.jdi.*` directly; zero external dependencies, compiles on first use
 
 ### Fixed
-- **Java DAP initialization** – send configurationDone concurrently with launch/attach (KDA blocks responses until configurationDone arrives)
 - **Java thread discovery** – discover JVM threads via DAP threads request instead of hardcoding threadId=1
 - **Java variable access** – document and enforce `javac -g` requirement for LocalVariableTable (JDI needs it for local variable inspection)
-- **Java classpath resolution** – compile into Gradle-style build output directories for KDA's ProjectClassesResolver
-- **Java deferred breakpoints** – re-send breakpoints after class loading in attach mode (KDA's deferred breakpoints report verified but don't fire)
 
 ## [0.18.0] - 2026-02-16
 

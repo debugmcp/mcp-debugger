@@ -4,7 +4,7 @@
  * JdiDapServer.java compiles to java/out/JdiDapServer.class.
  * This module resolves that output directory for use by the adapter.
  */
-import { existsSync, statSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync, execSync } from 'child_process';

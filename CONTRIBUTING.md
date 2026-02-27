@@ -27,7 +27,7 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 - Python 3.7+ (for debugging Python code)
 - Go 1.18+ and Delve (for debugging Go code, optional)
 - Rust toolchain (for debugging Rust code, optional — CodeLLDB auto-downloads during install)
-- JDK 11+ (for debugging Java code, optional — KDA is vendored; compile with `javac -g` for variable inspection)
+- JDK 11+ (for debugging Java code, optional — JDI bridge compiles on first use; compile target code with `javac -g` for variable inspection)
 - Docker (optional, for containerized development)
 - Git
 
@@ -284,7 +284,7 @@ mcp-debugger/
 │   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
 │   ├── adapter-rust/      # Rust adapter (CodeLLDB)
 │   ├── adapter-go/        # Go adapter (Delve)
-│   ├── adapter-java/      # Java adapter (kotlin-debug-adapter)
+│   ├── adapter-java/      # Java adapter (JDI bridge)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
