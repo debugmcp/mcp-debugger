@@ -1,12 +1,47 @@
 /**
- * DotnetAdapterPolicy - policy for .NET Debug Adapter (vsdbg)
+ * DotnetAdapterPolicy - DAP proxy policy for the .NET debug adapter (vsdbg)
  *
- * Encodes vsdbg-specific behaviors and variable handling logic.
- * vsdbg communicates via stdio (not TCP), so the adapter uses a
- * TCP-to-stdio bridge script to integrate with ProxyManager.
+ * This policy encodes all vsdbg-specific behaviors that the DAP proxy worker
+ * needs to know about. It is selected by `selectPolicy()` in
+ * `session-manager-data.ts` when the session language is 'dotnet'.
  *
- * Critical safety: Always sets terminateDebuggee=false on detach
- * to never kill attached processes (especially NinjaTrader).
+ * ## Why vsdbg needs special handling
+ *
+ * vsdbg (Microsoft's .NET debugger, bundled with the VS Code C# extension)
+ * differs from other DAP adapters in several important ways:
+ *
+ * 1. **Stdio-only communication**: vsdbg uses stdin/stdout for DAP messages
+ *    (with --interpreter=vscode), but mcp-debugger's proxy communicates
+ *    via TCP. A TCP-to-stdio bridge (vsdbg-bridge.ts) translates between them.
+ *
+ * 2. **Proprietary handshake**: vsdbg sends a `handshake` reverse request
+ *    with a challenge that must be signed using vsda.node (a native module
+ *    from the C# extension). The bridge handles this automatically.
+ *
+ * 3. **Reversed attach sequence**: Most DAP adapters send the `initialized`
+ *    event after `initialize` but before `attach`. vsdbg sends `initialized`
+ *    only AFTER processing the `attach` request. The `sendAttachBeforeInitialized`
+ *    flag tells the proxy worker to use this reversed sequence. Without it,
+ *    the proxy deadlocks waiting for an event that never comes.
+ *
+ * 4. **Adapter ID matters**: vsdbg's `initialize` request requires the correct
+ *    `adapterID` — `'coreclr'` for .NET 5+ or `'clr'` for .NET Framework 4.x.
+ *    The wrong value causes a cryptic rejection. We default to `'coreclr'` and
+ *    allow callers to override via `dapLaunchArgs.type = 'clr'` for Framework.
+ *
+ * 5. **Scope naming**: vsdbg uses `'Locals'` (capital L) for the local
+ *    variables scope, unlike Python's `'Locals'` or JavaScript's `'Local'`.
+ *
+ * 6. **Compiler-generated variables**: C# compilers generate variables with
+ *    names like `<>c__DisplayClass`, `CS$<>`, `<>t__builder` for closures,
+ *    async state machines, and display classes. These are filtered out by
+ *    `extractLocalVariables` unless `includeSpecial` is true.
+ *
+ * ## Safety
+ *
+ * terminateDebuggee is always false when detaching from attached processes.
+ * The proxy worker auto-detaches safely on session close for attach-mode
+ * sessions, preventing accidental process termination.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';

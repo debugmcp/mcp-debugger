@@ -3,10 +3,95 @@
  *
  * Provides .NET/C#-specific debugging functionality using vsdbg (or netcoredbg).
  * Encapsulates all .NET-specific logic including executable discovery,
- * environment validation, and vsdbg integration.
+ * environment validation, PDB conversion, and vsdbg integration.
  *
- * Critical safety: When attaching to processes (especially NinjaTrader),
- * terminateDebuggee is always set to false to prevent killing the target.
+ * ## .NET Runtime Landscape and Why This Is Complex
+ *
+ * There are two fundamentally different .NET runtimes in the wild:
+ *
+ * - **.NET Core / .NET 5+** (modern, cross-platform): Uses the `coreclr` runtime.
+ *   Produces **Portable PDB** debug symbols by default. Both vsdbg and netcoredbg
+ *   work out of the box.
+ *
+ * - **.NET Framework 4.x** (Windows-only, legacy but widely deployed): Uses the
+ *   `clr` runtime. Produces **Windows PDB** debug symbols (also called "full" or
+ *   "native" PDBs). Only vsdbg supports this runtime — netcoredbg does not.
+ *   Many large applications still run on Framework 4.8 (e.g., NinjaTrader 8,
+ *   Unity Editor, legacy enterprise apps).
+ *
+ * ## PDB Format Problem
+ *
+ * vsdbg requires **Portable PDB** format for symbol loading, even when debugging
+ * .NET Framework 4.x applications. But .NET Framework compilers (csc.exe, and
+ * tools like NinjaTrader's built-in NinjaScript compiler) only produce
+ * **Windows PDB** format. This means:
+ *
+ * 1. The PDB files exist and contain valid debug information
+ * 2. vsdbg cannot read them because they're the wrong format
+ * 3. Breakpoints show "No symbols loaded" even though everything looks correct
+ *
+ * The solution is **Pdb2Pdb.exe** (from Microsoft's `Microsoft.DiaSymReader.Converter`
+ * NuGet package), which converts Windows PDBs to Portable PDBs. We bundle it in
+ * `packages/adapter-dotnet/tools/pdb2pdb/`.
+ *
+ * ## PDB File Locking Problem
+ *
+ * When attaching to a running process, the target application holds a file lock
+ * on its PDB files. Pdb2Pdb cannot write to a locked file. In-place conversion
+ * fails with "The process cannot access the file because it is being used by
+ * another process."
+ *
+ * The solution is a **copy-to-temp** strategy:
+ * 1. Copy the DLL and PDB to a temporary directory
+ * 2. Run Pdb2Pdb on the temp copies (originals are untouched)
+ * 3. Pass the temp directory as `symbolOptions.searchPaths` in the DAP attach
+ *    config, so vsdbg finds the converted Portable PDBs there
+ *
+ * This is implemented in `convertPdbsToTemp()` in `dotnet-utils.ts` and called
+ * from `transformAttachConfig()` in this file.
+ *
+ * ## Adapter ID: `clr` vs `coreclr`
+ *
+ * vsdbg's DAP `initialize` request requires an `adapterID` field that tells it
+ * which runtime to target:
+ * - `adapterID: 'coreclr'` — for .NET Core / .NET 5/6/7/8+
+ * - `adapterID: 'clr'` — for .NET Framework 4.x
+ *
+ * Using the wrong one causes vsdbg to reject the initialize request with a
+ * cryptic error (ErrorCode: -2147467259, AdapterId: "unknown").
+ *
+ * The default is `coreclr` (set in DotnetAdapterPolicy.getDapAdapterConfiguration).
+ * Callers targeting .NET Framework must pass `dapLaunchArgs: { type: 'clr' }` in
+ * the `attach_to_process` or `start_debugging` MCP tool call to override.
+ *
+ * ## DAP Handshake Order: `sendAttachBeforeInitialized`
+ *
+ * Most DAP adapters (debugpy, js-debug, CodeLLDB, Delve) follow this sequence:
+ *   initialize → response → initialized event → attach/launch → configurationDone
+ *
+ * vsdbg follows a different sequence for attach mode:
+ *   initialize → response → attach → initialized event → configurationDone
+ *
+ * vsdbg does NOT send the `initialized` event until AFTER it processes the
+ * `attach` request. Waiting for `initialized` before sending `attach` is a
+ * deadlock. The `sendAttachBeforeInitialized` flag in DotnetAdapterPolicy
+ * tells the proxy worker to use this reversed sequence.
+ *
+ * ## vsdbg Handshake (vsda)
+ *
+ * vsdbg implements a proprietary authentication handshake: it sends a
+ * `handshake` reverse request containing a challenge value, and expects
+ * the host to sign it using vsda.node (a native module bundled with the
+ * VS Code C# extension). Without a valid signature, vsdbg refuses to
+ * proceed. The vsdbg-bridge handles this signing automatically.
+ *
+ * ## Critical Safety: terminateDebuggee
+ *
+ * When attaching to a process (especially long-running ones like NinjaTrader),
+ * terminateDebuggee is always set to false on disconnect. The proxy worker's
+ * handleTerminate() auto-detaches with terminateDebuggee=false for attach-mode
+ * sessions, so even if close_debug_session is called without an explicit
+ * detach_from_process, the target process survives.
  *
  * @since 0.1.0
  */

@@ -1,9 +1,55 @@
 /**
- * .NET debugger executable detection utilities.
+ * .NET debugger executable detection and PDB conversion utilities.
  *
- * Supports two backends:
- * - vsdbg (Microsoft, ships with VS Code C# extension) — required for .NET Framework 4.8
- * - netcoredbg (Samsung, open-source) — alternative for .NET Core/.NET 5+
+ * ## Debugger Backends
+ *
+ * Two DAP-compatible .NET debuggers exist:
+ *
+ * - **vsdbg** (Microsoft, proprietary, bundled with VS Code C# extension):
+ *   Supports both .NET Framework 4.x and .NET Core/.NET 5+. Required for
+ *   Framework debugging. Found under ~/.vscode/extensions/ms-dotnettools.csharp-{version}/.debugger/
+ *
+ * - **netcoredbg** (Samsung, open-source, https://github.com/Samsung/netcoredbg):
+ *   Supports .NET Core/.NET 5+ only. Does NOT support .NET Framework 4.x.
+ *   Simpler to install (single binary) but less capable than vsdbg.
+ *
+ * ## PDB Conversion (convertPdbsToTemp)
+ *
+ * .NET debug symbols come in two incompatible formats:
+ *
+ * - **Windows PDB** (aka "full" or "native" PDB): The legacy format produced
+ *   by .NET Framework compilers (csc.exe), NinjaTrader's NinjaScript compiler,
+ *   Unity, and any tool using the older Roslyn pipeline. These PDBs use a
+ *   proprietary Microsoft format and are typically large.
+ *
+ * - **Portable PDB**: The modern, cross-platform format used by .NET Core/.NET 5+
+ *   by default. Smaller, standardized, and the only format vsdbg can read for
+ *   symbol loading and breakpoint resolution.
+ *
+ * When debugging a .NET Framework 4.x application (or any app with Windows PDBs),
+ * vsdbg cannot load the symbols --breakpoints silently fail with "No symbols loaded."
+ *
+ * **Pdb2Pdb.exe** (from Microsoft's `Microsoft.DiaSymReader.Converter` NuGet package)
+ * converts Windows PDBs to Portable PDBs. It reads the DLL's metadata plus the
+ * Windows PDB and produces an equivalent Portable PDB.
+ *
+ * The conversion uses a **copy-to-temp** strategy because the target process
+ * (e.g., NinjaTrader) holds a file lock on the original PDB. We:
+ * 1. Copy the DLL and PDB to a temp directory
+ * 2. Run Pdb2Pdb on the temp copies
+ * 3. Return the temp dir path for use as `symbolOptions.searchPaths`
+ *
+ * Pdb2Pdb may emit PDB0016 warnings ("Invalid scope IL offset range") for
+ * certain compiler-generated scopes. These warnings are non-fatal --the output
+ * Portable PDB is still valid and usable for debugging.
+ *
+ * ## vsda Handshake (findVsdaNode)
+ *
+ * vsdbg implements a proprietary authentication mechanism: it sends a `handshake`
+ * reverse request with a random challenge value, and the host must sign it using
+ * vsda.node --a native Node.js addon bundled with the VS Code C# extension.
+ * Without a valid signature, vsdbg prints a telemetry event and exits.
+ * findVsdaNode() locates this native module in the C# extension directory.
  */
 import { spawn, spawnSync } from 'child_process';
 import fs from 'node:fs';
@@ -487,7 +533,7 @@ export function convertPdbsToTemp(sourceDirs: string[], pdb2pdbPath: string): st
         continue;
       }
 
-      // Convert: Pdb2Pdb.exe <dll> — it auto-finds the adjacent PDB and outputs <name>.pdb2
+      // Convert: Pdb2Pdb.exe <dll> --it auto-finds the adjacent PDB and outputs <name>.pdb2
       const result = spawnSync(pdb2pdbPath, [path.join(tempDir, dllFile)], {
         timeout: 30000,
         stdio: ['ignore', 'pipe', 'pipe']

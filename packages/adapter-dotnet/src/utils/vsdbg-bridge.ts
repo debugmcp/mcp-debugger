@@ -1,15 +1,47 @@
 /**
  * TCP-to-stdio bridge for vsdbg.
  *
- * vsdbg only communicates via stdio (stdin/stdout) with --interpreter=vscode,
- * but the mcp-debugger proxy communicates with DAP backends via TCP.
+ * ## Why a bridge is needed
  *
- * This bridge:
- * 1. Optionally converts Windows PDBs to Portable PDBs (vsdbg requirement)
- * 2. Listens on the TCP port specified by ProxyManager
- * 3. Spawns vsdbg as a child process with stdio pipes
- * 4. Intercepts the vsda handshake challenge from vsdbg and signs it
- * 5. Pipes all other DAP traffic transparently between TCP and vsdbg
+ * mcp-debugger's proxy worker communicates with DAP adapters over TCP: it
+ * connects to a port and exchanges DAP JSON messages. Most adapters (debugpy,
+ * js-debug, CodeLLDB, Delve) natively support a TCP or socket transport.
+ *
+ * vsdbg is different — it only speaks DAP via stdio (stdin/stdout) when
+ * launched with `--interpreter=vscode`. There is no built-in TCP mode.
+ *
+ * This bridge process solves the mismatch:
+ * 1. Listens on a TCP port (assigned by ProxyManager)
+ * 2. Spawns vsdbg as a child process with stdio pipes
+ * 3. Pipes DAP messages bidirectionally between TCP and vsdbg's stdio
+ *
+ * ## vsda Handshake
+ *
+ * vsdbg implements a proprietary authentication mechanism. Before processing
+ * any DAP requests, it sends a `handshake` reverse request containing a
+ * random challenge value. The host must sign this challenge using vsda.node
+ * (a native Node.js addon bundled with the VS Code C# extension) and return
+ * the signature. Without a valid signature, vsdbg refuses to proceed.
+ *
+ * The bridge intercepts this handshake transparently: it detects the
+ * `handshake` request in vsdbg's stdout, loads vsda.node via createRequire,
+ * calls `vsda.createNewKeyPair()` and `signer.sign(challenge)`, and sends
+ * the signed response back to vsdbg's stdin. The DAP client on the TCP side
+ * never sees the handshake — it's fully handled by the bridge.
+ *
+ * ## PDB Conversion (launch mode fallback)
+ *
+ * For launch mode, the bridge can optionally convert Windows PDBs to Portable
+ * PDBs before spawning vsdbg. This is a fallback — for attach mode, PDB
+ * conversion is handled earlier in the pipeline by DotnetDebugAdapter's
+ * transformAttachConfig(), which uses a copy-to-temp strategy (see
+ * dotnet-utils.ts). The bridge's in-place conversion only works when the
+ * PDB files are not locked by a running process.
+ *
+ * ## Console Window Suppression
+ *
+ * On Windows, vsdbg is spawned with `windowsHide: true` to prevent a visible
+ * console window from appearing on the desktop.
  *
  * Usage: node vsdbg-bridge.js --vsdbg <path> --host <host> --port <port>
  *          [--vsda <path>] [--pdb2pdb <path>] [--convert-pdbs <dir1,dir2,...>]
