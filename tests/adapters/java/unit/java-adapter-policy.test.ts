@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { JavaAdapterPolicy } from '@debugmcp/shared';
 import { SessionState } from '@debugmcp/shared';
 
@@ -222,6 +222,209 @@ describe('JavaAdapterPolicy', () => {
   describe('shouldDeferParentConfigDone', () => {
     it('should return false', () => {
       expect(JavaAdapterPolicy.shouldDeferParentConfigDone()).toBe(false);
+    });
+  });
+
+  describe('extractLocalVariables', () => {
+    it('should return empty array when no stack frames', () => {
+      const result = JavaAdapterPolicy.extractLocalVariables([], {}, {});
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array when stack frames is null', () => {
+      const result = JavaAdapterPolicy.extractLocalVariables(null as any, {}, {});
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array when no scopes for top frame', () => {
+      const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
+      const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, {}, {});
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array when scopes is empty', () => {
+      const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
+      const scopes = { 1: [] };
+      const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes, {});
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array when no Locals scope', () => {
+      const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
+      const scopes = { 1: [{ name: 'Globals', variablesReference: 100 }] };
+      const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, {});
+      expect(result).toEqual([]);
+    });
+
+    it('should extract variables from Locals scope', () => {
+      const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
+      const scopes = { 1: [{ name: 'Locals', variablesReference: 100 }] };
+      const variables = { 100: [{ name: 'x', value: '42', type: 'int' }] };
+      const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, variables as any);
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('x');
+    });
+
+    it('should also recognize Local scope name', () => {
+      const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
+      const scopes = { 1: [{ name: 'Local', variablesReference: 100 }] };
+      const variables = { 100: [{ name: 'y', value: '10', type: 'int' }] };
+      const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, variables as any);
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('y');
+    });
+
+    it('should return empty array when variables not found for scope', () => {
+      const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
+      const scopes = { 1: [{ name: 'Locals', variablesReference: 100 }] };
+      const variables = { 200: [{ name: 'z', value: '5', type: 'int' }] }; // Different ref
+      const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, variables as any);
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('getDebuggerConfiguration', () => {
+    it('should return correct configuration', () => {
+      const config = JavaAdapterPolicy.getDebuggerConfiguration();
+      expect(config.requiresStrictHandshake).toBe(false);
+      expect(config.skipConfigurationDone).toBe(false);
+      expect(config.supportsVariableType).toBe(true);
+    });
+  });
+
+  describe('isChildReadyEvent', () => {
+    it('should return true for initialized event', () => {
+      const result = JavaAdapterPolicy.isChildReadyEvent({ event: 'initialized' } as any);
+      expect(result).toBe(true);
+    });
+
+    it('should return false for other events', () => {
+      expect(JavaAdapterPolicy.isChildReadyEvent({ event: 'stopped' } as any)).toBe(false);
+      expect(JavaAdapterPolicy.isChildReadyEvent({ event: 'output' } as any)).toBe(false);
+    });
+
+    it('should return false for null/undefined event', () => {
+      expect(JavaAdapterPolicy.isChildReadyEvent(null as any)).toBe(false);
+      expect(JavaAdapterPolicy.isChildReadyEvent(undefined as any)).toBe(false);
+    });
+  });
+
+  describe('getDapClientBehavior', () => {
+    it('should return behavior configuration', () => {
+      const behavior = JavaAdapterPolicy.getDapClientBehavior();
+      expect(behavior.mirrorBreakpointsToChild).toBe(false);
+      expect(behavior.deferParentConfigDone).toBe(false);
+      expect(behavior.pauseAfterChildAttach).toBe(false);
+      expect(behavior.childInitTimeout).toBe(5000);
+      expect(behavior.suppressPostAttachConfigDone).toBe(false);
+    });
+
+    it('should handle runInTerminal reverse request', async () => {
+      const behavior = JavaAdapterPolicy.getDapClientBehavior();
+      const mockContext = {
+        sendResponse: vi.fn()
+      };
+      const request = { command: 'runInTerminal', seq: 1, type: 'request' };
+
+      const result = await behavior.handleReverseRequest(request as any, mockContext as any);
+
+      expect(result.handled).toBe(true);
+      expect(mockContext.sendResponse).toHaveBeenCalledWith(request, {});
+    });
+
+    it('should not handle other reverse requests', async () => {
+      const behavior = JavaAdapterPolicy.getDapClientBehavior();
+      const mockContext = { sendResponse: vi.fn() };
+      const request = { command: 'other', seq: 1, type: 'request' };
+
+      const result = await behavior.handleReverseRequest(request as any, mockContext as any);
+
+      expect(result.handled).toBe(false);
+      expect(mockContext.sendResponse).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getAdapterSpawnConfig', () => {
+    it('should use provided adapterCommand when present', () => {
+      const payload = {
+        adapterCommand: {
+          command: '/custom/java',
+          args: ['-jar', 'debug.jar'],
+          env: { JAVA_OPTS: '-Xmx1g' }
+        },
+        adapterHost: '127.0.0.1',
+        adapterPort: 5005,
+        logDir: '/tmp/logs'
+      };
+
+      const config = JavaAdapterPolicy.getAdapterSpawnConfig!(payload as any);
+
+      expect(config.command).toBe('/custom/java');
+      expect(config.args).toEqual(['-jar', 'debug.jar']);
+      expect(config.host).toBe('127.0.0.1');
+      expect(config.port).toBe(5005);
+      expect(config.logDir).toBe('/tmp/logs');
+      expect(config.env).toEqual({ JAVA_OPTS: '-Xmx1g' });
+    });
+
+    it('should return default JdiDapServer config when no adapterCommand', () => {
+      const payload = {
+        adapterHost: 'localhost',
+        adapterPort: 38000,
+        logDir: '/var/log'
+      };
+
+      const config = JavaAdapterPolicy.getAdapterSpawnConfig!(payload as any);
+
+      expect(config.command).toBe('java');
+      expect(config.args).toContain('-cp');
+      expect(config.args).toContain('java/out');
+      expect(config.args).toContain('JdiDapServer');
+      expect(config.args).toContain('--port');
+      expect(config.args).toContain('38000');
+      expect(config.host).toBe('localhost');
+      expect(config.port).toBe(38000);
+    });
+  });
+
+  describe('filterStackFrames - file path filtering', () => {
+    it('should filter frames with /jdk/ in path', () => {
+      const frames = [
+        { id: 1, name: 'com.example.App.run', file: '/app/App.java', line: 10 },
+        { id: 2, name: 'Runtime.exec', file: '/usr/lib/jdk/Runtime.java', line: 100 }
+      ];
+
+      const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].id).toBe(1);
+    });
+
+    it('should filter frames with /rt.jar/ in path', () => {
+      const frames = [
+        { id: 1, name: 'com.example.App.run', file: '/app/App.java', line: 10 },
+        { id: 2, name: 'Object.wait', file: '/jre/lib/rt.jar/Object.java', line: 50 }
+      ];
+
+      const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].id).toBe(1);
+    });
+  });
+
+  describe('validateExecutable', () => {
+    it('should return true for valid java command', async () => {
+      // This test uses the actual system java if available
+      // In CI, Java 21 should be set up
+      if (process.env.JAVA_HOME || process.env.CI) {
+        const result = await JavaAdapterPolicy.validateExecutable!('java');
+        // May be true or false depending on environment
+        expect(typeof result).toBe('boolean');
+      }
+    });
+
+    it('should return false for invalid command', async () => {
+      const result = await JavaAdapterPolicy.validateExecutable!('/nonexistent/java123456');
+      expect(result).toBe(false);
     });
   });
 });

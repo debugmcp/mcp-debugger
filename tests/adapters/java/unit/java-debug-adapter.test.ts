@@ -572,4 +572,45 @@ describe('JavaDebugAdapter', () => {
       }
     });
   });
+
+  describe('handleDapEvent - breakpoint', () => {
+    it('should emit breakpoint event', () => {
+      const breakpointHandler = vi.fn();
+      adapter.on('breakpoint', breakpointHandler);
+
+      const event = {
+        event: 'breakpoint',
+        body: {
+          reason: 'changed',
+          breakpoint: { id: 1, verified: true }
+        }
+      };
+
+      adapter.handleDapEvent(event as any);
+      expect(breakpointHandler).toHaveBeenCalledWith(event);
+    });
+  });
+
+  describe('getFeatureRequirements', () => {
+    it('should return JDK requirement for conditional breakpoints', () => {
+      const requirements = adapter.getFeatureRequirements(DebugFeature.CONDITIONAL_BREAKPOINTS);
+      expect(requirements).toHaveLength(1);
+      expect(requirements[0].type).toBe('dependency');
+      expect(requirements[0].description).toContain('JDK');
+      expect(requirements[0].required).toBe(true);
+    });
+
+    it('should return JDI requirement for exception breakpoints', () => {
+      const requirements = adapter.getFeatureRequirements(DebugFeature.EXCEPTION_BREAKPOINTS);
+      expect(requirements).toHaveLength(1);
+      expect(requirements[0].type).toBe('dependency');
+      expect(requirements[0].description).toContain('JDI');
+      expect(requirements[0].required).toBe(true);
+    });
+
+    it('should return empty array for unsupported features', () => {
+      const requirements = adapter.getFeatureRequirements(DebugFeature.STEP_BACK);
+      expect(requirements).toHaveLength(0);
+    });
+  });
 });
