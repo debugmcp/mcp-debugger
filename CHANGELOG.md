@@ -10,12 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Java debugging support** – JDI bridge (`JdiDapServer.java`) with launch and attach modes, variable inspection, and deferred breakpoints via ClassPrepareRequest
 - **Java attach mode** – connect to running JVMs via JDWP agent for debugging servers and complex applications
+- **Java expression evaluation** – full expression evaluator supporting field access, method calls, array indexing, arithmetic, string concatenation, casting, `instanceof`, ternary, and unary operators
+- **Java conditional breakpoints** – conditions evaluated server-side via the expression evaluator
 - **Java documentation** – `docs/java/README.md` user guide covering prerequisites, JDI bridge architecture, and troubleshooting
 
 ### Changed
 - **Java backend** – replaced KDA (kotlin-debug-adapter) and stdio-tcp-bridge with a single JDI bridge (`JdiDapServer.java`) using `com.sun.jdi.*` directly; zero external dependencies, compiles on first use
+- **Java minimum JDK** – bumped from JDK 11+ to JDK 21+ to match `--release 21` compilation target
 
 ### Fixed
+- **Java inner class breakpoints** – fixed JDWP ClassPrepareRequest filter patterns (`*ClassName$*` silently fails; changed to `ClassName$*`)
+- **Java instanceof with interfaces** – `isSubtypeOf` now handles `InterfaceType` subjects and recursive interface-extends-interface chains
+- **Java thread ID overflow** – changed from `int` to `long` thread IDs throughout the DAP bridge
+- **Java frame ID collisions** – replaced arithmetic encoding (`threadId * 100000 + frameIndex`) with lookup-table approach
+- **Java breakpoint IDs** – added unique, monotonically increasing breakpoint IDs per DAP spec
+- **Java thread safety** – used `ConcurrentHashMap` and `AtomicInteger` for shared state; added `synchronized` blocks for frame cache access
+- **Java short-circuit evaluation** – `&&` and `||` now properly short-circuit
 - **Java thread discovery** – discover JVM threads via DAP threads request instead of hardcoding threadId=1
 - **Java variable access** – document and enforce `javac -g` requirement for LocalVariableTable (JDI needs it for local variable inspection)
 
