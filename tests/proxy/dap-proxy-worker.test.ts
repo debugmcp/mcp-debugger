@@ -28,7 +28,8 @@ import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,
-  GoAdapterPolicy
+  GoAdapterPolicy,
+  JavaAdapterPolicy
 } from '@debugmcp/shared';
 
 // Mock implementations
@@ -230,7 +231,7 @@ describe('DapProxyWorker', () => {
       // Use worker with mocked exit hook to prevent process.exit
       const exitSpy = vi.fn();
       worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-      
+
       const payload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
@@ -250,6 +251,110 @@ describe('DapProxyWorker', () => {
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('[Worker] Using adapter policy: python')
+      );
+    });
+
+    it('should select Go policy for dlv adapter', async () => {
+      const exitSpy = vi.fn();
+      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        scriptPath: '/path/to/main.go',
+        adapterHost: 'localhost',
+        adapterPort: 9876,
+        logDir: '/logs',
+        executablePath: 'dlv',
+        adapterCommand: {
+          command: 'dlv',
+          args: ['dap', '--listen=:9876']
+        },
+        dryRunSpawn: true
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[Worker] Using adapter policy: go')
+      );
+    });
+
+    it('should select Java policy for JdiDapServer adapter', async () => {
+      const exitSpy = vi.fn();
+      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        scriptPath: '/path/to/Main.java',
+        adapterHost: 'localhost',
+        adapterPort: 5005,
+        logDir: '/logs',
+        executablePath: 'java',
+        adapterCommand: {
+          command: 'java',
+          args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
+        },
+        dryRunSpawn: true
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[Worker] Using adapter policy: java')
+      );
+    });
+
+    it('should select Rust policy for codelldb adapter', async () => {
+      const exitSpy = vi.fn();
+      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        scriptPath: '/path/to/main.rs',
+        adapterHost: 'localhost',
+        adapterPort: 12345,
+        logDir: '/logs',
+        executablePath: 'codelldb',
+        adapterCommand: {
+          command: '/path/to/codelldb',
+          args: ['--port', '12345']
+        },
+        dryRunSpawn: true
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[Worker] Using adapter policy: rust')
+      );
+    });
+
+    it('should select Mock policy for mock-adapter', async () => {
+      const exitSpy = vi.fn();
+      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        scriptPath: '/path/to/script.mock',
+        adapterHost: 'localhost',
+        adapterPort: 9999,
+        logDir: '/logs',
+        executablePath: 'mock',
+        adapterCommand: {
+          command: 'node',
+          args: ['mock-adapter-process.js']
+        },
+        dryRunSpawn: true
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[Worker] Using adapter policy: mock')
       );
     });
   });
@@ -1392,6 +1497,417 @@ describe('DapProxyWorker', () => {
 
       expect(mockLogger.info).toHaveBeenCalledWith('[Worker] Shutdown already in progress.');
       expect(worker.getState()).toBe(ProxyState.SHUTTING_DOWN);
+    });
+  });
+
+  describe('Attach Mode Flow', () => {
+    it('should handle attach mode with initialized event', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'attach-session',
+        scriptPath: '/path/to/Main.java',
+        adapterHost: 'localhost',
+        adapterPort: 5005,
+        logDir: '/logs',
+        executablePath: 'java',
+        launchConfig: {
+          request: 'attach',
+          hostName: 'localhost',
+          port: 5005
+        },
+        adapterCommand: {
+          command: 'java',
+          args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
+        }
+      };
+
+      const adapterEmitter = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(adapterEmitter, { pid: 999, kill: vi.fn(), unref: vi.fn(), killed: false });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterEmitter as ChildProcess, pid: 999 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          // Emit 'initialized' event shortly after initializeSession
+          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+        }),
+        sendAttachRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JavaAdapterPolicy;
+      (worker as any).adapterState = JavaAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Verify attach flow was executed
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Waiting for "initialized" event before sending attach')
+      );
+      expect(connectionStub.sendAttachRequest).toHaveBeenCalled();
+    });
+
+    it('should handle attach mode and call handleInitializedEvent after attach', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'attach-session-2',
+        scriptPath: '/path/to/Main.java',
+        adapterHost: 'localhost',
+        adapterPort: 5005,
+        logDir: '/logs',
+        executablePath: 'java',
+        launchConfig: {
+          request: 'attach',
+          hostName: 'localhost',
+          port: 5005
+        },
+        adapterCommand: {
+          command: 'java',
+          args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
+        }
+      };
+
+      const adapterEmitter = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(adapterEmitter, { pid: 999, kill: vi.fn(), unref: vi.fn(), killed: false });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterEmitter as ChildProcess, pid: 999 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+        }),
+        sendAttachRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JavaAdapterPolicy;
+      (worker as any).adapterState = JavaAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Verify attach flow was executed and then handleInitializedEvent was called
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('"initialized" event received, sending attach request')
+      );
+      expect(connectionStub.sendAttachRequest).toHaveBeenCalled();
+      // After attach, handleInitializedEvent is called which sets breakpoints and configDone
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Waiting for "initialized" event from adapter')
+      );
+    });
+  });
+
+  describe('Go/Java Launch Sequence', () => {
+    it('should handle sendLaunchBeforeConfig with initialized event before launch', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'go-session',
+        scriptPath: '/path/to/main.go',
+        adapterHost: 'localhost',
+        adapterPort: 9876,
+        logDir: '/logs',
+        executablePath: 'dlv',
+        adapterCommand: {
+          command: 'dlv',
+          args: ['dap', '--listen=:9876']
+        }
+      };
+
+      const adapterEmitter = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(adapterEmitter, { pid: 999, kill: vi.fn(), unref: vi.fn(), killed: false });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterEmitter as ChildProcess, pid: 999 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          // Go/Delve sends initialized quickly after initialize
+          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+        }),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = GoAdapterPolicy;
+      (worker as any).adapterState = GoAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Verify two-phase initialized handling was used
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Phase 1: Waiting briefly for "initialized" event before launch')
+      );
+      expect(connectionStub.sendLaunchRequest).toHaveBeenCalled();
+    });
+
+    it('should handle sendConfigDoneWithLaunch path with initial breakpoints', async () => {
+      // Create a custom policy with sendConfigDoneWithLaunch: true
+      const customPolicy = {
+        ...JavaAdapterPolicy,
+        name: 'custom-kda',
+        getInitializationBehavior: () => ({
+          sendLaunchBeforeConfig: true,
+          sendConfigDoneWithLaunch: true
+        }),
+        createInitialState: () => ({})
+      };
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'kda-launch-session',
+        scriptPath: '/path/to/Main.java',
+        adapterHost: 'localhost',
+        adapterPort: 5005,
+        logDir: '/logs',
+        executablePath: 'java',
+        initialBreakpoints: [{ file: '/path/to/Main.java', line: 15 }],
+        adapterCommand: {
+          command: 'java',
+          args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
+        }
+      };
+
+      const adapterEmitter = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(adapterEmitter, { pid: 999, kill: vi.fn(), unref: vi.fn(), killed: false });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterEmitter as ChildProcess, pid: 999 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+        }),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      // Mock dapClient.sendRequest for configurationDone
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({});
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = customPolicy;
+      (worker as any).adapterState = {};
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Verify sendConfigDoneWithLaunch flow was executed
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('sendConfigDoneWithLaunch')
+      );
+      expect(connectionStub.sendLaunchRequest).toHaveBeenCalled();
+      expect(connectionStub.setBreakpoints).toHaveBeenCalled();
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('configurationDone', {});
+    });
+
+    it('should handle sendConfigDoneWithAttach path with initial breakpoints', async () => {
+      // Create a custom policy with sendConfigDoneWithAttach: true
+      const customPolicy = {
+        ...JavaAdapterPolicy,
+        name: 'custom-kda-attach',
+        getInitializationBehavior: () => ({
+          sendLaunchBeforeConfig: true,
+          sendConfigDoneWithAttach: true
+        }),
+        createInitialState: () => ({})
+      };
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'kda-attach-session',
+        scriptPath: '/path/to/Main.java',
+        adapterHost: 'localhost',
+        adapterPort: 5005,
+        logDir: '/logs',
+        executablePath: 'java',
+        launchConfig: {
+          request: 'attach',
+          hostName: 'localhost',
+          port: 5005
+        },
+        initialBreakpoints: [{ file: '/path/to/Main.java', line: 20 }],
+        adapterCommand: {
+          command: 'java',
+          args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
+        }
+      };
+
+      const adapterEmitter = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(adapterEmitter, { pid: 999, kill: vi.fn(), unref: vi.fn(), killed: false });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterEmitter as ChildProcess, pid: 999 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+        }),
+        sendAttachRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      // Mock dapClient.sendRequest for configurationDone
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({});
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = customPolicy;
+      (worker as any).adapterState = {};
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Verify sendConfigDoneWithAttach flow was executed
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('sendConfigDoneWithAttach')
+      );
+      expect(connectionStub.sendAttachRequest).toHaveBeenCalled();
+      expect(connectionStub.setBreakpoints).toHaveBeenCalled();
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('configurationDone', {});
+    });
+
+    it('should handle Java launch with sendLaunchBeforeConfig and handleInitializedEvent', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'java-launch-session',
+        scriptPath: '/path/to/Main.java',
+        adapterHost: 'localhost',
+        adapterPort: 5005,
+        logDir: '/logs',
+        executablePath: 'java',
+        adapterCommand: {
+          command: 'java',
+          args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
+        }
+      };
+
+      const adapterEmitter = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(adapterEmitter, { pid: 999, kill: vi.fn(), unref: vi.fn(), killed: false });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterEmitter as ChildProcess, pid: 999 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onStopped) client.on('stopped', handlers.onStopped);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+        }),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JavaAdapterPolicy;
+      (worker as any).adapterState = JavaAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Verify two-phase launch was used (sendLaunchBeforeConfig)
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Phase 1: Waiting briefly for "initialized" event before launch')
+      );
+      expect(connectionStub.sendLaunchRequest).toHaveBeenCalled();
+      // After launch, handleInitializedEvent is called
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('"initialized" event received before launch')
+      );
     });
   });
 });
