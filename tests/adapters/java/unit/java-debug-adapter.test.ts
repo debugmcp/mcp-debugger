@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
+import path from 'path';
 import type { AdapterDependencies } from '@debugmcp/shared';
 import { AdapterState, DebugLanguage, DebugFeature } from '@debugmcp/shared';
 import { JavaDebugAdapter } from '@debugmcp/adapter-java';
@@ -472,11 +473,13 @@ describe('JavaDebugAdapter', () => {
 
     it('should include JAVA_HOME when set', () => {
       const originalJavaHome = process.env.JAVA_HOME;
-      process.env.JAVA_HOME = '/custom/jdk';
+      const customJdkPath = path.join(path.sep, 'custom', 'jdk');
+      process.env.JAVA_HOME = customJdkPath;
 
       try {
         const paths = adapter.getExecutableSearchPaths();
-        expect(paths.some(p => p.includes('/custom/jdk'))).toBe(true);
+        // Normalize paths for comparison (handles / vs \ on different platforms)
+        expect(paths.some(p => p.split(path.sep).join('/').includes('custom/jdk'))).toBe(true);
       } finally {
         if (originalJavaHome) {
           process.env.JAVA_HOME = originalJavaHome;

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
+import path from 'path';
 import {
   findJavaExecutable,
   getJavaVersion,
@@ -59,7 +60,8 @@ describe('java-utils', () => {
 
     it('should use JAVA_HOME when set', async () => {
       const originalJavaHome = process.env.JAVA_HOME;
-      process.env.JAVA_HOME = '/test/jdk';
+      const testJdkPath = path.join(path.sep, 'test', 'jdk');
+      process.env.JAVA_HOME = testJdkPath;
 
       mockSpawn.mockImplementation((_cmd) => {
         const proc = new EventEmitter() as any;
@@ -74,7 +76,8 @@ describe('java-utils', () => {
 
       try {
         const result = await findJavaExecutable();
-        expect(result).toContain('/test/jdk');
+        // Normalize both paths for comparison (handles / vs \ on different platforms)
+        expect(result.split(path.sep).join('/')).toContain('test/jdk');
       } finally {
         if (originalJavaHome) {
           process.env.JAVA_HOME = originalJavaHome;
@@ -202,11 +205,13 @@ describe('java-utils', () => {
 
     it('should include JAVA_HOME/bin when set', () => {
       const originalJavaHome = process.env.JAVA_HOME;
-      process.env.JAVA_HOME = '/custom/jdk';
+      const customJdkPath = path.join(path.sep, 'custom', 'jdk');
+      process.env.JAVA_HOME = customJdkPath;
 
       try {
         const paths = getJavaSearchPaths();
-        expect(paths[0]).toContain('/custom/jdk/bin');
+        // Normalize path for comparison (handles / vs \ on different platforms)
+        expect(paths[0].split(path.sep).join('/')).toContain('custom/jdk/bin');
       } finally {
         if (originalJavaHome) {
           process.env.JAVA_HOME = originalJavaHome;
@@ -220,7 +225,9 @@ describe('java-utils', () => {
       const paths = getJavaSearchPaths();
       // PATH entries are always appended
       if (process.env.PATH) {
-        const pathEntries = process.env.PATH.split(':');
+        // Use platform-appropriate PATH separator (: on Unix, ; on Windows)
+        const pathSeparator = process.platform === 'win32' ? ';' : ':';
+        const pathEntries = process.env.PATH.split(pathSeparator);
         // At least some PATH entries should be in the search paths
         expect(paths.some(p => pathEntries.includes(p))).toBe(true);
       }
