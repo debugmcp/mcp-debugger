@@ -118,6 +118,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         create: vi.fn().mockResolvedValue({
           buildAdapterCommand: vi.fn().mockReturnValue('python -m debugpy'),
           resolveExecutablePath: vi.fn().mockResolvedValue('python')
+        }),
+        getAdapterPolicy: vi.fn().mockReturnValue({
+          name: 'python',
+          getInitializationBehavior: () => ({})
         })
       }
     };
@@ -1435,6 +1439,143 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // All should complete (some may fail due to state changes)
       expect(results).toHaveLength(3);
       vi.useRealTimers();
+    });
+  });
+
+  describe('Attach Mode Handling', () => {
+    // These tests use resolveExecutablePath to throw immediately after config transformation
+    // This allows us to verify the attach mode logic was exercised without waiting for proxy startup
+    // Note: startDebugging returns { success: false, ... } on error, not throw
+
+    it('should detect attach mode from request field', async () => {
+      const mockAdapter = {
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockReturnValue({ type: 'java', request: 'attach' }),
+        transformLaunchConfig: vi.fn().mockResolvedValue({}),
+        // Throw after config transform to exit fast
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'java';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging(
+        'test-session',
+        '/dummy/path.java',
+        [],
+        { request: 'attach', host: 'localhost', port: 5005 }
+      );
+
+      expect(result.success).toBe(false);
+      // Verify transformAttachConfig was called (not transformLaunchConfig)
+      expect(mockAdapter.transformAttachConfig).toHaveBeenCalled();
+      expect(mockAdapter.transformLaunchConfig).not.toHaveBeenCalled();
+    });
+
+    it('should detect attach mode from __attachMode flag', async () => {
+      const mockAdapter = {
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockReturnValue({ type: 'java', request: 'attach' }),
+        transformLaunchConfig: vi.fn().mockResolvedValue({}),
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'java';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging(
+        'test-session',
+        '/dummy/path.java',
+        [],
+        { __attachMode: true, host: 'localhost', port: 5005 }
+      );
+
+      expect(result.success).toBe(false);
+      expect(mockAdapter.transformAttachConfig).toHaveBeenCalled();
+      expect(mockAdapter.transformLaunchConfig).not.toHaveBeenCalled();
+    });
+
+    it('should not set program/cwd/args in attach mode', async () => {
+      let capturedConfig: Record<string, unknown> | null = null;
+      const mockAdapter = {
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockImplementation((config) => {
+          capturedConfig = config;
+          return { type: 'java', request: 'attach' };
+        }),
+        transformLaunchConfig: vi.fn().mockResolvedValue({}),
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'java';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging(
+        'test-session',
+        '/some/script.java',
+        ['arg1', 'arg2'],
+        { request: 'attach', host: 'localhost', port: 5005 }
+      );
+
+      expect(result.success).toBe(false);
+      // Verify program, cwd, args are NOT in the config for attach mode
+      expect(capturedConfig).not.toBeNull();
+      expect(capturedConfig!.program).toBeUndefined();
+      expect(capturedConfig!.args).toBeUndefined();
+    });
+
+    it('should fall back to transformLaunchConfig when adapter does not support attach', async () => {
+      const mockAdapter = {
+        supportsAttach: vi.fn().mockReturnValue(false), // Does not support attach
+        transformLaunchConfig: vi.fn().mockResolvedValue({ type: 'python' }),
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'python';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging(
+        'test-session',
+        '/script.py',
+        [],
+        { request: 'attach' } // Request attach but adapter doesn't support it
+      );
+
+      expect(result.success).toBe(false);
+      // Should fall back to transformLaunchConfig
+      expect(mockAdapter.transformLaunchConfig).toHaveBeenCalled();
+    });
+
+    it('should handle transformAttachConfig errors gracefully', async () => {
+      const mockAdapter = {
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockImplementation(() => {
+          throw new Error('Attach config transformation failed');
+        }),
+        transformLaunchConfig: vi.fn().mockResolvedValue({}),
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'java';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging(
+        'test-session',
+        '/dummy/path.java',
+        [],
+        { request: 'attach', host: 'localhost', port: 5005 }
+      );
+
+      expect(result.success).toBe(false);
+      // Should have logged the warning about transformAttachConfig failure
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('transformAttachConfig failed')
+      );
     });
   });
 });
