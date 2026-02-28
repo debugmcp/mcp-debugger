@@ -21,6 +21,7 @@ export async function findJavaExecutable(preferredPath?: string): Promise<string
 
   // Try JAVA_HOME
   if (process.env.JAVA_HOME) {
+    /* istanbul ignore next -- platform-specific executable extension */
     const ext = process.platform === 'win32' ? '.exe' : '';
     const javaHome = path.join(process.env.JAVA_HOME, 'bin', `java${ext}`);
     if (await validateJavaExecutable(javaHome)) {
@@ -113,6 +114,7 @@ export function getJavaSearchPaths(): string[] {
     paths.push(path.join(process.env.JAVA_HOME, 'bin'));
   }
 
+  /* istanbul ignore next -- platform-specific: Windows */
   if (process.platform === 'win32') {
     // Common Windows JDK locations
     const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
@@ -123,6 +125,7 @@ export function getJavaSearchPaths(): string[] {
       path.join(programFiles, 'Eclipse Adoptium'),
       path.join(programFiles, 'Microsoft', 'jdk'),
     );
+  /* istanbul ignore next -- platform-specific: macOS */
   } else if (process.platform === 'darwin') {
     paths.push(
       '/Library/Java/JavaVirtualMachines',

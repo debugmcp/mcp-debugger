@@ -193,6 +193,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   getDefaultExecutableName(): string {
+    /* istanbul ignore next -- platform-specific executable name */
     return process.platform === 'win32' ? 'java.exe' : 'java';
   }
 
@@ -224,8 +225,10 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
 
     // Find java executable
+    /* istanbul ignore next -- platform-specific executable name */
+    const javaExe = process.platform === 'win32' ? 'java.exe' : 'java';
     const javaCmd = process.env.JAVA_HOME
-      ? path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java')
+      ? path.join(process.env.JAVA_HOME, 'bin', javaExe)
       : 'java';
 
     const env: Record<string, string> = { ...process.env as Record<string, string> };

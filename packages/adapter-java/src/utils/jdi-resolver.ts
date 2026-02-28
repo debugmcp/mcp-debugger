@@ -93,11 +93,14 @@ export function ensureJdiBridgeCompiled(): string | null {
   // Find javac
   let javac: string | null = null;
   if (process.env.JAVA_HOME) {
-    const candidate = path.resolve(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'javac.exe' : 'javac');
+    /* istanbul ignore next -- platform-specific executable name */
+    const javacExe = process.platform === 'win32' ? 'javac.exe' : 'javac';
+    const candidate = path.resolve(process.env.JAVA_HOME, 'bin', javacExe);
     if (existsSync(candidate)) javac = candidate;
   }
   if (!javac) {
     try {
+      /* istanbul ignore next -- platform-specific command */
       const cmd = process.platform === 'win32' ? 'where javac' : 'which javac';
       const result = execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       if (result) javac = result.split('\n')[0].trim();
