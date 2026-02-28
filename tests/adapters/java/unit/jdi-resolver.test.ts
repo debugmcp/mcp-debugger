@@ -77,8 +77,10 @@ describe('jdi-resolver', () => {
       delete process.env.JDI_BRIDGE_DIR;
 
       // Simulate class found in one of the candidate paths
+      // Use path.join pattern to match platform-specific separators
+      const expectedPattern = path.join('java', 'out', 'JdiDapServer.class');
       mockExistsSync.mockImplementation((p: any) => {
-        return p.toString().includes('java/out/JdiDapServer.class');
+        return p.toString().includes(expectedPattern);
       });
 
       const result = resolveJdiBridgeClassDir();

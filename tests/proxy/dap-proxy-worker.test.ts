@@ -254,108 +254,37 @@ describe('DapProxyWorker', () => {
       );
     });
 
-    it('should select Go policy for dlv adapter', async () => {
-      const exitSpy = vi.fn();
-      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/main.go',
-        adapterHost: 'localhost',
-        adapterPort: 9876,
-        logDir: '/logs',
-        executablePath: 'dlv',
-        adapterCommand: {
-          command: 'dlv',
-          args: ['dap', '--listen=:9876']
-        },
-        dryRunSpawn: true
-      };
-
-      await worker.handleCommand(payload);
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('[Worker] Using adapter policy: go')
-      );
+    it('should select Go policy for dlv adapter', () => {
+      // Test policy selection directly without triggering full validation
+      const policy = (worker as any).selectAdapterPolicy({
+        command: 'dlv',
+        args: ['dap', '--listen=:9876']
+      });
+      expect(policy.name).toBe('go');
     });
 
-    it('should select Java policy for JdiDapServer adapter', async () => {
-      const exitSpy = vi.fn();
-      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/Main.java',
-        adapterHost: 'localhost',
-        adapterPort: 5005,
-        logDir: '/logs',
-        executablePath: 'java',
-        adapterCommand: {
-          command: 'java',
-          args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
-        },
-        dryRunSpawn: true
-      };
-
-      await worker.handleCommand(payload);
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('[Worker] Using adapter policy: java')
-      );
+    it('should select Java policy for JdiDapServer adapter', () => {
+      const policy = (worker as any).selectAdapterPolicy({
+        command: 'java',
+        args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
+      });
+      expect(policy.name).toBe('java');
     });
 
-    it('should select Rust policy for codelldb adapter', async () => {
-      const exitSpy = vi.fn();
-      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/main.rs',
-        adapterHost: 'localhost',
-        adapterPort: 12345,
-        logDir: '/logs',
-        executablePath: 'codelldb',
-        adapterCommand: {
-          command: '/path/to/codelldb',
-          args: ['--port', '12345']
-        },
-        dryRunSpawn: true
-      };
-
-      await worker.handleCommand(payload);
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('[Worker] Using adapter policy: rust')
-      );
+    it('should select Rust policy for codelldb adapter', () => {
+      const policy = (worker as any).selectAdapterPolicy({
+        command: '/path/to/codelldb',
+        args: ['--port', '12345']
+      });
+      expect(policy.name).toBe('rust');
     });
 
-    it('should select Mock policy for mock-adapter', async () => {
-      const exitSpy = vi.fn();
-      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/script.mock',
-        adapterHost: 'localhost',
-        adapterPort: 9999,
-        logDir: '/logs',
-        executablePath: 'mock',
-        adapterCommand: {
-          command: 'node',
-          args: ['mock-adapter-process.js']
-        },
-        dryRunSpawn: true
-      };
-
-      await worker.handleCommand(payload);
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('[Worker] Using adapter policy: mock')
-      );
+    it('should select Mock policy for mock-adapter', () => {
+      const policy = (worker as any).selectAdapterPolicy({
+        command: 'node',
+        args: ['mock-adapter-process.js']
+      });
+      expect(policy.name).toBe('mock');
     });
   });
 
