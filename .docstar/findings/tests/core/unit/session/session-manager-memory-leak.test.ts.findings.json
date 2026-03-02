@@ -1,6 +1,0 @@
-{
-  "source": "tests\\core\\unit\\session\\session-manager-memory-leak.test.ts",
-  "source_hash": "fc8e19a38fb794fa",
-  "generated": "2026-02-19T23:47:39Z",
-  "findings": []
-}
