@@ -822,7 +822,7 @@ describe('DapProxyWorker', () => {
       shutdownSpy.mockRestore();
     });
 
-    it('handleTerminate should shutdown client and process', async () => {
+    it('handleTerminate should shutdown client and process (launch mode)', async () => {
       (worker as any).dapClient = mockDapClient;
       const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
       const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
@@ -832,8 +832,25 @@ describe('DapProxyWorker', () => {
 
       await worker.handleTerminate();
 
+      // Launch mode: shutdown calls disconnect with default terminateDebuggee=true
       expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient);
       expect(mockDapClient.shutdown).toHaveBeenCalledWith('worker shutdown');
+      expect(worker.getState()).toBe(ProxyState.TERMINATED);
+    });
+
+    it('handleTerminate should auto-detach in attach mode', async () => {
+      (worker as any).dapClient = mockDapClient;
+      const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+      const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).isAttachMode = true;
+
+      await worker.handleTerminate();
+
+      // Attach mode: auto-detach sends disconnect with terminateDebuggee=false
+      expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient, false);
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
     });
   });
