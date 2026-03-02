@@ -107,8 +107,10 @@ else
     exit 1
 fi
 
-# Docstar shadow documentation check (optional — runs only if docstar is installed)
+# Docstar full shadow + check (optional — runs only if docstar is installed)
 if command -v docstar >/dev/null 2>&1; then
-  echo "🔍 Docstar: Checking shadow documentation..."
+  echo "📝 Docstar: Updating shadow documentation..."
+  docstar shadow . 2>/dev/null || true
+  echo "🔍 Docstar: Checking documentation..."
   docstar check || true
 fi
