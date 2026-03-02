@@ -52,13 +52,21 @@ jobs:
 
     - name: Install Node dependencies
       run: pnpm install --frozen-lockfile
-    
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+
+    - name: Vendor adapter binaries
+      run: pnpm run vendor:adapters
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build project
       run: pnpm run build:ci
-    
+
     - name: Run linting
       run: pnpm run lint
-    
+
     # Use test:ci-coverage which includes Python tests but excludes e2e tests
     - name: Run tests with coverage
       run: pnpm run test:ci-coverage
@@ -124,6 +132,8 @@ jobs:
 
     - name: Install Node dependencies
       run: pnpm install --frozen-lockfile
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
 
     - name: Build project (CI)
       run: pnpm run build:ci
@@ -165,7 +175,9 @@ jobs:
     
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
-    
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+
     - name: Run ESLint
       run: pnpm run lint
     
@@ -194,13 +206,23 @@ jobs:
     
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
-    
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+
+    - name: Vendor adapter binaries
+      run: pnpm run vendor:adapters
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Run linting
       run: pnpm run lint
 
     - name: Build project
       run: pnpm run build
-    
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+
     - name: Build Docker image
       run: docker build -t mcp-debugger:local .
     

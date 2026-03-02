@@ -296,7 +296,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
   describe('Server Lifecycle', () => {
     it('should handle server start', async () => {
       await server.start();
-      expect(mockLogger.info).toHaveBeenCalledWith('Debug MCP Server started');
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('[MCP Server] Started at'));
     });
 
     it('should handle server stop and cleanup', async () => {

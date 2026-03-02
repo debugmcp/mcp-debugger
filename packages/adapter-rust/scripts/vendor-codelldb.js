@@ -6,9 +6,10 @@
  * 
  * Environment variables:
  *   - CODELLDB_VERSION: Version to download (default: '1.11.8')
- *   - CI: Set to 'true' in CI environments
+ *   - CI: Set to 'true' in CI environments (vendors current platform only by default)
  *   - SKIP_ADAPTER_VENDOR: Set to 'true' to skip vendoring
- *   - CODELLDB_PLATFORMS: Comma-separated list of platforms (default: current platform or all in CI)
+ *   - CODELLDB_PLATFORMS: Comma-separated list of platforms to vendor
+ *   - CODELLDB_VENDOR_ALL: Set to 'true' to vendor all platforms in CI, or 'false' for current-only locally
  *   - CODELLDB_FORCE_REBUILD: Set to 'true' to force re-vendor
  *   - CODELLDB_VENDOR_LOCAL_ONLY: Set to 'true' to forbid downloads (use existing artifacts only)
  */
@@ -34,10 +35,6 @@ const FORCE_REBUILD = process.env.CODELLDB_FORCE_REBUILD === 'true';
 const IS_CI = process.env.CI === 'true';
 const SKIP_VENDOR = process.env.SKIP_ADAPTER_VENDOR === 'true';
 const KEEP_TEMP = process.env.CODELLDB_KEEP_TEMP === 'true';
-const VENDOR_ALL =
-  process.env.CODELLDB_VENDOR_ALL !== undefined
-    ? process.env.CODELLDB_VENDOR_ALL.toLowerCase() !== 'false'
-    : true;
 const LOCAL_ONLY = process.env.CODELLDB_VENDOR_LOCAL_ONLY === 'true';
 const RELEASE_BASE_URLS = [
   process.env.CODELLDB_RELEASE_BASE?.replace(/\/$/, '') ||
@@ -624,7 +621,7 @@ function determinePlatforms() {
     log(`Using platforms from CODELLDB_PLATFORMS: ${fromEnv.join(', ')}`);
     return fromEnv;
   }
-  
+
   // Command line arguments take precedence
   const cliPlatforms = process.argv.slice(2);
   if (cliPlatforms.length > 0) {
@@ -632,28 +629,40 @@ function determinePlatforms() {
     return cliPlatforms;
   }
 
-  const vendorAll = VENDOR_ALL || IS_CI;
-  if (vendorAll) {
-    if (process.env.CODELLDB_VENDOR_ALL?.toLowerCase() === 'false') {
-      log('CODELLDB_VENDOR_ALL=false - vendoring current platform only');
-    } else if (IS_CI && !VENDOR_ALL) {
-      log('CI environment detected - vendoring all platforms');
-    } else {
-      log('Vendoring all supported platforms (CODELLDB_VENDOR_ALL not set to false)');
+  // In CI, default to current platform only — CI runners only need their own
+  // platform's binary, and downloading all 5 platforms is fragile (GitHub
+  // releases can return transient 503 errors for cross-platform assets).
+  // Use CODELLDB_VENDOR_ALL=true or CODELLDB_PLATFORMS to override.
+  if (IS_CI) {
+    if (process.env.CODELLDB_VENDOR_ALL?.toLowerCase() === 'true') {
+      log('CI environment with CODELLDB_VENDOR_ALL=true - vendoring all platforms');
+      return Object.keys(PLATFORMS);
     }
+    const currentPlatform = getCurrentPlatform();
+    if (currentPlatform) {
+      log(`CI environment detected - vendoring current platform only: ${currentPlatform}`);
+      return [currentPlatform];
+    }
+    logWarn(`CI environment but unknown platform: ${process.platform}-${process.arch}`);
+    logWarn('Vendoring all platforms as fallback');
     return Object.keys(PLATFORMS);
   }
-  
-  // Otherwise, only vendor current platform
-  const currentPlatform = getCurrentPlatform();
-  if (!currentPlatform) {
+
+  // Local development: vendor all platforms by default (for cross-platform builds)
+  // unless CODELLDB_VENDOR_ALL=false
+  if (process.env.CODELLDB_VENDOR_ALL?.toLowerCase() === 'false') {
+    const currentPlatform = getCurrentPlatform();
+    if (currentPlatform) {
+      log('CODELLDB_VENDOR_ALL=false - vendoring current platform only');
+      return [currentPlatform];
+    }
     logWarn(`Unknown platform: ${process.platform}-${process.arch}`);
     logWarn('Vendoring all platforms as fallback');
     return Object.keys(PLATFORMS);
   }
-  
-  log(`Using detected platform: ${currentPlatform}`);
-  return [currentPlatform];
+
+  log('Vendoring all supported platforms (set CODELLDB_VENDOR_ALL=false for current platform only)');
+  return Object.keys(PLATFORMS);
 }
 
 /**
