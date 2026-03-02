@@ -414,61 +414,13 @@ export class DapProxyWorker {
 
           this.logger!.info('[Worker] "initialized" event received, sending attach request');
 
-          if (initBehavior.sendConfigDoneWithAttach) {
-            // Reserved for adapters that require configurationDone before responding
-            // to attach. The adapter blocks the attach response until configurationDone
-            // arrives, but does NOT send a DAP response for configurationDone. So we:
-            //   1. Send attach (non-blocking)
-            //   2. Send breakpoints (awaited)
-            //   3. Fire configurationDone (no await — adapter won't respond)
-            //   4. Await attach response
-            this.logger!.info('[Worker] sendConfigDoneWithAttach: sending attach + configurationDone concurrently');
-            this.deferInitializedHandling = false;
-            this.initializedEventHandled = true;
+          await this.connectionManager!.sendAttachRequest(
+            this.dapClient,
+            payload.launchConfig || {}
+          );
 
-            const attachPromise = this.connectionManager!.sendAttachRequest(
-              this.dapClient,
-              payload.launchConfig || {}
-            );
-
-            // Set initial breakpoints
-            if (payload.initialBreakpoints?.length) {
-              this.logger!.info('[Worker] Initial breakpoints payload:', payload.initialBreakpoints);
-              const groupedBreakpoints = new Map<string, { line: number; condition?: string }[]>();
-              for (const breakpoint of payload.initialBreakpoints) {
-                const filePath = path.resolve(breakpoint.file);
-                if (!groupedBreakpoints.has(filePath)) {
-                  groupedBreakpoints.set(filePath, []);
-                }
-                groupedBreakpoints.get(filePath)!.push({
-                  line: breakpoint.line,
-                  condition: breakpoint.condition
-                });
-              }
-              for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
-                await this.connectionManager!.setBreakpoints(this.dapClient, filePath, breakpoints);
-              }
-            }
-
-            // Fire configurationDone without awaiting response (adapter won't send one)
-            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for attach)');
-            this.dapClient.sendRequest('configurationDone', {}).catch((err: Error) => {
-              this.logger!.warn('[Worker] configurationDone response error (expected for sendConfigDoneWithAttach):', err.message);
-            });
-
-            // Await the attach response
-            await attachPromise;
-            this.state = ProxyState.CONNECTED;
-            this.sendStatus('adapter_configured_and_launched');
-          } else {
-            await this.connectionManager!.sendAttachRequest(
-              this.dapClient,
-              payload.launchConfig || {}
-            );
-
-            this.deferInitializedHandling = false;
-            await this.handleInitializedEvent();
-          }
+          this.deferInitializedHandling = false;
+          await this.handleInitializedEvent();
         /* istanbul ignore next -- Go/Java launch sequence: covered by E2E/integration tests */
         } else if (initBehavior.sendLaunchBeforeConfig) {
           // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve, Java/JDI bridge
@@ -485,81 +437,30 @@ export class DapProxyWorker {
             this.logger!.warn('[Worker] "initialized" event not received within 2s — falling back to launch-first flow');
           }
 
-          if (initBehavior.sendConfigDoneWithLaunch) {
-            // Reserved for adapters that block the launch response until
-            // configurationDone arrives. Same pattern as sendConfigDoneWithAttach:
-            //   1. Send launch (non-blocking)
-            //   2. Set breakpoints (awaited)
-            //   3. Fire configurationDone (no await — adapter won't respond)
-            //   4. Await launch response
-            this.logger!.info('[Worker] sendConfigDoneWithLaunch: sending launch + configurationDone concurrently');
-            this.deferInitializedHandling = false;
-            this.initializedEventHandled = true;
+          // Standard two-phase: send launch, wait for response, then configurationDone
+          await this.connectionManager!.sendLaunchRequest(
+            this.dapClient,
+            payload.scriptPath,
+            payload.scriptArgs,
+            payload.stopOnEntry,
+            payload.justMyCode,
+            payload.launchConfig
+          );
 
-            const launchPromise = this.connectionManager!.sendLaunchRequest(
-              this.dapClient,
-              payload.scriptPath,
-              payload.scriptArgs,
-              payload.stopOnEntry,
-              payload.justMyCode,
-              payload.launchConfig
-            );
-
-            // Set initial breakpoints
-            if (payload.initialBreakpoints?.length) {
-              this.logger!.info('[Worker] Initial breakpoints payload:', payload.initialBreakpoints);
-              const groupedBreakpoints = new Map<string, { line: number; condition?: string }[]>();
-              for (const breakpoint of payload.initialBreakpoints) {
-                const filePath = path.resolve(breakpoint.file);
-                if (!groupedBreakpoints.has(filePath)) {
-                  groupedBreakpoints.set(filePath, []);
-                }
-                groupedBreakpoints.get(filePath)!.push({
-                  line: breakpoint.line,
-                  condition: breakpoint.condition
-                });
-              }
-              for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
-                await this.connectionManager!.setBreakpoints(this.dapClient, filePath, breakpoints);
-              }
-            }
-
-            // Fire configurationDone without awaiting response (adapter won't send one)
-            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for launch)');
-            this.dapClient.sendRequest('configurationDone', {}).catch((err: Error) => {
-              this.logger!.warn('[Worker] configurationDone response error (expected for sendConfigDoneWithLaunch):', err.message);
-            });
-
-            // Await the launch response
-            await launchPromise;
-            this.state = ProxyState.CONNECTED;
-            this.sendStatus('adapter_configured_and_launched');
-          } else {
-            // Standard two-phase: send launch, wait for response, then configurationDone
-            await this.connectionManager!.sendLaunchRequest(
-              this.dapClient,
-              payload.scriptPath,
-              payload.scriptArgs,
-              payload.stopOnEntry,
-              payload.justMyCode,
-              payload.launchConfig
-            );
-
-            if (!receivedBeforeLaunch) {
-              // Phase 2: Wait for initialized after launch
-              this.logger!.info('[Worker] Phase 2: Waiting for "initialized" event after launch');
-              await Promise.race([
-                this.initializedEventPromise!,
-                new Promise((_, reject) =>
-                  setTimeout(() => reject(new Error('Timeout waiting for initialized event (after launch fallback)')), 10000)
-                )
-              ]);
-              this.logger!.info('[Worker] "initialized" event received after launch (fallback succeeded)');
-            }
-
-            this.deferInitializedHandling = false;
-            await this.handleInitializedEvent();
+          if (!receivedBeforeLaunch) {
+            // Phase 2: Wait for initialized after launch
+            this.logger!.info('[Worker] Phase 2: Waiting for "initialized" event after launch');
+            await Promise.race([
+              this.initializedEventPromise!,
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout waiting for initialized event (after launch fallback)')), 10000)
+              )
+            ]);
+            this.logger!.info('[Worker] "initialized" event received after launch (fallback succeeded)');
           }
+
+          this.deferInitializedHandling = false;
+          await this.handleInitializedEvent();
         } else {
           // LAUNCH MODE: Send launch request FIRST, then wait for "initialized"
           // Python/debugpy sends "initialized" AFTER receiving the launch request

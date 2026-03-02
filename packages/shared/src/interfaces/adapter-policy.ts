@@ -288,12 +288,6 @@ export interface AdapterPolicy {
     /** Whether the adapter sends 'initialized' before receiving 'launch', requiring
      *  the proxy to defer initialized handling and send launch before configurationDone. */
     sendLaunchBeforeConfig?: boolean;
-    /** Whether configurationDone must be sent concurrently with attach (not after).
-     *  For adapters that require configurationDone before responding to attach. */
-    sendConfigDoneWithAttach?: boolean;
-    /** Whether configurationDone must be sent concurrently with launch (not after).
-     *  For adapters that block the launch response until configurationDone arrives. */
-    sendConfigDoneWithLaunch?: boolean;
   };
 
   /**

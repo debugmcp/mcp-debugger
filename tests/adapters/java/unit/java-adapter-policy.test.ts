@@ -208,8 +208,6 @@ describe('JavaAdapterPolicy', () => {
       expect(behavior.sendLaunchBeforeConfig).toBe(true);
       expect(behavior.deferConfigDone).toBeUndefined();
       expect(behavior.defaultStopOnEntry).toBeUndefined();
-      expect(behavior.sendConfigDoneWithAttach).toBeUndefined();
-      expect(behavior.sendConfigDoneWithLaunch).toBeUndefined();
     });
   });
 
