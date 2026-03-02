@@ -3,7 +3,7 @@
  *
  * JdiDapServer is a single-file Java program that implements a minimal DAP
  * server using JDI (com.sun.jdi.*) directly. It speaks DAP over TCP natively,
- * eliminating the need for the stdio-tcp bridge that KDA required.
+ * eliminating the need for a stdio-tcp bridge.
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';

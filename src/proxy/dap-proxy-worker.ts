@@ -415,12 +415,12 @@ export class DapProxyWorker {
           this.logger!.info('[Worker] "initialized" event received, sending attach request');
 
           if (initBehavior.sendConfigDoneWithAttach) {
-            // KDA requires configurationDone before it responds to attach, but KDA
-            // does NOT send a DAP response for configurationDone — it just unblocks
-            // the attach handler internally. So we:
+            // Reserved for adapters that require configurationDone before responding
+            // to attach. The adapter blocks the attach response until configurationDone
+            // arrives, but does NOT send a DAP response for configurationDone. So we:
             //   1. Send attach (non-blocking)
             //   2. Send breakpoints (awaited)
-            //   3. Fire configurationDone (no await — KDA won't respond)
+            //   3. Fire configurationDone (no await — adapter won't respond)
             //   4. Await attach response
             this.logger!.info('[Worker] sendConfigDoneWithAttach: sending attach + configurationDone concurrently');
             this.deferInitializedHandling = false;
@@ -450,10 +450,10 @@ export class DapProxyWorker {
               }
             }
 
-            // Fire configurationDone without awaiting response (KDA won't send one)
-            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for KDA)');
+            // Fire configurationDone without awaiting response (adapter won't send one)
+            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for attach)');
             this.dapClient.sendRequest('configurationDone', {}).catch((err: Error) => {
-              this.logger!.warn('[Worker] configurationDone response error (expected for KDA):', err.message);
+              this.logger!.warn('[Worker] configurationDone response error (expected for sendConfigDoneWithAttach):', err.message);
             });
 
             // Await the attach response
@@ -471,7 +471,7 @@ export class DapProxyWorker {
           }
         /* istanbul ignore next -- Go/Java launch sequence: covered by E2E/integration tests */
         } else if (initBehavior.sendLaunchBeforeConfig) {
-          // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve, Java/KDA
+          // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve, Java/JDI bridge
           // Phase 1: Brief wait — some adapters send initialized immediately after initialize
           this.logger!.info('[Worker] Phase 1: Waiting briefly for "initialized" event before launch');
           const receivedBeforeLaunch = await Promise.race([
@@ -486,11 +486,11 @@ export class DapProxyWorker {
           }
 
           if (initBehavior.sendConfigDoneWithLaunch) {
-            // KDA blocks the launch response until configurationDone arrives.
-            // Same pattern as sendConfigDoneWithAttach:
+            // Reserved for adapters that block the launch response until
+            // configurationDone arrives. Same pattern as sendConfigDoneWithAttach:
             //   1. Send launch (non-blocking)
             //   2. Set breakpoints (awaited)
-            //   3. Fire configurationDone (no await — KDA won't respond)
+            //   3. Fire configurationDone (no await — adapter won't respond)
             //   4. Await launch response
             this.logger!.info('[Worker] sendConfigDoneWithLaunch: sending launch + configurationDone concurrently');
             this.deferInitializedHandling = false;
@@ -524,10 +524,10 @@ export class DapProxyWorker {
               }
             }
 
-            // Fire configurationDone without awaiting response (KDA won't send one)
-            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for KDA launch)');
+            // Fire configurationDone without awaiting response (adapter won't send one)
+            this.logger!.info('[Worker] Sending configurationDone (fire-and-forget for launch)');
             this.dapClient.sendRequest('configurationDone', {}).catch((err: Error) => {
-              this.logger!.warn('[Worker] configurationDone response error (expected for KDA):', err.message);
+              this.logger!.warn('[Worker] configurationDone response error (expected for sendConfigDoneWithLaunch):', err.message);
             });
 
             // Await the launch response
@@ -620,9 +620,9 @@ export class DapProxyWorker {
       },
       onStopped: async (body) => {
         this.logger!.info('[Worker] DAP event: stopped', body);
-        // KDA (Java adapter) needs a 'threads' request after stopped to refresh
-        // its internal thread list, otherwise stackTrace returns empty frames.
-        // We MUST await this before forwarding the stopped event so that
+        // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
+        // to ensure thread data is fresh before stackTrace requests.
+        // We await this before forwarding the stopped event so that
         // getStackTrace has thread data available.
         if (this.dapClient && this.adapterPolicy?.name === 'java') {
           try {

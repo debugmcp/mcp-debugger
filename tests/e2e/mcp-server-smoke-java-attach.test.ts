@@ -5,7 +5,7 @@
  * then use attach_to_process to connect the debugger.
  *
  * JDI bridge handles deferred breakpoints natively via ClassPrepareRequest,
- * so no breakpoint re-sends are needed (unlike KDA).
+ * so no breakpoint re-sends are needed.
  *
  * Hard assertions (every step must succeed):
  * - Session creation returns valid sessionId

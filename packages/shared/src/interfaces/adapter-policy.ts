@@ -289,10 +289,10 @@ export interface AdapterPolicy {
      *  the proxy to defer initialized handling and send launch before configurationDone. */
     sendLaunchBeforeConfig?: boolean;
     /** Whether configurationDone must be sent concurrently with attach (not after).
-     *  KDA requires configurationDone before it responds to the attach request. */
+     *  For adapters that require configurationDone before responding to attach. */
     sendConfigDoneWithAttach?: boolean;
     /** Whether configurationDone must be sent concurrently with launch (not after).
-     *  KDA blocks the launch response until configurationDone arrives. */
+     *  For adapters that block the launch response until configurationDone arrives. */
     sendConfigDoneWithLaunch?: boolean;
   };
 
