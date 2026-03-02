@@ -4,9 +4,26 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import { promisify } from 'util';
-import { exec as execCallback } from 'child_process';
+import { exec as execCallback, execSync } from 'child_process';
 
 const exec = promisify(execCallback);
+
+/**
+ * Check if Python with debugpy is available on the system.
+ * Uses the same pattern as Go/Rust toolchain detection.
+ */
+export function hasPythonWithDebugpy(): boolean {
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  try {
+    execSync(`${pythonCmd} -m debugpy --version`, { stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when Python + debugpy are NOT available (for use with describe.skipIf / it.skipIf). */
+export const SKIP_PYTHON = !hasPythonWithDebugpy();
 
 /**
  * Parse SDK tool results

@@ -155,7 +155,8 @@
     "@debugmcp/adapter-javascript": "workspace:*",
     "@debugmcp/adapter-mock": "workspace:*",
     "@debugmcp/adapter-python": "workspace:*",
-    "@debugmcp/adapter-rust": "workspace:*"
+    "@debugmcp/adapter-rust": "workspace:*",
+    "@debugmcp/adapter-dotnet": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",

@@ -144,17 +144,19 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     try {
       if (isAttachMode && adapter.supportsAttach && adapter.supportsAttach() && adapter.transformAttachConfig) {
         // Call transformAttachConfig for attach operations
+        this.logger.info(`[SessionManager] Calling transformAttachConfig for ${session.language}, config keys: ${Object.keys(genericLaunchConfig).join(', ')}`);
         transformedLaunchConfig = adapter.transformAttachConfig(genericLaunchConfig as GenericAttachConfig);
-        this.logger.info(`[SessionManager] Using attach config for ${session.language}`);
+        const transformedKeys = transformedLaunchConfig ? Object.keys(transformedLaunchConfig) : [];
+        const hasSymbolOpts = transformedLaunchConfig && 'symbolOptions' in (transformedLaunchConfig as Record<string, unknown>);
+        this.logger.info(`[SessionManager] transformAttachConfig returned keys: ${transformedKeys.join(', ')}, symbolOptions: ${hasSymbolOpts ? 'present' : 'absent'}`);
       } else {
         // Call transformLaunchConfig for launch operations
         transformedLaunchConfig = await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
       }
     } catch (error) {
+      const errMsg = error instanceof Error ? error.stack || error.message : String(error);
       this.logger.warn(
-        `[SessionManager] transform${isAttachMode ? 'Attach' : 'Launch'}Config failed for ${session.language}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `[SessionManager] transform${isAttachMode ? 'Attach' : 'Launch'}Config failed for ${session.language}: ${errMsg}`
       );
       transformedLaunchConfig = undefined;
     }

@@ -32,6 +32,7 @@
     { "path": "./packages/adapter-python" },
     { "path": "./packages/adapter-javascript" },
     { "path": "./packages/adapter-rust" },
+    { "path": "./packages/adapter-dotnet" },
     { "path": "./packages/mcp-debugger" },
     { "path": "./tsconfig.src.json" }
   ]

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildDockerImage, createDockerMcpClient, hostToContainerPath, getDockerLogs } from './docker-test-utils.js';
-import { parseSdkToolResult } from '../smoke-test-utils.js';
+import { parseSdkToolResult, SKIP_PYTHON } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,7 +18,7 @@ const ROOT = path.resolve(__dirname, '../../..');
 
 const SKIP_DOCKER = process.env.SKIP_DOCKER_TESTS === 'true';
 
-describe.skipIf(SKIP_DOCKER)('Docker: Python Debugging Smoke Tests', () => {
+describe.skipIf(SKIP_DOCKER || SKIP_PYTHON)('Docker: Python Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;

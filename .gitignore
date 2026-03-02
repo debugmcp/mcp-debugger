@@ -137,6 +137,10 @@ examples/.cargo/
 examples/rust/**/.cargo/
 examples/rust/**/.debug-mcp-linux-build
 
+# .NET build artifacts
+examples/dotnet/bin/
+examples/dotnet/obj/
+
 # Java build artifacts
 examples/java/*.class
 

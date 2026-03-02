@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'; // Removed StdioClientTransportParameters
 import { ServerResult } from '@modelcontextprotocol/sdk/types.js'; 
-import { ensurePythonOnPath } from './env-utils.js';
+import { ensurePythonOnPath, SKIP_PYTHON } from './env-utils.js';
 
 // --- SDK-based MCP Client for Testing ---
 let client: Client | null = null;
@@ -124,7 +124,7 @@ async function waitForStackFrames(
   throw new Error(`Timed out waiting for stack frames for session ${sessionId}`);
 }
 
-describe('Python Debugging Workflow - Integration Test @requires-python', () => {
+describe.skipIf(SKIP_PYTHON)('Python Debugging Workflow - Integration Test @requires-python', () => {
   let sessionId: string;
   const scriptPath = path.resolve('tests/fixtures/python/debug_test_simple.py'); // Absolute path
   const breakpointLine = 13; // Line 'c = a + b' in debug_test_simple.py

@@ -3,13 +3,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { ensurePythonOnPath } from './env-utils.js';
+import { ensurePythonOnPath, SKIP_PYTHON } from './env-utils.js';
 import fs from 'fs';
 
 // DO NOT mock Python discovery - we want to test the real implementation
 // This test should fail on Windows if python3 is the Microsoft Store redirect
 
-describe('Python Discovery - Real Implementation Test @requires-python', () => {
+describe.skipIf(SKIP_PYTHON)('Python Discovery - Real Implementation Test @requires-python', () => {
   let client: Client | null = null;
 
   beforeAll(async () => {

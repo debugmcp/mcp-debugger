@@ -20,6 +20,7 @@ import { existsSync as nativeNodeExistsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { SKIP_PYTHON } from './smoke-test-utils.js';
 // No mocking of python-utils - E2E tests should use real Python discovery
 
 const exec = promisify(execCallback);
@@ -198,7 +199,7 @@ async function startMcpServer(port: number): Promise<ChildProcess> {
   return serverProcess;
 }
 
-describe('MCP Server connecting to debugpy', () => {
+describe.skipIf(SKIP_PYTHON)('MCP Server connecting to debugpy', () => {
   beforeAll(async () => {
     try {
       // Ensure build output exists before running E2E
