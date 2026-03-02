@@ -177,5 +177,44 @@ describe('JavaAdapterFactory', () => {
       expect(result.details?.arch).toBe(process.arch);
       expect(result.details?.timestamp).toBeDefined();
     });
+
+    it('should warn when Java version is below 21', async () => {
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          // Simulate Java 17 which is valid but below recommended 21
+          proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
+          proc.emit('exit', 0);
+        });
+        return proc;
+      });
+
+      const result = await factory.validate();
+
+      expect(result.valid).toBe(true); // Still valid, just a warning
+      expect(result.warnings?.some(w => w.includes('Java 21+ recommended'))).toBe(true);
+      expect(result.details?.javaVersion).toBe('17.0.1');
+    });
+
+    it('should not warn when Java version is 21 or higher', async () => {
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          proc.stderr.emit('data', Buffer.from('openjdk version "21.0.1"\n'));
+          proc.emit('exit', 0);
+        });
+        return proc;
+      });
+
+      const result = await factory.validate();
+
+      expect(result.valid).toBe(true);
+      // Should not have the Java 21+ warning when version is 21
+      expect(result.warnings?.some(w => w.includes('Java 21+ recommended'))).toBeFalsy();
+    });
   });
 });

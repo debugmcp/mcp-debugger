@@ -1442,6 +1442,155 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
   });
 
+  describe('attachToProcess thread discovery', () => {
+    let mockAdapter: any;
+
+    beforeEach(() => {
+      mockAdapter = {
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockReturnValue({ type: 'java', request: 'attach', host: 'localhost', port: 5005 }),
+        buildAdapterCommand: vi.fn().mockReturnValue({ command: 'java', args: ['-jar', 'debug.jar'] }),
+        resolveExecutablePath: vi.fn().mockResolvedValue('java')
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'java';
+      mockSession.state = SessionState.CREATED;
+      mockProxyManager.setCurrentThreadId = vi.fn();
+    });
+
+    it('should discover main thread when available', async () => {
+      // Setup: threads request returns threads including "main"
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return {
+            body: {
+              threads: [
+                { id: 1, name: 'Reference Handler' },
+                { id: 2, name: 'main' },
+                { id: 3, name: 'Finalizer' }
+              ]
+            }
+          };
+        }
+        return {};
+      });
+
+      // Mock startProxyManager to succeed and set up the proxy
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('threads', {});
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(2); // main thread id
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Discovered 3 threads')
+      );
+    });
+
+    it('should use first thread when main is not available', async () => {
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return {
+            body: {
+              threads: [
+                { id: 5, name: 'Worker-1' },
+                { id: 6, name: 'Worker-2' }
+              ]
+            }
+          };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(5); // first thread
+    });
+
+    it('should fall back to threadId=1 when no threads returned', async () => {
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(1); // fallback
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('No threads returned by adapter')
+      );
+    });
+
+    it('should fall back to threadId=1 when threads request fails', async () => {
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          throw new Error('Connection refused');
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(1); // fallback
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to discover threads')
+      );
+    });
+
+    it('should skip thread discovery when stopOnEntry is false', async () => {
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: false
+      });
+
+      expect(result.success).toBe(true);
+      // threads request should not be made when stopOnEntry is false
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('threads', {});
+      expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Attach Mode Handling', () => {
     // These tests use resolveExecutablePath to throw immediately after config transformation
     // This allows us to verify the attach mode logic was exercised without waiting for proxy startup

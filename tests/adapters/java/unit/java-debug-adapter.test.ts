@@ -144,6 +144,27 @@ describe('JavaDebugAdapter', () => {
         if (originalJavaHome) process.env.JAVA_HOME = originalJavaHome;
       }
     });
+
+    it('should warn when Java version is old (< 11)', async () => {
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          // Simulate Java 8 (1.8.0) version string
+          proc.stderr.emit('data', Buffer.from('openjdk version "1.8.0_292"\n'));
+          proc.emit('exit', 0);
+        });
+        return proc;
+      });
+
+      await adapter.initialize();
+      expect(adapter.getState()).toBe(AdapterState.READY);
+      // Should have logged a warning about old Java version
+      expect(mockDependencies.logger?.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Java 11+ recommended')
+      );
+    });
   });
 
   describe('dispose', () => {
@@ -296,6 +317,12 @@ describe('JavaDebugAdapter', () => {
       expect(translated).toContain('class not found');
     });
 
+    it('should translate NoClassDefFoundError', () => {
+      const error = new Error('java.lang.NoClassDefFoundError: com/example/Main');
+      const translated = adapter.translateErrorMessage(error);
+      expect(translated).toContain('class not found');
+    });
+
     it('should pass through unknown errors', () => {
       const error = new Error('some unknown error');
       const translated = adapter.translateErrorMessage(error);
@@ -407,6 +434,24 @@ describe('JavaDebugAdapter', () => {
 
       expect(transformed.stopOnEntry).toBe(false);
     });
+
+    it('should pass through classpath when provided', async () => {
+      const transformed = await adapter.transformLaunchConfig({
+        classpath: '/app/lib/*:/app/classes',
+        cwd: '/app',
+      } as any);
+
+      expect(transformed.classpath).toBe('/app/lib/*:/app/classes');
+    });
+
+    it('should pass through sourcePath when provided', async () => {
+      const transformed = await adapter.transformLaunchConfig({
+        sourcePath: '/app/src',
+        cwd: '/app',
+      } as any);
+
+      expect(transformed.sourcePath).toBe('/app/src');
+    });
   });
 
   describe('handleDapEvent', () => {
@@ -426,6 +471,21 @@ describe('JavaDebugAdapter', () => {
       expect(stoppedSpy).toHaveBeenCalled();
     });
 
+    it('should transition to DEBUGGING on continued event', () => {
+      const continuedSpy = vi.fn();
+      adapter.on('continued', continuedSpy);
+
+      adapter.handleDapEvent({
+        event: 'continued',
+        body: { threadId: 1 },
+        seq: 1,
+        type: 'event'
+      });
+
+      expect(adapter.getState()).toBe(AdapterState.DEBUGGING);
+      expect(continuedSpy).toHaveBeenCalled();
+    });
+
     it('should transition to DISCONNECTED on terminated event', () => {
       const terminatedSpy = vi.fn();
       adapter.on('terminated', terminatedSpy);
@@ -441,6 +501,34 @@ describe('JavaDebugAdapter', () => {
       expect(terminatedSpy).toHaveBeenCalled();
     });
 
+    it('should emit exited event', () => {
+      const exitedSpy = vi.fn();
+      adapter.on('exited', exitedSpy);
+
+      adapter.handleDapEvent({
+        event: 'exited',
+        body: { exitCode: 0 },
+        seq: 1,
+        type: 'event'
+      });
+
+      expect(exitedSpy).toHaveBeenCalled();
+    });
+
+    it('should emit thread event', () => {
+      const threadSpy = vi.fn();
+      adapter.on('thread', threadSpy);
+
+      adapter.handleDapEvent({
+        event: 'thread',
+        body: { reason: 'started', threadId: 1 },
+        seq: 1,
+        type: 'event'
+      });
+
+      expect(threadSpy).toHaveBeenCalled();
+    });
+
     it('should emit output event', () => {
       const outputSpy = vi.fn();
       adapter.on('output', outputSpy);
@@ -453,6 +541,27 @@ describe('JavaDebugAdapter', () => {
       });
 
       expect(outputSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('sendDapRequest', () => {
+    it('should throw as DAP forwarding is not implemented', async () => {
+      await expect(adapter.sendDapRequest('stackTrace', { threadId: 1 }))
+        .rejects.toThrow('DAP request forwarding not implemented');
+    });
+  });
+
+  describe('handleDapResponse', () => {
+    it('should be a no-op', () => {
+      // handleDapResponse is a no-op - responses are handled by ProxyManager
+      // Just verify it doesn't throw
+      expect(() => adapter.handleDapResponse({
+        seq: 1,
+        type: 'response',
+        request_seq: 1,
+        success: true,
+        command: 'stackTrace'
+      })).not.toThrow();
     });
   });
 
