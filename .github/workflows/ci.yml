@@ -50,6 +50,12 @@ jobs:
     - name: Install Delve debugger
       run: go install github.com/go-delve/delve/cmd/dlv@latest
 
+    - name: Setup Java 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
     - name: Install Node dependencies
       run: pnpm install --frozen-lockfile
       env:
@@ -130,6 +136,12 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install debugpy
 
+    - name: Setup Java 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
     - name: Install Node dependencies
       run: pnpm install --frozen-lockfile
       env:
@@ -172,7 +184,13 @@ jobs:
       with:
         node-version: '22.x'
         cache: 'pnpm'
-    
+
+    - name: Setup Java 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
       env:
@@ -204,6 +222,12 @@ jobs:
         node-version: '22.x'
         cache: 'pnpm'
     
+    - name: Setup Java 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
       env:

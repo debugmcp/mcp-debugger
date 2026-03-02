@@ -500,8 +500,8 @@ describe('DapConnectionManager', () => {
       );
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
-        source: { path: sourcePath },
-        breakpoints: [{ line: 10 }]
+        source: { path: sourcePath, name: 'source.py' },
+        breakpoints: [{ line: 10, condition: undefined }]
       });
       expect(result).toBe(response);
     });
@@ -536,11 +536,11 @@ describe('DapConnectionManager', () => {
       );
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
-        source: { path: sourcePath },
+        source: { path: sourcePath, name: 'source.py' },
         breakpoints: [
-          { line: 10 },
-          { line: 20 },
-          { line: 30 }
+          { line: 10, condition: undefined },
+          { line: 20, condition: undefined },
+          { line: 30, condition: undefined }
         ]
       });
       expect(result.body.breakpoints).toHaveLength(3);
@@ -574,7 +574,7 @@ describe('DapConnectionManager', () => {
       );
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
-        source: { path: sourcePath },
+        source: { path: sourcePath, name: 'source.py' },
         breakpoints: [
           { line: 10, condition: 'x > 5' },
           { line: 20, condition: 'y == "test"' }
@@ -602,7 +602,7 @@ describe('DapConnectionManager', () => {
       );
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
-        source: { path: sourcePath },
+        source: { path: sourcePath, name: 'source.py' },
         breakpoints: []
       });
       expect(result.body.breakpoints).toHaveLength(0);
