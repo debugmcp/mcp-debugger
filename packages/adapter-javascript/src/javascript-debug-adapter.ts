@@ -1,6 +1,5 @@
 /**
- * JavaScript/TypeScript Debug Adapter (skeleton)
- *
+ * JavaScript/TypeScript Debug Adapter
  *
  * @since 0.1.0
  */
