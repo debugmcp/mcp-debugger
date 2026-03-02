@@ -2,6 +2,7 @@
  * DAP connection management utilities
  */
 
+import * as path from 'path';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import {
   IDapClient,
@@ -269,7 +270,7 @@ export class DapConnectionManager {
     }));
 
     const setBreakpointsArgs: DebugProtocol.SetBreakpointsArguments = {
-      source: { path: sourcePath },
+      source: { path: sourcePath, name: path.basename(sourcePath) },
       breakpoints: sourceBreakpoints
     };
 

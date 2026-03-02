@@ -322,6 +322,15 @@ packages/adapter-{language}/
 - Uses vendored CodeLLDB debug adapter (auto-downloaded during `pnpm install`)
 - Supports both MSVC and GNU toolchains on Windows
 
+### Java
+- JDK 21+ must be installed (`java` and `javac` on PATH, or `JAVA_HOME` set)
+- Uses JDI bridge (`JdiDapServer.java`) — a single Java file compiled on first use via `javac`
+- **Must compile target code with `javac -g`** for variable inspection (includes `LocalVariableTable`)
+- Launch mode: Pass `mainClass` and `classpath` directly — JDI bridge spawns the JVM and connects via JDI
+- Attach mode: Connect to JVM with JDWP agent (`-agentlib:jdwp=...`). JDI bridge handles deferred breakpoints natively via `ClassPrepareRequest`
+- Zero external dependencies — JDI (`com.sun.jdi.*`) ships with every JDK
+- See `docs/java/README.md` for architecture details
+
 ### Go
 - Go 1.18+ must be installed
 - Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`

@@ -211,12 +211,13 @@ describe('Session Models', () => {
         expect(DebugLanguage.MOCK).toBe('mock');
       });
 
-      it('should have exactly 5 language options including javascript, rust, and go', () => {
+      it('should have exactly 6 language options including javascript, rust, go, and java', () => {
         const languages = Object.values(DebugLanguage);
-        expect(languages).toHaveLength(5);
+        expect(languages).toHaveLength(6);
         expect(languages).toContain('javascript');
         expect(languages).toContain('rust');
         expect(languages).toContain('go');
+        expect(languages).toContain('java');
       });
     });
 
