@@ -209,7 +209,7 @@ describe('MessageParser', () => {
         [{ file: 'test.py' }], // Missing line
         [{ line: 10 }], // Missing file
         [{ file: 123, line: 10 }], // Invalid file type
-        [{ file: 'test.py', line: '10' }], // Invalid line type
+        [{ file: 'test.py', line: 'abc' }], // Non-numeric line string still fails
         [{ file: 'test.py', line: 10, condition: 123 }] // Invalid condition type
       ];
 
@@ -227,6 +227,63 @@ describe('MessageParser', () => {
 
         expect(() => MessageParser.validateInitPayload(payload))
           .toThrow(/Breakpoint/);
+      });
+    });
+
+    describe('string-to-type coercion (Claude Code SSE bug workaround)', () => {
+      const basePayload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        executablePath: '/usr/bin/python3',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/home/user/script.py'
+      };
+
+      it('should coerce breakpoint line from numeric string to number', () => {
+        const payload = {
+          ...basePayload,
+          initialBreakpoints: [{ file: 'test.py', line: '10' }]
+        };
+        const result = MessageParser.validateInitPayload(payload);
+        expect((result as any).initialBreakpoints[0].line).toBe(10);
+      });
+
+      it('should coerce adapterPort from numeric string to number', () => {
+        const payload = { ...basePayload, adapterPort: '58000' };
+        const result = MessageParser.validateInitPayload(payload);
+        expect((result as any).adapterPort).toBe(58000);
+      });
+
+      it('should coerce stopOnEntry from string "true" to boolean', () => {
+        const payload = { ...basePayload, stopOnEntry: 'true' };
+        const result = MessageParser.validateInitPayload(payload);
+        expect((result as any).stopOnEntry).toBe(true);
+      });
+
+      it('should coerce justMyCode from string "false" to boolean', () => {
+        const payload = { ...basePayload, justMyCode: 'false' };
+        const result = MessageParser.validateInitPayload(payload);
+        expect((result as any).justMyCode).toBe(false);
+      });
+
+      it('should coerce dryRunSpawn from string "true" to boolean', () => {
+        const payload = { ...basePayload, dryRunSpawn: 'true' };
+        const result = MessageParser.validateInitPayload(payload);
+        expect((result as any).dryRunSpawn).toBe(true);
+      });
+
+      it('should reject non-numeric adapterPort string', () => {
+        const payload = { ...basePayload, adapterPort: 'not-a-number' };
+        expect(() => MessageParser.validateInitPayload(payload))
+          .toThrow("Init payload invalid 'adapterPort'");
+      });
+
+      it('should reject non-boolean string for stopOnEntry', () => {
+        const payload = { ...basePayload, stopOnEntry: 'yes' };
+        expect(() => MessageParser.validateInitPayload(payload))
+          .toThrow("Init payload 'stopOnEntry' must be a boolean if provided");
       });
     });
   });

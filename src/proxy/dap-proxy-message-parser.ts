@@ -70,6 +70,12 @@ export class MessageParser {
       }
     }
 
+    // Coerce adapterPort string → number (Claude Code SSE double-stringify bug)
+    if (typeof obj.adapterPort === 'string') {
+      const parsed = Number(obj.adapterPort);
+      if (!Number.isNaN(parsed)) obj.adapterPort = parsed;
+    }
+
     // Required number field
     if (typeof obj.adapterPort !== 'number' || obj.adapterPort <= 0 || obj.adapterPort > 65535) {
       throw new Error(`Init payload invalid 'adapterPort': ${obj.adapterPort}`);
@@ -78,6 +84,12 @@ export class MessageParser {
     // Optional fields validation
     if (obj.scriptArgs !== undefined && !Array.isArray(obj.scriptArgs)) {
       throw new Error(`Init payload 'scriptArgs' must be an array if provided`);
+    }
+
+    // Coerce boolean strings → booleans (Claude Code SSE double-stringify bug)
+    for (const boolKey of ['stopOnEntry', 'justMyCode', 'dryRunSpawn'] as const) {
+      if (obj[boolKey] === 'true') obj[boolKey] = true;
+      else if (obj[boolKey] === 'false') obj[boolKey] = false;
     }
 
     if (obj.stopOnEntry !== undefined && typeof obj.stopOnEntry !== 'boolean') {
@@ -103,6 +115,11 @@ export class MessageParser {
           throw new Error(`Invalid breakpoint in initialBreakpoints`);
         }
         const bpObj = bp as Record<string, unknown>;
+        // Coerce line string → number (Claude Code SSE double-stringify bug)
+        if (typeof bpObj.line === 'string') {
+          const parsed = Number(bpObj.line);
+          if (!Number.isNaN(parsed)) bpObj.line = parsed;
+        }
         if (typeof bpObj.file !== 'string' || typeof bpObj.line !== 'number') {
           throw new Error(`Breakpoint must have 'file' (string) and 'line' (number)`);
         }

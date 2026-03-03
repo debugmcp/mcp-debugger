@@ -100,6 +100,66 @@ interface ToolArguments {
 }
 
 /**
+ * Schema-driven type coercion for MCP tool arguments.
+ *
+ * Works around a known Claude Code bug (anthropics/claude-code#11359) where
+ * SSE-transport tool arguments arrive as strings instead of their declared
+ * JSON-Schema types.  Called once per request on the fresh args object — no
+ * shared state is mutated.
+ */
+const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 'array'> = {
+  // numbers
+  line: 'number', linesContext: 'number', scope: 'number',
+  frameId: 'number', port: 'number', timeout: 'number',
+  // booleans
+  includeInternals: 'boolean', includeSpecial: 'boolean',
+  stopOnEntry: 'boolean', justMyCode: 'boolean',
+  dryRunSpawn: 'boolean', terminateProcess: 'boolean',
+  // objects
+  dapLaunchArgs: 'object', adapterLaunchConfig: 'object',
+  // arrays
+  args: 'array', sourcePaths: 'array',
+};
+
+function coerceToolArguments(args: Record<string, unknown>): Record<string, unknown> {
+  for (const [key, expectedType] of Object.entries(TOOL_ARG_EXPECTED_TYPES)) {
+    const val = args[key];
+    if (val === undefined) continue;
+
+    // Handle "null" string → undefined for optional params
+    if (val === 'null') { args[key] = undefined; continue; }
+
+    if (typeof val !== 'string') continue; // already correct type
+
+    switch (expectedType) {
+      case 'number': {
+        if (val !== '') {
+          const n = Number(val);
+          if (!Number.isNaN(n)) args[key] = n;
+        }
+        break;
+      }
+      case 'boolean':
+        if (val === 'true') args[key] = true;
+        else if (val === 'false') args[key] = false;
+        break;
+      case 'object':
+      case 'array':
+        try {
+          const parsed = JSON.parse(val);
+          if (expectedType === 'object' && typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            args[key] = parsed;
+          } else if (expectedType === 'array' && Array.isArray(parsed)) {
+            args[key] = parsed;
+          }
+        } catch { /* leave as-is, downstream validation will catch */ }
+        break;
+    }
+  }
+  return args;
+}
+
+/**
  * Main Debug MCP Server class
  */
 export class DebugMcpServer {
@@ -532,7 +592,7 @@ export class DebugMcpServer {
       CallToolRequestSchema,
       async (request): Promise<ServerResult> => {
         const toolName = request.params.name;
-        const args = request.params.arguments as ToolArguments; 
+        const args = coerceToolArguments((request.params.arguments ?? {}) as Record<string, unknown>) as ToolArguments;
 
         // Log tool call with structured logging
         this.logger.info('tool:call', {
