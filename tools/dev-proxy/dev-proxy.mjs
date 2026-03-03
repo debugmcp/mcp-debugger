@@ -351,7 +351,25 @@ class BackendManager {
     } else {
       // SSE mode: connect to running HTTP server
       const sseUrl = new URL(`http://localhost:${BACKEND_PORT}/sse`);
-      const transport = new SSEClientTransport(sseUrl);
+
+      // Block EventSource auto-reconnection: eventsource@4.0.0 reconnects when the
+      // SSE stream reader returns done, creating a phantom 2nd session that overwrites
+      // the 1st transport in Protocol._transport. Returning 204 on reconnect attempts
+      // causes EventSource to permanently close (no further reconnection per SSE spec).
+      let initialFetchDone = false;
+      const transport = new SSEClientTransport(sseUrl, {
+        eventSourceInit: {
+          fetch: async (url, init) => {
+            if (initialFetchDone) {
+              log('Blocking EventSource auto-reconnection (returning 204)');
+              return new Response(null, { status: 204 });
+            }
+            const resp = await globalThis.fetch(url, init);
+            initialFetchDone = true;
+            return resp;
+          },
+        },
+      });
 
       transport.onerror = (err) => {
         log(`SSE transport error: ${err.message}`);

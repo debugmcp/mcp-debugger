@@ -55,15 +55,26 @@ export function createSSEApp(
     try {
       // Create SSE transport with the response object
       const transport = new SSEServerTransport('/sse', res as ServerResponse);
-      
+
+      // Block EventSource phantom reconnection: eventsource@4.0.0 auto-reconnects
+      // ~3s after initial connection when the SSE stream reader returns done.
+      // This creates a 2nd session that overwrites Protocol._transport, so responses
+      // to the 1st session are lost and tool calls timeout.
+      // Returning 204 causes EventSource to permanently close (per SSE spec).
+      if (sharedDebugServer.server.transport) {
+        logger.info('Blocking phantom SSE reconnection (returning 204)');
+        res.status(204).end();
+        return;
+      }
+
       // Connect the shared server to the transport (this automatically calls start())
       await sharedDebugServer.server.connect(transport);
-      
+
       // Store the transport by session ID
       const sessionId = transport.sessionId;
       const sessionData: SessionData = { transport, isClosing: false };
       sseTransports.set(sessionId, sessionData);
-      
+
       logger.info(`SSE connection established: ${sessionId}`);
       
       // Keep the connection alive with periodic pings
