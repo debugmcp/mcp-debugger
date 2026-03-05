@@ -168,8 +168,8 @@ export class AdapterLoader {
   // Try multiple fallback locations (node_modules first, then packages for non-container/dev images)
   private getFallbackModulePaths(language: string): string[] {
     return [
-      new URL(`../node_modules/@debugmcp/adapter-${language}/dist/index.js`, import.meta.url).href,
-      new URL(`../packages/adapter-${language}/dist/index.js`, import.meta.url).href
+      new URL(`../../node_modules/@debugmcp/adapter-${language}/dist/index.js`, import.meta.url).href,
+      new URL(`../../packages/adapter-${language}/dist/index.js`, import.meta.url).href
     ];
   }
  
