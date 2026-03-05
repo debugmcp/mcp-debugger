@@ -106,6 +106,21 @@ describe('SessionStoreFactory', () => {
       expect(store).toBeInstanceOf(SessionStore);
     });
 
+    it('should create dotnet session using DotnetAdapterPolicy', () => {
+      const factory = new SessionStoreFactory();
+      const store = factory.create();
+
+      const session = store.createSession({
+        language: DebugLanguage.DOTNET,
+        name: 'dotnet-session'
+      });
+
+      expect(session).toBeDefined();
+      expect(session.language).toBe(DebugLanguage.DOTNET);
+      expect(session.name).toBe('dotnet-session');
+      expect(store.has(session.id)).toBe(true);
+    });
+
     it('should create stores that maintain independent state', () => {
       const factory = new SessionStoreFactory();
       const store1 = factory.create();
