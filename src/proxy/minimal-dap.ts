@@ -413,7 +413,11 @@ export class MinimalDapClient extends EventEmitter {
       
       this.socket.on('error', (err) => {
         logger.error('[MinimalDapClient] Socket error:', err);
-        
+
+        // After shutdown, all listeners are stripped — emitting 'error' would
+        // crash the child process with an uncaught exception. Bail out early.
+        if (this.isDisconnectingOrDisconnected) return;
+
         // Only emit error events after successful connection
         // During connection, just reject the promise
         if (connected) {

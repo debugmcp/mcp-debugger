@@ -1308,7 +1308,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
   });
 
   describe('Operation Success Scenarios', () => {
-    it('continues execution without forcing session into RUNNING state immediately', async () => {
+    it('sets RUNNING state before sending DAP continue request', async () => {
       mockSession.state = SessionState.PAUSED;
       mockProxyManager.isRunning.mockReturnValue(true);
       mockProxyManager.getCurrentThreadId.mockReturnValue(7);
@@ -1318,8 +1318,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('continue', { threadId: 7 });
       expect(result.success).toBe(true);
-      expect(mockSessionStore.updateState).not.toHaveBeenCalledWith('test-session', SessionState.RUNNING);
-      expect(mockSession.state).toBe(SessionState.PAUSED);
+      expect(mockSessionStore.updateState).toHaveBeenCalledWith('test-session', SessionState.RUNNING);
     });
   });
 

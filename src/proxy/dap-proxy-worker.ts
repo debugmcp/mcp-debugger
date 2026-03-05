@@ -341,7 +341,14 @@ export class DapProxyWorker {
     if (!spawnConfig) {
       throw new Error(`Adapter policy ${this.adapterPolicy.name} does not provide spawn configuration`);
     }
-    
+
+    // In container mode, default adapter cwd to workspace root so that
+    // relative paths in DAP launch args (classpath, cwd, etc.) resolve
+    // against the mounted project directory rather than /app.
+    if (process.env.MCP_WORKSPACE_ROOT && !spawnConfig.cwd) {
+      spawnConfig.cwd = process.env.MCP_WORKSPACE_ROOT;
+    }
+
     // Spawn adapter process using the config from the policy
     const spawnResult = await this.processManager!.spawn(spawnConfig);
 

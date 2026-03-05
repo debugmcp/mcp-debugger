@@ -51,6 +51,10 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       (config as unknown as { enableDynamicLoading?: boolean })?.enableDynamicLoading ??
       (process.env.MCP_CONTAINER === 'true')
     );
+
+    // Safety handler: prevent crash from async dispose error events
+    // (e.g. adapter.dispose() failures in unregister/disposeAll/setupAutoDispose)
+    this.on('error', () => {});
   }
 
   /**

@@ -403,9 +403,13 @@ class BackendManager {
 
   async _killChild() {
     // Only used for SSE mode (manually spawned child)
-    if (!this.child) return;
+    if (!this.child) {
+      // Even with no child, a Docker container may be orphaned on our port
+      await this._killDockerContainer();
+      return;
+    }
 
-    return new Promise((resolve) => {
+    await new Promise((resolve) => {
       const child = this.child;
       if (!child || child.exitCode !== null) {
         this.child = null;
@@ -416,8 +420,8 @@ class BackendManager {
       const forceKillTimer = setTimeout(() => {
         try {
           if (process.platform === 'win32') {
-            // On Windows, use taskkill to force-terminate the process tree
-            execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' });
+            // On Windows, use taskkill to force-terminate the process (no /T to avoid killing unrelated trees)
+            execSync(`taskkill /pid ${child.pid} /F`, { stdio: 'ignore' });
           } else {
             child.kill('SIGKILL');
           }
@@ -435,7 +439,7 @@ class BackendManager {
       // Graceful kill (on Windows, use /F immediately — WM_CLOSE is ignored by console Node processes)
       try {
         if (process.platform === 'win32') {
-          execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' });
+          execSync(`taskkill /pid ${child.pid} /F`, { stdio: 'ignore' });
         } else {
           child.kill('SIGTERM');
         }
@@ -445,6 +449,9 @@ class BackendManager {
         resolve();
       }
     });
+
+    // After killing the CLI process, also stop any Docker container on our port
+    await this._killDockerContainer();
   }
 
   async _forceKillPid(pid) {
@@ -454,7 +461,7 @@ class BackendManager {
       // Give the abort signal a moment to propagate
       await new Promise((r) => setTimeout(r, 500));
       if (process.platform === 'win32') {
-        execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
+        execSync(`taskkill /pid ${pid} /F`, { stdio: 'ignore' });
       } else {
         process.kill(pid, 0); // Check if alive (throws if dead)
         process.kill(pid, 'SIGKILL');
@@ -467,6 +474,9 @@ class BackendManager {
   async _ensurePortFree() {
     // Only needed for SSE mode — check if BACKEND_PORT is held by an orphan and kill it
     if (this.backendTransport !== 'sse') return;
+
+    // Kill any Docker container publishing on our port (survives CLI process kill)
+    await this._killDockerContainer();
 
     try {
       let pid = null;
@@ -490,6 +500,18 @@ class BackendManager {
       }
 
       if (pid && pid > 0) {
+        // Validate it's a node process before killing (safety: don't kill Docker, etc.)
+        if (process.platform === 'win32') {
+          try {
+            const taskInfo = execSync(`tasklist /fi "PID eq ${pid}" /fo csv /nh`,
+              { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+            if (!taskInfo.toLowerCase().includes('node')) {
+              log(`Port ${BACKEND_PORT} held by non-node PID ${pid} — skipping kill`);
+              return;
+            }
+          } catch { /* proceed with kill if tasklist fails */ }
+        }
+
         log(`Port ${BACKEND_PORT} is held by PID ${pid} — killing orphan`);
         await this._forceKillPid(pid);
         // Give OS a moment to release the port
@@ -497,6 +519,27 @@ class BackendManager {
       }
     } catch {
       // No process holding the port, or command not available — proceed
+    }
+  }
+
+  async _killDockerContainer() {
+    // Only relevant when the backend command is "docker run ..."
+    if (!BACKEND_CMD || !BACKEND_CMD.match(/^docker\s+run/)) return;
+
+    try {
+      const ids = execSync(
+        `docker ps -q --filter publish=${BACKEND_PORT}`,
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      ).trim();
+
+      for (const id of ids.split('\n').filter(Boolean)) {
+        log(`Killing Docker container ${id} on port ${BACKEND_PORT}`);
+        try { execSync(`docker kill ${id}`, { stdio: 'ignore' }); } catch { /* already dead */ }
+      }
+
+      if (ids) await new Promise((r) => setTimeout(r, 1000));
+    } catch {
+      // docker not available or no containers — proceed
     }
   }
 }

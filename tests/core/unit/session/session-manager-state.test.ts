@@ -48,11 +48,11 @@ describe('SessionManager - State Machine Integrity', () => {
     // INITIALIZING → PAUSED (because stopOnEntry=true by default)
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
     
-    // PAUSED → RUNNING
+    // PAUSED → RUNNING (continue sets RUNNING before DAP request; continued event is a no-op)
     dependencies.mockProxyManager.simulateStopped(1, 'entry');
     await sessionManager.continue(session.id);
     dependencies.mockProxyManager.simulateEvent('continued');
-    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
+    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.RUNNING);
     
     // RUNNING → STOPPED (session removed from store after close)
     await sessionManager.closeSession(session.id);

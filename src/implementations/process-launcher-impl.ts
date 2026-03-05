@@ -268,6 +268,12 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
       { event: 'message', listener: messageHandler }
     );
 
+    // Permanent safety handler: prevents Node.js from throwing when the raw
+    // child process emits 'error' after dispose() strips tracked listeners.
+    // This handles late IPC/OS errors during process teardown (e.g. Java JDI bridge).
+    // NOT tracked in childProcessListeners so it survives dispose().
+    childProcess.on('error', () => {});
+
     // NO promise creation here - wait for waitForInitialization()
 
     // Set up early exit handler

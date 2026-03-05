@@ -64,12 +64,16 @@ async function waitForPausedState(
   client: Client,
   sessionId: string,
   maxAttempts = 20,
-  intervalMs = 500
+  intervalMs = 500,
+  validate?: (frames: Array<{ file?: string; name?: string; line?: number }>) => boolean
 ): Promise<{ stackFrames?: Array<{ file?: string; name?: string; line?: number }> } | null> {
   for (let i = 0; i < maxAttempts; i++) {
     const result = await callToolSafely(client, 'get_stack_trace', { sessionId });
     if (result.stackFrames && (result.stackFrames as any[]).length > 0) {
-      return result as { stackFrames: Array<{ file?: string; name?: string; line?: number }> };
+      const frames = result.stackFrames as Array<{ file?: string; name?: string; line?: number }>;
+      if (!validate || validate(frames)) {
+        return result as { stackFrames: Array<{ file?: string; name?: string; line?: number }> };
+      }
     }
     await new Promise(r => setTimeout(r, intervalMs));
   }
@@ -273,7 +277,9 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       // 5. Poll for breakpoint hit (non-empty stack frames)
       //    InfiniteWait.main() sleeps 2s then calls compute() — breakpoint should fire.
       console.log('[Java Attach Test] Waiting for breakpoint hit...');
-      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 20, 500,
+        (frames) => frames[0]?.name?.toLowerCase().includes('compute') ?? false
+      );
 
       // HARD ASSERTION: Breakpoint must fire
       expect(stackResponse).not.toBeNull();
@@ -431,7 +437,9 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
 
       // 5. Wait for FIRST breakpoint hit at compute():14
       console.log('[Attach BP-While-Paused] Waiting for first breakpoint (line 14)...');
-      const stack1 = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+      const stack1 = await waitForPausedState(mcpClient!, sessionId, 20, 500,
+        (frames) => frames[0]?.name?.toLowerCase().includes('compute') ?? false
+      );
       expect(stack1).not.toBeNull();
       const frames1 = stack1!.stackFrames!;
       expect(frames1.length).toBeGreaterThan(0);
@@ -457,7 +465,9 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
 
       // 8. Wait for SECOND breakpoint hit at format():19
       console.log('[Attach BP-While-Paused] Waiting for second breakpoint (line 19)...');
-      const stack2 = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+      const stack2 = await waitForPausedState(mcpClient!, sessionId, 20, 500,
+        (frames) => frames[0]?.name?.toLowerCase().includes('format') ?? false
+      );
 
       // HARD ASSERTION: Second breakpoint must fire
       expect(stack2).not.toBeNull();

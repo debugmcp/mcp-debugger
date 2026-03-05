@@ -25,6 +25,7 @@ COPY packages/adapter-python/package.json ./packages/adapter-python/package.json
 COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/package.json
 COPY packages/adapter-rust/package.json ./packages/adapter-rust/package.json
 COPY packages/adapter-go/package.json ./packages/adapter-go/package.json
+COPY packages/adapter-java/package.json ./packages/adapter-java/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
@@ -49,6 +50,7 @@ COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
 COPY packages/adapter-javascript/tsconfig*.json ./packages/adapter-javascript/
 COPY packages/adapter-rust/tsconfig*.json ./packages/adapter-rust/
 COPY packages/adapter-go/tsconfig*.json ./packages/adapter-go/
+COPY packages/adapter-java/tsconfig*.json ./packages/adapter-java/
 
 COPY src ./src
 COPY scripts ./scripts/
@@ -81,7 +83,11 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/ && \
     cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
-    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/
+    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/ && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-java && \
+    cp -r /app/packages/adapter-java/dist /app/node_modules/@debugmcp/adapter-java/ && \
+    cp -r /app/packages/adapter-java/java /app/node_modules/@debugmcp/adapter-java/ && \
+    cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/
 
 # Stage 2: Create runtime image with full LLDB dependencies
 FROM ubuntu:24.04
@@ -110,7 +116,8 @@ RUN apt-get update && \
       python3-venv \
       libstdc++6 \
       lldb \
-      python3-lldb && \
+      python3-lldb \
+      openjdk-21-jdk-headless && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     pip3 install --break-system-packages --no-cache-dir "debugpy>=1.8.14"
@@ -129,6 +136,12 @@ COPY --from=builder /app/dist/proxy/utils /app/dist/proxy/utils
 # Copy ONLY the runtime adapter packages (not entire node_modules)
 # These are loaded dynamically at runtime via import()
 COPY --from=builder /app/node_modules/@debugmcp /app/node_modules/@debugmcp
+
+# Pre-compile JDI bridge for instant Java debugging (no on-demand compilation at runtime)
+RUN mkdir -p /app/node_modules/@debugmcp/adapter-java/java/out && \
+    javac --release 21 \
+      /app/node_modules/@debugmcp/adapter-java/java/JdiDapServer.java \
+      -d /app/node_modules/@debugmcp/adapter-java/java/out
 
 # Copy ONLY the production runtime dependencies needed by adapters
 # Use a minimal set - the bundle already includes most dependencies
