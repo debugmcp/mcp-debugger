@@ -35,6 +35,7 @@ import {
   RustAdapterPolicy,
   GoAdapterPolicy,
   JavaAdapterPolicy,
+  DotnetAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 
@@ -122,6 +123,9 @@ export class DapProxyWorker {
     } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
       /* istanbul ignore next -- adapter-specific: requires Java adapter */
       return JavaAdapterPolicy;
+    } else if (DotnetAdapterPolicy.matchesAdapter(adapterCommand)) {
+      /* istanbul ignore next -- adapter-specific: requires .NET adapter */
+      return DotnetAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
       /* istanbul ignore next -- adapter-specific: requires Mock adapter */
       return MockAdapterPolicy;
