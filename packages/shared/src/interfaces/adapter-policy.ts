@@ -298,6 +298,10 @@ export interface AdapterPolicy {
     /** Whether the adapter sends 'initialized' before receiving 'launch', requiring
      *  the proxy to defer initialized handling and send launch before configurationDone. */
     sendLaunchBeforeConfig?: boolean;
+    /** Whether the adapter requires attach to be sent BEFORE the initialized event.
+     *  Some adapters send initialized only AFTER processing the attach request, so waiting
+     *  for initialized before sending attach causes a deadlock. */
+    sendAttachBeforeInitialized?: boolean;
   };
 
   /**

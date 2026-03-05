@@ -150,6 +150,7 @@
     "winston": "^3.11.0"
   },
   "optionalDependencies": {
+    "@debugmcp/adapter-dotnet": "workspace:*",
     "@debugmcp/adapter-go": "workspace:*",
     "@debugmcp/adapter-java": "workspace:*",
     "@debugmcp/adapter-javascript": "workspace:*",

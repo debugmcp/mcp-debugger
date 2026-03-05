@@ -407,9 +407,30 @@ export class DapProxyWorker {
           this.adapterPolicy.getDapAdapterConfiguration().type
         );
 
-        /* istanbul ignore next -- attach mode: covered by E2E/integration tests with Java adapter */
-        if (isAttachMode) {
-          // ATTACH MODE: Wait for "initialized" event BEFORE sending attach
+        if (isAttachMode && initBehavior.sendAttachBeforeInitialized) {
+          // ATTACH-FIRST MODE: Send attach immediately, then wait for initialized
+          // Some adapters only send 'initialized' AFTER processing the attach request
+          const attachPayload = payload.launchConfig || {};
+          const payloadKeys = Object.keys(attachPayload);
+          const hasSymbolOpts = 'symbolOptions' in (attachPayload as Record<string, unknown>);
+          this.logger!.info(`[Worker] Attach-first mode — sending attach. Keys: ${payloadKeys.join(', ')}, symbolOptions: ${hasSymbolOpts ? JSON.stringify((attachPayload as Record<string, unknown>).symbolOptions) : 'absent'}`);
+          await this.connectionManager!.sendAttachRequest(
+            this.dapClient,
+            attachPayload
+          );
+
+          this.logger!.info('[Worker] Attach sent, waiting for "initialized" event');
+          await Promise.race([
+            this.initializedEventPromise!,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout waiting for initialized event after attach')), 15000)
+            )
+          ]);
+
+          this.deferInitializedHandling = false;
+          await this.handleInitializedEvent();
+        } else if (isAttachMode) {
+          // STANDARD ATTACH MODE: Wait for "initialized" event BEFORE sending attach
           // Some adapters send "initialized" after initialize response, before attach
           this.logger!.info('[Worker] Waiting for "initialized" event before sending attach');
           await Promise.race([

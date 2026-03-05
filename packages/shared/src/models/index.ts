@@ -84,6 +84,7 @@ export enum DebugLanguage {
   RUST = 'rust',
   GO = 'go',
   JAVA = 'java',
+  DOTNET = 'dotnet',
   MOCK = 'mock',  // Mock adapter for testing
 }
 

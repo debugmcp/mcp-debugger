@@ -20,6 +20,7 @@ import {
   RustAdapterPolicy,
   GoAdapterPolicy,
   JavaAdapterPolicy,
+  DotnetAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
@@ -80,6 +81,8 @@ export class SessionStore {
         return GoAdapterPolicy;
       case DebugLanguage.JAVA:
         return JavaAdapterPolicy;
+      case DebugLanguage.DOTNET:
+        return DotnetAdapterPolicy;
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
       default:
