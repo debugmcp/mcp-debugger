@@ -18,6 +18,7 @@ import {
   PythonAdapterPolicy,
   JsDebugAdapterPolicy,
   RustAdapterPolicy,
+  DotnetAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
@@ -74,6 +75,8 @@ export class SessionStore {
         return JsDebugAdapterPolicy;
       case DebugLanguage.RUST:
         return RustAdapterPolicy;
+      case DebugLanguage.DOTNET:
+        return DotnetAdapterPolicy;
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
       default:
