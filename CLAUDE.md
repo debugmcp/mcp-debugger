@@ -233,7 +233,7 @@ Sessions use a **dual-state model**:
 
 ### Adapter System
 - `src/adapters/adapter-registry.ts` - Adapter lifecycle management
-- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (5 known adapters)
+- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (6 known adapters)
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter (debugpy)
 - `packages/adapter-javascript/` - JavaScript/Node.js debug adapter (js-debug)

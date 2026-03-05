@@ -7,16 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-03-05
+
 ### Added
+- **Go debugging support** – full Delve DAP adapter with debug, test, exec, replay, and core modes, goroutine-aware stack traces, and automatic `dlv` detection (contributed by [@swinyx](https://github.com/swinyx))
 - **Java debugging support** – JDI bridge (`JdiDapServer.java`) with launch and attach modes, variable inspection, and deferred breakpoints via ClassPrepareRequest
 - **Java attach mode** – connect to running JVMs via JDWP agent for debugging servers and complex applications
 - **Java expression evaluation** – full expression evaluator supporting field access, method calls, array indexing, arithmetic, string concatenation, casting, `instanceof`, ternary, and unary operators
 - **Java conditional breakpoints** – conditions evaluated server-side via the expression evaluator
 - **Java documentation** – `docs/java/README.md` user guide covering prerequisites, JDI bridge architecture, and troubleshooting
+- **CI Go + Java toolchains** – workflow now installs Go 1.21, Delve, and JDK 21 for cross-platform E2E testing
+- **Dev proxy** – lightweight MCP proxy for hot-reloading mcp-debugger during development without restarting Claude Code
+- **Dev proxy STDIO backend transport mode** – STDIO transport option for the dev proxy
 
 ### Changed
 - **Java backend** – replaced KDA (kotlin-debug-adapter) and stdio-tcp-bridge with a single JDI bridge (`JdiDapServer.java`) using `com.sun.jdi.*` directly; zero external dependencies, compiles on first use
 - **Java minimum JDK** – bumped from JDK 11+ to JDK 21+ to match `--release 21` compilation target
+- Removed dead `sendConfigDoneWithAttach`/`sendConfigDoneWithLaunch` code paths
 
 ### Fixed
 - **Java inner class breakpoints** – fixed JDWP ClassPrepareRequest filter patterns (`*ClassName$*` silently fails; changed to `ClassName$*`)
@@ -28,22 +35,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Java short-circuit evaluation** – `&&` and `||` now properly short-circuit
 - **Java thread discovery** – discover JVM threads via DAP threads request instead of hardcoding threadId=1
 - **Java variable access** – document and enforce `javac -g` requirement for LocalVariableTable (JDI needs it for local variable inspection)
-
-## [0.18.0] - 2026-02-16
-
-### Added
-- **Go debugging support** – full Delve DAP adapter with debug, test, exec, replay, and core modes, goroutine-aware stack traces, and automatic `dlv` detection (contributed by [@swinyx](https://github.com/swinyx))
-- **CI Go toolchain** – workflow now installs Go 1.21 and Delve for cross-platform E2E testing
-- **Dev proxy** – lightweight MCP proxy for hot-reloading mcp-debugger during development without restarting Claude Code
-
-### Removed
-- **Java adapter** – jdb text-parsing approach proved too fragile for reliable breakpoint handling
-
-### Fixed
+- Block EventSource phantom reconnection in SSE transport
+- Coerce stringified tool arguments from SSE transport
+- Docker Java support, crash safety, and continue-execution state race
+- Auto-detach safety for attach sessions
+- Prevent orphan child processes from holding ports after SSE crash
+- Prevent SSE backend from crashing immediately after startup
+- Two-phase initialized event handling for Delve on Windows
+- Replace printf-generated Docker entry.sh with version-controlled script
+- Downgrade missing debugpy to warning for virtualenv support
+- Prevent Docker path double-prefixing with idempotent resolution
 - Bundled Go adapter and mock-adapter-process for npx distribution
 - Resolved `workspace:*` dependency resolution during `pnpm pack`
 - Fixed cross-test pollution from `process.env.PATH` in Go/Python unit tests
 - Added Go adapter to Dockerfile and fixed Windows volume mount paths
+
+### Removed
+- **Java jdb adapter** – jdb text-parsing approach proved too fragile; replaced by JDI bridge
 
 ## [0.17.0] - 2025-11-22
 

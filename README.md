@@ -16,11 +16,11 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.18.0: Go debugging support! Debug Go programs with Delve.
+> 🆕 Version 0.18.0: Java debugging via JDI bridge with launch and attach modes! Plus Go debugging with Delve.
 
-> 🆕 Version 0.17.0: Rust debugging support (Alpha)! Debug Rust programs with CodeLLDB, including Cargo projects, async code, and full variable inspection—plus step commands now return the active source context so agents keep their place automatically.
+> 🆕 Version 0.17.0: Rust debugging support! Debug Rust programs with CodeLLDB on Linux/macOS, including Cargo projects, async code, and full variable inspection—plus step commands now return the active source context so agents keep their place automatically.
 
-> 🔥 Version 0.16.0: JavaScript/Node.js debugging support (Alpha)! Full debugging capabilities with bundled js-debug, TypeScript support, and zero-runtime dependencies via improved npx distribution.
+> 🔥 Version 0.16.0: JavaScript/Node.js debugging support! Full debugging capabilities with bundled js-debug, TypeScript support, and zero-runtime dependencies via improved npx distribution.
 
 > 🎬 **Demo Video**: See the debugger in action!
 > 
@@ -39,9 +39,10 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
-- 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger (Alpha)
-- 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Alpha)
+- 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger
+- 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Linux/macOS; Windows not supported)
 - 🐹 **Go debugging via Delve** – Full DAP support for Go programs
+- ☕ **Java debugging via JDI bridge** – Launch and attach modes with JDK 21+
 > WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
 > NOTE: The published npm bundle ships the Linux x64 CodeLLDB runtime to stay under registry size limits. On macOS or Windows, point the `CODELLDB_PATH` environment variable at an existing CodeLLDB installation (for example from the VSCode extension) or clone the repo and run `pnpm --filter @debugmcp/adapter-rust run build:adapter` to vendor your platform binaries locally.
 
@@ -60,7 +61,7 @@ The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (vi
 - 🔌 **STDIO and SSE transport modes** – Works with any MCP client
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via tsup (~3 MB)
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
-- 📊 **1019 tests passing** – battle-tested end-to-end
+- 📊 **1266+ tests passing** – battle-tested end-to-end
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
 - 🛡️ **Path validation** – Prevents crashes from non-existent files
@@ -109,7 +110,7 @@ cd mcp-debugger
 docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
-> ⚠️ The Docker image intentionally ships only the Python and JavaScript adapters. Rust debugging requires the local, SSE, or packed deployments where the adapter runs next to your toolchain.
+> ⚠️ The Docker image ships Python, JavaScript, Go, and Java adapters. Rust debugging requires the local, SSE, or packed deployments where the adapter runs next to your toolchain.
 
 ### Using npm
 
@@ -141,7 +142,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",  // or "javascript", "rust", "go", or "mock" for testing
+  "language": "python",  // or "javascript", "rust", "go", "java", or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -168,19 +169,23 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 |------|-------------|--------|
 | `create_debug_session` | Create a new debugging session | ✅ Implemented |
 | `list_debug_sessions` | List all active sessions | ✅ Implemented |
+| `list_supported_languages` | Show available language adapters | ✅ Implemented |
 | `set_breakpoint` | Set a breakpoint in a file | ✅ Implemented |
 | `start_debugging` | Start debugging a script | ✅ Implemented |
+| `attach_to_process` | Attach debugger to a running process | ✅ Implemented |
+| `detach_from_process` | Detach debugger from a process | ✅ Implemented |
 | `get_stack_trace` | Get the current stack trace | ✅ Implemented |
 | `get_scopes` | Get variable scopes for a frame | ✅ Implemented |
 | `get_variables` | Get variables in a scope | ✅ Implemented |
+| `get_local_variables` | Get local variables in current frame | ✅ Implemented |
 | `step_over` | Step over the current line | ✅ Implemented |
 | `step_into` | Step into a function | ✅ Implemented |
 | `step_out` | Step out of a function | ✅ Implemented |
 | `continue_execution` | Continue running | ✅ Implemented |
-| `close_debug_session` | Close a session | ✅ Implemented |
-| `pause_execution` | Pause running execution | ❌ Not Implemented |
-| `evaluate_expression` | Evaluate expressions | ❌ Not Implemented |
+| `pause_execution` | Pause running execution | ✅ Implemented |
+| `evaluate_expression` | Evaluate expressions in debug context | ✅ Implemented |
 | `get_source_context` | Get source code context | ✅ Implemented |
+| `close_debug_session` | Close a session | ✅ Implemented |
 
 > 📸 **Screenshot**: *Multi-Session Debugging*
 > 
@@ -206,14 +211,14 @@ Version 0.10.0 introduces a clean adapter pattern that separates language-agnost
                     │ ProxyManager │◀─────│ Language Adapter│
                     └──────────────┘      └─────────────────┘
                                                    │
-                          ┌──────────────┴──────────────────────────────────┐
-                          │                                                  │
-              ┌───────────┼───────────┬───────────┬───────────┐              │
-              │           │           │           │           │              │
-        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
-        │Python    ││JavaScript││Rust      ││Go        ││Mock      │
-        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
-        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
+                          ┌──────────────┴──────────────────────────────────────────┐
+                          │                                                          │
+              ┌───────────┼───────────┬───────────┬───────────┬───────────┐          │
+              │           │           │           │           │           │          │
+        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
+        │Python    ││JavaScript││Rust      ││Go        ││Java      ││Mock      │
+        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
+        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
 ```
 
 ### Adding Language Support
@@ -366,6 +371,7 @@ Then get the local variables:
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
 - 🟨 [JavaScript Debugging Guide](./docs/javascript/README.md) – JavaScript/TypeScript features
 - 🐹 [Go Debugging Guide](./docs/go/README.md) – Go debugging with Delve
+- ☕ [Java Debugging Guide](./docs/java/README.md) – Java debugging with JDI bridge
 - [Rust Debugging on Windows](docs/rust-debugging-windows.md) - Toolchain requirements and troubleshooting
 - 🤖 [AI Integration Guide](./docs/ai-integration.md) – Leverage AI-friendly features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
@@ -434,11 +440,12 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.18.0 with Go debugging support via Delve, Rust adapter (Alpha), and polished multi-language distribution
-- ✅ **1569 tests** passing end-to-end
+- ✅ **Production Ready**: v0.18.0 with six language adapters and polished multi-language distribution
 - ✅ **Clean architecture** with adapter pattern
-- 🟨 **JavaScript/Node.js**: Alpha support with full debugging loop
+- ✅ **JavaScript/Node.js**: Full debugging loop via js-debug
 - ✅ **Go**: Full debugging support via Delve DAP
+- ✅ **Java**: Launch and attach modes via JDI bridge
+- 🦀 **Rust**: Full support on Linux/macOS; Windows not supported (MSVC/CodeLLDB incompatibility)
 - 🚧 **Coming Soon**: Ruby, C/C++, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
 

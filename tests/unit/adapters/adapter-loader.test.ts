@@ -340,7 +340,7 @@ describe('AdapterLoader', () => {
       expect(javaAdapter).toEqual({
         name: 'java',
         packageName: '@debugmcp/adapter-java',
-        description: 'Java debugger using kotlin-debug-adapter',
+        description: 'Java debugger using JDI bridge',
         installed: false
       });
     });
