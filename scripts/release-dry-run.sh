@@ -94,82 +94,36 @@ else
   warn "Not logged in to npm locally"
 fi
 
-# Test the GitHub secret NPM_TOKEN if gh is available
 if command -v gh > /dev/null 2>&1; then
-  # Check secret exists
-  if gh secret list 2>/dev/null | grep -q "NPM_TOKEN"; then
-    pass "GitHub secret NPM_TOKEN exists"
+  # Check secrets exist
+  SECRETS_LIST=$(gh secret list 2>/dev/null || echo "")
+  for secret in NPM_TOKEN DOCKER_USERNAME DOCKER_PASSWORD PYPI_TOKEN; do
+    if echo "$SECRETS_LIST" | grep -q "^${secret}"; then
+      pass "GitHub secret $secret exists"
+    else
+      fail "GitHub secret $secret not found"
+    fi
+  done
 
-    # Fetch the token value isn't possible via gh, but we can check
-    # if the user has it locally in an env var to validate it
-    if [[ -n "${NPM_TOKEN:-}" ]]; then
-      # Test token against npm registry
-      NPM_TOKEN_USER=$(npm whoami --registry https://registry.npmjs.org 2>/dev/null \
-        --//registry.npmjs.org/:_authToken="$NPM_TOKEN") || true
-      if [[ -n "$NPM_TOKEN_USER" ]]; then
-        pass "NPM_TOKEN is valid (user: $NPM_TOKEN_USER)"
+  # Trigger the validate-secrets workflow to actually test tokens against live APIs
+  echo ""
+  echo "  Triggering validate-secrets workflow on GitHub Actions..."
+  if gh workflow run validate-secrets.yml 2>/dev/null; then
+    sleep 3
+    # Get the run ID of the workflow we just triggered
+    RUN_ID=$(gh run list --workflow=validate-secrets.yml --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
+    if [[ -n "$RUN_ID" ]]; then
+      echo "  Waiting for token validation (run $RUN_ID)..."
+      if gh run watch "$RUN_ID" --exit-status > /dev/null 2>&1; then
+        pass "All release tokens validated by GitHub Actions"
       else
-        fail "NPM_TOKEN is set but invalid/expired — regenerate at npmjs.com"
+        fail "Token validation failed — run: gh run view $RUN_ID --log"
       fi
     else
-      warn "Set NPM_TOKEN env var to validate the token locally"
-      echo "       NPM_TOKEN=<your-token> npm run release:dry-run"
+      warn "Could not find workflow run — check manually: gh run list --workflow=validate-secrets.yml"
     fi
   else
-    fail "GitHub secret NPM_TOKEN not found"
-  fi
-
-  # Check Docker Hub credentials
-  if gh secret list 2>/dev/null | grep -q "DOCKER_USERNAME"; then
-    pass "GitHub secret DOCKER_USERNAME exists"
-  else
-    fail "GitHub secret DOCKER_USERNAME not found"
-  fi
-  if gh secret list 2>/dev/null | grep -q "DOCKER_PASSWORD"; then
-    pass "GitHub secret DOCKER_PASSWORD exists"
-  else
-    fail "GitHub secret DOCKER_PASSWORD not found"
-  fi
-
-  if [[ -n "${DOCKER_USERNAME:-}" && -n "${DOCKER_PASSWORD:-}" ]]; then
-    if echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin > /dev/null 2>&1; then
-      pass "Docker Hub credentials are valid"
-      docker logout > /dev/null 2>&1 || true
-    else
-      fail "Docker Hub credentials are invalid — check DOCKER_USERNAME/DOCKER_PASSWORD"
-    fi
-  elif command -v docker > /dev/null 2>&1; then
-    warn "Set DOCKER_USERNAME + DOCKER_PASSWORD env vars to validate Docker credentials"
-  fi
-
-  # Check PyPI token
-  if gh secret list 2>/dev/null | grep -q "PYPI_TOKEN"; then
-    pass "GitHub secret PYPI_TOKEN exists"
-  else
-    fail "GitHub secret PYPI_TOKEN not found"
-  fi
-
-  if [[ -n "${PYPI_TOKEN:-}" ]]; then
-    # PyPI tokens start with "pypi-" — basic format check plus API validation
-    if [[ "$PYPI_TOKEN" == pypi-* ]]; then
-      pass "PYPI_TOKEN has valid format (pypi-...)"
-      # Test token by hitting the simple API with authentication
-      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-        -H "Authorization: Bearer $PYPI_TOKEN" \
-        "https://upload.pypi.org/legacy/" 2>/dev/null) || true
-      if [[ "$HTTP_CODE" == "405" ]]; then
-        # 405 Method Not Allowed = auth succeeded, just wrong HTTP method (GET vs POST)
-        pass "PYPI_TOKEN is valid (authenticated to upload.pypi.org)"
-      elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
-        fail "PYPI_TOKEN is expired/revoked (HTTP $HTTP_CODE)"
-      else
-        warn "Could not verify PYPI_TOKEN (HTTP $HTTP_CODE)"
-      fi
-    else
-      fail "PYPI_TOKEN doesn't start with 'pypi-' — likely wrong value"
-    fi
-  else
-    warn "Set PYPI_TOKEN env var to validate the token locally"
+    warn "Could not trigger validate-secrets workflow (push .github/workflows/validate-secrets.yml first)"
   fi
 else
   warn "gh CLI not available — skipping GitHub secrets check"
