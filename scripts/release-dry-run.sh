@@ -71,14 +71,24 @@ else
   fail "Unit tests failed"
 fi
 
-# --- 5. npm pack dry-run for all published packages ---
+# --- 5. npm pack dry-run and provenance readiness ---
 echo ""
 echo "── npm pack dry-run ──"
-for pkg in @debugmcp/shared @debugmcp/adapter-mock @debugmcp/adapter-python @debugmcp/mcp-debugger; do
-  if npm pack --dry-run -w "$pkg" > /dev/null 2>&1; then
-    pass "npm pack $pkg"
+PUBLISHED_PKGS=("shared" "adapter-mock" "adapter-python" "mcp-debugger")
+for pkg_dir in "${PUBLISHED_PKGS[@]}"; do
+  pkg_name=$(node -e "console.log(require('./packages/$pkg_dir/package.json').name)")
+  if npm pack --dry-run -w "$pkg_name" > /dev/null 2>&1; then
+    pass "npm pack $pkg_name"
   else
-    fail "npm pack $pkg failed"
+    fail "npm pack $pkg_name failed"
+  fi
+
+  # --provenance requires repository.url matching the GitHub repo
+  REPO_URL=$(node -e "const p=require('./packages/$pkg_dir/package.json'); console.log(p.repository?.url || '')")
+  if echo "$REPO_URL" | grep -q "github.com/debugmcp/mcp-debugger"; then
+    pass "$pkg_name repository.url set (required for --provenance)"
+  else
+    fail "$pkg_name missing repository.url — npm --provenance will fail (E422)"
   fi
 done
 
