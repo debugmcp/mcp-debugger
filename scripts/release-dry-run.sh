@@ -110,14 +110,28 @@ if command -v gh > /dev/null 2>&1; then
   echo "  Triggering validate-secrets workflow on GitHub Actions..."
   if gh workflow run validate-secrets.yml 2>/dev/null; then
     sleep 3
-    # Get the run ID of the workflow we just triggered
     RUN_ID=$(gh run list --workflow=validate-secrets.yml --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null)
     if [[ -n "$RUN_ID" ]]; then
       echo "  Waiting for token validation (run $RUN_ID)..."
-      if gh run watch "$RUN_ID" --exit-status > /dev/null 2>&1; then
-        pass "All release tokens validated by GitHub Actions"
-      else
-        fail "Token validation failed — run: gh run view $RUN_ID --log"
+      # Wait for the run to complete
+      gh run watch "$RUN_ID" > /dev/null 2>&1 || true
+
+      # Report per-job results
+      JOBS_JSON=$(gh run view "$RUN_ID" --json jobs --jq '.jobs[] | .name + "|" + .conclusion' 2>/dev/null)
+      ALL_OK=true
+      while IFS='|' read -r job_name job_result; do
+        if [[ "$job_result" == "success" ]]; then
+          pass "$job_name"
+        elif [[ "$job_result" == "failure" ]]; then
+          fail "$job_name"
+          ALL_OK=false
+        else
+          warn "$job_name ($job_result)"
+        fi
+      done <<< "$JOBS_JSON"
+
+      if [[ "$ALL_OK" != "true" ]]; then
+        echo "       Details: gh run view $RUN_ID --log"
       fi
     else
       warn "Could not find workflow run — check manually: gh run list --workflow=validate-secrets.yml"
