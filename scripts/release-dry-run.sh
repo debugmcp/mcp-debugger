@@ -82,14 +82,53 @@ for pkg in @debugmcp/shared @debugmcp/adapter-mock @debugmcp/adapter-python @deb
   fi
 done
 
-# --- 6. Check npm token can access the scope ---
+# --- 6. Check npm token and GitHub secrets ---
 echo ""
 echo "── npm authentication ──"
+
+# Test local npm login
 if npm whoami > /dev/null 2>&1; then
   NPM_USER=$(npm whoami)
-  pass "Logged in to npm as: $NPM_USER"
+  pass "Local npm login: $NPM_USER"
 else
-  warn "Not logged in to npm (CI uses NPM_TOKEN secret)"
+  warn "Not logged in to npm locally"
+fi
+
+# Test the GitHub secret NPM_TOKEN if gh is available
+if command -v gh > /dev/null 2>&1; then
+  # Check secret exists
+  if gh secret list 2>/dev/null | grep -q "NPM_TOKEN"; then
+    pass "GitHub secret NPM_TOKEN exists"
+
+    # Fetch the token value isn't possible via gh, but we can check
+    # if the user has it locally in an env var to validate it
+    if [[ -n "${NPM_TOKEN:-}" ]]; then
+      # Test token against npm registry
+      NPM_TOKEN_USER=$(npm whoami --registry https://registry.npmjs.org 2>/dev/null \
+        --//registry.npmjs.org/:_authToken="$NPM_TOKEN") || true
+      if [[ -n "$NPM_TOKEN_USER" ]]; then
+        pass "NPM_TOKEN is valid (user: $NPM_TOKEN_USER)"
+      else
+        fail "NPM_TOKEN is set but invalid/expired — regenerate at npmjs.com"
+      fi
+    else
+      warn "Set NPM_TOKEN env var to validate the token locally"
+      echo "       NPM_TOKEN=<your-token> npm run release:dry-run"
+    fi
+  else
+    fail "GitHub secret NPM_TOKEN not found"
+  fi
+
+  # Check other required secrets exist
+  for secret in DOCKER_USERNAME DOCKER_PASSWORD PYPI_TOKEN; do
+    if gh secret list 2>/dev/null | grep -q "$secret"; then
+      pass "GitHub secret $secret exists"
+    else
+      fail "GitHub secret $secret not found"
+    fi
+  done
+else
+  warn "gh CLI not available — skipping GitHub secrets check"
 fi
 
 # Check if packages already exist at this version (would be skipped during publish)
