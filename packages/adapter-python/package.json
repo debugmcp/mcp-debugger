@@ -29,6 +29,11 @@
   "peerDependencies": {
     "@debugmcp/shared": "0.18.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/debugmcp/mcp-debugger.git",
+    "directory": "packages/adapter-python"
+  },
   "publishConfig": {
     "access": "public"
   }
