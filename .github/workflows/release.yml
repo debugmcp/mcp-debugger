@@ -73,7 +73,9 @@ jobs:
     
     - name: Build project
       run: pnpm run build
-    
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Run tests
       run: pnpm run test:ci-no-python
 
@@ -277,6 +279,8 @@ jobs:
     
     - name: Build project
       run: pnpm run build
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Pack npm tarballs (dry-run)
       run: |
