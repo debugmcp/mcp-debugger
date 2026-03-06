@@ -285,10 +285,13 @@ jobs:
         npm pack --dry-run -w @debugmcp/adapter-python
         npm pack --dry-run -w @debugmcp/mcp-debugger
     
-    - name: Publish to npm (workspaces, trusted publishing)
+    - name: Publish to npm (workspaces)
       run: |
+        # Authenticate npm
+        npm config set //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+
         # Publish packages in dependency order if the target version does NOT yet exist
-        # Uses OIDC provenance via --provenance — no long-lived NPM_TOKEN needed
+        # --provenance adds signed build attestation (requires id-token: write)
         if npm view @debugmcp/shared@${SHARED_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/shared@${SHARED_VERSION} already exists, skipping"
         else
@@ -312,6 +315,8 @@ jobs:
         else
           npm publish -w @debugmcp/mcp-debugger --access public --provenance --tag ${NPM_TAG}
         fi
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   create-release:
     name: Create GitHub Release
