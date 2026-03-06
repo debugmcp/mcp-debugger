@@ -119,14 +119,58 @@ if command -v gh > /dev/null 2>&1; then
     fail "GitHub secret NPM_TOKEN not found"
   fi
 
-  # Check other required secrets exist
-  for secret in DOCKER_USERNAME DOCKER_PASSWORD PYPI_TOKEN; do
-    if gh secret list 2>/dev/null | grep -q "$secret"; then
-      pass "GitHub secret $secret exists"
+  # Check Docker Hub credentials
+  if gh secret list 2>/dev/null | grep -q "DOCKER_USERNAME"; then
+    pass "GitHub secret DOCKER_USERNAME exists"
+  else
+    fail "GitHub secret DOCKER_USERNAME not found"
+  fi
+  if gh secret list 2>/dev/null | grep -q "DOCKER_PASSWORD"; then
+    pass "GitHub secret DOCKER_PASSWORD exists"
+  else
+    fail "GitHub secret DOCKER_PASSWORD not found"
+  fi
+
+  if [[ -n "${DOCKER_USERNAME:-}" && -n "${DOCKER_PASSWORD:-}" ]]; then
+    if echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin > /dev/null 2>&1; then
+      pass "Docker Hub credentials are valid"
+      docker logout > /dev/null 2>&1 || true
     else
-      fail "GitHub secret $secret not found"
+      fail "Docker Hub credentials are invalid — check DOCKER_USERNAME/DOCKER_PASSWORD"
     fi
-  done
+  elif command -v docker > /dev/null 2>&1; then
+    warn "Set DOCKER_USERNAME + DOCKER_PASSWORD env vars to validate Docker credentials"
+  fi
+
+  # Check PyPI token
+  if gh secret list 2>/dev/null | grep -q "PYPI_TOKEN"; then
+    pass "GitHub secret PYPI_TOKEN exists"
+  else
+    fail "GitHub secret PYPI_TOKEN not found"
+  fi
+
+  if [[ -n "${PYPI_TOKEN:-}" ]]; then
+    # PyPI tokens start with "pypi-" — basic format check plus API validation
+    if [[ "$PYPI_TOKEN" == pypi-* ]]; then
+      pass "PYPI_TOKEN has valid format (pypi-...)"
+      # Test token by hitting the simple API with authentication
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $PYPI_TOKEN" \
+        "https://upload.pypi.org/legacy/" 2>/dev/null) || true
+      if [[ "$HTTP_CODE" == "405" ]]; then
+        # 405 Method Not Allowed = auth succeeded, just wrong HTTP method (GET vs POST)
+        pass "PYPI_TOKEN is valid (authenticated to upload.pypi.org)"
+      elif [[ "$HTTP_CODE" == "401" || "$HTTP_CODE" == "403" ]]; then
+        fail "PYPI_TOKEN is expired/revoked (HTTP $HTTP_CODE)"
+      else
+        warn "Could not verify PYPI_TOKEN (HTTP $HTTP_CODE)"
+      fi
+    else
+      fail "PYPI_TOKEN doesn't start with 'pypi-' — likely wrong value"
+    fi
+  else
+    warn "Set PYPI_TOKEN env var to validate the token locally"
+  fi
 else
   warn "gh CLI not available — skipping GitHub secrets check"
 fi
