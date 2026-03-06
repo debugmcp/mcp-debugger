@@ -455,6 +455,11 @@ See [Roadmap.md](./Roadmap.md) for planned features.
 
 MIT License - see [LICENSE](./LICENSE) for details.
 
+## 👥 Contributors
+
+- [@swinyx](https://github.com/swinyx) — Go adapter (Delve)
+- [@roofpig95008](https://github.com/roofpig95008) — Java adapter (JDI bridge)
+
 ## 🙏 Acknowledgments
 
 Built with:
