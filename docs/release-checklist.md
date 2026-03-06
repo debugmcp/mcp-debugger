@@ -16,10 +16,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 - [ ] `release.yml` changelog extraction strips `v` prefix (`refs/tags/v}` not `refs/tags/}`)
 
 ### Manual
-- [ ] **npm token is valid** — check in GitHub repo Settings → Secrets → `NPM_TOKEN`
-  - npm classic tokens expire; granular tokens have configurable expiry
-  - Test locally: `NPM_TOKEN=<token> npm whoami --registry https://registry.npmjs.org`
-  - 404 on PUT to a scoped package that exists = expired/revoked token
+- [ ] **npm trusted publishing configured** — each `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). No token needed — OIDC handles auth.
 - [ ] **Docker Hub credentials** — `DOCKER_USERNAME` and `DOCKER_PASSWORD` secrets are current
 - [ ] **PyPI token** — `PYPI_TOKEN` secret is current
 - [ ] `release.yml` default ref updated to current tag (for workflow_dispatch reruns)
@@ -30,7 +27,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `E404` on `npm publish` PUT | npm token expired or lacks scope write access | Regenerate token at npmjs.com → Access Tokens, update `NPM_TOKEN` secret |
+| `E404` on `npm publish` PUT | Trusted publishing not configured for the package | npmjs.com → package Settings → Configure Trusted Publishing |
 | `release version 21 not supported` | JDK < 21 in workflow job | Add `actions/setup-java@v4` with `java-version: '21'` |
 | Changelog empty in GitHub Release | `release.yml` doesn't strip `v` from tag | Use `${RELEASE_REF#refs/tags/v}` |
 | Build fails in `npm-publish` | Missing toolchain (Go/Java/etc.) | Mirror `build-and-test` toolchain setup in `npm-publish` job |

@@ -211,7 +211,10 @@ jobs:
     name: Publish to npm
     needs: build-and-test
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      id-token: write  # Required for npm trusted publishing (OIDC)
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -282,37 +285,33 @@ jobs:
         npm pack --dry-run -w @debugmcp/adapter-python
         npm pack --dry-run -w @debugmcp/mcp-debugger
     
-    - name: Publish to npm (workspaces)
+    - name: Publish to npm (workspaces, trusted publishing)
       run: |
-        # Authenticate npm
-        npm config set //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
-
         # Publish packages in dependency order if the target version does NOT yet exist
+        # Uses OIDC provenance via --provenance — no long-lived NPM_TOKEN needed
         if npm view @debugmcp/shared@${SHARED_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/shared@${SHARED_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/shared --access public
+          npm publish -w @debugmcp/shared --access public --provenance
         fi
 
         if npm view @debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/adapter-mock --access public
+          npm publish -w @debugmcp/adapter-mock --access public --provenance
         fi
 
         if npm view @debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/adapter-python --access public
+          npm publish -w @debugmcp/adapter-python --access public --provenance
         fi
 
         if npm view @debugmcp/mcp-debugger@${CLI_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/mcp-debugger@${CLI_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/mcp-debugger --access public --tag ${NPM_TAG}
+          npm publish -w @debugmcp/mcp-debugger --access public --provenance --tag ${NPM_TAG}
         fi
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   create-release:
     name: Create GitHub Release
