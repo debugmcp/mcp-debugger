@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Go debugging support** – full Delve DAP adapter with debug, test, exec, replay, and core modes, goroutine-aware stack traces, and automatic `dlv` detection (contributed by [@swinyx](https://github.com/swinyx))
-- **Java debugging support** – JDI bridge (`JdiDapServer.java`) with launch and attach modes, variable inspection, and deferred breakpoints via ClassPrepareRequest
+- **Java debugging support** – JDI bridge (`JdiDapServer.java`) with launch and attach modes, variable inspection, and deferred breakpoints via ClassPrepareRequest (contributed by [@roofpig95008](https://github.com/roofpig95008))
 - **Java attach mode** – connect to running JVMs via JDWP agent for debugging servers and complex applications
 - **Java expression evaluation** – full expression evaluator supporting field access, method calls, array indexing, arithmetic, string concatenation, casting, `instanceof`, ternary, and unary operators
 - **Java conditional breakpoints** – conditions evaluated server-side via the expression evaluator

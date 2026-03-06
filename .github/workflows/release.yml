@@ -231,6 +231,12 @@ jobs:
         registry-url: 'https://registry.npmjs.org'
         cache: 'pnpm'
     
+    - name: Setup Java 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
     - name: Install dependencies
       run: pnpm install --frozen-lockfile --ignore-scripts
 
@@ -239,7 +245,7 @@ jobs:
         node -v
         npm -v
         pnpm -v
-    
+
     - name: Resolve release ref
       run: |
         if [ -n "${{ github.event.inputs.ref }}" ]; then
