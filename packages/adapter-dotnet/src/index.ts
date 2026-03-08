@@ -13,5 +13,10 @@ export {
   listDotnetProcesses,
   isPortablePdb,
   findPdb2PdbExecutable,
+  convertPdbsToTemp,
+  getProcessExecutablePath,
+  getProcessExecutableDir,
+  getExeArchitecture,
+  getProcessArchitecture,
   CommandNotFoundError
 } from './utils/dotnet-utils.js';

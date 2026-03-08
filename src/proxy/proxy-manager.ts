@@ -306,6 +306,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   async stop(): Promise<void> {
     if (!this.proxyProcess) {
+      // No proxy process, but still dispose adapter to release instance slot
+      this.cleanup();
       return;
     }
 
@@ -1013,10 +1015,18 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     if (this.dapState) {
       this.dapState = clearPendingRequests(this.dapState);
     }
-    
+
     // Clear adapter-provided launch barriers
     this.clearActiveLaunchBarrier();
-    
+
+    // Dispose the adapter so AdapterRegistry releases the instance slot
+    if (this.adapter && typeof this.adapter.dispose === 'function') {
+      this.adapter.dispose().catch(err => {
+        this.logger.warn(`[ProxyManager] Error disposing adapter during cleanup: ${err instanceof Error ? err.message : String(err)}`);
+      });
+      this.adapter = null;
+    }
+
     this.proxyProcess = null;
     this.isInitialized = false;
     this.adapterConfigured = false;

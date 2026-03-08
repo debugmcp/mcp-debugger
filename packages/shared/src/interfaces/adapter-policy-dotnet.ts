@@ -165,6 +165,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
     return new Promise((resolve) => {
       const child = spawn(netcoredbgCmd, ['--version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
       let hasOutput = false;

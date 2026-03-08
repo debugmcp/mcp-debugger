@@ -429,9 +429,16 @@ describe('DotnetAdapterPolicy', () => {
 
   // ===== validateExecutable =====
 
-  it('validateExecutable resolves true when netcoredbg exits with code 0', async () => {
-    // This test is inherently platform-dependent; we test the structure
-    // The actual spawn is internal, so we just verify the function exists
-    expect(typeof DotnetAdapterPolicy.validateExecutable).toBe('function');
+  describe('validateExecutable', () => {
+    it('resolves true for a command that exists and exits 0', async () => {
+      // node --version always exits 0 with output
+      const result = await DotnetAdapterPolicy.validateExecutable!(process.execPath);
+      expect(result).toBe(true);
+    }, 10000);
+
+    it('resolves false for a command that does not exist', async () => {
+      const result = await DotnetAdapterPolicy.validateExecutable!('nonexistent_command_that_does_not_exist_12345');
+      expect(result).toBe(false);
+    }, 10000);
   });
 });

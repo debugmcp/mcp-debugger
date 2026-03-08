@@ -18,6 +18,7 @@ mcp-debugger/
 │   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug
 │   ├── adapter-rust/       # Rust debug adapter using CodeLLDB
 │   ├── adapter-go/         # Go debug adapter using Delve
+│   ├── adapter-dotnet/     # .NET/C# debug adapter using netcoredbg
 │   ├── adapter-mock/       # Mock adapter for testing
 │   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
@@ -35,6 +36,7 @@ mcp-debugger/
 - **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug
 - **@debugmcp/adapter-rust**: Rust debugging support via CodeLLDB
 - **@debugmcp/adapter-go**: Go debugging support via Delve
+- **@debugmcp/adapter-dotnet**: .NET/C# debugging support via netcoredbg
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
 - **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
@@ -187,7 +189,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`)
    - **ProxyCore**: Pure business logic, message processing
    - **ProxyWorker**: Core worker handling debugging operations
-   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `MockAdapterPolicy`)
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`)
    - Implements full Debug Adapter Protocol (DAP) communication
 
 ### Key Patterns
@@ -233,12 +235,13 @@ Sessions use a **dual-state model**:
 
 ### Adapter System
 - `src/adapters/adapter-registry.ts` - Adapter lifecycle management
-- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (5 known adapters)
+- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (7 known adapters)
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter (debugpy)
 - `packages/adapter-javascript/` - JavaScript/Node.js debug adapter (js-debug)
 - `packages/adapter-rust/` - Rust debug adapter (CodeLLDB)
 - `packages/adapter-go/` - Go debug adapter (Delve)
+- `packages/adapter-dotnet/` - .NET/C# debug adapter (netcoredbg)
 - `packages/adapter-mock/` - Mock adapter for testing
 
 ### Distribution
@@ -335,6 +338,13 @@ packages/adapter-{language}/
 - Go 1.18+ must be installed
 - Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`
 - Uses Delve's native DAP protocol support
+
+### .NET/C#
+- netcoredbg must be built from source or set `NETCOREDBG_PATH` environment variable
+- For .NET Core/.NET 5+: works out of the box with standard netcoredbg
+- For .NET Framework 4.8: requires modified netcoredbg fork with Desktop CLR support
+- PDB symbols must be in Portable format (compile with `/debug:portable` or convert with Pdb2Pdb)
+- Uses TCP-to-stdio bridge on Windows due to netcoredbg server mode bug
 
 ### Mock (Testing)
 - No external requirements

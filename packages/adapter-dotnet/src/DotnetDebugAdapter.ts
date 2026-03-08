@@ -67,7 +67,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { findNetcoredbgExecutable, findPdb2PdbExecutable, convertPdbsToTemp } from './utils/dotnet-utils.js';
+import { findNetcoredbgExecutable, findPdb2PdbExecutable, convertPdbsToTemp, getProcessExecutableDir, getProcessArchitecture } from './utils/dotnet-utils.js';
 
 /**
  * Cache entry for debugger executable paths
@@ -115,6 +115,7 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   // State
   private currentThreadId: number | null = null;
   private connected = false;
+  private targetProcessArch: 'x86' | 'x64' | null = null;
 
   constructor(dependencies: AdapterDependencies) {
     super();
@@ -148,6 +149,7 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
     this.debuggerPathCache.clear();
     this.currentThreadId = null;
     this.connected = false;
+    this.targetProcessArch = null;
     this.state = AdapterState.UNINITIALIZED;
     this.emit('disposed');
   }
@@ -221,7 +223,8 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Executable Management =====
 
   async resolveExecutablePath(preferredPath?: string): Promise<string> {
-    const cacheKey = preferredPath || 'default';
+    const archSuffix = this.targetProcessArch ? `-${this.targetProcessArch}` : '';
+    const cacheKey = (preferredPath || 'default') + archSuffix;
     const cached = this.debuggerPathCache.get(cacheKey);
 
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
@@ -231,7 +234,8 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
 
     const resolvedPath = await findNetcoredbgExecutable(
       preferredPath,
-      this.dependencies.logger as { error: (msg: string) => void; debug?: (msg: string) => void } | undefined
+      this.dependencies.logger as { error: (msg: string) => void; debug?: (msg: string) => void } | undefined,
+      this.targetProcessArch || undefined
     );
 
     this.debuggerPathCache.set(cacheKey, {
@@ -348,13 +352,32 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
+    // Detect target process architecture for executable resolution
+    // This must happen before resolveExecutablePath is called (which happens after this method)
+    if (config.processId) {
+      this.targetProcessArch = getProcessArchitecture(config.processId);
+      this.dependencies.logger?.debug?.(
+        `[DotnetDebugAdapter] Target process ${config.processId} architecture: ${this.targetProcessArch || 'unknown'}`
+      );
+    }
+
+    // Determine directories to scan for PDB files
+    // Use explicit sourcePaths if provided, otherwise auto-detect from process executable
+    let pdbScanDirs = config.sourcePaths;
+    if (!pdbScanDirs && config.processId) {
+      const procDir = getProcessExecutableDir(config.processId);
+      if (procDir) {
+        pdbScanDirs = [procDir];
+      }
+    }
+
     // Convert Windows PDBs to Portable PDB format in a temp directory
     // (originals may be locked by the debuggee process)
     const symbolSearchPaths: string[] = [];
-    if (config.sourcePaths) {
+    if (pdbScanDirs) {
       const pdb2pdbPath = findPdb2PdbExecutable();
       if (pdb2pdbPath) {
-        const tempDir = convertPdbsToTemp(config.sourcePaths, pdb2pdbPath);
+        const tempDir = convertPdbsToTemp(pdbScanDirs, pdb2pdbPath);
         if (tempDir) {
           symbolSearchPaths.push(tempDir);
         }
@@ -369,8 +392,8 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
       justMyCode: config.justMyCode ?? true,
       // CRITICAL: Never terminate the debuggee on detach
       terminateDebuggee: false,
-      sourceFileMap: config.sourcePaths ? Object.fromEntries(
-        config.sourcePaths.map(p => [p, p])
+      sourceFileMap: pdbScanDirs ? Object.fromEntries(
+        pdbScanDirs.map(p => [p, p])
       ) : undefined,
       symbolOptions: symbolSearchPaths.length > 0
         ? { searchPaths: symbolSearchPaths, searchMicrosoftSymbolServer: false }

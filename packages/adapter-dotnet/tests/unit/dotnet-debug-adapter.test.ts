@@ -7,17 +7,23 @@ import {
   AdapterErrorCode
 } from '@debugmcp/shared';
 import { DotnetDebugAdapter } from '../../src/DotnetDebugAdapter.js';
-import { findNetcoredbgExecutable } from '../../src/utils/dotnet-utils.js';
+import { findNetcoredbgExecutable, findPdb2PdbExecutable, convertPdbsToTemp, getProcessExecutableDir, getProcessArchitecture } from '../../src/utils/dotnet-utils.js';
 
 vi.mock('../../src/utils/dotnet-utils.js', () => ({
   findNetcoredbgExecutable: vi.fn(),
   findDotnetBackend: vi.fn(),
   listDotnetProcesses: vi.fn(),
   findPdb2PdbExecutable: vi.fn(),
-  convertPdbsToTemp: vi.fn()
+  convertPdbsToTemp: vi.fn(),
+  getProcessExecutableDir: vi.fn(),
+  getProcessArchitecture: vi.fn()
 }));
 
 const findNetcoredbgExecutableMock = vi.mocked(findNetcoredbgExecutable);
+const findPdb2PdbExecutableMock = vi.mocked(findPdb2PdbExecutable);
+const convertPdbsToTempMock = vi.mocked(convertPdbsToTemp);
+const getProcessExecutableDirMock = vi.mocked(getProcessExecutableDir);
+const getProcessArchitectureMock = vi.mocked(getProcessArchitecture);
 
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {} as unknown,
@@ -227,6 +233,21 @@ describe('DotnetDebugAdapter', () => {
       const cmd = adapter.getAdapterInstallCommand();
       expect(cmd).toContain('netcoredbg');
     });
+
+    it('propagates environment in adapter command', () => {
+      const command = adapter.buildAdapterCommand({
+        sessionId: 'test',
+        executablePath: '/path/to/netcoredbg',
+        adapterHost: '127.0.0.1',
+        adapterPort: 9999,
+        logDir: '/tmp',
+        scriptPath: '/app.dll',
+        launchConfig: {}
+      });
+
+      expect(command.env).toBeDefined();
+      expect(typeof command.env).toBe('object');
+    });
   });
 
   // ===== Launch Configuration =====
@@ -311,6 +332,135 @@ describe('DotnetDebugAdapter', () => {
       expect(result.processId).toBe(5678);
     });
 
+    it('builds sourceFileMap from sourcePaths', () => {
+      const result = adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234,
+        sourcePaths: ['/app/src', '/app/lib']
+      });
+
+      expect(result.sourceFileMap).toEqual({
+        '/app/src': '/app/src',
+        '/app/lib': '/app/lib'
+      });
+    });
+
+    it('converts PDBs when sourcePaths and pdb2pdb available', () => {
+      findPdb2PdbExecutableMock.mockReturnValue('/tools/Pdb2Pdb.exe');
+      convertPdbsToTempMock.mockReturnValue('/tmp/converted-pdbs');
+
+      const result = adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234,
+        sourcePaths: ['/app/bin']
+      });
+
+      expect(findPdb2PdbExecutableMock).toHaveBeenCalled();
+      expect(convertPdbsToTempMock).toHaveBeenCalledWith(['/app/bin'], '/tools/Pdb2Pdb.exe');
+      expect(result.symbolOptions).toEqual({
+        searchPaths: ['/tmp/converted-pdbs'],
+        searchMicrosoftSymbolServer: false
+      });
+    });
+
+    it('skips PDB conversion when pdb2pdb not found', () => {
+      findPdb2PdbExecutableMock.mockReturnValue(null);
+
+      const result = adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234,
+        sourcePaths: ['/app/bin']
+      });
+
+      expect(convertPdbsToTempMock).not.toHaveBeenCalled();
+      expect(result.symbolOptions).toBeUndefined();
+    });
+
+    it('skips symbolOptions when convertPdbsToTemp returns null', () => {
+      findPdb2PdbExecutableMock.mockReturnValue('/tools/Pdb2Pdb.exe');
+      convertPdbsToTempMock.mockReturnValue(null);
+
+      const result = adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234,
+        sourcePaths: ['/app/bin']
+      });
+
+      expect(result.symbolOptions).toBeUndefined();
+    });
+
+    it('auto-detects process executable dir for PDB conversion when no sourcePaths', () => {
+      getProcessExecutableDirMock.mockReturnValue('C:\\Program Files\\App');
+      findPdb2PdbExecutableMock.mockReturnValue('/tools/Pdb2Pdb.exe');
+      convertPdbsToTempMock.mockReturnValue('/tmp/converted-pdbs');
+
+      const result = adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234
+      });
+
+      expect(getProcessExecutableDirMock).toHaveBeenCalledWith(1234);
+      expect(convertPdbsToTempMock).toHaveBeenCalledWith(['C:\\Program Files\\App'], '/tools/Pdb2Pdb.exe');
+      expect(result.symbolOptions).toEqual({
+        searchPaths: ['/tmp/converted-pdbs'],
+        searchMicrosoftSymbolServer: false
+      });
+    });
+
+    it('skips auto-detection when sourcePaths provided', () => {
+      getProcessExecutableDirMock.mockReturnValue('C:\\Program Files\\App');
+      findPdb2PdbExecutableMock.mockReturnValue('/tools/Pdb2Pdb.exe');
+      convertPdbsToTempMock.mockReturnValue(null);
+
+      adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234,
+        sourcePaths: ['/explicit/path']
+      });
+
+      expect(getProcessExecutableDirMock).not.toHaveBeenCalled();
+      expect(convertPdbsToTempMock).toHaveBeenCalledWith(['/explicit/path'], '/tools/Pdb2Pdb.exe');
+    });
+
+    it('detects target process architecture during attach', () => {
+      getProcessArchitectureMock.mockReturnValue('x86');
+
+      adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234
+      });
+
+      expect(getProcessArchitectureMock).toHaveBeenCalledWith(1234);
+    });
+
+    it('passes detected x86 architecture to resolveExecutablePath', async () => {
+      getProcessArchitectureMock.mockReturnValue('x86');
+      findNetcoredbgExecutableMock.mockResolvedValue('/path/to/bin-x86/netcoredbg.exe');
+
+      adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234
+      });
+
+      await adapter.resolveExecutablePath();
+
+      expect(findNetcoredbgExecutableMock).toHaveBeenCalledWith(
+        undefined,
+        expect.anything(),
+        'x86'
+      );
+    });
+
+    it('does not set architecture when no processId', () => {
+      findNetcoredbgExecutableMock.mockResolvedValue('/path/to/netcoredbg.exe');
+
+      adapter.transformAttachConfig({
+        request: 'attach'
+      });
+
+      expect(getProcessArchitectureMock).not.toHaveBeenCalled();
+    });
+
     it('returns default attach config', () => {
       const defaults = adapter.getDefaultAttachConfig();
       expect(defaults).toBeDefined();
@@ -378,6 +528,16 @@ describe('DotnetDebugAdapter', () => {
       });
 
       expect(adapter.getCurrentThreadId()).toBeNull();
+    });
+
+    it('handleDapResponse does not throw', () => {
+      expect(() => adapter.handleDapResponse({
+        command: 'continue',
+        request_seq: 1,
+        seq: 2,
+        type: 'response',
+        success: true
+      })).not.toThrow();
     });
   });
 
@@ -508,6 +668,16 @@ describe('DotnetDebugAdapter', () => {
       expect(msg).toContain('PID');
     });
 
+    it('translates symbol loading errors', () => {
+      const msg = adapter.translateErrorMessage(new Error('failed to symbol load PDB'));
+      expect(msg).toContain('Portable PDB');
+    });
+
+    it('translates connection refused errors', () => {
+      const msg = adapter.translateErrorMessage(new Error('connection refused by debugger'));
+      expect(msg).toContain('netcoredbg');
+    });
+
     it('passes through unrecognized errors', () => {
       const msg = adapter.translateErrorMessage(new Error('something unexpected'));
       expect(msg).toBe('something unexpected');
@@ -521,6 +691,12 @@ describe('DotnetDebugAdapter', () => {
       const reqs = adapter.getFeatureRequirements(DebugFeature.CONDITIONAL_BREAKPOINTS);
       expect(reqs.length).toBeGreaterThan(0);
       expect(reqs[0].type).toBe('dependency');
+    });
+
+    it('returns requirements for exception info request', () => {
+      const reqs = adapter.getFeatureRequirements(DebugFeature.EXCEPTION_INFO_REQUEST);
+      expect(reqs.length).toBeGreaterThan(0);
+      expect(reqs[0].description).toContain('PDB');
     });
 
     it('returns empty array for features with no special requirements', () => {

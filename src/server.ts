@@ -577,7 +577,7 @@ export class DebugMcpServer {
           { name: 'step_into', description: 'Step into', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'step_out', description: 'Step out', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'continue_execution', description: 'Continue execution', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'pause_execution', description: 'Pause execution (Not Implemented)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'pause_execution', description: 'Pause a running program', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
           { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' } }, required: ['sessionId'] } },
           { name: 'get_stack_trace', description: 'Get stack trace', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' } }, required: ['sessionId'] } },
@@ -1197,11 +1197,17 @@ export class DebugMcpServer {
 
   private async handlePause(args: { sessionId: string }): Promise<ServerResult> {
     try {
-      this.logger.info(`Pause requested for session: ${args.sessionId}`);
-      throw new McpError(McpErrorCode.InternalError, "Pause execution not yet implemented with proxy.");
+      this.validateSession(args.sessionId);
+      const result = await this.sessionManager.pause(args.sessionId);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       this.logger.error('Failed to pause execution', { error });
       if (error instanceof McpError) throw error;
+      if (error instanceof SessionTerminatedError ||
+          error instanceof SessionNotFoundError ||
+          error instanceof ProxyNotRunningError) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+      }
       throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
     }
   }
