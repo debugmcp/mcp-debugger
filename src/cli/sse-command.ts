@@ -221,9 +221,9 @@ export async function handleSSECommand(
     });
 
     // Handle graceful shutdown
-    process.on('SIGINT', () => {
+    const gracefulShutdown = () => {
       logger.info('Shutting down SSE server...');
-      
+
       // Close all SSE connections
       const sseTransports = (app as any).sseTransports as Map<string, SessionData> | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (sseTransports) {
@@ -231,7 +231,7 @@ export async function handleSSECommand(
           transport.close();
         });
       }
-      
+
       // Stop the shared debug server
       const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (sharedDebugServer) {
@@ -240,11 +240,14 @@ export async function handleSSECommand(
           logger.error('Error stopping shared Debug MCP Server:', error);
         });
       }
-      
+
       server.close(() => {
         exitProcess(0);
       });
-    });
+    };
+
+    process.on('SIGINT', gracefulShutdown);
+    process.on('SIGTERM', gracefulShutdown);
 
   } catch (error) {
     logger.error('Failed to start server in SSE mode', { error });
