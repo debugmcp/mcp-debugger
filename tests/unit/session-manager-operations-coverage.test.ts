@@ -2173,4 +2173,40 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(innerBp.verified).toBe(true);
     });
   });
+
+  describe('selectPolicy coverage', () => {
+    it('should return DotnetAdapterPolicy for dotnet language', () => {
+      const policy = (operations as any).selectPolicy('dotnet');
+      expect(policy.name).toBe('dotnet');
+    });
+
+    it('should return DotnetAdapterPolicy for DebugLanguage.DOTNET', () => {
+      const { DebugLanguage } = require('@debugmcp/shared');
+      const policy = (operations as any).selectPolicy(DebugLanguage.DOTNET);
+      expect(policy.name).toBe('dotnet');
+    });
+
+    it('should apply dotnet filtering in getStackTrace for dotnet session', async () => {
+      mockSession.language = 'dotnet';
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.isRunning.mockReturnValue(true);
+      mockProxyManager.getCurrentThreadId.mockReturnValue(1);
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          stackFrames: [
+            { id: 1, name: 'MyApp.Main', line: 10, column: 1, source: { path: '/app/Program.cs' } },
+            { id: 2, name: 'System.Runtime.CompilerServices.TaskAwaiter', line: 0, column: 0 },
+            { id: 3, name: 'Microsoft.AspNetCore.Hosting', line: 0, column: 0 }
+          ]
+        }
+      });
+
+      const frames = await operations.getStackTrace('test-session', undefined, false);
+
+      // DotnetAdapterPolicy.filterStackFrames filters out frames with no file
+      // and frames starting with System.* or Microsoft.*
+      expect(frames).toHaveLength(1);
+      expect(frames[0].name).toBe('MyApp.Main');
+    });
+  });
 });

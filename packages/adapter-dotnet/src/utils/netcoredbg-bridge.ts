@@ -38,7 +38,8 @@ const server = net.createServer((socket) => {
 
   // Spawn netcoredbg in stdio mode
   netcoredbg = spawn(netcoredbgPath, ['--interpreter=vscode'], {
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true
   });
 
   // Forward: TCP → netcoredbg stdin

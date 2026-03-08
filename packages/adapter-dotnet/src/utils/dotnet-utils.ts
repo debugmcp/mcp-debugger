@@ -63,42 +63,88 @@ export class CommandNotFoundError extends Error {
  */
 export async function findNetcoredbgExecutable(
   preferredPath?: string,
-  logger: Logger = noopLogger
+  logger: Logger = noopLogger,
+  targetArch?: 'x86' | 'x64'
 ): Promise<string> {
-  logger.debug?.('[Dotnet Detection] Starting netcoredbg discovery...');
+  logger.debug?.(`[Dotnet Detection] Starting netcoredbg discovery... (targetArch=${targetArch || 'any'})`);
 
-  // 1. Environment variable
+  // 1. Architecture-specific environment variable (NETCOREDBG_X86_PATH for 32-bit targets)
+  if (targetArch === 'x86' && process.env.NETCOREDBG_X86_PATH) {
+    const envPath = process.env.NETCOREDBG_X86_PATH;
+    if (fs.existsSync(envPath)) {
+      logger.debug?.(`[Dotnet Detection] Using NETCOREDBG_X86_PATH: ${envPath}`);
+      return envPath;
+    }
+    logger.debug?.(`[Dotnet Detection] NETCOREDBG_X86_PATH set but not found: ${envPath}`);
+  }
+
+  // 2. General environment variable
   if (process.env.NETCOREDBG_PATH) {
     const envPath = process.env.NETCOREDBG_PATH;
     if (fs.existsSync(envPath)) {
-      logger.debug?.(`[Dotnet Detection] Using NETCOREDBG_PATH: ${envPath}`);
-      return envPath;
+      // If targeting x86, verify the binary matches
+      if (targetArch === 'x86') {
+        const arch = getExeArchitecture(envPath);
+        if (arch === 'x86') {
+          logger.debug?.(`[Dotnet Detection] Using NETCOREDBG_PATH (x86 match): ${envPath}`);
+          return envPath;
+        }
+        logger.debug?.(`[Dotnet Detection] NETCOREDBG_PATH is ${arch || 'unknown'} arch, need x86 — skipping`);
+      } else {
+        logger.debug?.(`[Dotnet Detection] Using NETCOREDBG_PATH: ${envPath}`);
+        return envPath;
+      }
     }
     logger.debug?.(`[Dotnet Detection] NETCOREDBG_PATH set but not found: ${envPath}`);
   }
 
-  // 2. User-specified path
+  // 3. User-specified path
   if (preferredPath && fs.existsSync(preferredPath)) {
-    logger.debug?.(`[Dotnet Detection] Using preferred path: ${preferredPath}`);
-    return preferredPath;
+    if (targetArch === 'x86') {
+      const arch = getExeArchitecture(preferredPath);
+      if (arch === 'x86') {
+        logger.debug?.(`[Dotnet Detection] Using preferred path (x86 match): ${preferredPath}`);
+        return preferredPath;
+      }
+      logger.debug?.(`[Dotnet Detection] Preferred path is ${arch || 'unknown'} arch, need x86 — skipping`);
+    } else {
+      logger.debug?.(`[Dotnet Detection] Using preferred path: ${preferredPath}`);
+      return preferredPath;
+    }
   }
 
-  // 3. Search PATH
-  try {
-    const resolved = await which('netcoredbg');
-    logger.debug?.(`[Dotnet Detection] Found netcoredbg in PATH: ${resolved}`);
-    return resolved;
-  } catch {
-    // Not found in PATH
+  // 4. Search PATH (skip for architecture-specific search — PATH binaries are unpredictable)
+  if (!targetArch) {
+    try {
+      const resolved = await which('netcoredbg');
+      logger.debug?.(`[Dotnet Detection] Found netcoredbg in PATH: ${resolved}`);
+      return resolved;
+    } catch {
+      // Not found in PATH
+    }
   }
 
-  // 4. Common installation locations
-  const candidates = getNetcoredbgSearchPaths();
+  // 5. Common installation locations (architecture-aware)
+  const candidates = getNetcoredbgSearchPaths(targetArch);
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
+      // Validate architecture if targeting x86
+      if (targetArch === 'x86') {
+        const arch = getExeArchitecture(candidate);
+        if (arch !== 'x86') {
+          logger.debug?.(`[Dotnet Detection] Skipping ${candidate} (arch=${arch || 'unknown'}, need x86)`);
+          continue;
+        }
+      }
       logger.debug?.(`[Dotnet Detection] Found netcoredbg at: ${candidate}`);
       return candidate;
     }
+  }
+
+  // 6. If architecture-specific search failed, fall back to any architecture
+  if (targetArch) {
+    logger.debug?.(`[Dotnet Detection] No ${targetArch} netcoredbg found, falling back to any architecture`);
+    return findNetcoredbgExecutable(preferredPath, logger);
   }
 
   throw new CommandNotFoundError(
@@ -109,11 +155,20 @@ export async function findNetcoredbgExecutable(
 /**
  * Get platform-specific common locations for netcoredbg.
  */
-function getNetcoredbgSearchPaths(): string[] {
+function getNetcoredbgSearchPaths(targetArch?: 'x86' | 'x64'): string[] {
   const paths: string[] = [];
   const home = process.env.HOME || process.env.USERPROFILE || '';
 
   if (process.platform === 'win32') {
+    // When targeting x86, prioritize x86 build directories
+    if (targetArch === 'x86') {
+      paths.push(
+        path.join(home, 'documents', 'github', 'netcoredbg', 'bin-x86', 'netcoredbg.exe'),
+        'C:\\netcoredbg-x86\\netcoredbg.exe',
+        path.join(home, 'netcoredbg-x86', 'netcoredbg.exe'),
+        'C:\\Program Files (x86)\\netcoredbg\\netcoredbg.exe'
+      );
+    }
     paths.push(
       path.join(home, 'documents', 'github', 'netcoredbg', 'bin', 'netcoredbg.exe'),
       'C:\\netcoredbg\\netcoredbg.exe',
@@ -162,7 +217,8 @@ export async function listDotnetProcesses(
 
   return new Promise((resolve) => {
     const child = spawn('tasklist', ['/FO', 'CSV', '/NH'], {
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let output = '';
@@ -205,6 +261,102 @@ export async function listDotnetProcesses(
       resolve(processes);
     });
   });
+}
+
+/**
+ * Get the full executable path for a running process by PID.
+ * Windows-only. Uses WMIC to look up the process's executable path.
+ *
+ * @param pid Process ID
+ * @returns Full path to the process executable, or null if not found
+ */
+export function getProcessExecutablePath(pid: number | string): string | null {
+  if (process.platform !== 'win32') {
+    return null;
+  }
+
+  try {
+    const result = spawnSync(
+      'wmic',
+      ['process', 'where', `ProcessId=${pid}`, 'get', 'ExecutablePath', '/VALUE'],
+      { timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
+    );
+
+    if (result.status !== 0 || !result.stdout) {
+      return null;
+    }
+
+    const output = result.stdout.toString();
+    const match = output.match(/ExecutablePath=(.+)/);
+    if (!match) {
+      return null;
+    }
+
+    return match[1].trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the executable directory for a running process by PID.
+ * Windows-only. Uses WMIC to look up the process's executable path.
+ *
+ * @param pid Process ID
+ * @returns Directory containing the process executable, or null if not found
+ */
+export function getProcessExecutableDir(pid: number | string): string | null {
+  const exePath = getProcessExecutablePath(pid);
+  return exePath ? path.dirname(exePath) : null;
+}
+
+/**
+ * Determine the architecture of a PE executable by reading its Machine header field.
+ *
+ * @param exePath Absolute path to a .exe file
+ * @returns 'x86' or 'x64', or null if the file can't be read or has an unknown architecture
+ */
+export function getExeArchitecture(exePath: string): 'x86' | 'x64' | null {
+  try {
+    const fd = fs.openSync(exePath, 'r');
+    try {
+      // Read PE header offset from DOS header at 0x3C
+      const dosHeader = Buffer.alloc(4);
+      fs.readSync(fd, dosHeader, 0, 4, 0x3C);
+      const peOffset = dosHeader.readUInt32LE(0);
+
+      // Read PE signature (4 bytes "PE\0\0") + Machine field (2 bytes)
+      const peHeader = Buffer.alloc(6);
+      fs.readSync(fd, peHeader, 0, 6, peOffset);
+
+      // Verify PE signature
+      if (peHeader[0] !== 0x50 || peHeader[1] !== 0x45 || peHeader[2] !== 0 || peHeader[3] !== 0) {
+        return null;
+      }
+
+      const machine = peHeader.readUInt16LE(4);
+      if (machine === 0x014c) return 'x86';
+      if (machine === 0x8664) return 'x64';
+
+      return null;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect the architecture of a running process by reading the PE header of its executable.
+ *
+ * @param pid Process ID
+ * @returns 'x86' or 'x64', or null if detection fails
+ */
+export function getProcessArchitecture(pid: number | string): 'x86' | 'x64' | null {
+  const exePath = getProcessExecutablePath(pid);
+  if (!exePath) return null;
+  return getExeArchitecture(exePath);
 }
 
 /**
