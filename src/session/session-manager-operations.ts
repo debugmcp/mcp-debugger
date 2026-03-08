@@ -805,6 +805,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           newBreakpoint.verified = bpInfo.verified;
           newBreakpoint.line = bpInfo.line || newBreakpoint.line;
           newBreakpoint.message = bpInfo.message; // Capture validation message
+          // Enhance "no symbols" message for .NET with PDB format guidance
+          if (bpInfo.message && session.language === 'dotnet' &&
+              bpInfo.message.toLowerCase().includes('no symbols')) {
+            newBreakpoint.message += ' (Hint: netcoredbg requires Portable PDB format. Compile with /debug:portable or convert with Pdb2Pdb.)';
+          }
           this.logger.info(
             `[SessionManager] Breakpoint ${bpId} sent and response received. Verified: ${newBreakpoint.verified}${
               bpInfo.message ? `, Message: ${bpInfo.message}` : ''
@@ -1135,6 +1140,48 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
+  async pause(sessionId: string): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+
+    this.logger.info(
+      `[SessionManager pause] Called for session ${sessionId}. Current state: ${session.state}`
+    );
+
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      throw new ProxyNotRunningError(sessionId, 'pause');
+    }
+
+    if (session.state === SessionState.PAUSED) {
+      return { success: true, state: session.state, data: { message: 'Already paused' } };
+    }
+
+    if (session.state !== SessionState.RUNNING) {
+      return { success: false, error: `Cannot pause in state: ${session.state}`, state: session.state };
+    }
+
+    try {
+      // DAP pause request uses threadId 0 to pause all threads
+      await session.proxyManager.sendDapRequest('pause', { threadId: 0 });
+
+      this.logger.info(
+        `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`
+      );
+
+      // The stopped event handler will set state to PAUSED and update threadId.
+      // Return success — the caller should poll or wait for state change.
+      return { success: true, state: session.state };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
+      );
+      throw error;
+    }
+  }
 
   /**
    * Helper method to truncate long strings for logging
@@ -1426,7 +1473,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         success: true,
         state: finalState,
         data: {
-          message: `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
+          message: attachConfig.processId
+            ? `Attached to process PID ${attachConfig.processId}`
+            : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
           attachConfig
         }
       };
@@ -1477,8 +1526,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           this.logger.warn(`[SessionManager] Disconnect request failed, continuing with cleanup:`, disconnectError);
         }
 
-        // Stop the proxy manager
-        await session.proxyManager.stop();
+        // Stop the proxy manager — it may already be gone if the disconnect
+        // request triggered a 'terminated' event that cleared proxyManager.
+        if (session.proxyManager) {
+          await session.proxyManager.stop();
+        }
 
         this._updateSessionState(session, SessionState.STOPPED);
         this.sessionStore.update(sessionId, {

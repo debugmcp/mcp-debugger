@@ -931,11 +931,22 @@ export class DapProxyWorker {
       this.dapClient.shutdown('worker shutdown');
     }
 
-    // Disconnect DAP client
+    // Disconnect DAP client — for attach mode via handleTerminate(), dapClient is
+    // already null (handled by auto-detach above). But if shutdown() is reached through
+    // other paths (signals, crashes, parent death), dapClient may still be live.
+    // In attach mode, always use terminateDebuggee=false to preserve the debuggee.
     if (this.connectionManager && this.dapClient) {
-      await this.connectionManager.disconnect(this.dapClient);
+      const terminateDebuggee = !this.isAttachMode;
+      await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
     }
     this.dapClient = null;
+
+    // In attach mode, give the adapter time to complete ICorDebugProcess::Detach()
+    // after receiving the DAP disconnect before we kill the adapter process.
+    if (this.isAttachMode && this.processManager && this.adapterProcess) {
+      this.logger?.info('[Worker] Attach mode: waiting 500ms for adapter to complete detach...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     // Terminate adapter process
     if (this.processManager && this.adapterProcess) {

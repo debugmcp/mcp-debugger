@@ -271,7 +271,12 @@ export class ProxyRunner {
     this.logger.info('[ProxyRunner] IPC message handler attached');
 
     process.on('disconnect', () => {
-      this.logger.warn('[ProxyRunner] IPC channel disconnected');
+      this.logger.warn('[ProxyRunner] IPC channel disconnected — parent process died');
+      // Trigger worker shutdown so attach-mode auto-detach runs before exit.
+      // Use the same pattern as SIGTERM in setupGlobalErrorHandlers().
+      this.worker.shutdown().finally(() => {
+        process.exit(0);
+      });
     });
 
     process.on('error', (err: Error) => {

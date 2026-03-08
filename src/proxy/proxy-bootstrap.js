@@ -17,22 +17,11 @@ function logBootstrapActivity(message) {
   console.error(`${bootstrapLogPrefix} ${message}`);
 }
 
-// Set up signal handlers to ensure proper cleanup
-process.on('SIGTERM', () => {
-  logBootstrapActivity('Received SIGTERM, shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  logBootstrapActivity('Received SIGINT, shutting down gracefully...');
-  process.exit(0);
-});
-
-// Handle parent process death
-process.on('disconnect', () => {
-  logBootstrapActivity('Parent process disconnected, shutting down...');
-  process.exit(0);
-});
+// NOTE: No SIGTERM/SIGINT/disconnect handlers here. The worker module
+// (dap-proxy-core.ts / ProxyRunner) registers its own async handlers that
+// perform proper cleanup (auto-detach in attach mode, graceful DAP disconnect).
+// Bootstrap handlers would race with worker shutdown and call process.exit()
+// before the async auto-detach could complete.
 
 // Set up heartbeat to detect orphaned state
 let lastHeartbeat = Date.now();
@@ -41,9 +30,12 @@ const HEARTBEAT_TIMEOUT = 30000; // 30 seconds
  // Check if we're orphaned every 10 seconds
 setInterval(() => {
   // Use container-safe orphan detection (ppid=1 ignored inside containers)
+  // Send SIGTERM (not process.exit) so the worker's signal handler fires
+  // and runs auto-detach before exit.
   if (shouldExitAsOrphanFromEnv(process.ppid, process.env)) {
-    logBootstrapActivity('Process orphaned (ppid=1 outside container), terminating...');
-    process.exit(1);
+    logBootstrapActivity('Process orphaned (ppid=1 outside container), sending SIGTERM...');
+    process.kill(process.pid, 'SIGTERM');
+    return;
   }
 
   // Also check if we haven't received any IPC messages in a while
@@ -52,8 +44,8 @@ setInterval(() => {
       // Try to ping parent
       process.send({ type: 'heartbeat', pid: process.pid });
     } catch {
-      logBootstrapActivity('Cannot communicate with parent, terminating...');
-      process.exit(1);
+      logBootstrapActivity('Cannot communicate with parent, sending SIGTERM...');
+      process.kill(process.pid, 'SIGTERM');
     }
   }
 }, 10000);
