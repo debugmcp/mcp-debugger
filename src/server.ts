@@ -338,17 +338,35 @@ export class DebugMcpServer {
 
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
-    
+
+    // Java FQCN support: if the file looks like a fully-qualified class name
+    // (e.g. "com.example.MyClass" or "com.example.Outer$Inner"), skip file
+    // existence check and pass it directly to the debug adapter.
+    // The JDI bridge resolves FQCNs via vm.classesByName().
+    if (this.isJavaFqcn(file)) {
+      this.logger.info(`[DebugMcpServer.setBreakpoint] Java FQCN detected: ${file}`);
+      return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
+    }
+
     // Check file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(file);
     if (!fileCheck.exists) {
       throw this.fileNotFoundError('Breakpoint file', file, fileCheck);
     }
-    
+
     this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${fileCheck.effectivePath} (original: ${file})`);
-    
+
     // Pass the effective path (which has been resolved for container) to session manager
     return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition);
+  }
+
+  /**
+   * Checks if a string looks like a Java class name (simple or fully-qualified)
+   * rather than a file path. E.g. "com.example.MyClass", "com.example.Outer$Inner", "MyClass"
+   * A class name has no path separators and no file extension.
+   */
+  private isJavaFqcn(file: string): boolean {
+    return !file.includes('/') && !file.includes('\\') && !file.endsWith('.java');
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -523,7 +541,7 @@ export class DebugMcpServer {
           { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions', inputSchema: { type: 'object', properties: {} } },
-          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' } }, required: ['sessionId', 'file', 'line'] } },
           { name: 'start_debugging', description: 'Start debugging a script', inputSchema: { 
               type: 'object', 
               properties: { 

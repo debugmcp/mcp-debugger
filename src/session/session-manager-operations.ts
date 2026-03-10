@@ -784,45 +784,52 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
     ) {
       try {
+        // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
+        const allBpsForFile = Array.from(session.breakpoints.values())
+          .filter(bp => bp.file === file);
+
         this.logger.info(
-          `[SessionManager] Active proxy for session ${sessionId}, sending breakpoint ${bpId}.`
+          `[SessionManager] Active proxy for session ${sessionId}, sending ${allBpsForFile.length} breakpoint(s) for ${file}.`
         );
         const response =
           await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>(
             'setBreakpoints',
             {
-              source: { path: newBreakpoint.file },
-              breakpoints: [{ line: newBreakpoint.line, condition: newBreakpoint.condition }],
+              source: { path: file },
+              breakpoints: allBpsForFile.map(bp => ({ line: bp.line, condition: bp.condition })),
             }
           );
         if (
           response &&
           response.body &&
-          response.body.breakpoints &&
-          response.body.breakpoints.length > 0
+          response.body.breakpoints
         ) {
-          const bpInfo = response.body.breakpoints[0];
-          newBreakpoint.verified = bpInfo.verified;
-          newBreakpoint.line = bpInfo.line || newBreakpoint.line;
-          newBreakpoint.message = bpInfo.message; // Capture validation message
-          this.logger.info(
-            `[SessionManager] Breakpoint ${bpId} sent and response received. Verified: ${newBreakpoint.verified}${
-              bpInfo.message ? `, Message: ${bpInfo.message}` : ''
-            }`
-          );
+          const responseBps = response.body.breakpoints;
+          // Update ALL breakpoints from response (positional match)
+          for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
+            const bpInfo = responseBps[i];
+            allBpsForFile[i].verified = bpInfo.verified;
+            allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
+            allBpsForFile[i].message = bpInfo.message;
+            this.logger.info(
+              `[SessionManager] Breakpoint ${allBpsForFile[i].id} response received. Verified: ${allBpsForFile[i].verified}${
+                bpInfo.message ? `, Message: ${bpInfo.message}` : ''
+              }`
+            );
 
-          // Log breakpoint verification with structured logging
-          if (newBreakpoint.verified) {
-            this.logger.info('debug:breakpoint', {
-              event: 'verified',
-              sessionId: sessionId,
-              sessionName: session.name,
-              breakpointId: bpId,
-              file: newBreakpoint.file,
-              line: newBreakpoint.line,
-              verified: true,
-              timestamp: Date.now(),
-            });
+            // Log breakpoint verification with structured logging
+            if (allBpsForFile[i].verified) {
+              this.logger.info('debug:breakpoint', {
+                event: 'verified',
+                sessionId: sessionId,
+                sessionName: session.name,
+                breakpointId: allBpsForFile[i].id,
+                file: allBpsForFile[i].file,
+                line: allBpsForFile[i].line,
+                verified: true,
+                timestamp: Date.now(),
+              });
+            }
           }
         }
       } catch (error) {

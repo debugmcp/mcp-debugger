@@ -48,7 +48,7 @@ public class JdiDapServer {
     private final AtomicInteger nextBreakpointId = new AtomicInteger(1);
 
     // --- Deferred breakpoints (class not yet loaded) ---
-    // Map: source path basename (e.g. "HelloWorld.java") -> list of line numbers
+    // Map: sourcePath (FQCN or file path from DAP request) -> breakpoint info
     private final ConcurrentHashMap<String, Map<String, Object>> deferredBreakpoints = new ConcurrentHashMap<>();
     // Track source paths for deferred breakpoint responses
     private final ConcurrentHashMap<String, String> sourcePathMap = new ConcurrentHashMap<>();
@@ -371,13 +371,15 @@ public class JdiDapServer {
         if (vm == null || deferredBreakpoints.isEmpty()) return;
 
         for (Map.Entry<String, Map<String, Object>> entry : deferredBreakpoints.entrySet()) {
-            String className = entry.getKey();
+            String sourcePath = entry.getKey();
             Map<String, Object> bpInfo = entry.getValue();
-            String sourcePath = str(bpInfo, "sourcePath");
+            String className = str(bpInfo, "className");
+            if (className == null) className = str(bpInfo, "sourcePath");
             List<Object> breakpointSpecs = list(bpInfo, "breakpoints");
             if (breakpointSpecs == null) continue;
 
-            String fileName = className + ".java";
+            String simpleClassName = className.contains(".") ? className.substring(className.lastIndexOf('.') + 1) : className;
+            String fileName = simpleClassName + ".java";
 
             // Check if the class is already loaded (by simple name or source file)
             ReferenceType found = findLoadedClass(className, fileName);
@@ -400,7 +402,7 @@ public class JdiDapServer {
                     EventRequestManager erm = vm.eventRequestManager();
                     ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
                     innerCpr.addClassFilter(className + "$*");
-                    innerCpr.putProperty("jdi-bp-class", className);
+                    innerCpr.putProperty("jdi-bp-source", sourcePath);
                     innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
                     innerCpr.enable();
                     log("Registered ClassPrepareRequest for inner classes " + className + "$* (some breakpoints unresolved)");
@@ -410,7 +412,7 @@ public class JdiDapServer {
                 EventRequestManager erm = vm.eventRequestManager();
                 ClassPrepareRequest cpr = erm.createClassPrepareRequest();
                 cpr.addClassFilter("*" + className);
-                cpr.putProperty("jdi-bp-class", className);
+                cpr.putProperty("jdi-bp-source", sourcePath);
                 cpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
                 cpr.enable();
                 log("Registered deferred ClassPrepareRequest for *" + className);
@@ -418,12 +420,21 @@ public class JdiDapServer {
                 // Also register for inner classes (e.g. Outer$Inner)
                 ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
                 innerCpr.addClassFilter(className + "$*");
-                innerCpr.putProperty("jdi-bp-class", className);
+                innerCpr.putProperty("jdi-bp-source", sourcePath);
                 innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
                 innerCpr.enable();
                 log("Registered deferred ClassPrepareRequest for " + className + "$*");
             }
         }
+    }
+
+    /**
+     * Checks if the given string looks like a Java class name (simple or
+     * fully-qualified) rather than a file path. A class name has no path
+     * separators and does not end with ".java".
+     */
+    private boolean isJavaFqcn(String s) {
+        return s != null && !s.contains("/") && !s.contains("\\") && !s.endsWith(".java");
     }
 
     /**
@@ -461,23 +472,35 @@ public class JdiDapServer {
             return;
         }
 
-        // Extract class name from source path
-        String fileName = new File(sourcePath).getName();
-        String className = fileName.replace(".java", "");
+        // Extract class name from source path or FQCN
+        String fileName;
+        String className;
+        if (isJavaFqcn(sourcePath)) {
+            // FQCN input: "com.example.MyClass" or "com.example.Outer$Inner"
+            className = sourcePath;
+            String simpleName = className.contains(".") ? className.substring(className.lastIndexOf('.') + 1) : className;
+            // Strip inner class suffix for source file name
+            if (simpleName.contains("$")) {
+                simpleName = simpleName.substring(0, simpleName.indexOf('$'));
+            }
+            fileName = simpleName + ".java";
+        } else {
+            // File path input: "/path/to/MyClass.java"
+            fileName = new File(sourcePath).getName();
+            className = fileName.replace(".java", "");
+        }
 
-        // Clear existing breakpoints for this source file
+        // Clear existing breakpoints for this source path.
+        // Match by the "jdi-bp-source" property we tag on each BreakpointRequest.
+        // This avoids collisions between same-named classes in different packages
+        // (e.g. com.a.Foo vs com.b.Foo) since sourcePath is the exact DAP value.
         if (vm != null) {
             EventRequestManager erm = vm.eventRequestManager();
             List<BreakpointRequest> toRemove = new ArrayList<>();
             for (BreakpointRequest br : erm.breakpointRequests()) {
-                try {
-                    Location loc = br.location();
-                    String srcName = loc.sourceName();
-                    if (fileName.equals(srcName)) {
-                        toRemove.add(br);
-                    }
-                } catch (AbsentInformationException e) {
-                    // Can't determine source, skip
+                Object prop = br.getProperty("jdi-bp-source");
+                if (sourcePath.equals(prop)) {
+                    toRemove.add(br);
                 }
             }
             for (BreakpointRequest br : toRemove) {
@@ -485,14 +508,13 @@ public class JdiDapServer {
             }
         }
 
-        // Remove any existing class prepare requests for this class
+        // Remove any existing class prepare requests for this source path
         if (vm != null) {
             EventRequestManager erm = vm.eventRequestManager();
             List<ClassPrepareRequest> toRemove = new ArrayList<>();
             for (ClassPrepareRequest cpr : erm.classPrepareRequests()) {
-                // Check if this CPR was for our class by looking at the property we set
-                Object prop = cpr.getProperty("jdi-bp-class");
-                if (className.equals(prop)) {
+                Object prop = cpr.getProperty("jdi-bp-source");
+                if (sourcePath.equals(prop)) {
                     toRemove.add(cpr);
                 }
             }
@@ -501,11 +523,12 @@ public class JdiDapServer {
             }
         }
 
-        // Store breakpoint specs for deferred setting
+        // Store breakpoint specs for deferred setting (keyed by sourcePath for uniqueness)
         Map<String, Object> bpInfo = new HashMap<>();
         bpInfo.put("sourcePath", sourcePath);
+        bpInfo.put("className", className);
         bpInfo.put("breakpoints", breakpointSpecs);
-        deferredBreakpoints.put(className, bpInfo);
+        deferredBreakpoints.put(sourcePath, bpInfo);
         sourcePathMap.put(className, sourcePath);
 
         // Try to set breakpoints on already-loaded classes
@@ -535,7 +558,7 @@ public class JdiDapServer {
                 EventRequestManager erm = vm.eventRequestManager();
                 ClassPrepareRequest cpr = erm.createClassPrepareRequest();
                 cpr.addClassFilter("*" + className);
-                cpr.putProperty("jdi-bp-class", className);
+                cpr.putProperty("jdi-bp-source", sourcePath);
                 cpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
                 cpr.enable();
                 log("Registered ClassPrepareRequest for *" + className);
@@ -543,7 +566,7 @@ public class JdiDapServer {
                 // Also register for inner classes (e.g. Outer$Inner)
                 ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
                 innerCpr.addClassFilter(className + "$*");
-                innerCpr.putProperty("jdi-bp-class", className);
+                innerCpr.putProperty("jdi-bp-source", sourcePath);
                 innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
                 innerCpr.enable();
                 log("Registered ClassPrepareRequest for " + className + "$*");
@@ -568,7 +591,7 @@ public class JdiDapServer {
             EventRequestManager erm = vm.eventRequestManager();
             ClassPrepareRequest innerCpr = erm.createClassPrepareRequest();
             innerCpr.addClassFilter(className + "$*");
-            innerCpr.putProperty("jdi-bp-class", className);
+            innerCpr.putProperty("jdi-bp-source", sourcePath);
             innerCpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
             innerCpr.enable();
             log("Registered ClassPrepareRequest for inner classes " + className + "$* (some breakpoints unresolved on outer class)");
@@ -595,6 +618,11 @@ public class JdiDapServer {
                 // JDI doesn't support conditional breakpoints natively,
                 // but we store the condition and evaluate it on hit
                 bpr.putProperty("condition", condition);
+            }
+            // Tag with sourcePath for precise cleanup (avoids collisions between
+            // same-named classes in different packages, e.g. com.a.Foo vs com.b.Foo)
+            if (sourcePath != null) {
+                bpr.putProperty("jdi-bp-source", sourcePath);
             }
             bpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
             bpr.enable();
@@ -1097,20 +1125,30 @@ public class JdiDapServer {
     }
 
     private void handleClassPrepared(ReferenceType refType) {
-        String className = refType.name();
-        // Also check simple name (without package)
-        String simpleName = className.contains(".") ? className.substring(className.lastIndexOf('.') + 1) : className;
+        // Look up deferred breakpoints via the sourcePath stored on the ClassPrepareRequest
+        // that triggered this event. Fall back to scanning all deferred entries by className.
+        // The CPR property is set in handleSetBreakpoints / registerPendingBreakpoints.
+        Map<String, Object> bpInfo = null;
 
-        Map<String, Object> bpInfo = deferredBreakpoints.get(simpleName);
-        if (bpInfo == null) bpInfo = deferredBreakpoints.get(className);
-        // For inner classes (e.g. "Outer$Inner"), strip "$..." and retry
-        if (bpInfo == null && simpleName.contains("$")) {
-            String outerName = simpleName.substring(0, simpleName.indexOf('$'));
-            bpInfo = deferredBreakpoints.get(outerName);
-        }
-        if (bpInfo == null && className.contains("$")) {
-            String outerFqn = className.substring(0, className.indexOf('$'));
-            bpInfo = deferredBreakpoints.get(outerFqn);
+        // Primary lookup: scan deferredBreakpoints for an entry whose className matches this type
+        String className = refType.name();
+        String simpleName = className.contains(".") ? className.substring(className.lastIndexOf('.') + 1) : className;
+        for (Map<String, Object> entry : deferredBreakpoints.values()) {
+            String entryClassName = str(entry, "className");
+            if (entryClassName == null) continue;
+            if (entryClassName.equals(className) || entryClassName.equals(simpleName)) {
+                bpInfo = entry;
+                break;
+            }
+            // Inner class: strip "$..." and check outer
+            if (simpleName.contains("$")) {
+                String outerName = simpleName.substring(0, simpleName.indexOf('$'));
+                if (entryClassName.equals(outerName)) { bpInfo = entry; break; }
+            }
+            if (className.contains("$")) {
+                String outerFqn = className.substring(0, className.indexOf('$'));
+                if (entryClassName.equals(outerFqn)) { bpInfo = entry; break; }
+            }
         }
         if (bpInfo == null) return;
 
