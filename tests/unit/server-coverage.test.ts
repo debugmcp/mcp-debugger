@@ -291,6 +291,153 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       await expect(server.setBreakpoint('test-session', '/path/to/file.py', -1))
         .rejects.toThrow('Invalid line number');
     });
+
+    it('should skip file existence check for Java FQCN', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      const mockFileChecker = {
+        checkExists: vi.fn()
+      };
+      (server as any).fileChecker = mockFileChecker;
+
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        id: 'bp-1',
+        file: 'com.example.MyClass',
+        line: 42,
+        verified: true
+      });
+
+      const result = await server.setBreakpoint('test-session', 'com.example.MyClass', 42);
+
+      expect(result.verified).toBe(true);
+      expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', 'com.example.MyClass', 42, undefined);
+    });
+
+    it('should skip file existence check for Java FQCN with inner class', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      const mockFileChecker = {
+        checkExists: vi.fn()
+      };
+      (server as any).fileChecker = mockFileChecker;
+
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        id: 'bp-1',
+        file: 'com.example.Outer$Inner',
+        line: 10,
+        verified: true
+      });
+
+      const result = await server.setBreakpoint('test-session', 'com.example.Outer$Inner', 10);
+
+      expect(result.verified).toBe(true);
+      expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
+    });
+
+    it('should skip file existence check for simple class name with inner class', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      const mockFileChecker = {
+        checkExists: vi.fn()
+      };
+      (server as any).fileChecker = mockFileChecker;
+
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        id: 'bp-1',
+        file: 'MyClass$Inner',
+        line: 15,
+        verified: true
+      });
+
+      const result = await server.setBreakpoint('test-session', 'MyClass$Inner', 15);
+
+      expect(result.verified).toBe(true);
+      expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
+    });
+
+    it('should skip file existence check for simple class name without package', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      const mockFileChecker = {
+        checkExists: vi.fn()
+      };
+      (server as any).fileChecker = mockFileChecker;
+
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        id: 'bp-1',
+        file: 'MyClass',
+        line: 5,
+        verified: true
+      });
+
+      const result = await server.setBreakpoint('test-session', 'MyClass', 5);
+
+      expect(result.verified).toBe(true);
+      expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
+    });
+
+    it('should NOT skip file existence check for .java file paths', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({
+          exists: true,
+          effectivePath: '/path/to/MyClass.java'
+        })
+      };
+
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        id: 'bp-1',
+        file: '/path/to/MyClass.java',
+        line: 10,
+        verified: true
+      });
+
+      await server.setBreakpoint('test-session', '/path/to/MyClass.java', 10);
+
+      expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('/path/to/MyClass.java');
+    });
+
+    it('should NOT skip file existence check for paths with separators', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({
+          exists: true,
+          effectivePath: '/path/to/script.py'
+        })
+      };
+
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        id: 'bp-1',
+        file: '/path/to/script.py',
+        line: 10,
+        verified: true
+      });
+
+      await server.setBreakpoint('test-session', '/path/to/script.py', 10);
+
+      expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('/path/to/script.py');
+    });
   });
 
   describe('Server Lifecycle', () => {
