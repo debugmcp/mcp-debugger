@@ -427,6 +427,15 @@ public class JdiDapServer {
     }
 
     /**
+     * Checks if the given string looks like a Java class name (simple or
+     * fully-qualified) rather than a file path. A class name has no path
+     * separators and does not end with ".java".
+     */
+    private boolean isJavaFqcn(String s) {
+        return s != null && !s.contains("/") && !s.contains("\\") && !s.endsWith(".java");
+    }
+
+    /**
      * Find a loaded class by simple name or source file name.
      * Handles package-qualified classes (e.g., com.example.MyClass) that
      * won't be found by vm.classesByName("MyClass").
@@ -461,9 +470,23 @@ public class JdiDapServer {
             return;
         }
 
-        // Extract class name from source path
-        String fileName = new File(sourcePath).getName();
-        String className = fileName.replace(".java", "");
+        // Extract class name from source path or FQCN
+        String fileName;
+        String className;
+        if (isJavaFqcn(sourcePath)) {
+            // FQCN input: "com.example.MyClass" or "com.example.Outer$Inner"
+            className = sourcePath;
+            String simpleName = className.contains(".") ? className.substring(className.lastIndexOf('.') + 1) : className;
+            // Strip inner class suffix for source file name
+            if (simpleName.contains("$")) {
+                simpleName = simpleName.substring(0, simpleName.indexOf('$'));
+            }
+            fileName = simpleName + ".java";
+        } else {
+            // File path input: "/path/to/MyClass.java"
+            fileName = new File(sourcePath).getName();
+            className = fileName.replace(".java", "");
+        }
 
         // Clear existing breakpoints for this source file
         if (vm != null) {
