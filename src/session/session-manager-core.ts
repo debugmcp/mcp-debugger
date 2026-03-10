@@ -2,8 +2,9 @@
  * Core session management functionality including lifecycle, state management,
  * and event handling.
  */
-import { 
-  SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState
+import {
+  SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
+  AdapterPolicy
 } from '@debugmcp/shared';
 import { SessionStore, ManagedSession } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
@@ -145,8 +146,16 @@ export abstract class SessionManagerCore {
     });
   }
 
-  public getSession(sessionId: string): ManagedSession | undefined { 
-    return this.sessionStore.get(sessionId); 
+  /**
+   * Get the adapter policy for a session's language.
+   */
+  public getSessionPolicy(sessionId: string): AdapterPolicy {
+    const session = this.sessionStore.getOrThrow(sessionId);
+    return this.sessionStore.selectPolicy(session.language);
+  }
+
+  public getSession(sessionId: string): ManagedSession | undefined {
+    return this.sessionStore.get(sessionId);
   }
   
   public getAllSessions(): DebugSessionInfo[] { 

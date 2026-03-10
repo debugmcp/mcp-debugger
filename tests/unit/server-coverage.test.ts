@@ -31,6 +31,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     // Mock the session manager
     mockSessionManager = {
       getSession: vi.fn(),
+      getSessionPolicy: vi.fn().mockReturnValue({}),
       createSession: vi.fn(),
       closeSession: vi.fn(),
       closeAllSessions: vi.fn(),
@@ -292,10 +293,16 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         .rejects.toThrow('Invalid line number');
     });
 
-    it('should skip file existence check for Java FQCN', async () => {
+    it('should skip file existence check when policy recognizes non-file source identifier', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      // Mock policy with isNonFileSourceIdentifier (e.g. Java adapter)
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        isNonFileSourceIdentifier: (src: string) =>
+          !src.includes('/') && !src.includes('\\') && !src.endsWith('.java')
       });
 
       const mockFileChecker = {
@@ -317,10 +324,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', 'com.example.MyClass', 42, undefined);
     });
 
-    it('should skip file existence check for Java FQCN with inner class', async () => {
+    it('should skip file existence check for inner class notation via policy', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        isNonFileSourceIdentifier: (src: string) =>
+          !src.includes('/') && !src.includes('\\') && !src.endsWith('.java')
       });
 
       const mockFileChecker = {
@@ -341,34 +353,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
     });
 
-    it('should skip file existence check for simple class name with inner class', async () => {
+    it('should skip file existence check for simple class name via policy', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
 
-      const mockFileChecker = {
-        checkExists: vi.fn()
-      };
-      (server as any).fileChecker = mockFileChecker;
-
-      mockSessionManager.setBreakpoint.mockResolvedValue({
-        id: 'bp-1',
-        file: 'MyClass$Inner',
-        line: 15,
-        verified: true
-      });
-
-      const result = await server.setBreakpoint('test-session', 'MyClass$Inner', 15);
-
-      expect(result.verified).toBe(true);
-      expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
-    });
-
-    it('should skip file existence check for simple class name without package', async () => {
-      mockSessionManager.getSession.mockReturnValue({
-        id: 'test-session',
-        sessionLifecycle: SessionLifecycleState.ACTIVE
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        isNonFileSourceIdentifier: (src: string) =>
+          !src.includes('/') && !src.includes('\\') && !src.endsWith('.java')
       });
 
       const mockFileChecker = {
@@ -389,10 +382,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
     });
 
-    it('should NOT skip file existence check for .java file paths', async () => {
+    it('should NOT skip file existence check when policy returns false for .java paths', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        isNonFileSourceIdentifier: (src: string) =>
+          !src.includes('/') && !src.includes('\\') && !src.endsWith('.java')
       });
 
       (server as any).fileChecker = {
@@ -414,11 +412,14 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('/path/to/MyClass.java');
     });
 
-    it('should NOT skip file existence check for paths with separators', async () => {
+    it('should NOT skip file existence check when policy has no isNonFileSourceIdentifier', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
+
+      // Policy without isNonFileSourceIdentifier (e.g. Python adapter)
+      mockSessionManager.getSessionPolicy.mockReturnValue({});
 
       (server as any).fileChecker = {
         checkExists: vi.fn().mockResolvedValue({
@@ -437,6 +438,29 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       await server.setBreakpoint('test-session', '/path/to/script.py', 10);
 
       expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('/path/to/script.py');
+    });
+
+    it('should run file existence check for FQCN-like input when policy does not implement isNonFileSourceIdentifier', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      // Non-Java policy (no isNonFileSourceIdentifier) — even "MyClass" gets file-checked
+      mockSessionManager.getSessionPolicy.mockReturnValue({});
+
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({
+          exists: false,
+          effectivePath: 'MyClass',
+          errorMessage: 'File does not exist'
+        })
+      };
+
+      await expect(server.setBreakpoint('test-session', 'MyClass', 5))
+        .rejects.toThrow('Breakpoint file not found');
+
+      expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('MyClass');
     });
   });
 
@@ -613,8 +637,14 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       proxyManager: { getCurrentThreadId: () => 1 }
     };
 
+    const javaPolicyMock = {
+      isNonFileSourceIdentifier: (src: string) =>
+        !src.includes('/') && !src.includes('\\') && !src.endsWith('.java')
+    };
+
     it('should send all breakpoints for same file in single DAP request', async () => {
       mockSessionManager.getSession.mockReturnValue(activeSession);
+      mockSessionManager.getSessionPolicy.mockReturnValue(javaPolicyMock);
 
       // First breakpoint
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({
@@ -648,6 +678,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should update all breakpoints from DAP response', async () => {
       mockSessionManager.getSession.mockReturnValue(activeSession);
+      mockSessionManager.getSessionPolicy.mockReturnValue(javaPolicyMock);
 
       // Simulate setBreakpoint returning updated breakpoint info
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({
@@ -667,6 +698,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should not interfere between different source files', async () => {
       mockSessionManager.getSession.mockReturnValue(activeSession);
+      mockSessionManager.getSessionPolicy.mockReturnValue(javaPolicyMock);
 
       // BP on com.a.Foo
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({

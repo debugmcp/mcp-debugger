@@ -65,6 +65,10 @@ bundled-adapters/
 .claude/
 .docstar/
 
+# Osoji (code cleanup tool)
+.osoji/
+.osojiignore
+
 # MCP server configuration (contains local paths)
 .mcp.json
 

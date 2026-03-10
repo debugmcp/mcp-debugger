@@ -22,6 +22,14 @@ export const JavaAdapterPolicy: AdapterPolicy = {
     return evt?.event === 'initialized';
   },
 
+  isNonFileSourceIdentifier: (sourceIdentifier: string): boolean => {
+    // Java FQCNs (e.g. "com.example.MyClass", "com.example.Outer$Inner")
+    // have no path separators and don't end with ".java"
+    return !sourceIdentifier.includes('/') &&
+           !sourceIdentifier.includes('\\') &&
+           !sourceIdentifier.endsWith('.java');
+  },
+
   extractLocalVariables: (
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,

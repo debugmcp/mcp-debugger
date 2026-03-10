@@ -146,7 +146,8 @@ describe('Dynamic Tool Documentation', () => {
       const fileDescription = setBreakpointTool!.inputSchema.properties.file.description;
       expect(fileDescription).toBeDefined();
       expect(fileDescription).toContain('Path to the source file');
-      expect(fileDescription).toContain('Use absolute paths or paths relative to your current working directory');
+      // The description mentions Java FQCN support and absolute file paths
+      expect(fileDescription).toContain('absolute file paths');
     });
 
     it('should provide generic path guidance in start_debugging scriptPath description', async () => {
@@ -221,7 +222,8 @@ describe('Dynamic Tool Documentation', () => {
           const description = tool.inputSchema.properties.file.description;
           expect(typeof description).toBe('string');
           expect(description?.length).toBeGreaterThan(0);
-          expect(description).toContain('relative to your current working directory');
+          // set_breakpoint mentions Java FQCN and absolute file paths
+          expect(description).toContain('absolute file paths');
         } else if (tool.name === 'start_debugging') {
           const description = tool.inputSchema.properties.scriptPath.description;
           expect(typeof description).toBe('string');

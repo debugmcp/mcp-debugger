@@ -168,9 +168,19 @@ export interface AdapterPolicy {
   ): boolean;
 
   /**
+   * Check if a source identifier is a non-file reference that this adapter
+   * can resolve at runtime (e.g., Java FQCNs resolved via vm.classesByName()).
+   * When this returns true, the server skips the file existence check.
+   *
+   * @param sourceIdentifier The source identifier to check
+   * @returns True if this is a valid non-file identifier for this adapter
+   */
+  isNonFileSourceIdentifier?(sourceIdentifier: string): boolean;
+
+  /**
    * Validate that the resolved executable is actually usable for this language.
    * This is language-specific - e.g., Python needs to check for Windows Store aliases.
-   * 
+   *
    * @param executablePath The path to validate
    * @returns Promise resolving to true if valid, false otherwise
    */

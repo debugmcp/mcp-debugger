@@ -6,8 +6,8 @@
  * testability and follows the Single Responsibility Principle.
  */
 import { v4 as uuidv4 } from 'uuid';
-import { 
-  DebugLanguage, 
+import {
+  DebugLanguage,
   SessionState,
   SessionLifecycleState,
   ExecutionState,
@@ -18,6 +18,8 @@ import {
   PythonAdapterPolicy,
   JsDebugAdapterPolicy,
   RustAdapterPolicy,
+  GoAdapterPolicy,
+  JavaAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
@@ -66,7 +68,7 @@ export class SessionStore {
   /**
    * Selects the appropriate adapter policy based on language
    */
-  private selectPolicy(language: DebugLanguage): AdapterPolicy {
+  public selectPolicy(language: DebugLanguage): AdapterPolicy {
     switch (language) {
       case DebugLanguage.PYTHON:
         return PythonAdapterPolicy;
@@ -74,6 +76,10 @@ export class SessionStore {
         return JsDebugAdapterPolicy;
       case DebugLanguage.RUST:
         return RustAdapterPolicy;
+      case DebugLanguage.GO:
+        return GoAdapterPolicy;
+      case DebugLanguage.JAVA:
+        return JavaAdapterPolicy;
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
       default:

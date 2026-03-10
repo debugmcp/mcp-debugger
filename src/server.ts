@@ -339,12 +339,10 @@ export class DebugMcpServer {
   public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
 
-    // Java FQCN support: if the file looks like a fully-qualified class name
-    // (e.g. "com.example.MyClass" or "com.example.Outer$Inner"), skip file
-    // existence check and pass it directly to the debug adapter.
-    // The JDI bridge resolves FQCNs via vm.classesByName().
-    if (this.isJavaFqcn(file)) {
-      this.logger.info(`[DebugMcpServer.setBreakpoint] Java FQCN detected: ${file}`);
+    // Check if the adapter handles non-file source identifiers (e.g. Java FQCNs)
+    const policy = this.sessionManager.getSessionPolicy(sessionId);
+    if (policy.isNonFileSourceIdentifier?.(file)) {
+      this.logger.info(`[DebugMcpServer.setBreakpoint] Non-file source identifier detected: ${file}`);
       return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
     }
 
@@ -358,15 +356,6 @@ export class DebugMcpServer {
 
     // Pass the effective path (which has been resolved for container) to session manager
     return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition);
-  }
-
-  /**
-   * Checks if a string looks like a Java class name (simple or fully-qualified)
-   * rather than a file path. E.g. "com.example.MyClass", "com.example.Outer$Inner", "MyClass"
-   * A class name has no path separators and no file extension.
-   */
-  private isJavaFqcn(file: string): boolean {
-    return !file.includes('/') && !file.includes('\\') && !file.endsWith('.java');
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
