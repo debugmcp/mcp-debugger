@@ -1726,4 +1726,495 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
     });
   });
+
+  describe('Multi-Breakpoint DAP Aggregation', () => {
+    /**
+     * Helper: set a breakpoint and return DAP response with given verified BPs.
+     * The mock returns all requested BPs as verified with their original lines.
+     */
+    function mockDapSetBreakpointsResponse(bpCount: number) {
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: Array.from({ length: bpCount }, (_, i) => ({
+            verified: true,
+            line: 0, // will be overridden per-test
+          }))
+        }
+      });
+    }
+
+    /** Helper to extract the breakpoints array from the last sendDapRequest call. */
+    function getLastDapBreakpoints(): Array<{ line: number; condition?: string }> {
+      const calls = mockProxyManager.sendDapRequest.mock.calls;
+      const lastCall = calls[calls.length - 1];
+      return lastCall[1].breakpoints;
+    }
+
+    /** Helper to extract the source path from the last sendDapRequest call. */
+    function getLastDapSourcePath(): string {
+      const calls = mockProxyManager.sendDapRequest.mock.calls;
+      const lastCall = calls[calls.length - 1];
+      return lastCall[1].source.path;
+    }
+
+    beforeEach(() => {
+      mockSession.state = SessionState.PAUSED;
+      mockSession.breakpoints = new Map();
+    });
+
+    it('should send all 3 BPs for same file in a single DAP request', async () => {
+      // Set 3 breakpoints on same file, each DAP response returns all BPs so far
+      for (let i = 1; i <= 3; i++) {
+        mockProxyManager.sendDapRequest.mockResolvedValue({
+          body: {
+            breakpoints: Array.from({ length: i }, (_, j) => ({
+              verified: true,
+              line: (j + 1) * 10,
+            }))
+          }
+        });
+        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+      }
+
+      // The last DAP call should have all 3 BPs
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(3);
+      expect(lastBps.map(bp => bp.line)).toEqual([10, 20, 30]);
+      expect(getLastDapSourcePath()).toBe('com.example.Foo');
+    });
+
+    it('should remove first BP: remaining 2 BPs are sent correctly', async () => {
+      // Set 3 BPs
+      for (let i = 1; i <= 3; i++) {
+        mockProxyManager.sendDapRequest.mockResolvedValue({
+          body: {
+            breakpoints: Array.from({ length: i }, (_, j) => ({
+              verified: true,
+              line: (j + 1) * 10,
+            }))
+          }
+        });
+        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+      }
+
+      // Remove first BP (line 10) by deleting from session.breakpoints
+      const firstBpId = Array.from(mockSession.breakpoints.entries())
+        .find(([_, bp]: [string, any]) => bp.line === 10)?.[0];
+      expect(firstBpId).toBeDefined();
+      mockSession.breakpoints.delete(firstBpId!);
+
+      // Set another BP to trigger a new DAP request (simulates re-sync)
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 20 },
+            { verified: true, line: 30 },
+            { verified: true, line: 40 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 40);
+
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(3);
+      expect(lastBps.map(bp => bp.line)).toEqual([20, 30, 40]);
+    });
+
+    it('should remove middle BP: remaining 2 BPs are sent correctly', async () => {
+      // Set 3 BPs
+      for (let i = 1; i <= 3; i++) {
+        mockProxyManager.sendDapRequest.mockResolvedValue({
+          body: {
+            breakpoints: Array.from({ length: i }, (_, j) => ({
+              verified: true,
+              line: (j + 1) * 10,
+            }))
+          }
+        });
+        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+      }
+
+      // Remove middle BP (line 20)
+      const middleBpId = Array.from(mockSession.breakpoints.entries())
+        .find(([_, bp]: [string, any]) => bp.line === 20)?.[0];
+      expect(middleBpId).toBeDefined();
+      mockSession.breakpoints.delete(middleBpId!);
+
+      // Trigger new DAP request
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 10 },
+            { verified: true, line: 30 },
+            { verified: true, line: 40 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 40);
+
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(3);
+      expect(lastBps.map(bp => bp.line)).toEqual([10, 30, 40]);
+    });
+
+    it('should remove last BP: remaining 2 BPs are sent correctly', async () => {
+      // Set 3 BPs
+      for (let i = 1; i <= 3; i++) {
+        mockProxyManager.sendDapRequest.mockResolvedValue({
+          body: {
+            breakpoints: Array.from({ length: i }, (_, j) => ({
+              verified: true,
+              line: (j + 1) * 10,
+            }))
+          }
+        });
+        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+      }
+
+      // Remove last BP (line 30)
+      const lastBpId = Array.from(mockSession.breakpoints.entries())
+        .find(([_, bp]: [string, any]) => bp.line === 30)?.[0];
+      expect(lastBpId).toBeDefined();
+      mockSession.breakpoints.delete(lastBpId!);
+
+      // Trigger new DAP request
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 10 },
+            { verified: true, line: 20 },
+            { verified: true, line: 40 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 40);
+
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(3);
+      expect(lastBps.map(bp => bp.line)).toEqual([10, 20, 40]);
+    });
+
+    it('should not include BPs from different files in the DAP request', async () => {
+      // Set BP on file A
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.a.Foo', 10);
+
+      // Set BP on file B (different package, same simple name)
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 20 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.b.Foo', 20);
+
+      // Last DAP request should only contain the BP for com.b.Foo
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(1);
+      expect(lastBps[0].line).toBe(20);
+      expect(getLastDapSourcePath()).toBe('com.b.Foo');
+    });
+
+    it('should update verified status for all BPs from DAP response', async () => {
+      // Set 2 BPs, first response: only first verified
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+
+      // Second BP: both returned, second unverified
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 10 },
+            { verified: false, line: 20, message: 'No executable code at line 20' },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 20);
+
+      const bps = Array.from(mockSession.breakpoints.values());
+      const bp10 = bps.find((bp: any) => bp.line === 10);
+      const bp20 = bps.find((bp: any) => bp.line === 20);
+
+      expect(bp10.verified).toBe(true);
+      expect(bp20.verified).toBe(false);
+      expect(bp20.message).toBe('No executable code at line 20');
+    });
+
+    it('should update line number when DAP adjusts it', async () => {
+      // DAP can adjust the line to the nearest executable line
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [{ verified: true, line: 12 }] // adjusted from 10 to 12
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+
+      const bps = Array.from(mockSession.breakpoints.values());
+      expect(bps).toHaveLength(1);
+      expect((bps[0] as any).line).toBe(12); // adjusted
+    });
+
+    it('should update message field from DAP response', async () => {
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [{
+            verified: true,
+            line: 10,
+            message: 'Breakpoint bound to com.example.Foo:10'
+          }]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+
+      const bp = Array.from(mockSession.breakpoints.values())[0] as any;
+      expect(bp.message).toBe('Breakpoint bound to com.example.Foo:10');
+    });
+
+    it('should pass condition through to DAP request', async () => {
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 10, 'x > 5');
+
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(1);
+      expect(lastBps[0].condition).toBe('x > 5');
+    });
+
+    it('should preserve conditions when adding a second BP to the same file', async () => {
+      // First BP with condition
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 10, 'x > 5');
+
+      // Second BP without condition — DAP request should contain both
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 10 },
+            { verified: true, line: 20 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 20);
+
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps[0].line).toBe(10);
+      expect(lastBps[0].condition).toBe('x > 5');
+      expect(lastBps[1].line).toBe(20);
+      expect(lastBps[1].condition).toBeUndefined();
+    });
+
+    it('should handle DAP response with fewer BPs than sent', async () => {
+      // Set 2 BPs
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+
+      // DAP only returns 1 BP in response (e.g. adapter bug or limit)
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [{ verified: true, line: 10 }]
+          // missing second BP
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.example.Foo', 20);
+
+      // First BP updated, second remains unverified (default)
+      const bps = Array.from(mockSession.breakpoints.values());
+      const bp10 = bps.find((bp: any) => bp.line === 10);
+      const bp20 = bps.find((bp: any) => bp.line === 20);
+      expect(bp10.verified).toBe(true);
+      expect(bp20.verified).toBe(false);
+    });
+
+    it('should keep com.b.Foo BP intact when removing com.a.Foo BP', async () => {
+      // Set BP on com.a.Foo
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.a.Foo', 10);
+
+      // Set BP on com.b.Foo
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 20 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.b.Foo', 20);
+
+      // Both BPs exist
+      expect(mockSession.breakpoints.size).toBe(2);
+
+      // Remove the com.a.Foo BP
+      const aFooBpId = Array.from(mockSession.breakpoints.entries())
+        .find(([_, bp]: [string, any]) => bp.file === 'com.a.Foo')?.[0];
+      expect(aFooBpId).toBeDefined();
+      mockSession.breakpoints.delete(aFooBpId!);
+
+      // Add new BP on com.b.Foo to trigger DAP re-sync for that file
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 20 },
+            { verified: true, line: 30 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.b.Foo', 30);
+
+      // DAP request should only contain com.b.Foo BPs (20, 30), not com.a.Foo
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps.map(bp => bp.line)).toEqual([20, 30]);
+      expect(getLastDapSourcePath()).toBe('com.b.Foo');
+
+      // com.a.Foo BP should be gone, com.b.Foo BPs should remain
+      const remainingFiles = Array.from(mockSession.breakpoints.values())
+        .map((bp: any) => bp.file);
+      expect(remainingFiles).not.toContain('com.a.Foo');
+      expect(remainingFiles.filter((f: string) => f === 'com.b.Foo')).toHaveLength(2);
+    });
+
+    it('should keep com.b.Foo BP intact when removing com.b.Foo BP (but not the other)', async () => {
+      // Set 2 BPs on com.b.Foo
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.b.Foo', 10);
+
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 10 },
+            { verified: true, line: 20 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.b.Foo', 20);
+
+      // Set BP on com.a.Foo
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 50 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.a.Foo', 50);
+
+      expect(mockSession.breakpoints.size).toBe(3);
+
+      // Remove one of the com.b.Foo BPs (line 10)
+      const bFoo10Id = Array.from(mockSession.breakpoints.entries())
+        .find(([_, bp]: [string, any]) => bp.file === 'com.b.Foo' && bp.line === 10)?.[0];
+      expect(bFoo10Id).toBeDefined();
+      mockSession.breakpoints.delete(bFoo10Id!);
+
+      // Trigger re-sync on com.b.Foo
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 20 },
+            { verified: true, line: 30 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.b.Foo', 30);
+
+      // DAP request for com.b.Foo should contain remaining + new (20, 30)
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps.map(bp => bp.line)).toEqual([20, 30]);
+      expect(getLastDapSourcePath()).toBe('com.b.Foo');
+
+      // com.a.Foo BP (line 50) should be untouched
+      const aFooBp = Array.from(mockSession.breakpoints.values())
+        .find((bp: any) => bp.file === 'com.a.Foo') as any;
+      expect(aFooBp).toBeDefined();
+      expect(aFooBp.line).toBe(50);
+      expect(aFooBp.verified).toBe(true);
+    });
+
+    it('should treat com.A.Foo and com.A$Foo as separate sources', async () => {
+      // com.A.Foo = class Foo in package com.A
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.A.Foo', 10);
+
+      // com.A$Foo = inner class Foo of class A in default package
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 20 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.A$Foo', 20);
+
+      expect(mockSession.breakpoints.size).toBe(2);
+
+      // Remove com.A.Foo BP
+      const aFooBpId = Array.from(mockSession.breakpoints.entries())
+        .find(([_, bp]: [string, any]) => bp.file === 'com.A.Foo')?.[0];
+      expect(aFooBpId).toBeDefined();
+      mockSession.breakpoints.delete(aFooBpId!);
+
+      // Trigger re-sync on com.A$Foo
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 20 },
+            { verified: true, line: 30 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.A$Foo', 30);
+
+      // DAP request should only contain com.A$Foo BPs
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps.map(bp => bp.line)).toEqual([20, 30]);
+      expect(getLastDapSourcePath()).toBe('com.A$Foo');
+
+      // com.A.Foo should be gone from breakpoints map
+      const remainingFiles = Array.from(mockSession.breakpoints.values())
+        .map((bp: any) => bp.file);
+      expect(remainingFiles).not.toContain('com.A.Foo');
+      expect(remainingFiles.filter((f: string) => f === 'com.A$Foo')).toHaveLength(2);
+    });
+
+    it('should keep com.A$Foo BP when adding more BPs to com.A.Foo', async () => {
+      // com.A$Foo (inner class)
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.A$Foo', 10);
+
+      // com.A.Foo (regular class)
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: { breakpoints: [{ verified: true, line: 20 }] }
+      });
+      await operations.setBreakpoint('test-session', 'com.A.Foo', 20);
+
+      // Add second BP to com.A.Foo
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [
+            { verified: true, line: 20 },
+            { verified: true, line: 30 },
+          ]
+        }
+      });
+      await operations.setBreakpoint('test-session', 'com.A.Foo', 30);
+
+      // DAP request should only contain com.A.Foo BPs (20, 30)
+      const lastBps = getLastDapBreakpoints();
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps.map(bp => bp.line)).toEqual([20, 30]);
+      expect(getLastDapSourcePath()).toBe('com.A.Foo');
+
+      // com.A$Foo BP (line 10) should be untouched
+      const innerBp = Array.from(mockSession.breakpoints.values())
+        .find((bp: any) => bp.file === 'com.A$Foo') as any;
+      expect(innerBp).toBeDefined();
+      expect(innerBp.line).toBe(10);
+      expect(innerBp.verified).toBe(true);
+    });
+  });
 });

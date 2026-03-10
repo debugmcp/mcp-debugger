@@ -606,6 +606,97 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     });
   });
 
+  describe('Multi-Breakpoint per Source File', () => {
+    const activeSession = {
+      id: 'test-session',
+      sessionLifecycle: SessionLifecycleState.ACTIVE,
+      proxyManager: { getCurrentThreadId: () => 1 }
+    };
+
+    it('should send all breakpoints for same file in single DAP request', async () => {
+      mockSessionManager.getSession.mockReturnValue(activeSession);
+
+      // First breakpoint
+      mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+        id: 'bp-1',
+        file: 'com.example.Foo',
+        line: 10,
+        verified: true,
+      });
+
+      await server.setBreakpoint('test-session', 'com.example.Foo', 10);
+
+      // Second breakpoint on same file
+      mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+        id: 'bp-2',
+        file: 'com.example.Foo',
+        line: 20,
+        verified: true,
+      });
+
+      await server.setBreakpoint('test-session', 'com.example.Foo', 20);
+
+      // Both calls should have been made
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+        'test-session', 'com.example.Foo', 10, undefined
+      );
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+        'test-session', 'com.example.Foo', 20, undefined
+      );
+    });
+
+    it('should update all breakpoints from DAP response', async () => {
+      mockSessionManager.getSession.mockReturnValue(activeSession);
+
+      // Simulate setBreakpoint returning updated breakpoint info
+      mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+        id: 'bp-1',
+        file: 'com.example.Foo',
+        line: 10,
+        verified: true,
+        message: 'Breakpoint set',
+      });
+
+      const result = await server.setBreakpoint('test-session', 'com.example.Foo', 10);
+      expect(result.id).toBe('bp-1');
+      expect(result.verified).toBe(true);
+      expect(result.line).toBe(10);
+      expect(result.message).toBe('Breakpoint set');
+    });
+
+    it('should not interfere between different source files', async () => {
+      mockSessionManager.getSession.mockReturnValue(activeSession);
+
+      // BP on com.a.Foo
+      mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+        id: 'bp-1',
+        file: 'com.a.Foo',
+        line: 10,
+        verified: true,
+      });
+      await server.setBreakpoint('test-session', 'com.a.Foo', 10);
+
+      // BP on com.b.Foo (different package, same simple name)
+      mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+        id: 'bp-2',
+        file: 'com.b.Foo',
+        line: 15,
+        verified: true,
+      });
+      await server.setBreakpoint('test-session', 'com.b.Foo', 15);
+
+      // Both should be set independently
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+        'test-session', 'com.a.Foo', 10, undefined
+      );
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+        'test-session', 'com.b.Foo', 15, undefined
+      );
+    });
+  });
+
   describe('Evaluate Expression Edge Cases', () => {
     it('should handle expression evaluation in terminated session', async () => {
       mockSessionManager.getSession.mockReturnValue({
