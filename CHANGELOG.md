@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-03-11
+
+### Added
+- Java FQCN (Fully Qualified Class Name) support as breakpoint file parameter — pass class names like `com.example.MyClass` instead of file paths
+
+### Fixed
+- Multi-breakpoint aggregation and sourcePath-based breakpoint cleanup
+- Moved `isJavaFqcn` into adapter policy layer following Open/Closed principle
+
 ## [0.18.0] - 2026-03-05
 
 ### Added

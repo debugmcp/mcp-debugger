@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-java",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Java debug adapter for MCP Debugger using JDI bridge",
   "type": "module",
   "main": "./dist/index.js",

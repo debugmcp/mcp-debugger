@@ -9,7 +9,7 @@ on:
       ref:
         description: 'Git ref (tag or branch) to release from'
         required: true
-        default: 'refs/tags/v0.18.0'
+        default: 'refs/tags/v0.18.1'
 
 jobs:
   build-and-test:

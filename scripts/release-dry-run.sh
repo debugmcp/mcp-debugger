@@ -24,15 +24,23 @@ ROOT_VER=$(node -e "console.log(require('./package.json').version)")
 SHARED_VER=$(node -e "console.log(require('./packages/shared/package.json').version)")
 MOCK_VER=$(node -e "console.log(require('./packages/adapter-mock/package.json').version)")
 PYTHON_VER=$(node -e "console.log(require('./packages/adapter-python/package.json').version)")
+GO_VER=$(node -e "console.log(require('./packages/adapter-go/package.json').version)")
+JAVA_VER=$(node -e "console.log(require('./packages/adapter-java/package.json').version)")
+JS_VER=$(node -e "console.log(require('./packages/adapter-javascript/package.json').version)")
+RUST_VER=$(node -e "console.log(require('./packages/adapter-rust/package.json').version)")
 CLI_VER=$(node -e "console.log(require('./packages/mcp-debugger/package.json').version)")
 
-echo "  Root:          $ROOT_VER"
-echo "  shared:        $SHARED_VER"
-echo "  adapter-mock:  $MOCK_VER"
-echo "  adapter-python:$PYTHON_VER"
-echo "  mcp-debugger:  $CLI_VER"
+echo "  Root:               $ROOT_VER"
+echo "  shared:             $SHARED_VER"
+echo "  adapter-mock:       $MOCK_VER"
+echo "  adapter-python:     $PYTHON_VER"
+echo "  adapter-go:         $GO_VER"
+echo "  adapter-java:       $JAVA_VER"
+echo "  adapter-javascript: $JS_VER"
+echo "  adapter-rust:       $RUST_VER"
+echo "  mcp-debugger:       $CLI_VER"
 
-if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
+if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$GO_VER" && "$ROOT_VER" == "$JAVA_VER" && "$ROOT_VER" == "$JS_VER" && "$ROOT_VER" == "$RUST_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
   pass "All package versions match ($ROOT_VER)"
 else
   fail "Package versions are inconsistent"
