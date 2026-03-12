@@ -1327,32 +1327,6 @@ describe('MinimalDapClient', () => {
     });
   });
 
-  describe('Initialization helpers', () => {
-    it('resolves waitInitialized quietly when timeout elapses', async () => {
-      const scheduled: Array<() => void> = [];
-      const fakeTimers = {
-        setTimeout: vi.fn((cb: (...args: unknown[]) => void) => {
-          scheduled.push(cb as () => void);
-          return Symbol('timer') as unknown as NodeJS.Timeout;
-        }),
-        clearTimeout: vi.fn()
-      };
-
-      const timeoutClient = new MinimalDapClient('localhost', 9000, undefined, {
-        timers: fakeTimers
-      });
-
-      const waitPromise = (timeoutClient as any).waitInitialized(25);
-
-      expect(fakeTimers.setTimeout).toHaveBeenCalled();
-      expect(scheduled).toHaveLength(1);
-      scheduled[0]!();
-
-      await expect(waitPromise).resolves.toBeUndefined();
-      timeoutClient.shutdown();
-    });
-  });
-
   describe('Request error handling and resilience', () => {
     it('rejects sendRequest when socket write fails and clears pending entry', async () => {
       const failingClient = new MinimalDapClient('localhost', 8787);

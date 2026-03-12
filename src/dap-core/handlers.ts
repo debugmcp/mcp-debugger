@@ -158,7 +158,7 @@ function handleErrorMessage(
 }
 
 /**
- * Handle DAP events (Phase 2 placeholder)
+ * Handle DAP events and update session state
  */
 function handleDapEvent(
   state: DAPSessionState,
@@ -228,7 +228,7 @@ function handleDapEvent(
 }
 
 /**
- * Handle DAP responses (Phase 3 placeholder)
+ * Handle DAP responses and correlate with pending requests
  */
 function handleDapResponse(
   state: DAPSessionState,

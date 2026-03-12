@@ -3,12 +3,11 @@ import subprocess
 import time
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 from rich.layout import Layout
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.text import Text
 
 # --- Configuration ---

@@ -60,7 +60,6 @@ function createChildSafePolicy(policy: AdapterPolicy): AdapterPolicy {
 
 export interface ChildSessionOptions {
   policy: AdapterPolicy;
-  parentClient: MinimalDapClient;
   host: string;
   port: number;
 }
@@ -68,28 +67,25 @@ export interface ChildSessionOptions {
 export class ChildSessionManager extends EventEmitter {
   private policy: AdapterPolicy;
   private dapBehavior: DapClientBehavior;
-  private parentClient: MinimalDapClient;
   private host: string;
   private port: number;
-  
+
   // Child session tracking
   private adoptedTargets = new Set<string>();
   private childSessions = new Map<string, MinimalDapClient>();
   private activeChild: MinimalDapClient | null = null;
-  
+
   // Breakpoint mirroring
   private storedBreakpoints = new Map<string, DebugProtocol.SourceBreakpoint[]>();
-  
+
   // State tracking
   private adoptionInProgress = false;
-  private childConfigComplete = false;
   private readonly instanceId: string;
 
   constructor(options: ChildSessionOptions) {
     super();
     this.policy = options.policy;
     this.dapBehavior = options.policy.getDapClientBehavior();
-    this.parentClient = options.parentClient;
     this.host = options.host;
     this.port = options.port;
     this.instanceId = createInstanceId();
@@ -242,13 +238,13 @@ export class ChildSessionManager extends EventEmitter {
       
       this.adoptionInProgress = false;
       logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = false for ${pendingId} (success)`);
-      this.childConfigComplete = true;
-      
+
       logger.info(`[ChildSessionManager:${this.instanceId}] Child session created successfully for ${pendingId}`);
       this.emit('childCreated', pendingId, child);
       
     } catch (error) {
       this.adoptionInProgress = false;
+      this.adoptedTargets.delete(pendingId);
       logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = false for ${pendingId} (error)`);
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(`[ChildSessionManager:${this.instanceId}] Failed to create child session for ${pendingId}: ${msg}`);

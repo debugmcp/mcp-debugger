@@ -8,8 +8,6 @@ def main():
     x = 10
     y = 20
     result = x + y
-    message = "Testing debugger"
-    
     print("Before input - set breakpoint here")
     # This line will pause execution
     user_input = input("Press Enter to continue: ")

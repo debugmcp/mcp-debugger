@@ -610,28 +610,6 @@ You can also specify the Go path explicitly in your debug configuration.`;
   }
   
   /**
-   * Resolve Delve executable path
-   */
-  async resolveDelveExecutablePath(preferredPath?: string): Promise<string> {
-    const cacheKey = preferredPath || 'default';
-    const cached = this.delvePathCache.get(cacheKey);
-    
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      this.dependencies.logger?.debug?.(`[GoDebugAdapter] Using cached Delve path: ${cached.path}`);
-      return cached.path;
-    }
-    
-    const dlvPath = await findDelveExecutable(preferredPath, this.dependencies.logger);
-    
-    this.delvePathCache.set(cacheKey, {
-      path: dlvPath,
-      timestamp: Date.now()
-    });
-    
-    return dlvPath;
-  }
-  
-  /**
    * Check Delve version
    */
   async checkDelveVersion(dlvPath: string): Promise<string | null> {

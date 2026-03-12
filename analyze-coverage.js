@@ -21,7 +21,6 @@ try {
   const coverage = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
   const overall = coverage.total ? coverage.total.lines.pct : 0;
   
-  let totalUncovered = 0;
   let totalLines = 0;
   const files = [];
   
@@ -29,7 +28,6 @@ try {
     if (filePath === 'total') continue;
     
     const uncovered = data.lines.total - data.lines.covered;
-    totalUncovered += uncovered;
     totalLines += data.lines.total;
     
     // Extract relative path for cleaner display

@@ -17,8 +17,6 @@ import {
 export interface GenericAdapterConfig {
   command: string;
   args: string[];
-  host: string;
-  port: number;
   logDir: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;

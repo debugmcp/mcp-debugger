@@ -63,16 +63,6 @@ export class MockAdapterFactory implements IAdapterFactory {
         errors.push('Node.js runtime not detected');
       }
       
-      // Simulate a warning for demonstration
-      if (this.config.errorProbability && this.config.errorProbability > 0.5) {
-        warnings.push(`High error probability configured: ${this.config.errorProbability * 100}%`);
-      }
-      
-      // Check for conflicting configuration
-      if (this.config.defaultDelay && this.config.defaultDelay > 1000) {
-        warnings.push(`High default delay configured: ${this.config.defaultDelay}ms may slow down tests`);
-      }
-      
     } catch (error) {
       errors.push(`Validation error: ${error instanceof Error ? error.message : String(error)}`);
     }

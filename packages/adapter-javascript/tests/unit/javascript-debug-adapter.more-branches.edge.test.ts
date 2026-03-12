@@ -14,10 +14,6 @@ const depsWithLogger = {
   }
 } as unknown as import('@debugmcp/shared').AdapterDependencies;
 
-const depsNoLogger = {
-  logger: undefined
-} as unknown as import('@debugmcp/shared').AdapterDependencies;
-
 describe('JavascriptDebugAdapter additional branch coverage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();

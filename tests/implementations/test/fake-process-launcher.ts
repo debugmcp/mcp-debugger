@@ -5,15 +5,14 @@
 
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { 
-  IProcess, 
-  IProcessLauncher, 
+import {
+  IProcess,
+  IProcessLauncher,
   IProcessOptions,
   IDebugTargetLauncher,
   IDebugTarget,
   IProxyProcessLauncher,
-  IProxyProcess,
-  IProcessLauncherFactory
+  IProxyProcess
 } from '../../../src/interfaces/process-interfaces.js';
 
 /**
@@ -297,33 +296,5 @@ export class FakeProxyProcessLauncher implements IProxyProcessLauncher {
   reset(): void {
     this.launchedProxies = [];
     this.nextProxy = undefined;
-  }
-}
-
-/**
- * Fake implementation of IProcessLauncherFactory for testing
- */
-export class FakeProcessLauncherFactory implements IProcessLauncherFactory {
-  public processLauncher = new FakeProcessLauncher();
-  public debugTargetLauncher = new FakeDebugTargetLauncher();
-  public proxyProcessLauncher = new FakeProxyProcessLauncher();
-  
-  createProcessLauncher(): IProcessLauncher {
-    return this.processLauncher;
-  }
-  
-  createDebugTargetLauncher(): IDebugTargetLauncher {
-    return this.debugTargetLauncher;
-  }
-  
-  createProxyProcessLauncher(): IProxyProcessLauncher {
-    return this.proxyProcessLauncher;
-  }
-  
-  // Test helper: reset all fakes
-  reset(): void {
-    this.processLauncher.reset();
-    this.debugTargetLauncher.reset();
-    this.proxyProcessLauncher.reset();
   }
 }

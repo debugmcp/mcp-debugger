@@ -22,17 +22,3 @@ export function createMockLogger(logLevel: string = 'debug'): ILogger {
 
   return logger;
 }
-
-/**
- * Creates a spy logger that logs to console while recording calls
- * Useful for debugging tests
- * @returns Spy logger instance
- */
-export function createSpyLogger(): ILogger {
-  return {
-    info: vi.fn((...args: any[]) => console.log('[INFO]', ...args)),
-    error: vi.fn((...args: any[]) => console.error('[ERROR]', ...args)),
-    debug: vi.fn((...args: any[]) => console.log('[DEBUG]', ...args)),
-    warn: vi.fn((...args: any[]) => console.warn('[WARN]', ...args))
-  };
-}

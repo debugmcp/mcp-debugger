@@ -104,7 +104,6 @@ export class MinimalDapClient extends EventEmitter {
 
       this.childSessionManager = createChildSessionManager({
         policy: this.policy,
-        parentClient: this,
         host,
         port
       });
@@ -354,42 +353,6 @@ export class MinimalDapClient extends EventEmitter {
     return new Promise((resolve) => {
       this.timers.setTimeout(resolve, ms);
     });
-  }
-
-  private async waitInitialized(timeoutMs = 5000): Promise<void> {
-    if (this.initializedSeen) return;
-    await new Promise<void>((resolve) => {
-      let done = false;
-      const onInit = () => {
-        if (done) return;
-        done = true;
-        this.removeListener('initialized', onInit);
-        resolve();
-      };
-      const timer = this.timers.setTimeout(() => {
-        if (done) return;
-        done = true;
-        this.removeListener('initialized', onInit);
-        resolve();
-      }, timeoutMs);
-      this.on('initialized', () => {
-        this.timers.clearTimeout(timer);
-        onInit();
-      });
-    });
-  }
-
-  private flushDeferredParentConfigDone(): void {
-    if (this.parentConfigDoneDeferred) {
-      const pending = this.parentConfigDoneDeferred;
-      this.parentConfigDoneDeferred = null;
-      // Ensure we do not defer the parent's configDone again
-      this.suppressNextConfigDoneDeferral = true;
-      // Send now and wire through the original promise handlers
-      void this.sendRequest<DebugProtocol.Response>('configurationDone', pending.args)
-        .then(pending.resolve)
-        .catch(pending.reject);
-    }
   }
 
   public connect(): Promise<void> {

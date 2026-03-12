@@ -220,7 +220,7 @@ export abstract class SessionManagerCore {
     const handlers = new Map<string, (...args: any[]) => void>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- Event handlers require flexible argument signatures to support various event types
 
     // Named function for stopped event
-    const handleStopped = (threadId: number, reason: string) => {
+    const handleStopped = (threadId: number | undefined, reason: string) => {
       this.logger.debug(`[SessionManager] 'stopped' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
       

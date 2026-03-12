@@ -9,7 +9,6 @@ This module provides a sliding window view of code files that:
 """
 
 from typing import List, Tuple, Optional, Set, Dict
-import os
 from pathlib import Path
 
 

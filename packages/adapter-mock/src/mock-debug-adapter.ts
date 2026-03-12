@@ -34,22 +34,13 @@ import { AdapterDependencies } from '@debugmcp/shared';
  */
 export interface MockAdapterConfig {
   // Timing configuration
-  defaultDelay?: number;        // Base delay for operations (ms)
   connectionDelay?: number;     // Delay for connect operation
-  stepDelay?: number;          // Delay for step operations
-  
+
   // Behavior configuration
   supportedFeatures?: DebugFeature[];  // Which DAP features to support
-  maxVariableDepth?: number;           // How deep variable trees can go
-  maxArrayLength?: number;             // Maximum array size to simulate
-  
+
   // Error simulation
-  errorProbability?: number;    // Random error chance (0-1)
   errorScenarios?: MockErrorScenario[]; // Enabled error scenarios
-  
-  // Performance simulation
-  cpuIntensive?: boolean;       // Simulate CPU-intensive operations
-  memoryIntensive?: boolean;    // Simulate memory pressure
 }
 
 /**
@@ -58,11 +49,7 @@ export interface MockAdapterConfig {
 export enum MockErrorScenario {
   NONE = 'none',
   EXECUTABLE_NOT_FOUND = 'executable_not_found',
-  ADAPTER_CRASH = 'adapter_crash',
-  CONNECTION_TIMEOUT = 'connection_timeout',
-  INVALID_BREAKPOINT = 'invalid_breakpoint',
-  SCRIPT_ERROR = 'script_error',
-  OUT_OF_MEMORY = 'out_of_memory'
+  CONNECTION_TIMEOUT = 'connection_timeout'
 }
 
 /**
@@ -140,21 +127,14 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
     super();
     this.dependencies = dependencies;
     this.config = {
-      defaultDelay: config.defaultDelay ?? 0,
       connectionDelay: config.connectionDelay ?? 50,
-      stepDelay: config.stepDelay ?? 5,
       supportedFeatures: config.supportedFeatures ?? [
         DebugFeature.CONDITIONAL_BREAKPOINTS,
         DebugFeature.FUNCTION_BREAKPOINTS,
         DebugFeature.VARIABLE_PAGING,
         DebugFeature.SET_VARIABLE
       ],
-      maxVariableDepth: config.maxVariableDepth ?? 10,
-      maxArrayLength: config.maxArrayLength ?? 100,
-      errorProbability: config.errorProbability ?? 0,
       errorScenarios: config.errorScenarios ?? [],
-      cpuIntensive: config.cpuIntensive ?? false,
-      memoryIntensive: config.memoryIntensive ?? false
     };
   }
   

@@ -30,7 +30,7 @@ import { IDebugAdapter, AdapterLaunchBarrier } from '@debugmcp/shared';
  */
 export interface ProxyManagerEvents {
   // DAP events
-  'stopped': (threadId: number, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
+  'stopped': (threadId: number | undefined, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
   'continued': () => void;
   'terminated': () => void;
   'exited': () => void;
@@ -896,7 +896,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           this.currentThreadId = threadIdMaybe;
         }
         // Do not fabricate a threadId; emit undefined if adapter omitted it
-        this.emit('stopped', threadIdMaybe as unknown as number, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
+        this.emit('stopped', threadIdMaybe, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
         break;
       
       case 'continued':

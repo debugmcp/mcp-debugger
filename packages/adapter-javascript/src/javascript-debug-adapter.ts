@@ -27,7 +27,7 @@ import {
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
 import { findNode } from './utils/executable-resolver.js';
-import { detectTsRunners as detectTsRunnersUtil, detectBinary } from './utils/typescript-detector.js';
+import { detectBinary } from './utils/typescript-detector.js';
 import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/config-transformer.js';
 import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
 
@@ -574,7 +574,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     };
   }
 
-  // ===== DAP Protocol Operations (stubs) =====
+  // ===== DAP Protocol Operations =====
 
   async sendDapRequest<T extends DebugProtocol.Response>(command: string, args?: unknown): Promise<T> {
     // Minimal validation only; transport handled by ProxyManager
@@ -793,14 +793,4 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     return false;
   }
 
-  // ===== Internal discovery helpers =====
-  // Task 7 will use these detected runners to adjust runtime executable/args as needed.
-  private async detectTypeScriptRunners(): Promise<{ tsx?: string; tsNode?: string }> {
-    if (this.cachedTsRunners) {
-      return this.cachedTsRunners;
-    }
-    const result = await detectTsRunnersUtil();
-    this.cachedTsRunners = result;
-    return result;
-  }
 }

@@ -15,7 +15,6 @@ from rich.text import Text
 import time
 from typing import Optional, Dict
 import os
-import sys
 
 from .panels import ToolActivityPanel, CodeViewPanel, HeaderPanel
 from .state import DebugState

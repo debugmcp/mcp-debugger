@@ -360,7 +360,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   /**
    * Set up auto-dispose for an adapter
    */
-  private setupAutoDispose(language: string, adapter: IDebugAdapter): void {
+  private setupAutoDispose(_language: string, adapter: IDebugAdapter): void {
     this.clearDisposeTimer(adapter);
 
     // Listen for adapter state changes

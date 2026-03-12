@@ -69,7 +69,6 @@ describe('ChildSessionManager', () => {
     beforeEach(() => {
       manager = new ChildSessionManager({
         policy: JsDebugAdapterPolicy,
-        parentClient: mockParentClient as any,
         host: 'localhost',
         port: 9229
       });
@@ -216,7 +215,6 @@ describe('ChildSessionManager', () => {
     beforeEach(() => {
       manager = new ChildSessionManager({
         policy: PythonAdapterPolicy,
-        parentClient: mockParentClient as any,
         host: 'localhost',
         port: 5678
       });
@@ -244,7 +242,6 @@ describe('ChildSessionManager', () => {
     beforeEach(() => {
       manager = new ChildSessionManager({
         policy: DefaultAdapterPolicy,
-        parentClient: mockParentClient as any,
         host: 'localhost',
         port: 9229
       });
@@ -261,7 +258,6 @@ describe('ChildSessionManager', () => {
     it('should shutdown all child sessions', async () => {
       manager = new ChildSessionManager({
         policy: JsDebugAdapterPolicy,
-        parentClient: mockParentClient as any,
         host: 'localhost',
         port: 9229
       });

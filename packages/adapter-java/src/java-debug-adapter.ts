@@ -8,7 +8,6 @@
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 import {
   IDebugAdapter,
   AdapterState,
@@ -32,9 +31,6 @@ import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { findJavaExecutable, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
 import { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled } from './utils/jdi-resolver.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * Java-specific launch configuration

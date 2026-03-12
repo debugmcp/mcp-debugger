@@ -1322,49 +1322,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
   });
 
-  describe('waitForInitialBreakpointPause behaviour', () => {
-    it('returns false when no proxy manager present', async () => {
-      mockSession.proxyManager = undefined;
-      const result = await (operations as any).waitForInitialBreakpointPause('test-session', 200);
-      expect(result).toBe(false);
-    });
-
-    it('returns true immediately when session already paused', async () => {
-      mockSession.state = SessionState.PAUSED;
-      const result = await (operations as any).waitForInitialBreakpointPause('test-session', 200);
-      expect(result).toBe(true);
-    });
-
-    it('resolves true when stopped event fires before timeout', async () => {
-      let captured: (() => void) | undefined;
-      mockProxyManager.once.mockImplementation((event: string, handler: () => void) => {
-        if (event === 'stopped') {
-          captured = handler;
-        }
-        return mockProxyManager;
-      });
-      mockProxyManager.removeListener.mockReturnValue(mockProxyManager);
-
-      const waitPromise = (operations as any).waitForInitialBreakpointPause('test-session', 500);
-      expect(captured).toBeDefined();
-      captured?.();
-      const result = await waitPromise;
-      expect(result).toBe(true);
-    });
-
-    it('resolves false when timeout elapses without event', async () => {
-      vi.useFakeTimers();
-      mockProxyManager.once.mockImplementation(() => mockProxyManager);
-      mockProxyManager.removeListener.mockReturnValue(mockProxyManager);
-
-      const waitPromise = (operations as any).waitForInitialBreakpointPause('test-session', 300);
-      await vi.advanceTimersByTimeAsync(350);
-      const result = await waitPromise;
-      expect(result).toBe(false);
-      vi.useRealTimers();
-    });
-  });
-
   describe('Session Not Found Scenarios', () => {
     it('should handle operations on non-existent session', async () => {
       mockSessionStore.getOrThrow.mockImplementation(() => {

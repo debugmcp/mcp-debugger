@@ -11,19 +11,16 @@
  */
 
 import { execSync } from 'child_process';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const isWindows = process.platform === 'win32';
-const isDarwin = process.platform === 'darwin';
 const isLinux = process.platform === 'linux';
 
 // Get the project root (parent of scripts directory)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
-const projectName = path.basename(projectRoot);
 
 console.log('===============================================');
 console.log('MCP Debugger Test Process Cleanup');

@@ -160,6 +160,6 @@ export default defineConfig({
   },
   // Handle ESM modules that need to be transformed
   optimizeDeps: {
-    include: ['@modelcontextprotocol/sdk', '@vscode/debugadapter', '@vscode/debugprotocol']
+    include: ['@modelcontextprotocol/sdk', '@vscode/debugprotocol']
   }
 });

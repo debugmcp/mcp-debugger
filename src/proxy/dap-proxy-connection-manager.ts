@@ -52,32 +52,29 @@ export class DapConnectionManager {
 
     let connectAttempts = 0;
 
-    while (connectAttempts < this.MAX_CONNECT_ATTEMPTS) {
+    for (;;) {
       try {
         this.logger.info(`[ConnectionManager] Attempting DAP client connect (attempt ${connectAttempts + 1}/${this.MAX_CONNECT_ATTEMPTS}) to ${host}:${port}`);
         await client.connect();
         this.logger.info('[ConnectionManager] DAP client connected to adapter successfully.');
-        
+
         // Remove temporary handler as connection succeeded
         client.off('error', tempErrorHandler);
         return client;
       } catch (err) {
         connectAttempts++;
         const errMessage = err instanceof Error ? err.message : String(err);
-        
+
         if (connectAttempts >= this.MAX_CONNECT_ATTEMPTS) {
           this.logger.error(`[ConnectionManager] Failed to connect DAP client after ${this.MAX_CONNECT_ATTEMPTS} attempts. Last error: ${errMessage}`);
           client.off('error', tempErrorHandler);
           throw new Error(`Failed to connect DAP client: ${errMessage}`);
         }
-        
+
         this.logger.warn(`[ConnectionManager] DAP client connect attempt ${connectAttempts} failed: ${errMessage}. Retrying in ${this.CONNECT_RETRY_INTERVAL}ms...`);
         await new Promise(resolve => setTimeout(resolve, this.CONNECT_RETRY_INTERVAL));
       }
     }
-
-    // This should never be reached due to the throw above, but TypeScript needs it
-    throw new Error('Connection retry loop exited unexpectedly');
   }
 
   /**

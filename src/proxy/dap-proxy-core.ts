@@ -48,6 +48,8 @@ export class ProxyRunner {
   private ipcMessageCounter = 0;
   private heartbeatInterval?: NodeJS.Timeout;
   private heartbeatTickCounter = 0;
+  private disconnectHandler?: () => void;
+  private errorHandler?: (err: Error) => void;
 
   constructor(
     private dependencies: DapProxyDependencies,
@@ -129,7 +131,12 @@ export class ProxyRunner {
     }
 
     this.logger.info('[ProxyRunner] Stopping proxy runner...');
-    
+
+    if (this._initTimeout) {
+      clearTimeout(this._initTimeout);
+      this._initTimeout = undefined;
+    }
+
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = undefined;
@@ -142,7 +149,17 @@ export class ProxyRunner {
     if (this.messageHandler && process.removeListener) {
       process.removeListener('message', this.messageHandler);
     }
-    
+
+    if (this.disconnectHandler) {
+      process.removeListener('disconnect', this.disconnectHandler);
+      this.disconnectHandler = undefined;
+    }
+
+    if (this.errorHandler) {
+      process.removeListener('error', this.errorHandler);
+      this.errorHandler = undefined;
+    }
+
     if (this.rl) {
       this.rl.close();
     }
@@ -270,13 +287,15 @@ export class ProxyRunner {
     process.on('message', this.messageHandler);
     this.logger.info('[ProxyRunner] IPC message handler attached');
 
-    process.on('disconnect', () => {
+    this.disconnectHandler = () => {
       this.logger.warn('[ProxyRunner] IPC channel disconnected');
-    });
+    };
+    process.on('disconnect', this.disconnectHandler);
 
-    process.on('error', (err: Error) => {
+    this.errorHandler = (err: Error) => {
       this.logger.error('[ProxyRunner] IPC channel error:', err);
-    });
+    };
+    process.on('error', this.errorHandler);
   }
 
   /**

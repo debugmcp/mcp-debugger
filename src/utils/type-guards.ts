@@ -103,7 +103,7 @@ export function validateProxyInitPayload(payload: unknown): ProxyInitPayload {
   ];
   
   for (const field of requiredFields) {
-    if (!p[field]) {
+    if (p[field] === undefined || p[field] === null) {
       throw new Error(`Invalid ProxyInitPayload: missing required field '${field}'`);
     }
   }

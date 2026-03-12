@@ -8,36 +8,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { parseSdkToolResult, ParsedToolResult } from './smoke-test-utils.js';
 
 /**
- * Event recorder for debugging test failures
- */
-export class EventRecorder {
-  private events: Array<{name: string, data: unknown, timestamp: number}> = [];
-  
-  record(name: string, data: unknown): void {
-    this.events.push({name, data, timestamp: Date.now()});
-  }
-  
-  getEventSequence(): string[] {
-    return this.events.map(e => e.name);
-  }
-  
-  dumpEvents(): void {
-    console.log('[EventRecorder] Event sequence:', this.getEventSequence());
-    console.log('[EventRecorder] Full events:', JSON.stringify(this.events, null, 2));
-  }
-  
-  clear(): void {
-    this.events = [];
-  }
-}
-
-/**
  * Options for waiting functions
  */
 export interface WaitOptions {
   timeout?: number;
   pollInterval?: number;
-  eventRecorder?: EventRecorder;
 }
 
 /**
@@ -101,11 +76,7 @@ export async function waitForSessionState(
   
   while (Date.now() - startTime < timeout) {
     const currentState = await getSessionState(client, sessionId);
-    
-    if (options.eventRecorder) {
-      options.eventRecorder.record('state-check', { sessionId, state: currentState });
-    }
-    
+
     if (currentState === expectedState) {
       console.log(`[EventUtils] Session ${sessionId} reached state '${expectedState}' after ${Date.now() - startTime}ms`);
       return true;
@@ -123,11 +94,7 @@ export async function waitForSessionState(
     `[EventUtils] Timeout waiting for session ${sessionId} to reach state '${expectedState}'. ` +
     `Current state: '${finalState}'. Waited ${timeout}ms`
   );
-  
-  if (options.eventRecorder) {
-    options.eventRecorder.dumpEvents();
-  }
-  
+
   return false;
 }
 
@@ -189,11 +156,7 @@ export async function waitForAnyState(
   
   while (Date.now() - startTime < timeout) {
     const currentState = await getSessionState(client, sessionId);
-    
-    if (options.eventRecorder) {
-      options.eventRecorder.record('state-check', { sessionId, state: currentState });
-    }
-    
+
     if (currentState && expectedStates.includes(currentState)) {
       console.log(`[EventUtils] Session ${sessionId} reached state '${currentState}' after ${Date.now() - startTime}ms`);
       return { success: true, state: currentState };
@@ -211,11 +174,7 @@ export async function waitForAnyState(
     `[EventUtils] Timeout waiting for session ${sessionId} to reach any of: ${expectedStates.join(', ')}. ` +
     `Current state: '${finalState}'. Waited ${timeout}ms`
   );
-  
-  if (options.eventRecorder) {
-    options.eventRecorder.dumpEvents();
-  }
-  
+
   return { success: false };
 }
 
@@ -256,64 +215,4 @@ export async function waitForBreakpointHit(
     ...options,
     timeout: options.timeout || PYTHON_TIMEOUT  // Use longer timeout for Python
   });
-}
-
-/**
- * Smart wait that handles common patterns
- * - After step operations, wait for paused
- * - After continue, wait for either paused (breakpoint) or stopped (program end)
- */
-export async function smartWaitAfterOperation(
-  client: Client,
-  sessionId: string,
-  operation: 'step_over' | 'step_into' | 'step_out' | 'continue',
-  options: WaitOptions = {}
-): Promise<{ success: boolean; finalState?: string }> {
-  if (operation === 'continue') {
-    // Continue can result in either paused (hit breakpoint) or stopped (program ended)
-    const result = await waitForAnyState(client, sessionId, ['paused', 'stopped'], options);
-    return { success: result.success, finalState: result.state };
-  } else {
-    // Step operations should always result in paused
-    const success = await waitForSessionState(client, sessionId, 'paused', options);
-    return { success, finalState: success ? 'paused' : undefined };
-  }
-}
-
-/**
- * Utility to collect states during a test operation
- * Useful for debugging flaky tests
- */
-export async function collectStatesDuring(
-  client: Client,
-  sessionId: string,
-  duration: number,
-  interval: number = 100
-): Promise<Array<{ timestamp: number; state: string | null }>> {
-  const states: Array<{ timestamp: number; state: string | null }> = [];
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < duration) {
-    const state = await getSessionState(client, sessionId);
-    states.push({ timestamp: Date.now() - startTime, state });
-    await new Promise(resolve => setTimeout(resolve, interval));
-  }
-  
-  return states;
-}
-
-/**
- * Assert that session is in expected state with helpful error message
- */
-export async function assertSessionState(
-  client: Client,
-  sessionId: string,
-  expectedState: string
-): Promise<void> {
-  const actualState = await getSessionState(client, sessionId);
-  if (actualState !== expectedState) {
-    throw new Error(
-      `Session ${sessionId} is in state '${actualState}', expected '${expectedState}'`
-    );
-  }
 }

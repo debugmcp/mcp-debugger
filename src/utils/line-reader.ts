@@ -70,7 +70,8 @@ export class LineReader {
    */
   private async readFileLines(filePath: string, options: LineReaderOptions): Promise<string[] | null> {
     // Check cache first
-    const cached = this.fileCache.get(filePath);
+    const cacheKey = `${filePath}:${options.encoding || 'utf8'}`;
+    const cached = this.fileCache.get(cacheKey);
     if (cached) {
       this.logger?.debug(`[LineReader] Cache hit for: ${filePath}`);
       return cached;
@@ -104,7 +105,7 @@ export class LineReader {
       }
       
       // Cache the result
-      this.fileCache.set(filePath, lines);
+      this.fileCache.set(cacheKey, lines);
       this.logger?.debug(`[LineReader] Cached file: ${filePath} (${lines.length} lines)`);
       
       return lines;

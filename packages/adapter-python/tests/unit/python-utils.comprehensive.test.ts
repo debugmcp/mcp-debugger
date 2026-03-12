@@ -58,7 +58,6 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
 };
 
 const originalEnv = process.env;
-const originalPlatform = process.platform;
 
 describe('CommandNotFoundError', () => {
   it('creates error with command property', () => {

@@ -3,7 +3,6 @@
 Converts asciinema recording to optimized GIF
 """
 import subprocess
-import sys
 from pathlib import Path
 
 def check_tool(tool_name: str, install_hint: str) -> bool:

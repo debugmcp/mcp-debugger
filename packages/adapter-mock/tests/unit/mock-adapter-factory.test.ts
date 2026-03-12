@@ -24,8 +24,7 @@ const createDependencies = (): AdapterDependencies & {
 describe('MockAdapterFactory', () => {
   it('creates MockDebugAdapter instances using provided configuration', () => {
     const factory = new MockAdapterFactory({
-      supportedFeatures: [DebugFeature.LOG_POINTS],
-      defaultDelay: 250
+      supportedFeatures: [DebugFeature.LOG_POINTS]
     });
 
     const adapter = factory.createAdapter(createDependencies());
@@ -53,24 +52,6 @@ describe('MockAdapterFactory', () => {
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual([]);
     expect(result.details.config).toEqual({});
-  });
-
-  it('reports warning when error probability is high', async () => {
-    const factory = new MockAdapterFactory({ errorProbability: 0.8 });
-
-    const result = await factory.validate();
-
-    expect(result.valid).toBe(true);
-    expect(result.warnings).toContain('High error probability configured: 80%');
-  });
-
-  it('reports warning when default delay is large', async () => {
-    const factory = new MockAdapterFactory({ defaultDelay: 2500 });
-
-    const result = await factory.validate();
-
-    expect(result.valid).toBe(true);
-    expect(result.warnings).toContain('High default delay configured: 2500ms may slow down tests');
   });
 
   it('createMockAdapterFactory helper forwards configuration', () => {

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import * as fs from 'fs/promises';
-import * as fssync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as rustUtils from '../src/utils/rust-utils.js';

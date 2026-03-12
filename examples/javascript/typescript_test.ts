@@ -21,7 +21,7 @@ class Calculator {
     }
 
     multiply(a: number, b: number): number {
-        const result = a * b;  // Breakpoint 2: Line 23
+        const result = a * b;  // Breakpoint 2: Line 24
         this.history.push(result);
         return result;
     }
@@ -34,7 +34,7 @@ class Calculator {
 // Generic function for testing generic type handling
 function swap<T>(a: T, b: T): [T, T] {
     console.log(`Before swap: a=${a}, b=${b}`);
-    const temp = a;  // Breakpoint 3: Line 36
+    const temp = a;  // Breakpoint 3: Line 37
     const swapped: [T, T] = [b, temp];
     console.log(`After swap: a=${swapped[0]}, b=${swapped[1]}`);
     return swapped;
@@ -47,7 +47,7 @@ async function fetchData(id: number): Promise<Person> {
     // Simulate async operation
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    const person: Person = {  // Breakpoint 4: Line 49
+    const person: Person = {  // Breakpoint 4: Line 50
         name: `Person ${id}`,
         age: 25 + id,
         email: `person${id}@example.com`
@@ -74,7 +74,7 @@ async function main() {
     // Test 1: Class instances and methods
     console.log("Test 1: Calculator class");
     const calc = new Calculator();
-    const sum = calc.add(10, 20);  // Breakpoint 5: Line 76
+    const sum = calc.add(10, 20);  // Breakpoint 5: Line 77
     const product = calc.multiply(5, 6);
     console.log(`Sum: ${sum}, Product: ${product}`);
     console.log(`History: ${calc.getHistory()}\n`);
@@ -119,7 +119,7 @@ async function main() {
     ];
     
     // Process todos - good place for breakpoint
-    for (const todo of todos) {  // Breakpoint 6: Line 119
+    for (const todo of todos) {  // Breakpoint 6: Line 122
         console.log(`Todo ${todo.id}: ${todo.title} (${todo.status})`);
         console.log(`  Tags: ${todo.tags.join(", ")}`);
         console.log(`  Metadata:`, todo.metadata);
@@ -129,7 +129,7 @@ async function main() {
     try {
         throwTestError();
     } catch (error) {
-        console.error("Caught error:", error);  // Breakpoint 7: Line 129
+        console.error("Caught error:", error);  // Breakpoint 7: Line 132
     }
     
     console.log("\nTypeScript debugging test completed!");

@@ -34,7 +34,7 @@ To debug this example using the Debug MCP Server:
      arguments={
        "sessionId": "YOUR_SESSION_ID",
        "file": "examples/python/fibonacci.py",
-       "line": 42
+       "line": 46
      }
    )
    ```

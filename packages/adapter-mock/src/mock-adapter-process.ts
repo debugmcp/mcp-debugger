@@ -95,12 +95,10 @@ function createConnection(input?: Readable, output?: Writable): DAPConnection {
 class MockDebugAdapterProcess {
   private connection?: DAPConnection;
   private server?: net.Server;
-  private isInitialized = false;
   private breakpoints = new Map<string, DebugProtocol.Breakpoint[]>();
-  private variableHandles = new Map<number, { type: string; variables: Array<{ name: string; value: string; type: string }> }>();
+  private variableHandles = new Map<number, { variables: Array<{ name: string; value: string; type: string }> }>();
   private nextVariableReference = 1000;
   private currentLine = 1;
-  private isRunning = false;
   private threads = [{ id: 1, name: 'main' }];
   
   constructor() {
@@ -313,8 +311,6 @@ class MockDebugAdapterProcess {
       type: 'event',
       event: 'initialized'
     } as DebugProtocol.InitializedEvent);
-    
-    this.isInitialized = true;
   }
   
   private handleConfigurationDone(request: DebugProtocol.ConfigurationDoneRequest): void {
@@ -355,7 +351,6 @@ class MockDebugAdapterProcess {
         } as DebugProtocol.StoppedEvent);
       }, 100);
     } else {
-      this.isRunning = true;
       this.log(`Running without stopOnEntry, will hit first breakpoint`);
       // Simulate running to first breakpoint
       setTimeout(() => {
@@ -367,7 +362,6 @@ class MockDebugAdapterProcess {
         if (allBreakpoints.length > 0) {
           const firstBreakpoint = allBreakpoints[0];
           this.currentLine = firstBreakpoint.line || 1;
-          this.isRunning = false;
           this.log(`Hit first breakpoint at line ${this.currentLine}`);
           this.sendEvent({
             seq: 0,
@@ -484,7 +478,6 @@ class MockDebugAdapterProcess {
       {
         name: 'Locals',
         variablesReference: this.getOrCreateVariableReference({
-          type: 'locals',
           variables: [
             { name: 'x', value: '10', type: 'int' },
             { name: 'y', value: '20', type: 'int' },
@@ -496,7 +489,6 @@ class MockDebugAdapterProcess {
       {
         name: 'Globals',
         variablesReference: this.getOrCreateVariableReference({
-          type: 'globals',
           variables: [
             { name: '__name__', value: '"__main__"', type: 'str' },
             { name: '__file__', value: '"simple-mock.js"', type: 'str' }
@@ -558,8 +550,6 @@ class MockDebugAdapterProcess {
   }
 
   private handleContinue(request: DebugProtocol.ContinueRequest): void {
-    this.isRunning = true;
-    
     this.sendResponse({
       seq: 0,
       type: 'response',
@@ -587,7 +577,6 @@ class MockDebugAdapterProcess {
       
       if (nextBreakpoint && nextBreakpoint.line) {
         // Hit the next breakpoint
-        this.isRunning = false;
         this.currentLine = nextBreakpoint.line;
         this.log(`Stopping at breakpoint on line ${this.currentLine}`);
         this.sendEvent({
@@ -693,8 +682,6 @@ class MockDebugAdapterProcess {
   }
   
   private handlePause(request: DebugProtocol.PauseRequest): void {
-    this.isRunning = false;
-    
     this.sendResponse({
       seq: 0,
       type: 'response',
@@ -779,7 +766,7 @@ class MockDebugAdapterProcess {
     this.sendResponse(response);
   }
   
-  private getOrCreateVariableReference(data: { type: string; variables: Array<{ name: string; value: string; type: string }> }): number {
+  private getOrCreateVariableReference(data: { variables: Array<{ name: string; value: string; type: string }> }): number {
     const ref = this.nextVariableReference++;
     this.variableHandles.set(ref, data);
     return ref;

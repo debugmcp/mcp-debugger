@@ -64,8 +64,6 @@ export interface ToolchainValidationResult {
 interface ExecutablePathCacheEntry {
   path: string;
   timestamp: number;
-  version?: string;
-  hasCodeLLDB?: boolean;
 }
 
 /**

@@ -1159,7 +1159,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * @param sessionId - The session ID
    * @param expression - The expression to evaluate
    * @param frameId - Optional stack frame ID for context (defaults to current frame)
-   * @param context - The context in which to evaluate ('repl' is default for maximum flexibility)
+   * @param context - The context in which to evaluate ('variables' is default for maximum flexibility)
    * @returns Evaluation result with value, type, and optional variable reference
    */
   async evaluateExpression(
@@ -1514,44 +1514,4 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
-  /**
-   * Wait for a session to emit a stopped event after launch to honour the first breakpoint.
-   */
-  private async waitForInitialBreakpointPause(sessionId: string, timeoutMs: number): Promise<boolean> {
-    const session = this._getSessionById(sessionId);
-    const proxyManager = session.proxyManager;
-
-    if (!proxyManager) {
-      return false;
-    }
-
-    if (session.state === SessionState.PAUSED) {
-      return true;
-    }
-
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-
-      const cleanup = () => {
-        proxyManager.removeListener('stopped', onStopped);
-        clearTimeout(timer);
-      };
-
-      const onStopped = () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve(true);
-      };
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve(false);
-      }, timeoutMs);
-
-      proxyManager.once('stopped', onStopped);
-    });
-  }
 }

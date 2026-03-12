@@ -137,7 +137,6 @@
     "@debugmcp/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@types/which": "^3.0.4",
-    "@vscode/debugadapter": "^1.68.0",
     "@vscode/debugprotocol": "^1.68.0",
     "commander": "^11.1.0",
     "debug": "^4.3.4",
@@ -148,8 +147,7 @@
     "node-fetch": "^2.7.0",
     "uuid": "^9.0.1",
     "which": "^5.0.0",
-    "winston": "^3.11.0",
-    "zod": "^3.22.4"
+    "winston": "^3.11.0"
   },
   "optionalDependencies": {
     "@debugmcp/adapter-go": "workspace:*",
@@ -161,7 +159,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
-    "@microsoft/fetch-event-source": "^2.0.1",
     "@types/debug": "^4.1.12",
     "@types/express": "^5.0.2",
     "@types/fs-extra": "^11.0.4",

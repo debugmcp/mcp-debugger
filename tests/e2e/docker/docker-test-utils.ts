@@ -77,18 +77,6 @@ async function runDockerBuild(imageName: string): Promise<void> {
 }
 
 /**
- * Check if a container is already running
- */
-export async function isContainerRunning(containerName: string): Promise<boolean> {
-  try {
-    const { stdout } = await execAsync(`docker ps --filter "name=${containerName}" --format "{{.Names}}"`);
-    return stdout.trim() === containerName;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Stop and remove a container if it exists
  */
 export async function cleanupContainer(containerName: string): Promise<void> {
