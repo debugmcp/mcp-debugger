@@ -17,14 +17,14 @@ graph TB
 
     subgraph "Proxy Management Layer"
         PM[ProxyManager<br/>proxy-manager.ts]
-        PC[ProxyCore<br/>dap-proxy-core.ts]
+        PC[ProxyRunner<br/>dap-proxy-core.ts]
         PW[ProxyWorker<br/>dap-proxy-worker.ts]
-        PPM[ProcessManager<br/>dap-proxy-process-manager.ts]
+        PPM[GenericAdapterManager<br/>dap-proxy-adapter-manager.ts]
     end
 
     subgraph "Debug Adapter Layer"
-        DA[debugpy<br/>Python Debug Adapter]
-        PY[Python Process<br/>Target Script]
+        DA[Debug Adapter<br/>debugpy / js-debug / CodeLLDB / Delve / JDI]
+        TGT[Target Process<br/>Script or Binary]
     end
 
     MC -->|MCP Protocol| MS
@@ -34,7 +34,7 @@ graph TB
     PC -->|Controls| PW
     PW -->|Manages| PPM
     PPM -->|Spawns| DA
-    DA -->|DAP Protocol| PY
+    DA -->|DAP Protocol| TGT
     
     classDef client fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     classDef server fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
@@ -44,7 +44,7 @@ graph TB
     class MC client
     class MS,SM server
     class PM,PC,PW,PPM proxy
-    class DA,PY adapter
+    class DA,TGT adapter
 ```
 
 ## Component Responsibilities
@@ -53,17 +53,17 @@ graph TB
 - **Purpose**: Entry point for MCP protocol communication
 - **Key Files**: 
   - `src/server.ts` - Main server implementation
-  - `src/index.ts` - CLI entry point with transport options (stdio/tcp)
+  - `src/index.ts` - CLI entry point with subcommands (stdio, sse, check-rust-binary)
 - **Responsibilities**:
   - Handle MCP tool registration and routing
   - Manage server lifecycle and transport modes
   - Route debugging commands to SessionManager
 
-### 2. SessionManager (`src/session/session-manager.ts`)
+### 2. SessionManager (`src/session/session-manager.ts`, thin facade over `session-manager-core.ts` + `session-manager-operations.ts`)
 - **Purpose**: Central orchestrator for debug sessions
 - **Key Dependencies**:
   ```typescript
-  // From src/session/session-manager.ts, lines 48-56
+  // From src/session/session-manager-core.ts
   export interface SessionManagerDependencies {
     fileSystem: IFileSystem;
     networkManager: INetworkManager;
@@ -71,6 +71,8 @@ graph TB
     proxyManagerFactory: IProxyManagerFactory;
     sessionStoreFactory: ISessionStoreFactory;
     debugTargetLauncher: IDebugTargetLauncher;
+    environment: IEnvironment;
+    adapterRegistry: IAdapterRegistry;
   }
   ```
 - **Responsibilities**:
@@ -85,10 +87,10 @@ graph TB
   - Spawns and controls proxy worker process
   - Implements typed event system for DAP events
   - Handles request/response correlation with timeout management
-- **Event Flow** (from lines 57-67):
+- **Event Flow**:
   ```typescript
   export interface ProxyManagerEvents {
-    'stopped': (threadId: number, reason: string, data?: any) => void;
+    'stopped': (threadId: number | undefined, reason: string, data?: StoppedEvent['body']) => void;
     'continued': () => void;
     'terminated': () => void;
     'exited': () => void;
@@ -97,13 +99,14 @@ graph TB
     'exit': (code: number | null, signal?: string) => void;
     'dry-run-complete': (command: string, script: string) => void;
     'adapter-configured': () => void;
+    'dap-event': (event: string, body: unknown) => void;
   }
   ```
 
 ### 4. DAP Proxy Architecture (`src/proxy/dap-proxy-*.ts`)
 The proxy system follows a three-layer architecture:
 
-#### a. ProxyCore (`src/proxy/dap-proxy-core.ts`)
+#### a. ProxyRunner (`src/proxy/dap-proxy-core.ts`)
 - **Purpose**: Pure business logic without side effects
 - **Features**:
   - Configurable communication channels (IPC/stdin)
@@ -129,10 +132,10 @@ The proxy system follows a three-layer architecture:
   - Process debugging commands
   - Track request timeouts
 
-#### c. ProcessManager (`src/proxy/dap-proxy-process-manager.ts`)
-- **Purpose**: Manages debugpy adapter process lifecycle
+#### c. GenericAdapterManager (`src/proxy/dap-proxy-adapter-manager.ts`)
+- **Purpose**: Manages debug adapter process lifecycle
 - **Features**:
-  - Spawns debugpy with proper arguments
+  - Spawns the debug adapter with proper arguments
   - Handles process monitoring and cleanup
   - Manages stdout/stderr streams
 
@@ -145,8 +148,8 @@ sequenceDiagram
     participant SM as SessionManager
     participant PM as ProxyManager
     participant PW as ProxyWorker
-    participant DA as debugpy
-    participant PY as Python Script
+    participant DA as Debug Adapter
+    participant TGT as Target Process
 
     C->>S: create_debug_session
     S->>SM: createSession()
@@ -162,7 +165,7 @@ sequenceDiagram
     S->>SM: startDebugging()
     SM->>PM: start(ProxyConfig)
     PM->>PW: spawn process
-    PW->>DA: spawn debugpy
+    PW->>DA: spawn adapter
     DA-->>PW: adapter ready
     PW->>DA: initialize
     PW->>DA: launch request
@@ -172,7 +175,7 @@ sequenceDiagram
     PM-->>SM: state: RUNNING
     SM-->>C: Debug started
     
-    Note over DA,PY: Script execution begins
+    Note over DA,TGT: Script execution begins
     
     DA-->>PW: stopped event (breakpoint)
     PW-->>PM: stopped event
@@ -194,7 +197,7 @@ sequenceDiagram
 ### Core Technologies
 - **Runtime**: Node.js 18+ with ES modules
 - **Language**: TypeScript 5.x with strict mode
-- **Protocol**: Model Context Protocol (MCP) over stdio/TCP
+- **Protocol**: Model Context Protocol (MCP) over stdio/SSE
 - **Debugging**: Debug Adapter Protocol (DAP) 1.51.0
 - **Testing**: Vitest with 90%+ coverage
 - **Bundling**: tsup with `noExternal` for self-contained distributions
@@ -218,7 +221,7 @@ sequenceDiagram
 ### 1. NPX Distribution (Recommended)
 ```bash
 npx @debugmcp/mcp-debugger stdio  # stdio mode
-npx @debugmcp/mcp-debugger tcp --port 6111  # TCP mode
+npx @debugmcp/mcp-debugger sse -p 3001  # SSE mode
 ```
 - Self-contained bundles with all dependencies
 - No installation required
@@ -290,8 +293,8 @@ Example from error-messages.ts:
 ```typescript
 proxyInitTimeout: (timeout: number) =>
   `Debug proxy initialization did not complete within ${timeout}s. ` +
-  `This may indicate that debugpy failed to start or is not installed. ` +
-  `Check that Python and debugpy are properly installed and accessible.`
+  `This may indicate that the debug adapter failed to start or is not properly configured. ` +
+  `Check that the required debug adapter is installed and accessible.`
 ```
 
 ## Next Steps

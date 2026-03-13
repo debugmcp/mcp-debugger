@@ -350,7 +350,7 @@ afterEach(() => {
   "mcpServers": {
     "debug-mcp-server": {
       "command": "node",
-      "args": ["path/to/dist/index.js"],
+      "args": ["path/to/dist/index.js", "stdio"],
       "env": {
         "DEBUG": "mcp:*,session:*,proxy:*",
         "LOG_LEVEL": "debug",

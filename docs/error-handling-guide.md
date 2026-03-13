@@ -34,11 +34,7 @@ export class SessionNotFoundError extends McpError {
 | `LanguageRuntimeNotFoundError` | Language runtime missing | `InvalidParams` |
 | `PythonNotFoundError` | Python specifically not found | `InvalidParams` |
 | `DebugSessionCreationError` | Failed to create session | `InternalError` |
-| `FileValidationError` | File validation failed | `InvalidParams` |
-| `PortAllocationError` | No available ports | `InternalError` |
 | `UnsupportedLanguageError` | Language not supported or adapter not found | `InvalidParams` |
-| `NodeNotFoundError` | Node.js runtime not found | `InvalidParams` |
-| `ProxyInitializationError` | Proxy failed to initialize | `InternalError` |
 
 ## Implementation Patterns
 
@@ -319,9 +315,7 @@ To add a new error type:
 
 1. **Check error types in logs** - The error class name is logged
 2. **Use error details** - Additional context is in the error's data property
-3. **Check error recovery** - Use `isRecoverableError()` helper to determine if an error is transient
-4. **Extract messages safely** - Use `getErrorMessage()` helper to safely extract message from unknown error types
-5. **Type-guard MCP errors** - Use `isMcpError<T>()` to narrow error types in catch blocks
+3. **Extract messages safely** - Use `getErrorMessage()` helper to safely extract message from unknown error types
 
 ## Summary
 

@@ -5,7 +5,6 @@
 import { describe, it, expect } from 'vitest';
 import { MessageParser } from '../../../src/proxy/dap-proxy-message-parser.js';
 import {
-  ProxyInitPayload,
   DapCommandPayload,
   TerminatePayload
 } from '../../../src/proxy/dap-proxy-interfaces.js';

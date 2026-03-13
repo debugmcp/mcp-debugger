@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
-import path from 'path';
-import { 
+import {
   DebugTargetLauncherImpl,
   ProcessLauncherImpl
 } from '../../../src/implementations/process-launcher-impl';

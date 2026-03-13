@@ -236,8 +236,11 @@ function main() {
       status = checkJavaScriptAdapter(adapter);
     } else if (adapter.name.includes('Rust')) {
       status = checkRustAdapter(adapter);
+    } else {
+      console.warn(`Unknown adapter type: ${adapter.name} — skipping`);
+      continue;
     }
-    
+
     statuses.push(status);
     if (!status.vendored) {
       allVendored = false;

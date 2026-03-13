@@ -14,219 +14,104 @@ The Mock Debug Adapter enables comprehensive testing of the mcp-debugger system 
 
 ## State Machine
 
-The mock adapter follows the standard debug adapter state transitions:
+The mock adapter follows a permissive state machine that mirrors real adapter behavior. Real adapters (e.g., Python/debugpy) do not enforce strict sequential transitions, so the mock intentionally allows shortcut paths:
 
 ```mermaid
 stateDiagram-v2
     [*] --> UNINITIALIZED: Constructor
     UNINITIALIZED --> INITIALIZING: initialize()
+    UNINITIALIZED --> READY: Direct ready
+    UNINITIALIZED --> CONNECTED: Direct connection
+    UNINITIALIZED --> DEBUGGING: Direct debugging
+    UNINITIALIZED --> ERROR: Error
     INITIALIZING --> READY: Environment validated
+    INITIALIZING --> CONNECTED: Direct connection during init
     INITIALIZING --> ERROR: Validation failed
+    INITIALIZING --> UNINITIALIZED: Reset
     READY --> CONNECTED: connect()
+    READY --> DEBUGGING: Direct debugging
+    READY --> DISCONNECTED: Disconnection
+    READY --> ERROR: Error
+    READY --> UNINITIALIZED: Reset
     CONNECTED --> DEBUGGING: Launch/Attach
-    DEBUGGING --> DEBUGGING: Step/Continue
+    CONNECTED --> CONNECTED: Idempotent
+    CONNECTED --> DISCONNECTED: disconnect()
+    CONNECTED --> READY: Back to ready
+    CONNECTED --> ERROR: Error
+    DEBUGGING --> DEBUGGING: Step/Continue (idempotent)
+    DEBUGGING --> CONNECTED: Back to connected
     DEBUGGING --> DISCONNECTED: Terminate
-    DISCONNECTED --> READY: Can reconnect
-    ERROR --> [*]: dispose()
-    DISCONNECTED --> [*]: dispose()
-    
-    note right of DEBUGGING
-        Simulates breakpoint hits,
-        step operations, and
-        variable inspection
-    end note
+    DEBUGGING --> READY: Back to ready
+    DEBUGGING --> ERROR: Error
+    DISCONNECTED --> READY: Reconnect
+    DISCONNECTED --> CONNECTED: Reconnect directly
+    DISCONNECTED --> UNINITIALIZED: Full reset
+    DISCONNECTED --> ERROR: Error
+    ERROR --> UNINITIALIZED: Reset
+    ERROR --> READY: Recovery
+    ERROR --> DISCONNECTED: Recovery
 ```
 
 ## Simulated Behaviors
 
 ### 1. Breakpoint Hits
 
-The mock adapter maintains an internal program counter and simulates hitting breakpoints:
+Breakpoint management happens inside the mock adapter process (`MockDebugAdapterProcess`). It stores breakpoints per-file via `setBreakpoints` requests and tracks a `currentLine` counter:
 
-```typescript
-interface MockBreakpoint {
-  id: string;
-  file: string;
-  line: number;
-  hitCount: number;
-  condition?: string;
-}
+- On **launch**: If `stopOnEntry` is true, emits `stopped(entry)` after 100ms. Otherwise, sorts all breakpoints by line, jumps to the first one and emits `stopped(breakpoint)` after 200ms. If no breakpoints are set, emits `terminated` + `exited`.
+- On **continue**: Finds the next breakpoint after `currentLine`, jumps to it and emits `stopped(breakpoint)`. If no breakpoint remains, emits `terminated` + `exited`.
 
-class MockDebugAdapter {
-  private breakpoints = new Map<string, MockBreakpoint>();
-  private programCounter = { file: 'main.mock', line: 1 };
-  
-  simulateBreakpointHit(breakpointId: string): void {
-    const bp = this.breakpoints.get(breakpointId);
-    if (bp) {
-      bp.hitCount++;
-      this.programCounter = { file: bp.file, line: bp.line };
-      // Events are delegated through ProxyManager rather than emitted directly.
-      // ProxyManager forwards DAP events to the session layer.
-      this.proxyManager.handleDapEvent({
-        event: 'stopped',
-        body: {
-          reason: 'breakpoint',
-          threadId: 1,
-          allThreadsStopped: true
-        }
-      });
-    }
-  }
-}
-```
+All breakpoints are returned as `verified: true` with a random numeric ID. The `MockDebugAdapter` class (used by the adapter registry) handles DAP events via `handleDapEvent()`, updating `currentThreadId` on `stopped` events and transitioning to the `DEBUGGING` state.
 
 ### 2. Variable Inspection
 
-Simulates a variable scope hierarchy with different types:
+The mock adapter process returns hardcoded scopes and variables. The `scopes` response returns two scopes (Locals and Globals), each backed by a dynamically-allocated variable reference:
 
 ```typescript
-interface MockVariable {
-  name: string;
-  value: string;
-  type: string;
-  variablesReference: number;
-  children?: MockVariable[];
-}
+// Locals scope variables
+{ name: 'x', value: '10', type: 'int' }
+{ name: 'y', value: '20', type: 'int' }
+{ name: 'result', value: '30', type: 'int' }
 
-const MOCK_VARIABLES: MockVariable[] = [
-  {
-    name: 'x',
-    value: '10',
-    type: 'int',
-    variablesReference: 0
-  },
-  {
-    name: 'y',
-    value: '20',
-    type: 'int',
-    variablesReference: 0
-  },
-  {
-    name: 'result',
-    value: '30',
-    type: 'int',
-    variablesReference: 0
-  },
-  {
-    name: 'complexObject',
-    value: 'Object',
-    type: 'object',
-    variablesReference: 1001,
-    children: [
-      { name: 'field1', value: '"hello"', type: 'string', variablesReference: 0 },
-      { name: 'field2', value: 'true', type: 'boolean', variablesReference: 0 }
-    ]
-  },
-  {
-    name: 'largeArray',
-    value: 'Array[1000]',
-    type: 'array',
-    variablesReference: 1002,
-    children: generateMockArray(1000)
-  }
-];
+// Globals scope variables
+{ name: '__name__', value: '"__main__"', type: 'str' }
+{ name: '__file__', value: '"simple-mock.js"', type: 'str' }
 ```
+
+All variables have `variablesReference: 0` (not expandable). Variable references are managed by an incrementing counter starting at 1000.
 
 ### 3. Step Operations
 
-Simulates different step behaviors:
+Step operations are handled by the mock adapter process with minimal simulation:
 
-```typescript
-class MockDebugAdapter {
-  async stepOver(): Promise<void> {
-    await this.simulateDelay(10); // Simulate execution time
-    this.programCounter.line++;
-    
-    // Check if we hit a breakpoint
-    const breakpointHit = this.checkBreakpointAt(
-      this.programCounter.file, 
-      this.programCounter.line
-    );
-    
-    this.emit('stopped', {
-      reason: breakpointHit ? 'breakpoint' : 'step',
-      threadId: 1
-    });
-  }
-  
-  async stepInto(): Promise<void> {
-    await this.simulateDelay(15);
-    // Simulate entering a function
-    this.callStack.push({
-      id: this.callStack.length,
-      name: `mockFunction${this.callStack.length}`,
-      file: 'mock-lib.mock',
-      line: 1
-    });
-    this.programCounter = { file: 'mock-lib.mock', line: 1 };
-    this.emit('stopped', { reason: 'step', threadId: 1 });
-  }
-  
-  async stepOut(): Promise<void> {
-    await this.simulateDelay(20);
-    // Simulate returning from function
-    if (this.callStack.length > 1) {
-      this.callStack.pop();
-      const caller = this.callStack[this.callStack.length - 1];
-      this.programCounter = { file: caller.file, line: caller.line + 1 };
-    }
-    this.emit('stopped', { reason: 'step', threadId: 1 });
-  }
-}
-```
+- **next** (step over): Increments `currentLine` by 1, sends success response, then emits `stopped(step)` after 50ms.
+- **stepIn**: Sends success response, then emits `stopped(step)` after 50ms. Does not modify `currentLine` or simulate entering a function.
+- **stepOut**: Sends success response, then emits `stopped(step)` after 50ms. Does not modify the call stack.
+- **pause**: Immediately sends `stopped(pause)` with no delay.
+
+All step events use `threadId: 1` and `allThreadsStopped: true`.
 
 ### 4. Error Scenarios
 
-Simulates various error conditions:
+The mock adapter supports two error scenarios via `MockErrorScenario`:
 
 ```typescript
 enum MockErrorScenario {
   NONE = 'none',
   EXECUTABLE_NOT_FOUND = 'executable_not_found',
-  ADAPTER_CRASH = 'adapter_crash',
-  CONNECTION_TIMEOUT = 'connection_timeout',
-  INVALID_BREAKPOINT = 'invalid_breakpoint',
-  SCRIPT_ERROR = 'script_error',
-  OUT_OF_MEMORY = 'out_of_memory'
+  CONNECTION_TIMEOUT = 'connection_timeout'
 }
+```
 
-class MockDebugAdapter {
-  private errorScenario: MockErrorScenario = MockErrorScenario.NONE;
-  
-  setErrorScenario(scenario: MockErrorScenario): void {
-    this.errorScenario = scenario;
-  }
-  
-  async validateEnvironment(): Promise<ValidationResult> {
-    if (this.errorScenario === MockErrorScenario.EXECUTABLE_NOT_FOUND) {
-      return {
-        valid: false,
-        errors: [{
-          code: 'MOCK_NOT_FOUND',
-          message: 'Mock executable not found',
-          recoverable: false
-        }],
-        warnings: []
-      };
-    }
-    return { valid: true, errors: [], warnings: [] };
-  }
-  
-  async connect(host: string, port: number): Promise<void> {
-    if (this.errorScenario === MockErrorScenario.CONNECTION_TIMEOUT) {
-      await this.simulateDelay(5000);
-      throw new AdapterError(
-        'Connection timeout',
-        AdapterErrorCode.CONNECTION_TIMEOUT,
-        true
-      );
-    }
-    // Normal connection
-    await this.simulateDelay(50);
-    this.setState(AdapterState.CONNECTED);
-  }
-}
+Error scenarios are activated via `setErrorScenario()` on the `MockDebugAdapter` instance:
+
+- **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code, which triggers an `AdapterError` with `ENVIRONMENT_INVALID` during `initialize()`.
+- **CONNECTION_TIMEOUT**: Causes `connect()` to throw an `AdapterError` with `CONNECTION_TIMEOUT` (recoverable).
+
+```typescript
+const adapter = new MockDebugAdapter(dependencies);
+adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT);
+// connect() will now throw AdapterError with CONNECTION_TIMEOUT
 ```
 
 ## Test Scenarios
@@ -298,81 +183,61 @@ const scenario: MockScenario = {
 
 ## Configuration
 
-The mock adapter can be configured through environment variables or constructor options:
+The mock adapter accepts a `MockAdapterConfig` object at construction:
 
 ```typescript
 interface MockAdapterConfig {
   // Timing configuration
-  defaultDelay?: number;        // Base delay for operations (ms)
-  connectionDelay?: number;     // Delay for connect operation
-  stepDelay?: number;          // Delay for step operations
-  
+  connectionDelay?: number;     // Delay for connect operation (default: 50ms)
+
   // Behavior configuration
   supportedFeatures?: DebugFeature[];  // Which DAP features to support
-  maxVariableDepth?: number;           // How deep variable trees can go
-  maxArrayLength?: number;             // Maximum array size to simulate
-  
-  // Error simulation
-  errorProbability?: number;    // Random error chance (0-1)
-  errorScenarios?: MockErrorScenario[]; // Enabled error scenarios
-  
-  // Performance simulation
-  cpuIntensive?: boolean;       // Simulate CPU-intensive operations
-  memoryIntensive?: boolean;    // Simulate memory pressure
-}
 
-// Usage
-const mockAdapter = new MockDebugAdapter({
-  defaultDelay: 5,
+  // Error simulation
+  errorScenarios?: MockErrorScenario[]; // Enabled error scenarios
+}
+```
+
+Default supported features (when none are specified):
+- `CONDITIONAL_BREAKPOINTS`
+- `FUNCTION_BREAKPOINTS`
+- `VARIABLE_PAGING`
+- `SET_VARIABLE`
+
+Usage:
+
+```typescript
+const factory = new MockAdapterFactory({
+  connectionDelay: 100,
   supportedFeatures: [
     DebugFeature.CONDITIONAL_BREAKPOINTS,
     DebugFeature.FUNCTION_BREAKPOINTS
   ],
-  maxVariableDepth: 10,
-  errorProbability: 0.1  // 10% chance of random errors
+  errorScenarios: [MockErrorScenario.CONNECTION_TIMEOUT]
 });
+
+const adapter = factory.createAdapter(dependencies);
 ```
 
 ## Mock Adapter Process
 
-The mock adapter includes a separate process script that simulates a real debug adapter. The default mode is stdio (matching the server default); TCP mode is also supported via `--session` and port arguments:
+The mock adapter includes a separate process (`mock-adapter-process.ts`) that simulates a real DAP server. It supports both stdio (default) and TCP transport:
 
-```typescript
-// packages/adapter-mock/src/mock-adapter-process.ts
-// Supports both stdio (default) and TCP transport modes.
-// Usage: node mock-adapter-process.js [--session <id>] [--port <port>]
-import { createServer } from 'net';
-
-const server = createServer((socket) => {
-  const protocol = new MockDebugProtocol(socket);
-
-  protocol.on('initialize', async (args) => {
-    await simulateDelay(10);
-    protocol.sendResponse({
-      capabilities: {
-        supportsConfigurationDoneRequest: true,
-        supportsConditionalBreakpoints: true,
-        supportsFunctionBreakpoints: false
-      }
-    });
-  });
-
-  protocol.on('launch', async (args) => {
-    // Simulate launching a program
-    await simulateDelay(50);
-    protocol.sendEvent('initialized');
-
-    if (args.stopOnEntry) {
-      protocol.sendEvent('stopped', {
-        reason: 'entry',
-        threadId: 1
-      });
-    }
-  });
-});
-
-server.listen(port, host);
 ```
+Usage: node mock-adapter-process.js [--port <port>] [--host <host>] [--session <id>]
+```
+
+The process implements a `DAPConnection` class that handles Content-Length framed DAP messages over streams. In TCP mode, it creates a `net.Server` and allows client reconnection.
+
+**Supported DAP commands**: `initialize`, `configurationDone`, `launch`, `setBreakpoints`, `threads`, `stackTrace`, `scopes`, `variables`, `evaluate`, `continue`, `next`, `stepIn`, `stepOut`, `pause`, `disconnect`, `terminate`.
+
+**Simulated behavior**:
+- **Breakpoints**: Tracked per-file. On `launch`, if `stopOnEntry` is true, sends a `stopped(entry)` event. Otherwise runs to the first breakpoint (sorted by line) or terminates if none are set.
+- **Continue**: Finds the next breakpoint after the current line and stops there, or sends `terminated` + `exited` if no more breakpoints remain.
+- **Step operations**: `next` increments `currentLine` by one; `stepIn` and `stepOut` send `stopped(step)` events after a 50ms delay.
+- **Variables**: Returns hardcoded scopes (Locals with `x=10, y=20, result=30`; Globals with `__name__, __file__`).
+- **Evaluate**: Always returns `'mock_value'` of type `string`.
+- **Stack trace**: Returns two frames: `main` (at current line) and `mockFunction` (at line 42).
 
 ## Testing with Mock Adapter
 
@@ -380,24 +245,23 @@ server.listen(port, host);
 ```typescript
 describe('MockDebugAdapter', () => {
   let adapter: MockDebugAdapter;
-  
+
   beforeEach(() => {
-    adapter = new MockDebugAdapter({
-      defaultDelay: 0  // No delays in tests
+    adapter = new MockDebugAdapter(mockDependencies, {
+      connectionDelay: 0  // No delays in tests
     });
   });
-  
-  it('should simulate breakpoint hit', async () => {
+
+  it('should initialize successfully', async () => {
     await adapter.initialize();
-    
-    const breakpoint = await adapter.setBreakpoint('test.mock', 10);
-    expect(breakpoint.verified).toBe(true);
-    
-    const stopPromise = waitForEvent(adapter, 'stopped');
-    adapter.simulateBreakpointHit(breakpoint.id);
-    
-    const event = await stopPromise;
-    expect(event.reason).toBe('breakpoint');
+    expect(adapter.getState()).toBe(AdapterState.READY);
+    expect(adapter.isReady()).toBe(true);
+  });
+
+  it('should simulate error scenario', async () => {
+    adapter.setErrorScenario(MockErrorScenario.EXECUTABLE_NOT_FOUND);
+    await expect(adapter.initialize()).rejects.toThrow(AdapterError);
+    expect(adapter.getState()).toBe(AdapterState.ERROR);
   });
 });
 ```

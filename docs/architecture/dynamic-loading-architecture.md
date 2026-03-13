@@ -1,6 +1,6 @@
 # Dynamic Loading Architecture
 
-Status: v0.15.0  
+Status: v0.18.0
 Scope: Adapter discovery, lazy loading, caching, error handling, and container considerations
 
 ## Overview

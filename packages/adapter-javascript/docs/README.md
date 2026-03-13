@@ -13,7 +13,7 @@ Key points
 Status and scope
 - This is a fully implemented adapter supporting JavaScript and TypeScript debugging
 - Environment validation includes Node.js detection, vendor file verification, and optional TypeScript runner detection
-- `DebugLanguage.JAVASCRIPT` is a full member of the enum (5 languages: Python, JavaScript, Rust, Go, Mock)
+- `DebugLanguage.JAVASCRIPT` is a full member of the enum (6 languages: Python, JavaScript, Rust, Go, Java, Mock)
 
 Build and test
 - Build: pnpm -w -F @debugmcp/adapter-javascript run build

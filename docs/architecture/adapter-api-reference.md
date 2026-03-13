@@ -1,6 +1,6 @@
 # Adapter API Reference
 
-Status: v0.15.0  
+Status: v0.18.0
 Audience: Adapter authors and maintainers  
 Source of truth: `@debugmcp/shared` interfaces and current implementation in `src/adapters/*`
 

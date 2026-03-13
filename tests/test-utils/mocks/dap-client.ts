@@ -123,11 +123,6 @@ export class MockDapClient extends EventEmitter {
 // Export a singleton instance
 export const mockDapClient = new MockDapClient();
 
-// Helper function to reset the mock client state
-export const resetMockDapClient = (): void => {
-  mockDapClient.reset();
-};
-
 // Export default for use with vi.mock
 export default {
   DebugAdapterClient: vi.fn().mockImplementation(() => mockDapClient)

@@ -1,6 +1,6 @@
 # Getting Started with Debug MCP Server
 
-This guide will walk you through testing the Debug MCP Server locally with a simple Python example.
+This guide will walk you through testing the Debug MCP Server locally with a simple Python example. The server also supports JavaScript, Rust, Go, and Java debugging -- see the language-specific guides for details.
 
 ## Prerequisites
 
@@ -101,4 +101,4 @@ Once you've verified the server works with the example, you can try:
 2. Exploring more complex debugging scenarios
 3. Testing the source code viewing and variable inspection features
 
-For more details on available commands, see the [Python Debugging documentation](./python/README.md).
+For more details on available commands, see the [Usage Guide](./usage.md).

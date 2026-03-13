@@ -1,4 +1,4 @@
-# Debug Adapter Development Guide (v0.15.0)
+# Debug Adapter Development Guide (v0.18.0)
 
 Audience: Adapter authors who want to add a new language to mcp-debugger  
 Scope: Full end-to-end instructions to build, test, publish, and troubleshoot a language adapter for the dynamic loading system.
@@ -65,7 +65,7 @@ packages/
     "clean": "rimraf dist"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "^0.14.1"
+    "@debugmcp/shared": "^0.18.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
@@ -196,7 +196,7 @@ export class ExampleAdapterFactory extends AdapterFactory {
       name: 'example',
       displayName: 'Example',
       description: 'Example adapter',
-      minimumDebuggerVersion: '0.14.0'
+      minimumDebuggerVersion: '0.18.0'
     });
   }
 

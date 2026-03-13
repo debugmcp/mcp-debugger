@@ -2,28 +2,24 @@
 
 ## Overview
 
-The mcp-debugger codebase has deep Python coupling across 99 files, with approximately 10 core files having critical dependencies and 50+ test files requiring Python runtime. The `DebugLanguage` enum contains only `PYTHON`, indicating the system was never truly multi-language but structured with that possibility in mind.
+The mcp-debugger codebase has evolved from a Python-only debugger to a multi-language system. The `DebugLanguage` enum now contains six values: `PYTHON`, `JAVASCRIPT`, `RUST`, `GO`, `JAVA`, and `MOCK`. Core components like SessionManager, ProxyManager, and DapProxyWorker are language-agnostic, using the Adapter Policy pattern and dynamic adapter loading. Python-specific logic has been moved into `packages/adapter-python/`. Some residual Python coupling still exists in peripheral files (test fixtures, interface methods like `launchPythonDebugTarget`).
 
-## Coupling Heat Map
+## Coupling Heat Map (Post-Refactoring)
 
 ```
-CRITICAL (Must Change):
-├── src/session/session-manager.ts     [Lines: 29, 114-196, 834]
-├── src/proxy/proxy-manager.ts         [Lines: 35-36]
-├── src/utils/python-utils.ts          [Entire file - 167 lines]
-└── src/proxy/dap-proxy-*.ts           [All proxy components]
+NONE (Fully Refactored):
+├── src/session/session-manager*.ts    [Language-agnostic, delegates to adapters]
+├── src/proxy/proxy-manager.ts         [Language-agnostic, uses IDebugAdapter]
+├── src/proxy/dap-proxy-worker.ts      [Uses AdapterPolicy pattern]
+├── src/proxy/dap-proxy-adapter-manager.ts [GenericAdapterManager, spawns any adapter]
+└── src/server.ts                      [Dynamic language discovery via AdapterRegistry]
 
-HIGH (Core Flow):
-├── src/server.ts                      [Lines: 73-75, 246, 318-322]
-├── src/session/models.ts              [Lines: 18-19, 48-49]
-└── src/implementations/process-launcher-impl.ts [Lines: 74-88]
+ISOLATED (Correct Separation):
+├── packages/adapter-python/           [Python-specific logic properly isolated]
+└── packages/shared/src/adapter-policies/ [Per-language policies]
 
-MEDIUM (Configuration):
-├── src/session/session-store.ts       [Lines: 3, 46, 64]
-├── src/interfaces/process-interfaces.ts [Lines: 21-28]
-└── package.json scripts               [Python assumptions in tests]
-
-LOW (Peripheral):
+LOW (Residual):
+├── packages/shared/src/interfaces/process-interfaces.ts [launchPythonDebugTarget naming]
 ├── tests/* (50+ files)                [Test fixtures and runners]
 ├── examples/python/*                  [Example scripts]
 └── docs/python/*                      [Documentation]
@@ -31,36 +27,21 @@ LOW (Peripheral):
 
 ## Critical Path Components
 
-### 1. src/session/session-manager.ts
-**Coupling Level: CRITICAL**
+### 1. src/session/session-manager.ts (thin facade over session-manager-core.ts + session-manager-operations.ts)
+**Coupling Level: LOW (refactored)**
 
-- **Line 29**: Import of `findPythonExecutable` from python-utils
-- **Lines 114-196**: Python path resolution logic
-  ```typescript
-  // Line 166-168: Hardcoded Python detection
-  } else if (['python', 'python3', 'py'].includes(executablePathFromSession.toLowerCase())) {
-    resolvedExecutablePath = await findPythonExecutable(undefined, this.logger);
-  ```
-- **Line 183**: Python-specific comment about container mode
-- **Line 834**: Error messages mentioning Python/debugpy
-
-**Anti-pattern**: Mixing language-specific logic with session management
+The SessionManager no longer imports `findPythonExecutable` or contains Python path resolution logic. Executable path resolution is delegated to the adapter via `IDebugAdapter.resolveExecutablePath()` in ProxyManager. The session-manager class hierarchy is:
+- `SessionManagerCore` (lifecycle, state management, event handlers)
+- `SessionManagerData` (variables, stack traces, scopes, local variables)
+- `SessionManagerOperations` (start debugging, stepping, breakpoints, evaluate)
+- `SessionManager` (thin facade extending `SessionManagerOperations`)
 
 ### 2. src/server.ts
-**Coupling Level: HIGH**
+**Coupling Level: LOW (refactored)**
 
-- **Lines 73-75**: Hard-coded Python check
-  ```typescript
-  if (params.language !== 'python') { 
-    throw new McpError(McpErrorCode.InvalidParams, "language parameter must be 'python'");
-  }
-  ```
-- **Line 246**: Tool definition with `enum: ['python']`
-- **Lines 318-322**: Python-specific error messages in catch blocks
+The hardcoded `language !== 'python'` check has been removed. The server now dynamically discovers supported languages from the `AdapterRegistry` and validates against the available set. Default language is still `'python'` when not specified, and `DEFAULT_LANGUAGES` includes `['python', 'mock']`. Tool definitions use the dynamically built language list.
 
-**Anti-pattern**: Language validation at API layer instead of adapter layer
-
-### 3. src/utils/python-utils.ts
+### 3. packages/adapter-python/src/utils/python-utils.ts
 **Coupling Level: CRITICAL**
 
 Entire file (167 lines) is Python-specific:
@@ -70,46 +51,33 @@ Entire file (167 lines) is Python-specific:
 
 **Note**: This is actually good separation - language-specific utils should be isolated
 
-### 4. src/proxy/dap-proxy-process-manager.ts
-**Coupling Level: CRITICAL**
+### 4. src/proxy/dap-proxy-adapter-manager.ts
+**Coupling Level: NONE (refactored)**
 
-- **Lines 26-32**: Hardcoded debugpy command
-  ```typescript
-  const args = [
-    '-m', 'debugpy.adapter',
-    '--host', host,
-    '--port', String(port),
-    '--log-dir', logDir
-  ];
-  ```
-- **Line 40**: Log message mentioning debugpy
-- **Line 65**: Error message about debugpy
-
-**Anti-pattern**: Proxy manager knows about specific debugger implementation
+This file is now `GenericAdapterManager` -- a fully language-agnostic component that spawns any debug adapter from a `GenericAdapterConfig` (command, args, logDir, cwd, env). The hardcoded debugpy command has been removed. Adapter spawn configuration is provided by the Adapter Policy pattern (`AdapterPolicy.getAdapterSpawnConfig()`).
 
 ## Configuration Components
 
-### 1. Data Structures with Python Fields
+### 1. Data Structures
 
-**src/session/models.ts**
-- Line 18: `DebugLanguage.PYTHON = 'python'` (only value!)
-- Lines 48-49: `executablePath?: string` in SessionConfig
+**packages/shared/src/models/index.ts**
+- `DebugLanguage` enum now has six values: PYTHON, JAVASCRIPT, RUST, GO, JAVA, MOCK
+- `executablePath?: string` remains language-agnostic in SessionConfig
 
-**src/proxy/proxy-manager.ts**
-- Lines 35-36: `executablePath: string` in ProxyConfig
+**src/proxy/proxy-config.ts**
+- `executablePath?: string` -- optional; adapters can discover the path if not provided
 
 **src/session/session-store.ts**
-- Line 3: `DEFAULT_PYTHON` platform-specific constant
-- Line 46: `executablePath?: string` in CreateSessionParams
-- Line 64: Default executable path logic
+- No longer has `DEFAULT_PYTHON` constant
+- Uses `AdapterPolicy.resolveExecutablePath()` for defaults
 
 ### 2. Interface Definitions
 
-**src/interfaces/process-interfaces.ts**
-- Lines 21-28: `IDebugTargetLauncher.launchPythonDebugTarget()`
+**packages/shared/src/interfaces/process-interfaces.ts**
+- `IDebugTargetLauncher.launchPythonDebugTarget()` -- residual Python naming, still in use
 
 **src/proxy/dap-proxy-interfaces.ts**
-- `executablePath` in multiple interfaces
+- `executablePath` in multiple interfaces (now language-agnostic)
 
 ## Peripheral Components
 
@@ -132,96 +100,78 @@ Entire file (167 lines) is Python-specific:
 ## Error Messages and Logging
 
 ### User-Facing Messages
-1. **src/server.ts:318-322**
+1. **src/utils/error-messages.ts** -- now uses generic language:
    ```typescript
-   "Please ensure:\n" +
-   "1. Python 3.7+ is installed and in your PATH\n" +
-   "2. The debugpy package is installed (pip install debugpy)\n"
+   `This may indicate that the debug adapter failed to start or is not properly configured. ` +
+   `Check that the required debug adapter is installed and accessible.`
    ```
 
-2. **src/utils/error-messages.ts:5-8**
-   ```typescript
-   `Check that Python and debugpy are properly installed and accessible.`
-   ```
+2. **src/server.ts** -- language-specific error messages are handled by adapters, not hardcoded
 
 ### Log Messages
-- Over 50 log statements mention "Python" or "debugpy"
-- Session manager logs Python path resolution
-- Proxy manager logs debugpy adapter spawning
+- Core log statements are language-agnostic (e.g., "Adapter spawned", "Adapter configured")
+- Adapter-specific log messages live in the respective adapter packages
 
 ## Configuration Files
 
 ### Default Configurations
 - No hardcoded Python paths in config files
-- Environment variables: `PYTHON_PATH`, `PYTHON_EXECUTABLE`
-- Platform-specific defaults: `python` (Windows) vs `python3` (Unix)
+- Python-specific environment variables (`PYTHON_PATH`, `PYTHON_EXECUTABLE`) are handled inside `packages/adapter-python/`
+- Platform-specific Python defaults (`python` on Windows vs `python3` on Unix) are in the Python adapter policy
 
-## Choke Points for Multi-Language Support
+## Multi-Language Support (Completed)
 
-### Minimal Changes Required:
+The following changes have been implemented:
 
-1. **Expand DebugLanguage enum** (src/session/models.ts)
+1. **DebugLanguage enum expanded** (`packages/shared/src/models/index.ts`)
    ```typescript
    export enum DebugLanguage {
      PYTHON = 'python',
-     // Add: NODE = 'node', GO = 'go', etc.
+     JAVASCRIPT = 'javascript',
+     RUST = 'rust',
+     GO = 'go',
+     JAVA = 'java',
+     MOCK = 'mock',
    }
    ```
 
-2. **Create Adapter Interface** (new file)
-   ```typescript
-   interface IDebugAdapter {
-     createSession(config: SessionConfig): Promise<DebugSession>;
-     spawnAdapter(config: AdapterConfig): Promise<AdapterProcess>;
-   }
-   ```
+2. **Adapter interfaces created** (`packages/shared/`)
+   - `IDebugAdapter` and `IAdapterFactory` interfaces in shared package
+   - Implementations in `packages/adapter-python/`, `packages/adapter-javascript/`, `packages/adapter-go/`, `packages/adapter-rust/`, `packages/adapter-mock/`
 
-3. **Adapter Selection Logic** (session-manager.ts)
-   - Replace Python-specific logic with adapter.createSession()
-   - Inject appropriate adapter based on language
+3. **Adapter Policy pattern** (`packages/shared/src/adapter-policies/`)
+   - `AdapterPolicy` interface with per-language policies (Python, JavaScript, Rust, Go, Java, Mock, Default)
+   - Handles language-specific DAP initialization sequences, stack frame filtering, variable extraction
 
-4. **Remove Language Validation** (server.ts:73-75)
-   - Let adapter handle unsupported languages
+4. **Dynamic adapter loading** (`src/adapters/adapter-loader.ts`, `src/adapters/adapter-registry.ts`)
+   - Adapters loaded on-demand by package name `@debugmcp/adapter-{language}`
+   - Server validates language against available adapters from the registry
 
-## Anti-Patterns to Avoid in Refactoring
+## Resolved Anti-Patterns
 
 1. **Language-Specific Parameters in Core Interfaces**
-   - Current: `executablePath` in SessionConfig (now language-agnostic)
-   - ✅ Already improved from previous `pythonPath`
+   - Resolved: `executablePath` is language-agnostic; adapters resolve defaults via `IDebugAdapter.resolveExecutablePath()`
 
 2. **Hardcoded Language Checks**
-   - Current: `if (language !== 'python')`
-   - Better: `if (!adapters.has(language))`
+   - Resolved: Server validates against `AdapterRegistry.getRegisteredLanguages()` instead of hardcoded strings
 
 3. **Mixing Business Logic with Language Logic**
-   - Current: Session manager knows about Python discovery
-   - Better: Adapter handles all language-specific concerns
+   - Resolved: Session manager delegates to adapters; language-specific logic lives in adapter packages and adapter policies
 
 4. **Assumptions in Error Messages**
-   - Current: "Install debugpy"
-   - Better: Adapter-provided error messages
+   - Partially resolved: Core error messages (error-messages.ts) are now generic; some test files still reference Python-specific messages
 
-## Surprises and Gotchas
+## Gotchas
 
-1. **🎯 No Existing Multi-Language Code**: The `DebugLanguage` enum only has `PYTHON`, so we're not breaking existing functionality
-2. **⚠️ Platform-Specific Python Commands**: Windows uses 'python' while Unix uses 'python3' by default
-3. **🔍 Windows Store Python Detection**: Special logic to detect and skip Windows Store Python aliases
-4. **📦 No debugpy in Docker**: The Dockerfile doesn't install Python or debugpy - relies on host
-5. **🧪 Test Coupling**: Many tests directly import python-utils instead of mocking
+1. Platform-specific Python commands: Windows uses 'python' while Unix uses 'python3' by default (handled by `PythonAdapterPolicy.resolveExecutablePath()`)
+2. Windows Store Python detection: Special logic in `packages/adapter-python/` to detect and skip Windows Store Python aliases
+3. Test coupling: Some test files still directly import python-utils instead of mocking via the adapter interface
+4. Residual naming: `IDebugTargetLauncher.launchPythonDebugTarget()` still uses Python-specific naming in the shared interfaces
 
-## Summary Statistics
+## Current Status
 
-- **Total files with Python dependencies**: 99
-- **Core files requiring refactoring**: 10
-- **Test files affected**: 50+
-- **Lines of Python-specific code in core**: ~500
-- **Estimated refactoring complexity**: HIGH for core, MEDIUM for tests
-- **Risk level**: HIGH (touches critical debugging flow)
-
-## Recommendations
-
-1. **Phase 1**: Extract adapter interface and implement PythonAdapter
-2. **Phase 2**: Refactor session-manager to use adapters
-3. **Phase 3**: Update API layer and tests
-4. **Quick Win**: The enum expansion won't break anything
-5. **Watch Out**: The proxy pattern already exists - leverage it!
+The multi-language refactoring is complete at the architecture level:
+- Core components (SessionManager, ProxyManager, DapProxyWorker) are language-agnostic
+- Six adapter policies handle language-specific DAP behavior
+- Dynamic adapter loading discovers adapters at runtime
+- Remaining Python coupling is in peripheral code (test fixtures, some interface naming)

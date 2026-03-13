@@ -96,7 +96,7 @@ All utility scripts use separate arguments for file paths to handle spaces in di
 ```
 
 ### Log Level Configuration
-The test setup file (`jest.setupAfterEnv.ts`) sets environment variables to reduce log noise:
+The test setup file (`tests/vitest.setup.ts`) sets environment variables to reduce log noise:
 ```javascript
 process.env.LOG_LEVEL = 'error';
 process.env.DEBUG_MCP_LOG_LEVEL = 'error';

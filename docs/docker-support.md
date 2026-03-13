@@ -6,22 +6,14 @@ This guide explains how to use Docker with the Debug MCP Server, allowing you to
 
 We provide a Dockerfile and build scripts for creating a Docker container with all necessary dependencies pre-installed, including Node.js and Python with debugpy.
 
-### Building with Scripts
-
-#### On Windows:
+### Building the Image
 ```bash
-.\docker-build.cmd
+docker build -t mcp-debugger:local .
 ```
 
-#### On Unix (Linux/macOS):
+Or using the npm script:
 ```bash
-chmod +x docker-build.sh
-./docker-build.sh
-```
-
-### Building Manually
-```bash
-docker build -t debug-mcp-server .
+npm run docker-build
 ```
 
 ## IMPORTANT: Mount Path Requirement
@@ -43,7 +35,7 @@ The Debug MCP Server uses a **TRUE HANDS-OFF** approach to path handling. When r
 Once the image is built, you can run the server with volume mounts:
 
 ```bash
-docker run -i --rm -v /path/to/your/project:/workspace:rw debug-mcp-server
+docker run -i --rm -v /path/to/your/project:/workspace:rw mcp-debugger:local
 ```
 
 ### Recommended Configuration for Claude
@@ -63,7 +55,7 @@ Here's the recommended configuration for your MCP settings file:
         "/path/to/your/project:/workspace:rw",
         "-v",
         "/path/to/temp:/tmp:rw",
-        "debug-mcp-server",
+        "mcp-debugger:local",
         "stdio",
         "--log-level",
         "debug",
@@ -127,7 +119,7 @@ To use both servers together, configure them in your MCP settings:
         "-i",
         "-v",
         "/path/to/your/project:/workspace:rw",
-        "debug-mcp-server",
+        "mcp-debugger:local",
         "stdio"
       ],
       "disabled": false,
@@ -170,7 +162,7 @@ If you need to debug files from multiple locations, you can mount multiple direc
   "/path/to/project1:/workspace/project1:rw",
   "-v",
   "/path/to/project2:/workspace/project2:rw",
-  "debug-mcp-server",
+  "mcp-debugger:local",
   "stdio"
 ]
 ```
@@ -182,7 +174,7 @@ Then reference files as `project1/file.py` or `project2/script.js`.
 To expose the debugpy port for remote debugging:
 
 ```bash
-docker run -i --rm -p 5679:5679 -v /path/to/project:/workspace:rw debug-mcp-server
+docker run -i --rm -p 5679:5679 -v /path/to/project:/workspace:rw mcp-debugger:local
 ```
 
 In the MCP settings:
@@ -195,7 +187,7 @@ In the MCP settings:
   "5679:5679",
   "-v",
   "/path/to/project:/workspace:rw",
-  "debug-mcp-server"
+  "mcp-debugger:local"
 ]
 ```
 
@@ -240,7 +232,7 @@ This ensures all dependencies needed for both Node.js execution and Python debug
 2. **Port already in use**:
    - If port 5678 is already in use, you can map to a different port:
    ```
-   docker run -i --rm -p 5679:5678 debug-mcp-server
+   docker run -i --rm -p 5679:5678 mcp-debugger:local
    ```
 
 3. **Build failures**:

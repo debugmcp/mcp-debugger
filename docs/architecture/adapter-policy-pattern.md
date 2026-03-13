@@ -14,46 +14,87 @@ This document explains the AdapterPolicy pattern and how it relates to the main 
 - **Purpose**: Complete debug adapter implementation
 - **Scope**: Handles all DAP protocol communication and language runtime management
 - **Location**: `packages/adapter-<language>/`
-- **Examples**: JavascriptDebugAdapter, PythonAdapter, MockAdapter
+- **Examples**: `JavascriptDebugAdapter`, `PythonDebugAdapter`, `MockDebugAdapter`, `RustDebugAdapter`, `GoDebugAdapter`
 
 ### AdapterPolicy (Supporting Pattern)
 - **Purpose**: Language-specific policies for session management
-- **Scope**: Lightweight behaviors used by SessionManager classes
+- **Scope**: Lightweight behaviors used by SessionManager and DAP proxy layer
 - **Location**: `packages/shared/src/interfaces/adapter-policy-*.ts`
-- **Examples**: JsDebugAdapterPolicy, PythonAdapterPolicy, MockAdapterPolicy
+- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `MockAdapterPolicy`
 
 ## AdapterPolicy Interface
 
-The AdapterPolicy interface provides static methods for language-specific behaviors:
+The `AdapterPolicy` interface is defined in `packages/shared/src/interfaces/adapter-policy.ts`. It provides both required and optional methods for language-specific behaviors:
 
 ```typescript
 export interface AdapterPolicy {
-  // DAP adapter configuration
-  getDapAdapterConfiguration(): AdapterConfiguration;
-  
-  // Executable path resolution and validation
+  // === Identity ===
+  name: string;                              // e.g., 'default', 'python', 'js-debug', 'rust', 'go', 'java', 'mock'
+
+  // === Child Session / Multi-session Support ===
+  supportsReverseStartDebugging: boolean;
+  childSessionStrategy: ChildSessionStrategy; // 'none' | 'launchWithPendingTarget' | 'attachByPort' | 'adoptInParent'
+  shouldDeferParentConfigDone(parentConfig: Record<string, unknown>): boolean;
+  buildChildStartArgs(pendingId: string, parentConfig: Record<string, unknown>):
+    { command: 'launch' | 'attach'; args: Record<string, unknown> };
+  isChildReadyEvent(evt: DebugProtocol.Event): boolean;
+
+  // === DAP adapter configuration ===
+  getDapAdapterConfiguration(): { type: string };
+  getDebuggerConfiguration(): {
+    requiresStrictHandshake?: boolean;
+    skipConfigurationDone?: boolean;
+    supportsVariableType?: boolean;
+  };
+  getInitializationBehavior(): {
+    deferConfigDone?: boolean;
+    addRuntimeExecutable?: boolean;
+    trackInitializeResponse?: boolean;
+    requiresInitialStop?: boolean;
+    defaultStopOnEntry?: boolean;
+    sendLaunchBeforeConfig?: boolean;
+  };
+  getDapClientBehavior(): DapClientBehavior;
+
+  // === Executable resolution ===
   resolveExecutablePath(providedPath?: string): string | undefined;
   validateExecutable?(executablePath: string): Promise<boolean>;
-  
-  // Debugger configuration and capabilities
-  getDebuggerConfiguration(): DebuggerConfiguration;
-  
-  // Language-specific handshake procedures
-  performHandshake?(context: HandshakeContext): Promise<void>;
-  
-  // Stack frame filtering (optional)
-  filterStackFrames?(frames: StackFrame[], includeInternals?: boolean): StackFrame[];
-  
-  // Variable extraction (optional)
-  extractLocalVariables?(
-    stackFrames: StackFrame[],
-    scopesMap: Record<number, DebugProtocol.Scope[]>,
-    variablesMap: Record<number, Variable[]>,
-    includeSpecial?: boolean
-  ): Variable[];
-  
-  // Scope name conventions (optional)
+
+  // === Command queueing ===
+  requiresCommandQueueing(): boolean;
+  shouldQueueCommand(command: string, state: AdapterSpecificState): CommandHandling;
+  processQueuedCommands?(commands: unknown[], state: AdapterSpecificState): unknown[];
+
+  // === State management ===
+  createInitialState(): AdapterSpecificState;
+  updateStateOnCommand?(command: string, args: unknown, state: AdapterSpecificState): void;
+  updateStateOnResponse?(command: string, response: unknown, state: AdapterSpecificState): void;
+  updateStateOnEvent?(event: string, body: unknown, state: AdapterSpecificState): void;
+  isInitialized(state: AdapterSpecificState): boolean;
+  isConnected(state: AdapterSpecificState): boolean;
+
+  // === Adapter matching ===
+  matchesAdapter(adapterCommand: { command: string; args: string[] }): boolean;
+
+  // === Adapter process spawning (optional) ===
+  getAdapterSpawnConfig?(payload: { ... }): { command: string; args: string[]; ... } | undefined;
+
+  // === Stack frame filtering (optional) ===
+  filterStackFrames?(frames: StackFrame[], includeInternals: boolean): StackFrame[];
+  isInternalFrame?(frame: StackFrame): boolean;
+
+  // === Variable extraction (optional) ===
+  extractLocalVariables?(stackFrames, scopes, variables, includeSpecial?): Variable[];
   getLocalScopeName?(): string | string[];
+
+  // === Session readiness (optional) ===
+  isSessionReady?(state: SessionState, options: { stopOnEntry?: boolean }): boolean;
+
+  // === Non-file source identifiers (optional, e.g. Java FQCNs) ===
+  isNonFileSourceIdentifier?(sourceIdentifier: string): boolean;
+
+  // === Language-specific handshake (optional) ===
+  performHandshake?(context: { proxyManager; sessionId; dapLaunchArgs?; scriptPath; ... }): Promise<void>;
 }
 ```
 
@@ -87,88 +128,59 @@ Client Request → Server → SessionManager
 - Stack frame filtering (e.g., hiding Node.js internals)
 - Variable extraction logic (e.g., Python's locals vs JavaScript's scopes)
 
-## Implementation Examples
+## All Adapter Policies
 
-### Python Policy
-```typescript
-export const PythonAdapterPolicy: AdapterPolicy = {
-  getDapAdapterConfiguration(): AdapterConfiguration {
-    return {
-      type: 'debugpy',
-      supportedProtocols: ['tcp'],
-      defaultPort: 5678
-    };
-  },
+| Policy | File | `name` | DAP type | Multi-session | Command queueing |
+|--------|------|--------|----------|---------------|------------------|
+| `DefaultAdapterPolicy` | `adapter-policy.ts` | `'default'` | `'default'` | No | No |
+| `PythonAdapterPolicy` | `adapter-policy-python.ts` | `'python'` | `'debugpy'` | No | No |
+| `JsDebugAdapterPolicy` | `adapter-policy-js.ts` | `'js-debug'` | `'pwa-node'` | Yes | Yes |
+| `RustAdapterPolicy` | `adapter-policy-rust.ts` | `'rust'` | `'lldb'` | No | No |
+| `GoAdapterPolicy` | `adapter-policy-go.ts` | `'go'` | `'dlv-dap'` | No | No |
+| `JavaAdapterPolicy` | `adapter-policy-java.ts` | `'java'` | `'java'` | No | No |
+| `MockAdapterPolicy` | `adapter-policy-mock.ts` | `'mock'` | `'mock'` | No | No |
 
-  resolveExecutablePath(providedPath?: string): string | undefined {
-    // Python-specific resolution logic
-    if (providedPath) return providedPath;
-    // Check common Python commands
-    const commands = ['python3', 'python', 'py'];
-    // ... resolution logic
-  },
+### Key Differences Between Policies
 
-  async validateExecutable(executablePath: string): Promise<boolean> {
-    // Validate it's actually Python
-    try {
-      const result = await execSync(`"${executablePath}" --version`);
-      return result.includes('Python');
-    } catch {
-      return false;
-    }
-  },
+**DefaultAdapterPolicy** is a lightweight placeholder used while the proxy worker determines which concrete policy to activate. All its methods return safe no-op values. `isInitialized()` and `isConnected()` always return `false`; `matchesAdapter()` always returns `false`.
 
-  extractLocalVariables(stackFrames, scopesMap, variablesMap): Variable[] {
-    // Python-specific: look for 'Locals' scope
-    const topFrame = stackFrames[0];
-    const scopes = scopesMap[topFrame.id] || [];
-    const localsScope = scopes.find(s => s.name === 'Locals');
-    // ... extraction logic
-  }
-};
-```
+**JsDebugAdapterPolicy** is the most complex policy:
+- `supportsReverseStartDebugging: true` and `childSessionStrategy: 'launchWithPendingTarget'`
+- Requires strict initialization sequence (tracked via `JsAdapterState` with `initializeResponded` and `startSent` flags)
+- `requiresCommandQueueing()` returns `true` -- commands are queued until initialize response, then reordered (configs -> configurationDone -> launch -> others)
+- Provides a full `performHandshake()` implementation for the js-debug multi-session setup
+- `isChildReadyEvent()` waits for `'thread'` or `'stopped'` (not `'initialized'`)
+- `filterStackFrames()` removes `<node_internals>` frames
 
-### JavaScript Policy
-```typescript
-export const JsDebugAdapterPolicy: AdapterPolicy = {
-  getDapAdapterConfiguration(): AdapterConfiguration {
-    return {
-      type: 'pwa-node',
-      supportedProtocols: ['tcp'],
-      defaultPort: 9229
-    };
-  },
+**PythonAdapterPolicy**:
+- `resolveExecutablePath()` checks `PYTHON_PATH` env var, then defaults to `'python'` (Windows) or `'python3'` (Unix)
+- `validateExecutable()` spawns Python to detect Windows Store aliases
+- `extractLocalVariables()` filters out `special variables`, `function variables`, dunder variables, and `_pydev*` internals
+- `getLocalScopeName()` returns `['Locals']`
 
-  async performHandshake(context: HandshakeContext): Promise<void> {
-    // JavaScript-specific multi-session negotiation
-    const { proxyManager, sessionId, dapLaunchArgs } = context;
-    
-    // Send initialize request
-    await proxyManager.sendDapRequest('initialize', {
-      clientID: 'mcp-debugger',
-      adapterID: 'pwa-node',
-      // ... capabilities
-    });
-    
-    // Handle multi-session mode if needed
-    if (needsMultiSession) {
-      // ... handle startDebugging reverse request
-    }
-  },
+**RustAdapterPolicy**:
+- `resolveExecutablePath()` checks `CARGO_PATH` env var
+- `validateExecutable()` runs `codelldb --version`
+- `getAdapterSpawnConfig()` resolves a vendored CodeLLDB binary based on platform/arch
+- `getLocalScopeName()` returns `['Local', 'Locals']`
 
-  filterStackFrames(frames: StackFrame[], includeInternals = false): StackFrame[] {
-    if (includeInternals) return frames;
-    
-    // Filter out Node.js internals
-    return frames.filter(frame => {
-      const file = frame.file || '';
-      return !file.includes('node_modules') && 
-             !file.includes('internal/') &&
-             !file.startsWith('node:');
-    });
-  }
-};
-```
+**GoAdapterPolicy**:
+- `resolveExecutablePath()` checks `DLV_PATH` env var, defaults to `'dlv'`
+- `getInitializationBehavior()` returns `{ defaultStopOnEntry: false, sendLaunchBeforeConfig: true }` to work around Delve's "unknown goroutine" quirk
+- `filterStackFrames()` removes `/runtime/` and `/testing/` frames
+- `getLocalScopeName()` returns `['Locals', 'Arguments']`
+
+**JavaAdapterPolicy**:
+- `resolveExecutablePath()` checks `JAVA_HOME` env var, constructs `$JAVA_HOME/bin/java`
+- `isNonFileSourceIdentifier()` detects Java FQCNs (no path separators, does not end with `.java`) so the server skips file existence checks
+- `getInitializationBehavior()` returns `{ sendLaunchBeforeConfig: true }` because JdiDapServer sends `'initialized'` during initialize
+- `filterStackFrames()` removes JDK internal frames (`java.*`, `javax.*`, `sun.*`)
+
+**MockAdapterPolicy**:
+- `resolveExecutablePath()` returns `providedPath || 'mock'`
+- `filterStackFrames()` returns all frames unfiltered
+- `extractLocalVariables()` returns all variables from the first scope
+- `getDapClientBehavior()` returns minimal config with `childInitTimeout: 1000` (shorter for testing)
 
 ## Usage in Session Management
 
@@ -186,6 +198,15 @@ export class SessionManagerData extends SessionManagerCore {
       case 'javascript':
       case DebugLanguage.JAVASCRIPT:
         return JsDebugAdapterPolicy;
+      case 'rust':
+      case DebugLanguage.RUST:
+        return RustAdapterPolicy;
+      case 'go':
+      case DebugLanguage.GO:
+        return GoAdapterPolicy;
+      case 'java':
+      case DebugLanguage.JAVA:
+        return JavaAdapterPolicy;
       case 'mock':
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
@@ -196,13 +217,13 @@ export class SessionManagerData extends SessionManagerCore {
 
   async getStackTrace(sessionId: string): Promise<StackFrame[]> {
     // ... get frames from DAP
-    
+
     // Apply language-specific filtering
     const policy = this.selectPolicy(session.language);
     if (policy.filterStackFrames) {
       frames = policy.filterStackFrames(frames, includeInternals);
     }
-    
+
     return frames;
   }
 }
@@ -260,38 +281,40 @@ To add complete support for a new language, you need both:
 
 ### 1. Create the IDebugAdapter Implementation
 ```typescript
-// packages/adapter-rust/src/rust-adapter.ts
-export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
+// packages/adapter-<language>/src/<language>-debug-adapter.ts
+export class MyLangDebugAdapter extends EventEmitter implements IDebugAdapter {
   // Full implementation of all IDebugAdapter methods
 }
 ```
 
 ### 2. Create the AdapterPolicy
 ```typescript
-// packages/shared/src/interfaces/adapter-policy-rust.ts
-export const RustAdapterPolicy: AdapterPolicy = {
-  getDapAdapterConfiguration(): AdapterConfiguration {
-    return {
-      type: 'lldb',
-      supportedProtocols: ['tcp'],
-      defaultPort: 3333
-    };
-  },
-  
-  resolveExecutablePath(providedPath?: string): string | undefined {
-    // Rust-specific resolution
-    return providedPath || 'rust-lldb';
-  },
-  
-  // Add any Rust-specific behaviors
+// packages/shared/src/interfaces/adapter-policy-<language>.ts
+export const MyLangAdapterPolicy: AdapterPolicy = {
+  name: 'mylang',
+  supportsReverseStartDebugging: false,
+  childSessionStrategy: 'none',
+  // ... implement all required methods
+  getDapAdapterConfiguration: () => ({ type: 'mylang' }),
+  resolveExecutablePath: (providedPath?: string) => providedPath || 'mylang',
+  getDebuggerConfiguration: () => ({}),
+  requiresCommandQueueing: () => false,
+  shouldQueueCommand: () => ({ shouldQueue: false, shouldDefer: false }),
+  createInitialState: () => ({ initialized: false, configurationDone: false }),
+  isInitialized: (state) => state.initialized,
+  isConnected: (state) => state.initialized,
+  matchesAdapter: (cmd) => cmd.command.includes('mylang'),
+  getInitializationBehavior: () => ({}),
+  getDapClientBehavior: () => ({}),
+  // ... optional methods as needed
 };
 ```
 
 ### 3. Register in selectPolicy()
 ```typescript
-case 'rust':
-case DebugLanguage.RUST:
-  return RustAdapterPolicy;
+case 'mylang':
+case DebugLanguage.MYLANG:
+  return MyLangAdapterPolicy;
 ```
 
 ## Benefits of the Dual-Pattern Architecture

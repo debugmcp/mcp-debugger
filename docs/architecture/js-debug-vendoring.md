@@ -1,6 +1,6 @@
 # [PROVISIONAL] js-debug vendoring and bootloader.js runtime requirement
 
-Status: PROVISIONAL (documented mitigation; implementation in progress)
+Status: IMPLEMENTED
 Last Updated: 2025-10-02
 
 This note documents a recurring startup failure with the JavaScript debug adapter (vscode-js-debug) when vendored into this monorepo, the underlying cause, and a robust vendoring strategy (including build-time checks) to avoid regression. Keep this under version control for future maintenance, especially if upstream packaging changes.

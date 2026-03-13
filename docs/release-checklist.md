@@ -5,7 +5,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 ## Before Tagging
 
 ### Automated (via `npm run release:dry-run`)
-- [ ] All package versions match (`package.json` in root, shared, adapter-mock, adapter-python, mcp-debugger)
+- [ ] All package versions match (`package.json` in root, shared, adapter-mock, adapter-python, adapter-javascript, mcp-debugger)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
 - [ ] `npm run build` succeeds
@@ -31,7 +31,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 | `release version 21 not supported` | JDK < 21 in workflow job | Add `actions/setup-java@v4` with `java-version: '21'` |
 | Changelog empty in GitHub Release | `release.yml` doesn't strip `v` from tag | Use `${RELEASE_REF#refs/tags/v}` |
 | Build fails in `npm-publish` | Missing toolchain (Go/Java/etc.) | Mirror `build-and-test` toolchain setup in `npm-publish` job |
-| `workspace:*` resolution error | pnpm pack without resolving workspace deps | Check `scripts/prepare-pack.cjs` handles new packages |
+| `workspace:*` resolution error | pnpm pack without resolving workspace deps | Check `scripts/prepare-pack.js` handles new packages |
 
 ## After Tagging
 

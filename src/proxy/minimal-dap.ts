@@ -23,7 +23,6 @@ const logger = createLogger('minimal-dap-simple');
 
 type MinimalDapClientOptions = {
   childSessionManagerFactory?: (options: ChildSessionOptions) => ChildSessionManager;
-  childClientFactory?: (host: string, port: number, policy: AdapterPolicy) => MinimalDapClient;
   timers?: {
     setTimeout: typeof setTimeout;
     clearTimeout: typeof clearTimeout;
@@ -49,8 +48,6 @@ export class MinimalDapClient extends EventEmitter {
   private adoptedTargets = new Set<string>();
   private childSessions = new Map<string, MinimalDapClient>();
   private activeChild: MinimalDapClient | null = null;
-  private storedBreakpoints = new Map<string, DebugProtocol.SourceBreakpoint[]>();
-  private initializedSeen = false;
 
   // Adapter policy and DAP behavior configuration
   private policy: AdapterPolicy;
@@ -73,7 +70,6 @@ export class MinimalDapClient extends EventEmitter {
   // Mirror of active children tracked for policy context
   // Child lifecycle is managed by ChildSessionManager; we only retain a view for policy consumers.
 
-  private readonly childClientFactory: (host: string, port: number, policy: AdapterPolicy) => MinimalDapClient;
   private readonly timers: {
     setTimeout: typeof setTimeout;
     clearTimeout: typeof clearTimeout;
@@ -89,13 +85,6 @@ export class MinimalDapClient extends EventEmitter {
       setTimeout,
       clearTimeout
     };
-    this.childClientFactory =
-      options?.childClientFactory ??
-      ((childHost: string, childPort: number, policyForChild: AdapterPolicy) =>
-        new MinimalDapClient(childHost, childPort, policyForChild, {
-          timers: this.timers
-        }));
-    
     // Initialize ChildSessionManager for policies that support child sessions
     if (this.policy.supportsReverseStartDebugging) {
       const createChildSessionManager =
@@ -256,11 +245,8 @@ export class MinimalDapClient extends EventEmitter {
     } else if (message.type === 'event') {
       const event = message as DebugProtocol.Event;
       logger.info(`[MinimalDapClient] Received event: ${event.event}`);
-      if (event.event === 'initialized') {
-        this.initializedSeen = true;
-        // Do not auto-send configurationDone here; defer to higher-level sequencing/policy
-        // This avoids premature resume and double-config in multi-session adapters like js-debug.
-      }
+      // Do not auto-send configurationDone on 'initialized'; defer to higher-level sequencing/policy.
+      // This avoids premature resume and double-config in multi-session adapters like js-debug.
       // Emit both the specific event and the generic event for backward compatibility
       this.emit(event.event, event.body);
       this.emit('event', event);
@@ -580,8 +566,6 @@ export class MinimalDapClient extends EventEmitter {
           const absolutePath = path.isAbsolute(sp) ? sp : path.resolve(sp);
           // Store breakpoints in ChildSessionManager for mirroring
           this.childSessionManager.storeBreakpoints(absolutePath, bps);
-          // Also keep local copy for legacy code compatibility
-          this.storedBreakpoints.set(absolutePath, bps);
         }
       } catch {
         // ignore tracking errors

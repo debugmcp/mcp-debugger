@@ -596,28 +596,28 @@ You can also specify the Python path explicitly in your debug configuration.`;
    * Check Python version
    */
   private async checkPythonVersion(pythonPath: string): Promise<string | null> {
-    // Check cache first
-    const cached = this.pythonPathCache.get(pythonPath);
+    // Check cache — try resolved path first, then 'default' key
+    const cached = this.pythonPathCache.get(pythonPath) || this.pythonPathCache.get('default');
     if (cached?.version) {
       return cached.version;
     }
-    
+
     const version = await getPythonVersion(pythonPath);
-    
+
     // Update cache
     if (version && cached) {
       cached.version = version;
     }
-    
+
     return version;
   }
-  
+
   /**
    * Check if debugpy is installed
    */
   private async checkDebugpyInstalled(pythonPath: string): Promise<boolean> {
-    // Check cache first
-    const cached = this.pythonPathCache.get(pythonPath);
+    // Check cache — try resolved path first, then 'default' key
+    const cached = this.pythonPathCache.get(pythonPath) || this.pythonPathCache.get('default');
     if (cached?.hasDebugpy !== undefined) {
       return cached.hasDebugpy;
     }

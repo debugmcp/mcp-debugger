@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DebugMcpServer } from '../../../../src/server.js';
-import type { ILogger, IFileSystem, IEnvironment } from '../../../../src/interfaces/external-dependencies.js';
 
 // Mock dependencies
 vi.mock('../../../../src/container/dependencies.js', () => ({
@@ -110,30 +109,9 @@ async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
 
 describe('Dynamic Tool Documentation', () => {
   let server: DebugMcpServer;
-  let mockEnvironment: IEnvironment;
-  let mockFileSystem: IFileSystem;
-  let mockLogger: ILogger;
 
   describe('Hands-off Path Approach', () => {
     beforeEach(() => {
-      mockEnvironment = {
-        get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? undefined : undefined) as (key: string) => string | undefined,
-        getCurrentWorkingDirectory: vi.fn().mockReturnValue(process.cwd()),
-        getAll: vi.fn().mockReturnValue({})
-      } as unknown as IEnvironment;
-
-      mockFileSystem = {
-        existsSync: vi.fn().mockReturnValue(true),
-        readFileSync: vi.fn()
-      } as unknown as IFileSystem;
-
-      mockLogger = {
-        info: vi.fn(),
-        debug: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn()
-      } as unknown as ILogger;
-
       server = new DebugMcpServer();
     });
 
@@ -241,23 +219,6 @@ describe('Dynamic Tool Documentation', () => {
 
   describe('MCP Response Serialization', () => {
     beforeEach(() => {
-      mockEnvironment = {
-        get: vi.fn((key: string) => key === 'MCP_CONTAINER' ? undefined : undefined) as (key: string) => string | undefined,
-        getCurrentWorkingDirectory: vi.fn().mockReturnValue(process.cwd()),
-        getAll: vi.fn().mockReturnValue({})
-      } as unknown as IEnvironment;
-
-      mockFileSystem = {
-        existsSync: vi.fn().mockReturnValue(true)
-      } as unknown as IFileSystem;
-
-      mockLogger = {
-        info: vi.fn(),
-        debug: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn()
-      } as unknown as ILogger;
-
       server = new DebugMcpServer();
     });
 

@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DebugMcpServer } from '../../src/server';
-import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionLifecycleState } from '@debugmcp/shared';
 
 describe('Server Coverage - Error Paths and Edge Cases', () => {

@@ -19,10 +19,9 @@ SessionManager is the central orchestrator for all debug sessions. It implements
 2. **Event Handler Management**
    - Uses WeakMap to track event handlers per session
    - Ensures proper cleanup to prevent memory leaks
-   - From lines 121-122:
    ```typescript
    // WeakMap to store event handlers for cleanup
-   private sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: any[]) => void>>();
+   protected sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: any[]) => void>>();
    ```
 
 3. **State Management**
@@ -60,32 +59,30 @@ class SessionManager {
 
 ### Event Handler Pattern
 
-The SessionManager sets up comprehensive event handlers for each ProxyManager (lines 184-310):
+The SessionManager sets up comprehensive event handlers for each ProxyManager:
 
 ```typescript
-private setupProxyEventHandlers(
-  session: ManagedSession, 
+protected setupProxyEventHandlers(
+  session: ManagedSession,
   proxyManager: IProxyManager,
   effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
 ): void {
   const handlers = new Map<string, (...args: any[]) => void>();
-  
+
   // Named functions for each event
-  const handleStopped = (threadId: number, reason: string) => {
+  const handleStopped = (threadId: number | undefined, reason: string) => {
+    // Handle auto-continue for stopOnEntry=false
     if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-      // Auto-continue if stopOnEntry=false
-      this.continue(sessionId).catch(err => {
-        this.logger.error(`Error auto-continuing:`, err);
-      });
+      this.handleAutoContinue().catch(err => { /* log error */ });
     } else {
       this._updateSessionState(session, SessionState.PAUSED);
     }
   };
-  
+
   // Register and track all handlers
   proxyManager.on('stopped', handleStopped);
   handlers.set('stopped', handleStopped);
-  
+
   // Store for cleanup
   this.sessionEventHandlers.set(session, handlers);
 }
@@ -93,13 +90,16 @@ private setupProxyEventHandlers(
 
 ### Cleanup Strategy
 
-The cleanup mechanism ensures no memory leaks (lines 313-344):
+The cleanup mechanism ensures no memory leaks:
 
 ```typescript
-private cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
+protected cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
+  // Safety check to prevent double cleanup
+  if (!this.sessionEventHandlers.has(session)) return;
+
   const handlers = this.sessionEventHandlers.get(session);
   if (!handlers) return;
-  
+
   handlers.forEach((handler, eventName) => {
     try {
       proxyManager.removeListener(eventName, handler);
@@ -107,7 +107,7 @@ private cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyM
       // Continue cleanup despite errors
     }
   });
-  
+
   this.sessionEventHandlers.delete(session);
 }
 ```
@@ -180,26 +180,31 @@ setTimeout(() => {
 
 ### Process Management
 
-The proxy script discovery mechanism (lines 297-315):
+The proxy script discovery mechanism uses directory-based resolution:
 
 ```typescript
 private async findProxyScript(): Promise<string> {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  
-  // Try .js first (for src/dev)
-  let proxyWorkerPath = path.resolve(__dirname, '../proxy/proxy-bootstrap.js');
-  
-  if (!await this.fileSystem.pathExists(proxyWorkerPath)) {
-    // Fallback to .cjs (for dist)
-    proxyWorkerPath = path.resolve(__dirname, '../proxy/proxy-bootstrap.cjs');
-    
-    if (!await this.fileSystem.pathExists(proxyWorkerPath)) {
-      throw new Error(`Bootstrap worker script not found.`);
-    }
+  const modulePath = fileURLToPath(this.runtimeEnv.moduleUrl);
+  const moduleDir = path.dirname(modulePath);
+  const dirParts = moduleDir.split(path.sep);
+  const lastPart = dirParts[dirParts.length - 1];
+  const secondLast = dirParts[dirParts.length - 2];
+
+  let distPath: string;
+  if (lastPart === 'dist') {
+    distPath = path.join(moduleDir, 'proxy', 'proxy-bootstrap.js');
+  } else if (lastPart === 'proxy' && secondLast === 'dist') {
+    distPath = path.join(moduleDir, 'proxy-bootstrap.js');
+  } else {
+    // Fallback to development layout
+    distPath = path.resolve(moduleDir, '../../dist/proxy/proxy-bootstrap.js');
   }
-  
-  return proxyWorkerPath;
+
+  if (!(await this.fileSystem.pathExists(distPath))) {
+    throw new Error(`Bootstrap worker script not found at: ${distPath}`);
+  }
+
+  return distPath;
 }
 ```
 
@@ -208,7 +213,7 @@ private async findProxyScript(): Promise<string> {
 **Location**: `src/proxy/dap-proxy-worker.ts`
 
 ### Overview
-The ProxyWorker is the core business logic component that runs in the proxy process. It manages the debugpy adapter lifecycle and DAP protocol communication.
+The ProxyWorker is the core business logic component that runs in the proxy process. It manages the debug adapter lifecycle and DAP protocol communication using the Adapter Policy pattern for language-specific behavior.
 
 ### State Machine
 
@@ -377,8 +382,8 @@ export const ErrorMessages = {
     
   proxyInitTimeout: (timeout: number) =>
     `Debug proxy initialization did not complete within ${timeout}s. ` +
-    `This may indicate that debugpy failed to start or is not installed. ` +
-    `Check that Python and debugpy are properly installed and accessible.`
+    `This may indicate that the debug adapter failed to start or is not properly configured. ` +
+    `Check that the required debug adapter is installed and accessible.`
 };
 ```
 
@@ -418,6 +423,8 @@ The dependency injection system enables comprehensive testing by abstracting all
      proxyManagerFactory: IProxyManagerFactory;
      sessionStoreFactory: ISessionStoreFactory;
      debugTargetLauncher: IDebugTargetLauncher;
+     environment: IEnvironment;
+     adapterRegistry: IAdapterRegistry;
    }
    ```
 

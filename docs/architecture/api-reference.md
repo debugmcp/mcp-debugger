@@ -1,7 +1,7 @@
 # mcp-debugger API Reference
 
-> **⚠️ DRAFT DOCUMENTATION**  
-> This API reference is based on mcp-debugger v0.10.0 and will be updated as the architecture evolves.
+> **⚠️ DRAFT DOCUMENTATION**
+> This API reference reflects the v2.x monorepo architecture with dynamic adapter loading.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@
 
 The core interface that all language adapters must implement.
 
-**Source**: [src/adapters/debug-adapter-interface.ts](../../src/adapters/debug-adapter-interface.ts)
+**Source**: [packages/shared/src/interfaces/debug-adapter.ts](../../packages/shared/src/interfaces/debug-adapter.ts)
 
 ### Properties
 
@@ -157,27 +157,39 @@ Default configuration values for the language.
 
 **Returns**: Common default settings
 
-### Path Translation Methods
+### Attach Support Methods (Optional)
 
-#### `translateScriptPath(scriptPath: string, context: PathContext): string`
-Handles language-specific path requirements.
+#### `supportsAttach?(): boolean`
+Checks if the adapter supports attaching to running processes.
+
+**Returns**: `true` if attach is supported
+
+#### `supportsDetach?(): boolean`
+Checks if the adapter supports detaching without terminating the debuggee.
+
+**Returns**: `true` if detach is supported
+
+#### `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig`
+Transforms generic attach config to language-specific format. Only called if `supportsAttach()` returns `true`.
+
+**Parameters**: Generic attach configuration
+**Returns**: Language-specific attach configuration
+
+#### `getDefaultAttachConfig?(): Partial<GenericAttachConfig>`
+Gets default attach configuration for this language.
+
+**Returns**: Default attach configuration with language-specific defaults
+
+### Launch Barrier (Optional)
+
+#### `createLaunchBarrier?(command: string, args?: unknown): AdapterLaunchBarrier | undefined`
+Optionally provides a launch barrier that customizes how ProxyManager coordinates a specific DAP request (e.g., fire-and-forget launches).
 
 **Parameters**:
-```typescript
-{
-  isContainer: boolean;
-  workspaceRoot: string;
-  platform: NodeJS.Platform;
-}
-```
+- `command` - The DAP command name
+- `args` - Optional command arguments
 
-**Returns**: Translated path suitable for the debug adapter
-
-#### `translateBreakpointPath(filePath: string, context: PathContext): string`
-Translates paths for breakpoint locations.
-
-**Parameters**: Same as `translateScriptPath`  
-**Returns**: Translated breakpoint file path
+**Returns**: An `AdapterLaunchBarrier` instance or `undefined`
 
 ### DAP Protocol Methods
 
@@ -392,8 +404,8 @@ Registers a new adapter factory.
 registry.register('python', new PythonAdapterFactory());
 ```
 
-#### `create(language: string, config: AdapterConfig): IDebugAdapter`
-Creates an adapter instance.
+#### `create(language: string, config: AdapterConfig): Promise<IDebugAdapter>`
+Creates an adapter instance (async).
 
 **Throws**: `AdapterNotFoundError` if language not supported
 
@@ -449,8 +461,11 @@ Common sequences:
 ```typescript
 enum DebugLanguage {
   PYTHON = 'python',
+  JAVASCRIPT = 'javascript',
+  RUST = 'rust',
+  GO = 'go',
+  JAVA = 'java',
   MOCK = 'mock',
-  // Future: NODE = 'node', GO = 'go', etc.
 }
 
 enum AdapterState {
@@ -488,11 +503,24 @@ class AdapterError extends Error {
 }
 
 enum AdapterErrorCode {
+  // Environment errors
   ENVIRONMENT_INVALID = 'ENVIRONMENT_INVALID',
   EXECUTABLE_NOT_FOUND = 'EXECUTABLE_NOT_FOUND',
   ADAPTER_NOT_INSTALLED = 'ADAPTER_NOT_INSTALLED',
+  INCOMPATIBLE_VERSION = 'INCOMPATIBLE_VERSION',
+  // Connection errors
   CONNECTION_FAILED = 'CONNECTION_FAILED',
-  // ... more codes
+  CONNECTION_TIMEOUT = 'CONNECTION_TIMEOUT',
+  CONNECTION_LOST = 'CONNECTION_LOST',
+  // Protocol errors
+  INVALID_RESPONSE = 'INVALID_RESPONSE',
+  UNSUPPORTED_OPERATION = 'UNSUPPORTED_OPERATION',
+  // Runtime errors
+  DEBUGGER_ERROR = 'DEBUGGER_ERROR',
+  SCRIPT_NOT_FOUND = 'SCRIPT_NOT_FOUND',
+  PERMISSION_DENIED = 'PERMISSION_DENIED',
+  // Generic errors
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR'
 }
 ```
 

@@ -80,8 +80,8 @@ chmod +x /app/entry.sh
    - Project lives in `250106 AGENTS` (has space) - debugging works fine
    - Windows backslash paths passed through correctly to debugpy
 
-2. **All 5 language adapters load successfully**
-   - Python, JavaScript, Go, Rust, Mock all listed
+2. **All 6 language adapters load successfully**
+   - Python, JavaScript, Go, Rust, Java, Mock all listed
    - Python, JavaScript, Go all complete full debug workflows
 
 3. **Edge cases handled cleanly** (tests 1.7-1.14)

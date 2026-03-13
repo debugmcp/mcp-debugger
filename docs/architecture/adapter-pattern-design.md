@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Debug Adapter Pattern transforms mcp-debugger from a Python-specific tool into a multi-language debugging platform. This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
+The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 6 languages (Python, JavaScript, Rust, Go, Java, and Mock). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
 
 1. **IDebugAdapter Interface**: Complete adapter implementations for full language support
 2. **AdapterPolicy Interface**: Lightweight policies for language-specific session management behaviors
@@ -84,15 +84,19 @@ graph TD
     
     subgraph "Language Adapters"
         PA[PythonAdapter]
-        MA[MockAdapter]
         NA[NodeAdapter]
+        RA[RustAdapter]
         GA[GoAdapter]
+        JA[JavaAdapter]
+        MA[MockAdapter]
     end
-    
+
     AR --> PA
-    AR --> MA
     AR --> NA
+    AR --> RA
     AR --> GA
+    AR --> JA
+    AR --> MA
     
     style AD fill:#9cf,stroke:#333,stroke-width:2px
     style AR fill:#9cf,stroke:#333,stroke-width:2px
@@ -356,13 +360,13 @@ sequenceDiagram
 
 ## MCP Tool Changes
 
-### Current Tool Signature (As of 2025-07-12)
+### Current Tool Signature
 ```json
 {
   "name": "create_debug_session",
   "inputSchema": {
     "properties": {
-      "language": { "enum": ["python"] },
+      "language": { "enum": ["python", "javascript", "rust", "go", "java", "mock"] },
       "executablePath": { "type": "string" }
     }
   }
@@ -467,7 +471,10 @@ if (!adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)) {
    export enum DebugLanguage {
      PYTHON = 'python',
      NODE = 'node',
-     GO = 'go' // New language
+     RUST = 'rust',
+     GO = 'go',
+     JAVA = 'java',
+     MOCK = 'mock'
    }
    ```
 

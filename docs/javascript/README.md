@@ -236,6 +236,6 @@ The JavaScript adapter uses:
 - **Vendor**: Microsoft's `js-debug` from VSCode
 - **Protocol**: Debug Adapter Protocol (DAP)
 - **Transport**: TCP for DAP communication between the proxy and the js-debug adapter process
-- **Version**: Compatible with Node.js 14+
+- **Version**: Compatible with Node.js 18+
 
 For adapter development details, see the [Adapter Development Guide](../architecture/adapter-development-guide.md).

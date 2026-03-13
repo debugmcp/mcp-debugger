@@ -63,22 +63,18 @@ echo "  Running Docker Smoke Tests"
 echo "====================================="
 echo ""
 
-# Track test results
-PYTHON_RESULT=0
-JS_RESULT=0
-
 # Run Python tests
 echo -e "${YELLOW}Running Python Docker tests...${NC}"
 echo "-------------------------------------"
-npx vitest run tests/e2e/docker/docker-smoke-python.test.ts --reporter=verbose
-PYTHON_RESULT=$?
+PYTHON_RESULT=0
+npx vitest run tests/e2e/docker/docker-smoke-python.test.ts --reporter=verbose || PYTHON_RESULT=$?
 echo ""
 
 # Run JavaScript tests
 echo -e "${YELLOW}Running JavaScript Docker tests...${NC}"
 echo "-------------------------------------"
-npx vitest run tests/e2e/docker/docker-smoke-javascript.test.ts --reporter=verbose
-JS_RESULT=$?
+JS_RESULT=0
+npx vitest run tests/e2e/docker/docker-smoke-javascript.test.ts --reporter=verbose || JS_RESULT=$?
 echo ""
 
 # Summary

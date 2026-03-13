@@ -188,10 +188,14 @@ async function runTest() {
     }
     
     if (serverProcess) {
+      const exited = new Promise(resolve => {
+        serverProcess.on('exit', resolve);
+      });
       serverProcess.kill('SIGTERM');
       // Give it a moment to shut down gracefully
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      if (!serverProcess.killed) {
+      const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), 3000));
+      const result = await Promise.race([exited, timeout]);
+      if (result === 'timeout') {
         serverProcess.kill('SIGKILL');
       }
     }

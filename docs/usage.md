@@ -12,7 +12,7 @@ This document describes how to use the mcp-debugger with Large Language Models (
 ### Installing from NPM
 
 ```bash
-npm install -g mcp-debugger
+npm install -g @debugmcp/mcp-debugger
 ```
 
 ### Building from Source
@@ -20,7 +20,7 @@ npm install -g mcp-debugger
 ```bash
 git clone https://github.com/debugmcp/mcp-debugger.git
 cd mcp-debugger
-npm install
+pnpm install
 npm run build
 ```
 
@@ -35,7 +35,7 @@ Add the server to your MCP settings:
   "mcpServers": {
     "mcp-debugger": {
       "command": "node",
-      "args": ["C:/path/to/mcp-debugger/dist/index.js", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
+      "args": ["C:/path/to/mcp-debugger/dist/index.js", "stdio", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
       "disabled": false,
       "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
     }
@@ -331,8 +331,9 @@ You can also evaluate arbitrary expressions in the current debug context:
 - Best lines for breakpoints: assignments, function calls, conditionals
 
 ### File Paths
-- The server converts relative paths to absolute paths
-- Responses always include the full absolute path
+- The server uses a hands-off approach to paths: paths are passed unchanged to the debug adapter
+- In container mode, `/workspace/` is prepended for file existence checks only
+- In host mode, use absolute paths (relative paths are rejected)
 - Use forward slashes (/) or escaped backslashes (\\\\) in JSON
 
 ## Common Errors and Solutions
@@ -355,14 +356,9 @@ You can also evaluate arbitrary expressions in the current debug context:
 ```
 **Solution**: Use the `variablesReference` from `get_scopes`, not the frame ID.
 
-## Unimplemented Features
-
-The following tools are defined but not yet implemented:
+## Partially Implemented Features
 
 1. **pause_execution**: Returns "Pause execution not yet implemented with proxy"
-2. **get_source_context**: Returns "Get source context not yet fully implemented with proxy"
-
-See [Roadmap.md](../Roadmap.md) for implementation timeline.
 
 ## Recently Implemented Features (v0.13.0)
 

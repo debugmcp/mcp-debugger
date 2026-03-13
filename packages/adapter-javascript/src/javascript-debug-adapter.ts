@@ -43,7 +43,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   // Per-instance memoization for executable detection
   private cachedNodePath?: string;
-  private cachedTsRunners?: { tsx?: string; tsNode?: string };
 
   constructor(dependencies: AdapterDependencies) {
     super();
@@ -97,7 +96,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     // Clear per-instance caches
     this.cachedNodePath = undefined;
-    this.cachedTsRunners = undefined;
 
     // Emit 'disconnected' for symmetry if we were connected
     if (wasConnected) {
@@ -433,15 +431,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     const runtimeExecutableWasOverridden = typeof runtimeExecutableOverride === 'string' && runtimeExecutableOverride.length > 0;
 
 
-    // Note: transformLaunchConfig is not async in the interface; however our internal
-    // helpers are async. Since we cannot change the signature, we synchronously block
-    // by using deasync-like pattern is not allowed. Instead, we conservatively return
-    // a config with best-effort synchronous defaults and attach async results is not possible.
-    // To comply, we perform a synchronous approximation for runtimeExecutable/args:
-    // - Prefer overrides immediately.
-    // - For auto-detection, we will fall back to 'node' and empty args synchronously,
-    //   and only compute more specific values when called in async contexts in later tasks.
-    // Here, we inline minimal logic synchronously while keeping async helpers available.
+    // transformLaunchConfig is synchronous (interface contract). We use synchronous-only
+    // fs helpers (detectBinary) for runtime discovery — no async or deasync patterns.
+    // Override > auto-detect (tsx/ts-node via detectBinary) > fallback to 'node'.
 
     // Synchronous detection using detectBinary (fs-only, no async)
     // Respect runtimeExecutable override if provided

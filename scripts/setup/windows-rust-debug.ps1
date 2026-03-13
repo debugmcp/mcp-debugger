@@ -3,9 +3,9 @@
   Prepare a Windows machine for Rust debugging with mcp-debugger.
 
 .DESCRIPTION
-  Ensures the required Rust toolchains are installed, exposes dlltool.exe from
-  the rustup GNU toolchain, builds the bundled Rust examples, and optionally
-  runs the Rust smoke test suite.
+  Ensures the required Rust toolchains are installed, exposes dlltool.exe
+  preferring MSYS2 MinGW over the rustup self-contained copy, builds the
+  bundled Rust examples, and optionally runs the Rust smoke test suite.
 
 .PARAMETER UpdateUserPath
   When supplied, the script permanently appends rustup's self-contained GNU bin
@@ -183,7 +183,7 @@ function Ensure-PathEntry {
     if (-not ($userParts | Where-Object { $_.Trim().ToLowerInvariant() -eq $resolvedEntry.Trim().ToLowerInvariant() })) {
       $newUserPath = ($userParts + $resolvedEntry) -join ';'
       [System.Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
-      Write-Host "Prepended $resolvedEntry to the user PATH."
+      Write-Host "Appended $resolvedEntry to the user PATH."
     }
   }
 }

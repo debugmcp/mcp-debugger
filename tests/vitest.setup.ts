@@ -57,14 +57,6 @@ afterEach(() => {
 afterAll(async () => {
   portManager.reset();
   
-  // Clean up the shared test server if it exists
-  try {
-    const { cleanupTestServer } = await import('./test-utils/helpers/session-helpers.js');
-    await cleanupTestServer();
-  } catch (error) {
-    // Ignore import errors - not all tests use session helpers
-    if (!String(error).includes('MODULE_NOT_FOUND') && !String(error).includes('Cannot resolve')) {
-      console.warn('[Vitest Setup] Error during test server cleanup:', error);
-    }
-  }
+  // session-helpers.ts (shared test server) was removed as dead code —
+  // no test file ever imported it, so the singleton was never created.
 });

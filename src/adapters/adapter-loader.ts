@@ -153,7 +153,7 @@ export class AdapterLoader {
         installed = await this.isAdapterAvailable(a.name);
       } catch {
         // If availability check fails, still include in list since adapters load on-demand
-        // The actual load will happen when createAdapter is called
+        // The actual load will happen when loadAdapter is called
         installed = false;
       }
       results.push({ ...a, installed });

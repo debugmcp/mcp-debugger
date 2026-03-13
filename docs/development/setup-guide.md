@@ -39,6 +39,10 @@ This guide will help you set up your development environment for working on the 
    - Install via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
    - CodeLLDB auto-downloads during `pnpm install`
 
+4. **JDK 21+** - For Java debugging
+   - Ensure `java` and `javac` are on PATH, or set `JAVA_HOME`
+   - Zero external dependencies (uses JDI from the JDK)
+
 ## Initial Setup
 
 ### 1. Clone the Repository
@@ -100,6 +104,7 @@ mcp-debugger/
 │   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
 │   ├── adapter-rust/      # Rust adapter (CodeLLDB)
 │   ├── adapter-go/        # Go adapter (Delve)
+│   ├── adapter-java/      # Java debug adapter (JDI)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
@@ -138,17 +143,14 @@ npm run test:watch
 # Run tests with coverage
 npm run test:coverage
 
-# View coverage report
-npm run coverage:report
+# View coverage summary
+npm run test:coverage:summary
 
 # Lint code
 npm run lint
 
 # Fix linting issues
 npm run lint:fix
-
-# Type checking
-npm run type-check
 ```
 
 ### Running the Server Locally

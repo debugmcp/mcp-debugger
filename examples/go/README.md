@@ -54,10 +54,11 @@ go build -gcflags="all=-N -l" -o goroutines main.go
 ```
 
 ### 3. Fibonacci Example (`fibonacci/`)
-A classic example with both recursive and iterative implementations:
+A classic example with recursive, iterative, and memoized implementations:
 - Recursive function debugging
 - Stack trace inspection across recursive calls
 - Variable state tracking
+- Memoization cache inspection (map contents)
 - Function return value inspection
 
 ## Debug Configurations

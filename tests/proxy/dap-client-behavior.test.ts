@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { DapClientContext, ReverseRequestResult } from '@debugmcp/shared';
+import type { DapClientContext } from '@debugmcp/shared';
 import {
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,

@@ -24,13 +24,12 @@ The SSE server runs in a different process/terminal with potentially different:
 
 ## Solutions
 
-### 1. Use Enhanced Launcher (Recommended)
+### 1. Verify Environment Before Starting
 
-Use `start-sse-server-enhanced.cmd` which:
-- Checks Python availability before starting
-- Verifies debugpy is installed
-- Shows the Python location being used
-- Sets environment variables to help Python discovery
+Before launching the SSE server, verify in the same terminal:
+- Python is available: `where python` / `which python`
+- debugpy is installed: `python -m debugpy --version`
+- Any required toolchains (Node.js, Go, etc.) are on PATH
 
 ### 2. Fix Timing Issue in Code
 
@@ -55,9 +54,9 @@ To verify this is an environment issue:
 
 2. Compare with Cline's environment (create a test task that runs these commands)
 
-3. Use the enhanced launcher:
+3. Start the SSE server in the verified environment:
    ```cmd
-   start-sse-server-enhanced.cmd
+   scripts\start-sse-server.cmd
    ```
 
 ## Long-term Fix

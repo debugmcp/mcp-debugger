@@ -9,13 +9,13 @@
  * 2. Set breakpoints and control execution
  * 3. Retrieve variables and evaluate expressions
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import * as net from 'net';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
 import * as path from 'path';
-import { mkdir, writeFile, rm, stat } from 'node:fs/promises'; // Native promise-based fs
+import { writeFile, rm, stat } from 'node:fs/promises'; // Native promise-based fs
 import { existsSync as nativeNodeExistsSync } from 'node:fs'; 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -383,7 +383,6 @@ print(f"Fibonacci(5) = {result}")
         expect(topFrame.line).toBe(4); 
         // We can also check the name if desired, it should be <module>
         expect(topFrame.name).toBe('<module>');
-        const frameId = topFrame.id;
       } catch (error) {
         console.error('[E2E] Error getting stack trace:', error);
         throw error;

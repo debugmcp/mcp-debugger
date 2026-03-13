@@ -2,7 +2,7 @@
  * Tests for ChildSessionManager - validates child session management abstraction
  */
 
-import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy } from '@debugmcp/shared';

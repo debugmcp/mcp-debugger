@@ -2,7 +2,7 @@
  * Unit tests for debug-adapter-interface
  * Testing enums, error classes, and type validation
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   AdapterState,
   AdapterError,

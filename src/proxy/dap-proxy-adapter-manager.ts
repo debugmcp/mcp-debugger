@@ -115,7 +115,7 @@ export class GenericAdapterManager {
       // ignore unref errors (older Node or platform quirk)
     }
 
-    // Spawned adapter process; hide console on Windows and keep attached for lifecycle management
+    // Spawned adapter process; hide console on Windows and detach for independent lifecycle
     this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers and stderr capture

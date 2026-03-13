@@ -36,6 +36,18 @@ To debug specific languages, install the corresponding adapter packages:
 # Python debugging support
 npm install -g @debugmcp/adapter-python
 
+# JavaScript/Node.js debugging support
+npm install -g @debugmcp/adapter-javascript
+
+# Rust debugging support
+npm install -g @debugmcp/adapter-rust
+
+# Go debugging support
+npm install -g @debugmcp/adapter-go
+
+# Java debugging support
+npm install -g @debugmcp/adapter-java
+
 # Mock adapter for testing
 npm install -g @debugmcp/adapter-mock
 ```

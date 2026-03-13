@@ -303,6 +303,9 @@ export abstract class SessionManagerCore {
       this.logger.debug(`[SessionManager] 'exited' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exited event`);
       this._updateSessionState(session, SessionState.STOPPED);
+
+      // Clean up listeners since proxy is gone
+      this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;
     };
     proxyManager.on('exited', handleExited);
@@ -338,6 +341,9 @@ export abstract class SessionManagerCore {
       this.logger.debug(`[SessionManager] 'error' event handler called for session ${sessionId}`);
       this.logger.error(`[ProxyManager ${sessionId}] Error:`, error);
       this._updateSessionState(session, SessionState.ERROR);
+
+      // Clean up listeners since proxy is in error state
+      this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;
     };
     proxyManager.on('error', handleError);

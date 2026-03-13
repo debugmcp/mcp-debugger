@@ -220,20 +220,6 @@ export interface DapProxyDependencies {
 // ===== DAP Types Extensions =====
 
 /**
- * Extended launch arguments with required program field
- */
-export interface ExtendedLaunchArgs extends DebugProtocol.LaunchRequestArguments {
-  program: string;
-  stopOnEntry?: boolean;
-  noDebug?: boolean;
-  args?: string[];
-  cwd?: string;
-  console?: string;
-  justMyCode?: boolean;
-  [key: string]: unknown;
-}
-
-/**
  * Extended initialize arguments with our custom fields
  */
 export interface ExtendedInitializeArgs extends DebugProtocol.InitializeRequestArguments {

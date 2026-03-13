@@ -43,6 +43,7 @@ npm install @debugmcp/shared
 - `JsDebugAdapterPolicy` - JavaScript/js-debug adapter policy
 - `RustAdapterPolicy` - Rust/CodeLLDB adapter policy
 - `GoAdapterPolicy` - Go/Delve adapter policy
+- `JavaAdapterPolicy` - Java/JDI bridge adapter policy
 - `MockAdapterPolicy` - Mock adapter policy for testing
 - `DefaultAdapterPolicy` - Lightweight placeholder used during initialization
 - `DapClientBehavior` - DAP client behavior configuration
@@ -73,7 +74,7 @@ npm install @debugmcp/shared
 
 ### Enumerations
 
-- `DebugLanguage` - Supported debug languages (Python, JavaScript, Rust, Go, Mock)
+- `DebugLanguage` - Supported debug languages (Python, JavaScript, Rust, Go, Java, Mock)
 - `AdapterState` - Adapter lifecycle states
 - `SessionState` - Session states (legacy, deprecated — use `SessionLifecycleState` + `ExecutionState` dual-state model)
 - `AdapterErrorCode` - Error codes for adapter operations

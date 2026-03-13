@@ -1,5 +1,7 @@
 # Event Management Pattern in MCP Debug Server
 
+> **Note**: The code snippets in this document illustrate design-intent patterns. They are simplified from the actual source and may not exactly match current signatures or file locations. Always consult the source files referenced in each section for authoritative details.
+
 This document describes the event management patterns used throughout the MCP Debug Server, focusing on proper event handling, memory leak prevention, and cleanup strategies.
 
 ## Overview
@@ -76,16 +78,10 @@ private setupProxyEventHandlers(
   const handleStopped = (threadId: number, reason: string) => {
     this.logger.debug(`[SessionManager] 'stopped' event handler called for session ${sessionId}`);
     this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
-    
-    // Handle auto-continue for stopOnEntry=false
-    if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-      this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false)`);
-      this.continue(sessionId).catch(err => {
-        this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
-      });
-    } else {
-      this._updateSessionState(session, SessionState.PAUSED);
-    }
+
+    // Transition session to PAUSED — the client must explicitly call
+    // continue_execution to resume. There is no auto-continue mechanism.
+    this._updateSessionState(session, SessionState.PAUSED);
   };
   proxyManager.on('stopped', handleStopped);
   handlers.set('stopped', handleStopped);
@@ -238,16 +234,10 @@ private handleDapEvent(message: ProxyDapEventMessage): void {
 // Named function for stopped event
 const handleStopped = (threadId: number, reason: string) => {
   this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
-  
-  // Handle auto-continue for stopOnEntry=false
-  if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-    this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false)`);
-    this.continue(sessionId).catch(err => {
-      this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
-    });
-  } else {
-    this._updateSessionState(session, SessionState.PAUSED);
-  }
+
+  // Transition session to PAUSED — the client must explicitly call
+  // continue_execution to resume. There is no auto-continue mechanism.
+  this._updateSessionState(session, SessionState.PAUSED);
 };
 ```
 

@@ -8,13 +8,10 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
-import { AdapterRegistry } from '../../../../src/adapters/adapter-registry.js';
-import { IAdapterRegistry } from '@debugmcp/shared';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
-  createMockStdioTransport,
   getToolHandlers
 } from './server-test-helpers.js';
 

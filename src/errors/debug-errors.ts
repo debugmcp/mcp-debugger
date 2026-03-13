@@ -39,15 +39,6 @@ export class PythonNotFoundError extends LanguageRuntimeNotFoundError {
 }
 
 /**
- * Node.js-specific runtime not found error (for future use)
- */
-export class NodeNotFoundError extends LanguageRuntimeNotFoundError {
-  constructor(nodePath: string) {
-    super('Node.js', nodePath);
-  }
-}
-
-/**
  * Session not found error
  */
 export class SessionNotFoundError extends McpError {
@@ -138,68 +129,6 @@ export class DebugSessionCreationError extends McpError {
 }
 
 /**
- * File validation error
- */
-export class FileValidationError extends McpError {
-  public readonly file: string;
-  public readonly reason: string;
-
-  constructor(file: string, reason: string) {
-    super(
-      McpErrorCode.InvalidParams,
-      `File validation failed for ${file}: ${reason}`,
-      { file, reason }
-    );
-    this.file = file;
-    this.reason = reason;
-  }
-}
-
-/**
- * Port allocation error
- */
-export class PortAllocationError extends McpError {
-  public readonly reason: string;
-
-  constructor(reason: string = 'No available ports') {
-    super(
-      McpErrorCode.InternalError,
-      `Port allocation failed: ${reason}`,
-      { reason }
-    );
-    this.reason = reason;
-  }
-}
-
-/**
- * Proxy initialization error
- */
-export class ProxyInitializationError extends McpError {
-  public readonly sessionId: string;
-  public readonly reason: string;
-
-  constructor(sessionId: string, reason: string) {
-    super(
-      McpErrorCode.InternalError,
-      `Failed to initialize proxy for session ${sessionId}: ${reason}`,
-      { sessionId, reason }
-    );
-    this.sessionId = sessionId;
-    this.reason = reason;
-  }
-}
-
-/**
- * Type guard to check if an error is a specific MCP error type
- */
-export function isMcpError<T extends McpError>(
-  error: unknown,
-  errorClass: new (...args: unknown[]) => T
-): error is T {
-  return error instanceof errorClass;
-}
-
-/**
  * Helper to extract error message safely
  */
 export function getErrorMessage(error: unknown): string {
@@ -209,26 +138,3 @@ export function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-/**
- * Helper to check if an error is recoverable
- */
-export function isRecoverableError(error: unknown): boolean {
-  // Session terminated or not found errors are not recoverable
-  if (error instanceof SessionTerminatedError ||
-      error instanceof SessionNotFoundError) {
-    return false;
-  }
-
-  // Proxy not running might be recoverable by restarting
-  if (error instanceof ProxyNotRunningError) {
-    return true;
-  }
-
-  // Language runtime errors might be recoverable by fixing the path
-  if (error instanceof LanguageRuntimeNotFoundError) {
-    return true;
-  }
-
-  // Default to not recoverable for unknown errors
-  return false;
-}

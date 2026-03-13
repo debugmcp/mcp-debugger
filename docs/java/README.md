@@ -12,7 +12,7 @@ MCP Client → MCP Server → ProxyManager → TCP → JdiDapServer (JVM)
                                               Target JVM (via JDWP)
 ```
 
-JdiDapServer is a ~1000-line Java program that:
+JdiDapServer is a ~2600-line Java program that:
 - Accepts DAP requests over TCP (Content-Length framed JSON)
 - Uses JDI to launch or attach to a target JVM
 - Handles deferred breakpoints via `ClassPrepareRequest` for classes not yet loaded

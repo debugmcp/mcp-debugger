@@ -86,7 +86,8 @@ sequenceDiagram
 ## Key Components
 
 ### 1. ProxyManager
-- Manages IPC communication with js-debug process
+- Manages IPC communication with the proxy worker process
+- The proxy worker then uses TCP to communicate with the js-debug adapter
 - Handles DAP protocol translation
 - Manages request/response tracking
 

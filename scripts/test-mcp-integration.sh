@@ -33,13 +33,13 @@ run_test() {
 
     if echo "$output" | grep -q "$expected_pattern"; then
         echo -e "${GREEN}✓ PASSED${NC}"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
         return 0
     else
         echo -e "${RED}✗ FAILED${NC}"
         echo "  Expected pattern: $expected_pattern"
         echo "  Got output: $output"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
         return 1
     fi
 }
@@ -47,7 +47,7 @@ run_test() {
 # Test 1: Initialize request
 run_test "initialize" \
     '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' \
-    '"result".*"protocolVersion".*"2024-11-05"'
+    '"result".*"protocolVersion".*"2024-11-05"' || true
 
 # Test 2: Clean output (no logs)
 echo -n "Testing clean output (no logs)... "
@@ -55,24 +55,24 @@ output=$(echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion
 # Check that output is valid JSON and contains no log timestamps
 if echo "$output" | python3 -m json.tool > /dev/null 2>&1 && ! echo "$output" | grep -q "^\[.*\]"; then
     echo -e "${GREEN}✓ PASSED${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗ FAILED${NC}"
     echo "  Output contains non-JSON content or logs"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Test 3: Tools list
 run_test "tools/list" \
     '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":2}' \
-    '"tools".*"create_debug_session"'
+    '"tools".*"create_debug_session"' || true
 
 # Test 4: Without stdio argument (should auto-detect)
 echo -n "Testing auto-detection (no stdio arg)... "
 output=$(echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' | timeout 2 node "$PROJECT_DIR/dist/index.js" 2>&1)
 if echo "$output" | python3 -m json.tool > /dev/null 2>&1; then
     echo -e "${GREEN}✓ PASSED${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${YELLOW}⚠ WARNING${NC}"
     echo "  Auto-detection may not be working, explicit stdio argument required"
@@ -83,14 +83,14 @@ echo -n "Testing Claude CLI integration... "
 if /home/ubuntu/.claude/local/claude mcp list 2>/dev/null | grep -q "mcp-debugger"; then
     if /home/ubuntu/.claude/local/claude mcp list 2>/dev/null | grep -q "mcp-debugger.*✓ Connected"; then
         echo -e "${GREEN}✓ PASSED${NC} (Connected)"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${YELLOW}⚠ WARNING${NC} (Configured but not connected - restart Claude Code)"
     fi
 else
     echo -e "${RED}✗ FAILED${NC} (Not configured)"
     echo "  Run: $PROJECT_DIR/scripts/install-claude-mcp.sh"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Summary

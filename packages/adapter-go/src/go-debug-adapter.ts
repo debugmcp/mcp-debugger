@@ -27,10 +27,11 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { 
-  findDelveExecutable, 
-  getGoVersion, 
-  getDelveVersion, 
+import {
+  findGoExecutable,
+  findDelveExecutable,
+  getGoVersion,
+  getDelveVersion,
   checkDelveDapSupport,
   getGoSearchPaths
 } from './utils/go-utils.js';
@@ -156,17 +157,12 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
 
+    // Check Go executable and version
     try {
-      // Check Go executable
-      if (process.env.CI === 'true') {
-        console.error('[GoDebugAdapter] Resolving Go executable path...');
-      }
-      const goPath = await this.resolveExecutablePath();
+      const goPath = await findGoExecutable();
       if (process.env.CI === 'true') {
         console.error('[GoDebugAdapter] Resolved Go path:', goPath);
       }
-      
-      // Check Go version
       const goVersion = await this.checkGoVersion(goPath);
       if (goVersion) {
         const [major, minor] = goVersion.split('.').map(Number);
@@ -184,35 +180,37 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
           message: 'Could not determine Go version'
         });
       }
-      
-      // Check Delve installation
-      try {
-        const dlvPath = await findDelveExecutable(undefined, this.dependencies.logger);
-        const dapCheck = await checkDelveDapSupport(dlvPath);
-        if (!dapCheck.supported) {
-          const stderrHint = dapCheck.stderr ? ` (stderr: ${dapCheck.stderr})` : '';
-          errors.push({
-            code: 'DELVE_DAP_NOT_SUPPORTED',
-            message: `Delve does not support DAP. Update with: go install github.com/go-delve/delve/cmd/dlv@latest${stderrHint}`,
-            recoverable: true
-          });
-        }
-      } catch {
-        errors.push({
-          code: 'DELVE_NOT_INSTALLED',
-          message: 'Delve (dlv) not installed. Install with: go install github.com/go-delve/delve/cmd/dlv@latest',
-          recoverable: true
-        });
-      }
-      
     } catch (error) {
       if (process.env.CI === 'true') {
-        console.error('[GoDebugAdapter] validateEnvironment catch block error:', error);
+        console.error('[GoDebugAdapter] Go executable not found:', error);
       }
       errors.push({
         code: 'GO_NOT_FOUND',
         message: error instanceof Error ? error.message : 'Go executable not found',
         recoverable: false
+      });
+    }
+
+    // Check Delve installation
+    try {
+      const dlvPath = await findDelveExecutable(undefined, this.dependencies.logger);
+      if (process.env.CI === 'true') {
+        console.error('[GoDebugAdapter] Resolved Delve path:', dlvPath);
+      }
+      const dapCheck = await checkDelveDapSupport(dlvPath);
+      if (!dapCheck.supported) {
+        const stderrHint = dapCheck.stderr ? ` (stderr: ${dapCheck.stderr})` : '';
+        errors.push({
+          code: 'DELVE_DAP_NOT_SUPPORTED',
+          message: `Delve does not support DAP. Update with: go install github.com/go-delve/delve/cmd/dlv@latest${stderrHint}`,
+          recoverable: true
+        });
+      }
+    } catch {
+      errors.push({
+        code: 'DELVE_NOT_INSTALLED',
+        message: 'Delve (dlv) not installed. Install with: go install github.com/go-delve/delve/cmd/dlv@latest',
+        recoverable: true
       });
     }
     

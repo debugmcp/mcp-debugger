@@ -1,27 +1,39 @@
 # Current Component Architecture
 
+> **Note**: This document was originally written during the Python-only era to map out coupling points for the multi-language refactoring. The refactoring is now complete — mcp-debugger supports 6 languages (Python, JavaScript, Rust, Go, Java, Mock) via the adapter pattern. The diagrams below are preserved for historical context but no longer reflect the current architecture. See [adapter-pattern-design.md](./adapter-pattern-design.md) for the current design.
+
 ## System Overview
 
 ```mermaid
 graph TD
     Client[MCP Client] -->|MCP Protocol| Server[server.ts]
     Server -->|Creates/Manages| SM[SessionManager]
+    SM -->|Gets Adapter| AR[AdapterRegistry]
     SM -->|Creates| PM[ProxyManager]
-    PM -->|Spawns| PA[Python Adapter Process]
-    PA -->|DAP Protocol| DP[debugpy]
-    DP -->|Controls| PY[Python Script]
-    
-    SM -->|Uses| PU[python-utils.ts]
-    SM -->|Uses| PT[PathTranslator]
+    PM -->|Spawns| AP[Adapter Process]
+    AP -->|DAP Protocol| DR[Debug Runtime]
+    DR -->|Controls| TS[Target Script]
+
     SM -->|Stores| SS[SessionStore]
-    
-    style PA fill:#f9f,stroke:#333,stroke-width:2px
-    style DP fill:#f9f,stroke:#333,stroke-width:2px
-    style PU fill:#f9f,stroke:#333,stroke-width:2px
-    
-    classDef pythonSpecific fill:#f9f,stroke:#333,stroke-width:2px
-    classDef coreComponent fill:#9cf,stroke:#333,stroke-width:2px
-    classDef protocol fill:#ff9,stroke:#333,stroke-width:2px
+
+    subgraph "Language Adapters"
+        PA[PythonAdapter]
+        NA[NodeAdapter]
+        RA[RustAdapter]
+        GA[GoAdapter]
+        JA[JavaAdapter]
+        MA[MockAdapter]
+    end
+
+    AR --> PA
+    AR --> NA
+    AR --> RA
+    AR --> GA
+    AR --> JA
+    AR --> MA
+
+    style AR fill:#9cf,stroke:#333,stroke-width:2px
+    style PM fill:#9cf,stroke:#333,stroke-width:2px
 ```
 
 ## Component Responsibilities
@@ -34,7 +46,7 @@ graph TD
 | **SessionStore** | Session state persistence | LOW - Python defaults | LOW |
 | **python-utils.ts** | Python executable discovery | **CRITICAL** - Entirely Python-specific | Keep as-is |
 | **SimpleFileChecker** | File existence validation only | NONE - Language agnostic | NONE |
-| **DebugpyAdapterManager** | debugpy process management | **CRITICAL** - debugpy specific | Replace with adapters |
+| **GenericAdapterManager** | debugpy process management | **CRITICAL** - debugpy specific | Replace with adapters |
 
 ## Session Creation Sequence
 
@@ -120,7 +132,7 @@ graph LR
     
     subgraph "Process Management"
         D[ProxyManager<br/>Lines 35-36]
-        E[DebugpyAdapterManager<br/>Lines 26-32]
+        E[GenericAdapterManager<br/>Lines 26-32]
     end
     
     subgraph "Utilities"
@@ -182,7 +194,7 @@ graph BT
     subgraph "Core Components"
         SM[SessionManager]
         PM[ProxyManager]
-        PA[ProxyAdapterManager]
+        PA[GenericAdapterManager]
     end
     
     subgraph "Utilities"
@@ -233,11 +245,8 @@ The system already uses a proxy pattern (ProxyManager → Adapter Process), whic
 - **Bad**: SessionManager mixes session logic with Python logic
 - **Ugly**: ProxyManager hardcodes debugpy commands
 
-### 3. **Single Language Assumption**
-The `DebugLanguage` enum having only `PYTHON` means:
-- No existing multi-language code to break
-- All current code assumes Python
-- Clean slate for adapter pattern
+### 3. **Multi-Language Support (Completed)**
+The `DebugLanguage` enum now includes all 6 supported languages (Python, JavaScript, Rust, Go, Java, Mock). The adapter pattern refactoring is complete.
 
 ### 4. **Event-Driven Architecture**
 The system is already event-driven (DAP events), making it easier to abstract language-specific behavior.
@@ -266,7 +275,7 @@ Client → Server → SessionManager → IDebugAdapter → Language-Specific Ada
 |-----------|------------|-----------------|-------------------|
 | server.ts | SessionManager | Language validation | LOW |
 | SessionManager | python-utils, ProxyManager | Path resolution, config | HIGH |
-| ProxyManager | DebugpyAdapterManager | Command building | MEDIUM |
+| ProxyManager | GenericAdapterManager | Command building | MEDIUM |
 | SessionStore | None (uses defaults) | Default paths | LOW |
 | PathTranslator | None | None | NONE |
 | python-utils | Python runtime | Entire purpose | N/A (Keep) |

@@ -6,7 +6,7 @@ This document outlines key findings and specific behaviors encountered while int
 
 The most critical aspect for successful integration was understanding the specific DAP message sequence expected by `debugpy.adapter`. While the DAP specification allows for some flexibility, `debugpy` has a particular order for initialization and configuration:
 
-1.  **`initialize` Request**: The client (our `dap-proxy.ts`) sends an `initialize` request to `debugpy.adapter`.
+1.  **`initialize` Request**: The client (our DAP proxy — see `src/proxy/dap-proxy-worker.ts` and `src/proxy/dap-proxy-core.ts`) sends an `initialize` request to `debugpy.adapter`.
 2.  **`initialize` Response**: `debugpy.adapter` responds, indicating its capabilities.
 3.  **`launch` Request**: The client **must** send a `launch` (or `attach`) request *before* `debugpy.adapter` considers itself fully initialized for further configuration. This request includes the script to run, `stopOnEntry` flags, etc.
 4.  **`initialized` Event**: After processing the `launch` request and the debuggee (Python script) has started (and potentially paused at entry), `debugpy.adapter` sends an `initialized` event back to the client. This event signals that the adapter is now ready for breakpoint configuration and other setup.

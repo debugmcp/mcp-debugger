@@ -34,7 +34,7 @@ This document provides a complete reference for all tools available in mcp-debug
 Creates a new debugging session.
 
 **Parameters:**
-- `language` (string, required): The programming language to debug. Currently only `"python"` is supported.
+- `language` (string, required): The programming language to debug. Supported languages: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"mock"`.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"Debug-{timestamp}"`.
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 - `host` (string, optional): Host for remote debugging *(not implemented)*.
@@ -700,7 +700,7 @@ All tools follow consistent error patterns:
 
 ### Common Error Scenarios
 1. **Session not found**: Occurs when a session terminates unexpectedly
-2. **Invalid language**: Only "python" is currently supported
+2. **Invalid language**: Language must be one of the 6 supported languages (python, javascript, rust, go, java, mock)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables
 

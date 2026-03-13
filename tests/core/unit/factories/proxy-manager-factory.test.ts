@@ -6,7 +6,6 @@ import { IFileSystem, ILogger } from '../../../../src/interfaces/external-depend
 import { createMockLogger, createMockFileSystem } from '../../../test-utils/helpers/test-dependencies.js';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
 import { IDebugAdapter } from '@debugmcp/shared';
-import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 import { DebugLanguage } from '@debugmcp/shared';
 
 describe('ProxyManagerFactory', () => {

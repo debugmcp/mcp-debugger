@@ -72,7 +72,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     private adapter: IDebugAdapter | null,  // Optional adapter for language-agnostic support
     private proxyProcessLauncher: IProxyProcessLauncher,
     private fileSystem: IFileSystem,
-    private logger: ILogger
+    private logger: ILogger,
+    runtimeEnv: ProxyRuntimeEnvironment = DEFAULT_RUNTIME_ENVIRONMENT
   ) {
     super();
   }
@@ -290,7 +291,9 @@ describe('SessionManager', () => {
       logger: createMockLogger(),
       proxyManagerFactory: createMockProxyManagerFactory(),
       sessionStoreFactory: createMockSessionStoreFactory(),
-      debugTargetLauncher: createMockDebugTargetLauncher()
+      debugTargetLauncher: createMockDebugTargetLauncher(),
+      environment: createMockEnvironment(),
+      adapterRegistry: createMockAdapterRegistry()
     };
 
     // Create SessionManager with mocks
@@ -327,8 +330,9 @@ describe('ProxyManager', () => {
   beforeEach(() => {
     // Use fake implementation instead of mock
     fakeLauncher = new FakeProxyProcessLauncher();
-    
+
     proxyManager = new ProxyManager(
+      null,  // No adapter
       fakeLauncher,  // Fake implementation
       createMockFileSystem(),  // Mock
       createMockLogger()  // Mock

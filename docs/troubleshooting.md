@@ -12,18 +12,18 @@ This guide provides solutions for common issues you might encounter when setting
 
 1. Verify the command path in your MCP settings:
    ```json
-   "command": "C:\\path\\to\\debug-mcp-server\\run-debug-server.cmd"
+   "command": "node",
+   "args": ["C:\\path\\to\\mcp-debugger\\dist\\cli", "stdio"]
    ```
-   Ensure this points to the correct location of your script.
+   Ensure the path points to the correct location of the built server.
 
 2. Check for spaces in file paths:
    - Windows paths with spaces require proper quoting
-   - Try using the absolute path with double quotes in the CMD script
 
 3. Run the server manually to see errors:
    - Open a terminal
    - Navigate to the project directory
-   - Run: `.\run-debug-server.cmd`
+   - Run: `node dist/index.js stdio`
    - Check for any error messages
 
 4. Restart VS Code:
@@ -36,13 +36,12 @@ This guide provides solutions for common issues you might encounter when setting
 **Solutions**:
 
 1. Check if the path exists:
-   - Verify that the dist directory and index.js file exist
+   - Verify that the `dist` directory and `cli` entry point exist
    - Run `npm run build` if the dist folder is missing
 
 2. Fix path formatting:
    - Windows paths might need backslashes instead of forward slashes
-   - Try modifying the run-debug-server.cmd file to use `%~dp0` for the current directory
-   - Ensure `cline_mcp_settings.json` (or equivalent) point to the correct path for `dist/index.js`.
+   - Ensure your MCP settings point to the correct path for `dist/index.js`
 
 3. Use quotes for paths with spaces:
    - If your path contains spaces, ensure it's properly quoted in the command
@@ -138,7 +137,7 @@ This guide provides solutions for common issues you might encounter when setting
    - Host: `test.py` → Container: `/workspace/test.py`
    - The debugger handles this translation automatically
 
-4. **Host Mode**: Relative paths are rejected — always use absolute paths when running outside Docker
+4. **Host Mode**: Relative paths are rejected -- always use absolute paths when running outside Docker
 
 ## Debugging Session Issues
 

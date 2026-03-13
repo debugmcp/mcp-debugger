@@ -14,8 +14,7 @@ class TestableSessionManagerOperations extends SessionManagerOperations {
     // no-op for tests
   }
 }
-import { DebugProtocol } from '@vscode/debugprotocol';
-import { 
+import {
   SessionNotFoundError,
   SessionTerminatedError,
   ProxyNotRunningError,

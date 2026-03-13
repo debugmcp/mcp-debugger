@@ -5,19 +5,14 @@ This document describes the testing architecture, patterns, and strategies used 
 ## Test Framework and Configuration
 
 ### Technology Stack
-- **Test Runner**: Vitest 1.3.1
+- **Test Runner**: Vitest 3.x
 - **Coverage Tool**: @vitest/coverage-v8
 - **Assertion Library**: Vitest's built-in expect
 - **Mocking**: Vitest's vi mocking utilities
 - **Configuration**: `vitest.config.ts`
 
 ### Coverage Achievement
-From `COVERAGE_SUMMARY.md`:
-- **Overall Coverage**: 90.42%
-- **Statements**: 6,517 of 7,208 (90.42%)
-- **Branches**: 826 of 970 (85.15%)
-- **Functions**: 704 of 782 (90.03%)
-- **Lines**: 6,390 of 7,076 (90.31%)
+Target: 90%+ overall coverage (run `npm run test:coverage` to see current numbers).
 
 ## Test Organization
 
@@ -26,17 +21,19 @@ From `COVERAGE_SUMMARY.md`:
 tests/
 ├── unit/                    # Unit tests (mirrors src/ structure)
 │   ├── proxy/              # ProxyManager tests
-│   ├── session/            # SessionManager tests
 │   ├── dap-core/           # Functional core tests
+│   ├── adapters/           # Adapter tests
 │   └── ...
-├── integration/            # Integration tests
-│   ├── proxy-startup.test.ts
-│   └── python_debug_workflow.test.ts
-├── e2e/                    # End-to-end tests
-│   └── debugpy-connection.test.ts
-├── implementations/test/   # Fake implementations
-├── mocks/                  # Shared mocks
-└── utils/                  # Test utilities
+├── core/                    # Core unit and integration tests
+├── adapters/                # Adapter-specific tests
+├── integration/             # Integration tests
+├── e2e/                     # End-to-end tests
+├── implementations/         # Fake implementations
+│   └── test/               # e.g., fake-process-launcher.ts
+└── test-utils/              # Shared test utilities
+    ├── mocks/              # Shared mocks
+    ├── fixtures/           # Test fixtures
+    └── helpers/            # Test helpers
 ```
 
 ## Key Testing Patterns
@@ -192,7 +189,7 @@ it('should handle process spawn failure', async () => {
 
 ### Mock Creation Helpers
 
-**Location**: `tests/utils/test-utils.ts`
+**Location**: `tests/test-utils/helpers/test-utils.ts`
 
 ```typescript
 export function createMockLogger(): ILogger {
@@ -218,7 +215,7 @@ export function createMockFileSystem(): IFileSystem {
 
 ### Port Management
 
-**Location**: `tests/utils/port-manager.ts`
+**Location**: `tests/test-utils/helpers/port-manager.ts`
 
 Ensures tests don't conflict on network ports:
 
@@ -243,11 +240,9 @@ export class TestPortManager {
 
 ## Integration Testing Strategy
 
-### Python Debug Workflow Test
+### Debug Workflow Test
 
-**Location**: `tests/integration/python_debug_workflow.test.ts`
-
-Tests the complete debugging flow:
+Tests the complete debugging flow (example pattern):
 
 ```typescript
 it('should debug Python script with breakpoints', async () => {
@@ -300,13 +295,13 @@ it('should debug Python script with breakpoints', async () => {
 - Test individual components in isolation
 - Mock all dependencies
 - Focus on logic and state management
-- Examples: `proxy-manager-lifecycle.test.ts`, `session-manager-dap.test.ts`
+- Examples: proxy and session unit tests under `tests/unit/`
 
 ### 2. Integration Tests
 - Test component interactions
 - Use real implementations where possible
 - Focus on data flow and protocol compliance
-- Examples: `python_debug_workflow.test.ts`, `proxy-startup.test.ts`
+- Examples: tests under `tests/core/integration/` and `tests/adapters/*/integration/`
 
 ### 3. End-to-End Tests
 - Test complete scenarios
@@ -383,9 +378,9 @@ Run coverage analysis:
 npm run test:coverage
 ```
 
-View detailed report:
+View a coverage summary:
 ```bash
-npm run coverage:report
+npm run test:coverage:summary
 ```
 
 ## Best Practices

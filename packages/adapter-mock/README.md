@@ -8,7 +8,7 @@ Mock debug adapter for testing the MCP Debugger. This package provides a fully f
 
 ## Install (workspace)
 
-This package is designed to be used via NPM workspaces within this monorepo.
+This package is designed to be used via pnpm workspaces within this monorepo.
 
 - Root package.json includes "@debugmcp/adapter-mock": "workspace:*"
 - Build order ensures @debugmcp/shared builds before this package

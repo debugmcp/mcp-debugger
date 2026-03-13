@@ -4,8 +4,8 @@ This guide will help you get started with `mcp-debugger` quickly, using real exa
 
 ## Prerequisites
 
-- **Node.js** (v16+) and npm installed
-- **Python** (3.8+) with `debugpy` installed
+- **Node.js** (v18+) and npm installed
+- **Python** (3.7+) with `debugpy` installed
 - **MCP Client** (Claude Desktop, or custom implementation)
 
 ## Installation
@@ -13,7 +13,7 @@ This guide will help you get started with `mcp-debugger` quickly, using real exa
 ### Option 1: Using npm (when published)
 
 ```bash
-npm install -g mcp-debugger
+npm install -g @debugmcp/mcp-debugger
 ```
 
 ### Option 2: From Source
@@ -21,7 +21,7 @@ npm install -g mcp-debugger
 ```bash
 git clone https://github.com/debugmcp/mcp-debugger.git
 cd mcp-debugger
-npm install
+pnpm install
 npm run build
 ```
 
@@ -36,7 +36,7 @@ Add to your MCP client configuration (e.g., Claude Desktop):
   "mcpServers": {
     "mcp-debugger": {
       "command": "node",
-      "args": ["C:/path/to/mcp-debugger/dist/index.js", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
+      "args": ["C:/path/to/mcp-debugger/dist/index.js", "stdio", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
       "disabled": false,
       "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
     }
@@ -48,10 +48,10 @@ Add to your MCP client configuration (e.g., Claude Desktop):
 
 ```bash
 # Run with debugging output
-node dist/index.js --log-level debug --log-file ./logs/debug.log
+node dist/index.js stdio --log-level debug --log-file ./logs/debug.log
 
 # Run in quiet mode
-node dist/index.js --log-level error
+node dist/index.js stdio --log-level error
 ```
 
 ## Quick Example: Debug a Python Script

@@ -18,6 +18,7 @@ mcp-debugger/
 │   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug
 │   ├── adapter-rust/       # Rust debug adapter using CodeLLDB
 │   ├── adapter-go/         # Go debug adapter using Delve
+│   ├── adapter-java/       # Java debug adapter using JDI bridge
 │   ├── adapter-mock/       # Mock adapter for testing
 │   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
@@ -35,6 +36,7 @@ mcp-debugger/
 - **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug
 - **@debugmcp/adapter-rust**: Rust debugging support via CodeLLDB
 - **@debugmcp/adapter-go**: Go debugging support via Delve
+- **@debugmcp/adapter-java**: Java debugging support via JDI bridge
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
 - **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
@@ -187,7 +189,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`)
    - **ProxyCore**: Pure business logic, message processing
    - **ProxyWorker**: Core worker handling debugging operations
-   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `MockAdapterPolicy`)
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `MockAdapterPolicy`)
    - Implements full Debug Adapter Protocol (DAP) communication
 
 ### Key Patterns
@@ -239,6 +241,7 @@ Sessions use a **dual-state model**:
 - `packages/adapter-javascript/` - JavaScript/Node.js debug adapter (js-debug)
 - `packages/adapter-rust/` - Rust debug adapter (CodeLLDB)
 - `packages/adapter-go/` - Go debug adapter (Delve)
+- `packages/adapter-java/` - Java debug adapter (JDI bridge)
 - `packages/adapter-mock/` - Mock adapter for testing
 
 ### Distribution
@@ -268,7 +271,7 @@ Sessions use a **dual-state model**:
 The project uses Vitest with three test levels:
 - **Unit Tests**: Test components in isolation with mocks
 - **Integration Tests**: Test component interactions
-- **E2E Tests**: Test full debugging workflows with real debugpy
+- **E2E Tests**: Test full debugging workflows with real debug adapters
 
 ## Common Debugging Scenarios
 

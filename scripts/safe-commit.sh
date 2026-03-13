@@ -22,7 +22,9 @@ if [ "$1" = "--skip-tests" ] || [ "$SKIP_TESTS" = "true" ]; then
     echo "⚡ Skipping other pre-commit checks (tests, build artifacts)"
     echo "   Use this only when you need to commit quickly!"
     # Commit with --no-verify to skip the normal pre-commit hook
-    shift  # Remove --skip-tests from arguments
+    if [ "$1" = "--skip-tests" ]; then
+        shift  # Remove --skip-tests from arguments
+    fi
     git commit --no-verify "$@"
 else
     # Run normal commit with all hooks

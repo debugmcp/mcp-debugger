@@ -26,7 +26,7 @@ To debug this example using the Debug MCP Server:
      }
    )
    ```
-3. Set a breakpoint at line 42 (where the bug is introduced):
+3. Set a breakpoint at line 46 (where the bug is introduced):
    ```
    use_mcp_tool(
      server_name="debug-mcp-server",

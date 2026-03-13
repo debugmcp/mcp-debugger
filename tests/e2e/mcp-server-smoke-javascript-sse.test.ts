@@ -25,7 +25,6 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'path';
-import * as os from 'os';
 import * as net from 'net';
 import { spawn, ChildProcess } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';

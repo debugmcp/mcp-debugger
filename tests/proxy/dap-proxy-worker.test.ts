@@ -18,12 +18,9 @@ import type {
   IDapClient,
   ProxyInitPayload,
   DapCommandPayload,
-  StatusMessage,
-  DapResponseMessage,
-  DapEventMessage
+  StatusMessage
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
-import type { AdapterPolicy } from '@debugmcp/shared';
 import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -166,7 +163,7 @@ describe('DapProxyWorker', () => {
       expect(worker.getState()).toBe(ProxyState.TERMINATED); // Dry run ends in TERMINATED
       
       // Exit hook will be called after a delay due to Windows IPC fix
-      // Dry run with missing adapter command exits with code 1
+      // Dry run with adapter command present exits with code 1
       await vi.advanceTimersByTimeAsync(150);
       expect(exitSpy).toHaveBeenCalledWith(1);
       

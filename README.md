@@ -78,7 +78,7 @@ Add to your MCP settings configuration:
   "mcpServers": {
     "mcp-debugger": {
       "command": "node",
-      "args": ["C:/path/to/mcp-debugger/dist/index.js", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
+      "args": ["C:/path/to/mcp-debugger/dist/index.js", "stdio", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
       "disabled": false,
       "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
     }

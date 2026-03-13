@@ -9,8 +9,8 @@ def sample_function():
     a = 5
     b = 10
     
-    # This is line 13 - the actual breakpoint line
-    c = a + b  # Line 14 - the test sets a breakpoint here
+    # This is line 12 - the actual breakpoint line
+    c = a + b  # Line 13 - the test sets a breakpoint here
     
     # Some more computation
     result = c * 2

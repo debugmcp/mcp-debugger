@@ -11,7 +11,7 @@ Python debug adapter for MCP Debugger using debugpy. This package provides:
   - CommandFinder (interface)
 
 ## Install (workspace)
-This package is intended to be used within the monorepo via npm workspaces.
+This package is intended to be used within the monorepo via pnpm workspaces.
 
 ## Build
 npm run build -w @debugmcp/adapter-python
