@@ -98,6 +98,9 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     getStackTrace: vi.fn(),
     getScopes: vi.fn(),
     evaluateExpression: vi.fn(),
+    pause: vi.fn(),
+    detachFromProcess: vi.fn(),
+    attachToProcess: vi.fn(),
     getAdapterRegistry: vi.fn().mockReturnValue(mockAdapterRegistry),
     adapterRegistry: mockAdapterRegistry
   };
