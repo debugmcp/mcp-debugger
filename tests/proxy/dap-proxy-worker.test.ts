@@ -879,8 +879,8 @@ describe('DapProxyWorker', () => {
 
       await worker.handleTerminate();
 
-      // Launch mode: shutdown calls disconnect with default terminateDebuggee=true
-      expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient);
+      // Launch mode: shutdown calls disconnect with terminateDebuggee=true
+      expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient, true);
       expect(mockDapClient.shutdown).toHaveBeenCalledWith('worker shutdown');
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
     });

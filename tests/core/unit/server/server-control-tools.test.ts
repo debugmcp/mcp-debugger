@@ -378,32 +378,40 @@ describe('Server Control Tools Tests', () => {
   });
 
   describe('pause_execution', () => {
-    it('should handle pause_execution as not implemented', async () => {
-      await expect(callToolHandler({
+    it('should pause execution successfully', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.pause.mockResolvedValue({
+        success: true,
+        state: 'paused'
+      });
+
+      const result = await callToolHandler({
         method: 'tools/call',
         params: {
           name: 'pause_execution',
           arguments: { sessionId: 'test-session' }
         }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session');
+    });
+
+    it('should handle pause on non-existent session', async () => {
+      mockSessionManager.getSession.mockReturnValue(null);
+
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'pause_execution',
+          arguments: { sessionId: 'non-existent' }
+        }
       })).rejects.toThrow(McpError);
-      
-      try {
-        await callToolHandler({
-          method: 'tools/call',
-          params: {
-            name: 'pause_execution',
-            arguments: { sessionId: 'test-session' }
-          }
-        });
-      } catch (error) {
-        expect(error).toBeInstanceOf(McpError);
-        expect((error as McpError).code).toBe(McpErrorCode.InternalError);
-        expect((error as McpError).message).toMatch(/not yet implemented/i);
-      }
-      
-      expect(mockDependencies.logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Pause requested for session: test-session')
-      );
     });
   });
 });
