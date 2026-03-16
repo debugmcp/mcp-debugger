@@ -35,6 +35,7 @@ import {
   RustAdapterPolicy,
   GoAdapterPolicy,
   JavaAdapterPolicy,
+  DotnetAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
 
@@ -122,6 +123,9 @@ export class DapProxyWorker {
     } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
       /* istanbul ignore next -- adapter-specific: requires Java adapter */
       return JavaAdapterPolicy;
+    } else if (DotnetAdapterPolicy.matchesAdapter(adapterCommand)) {
+      /* istanbul ignore next -- adapter-specific: requires .NET adapter */
+      return DotnetAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
       /* istanbul ignore next -- adapter-specific: requires Mock adapter */
       return MockAdapterPolicy;
@@ -407,9 +411,30 @@ export class DapProxyWorker {
           this.adapterPolicy.getDapAdapterConfiguration().type
         );
 
-        /* istanbul ignore next -- attach mode: covered by E2E/integration tests with Java adapter */
-        if (isAttachMode) {
-          // ATTACH MODE: Wait for "initialized" event BEFORE sending attach
+        if (isAttachMode && initBehavior.sendAttachBeforeInitialized) {
+          // ATTACH-FIRST MODE: Send attach immediately, then wait for initialized
+          // Some adapters only send 'initialized' AFTER processing the attach request
+          const attachPayload = payload.launchConfig || {};
+          const payloadKeys = Object.keys(attachPayload);
+          const hasSymbolOpts = 'symbolOptions' in (attachPayload as Record<string, unknown>);
+          this.logger!.info(`[Worker] Attach-first mode — sending attach. Keys: ${payloadKeys.join(', ')}, symbolOptions: ${hasSymbolOpts ? JSON.stringify((attachPayload as Record<string, unknown>).symbolOptions) : 'absent'}`);
+          await this.connectionManager!.sendAttachRequest(
+            this.dapClient,
+            attachPayload
+          );
+
+          this.logger!.info('[Worker] Attach sent, waiting for "initialized" event');
+          await Promise.race([
+            this.initializedEventPromise!,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout waiting for initialized event after attach')), 15000)
+            )
+          ]);
+
+          this.deferInitializedHandling = false;
+          await this.handleInitializedEvent();
+        } else if (isAttachMode) {
+          // STANDARD ATTACH MODE: Wait for "initialized" event BEFORE sending attach
           // Some adapters send "initialized" after initialize response, before attach
           this.logger!.info('[Worker] Waiting for "initialized" event before sending attach');
           await Promise.race([
@@ -906,11 +931,22 @@ export class DapProxyWorker {
       this.dapClient.shutdown('worker shutdown');
     }
 
-    // Disconnect DAP client
+    // Disconnect DAP client — for attach mode via handleTerminate(), dapClient is
+    // already null (handled by auto-detach above). But if shutdown() is reached through
+    // other paths (signals, crashes, parent death), dapClient may still be live.
+    // In attach mode, always use terminateDebuggee=false to preserve the debuggee.
     if (this.connectionManager && this.dapClient) {
-      await this.connectionManager.disconnect(this.dapClient);
+      const terminateDebuggee = !this.isAttachMode;
+      await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
     }
     this.dapClient = null;
+
+    // In attach mode, give the adapter time to complete ICorDebugProcess::Detach()
+    // after receiving the DAP disconnect before we kill the adapter process.
+    if (this.isAttachMode && this.processManager && this.adapterProcess) {
+      this.logger?.info('[Worker] Attach mode: waiting 500ms for adapter to complete detach...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     // Terminate adapter process
     if (this.processManager && this.adapterProcess) {

@@ -2,9 +2,9 @@
  * Data retrieval operations for session management including variables,
  * stack traces, and scopes.
  */
-import { 
-  Variable, 
-  StackFrame, 
+import {
+  Variable,
+  StackFrame,
   SessionState,
   AdapterPolicy,
   DefaultAdapterPolicy,
@@ -12,6 +12,7 @@ import {
   JsDebugAdapterPolicy,
   RustAdapterPolicy,
   GoAdapterPolicy,
+  DotnetAdapterPolicy,
   MockAdapterPolicy,
   DebugLanguage
 } from '@debugmcp/shared';
@@ -39,6 +40,9 @@ export abstract class SessionManagerData extends SessionManagerCore {
       case 'go':
       case DebugLanguage.GO:
         return GoAdapterPolicy;
+      case 'dotnet':
+      case DebugLanguage.DOTNET:
+        return DotnetAdapterPolicy;
       case 'mock':
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;

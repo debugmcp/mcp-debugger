@@ -579,10 +579,11 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       });
     });
 
-    it('handlePause surfaces standardized error response', async () => {
-      await expect((server as any).handlePause({ sessionId: 'test-session' })).rejects.toThrow('Pause execution not yet implemented with proxy.');
-      expect(mockLogger.info).toHaveBeenCalledWith('Pause requested for session: test-session');
-      expect(mockLogger.error).toHaveBeenCalled();
+    it('handlePause throws McpError when session validation fails', async () => {
+      mockSessionManager.pause = vi.fn().mockRejectedValue(new Error('some pause error'));
+      (server as any).validateSession = vi.fn().mockImplementation(() => { throw new McpError(McpErrorCode.InvalidParams, 'Session not found: test-session'); });
+
+      await expect((server as any).handlePause({ sessionId: 'test-session' })).rejects.toThrow('Session not found');
     });
   });
 

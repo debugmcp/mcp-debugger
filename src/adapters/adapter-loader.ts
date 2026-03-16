@@ -142,6 +142,7 @@ export class AdapterLoader {
       { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB' },
       { name: 'go', packageName: '@debugmcp/adapter-go', description: 'Go debugger using Delve' },
       { name: 'java', packageName: '@debugmcp/adapter-java', description: 'Java debugger using JDI bridge' },
+      { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg' },
     ];
 
     const results: AdapterMetadata[] = [];

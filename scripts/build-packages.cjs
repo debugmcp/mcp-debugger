@@ -21,6 +21,7 @@ const packages = [
   ...(!disabledLanguages.has('rust') ? ['@debugmcp/adapter-rust'] : []),
   ...(!disabledLanguages.has('go') ? ['@debugmcp/adapter-go'] : []),
   ...(!disabledLanguages.has('java') ? ['@debugmcp/adapter-java'] : []),
+  ...(!disabledLanguages.has('dotnet') ? ['@debugmcp/adapter-dotnet'] : []),
 ];
 
 for (const pkg of packages) {

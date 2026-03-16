@@ -276,6 +276,22 @@ describe('DapProxyWorker', () => {
       expect(policy.name).toBe('rust');
     });
 
+    it('should select Dotnet policy for netcoredbg adapter', () => {
+      const policy = (worker as any).selectAdapterPolicy({
+        command: 'node',
+        args: ['netcoredbg-bridge.js', '/path/to/netcoredbg']
+      });
+      expect(policy.name).toBe('dotnet');
+    });
+
+    it('should select Dotnet policy for dotnet adapter command', () => {
+      const policy = (worker as any).selectAdapterPolicy({
+        command: '/path/to/netcoredbg',
+        args: ['--interpreter=vscode']
+      });
+      expect(policy.name).toBe('dotnet');
+    });
+
     it('should select Mock policy for mock-adapter', () => {
       const policy = (worker as any).selectAdapterPolicy({
         command: 'node',
@@ -863,8 +879,8 @@ describe('DapProxyWorker', () => {
 
       await worker.handleTerminate();
 
-      // Launch mode: shutdown calls disconnect with default terminateDebuggee=true
-      expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient);
+      // Launch mode: shutdown calls disconnect with terminateDebuggee=true
+      expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient, true);
       expect(mockDapClient.shutdown).toHaveBeenCalledWith('worker shutdown');
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
     });

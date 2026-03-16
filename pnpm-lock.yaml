@@ -127,6 +127,9 @@ importers:
         specifier: ^3.2.1
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.18.6)
     optionalDependencies:
+      '@debugmcp/adapter-dotnet':
+        specifier: workspace:*
+        version: link:packages/adapter-dotnet
       '@debugmcp/adapter-go':
         specifier: workspace:*
         version: link:packages/adapter-go
@@ -145,6 +148,31 @@ importers:
       '@debugmcp/adapter-rust':
         specifier: workspace:*
         version: link:packages/adapter-rust
+
+  packages/adapter-dotnet:
+    dependencies:
+      '@debugmcp/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@vscode/debugprotocol':
+        specifier: ^1.68.0
+        version: 1.68.0
+      which:
+        specifier: ^5.0.0
+        version: 5.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.29
+        version: 22.18.6
+      '@types/which':
+        specifier: ^3.0.4
+        version: 3.0.4
+      typescript:
+        specifier: ^5.2.2
+        version: 5.9.2
+      vitest:
+        specifier: ^3.2.1
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@22.18.6)
 
   packages/adapter-go:
     dependencies:

@@ -47,7 +47,7 @@
     "posttest:watch": "node scripts/cleanup-test-processes.js",
     "test:unit": "vitest run tests/unit tests/core/unit tests/adapters/*/unit",
     "posttest:unit": "node scripts/cleanup-test-processes.js",
-    "test:integration": "vitest run tests/core/integration tests/adapters/*/integration",
+    "test:integration": "vitest run tests/adapters/python/integration tests/adapters/go/integration tests/adapters/javascript/integration tests/adapters/rust/integration tests/integration",
     "posttest:integration": "node scripts/cleanup-test-processes.js",
     "test:e2e": "pnpm run pretest:docker && vitest run tests/e2e",
     "pretest:e2e": "pnpm run build",
@@ -150,6 +150,7 @@
     "winston": "^3.11.0"
   },
   "optionalDependencies": {
+    "@debugmcp/adapter-dotnet": "workspace:*",
     "@debugmcp/adapter-go": "workspace:*",
     "@debugmcp/adapter-java": "workspace:*",
     "@debugmcp/adapter-javascript": "workspace:*",

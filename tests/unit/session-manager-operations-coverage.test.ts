@@ -2173,4 +2173,153 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(innerBp.verified).toBe(true);
     });
   });
+
+  describe('Disconnect and Detach Safety', () => {
+    it('detachFromProcess should return error when proxyManager is null', async () => {
+      mockSession.proxyManager = null;
+
+      const result = await operations.detachFromProcess('test-session');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No active debug session to detach from');
+    });
+
+    it('detachFromProcess should send disconnect with terminateDebuggee=false', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const result = await operations.detachFromProcess('test-session', false);
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', {
+        terminateDebuggee: false
+      });
+      expect(result.data.message).toContain('process still running');
+    });
+
+    it('detachFromProcess should survive proxyManager being nulled during disconnect (race condition)', async () => {
+      mockSession.state = SessionState.PAUSED;
+      // Simulate the race: sendDapRequest triggers a 'terminated' event handler
+      // that sets proxyManager to undefined before we reach the .stop() call
+      mockProxyManager.sendDapRequest.mockImplementation(async () => {
+        mockSession.proxyManager = undefined;
+        return {};
+      });
+
+      const result = await operations.detachFromProcess('test-session', false);
+
+      expect(result.success).toBe(true);
+      // stop() should NOT have been called since proxyManager was cleared
+      expect(mockProxyManager.stop).not.toHaveBeenCalled();
+    });
+
+    it('detachFromProcess should call stop() when proxyManager survives disconnect', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const result = await operations.detachFromProcess('test-session', false);
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+    });
+
+    it('detachFromProcess should continue cleanup even when disconnect request fails', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockRejectedValue(new Error('Connection lost'));
+
+      const result = await operations.detachFromProcess('test-session', false);
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Disconnect request failed'),
+        expect.any(Error)
+      );
+      // Should still stop the proxy
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+    });
+
+    it('detachFromProcess with terminateProcess=true should call closeSession', async () => {
+      mockSession.state = SessionState.PAUSED;
+      // closeSession uses sessionStore.get (not getOrThrow)
+      mockSessionStore.get.mockReturnValue(mockSession);
+      mockProxyManager.stop.mockResolvedValue(undefined);
+
+      const result = await operations.detachFromProcess('test-session', true);
+
+      expect(result.success).toBe(true);
+      expect(result.data.message).toContain('terminated process');
+      // Should NOT have sent disconnect with terminateDebuggee=false
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('disconnect', {
+        terminateDebuggee: false
+      });
+    });
+
+    it('detachFromProcess should update session state to STOPPED and lifecycle to TERMINATED', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      await operations.detachFromProcess('test-session', false);
+
+      expect(mockSession.state).toBe(SessionState.STOPPED);
+      expect(mockSessionStore.update).toHaveBeenCalledWith('test-session', {
+        sessionLifecycle: SessionLifecycleState.TERMINATED
+      });
+    });
+
+    it('detachFromProcess should handle stop() failure gracefully', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+      mockProxyManager.stop.mockRejectedValue(new Error('Process already gone'));
+
+      const result = await operations.detachFromProcess('test-session', false);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Process already gone');
+    });
+
+    it('detachFromProcess should throw SessionNotFoundError for unknown session', async () => {
+      mockSessionStore.getOrThrow.mockImplementation(() => {
+        throw new SessionNotFoundError('unknown-session');
+      });
+
+      await expect(operations.detachFromProcess('unknown-session'))
+        .rejects.toThrow(SessionNotFoundError);
+    });
+  });
+
+  describe('selectPolicy coverage', () => {
+    it('should return DotnetAdapterPolicy for dotnet language', () => {
+      const policy = (operations as any).selectPolicy('dotnet');
+      expect(policy.name).toBe('dotnet');
+    });
+
+    it('should return DotnetAdapterPolicy for DebugLanguage.DOTNET', () => {
+      const { DebugLanguage } = require('@debugmcp/shared');
+      const policy = (operations as any).selectPolicy(DebugLanguage.DOTNET);
+      expect(policy.name).toBe('dotnet');
+    });
+
+    it('should apply dotnet filtering in getStackTrace for dotnet session', async () => {
+      mockSession.language = 'dotnet';
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.isRunning.mockReturnValue(true);
+      mockProxyManager.getCurrentThreadId.mockReturnValue(1);
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          stackFrames: [
+            { id: 1, name: 'MyApp.Main', line: 10, column: 1, source: { path: '/app/Program.cs' } },
+            { id: 2, name: 'System.Runtime.CompilerServices.TaskAwaiter', line: 0, column: 0 },
+            { id: 3, name: 'Microsoft.AspNetCore.Hosting', line: 0, column: 0 }
+          ]
+        }
+      });
+
+      const frames = await operations.getStackTrace('test-session', undefined, false);
+
+      // DotnetAdapterPolicy.filterStackFrames filters out frames with no file
+      // and frames starting with System.* or Microsoft.*
+      expect(frames).toHaveLength(1);
+      expect(frames[0].name).toBe('MyApp.Main');
+    });
+  });
 });
