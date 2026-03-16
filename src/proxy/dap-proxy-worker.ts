@@ -941,7 +941,7 @@ export class DapProxyWorker {
     }
     this.dapClient = null;
 
-    // In attach mode, give the adapter time to complete ICorDebugProcess::Detach()
+    // In attach mode, give the adapter time to complete detach cleanup
     // after receiving the DAP disconnect before we kill the adapter process.
     if (this.isAttachMode && this.processManager && this.adapterProcess) {
       this.logger?.info('[Worker] Attach mode: waiting 500ms for adapter to complete detach...');
