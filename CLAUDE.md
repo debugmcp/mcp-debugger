@@ -343,11 +343,14 @@ packages/adapter-{language}/
 - Uses Delve's native DAP protocol support
 
 ### .NET/C#
-- netcoredbg must be built from source or set `NETCOREDBG_PATH` environment variable
+- .NET 6+ SDK (or .NET Framework 4.x) must be installed
+- netcoredbg must be installed: download from [Samsung releases](https://github.com/Samsung/netcoredbg/releases) or build from source
+- Set `NETCOREDBG_PATH` environment variable to the netcoredbg executable, or add its directory to PATH
 - For .NET Core/.NET 5+: works out of the box with standard netcoredbg
 - For .NET Framework 4.8: requires modified netcoredbg fork with Desktop CLR support
-- PDB symbols must be in Portable format (compile with `/debug:portable` or convert with Pdb2Pdb)
+- PDB symbols must be in Portable format (compile with `/debug:portable` or the adapter's auto Pdb2Pdb conversion)
 - Uses TCP-to-stdio bridge on Windows due to netcoredbg server mode bug
+- See `docs/dotnet/README.md` for architecture details and debugging guide
 
 ### Mock (Testing)
 - No external requirements

@@ -1,0 +1,7 @@
+# Personal Osoji model policy for this repository.
+default_provider = "openai"
+
+[providers.openai]
+small = "gpt-5-mini"
+medium = "gpt-5.4"
+large = "gpt-5.4"
