@@ -4,8 +4,7 @@
  * ## Debugger Backend: netcoredbg
  *
  * This adapter uses netcoredbg (Samsung, open-source, MIT license).
- * Our modified fork extends netcoredbg with .NET Framework 4.8 Desktop CLR
- * support via ICorDebug COM interfaces.
+ * Supports .NET Core / .NET 5+ out of the box.
  *
  * netcoredbg natively supports DAP over TCP via --server=PORT --interpreter=vscode.
  * No bridge process is needed.

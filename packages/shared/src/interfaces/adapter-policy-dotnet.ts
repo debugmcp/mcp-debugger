@@ -17,8 +17,7 @@
  *
  * ## Adapter ID
  *
- * netcoredbg uses `adapterID: 'coreclr'` for both .NET Core and .NET Framework.
- * Our modified netcoredbg fork detects Desktop CLR internally.
+ * netcoredbg uses `adapterID: 'coreclr'`.
  *
  * ## Scope naming
  *

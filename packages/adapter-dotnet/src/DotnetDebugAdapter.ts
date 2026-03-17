@@ -12,10 +12,9 @@
  * - **.NET Core / .NET 5+** (modern, cross-platform): Uses the `coreclr` runtime.
  *   Produces **Portable PDB** debug symbols by default. netcoredbg works out of the box.
  *
- * - **.NET Framework 4.x** (Windows-only, legacy but widely deployed): Uses the
- *   `clr` (Desktop CLR) runtime. Produces **Windows PDB** debug symbols by default.
- *   Our modified netcoredbg (forked from Samsung/netcoredbg) adds Desktop CLR support
- *   via ICorDebug COM interfaces, enabling both attach and launch debugging.
+ * - **.NET Framework 4.x** (Windows-only, legacy): Uses the `clr` (Desktop CLR)
+ *   runtime. Not supported by stock netcoredbg. Community forks with Desktop CLR
+ *   support exist but are not officially endorsed.
  *
  * ## PDB Format Requirement
  *
@@ -472,27 +471,23 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   getInstallationInstructions(): string {
     return `.NET Debugging Setup (netcoredbg):
 
-1. Build netcoredbg from source:
-   git clone https://github.com/Samsung/netcoredbg
-   (Use our modified fork for .NET Framework 4.8 support)
+1. Download netcoredbg from Samsung releases:
+   https://github.com/Samsung/netcoredbg/releases
 
-2. Set NETCOREDBG_PATH to the built binary:
+2. Or build from source:
+   git clone https://github.com/Samsung/netcoredbg
+
+3. Set NETCOREDBG_PATH to the binary:
    export NETCOREDBG_PATH=/path/to/netcoredbg/bin/netcoredbg.exe
 
-3. For .NET Framework 4.8 debugging:
-   - Our modified netcoredbg supports Desktop CLR via ICorDebug
-   - Compile target apps with /debug:portable for symbol loading
-   - Or use Pdb2Pdb.exe to convert Windows PDBs to Portable format
-
-4. For .NET Core / .NET 5+:
-   - Works out of the box with standard netcoredbg`;
+4. Supports .NET Core / .NET 5+ out of the box`;
   }
 
   getMissingExecutableError(): string {
     return `netcoredbg not found. Set NETCOREDBG_PATH to the netcoredbg binary path.
 
-For .NET Framework 4.8 support, use the modified netcoredbg fork with Desktop CLR support.
-For .NET Core/.NET 5+, install standard netcoredbg from https://github.com/Samsung/netcoredbg`;
+Install from https://github.com/Samsung/netcoredbg/releases or build from source.
+Supports .NET Core / .NET 5+.`;
   }
 
   translateErrorMessage(error: Error): string {
