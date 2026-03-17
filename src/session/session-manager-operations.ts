@@ -108,7 +108,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
     // Only set program/cwd/args for launch mode
     if (!isAttachMode) {
-      genericLaunchConfig.program = scriptPath;
+      // Use scriptPath as program only if dapLaunchArgs didn't provide one
+      // (compiled languages like .NET, Rust, Go pass the binary via dapLaunchArgs.program)
+      if (typeof genericLaunchConfig.program !== 'string' || genericLaunchConfig.program.length === 0) {
+        genericLaunchConfig.program = scriptPath;
+      }
 
       if (Array.isArray(scriptArgs) && scriptArgs.length > 0) {
         genericLaunchConfig.args = scriptArgs;
