@@ -63,7 +63,7 @@ function ensureDotnetBuild(): string {
   // Find the built DLL (TFM may vary)
   const possibleTfms = ['net10.0', 'net9.0', 'net8.0', 'net7.0', 'net6.0'];
   for (const tfm of possibleTfms) {
-    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'SimpleTest.dll');
+    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'dotnet.dll');
     if (existsSync(dllPath)) return dllPath;
   }
 
@@ -73,11 +73,11 @@ function ensureDotnetBuild(): string {
 
   // Find the built DLL
   for (const tfm of possibleTfms) {
-    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'SimpleTest.dll');
+    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'dotnet.dll');
     if (existsSync(dllPath)) return dllPath;
   }
 
-  throw new Error('Failed to find built SimpleTest.dll');
+  throw new Error('Failed to find built dotnet.dll');
 }
 
 describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
@@ -156,7 +156,7 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
 
   it('should complete .NET debugging flow', async () => {
     const dllPath = ensureDotnetBuild();
-    const sourceFile = path.resolve(ROOT, 'examples', 'dotnet', 'SimpleTest.cs');
+    const sourceFile = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');
 
     // 1. Create debug session
     console.log('[.NET Smoke Test] Creating debug session...');
@@ -173,14 +173,14 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
     sessionId = createResponse.sessionId as string;
     console.log(`[.NET Smoke Test] Session created: ${sessionId}`);
 
-    // 2. Set breakpoint at line 12 (int temp = a;)
-    console.log('[.NET Smoke Test] Setting breakpoint at line 12...');
+    // 2. Set breakpoint at line 14 (int x = 10;)
+    console.log('[.NET Smoke Test] Setting breakpoint at line 14...');
     const bpResult = await mcpClient!.callTool({
       name: 'set_breakpoint',
       arguments: {
         sessionId,
         file: sourceFile,
-        line: 12
+        line: 14
       }
     });
 
@@ -253,16 +253,11 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
           const varNames = vars.map((v: any) => v.name);
           console.log('[.NET Smoke Test] Variable names:', varNames);
 
-          // At line 12, we should see a=1, b=2
-          const varA = vars.find(v => v.name === 'a');
-          const varB = vars.find(v => v.name === 'b');
-          if (varA) {
-            console.log(`[.NET Smoke Test] a = ${varA.value}`);
-            expect(varA.value).toBe('1');
-          }
-          if (varB) {
-            console.log(`[.NET Smoke Test] b = ${varB.value}`);
-            expect(varB.value).toBe('2');
+          // At line 14 (int x = 10;), x is not yet assigned so x=0
+          const varX = vars.find(v => v.name === 'x');
+          if (varX) {
+            console.log(`[.NET Smoke Test] x = ${varX.value}`);
+            expect(varX.value).toBe('0');
           }
         }
       }
