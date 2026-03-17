@@ -349,7 +349,7 @@ packages/adapter-{language}/
 - For .NET Core/.NET 5+: works out of the box with standard netcoredbg
 - For .NET Framework 4.8: requires modified netcoredbg fork with Desktop CLR support
 - PDB symbols must be in Portable format (compile with `/debug:portable` or the adapter's auto Pdb2Pdb conversion)
-- Uses TCP-to-stdio bridge on Windows due to netcoredbg server mode bug
+- Uses TCP-to-stdio bridge on all platforms (works around a netcoredbg --server mode bug originally discovered on Windows)
 - See `docs/dotnet/README.md` for architecture details and debugging guide
 
 ### Mock (Testing)

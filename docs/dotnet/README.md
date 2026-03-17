@@ -16,7 +16,7 @@ MCP Client → MCP Server → SessionManager → ProxyManager → ProxyWorker
                                                     .NET Runtime (CoreCLR or Desktop CLR)
 ```
 
-The adapter uses a TCP-to-stdio bridge on Windows to work around a netcoredbg `--server=PORT` bug where the TCP connection drops after the DAP initialize sequence. The bridge spawns netcoredbg in stdio mode (which works reliably) and exposes a TCP socket for the proxy to connect to.
+The adapter uses a TCP-to-stdio bridge on all platforms to work around a netcoredbg `--server=PORT` bug (originally discovered on Windows) where the TCP connection drops after the DAP initialize sequence. The bridge spawns netcoredbg in stdio mode (which works reliably) and exposes a TCP socket for the proxy to connect to.
 
 ## Prerequisites
 

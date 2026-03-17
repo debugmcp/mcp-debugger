@@ -1,9 +1,9 @@
 /**
  * netcoredbg TCP-to-stdio bridge
  *
- * netcoredbg's `--server=PORT` mode has a bug on Windows where the TCP
- * connection drops after the DAP initialize sequence. As a workaround,
- * this bridge:
+ * netcoredbg's `--server=PORT` mode has a bug on all platforms (originally
+ * discovered on Windows) where the TCP connection drops after the DAP
+ * initialize sequence. As a workaround, this bridge:
  *
  * 1. Listens on a TCP port (for the proxy to connect)
  * 2. Spawns netcoredbg in stdio mode (`--interpreter=vscode`)

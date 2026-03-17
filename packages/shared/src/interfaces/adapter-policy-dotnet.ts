@@ -8,7 +8,7 @@
  * ## netcoredbg communication
  *
  * netcoredbg supports DAP over TCP natively via `--server=PORT --interpreter=vscode`.
- * On Windows, a TCP-to-stdio bridge is used due to a netcoredbg server mode bug.
+ * On all platforms, a TCP-to-stdio bridge is used due to a netcoredbg server mode bug.
  *
  * ## DAP sequence
  *
@@ -292,8 +292,8 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   /**
    * Get the configuration for spawning netcoredbg.
    *
-   * netcoredbg's --server=PORT mode has a connection bug on Windows,
-   * so we use a TCP-to-stdio bridge. The adapter's buildAdapterCommand()
+   * netcoredbg's --server=PORT mode has a connection bug on all platforms
+   * (originally discovered on Windows), so we use a TCP-to-stdio bridge. The adapter's buildAdapterCommand()
    * returns the bridge command, which is passed here via payload.adapterCommand.
    */
   getAdapterSpawnConfig: (payload) => {

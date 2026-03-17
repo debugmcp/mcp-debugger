@@ -29,9 +29,9 @@
  * ## netcoredbg Communication
  *
  * netcoredbg supports DAP over TCP via `--server=PORT --interpreter=vscode`, but the
- * server mode has a connection bug on Windows. We use a lightweight TCP-to-stdio bridge
- * (`netcoredbg-bridge.ts`) that spawns netcoredbg in stdio mode and forwards DAP messages
- * over a TCP socket that the proxy connects to.
+ * server mode has a connection bug on all platforms (originally discovered on Windows).
+ * We use a lightweight TCP-to-stdio bridge (`netcoredbg-bridge.ts`) that spawns netcoredbg
+ * in stdio mode and forwards DAP messages over a TCP socket that the proxy connects to.
  *
  * ## Safety: terminateDebuggee
  *
@@ -45,6 +45,7 @@
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   IDebugAdapter,
   AdapterState,
@@ -282,18 +283,17 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   /**
    * Build the command to launch netcoredbg via the TCP-to-stdio bridge.
    *
-   * netcoredbg's `--server=PORT` mode has a connection bug on Windows,
-   * so we use a lightweight bridge that:
+   * netcoredbg's `--server=PORT` mode has a connection bug on all platforms
+   * (originally discovered on Windows), so we use a lightweight bridge that:
    * 1. Listens on the TCP port (for the proxy to connect)
    * 2. Spawns netcoredbg in stdio mode (`--interpreter=vscode`)
    * 3. Forwards DAP messages bidirectionally
    */
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     // Resolve the bridge script path relative to this file's dist location
-    const bridgePath = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
-      'utils', 'netcoredbg-bridge.js'
-    );
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const bridgePath = path.resolve(__dirname, 'utils', 'netcoredbg-bridge.js');
 
     return {
       command: process.execPath, // node

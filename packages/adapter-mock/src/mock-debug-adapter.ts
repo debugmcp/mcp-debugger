@@ -10,6 +10,7 @@ import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import {
   IDebugAdapter,
   AdapterState,
@@ -254,17 +255,9 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
     let mockAdapterPath: string;
 
     try {
-      // Try to use import.meta.url if available
-      const currentFileUrl = new URL(import.meta.url);
-      let currentDir = path.dirname(currentFileUrl.pathname);
-
-      // In Windows, remove the leading slash from the pathname
-      if (process.platform === 'win32' && currentDir.startsWith('/')) {
-        currentDir = currentDir.substring(1);
-      }
-
-      // Decode URL encoding (e.g., %20 for spaces)
-      currentDir = decodeURIComponent(currentDir);
+      // Use fileURLToPath for correct handling of spaces, drive letters, etc.
+      const __filename = fileURLToPath(import.meta.url);
+      const currentDir = path.dirname(__filename);
 
       mockAdapterPath = path.join(currentDir, 'mock-adapter-process.js');
 
