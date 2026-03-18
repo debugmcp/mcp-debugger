@@ -11,10 +11,13 @@ import { JavascriptAdapterFactory } from '@debugmcp/adapter-javascript';
 import { PythonAdapterFactory } from '@debugmcp/adapter-python';
 import { MockAdapterFactory } from '@debugmcp/adapter-mock';
 import { GoAdapterFactory } from '@debugmcp/adapter-go';
+import { RustAdapterFactory } from '@debugmcp/adapter-rust';
+import { JavaAdapterFactory } from '@debugmcp/adapter-java';
+import { DotnetAdapterFactory } from '@debugmcp/adapter-dotnet';
 import type { IAdapterFactory } from '@debugmcp/shared';
 
 interface BundledAdapterEntry {
-  language: 'javascript' | 'python' | 'mock' | 'go';
+  language: 'javascript' | 'python' | 'mock' | 'go' | 'rust' | 'java' | 'dotnet';
   factoryCtor: new () => IAdapterFactory;
 }
 
@@ -24,7 +27,10 @@ const adapters: BundledAdapterEntry[] = [
   { language: 'javascript', factoryCtor: JavascriptAdapterFactory },
   { language: 'python', factoryCtor: PythonAdapterFactory },
   { language: 'mock', factoryCtor: MockAdapterFactory },
-  { language: 'go', factoryCtor: GoAdapterFactory }
+  { language: 'go', factoryCtor: GoAdapterFactory },
+  { language: 'rust', factoryCtor: RustAdapterFactory },
+  { language: 'java', factoryCtor: JavaAdapterFactory },
+  { language: 'dotnet', factoryCtor: DotnetAdapterFactory },
 ];
 
 const globalAdapters = (globalThis as unknown as Record<string, BundledAdapterEntry[] | undefined>)[GLOBAL_KEY];
