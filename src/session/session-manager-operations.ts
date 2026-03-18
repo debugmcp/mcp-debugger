@@ -1199,6 +1199,21 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
+  async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>> {
+    const session = this._getSessionById(sessionId);
+
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      throw new ProxyNotRunningError(sessionId, 'listThreads');
+    }
+
+    const response = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+    return (response?.body?.threads ?? []).map(t => ({ id: t.id, name: t.name }));
+  }
+
   /**
    * Helper method to truncate long strings for logging
    */

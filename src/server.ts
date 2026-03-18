@@ -587,6 +587,7 @@ export class DebugMcpServer {
           { name: 'step_out', description: 'Step out', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'continue_execution', description: 'Continue execution', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'pause_execution', description: 'Pause a running program', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, threadId: { type: 'number', description: 'Thread ID to pause. If omitted or 0, pauses all threads. Only supported by the Java/JDI adapter.' } }, required: ['sessionId'] } },
+          { name: 'list_threads', description: 'List all threads in the debugged process', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
           { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' } }, required: ['sessionId'] } },
           { name: 'get_stack_trace', description: 'Get stack trace', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' } }, required: ['sessionId'] } },
@@ -1050,6 +1051,13 @@ export class DebugMcpServer {
               result = await this.handlePause(args as { sessionId: string; threadId?: number });
               break;
             }
+            case 'list_threads': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
+              }
+              result = await this.handleListThreads(args as { sessionId: string });
+              break;
+            }
             case 'get_variables': {
               if (!args.sessionId || args.scope === undefined) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
@@ -1218,6 +1226,23 @@ export class DebugMcpServer {
         return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
       }
       throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
+    }
+  }
+
+  private async handleListThreads(args: { sessionId: string }): Promise<ServerResult> {
+    try {
+      this.validateSession(args.sessionId);
+      const threads = await this.sessionManager.listThreads(args.sessionId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, threads }) }] };
+    } catch (error) {
+      this.logger.error('Failed to list threads', { error });
+      if (error instanceof McpError) throw error;
+      if (error instanceof SessionTerminatedError ||
+          error instanceof SessionNotFoundError ||
+          error instanceof ProxyNotRunningError) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+      }
+      throw new McpError(McpErrorCode.InternalError, `Failed to list threads: ${(error as Error).message}`);
     }
   }
 
