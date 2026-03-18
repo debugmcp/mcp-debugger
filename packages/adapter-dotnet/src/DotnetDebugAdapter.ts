@@ -43,6 +43,7 @@
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import fs from 'node:fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -289,21 +290,42 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
    * 3. Forwards DAP messages bidirectionally
    */
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
-    // Resolve the bridge script path relative to this file's dist location
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const bridgePath = path.resolve(__dirname, 'utils', 'netcoredbg-bridge.js');
+
+    const possiblePaths = [
+      // Development: running from compiled adapter package dist/
+      path.resolve(__dirname, 'utils', 'netcoredbg-bridge.js'),
+      // Bundled NPX distribution (cli.mjs is in dist/, bridge copied alongside)
+      path.resolve(__dirname, '..', 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
+      // Monorepo source tree fallback
+      path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
+      // CWD-relative fallback
+      path.resolve(process.cwd(), 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
+      // Container builds
+      '/app/packages/adapter-dotnet/dist/utils/netcoredbg-bridge.js',
+      '/app/node_modules/@debugmcp/adapter-dotnet/dist/utils/netcoredbg-bridge.js',
+    ];
+
+    const bridgePath = possiblePaths.find(p => fs.existsSync(p));
+
+    if (!bridgePath) {
+      this.dependencies.logger?.error?.('[DotnetDebugAdapter] netcoredbg-bridge.js not found. Searched:');
+      possiblePaths.forEach(p => {
+        this.dependencies.logger?.error?.(`  ${p}: NOT FOUND`);
+      });
+      throw new AdapterError(
+        'netcoredbg-bridge.js not found. Run: pnpm --filter @debugmcp/adapter-dotnet run build',
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
+    }
+
+    this.dependencies.logger?.info?.(`[DotnetDebugAdapter] Using bridge at: ${bridgePath}`);
 
     return {
-      command: process.execPath, // node
-      args: [
-        bridgePath,
-        config.executablePath,
-        config.adapterPort.toString()
-      ],
-      env: {
-        ...process.env as Record<string, string>
-      }
+      command: process.execPath,
+      args: [bridgePath, config.executablePath, config.adapterPort.toString()],
+      env: { ...process.env as Record<string, string> }
     };
   }
 

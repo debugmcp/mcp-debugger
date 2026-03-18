@@ -211,6 +211,17 @@ async function bundleCLI() {
     console.warn('Run: pnpm -w -F @debugmcp/adapter-rust run build:adapter');
   }
 
+  // Copy netcoredbg bridge script for .NET adapter
+  const bridgeSrc = path.join(repoRoot, 'packages/adapter-dotnet/dist/utils/netcoredbg-bridge.js');
+  if (fs.existsSync(bridgeSrc)) {
+    const bridgeDestDir = path.join(distDir, 'packages', 'adapter-dotnet', 'dist', 'utils');
+    fs.mkdirSync(bridgeDestDir, { recursive: true });
+    fs.cpSync(bridgeSrc, path.join(bridgeDestDir, 'netcoredbg-bridge.js'));
+    console.log('Copied netcoredbg bridge script.');
+  } else {
+    console.warn('Warning: netcoredbg-bridge.js not found; .NET debugging may fail in NPX distribution.');
+  }
+
   // Mirror dist into the package/ directory used by npm pack artifacts.
   const packageDir = path.join(packageRoot, 'package');
   const packageDistDir = path.join(packageDir, 'dist');
