@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DebugMcpServer } from '../../src/server';
 import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { SessionLifecycleState } from '@debugmcp/shared';
+import { SessionTerminatedError, SessionNotFoundError, ProxyNotRunningError } from '../../src/errors/debug-errors.js';
 
 describe('Server Coverage - Error Paths and Edge Cases', () => {
   let server: DebugMcpServer;
@@ -741,9 +742,278 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sessionId: 'test-session',
         expression: 'x + 1'
       });
-      
+
       // The method returns a success response with the error in the content
       expect(result.content[0].text).toContain('Session is terminated');
+    });
+  });
+
+  describe('handlePause', () => {
+    it('returns result on success', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.pause = vi.fn().mockResolvedValue({ success: true, state: 'paused' });
+
+      const result = await (server as any).handlePause({ sessionId: 'test-session' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.state).toBe('paused');
+    });
+
+    it('re-throws SessionTerminatedError (extends McpError)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.pause = vi.fn().mockRejectedValue(new SessionTerminatedError('test-session'));
+
+      await expect((server as any).handlePause({ sessionId: 'test-session' }))
+        .rejects.toThrow(McpError);
+    });
+
+    it('re-throws ProxyNotRunningError (extends McpError)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.pause = vi.fn().mockRejectedValue(new ProxyNotRunningError('test-session'));
+
+      await expect((server as any).handlePause({ sessionId: 'test-session' }))
+        .rejects.toThrow(McpError);
+    });
+
+    it('wraps generic errors as McpError', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.pause = vi.fn().mockRejectedValue(new Error('unexpected'));
+
+      await expect((server as any).handlePause({ sessionId: 'test-session' }))
+        .rejects.toThrow('Failed to pause execution');
+    });
+  });
+
+  describe('handleGetSourceContext', () => {
+    beforeEach(() => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+    });
+
+    it('returns source context on success', async () => {
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({ exists: true, effectivePath: '/app/main.py' })
+      };
+      (server as any).lineReader = {
+        getLineContext: vi.fn().mockResolvedValue({
+          lineContent: 'print("hello")',
+          surrounding: [
+            { line: 9, content: 'def main():' },
+            { line: 10, content: '    print("hello")' },
+            { line: 11, content: '' }
+          ]
+        })
+      };
+
+      const result = await (server as any).handleGetSourceContext({
+        sessionId: 'test-session',
+        file: '/app/main.py',
+        line: 10
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.file).toBe('/app/main.py');
+      expect(payload.line).toBe(10);
+      expect(payload.lineContent).toBe('print("hello")');
+      expect(payload.surrounding).toHaveLength(3);
+    });
+
+    it('throws McpError when file not found', async () => {
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({
+          exists: false,
+          effectivePath: '/missing.py',
+          errorMessage: 'ENOENT'
+        })
+      };
+
+      await expect((server as any).handleGetSourceContext({
+        sessionId: 'test-session',
+        file: '/missing.py',
+        line: 1
+      })).rejects.toThrow('Source file');
+    });
+
+    it('returns error JSON when file is unreadable', async () => {
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({ exists: true, effectivePath: '/app/binary.dat' })
+      };
+      (server as any).lineReader = {
+        getLineContext: vi.fn().mockResolvedValue(null)
+      };
+
+      const result = await (server as any).handleGetSourceContext({
+        sessionId: 'test-session',
+        file: '/app/binary.dat',
+        line: 1
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('Could not read source context');
+    });
+
+    it('uses default context lines when not specified', async () => {
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({ exists: true, effectivePath: '/app/test.py' })
+      };
+      const getLineContext = vi.fn().mockResolvedValue({
+        lineContent: 'x = 1',
+        surrounding: []
+      });
+      (server as any).lineReader = { getLineContext };
+
+      await (server as any).handleGetSourceContext({
+        sessionId: 'test-session',
+        file: '/app/test.py',
+        line: 5
+      });
+
+      expect(getLineContext).toHaveBeenCalledWith('/app/test.py', 5, { contextLines: 5 });
+    });
+  });
+
+  describe('handleGetLocalVariables', () => {
+    beforeEach(() => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.getLocalVariables = vi.fn();
+    });
+
+    it('returns variables with frame and scope info', async () => {
+      mockSessionManager.getLocalVariables.mockResolvedValue({
+        variables: [{ name: 'x', value: '42' }],
+        frame: { name: 'main', file: 'test.py', line: 10 },
+        scopeName: 'Locals'
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.count).toBe(1);
+      expect(payload.variables[0].name).toBe('x');
+      expect(payload.frame.name).toBe('main');
+      expect(payload.scopeName).toBe('Locals');
+    });
+
+    it('shows "not paused" message when no frame available', async () => {
+      mockSessionManager.getLocalVariables.mockResolvedValue({
+        variables: [],
+        frame: null,
+        scopeName: null
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.count).toBe(0);
+      expect(payload.message).toContain('No stack frames available');
+    });
+
+    it('shows "no local scope" message when frame exists but no scope', async () => {
+      mockSessionManager.getLocalVariables.mockResolvedValue({
+        variables: [],
+        frame: { name: 'main', file: 'test.py', line: 10 },
+        scopeName: null
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.message).toContain('No local scope found');
+    });
+
+    it('shows "scope is empty" message when scope exists but has no variables', async () => {
+      mockSessionManager.getLocalVariables.mockResolvedValue({
+        variables: [],
+        frame: { name: 'main', file: 'test.py', line: 10 },
+        scopeName: 'Locals'
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.message).toContain('The Locals scope is empty');
+    });
+
+    it('returns graceful JSON for McpError with "not paused"', async () => {
+      (server as any).validateSession = vi.fn().mockImplementation(() => {
+        throw new McpError(McpErrorCode.InvalidRequest, 'Session is not paused');
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('not paused');
+      expect(payload.message).toContain('Cannot get local variables');
+    });
+
+    it('wraps generic errors as McpError', async () => {
+      mockSessionManager.getLocalVariables.mockRejectedValue(new Error('unexpected'));
+
+      await expect((server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      })).rejects.toThrow('Failed to get local variables');
+    });
+  });
+
+  describe('handleListSupportedLanguages', () => {
+    it('returns installed languages and adapter metadata', async () => {
+      const result = await (server as any).handleListSupportedLanguages();
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.installed).toEqual(['python', 'mock']);
+      expect(payload.available).toHaveLength(2);
+      expect(payload.available[0].language).toBe('python');
+      expect(payload.available[0].package).toBe('@debugmcp/adapter-python');
+      expect(payload.count).toBe(2);
+    });
+
+    it('falls back to installed list when listAvailableAdapters fails', async () => {
+      mockSessionManager.adapterRegistry.listAvailableAdapters.mockRejectedValue(
+        new Error('metadata unavailable')
+      );
+
+      const result = await (server as any).handleListSupportedLanguages();
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.installed).toEqual(['python', 'mock']);
+      // available falls back to simple format derived from installed
+      expect(payload.available).toHaveLength(2);
+      expect(payload.available[0].installed).toBe(true);
     });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AdapterRegistry } from '../../../src/adapters/adapter-registry.js';
+import { AdapterRegistry, getAdapterRegistry, resetAdapterRegistry } from '../../../src/adapters/adapter-registry.js';
 import { AdapterNotFoundError, DuplicateRegistrationError, FactoryValidationError } from '@debugmcp/shared';
 
 const createAdapterStub = () => {
@@ -229,5 +229,219 @@ describe('AdapterRegistry', () => {
     expect(adapterStub.dispose).toHaveBeenCalled();
     expect(registry.getActiveAdapterCount()).toBe(0);
     expect(() => adapter.dispose()).not.toThrow();
+  });
+
+  it('allows override registration when allowOverride is true', async () => {
+    const registry = new AdapterRegistry({ allowOverride: true });
+    const factory1 = createFactory();
+    const factory2 = createFactory();
+
+    await registry.register('mock', factory1 as any);
+    await registry.register('mock', factory2 as any);
+
+    expect(registry.getSupportedLanguages()).toEqual(['mock']);
+  });
+
+  describe('listLanguages', () => {
+    it('returns only registered languages without dynamic loading', async () => {
+      const registry = new AdapterRegistry();
+      const factory = createFactory();
+
+      await registry.register('mock', factory as any);
+
+      const languages = await registry.listLanguages();
+      expect(languages).toEqual(['mock']);
+    });
+
+    it('merges registered and dynamically discovered languages', async () => {
+      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const factory = createFactory();
+      await registry.register('mock', factory as any);
+
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        listAvailableAdapters: vi.fn().mockResolvedValue([
+          { name: 'python', installed: true },
+          { name: 'go', installed: false }
+        ])
+      });
+
+      const languages = await registry.listLanguages();
+      expect(languages).toContain('mock');
+      expect(languages).toContain('python');
+      expect(languages).toContain('go');
+    });
+
+    it('falls back to registered languages when loader throws', async () => {
+      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const factory = createFactory();
+      await registry.register('mock', factory as any);
+
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        listAvailableAdapters: vi.fn().mockRejectedValue(new Error('loader error'))
+      });
+
+      const languages = await registry.listLanguages();
+      expect(languages).toEqual(['mock']);
+    });
+  });
+
+  describe('listAvailableAdapters', () => {
+    it('returns minimal metadata without dynamic loading', async () => {
+      const registry = new AdapterRegistry();
+      const factory = createFactory();
+      await registry.register('mock', factory as any);
+
+      const adapters = await registry.listAvailableAdapters();
+      expect(adapters).toEqual([{
+        name: 'mock',
+        packageName: '@debugmcp/adapter-mock',
+        description: undefined,
+        installed: true
+      }]);
+    });
+
+    it('merges loader metadata with registered, overriding installed status', async () => {
+      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const factory = createFactory();
+      await registry.register('mock', factory as any);
+
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        listAvailableAdapters: vi.fn().mockResolvedValue([
+          { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: false, description: 'Mock' },
+          { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python' }
+        ])
+      });
+
+      const adapters = await registry.listAvailableAdapters();
+      const mockAdapter = adapters.find(a => a.name === 'mock');
+      const pythonAdapter = adapters.find(a => a.name === 'python');
+
+      // Registered adapter overrides installed to true
+      expect(mockAdapter?.installed).toBe(true);
+      expect(pythonAdapter?.installed).toBe(true);
+    });
+
+    it('falls back to registered adapters when loader throws', async () => {
+      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const factory = createFactory();
+      await registry.register('mock', factory as any);
+
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        listAvailableAdapters: vi.fn().mockRejectedValue(new Error('fail'))
+      });
+
+      const adapters = await registry.listAvailableAdapters();
+      expect(adapters).toHaveLength(1);
+      expect(adapters[0].name).toBe('mock');
+      expect(adapters[0].installed).toBe(true);
+    });
+  });
+
+  describe('getAdapterInfo and getAllAdapterInfo', () => {
+    it('getAdapterInfo returns metadata for registered language', async () => {
+      const registry = new AdapterRegistry();
+      const factory = createFactory();
+      await registry.register('mock', factory as any);
+
+      const info = registry.getAdapterInfo('mock');
+      expect(info).toBeDefined();
+      expect(info!.language).toBe('mock');
+      expect(info!.available).toBe(true);
+      expect(info!.activeInstances).toBe(0);
+    });
+
+    it('getAdapterInfo returns undefined for unknown language', () => {
+      const registry = new AdapterRegistry();
+      expect(registry.getAdapterInfo('unknown')).toBeUndefined();
+    });
+
+    it('getAllAdapterInfo returns map of all registered adapters', async () => {
+      const registry = new AdapterRegistry();
+      await registry.register('mock', createFactory() as any);
+      await registry.register('python', createFactory() as any);
+
+      const all = registry.getAllAdapterInfo();
+      expect(all.size).toBe(2);
+      expect(all.has('mock')).toBe(true);
+      expect(all.has('python')).toBe(true);
+    });
+  });
+
+  describe('disposal error handling', () => {
+    it('unregister emits error when adapter disposal fails', async () => {
+      const registry = new AdapterRegistry();
+      const adapterStub = createAdapterStub();
+      adapterStub.dispose.mockRejectedValue(new Error('dispose failed'));
+
+      const factory = createFactory({
+        createAdapter: vi.fn().mockReturnValue(adapterStub)
+      });
+
+      await registry.register('mock', factory as any);
+      await registry.create('mock', {
+        sessionId: 's1',
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp',
+        scriptPath: '/tmp/app.js',
+        executablePath: '',
+        launchConfig: {}
+      });
+
+      const errors: Error[] = [];
+      registry.on('error', (err: Error) => errors.push(err));
+
+      const result = registry.unregister('mock');
+      expect(result).toBe(true);
+
+      // Let the async disposal error propagate
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].message).toContain('dispose');
+    });
+
+    it('disposeAll resolves even when adapter disposal fails', async () => {
+      const registry = new AdapterRegistry();
+      const adapterStub = createAdapterStub();
+      adapterStub.dispose.mockRejectedValue(new Error('dispose boom'));
+
+      const factory = createFactory({
+        createAdapter: vi.fn().mockReturnValue(adapterStub)
+      });
+
+      await registry.register('mock', factory as any);
+      await registry.create('mock', {
+        sessionId: 's1',
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp',
+        scriptPath: '/tmp/app.js',
+        executablePath: '',
+        launchConfig: {}
+      });
+
+      // disposeAll should not reject
+      await expect(registry.disposeAll()).resolves.toBeUndefined();
+      expect(registry.getActiveAdapterCount()).toBe(0);
+    });
+  });
+
+  describe('singleton helpers', () => {
+    afterEach(() => {
+      resetAdapterRegistry();
+    });
+
+    it('getAdapterRegistry returns same instance on repeated calls', () => {
+      const a = getAdapterRegistry();
+      const b = getAdapterRegistry();
+      expect(a).toBe(b);
+    });
+
+    it('resetAdapterRegistry creates a new instance', () => {
+      const a = getAdapterRegistry();
+      resetAdapterRegistry();
+      const b = getAdapterRegistry();
+      expect(a).not.toBe(b);
+    });
   });
 });
