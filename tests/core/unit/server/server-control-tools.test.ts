@@ -401,7 +401,7 @@ describe('Server Control Tools Tests', () => {
 
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);
-      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session');
+      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session', undefined);
     });
 
     it('should handle pause on non-existent session', async () => {

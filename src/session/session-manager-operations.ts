@@ -1156,7 +1156,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
-  async pause(sessionId: string): Promise<DebugResult> {
+  async pause(sessionId: string, threadId?: number): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
 
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
@@ -1180,8 +1180,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
 
     try {
-      // DAP pause request uses threadId 0 to pause all threads
-      await session.proxyManager.sendDapRequest('pause', { threadId: 0 });
+      // DAP pause request: threadId 0 pauses all threads, specific ID pauses only that thread
+      await session.proxyManager.sendDapRequest('pause', { threadId: threadId ?? 0 });
 
       this.logger.info(
         `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`
