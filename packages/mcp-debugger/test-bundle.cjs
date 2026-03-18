@@ -36,6 +36,53 @@ console.log('Bundle path:', bundlePath);
       }
     });
 
+    // Check that required runtime assets were copied into the bundle
+    console.log('\nChecking for required runtime assets:');
+    const requiredAssets = [
+      {
+        name: 'netcoredbg bridge (.NET)',
+        path: 'packages/adapter-dotnet/dist/utils/netcoredbg-bridge.js'
+      },
+      {
+        name: 'proxy bundle',
+        path: 'proxy/proxy-bundle.cjs'
+      }
+    ];
+    const optionalAssets = [
+      {
+        name: 'js-debug vendor (JavaScript)',
+        path: 'vendor/js-debug/vsDebugServer.cjs'
+      },
+      {
+        name: 'CodeLLDB vendor (Rust)',
+        path: 'vendor/codelldb'
+      }
+    ];
+
+    let assetsMissing = false;
+    for (const asset of requiredAssets) {
+      const assetPath = path.join(__dirname, 'dist', asset.path);
+      if (fs.existsSync(assetPath)) {
+        console.log(`  ✅ ${asset.name}: ${asset.path}`);
+      } else {
+        console.log(`  ❌ ${asset.name}: ${asset.path} MISSING`);
+        assetsMissing = true;
+      }
+    }
+    for (const asset of optionalAssets) {
+      const assetPath = path.join(__dirname, 'dist', asset.path);
+      if (fs.existsSync(assetPath)) {
+        console.log(`  ✅ ${asset.name}: ${asset.path}`);
+      } else {
+        console.log(`  ⚠️  ${asset.name}: ${asset.path} (optional, not found)`);
+      }
+    }
+
+    if (assetsMissing) {
+      console.error('\n❌ Required runtime assets missing from bundle!');
+      process.exit(1);
+    }
+
     // Check bundle size
     const stats = fs.statSync(bundlePath);
     const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2);

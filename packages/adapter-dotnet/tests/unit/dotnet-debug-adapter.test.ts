@@ -248,6 +248,7 @@ describe('DotnetDebugAdapter', () => {
       expect(command.env).toBeDefined();
       expect(typeof command.env).toBe('object');
     });
+
   });
 
   // ===== Launch Configuration =====
