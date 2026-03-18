@@ -59,6 +59,7 @@ public class JdiDapServer {
     private volatile boolean configurationDone = false;
     private volatile boolean launchSuspended = false; // true if we launched with suspend=y
     private volatile boolean stopOnEntry = true; // whether to stop on entry in launch mode
+    private volatile boolean lastStopAllThreads = true; // tracks whether last stop suspended all threads
 
     // --- Logging ---
     private static boolean debug = false;
@@ -195,6 +196,7 @@ public class JdiDapServer {
                 case "scopes": handleScopes(reqSeq, args); break;
                 case "variables": handleVariables(reqSeq, args); break;
                 case "continue": handleContinue(reqSeq, args); break;
+                case "pause": handlePause(reqSeq, args); break;
                 case "next": handleStep(reqSeq, args, StepRequest.STEP_OVER); break;
                 case "stepIn": handleStep(reqSeq, args, StepRequest.STEP_INTO); break;
                 case "stepOut": handleStep(reqSeq, args, StepRequest.STEP_OUT); break;
@@ -392,7 +394,8 @@ public class JdiDapServer {
                     Map<String, Object> bpSpec = asMap(bpObj);
                     int line = intVal(bpSpec, "line");
                     String condition = str(bpSpec, "condition");
-                    Map<String, Object> bp = setBreakpointOnClass(found, line, condition, sourcePath);
+                    String suspendPol = str(bpSpec, "suspendPolicy");
+                    Map<String, Object> bp = setBreakpointOnClass(found, line, condition, sourcePath, suspendPol);
                     if (!Boolean.TRUE.equals(bp.get("verified"))) {
                         hasUnresolved = true;
                     }
@@ -543,7 +546,8 @@ public class JdiDapServer {
                     Map<String, Object> bpSpec = asMap(bpObj);
                     int line = intVal(bpSpec, "line");
                     String condition = str(bpSpec, "condition");
-                    Map<String, Object> bp = setBreakpointOnClass(refType, line, condition, sourcePath);
+                    String suspendPol = str(bpSpec, "suspendPolicy");
+                    Map<String, Object> bp = setBreakpointOnClass(refType, line, condition, sourcePath, suspendPol);
                     results.add(bp);
                     if (!Boolean.TRUE.equals(bp.get("verified"))) {
                         hasUnresolvedBreakpoints = true;
@@ -600,7 +604,7 @@ public class JdiDapServer {
         sendResponse(reqSeq, "setBreakpoints", true, mapOf("breakpoints", results));
     }
 
-    private Map<String, Object> setBreakpointOnClass(ReferenceType refType, int line, String condition, String sourcePath) {
+    private Map<String, Object> setBreakpointOnClass(ReferenceType refType, int line, String condition, String sourcePath, String suspendPolicy) {
         Map<String, Object> bp = new HashMap<>();
         bp.put("id", nextBreakpointId.getAndIncrement());
         try {
@@ -624,7 +628,12 @@ public class JdiDapServer {
             if (sourcePath != null) {
                 bpr.putProperty("jdi-bp-source", sourcePath);
             }
-            bpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+            // "thread" = only suspend the event thread; default = suspend all threads
+            if ("thread".equals(suspendPolicy)) {
+                bpr.setSuspendPolicy(EventRequest.SUSPEND_EVENT_THREAD);
+            } else {
+                bpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+            }
             bpr.enable();
 
             bp.put("verified", true);
@@ -891,14 +900,60 @@ public class JdiDapServer {
             sendErrorResponse(reqSeq, "continue", "No active debug session");
             return;
         }
+        long threadId = longVal(args, "threadId");
+        boolean allContinued;
         try {
-            vm.resume();
+            if (!lastStopAllThreads && threadId > 0) {
+                // Only a single thread was suspended — resume just that thread
+                for (ThreadReference t : vm.allThreads()) {
+                    if (t.uniqueID() == threadId) {
+                        t.resume();
+                        break;
+                    }
+                }
+                allContinued = false;
+            } else {
+                vm.resume();
+                allContinued = true;
+            }
         } catch (VMDisconnectedException e) {
-            // VM already gone
+            allContinued = true;
         }
         Map<String, Object> body = new HashMap<>();
-        body.put("allThreadsContinued", true);
+        body.put("allThreadsContinued", allContinued);
         sendResponse(reqSeq, "continue", true, body);
+    }
+
+    private void handlePause(int reqSeq, Map<String, Object> args) {
+        if (vm == null) {
+            sendErrorResponse(reqSeq, "pause", "No active debug session");
+            return;
+        }
+        long threadId = longVal(args, "threadId");
+        try {
+            if (threadId > 0) {
+                // Pause a specific thread
+                for (ThreadReference t : vm.allThreads()) {
+                    if (t.uniqueID() == threadId) {
+                        t.suspend();
+                        sendStoppedEvent("pause", t.uniqueID(), false);
+                        sendResponse(reqSeq, "pause", true, new HashMap<>());
+                        return;
+                    }
+                }
+                sendErrorResponse(reqSeq, "pause", "Thread not found: " + threadId);
+            } else {
+                // Pause all threads (threadId 0 or absent)
+                vm.suspend();
+                // Pick the first thread for the stopped event
+                List<ThreadReference> threads = vm.allThreads();
+                long stoppedThreadId = threads.isEmpty() ? 0 : threads.get(0).uniqueID();
+                sendStoppedEvent("pause", stoppedThreadId);
+                sendResponse(reqSeq, "pause", true, new HashMap<>());
+            }
+        } catch (VMDisconnectedException e) {
+            sendErrorResponse(reqSeq, "pause", "VM disconnected");
+        }
     }
 
     private void handleStep(int reqSeq, Map<String, Object> args, int depth) {
@@ -1043,7 +1098,8 @@ public class JdiDapServer {
                             }
 
                             log("Breakpoint hit: " + bpe.location());
-                            sendStoppedEvent("breakpoint", bpe.thread().uniqueID());
+                            boolean allStopped = bpr == null || bpr.suspendPolicy() == EventRequest.SUSPEND_ALL;
+                            sendStoppedEvent("breakpoint", bpe.thread().uniqueID(), allStopped);
                             resume = false;
 
                         } else if (event instanceof StepEvent) {
@@ -1161,7 +1217,8 @@ public class JdiDapServer {
             Map<String, Object> bpSpec = asMap(bpObj);
             int line = intVal(bpSpec, "line");
             String condition = str(bpSpec, "condition");
-            Map<String, Object> bp = setBreakpointOnClass(refType, line, condition, sourcePath);
+            String suspendPol = str(bpSpec, "suspendPolicy");
+            Map<String, Object> bp = setBreakpointOnClass(refType, line, condition, sourcePath, suspendPol);
 
             // Send breakpoint verified event
             if (Boolean.TRUE.equals(bp.get("verified"))) {
@@ -1341,10 +1398,15 @@ public class JdiDapServer {
     }
 
     private void sendStoppedEvent(String reason, long threadId) {
+        sendStoppedEvent(reason, threadId, true);
+    }
+
+    private void sendStoppedEvent(String reason, long threadId, boolean allThreadsStopped) {
+        lastStopAllThreads = allThreadsStopped;
         Map<String, Object> body = new HashMap<>();
         body.put("reason", reason);
         body.put("threadId", threadId);
-        body.put("allThreadsStopped", true);
+        body.put("allThreadsStopped", allThreadsStopped);
         sendEvent("stopped", body);
     }
 

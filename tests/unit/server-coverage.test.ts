@@ -321,7 +321,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       expect(result.verified).toBe(true);
       expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
-      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', 'com.example.MyClass', 42, undefined);
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', 'com.example.MyClass', 42, undefined, undefined);
     });
 
     it('should skip file existence check for inner class notation via policy', async () => {
@@ -670,10 +670,10 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       // Both calls should have been made
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.example.Foo', 10, undefined
+        'test-session', 'com.example.Foo', 10, undefined, undefined
       );
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.example.Foo', 20, undefined
+        'test-session', 'com.example.Foo', 20, undefined, undefined
       );
     });
 
@@ -722,10 +722,10 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       // Both should be set independently
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.a.Foo', 10, undefined
+        'test-session', 'com.a.Foo', 10, undefined, undefined
       );
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.b.Foo', 15, undefined
+        'test-session', 'com.b.Foo', 15, undefined, undefined
       );
     });
   });

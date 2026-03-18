@@ -83,6 +83,7 @@ describe('Server Control Tools Tests', () => {
         'test-session',
         expect.stringContaining('/path/to/test.py'),
         10,
+        undefined,
         undefined
       );
       
@@ -125,7 +126,8 @@ describe('Server Control Tools Tests', () => {
         'test-session',
         expect.stringContaining('/path/to/test.py'),
         20,
-        'x > 10'
+        'x > 10',
+        undefined
       );
     });
 

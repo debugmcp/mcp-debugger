@@ -758,7 +758,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     sessionId: string,
     file: string,
     line: number,
-    condition?: string
+    condition?: string,
+    suspendPolicy?: 'all' | 'thread'
   ): Promise<Breakpoint> {
     const session = this._getSessionById(sessionId);
 
@@ -774,7 +775,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `[SessionManager setBreakpoint] Using validated file path "${file}" for session ${sessionId}`
     );
 
-    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, verified: false };
+    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, suspendPolicy, verified: false };
 
     if (!session.breakpoints) session.breakpoints = new Map();
     session.breakpoints.set(bpId, newBreakpoint);
@@ -800,7 +801,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             'setBreakpoints',
             {
               source: { path: file },
-              breakpoints: allBpsForFile.map(bp => ({ line: bp.line, condition: bp.condition })),
+              breakpoints: allBpsForFile.map(bp => ({
+                line: bp.line,
+                condition: bp.condition,
+                ...(bp.suspendPolicy ? { suspendPolicy: bp.suspendPolicy } : {}),
+              })),
             }
           );
         if (

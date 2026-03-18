@@ -97,6 +97,7 @@ interface ToolArguments {
   stopOnEntry?: boolean;
   justMyCode?: boolean;
   terminateProcess?: boolean;
+  suspendPolicy?: 'all' | 'thread';
 }
 
 /**
@@ -336,14 +337,14 @@ export class DebugMcpServer {
     return this.sessionManager.closeSession(sessionId);
   }
 
-  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
+  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string, suspendPolicy?: 'all' | 'thread'): Promise<Breakpoint> {
     this.validateSession(sessionId);
 
     // Check if the adapter handles non-file source identifiers (e.g. Java FQCNs)
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     if (policy.isNonFileSourceIdentifier?.(file)) {
       this.logger.info(`[DebugMcpServer.setBreakpoint] Non-file source identifier detected: ${file}`);
-      return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
+      return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
     }
 
     // Check file exists for immediate feedback
@@ -355,7 +356,7 @@ export class DebugMcpServer {
     this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${fileCheck.effectivePath} (original: ${file})`);
 
     // Pass the effective path (which has been resolved for container) to session manager
-    return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition);
+    return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition, suspendPolicy);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -530,7 +531,7 @@ export class DebugMcpServer {
           { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions', inputSchema: { type: 'object', properties: {} } },
-          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: ['sessionId', 'file', 'line'] } },
           { name: 'start_debugging', description: 'Start debugging a script', inputSchema: { 
               type: 'object', 
               properties: { 
@@ -702,7 +703,7 @@ export class DebugMcpServer {
               }
               
               try {
-                const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition);
+                const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition, args.suspendPolicy);
                 
                 // Log breakpoint event
                 this.logger.info('debug:breakpoint', {
