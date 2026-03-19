@@ -7,14 +7,13 @@ This guide explains how to correctly use the MCP Debugger tools when testing deb
 ### JavaScript Debugging Behavior
 
 **What to expect:**
-- The debugger will automatically skip Node.js internals and stop at your breakpoints
-- No manual continuation past Node.js initialization is needed
+- The debugger stops at your breakpoints in user code
 - Variables are accessible when stopped at user breakpoints
 
 **How it works:**
-- `continueOnAttach: true` makes the debugger automatically continue past the attachment point
 - The multi-session architecture properly routes evaluate commands to the active debugging context
 - You can immediately evaluate expressions when stopped at breakpoints
+- Note: auto-continue on entry is currently a placeholder and may not skip Node.js internals automatically; you may need to use `continue_execution` if stopped at an internal location
 
 ### Python Variable Inspection
 
@@ -113,17 +112,18 @@ if vars.get("variablesReference"):
     actual_vars = get_variables(sessionId=session_id, scope=vars["variablesReference"])
     # Now returns: [{"name":"a","value":"1"}, {"name":"b","value":"2"}, ...]
 
-# 7. Evaluate expressions (expression-only — statements are rejected by debugpy)
+# 7. Evaluate expressions
 evaluate_expression(sessionId=session_id, expression="a")  # Returns: "1"
 evaluate_expression(sessionId=session_id, expression="a + b")  # Returns: "3"
-# Note: Python eval only accepts expressions, not statements.
-# For example, "a + b" works but "a = 5" will be rejected.
+# Note: Expressions may mutate program state (e.g., "x = 5" may work in some
+# debugpy contexts). The server does not reject statements, but the debug
+# adapter may impose its own limitations.
 ```
 
 ## Common Issues and Solutions
 
 ### Issue: JavaScript shows Node.js internals in stack trace
-**Solution:** This is fixed! The debugger now uses `continueOnAttach: true` to skip internals automatically.
+**Solution:** Use `continue_execution` to move past internal frames. Stack trace filtering hides internal frames by default for supported languages.
 
 ### Issue: Python shows "special variables" instead of actual variables
 **Solution:** This is normal hierarchical organization. Use the `variablesReference` to expand:
@@ -194,7 +194,8 @@ session_id = create_debug_session(language="rust")
 # 2. Set breakpoint (use absolute path to the source file)
 set_breakpoint(sessionId=session_id, file="/path/to/src/main.rs", line=5)
 
-# 3. Start debugging (scriptPath is the source file; the adapter compiles it)
+# 3. Start debugging (scriptPath is the source file; the adapter resolves the
+#    enclosing Cargo project and may build/locate the binary before debugging)
 start_debugging(sessionId=session_id, scriptPath="/path/to/src/main.rs")
 
 # 4. Get stack trace and use actual frame IDs
@@ -254,7 +255,7 @@ get_local_variables(sessionId=session_id)
 
 ## .NET/C# Debugging
 
-**Prerequisites**: .NET 6+ SDK installed. netcoredbg must be installed (set `NETCOREDBG_PATH` or add to PATH).
+**Prerequisites**: netcoredbg must be installed (set `NETCOREDBG_PATH` or add to PATH). A .NET SDK is needed to compile your target application.
 
 **Key notes:**
 - PDB symbols must be in Portable format (compile with `/debug:portable`)
@@ -268,8 +269,12 @@ session_id = create_debug_session(language="dotnet")
 # 2. Set breakpoint
 set_breakpoint(sessionId=session_id, file="/path/to/Program.cs", line=10)
 
-# 3. Start debugging
-start_debugging(sessionId=session_id, scriptPath="/path/to/Program.cs")
+# 3. Start debugging (pass compiled target, not source file)
+start_debugging(
+    sessionId=session_id,
+    scriptPath="/path/to/bin/Debug/net8.0/YourApp.dll",
+    dapLaunchArgs={"program": "/path/to/bin/Debug/net8.0/YourApp.dll"}
+)
 
 # 4. Inspect variables
 get_local_variables(sessionId=session_id)
@@ -278,7 +283,7 @@ get_local_variables(sessionId=session_id)
 ## Summary
 
 The MCP Debugger is fully functional for Python, JavaScript, Rust, Go, Java, and .NET/C#. The key insights are:
-- **JavaScript**: Automatically skips Node.js internals - works as expected
+- **JavaScript**: Stack trace filtering hides internal frames; may need `continue_execution` if initially stopped at internals
 - **Python**: Use variablesReference to expand variable containers
 - **Rust**: CodeLLDB adapter is vendored; supports both MSVC and GNU toolchains
 - **Go**: Uses Delve's native DAP support

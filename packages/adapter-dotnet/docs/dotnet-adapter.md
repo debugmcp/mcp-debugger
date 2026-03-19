@@ -22,7 +22,7 @@ MCP Client → MCP Server → SessionManager → ProxyManager → ProxyWorker
 
 - **DotnetAdapterFactory** (`src/DotnetAdapterFactory.ts`): Implements `IAdapterFactory` for dependency injection. Creates adapter instances and provides metadata.
 
-- **DotnetAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-dotnet.ts`): DAP proxy policy encoding netcoredbg-specific behaviors — DAP sequence, scope naming, variable filtering, stack frame filtering, and spawn configuration.
+- **DotnetAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-dotnet.ts`): DAP proxy policy encoding netcoredbg-specific behaviors — DAP sequence, scope naming, variable filtering, stack frame filtering, and executable resolution. Note: this policy does not itself create the bridge command; it trusts upstream code (`DotnetDebugAdapter.buildAdapterCommand`) to supply `payload.adapterCommand` when bridge mode is required.
 
 - **netcoredbg-bridge** (`src/utils/netcoredbg-bridge.ts`): TCP-to-stdio bridge that works around a netcoredbg `--server=PORT` bug on Windows. Listens on a TCP port, spawns netcoredbg in stdio mode, and forwards DAP messages bidirectionally.
 
@@ -56,10 +56,17 @@ Stock netcoredbg only supports CoreCLR (.NET Core / .NET 5+). Community forks ex
 
 ### Executable Discovery Order
 
-1. `NETCOREDBG_PATH` environment variable
-2. Preferred path (if provided by caller)
-3. `which netcoredbg` (searches PATH)
-4. Common install locations (platform-specific)
+The adapter policy (`DotnetAdapterPolicy`) resolves in this order:
+1. Explicit provided path (from caller)
+2. `NETCOREDBG_PATH` environment variable
+3. Default command name `netcoredbg`
+
+The utility function `findNetcoredbgExecutable` in `dotnet-utils.ts` uses a more detailed search:
+1. `NETCOREDBG_X86_PATH` environment variable (for x86 attach targets)
+2. `NETCOREDBG_PATH` environment variable
+3. Caller-provided preferred path
+4. `which netcoredbg` (searches PATH)
+5. Hardcoded platform-specific candidate paths
 
 ## DAP Protocol Details
 

@@ -18,11 +18,11 @@ npm run docker-build
 
 ## IMPORTANT: Mount Path Requirement
 
-**When running the Debug MCP Server in a Docker container, you MUST mount your project files to `/workspace` inside the container.** This is a hard requirement - the containerized server expects all files to be debugged to be accessible under the `/workspace` directory.
+**When running the Debug MCP Server in a Docker container, you should mount your project files to `/workspace` inside the container.** This is the default and recommended mount point. The container sets `MCP_WORKSPACE_ROOT=/workspace` by default, which is used for path resolution. The `/workspace` directory is optional -- the server will still work from the image's default working directory, but path resolution will use whatever `MCP_WORKSPACE_ROOT` is set to.
 
 ### Why /workspace?
 
-The Debug MCP Server uses a **TRUE HANDS-OFF** approach to path handling. When running in a container (`MCP_CONTAINER=true`), it only prepends `/workspace/` for file existence checks - all paths are passed unchanged to the debug adapter. This means:
+The Debug MCP Server resolves paths through centralized container path utilities. When running in a container (`MCP_CONTAINER=true`), paths are resolved against the configured workspace root (`MCP_WORKSPACE_ROOT`, default `/workspace/`) via `SimpleFileChecker`, and the server passes the resolved effective path onward. This means:
 - Your project files must be mounted at `/workspace`
 - The LLM can provide any path format (relative, absolute, Windows, Linux)
 - The server does NO path interpretation or cross-platform conversion
@@ -93,12 +93,12 @@ Here's the recommended configuration for your MCP settings file:
 ### Important Notes:
 - Replace `/path/to/your/project` with the actual path to the project you want to debug
 - The `:rw` suffix allows read-write access (required for debugging)
-- The temp directory mount is optional but useful for log files
+- The temp directory mount is optional but useful for log files. Note: the current Docker entrypoint hardcodes `--log-level debug` and does not forward additional CLI flags from `docker run`
 - When using the debugger, provide paths relative to the project root (e.g., `examples/test.py` not `/workspace/examples/test.py`)
 
 ## Rust support in Docker
 
-> ⚠️ **Rust debugging is not supported inside the Docker image.** The container now builds with `DEBUG_MCP_DISABLE_LANGUAGES=rust`, so the Rust adapter is omitted entirely and the MCP tools will not advertise `rust` as an available language.
+> ⚠️ **Rust debugging is not supported inside the Docker image by default.** The container uses `MCP_DISABLE_LANGUAGES` to disable the Rust adapter, so the MCP tools will not advertise `rust` as an available language.
 
 Why? CodeLLDB inside the container could not reliably interpret DWARF data for binaries compiled on the host (Windows/WSL/macOS). Rather than forcing every user to rebuild their projects with a matching Linux toolchain, we recommend running Rust sessions via the local/stdio, SSE, or packed deployments—where the debugger runs next to the toolchain that produced the binary. The Docker variant remains the best choice for Python and JavaScript debugging and now ships a slimmer image (no CodeLLDB payload).
 

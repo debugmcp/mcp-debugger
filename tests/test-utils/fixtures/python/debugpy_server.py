@@ -7,7 +7,6 @@ It demonstrates the correct pattern where:
 2. The MCP server connects to this debugpy instance as a DAP client
 """
 import sys
-import os
 import time
 import argparse
 

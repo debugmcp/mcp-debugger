@@ -36,7 +36,7 @@ Add to your MCP client configuration (e.g., Claude Desktop):
   "mcpServers": {
     "mcp-debugger": {
       "command": "node",
-      "args": ["C:/path/to/mcp-debugger/dist/index.js", "stdio", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
+      "args": ["C:/path/to/mcp-debugger/dist/index.js", "stdio", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],  // Use dist/index.js for source builds; the npm package uses mcp-debugger CLI instead
       "disabled": false,
       "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
     }

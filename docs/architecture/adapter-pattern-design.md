@@ -39,8 +39,8 @@ The mcp-debugger architecture uses both patterns in complementary roles:
 
 ```typescript
 // During session creation
-const adapter = await adapterRegistry.create(session.language); // IDebugAdapter
-const policy = this.selectPolicy(session.language);             // AdapterPolicy
+const adapter = await adapterRegistry.create(session.language, config); // IDebugAdapter
+const policy = this.selectPolicy(session.language);                     // AdapterPolicy
 
 // IDebugAdapter handles core debugging
 await adapter.validateEnvironment();
@@ -110,10 +110,11 @@ graph TD
 ### Why These Methods?
 
 #### Lifecycle Management
-- **`initialize()`**: Performs one-time setup and environment validation
+- **`initialize()`**: Performs one-time adapter setup (resource preparation, internal state initialization)
+- **`validateEnvironment()`**: Separate method for environment validation (checking prerequisites, dependencies)
 - **`dispose()`**: Ensures clean resource cleanup
 
-**Rationale**: Separates construction from initialization, allowing dependency injection while deferring expensive operations.
+**Rationale**: Separates construction from initialization, and separates lifecycle setup from environment validation, allowing dependency injection while deferring expensive operations.
 
 #### State Management
 - **`getState()`**: Provides current adapter state
@@ -229,9 +230,8 @@ sequenceDiagram
     PM->>AP: spawn(command, args)
     AP-->>PM: process started
     
-    PM->>A: connect(host, port)
-    A-->>PM: connected
-    
+    Note over PM,AP: ProxyManager routes DAP via proxy worker process
+
     PM-->>SM: initialized
     SM-->>S: {success: true}
     S-->>C: Debugging started
@@ -288,9 +288,9 @@ sequenceDiagram
 4. Update ProxyManager to accept adapters
 
 ### Phase 4: Integration (COMPLETED)
-1. SessionManager uses AdapterRegistry for dynamic adapter creation
+1. SessionManager uses AdapterRegistry for adapter creation (dynamic loading occurs when `enableDynamicLoading` is enabled or in container mode)
 2. server.ts delegates language validation to AdapterRegistry (dynamic, not hardcoded)
-3. All language adapters load dynamically via `@debugmcp/adapter-<language>` packages
+3. Language adapters load via `@debugmcp/adapter-<language>` packages (dynamically when enabled, or pre-registered)
 4. Tests updated across the board
 
 ## Component Responsibilities
@@ -375,7 +375,7 @@ sequenceDiagram
 }
 ```
 
-**Note**: The `pythonPath` parameter has been completely removed. There is no backward compatibility - all clients must use `executablePath`.
+**Note**: The `pythonPath` parameter has been deprecated. Callers should use `executablePath`. Some internal compatibility/migration support for legacy Python-oriented configs still exists via `ConfigMigration` in the shared contracts.
 
 ### Session Creation Flow
 

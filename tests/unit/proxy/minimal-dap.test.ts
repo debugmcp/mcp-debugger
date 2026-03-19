@@ -6,7 +6,7 @@ import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
 import type { ChildSessionManager } from '../../../src/proxy/child-session-manager.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { JsDebugAdapterPolicy } from '@debugmcp/shared';
-import type { DapClientBehavior, ReverseRequestResult, AdapterPolicy } from '@debugmcp/shared';
+import type { DapClientBehavior, ReverseRequestResult } from '@debugmcp/shared';
 
 // Mock the net module
 vi.mock('net');

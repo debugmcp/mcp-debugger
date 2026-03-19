@@ -106,7 +106,7 @@ describe('SessionStoreFactory', () => {
       expect(store).toBeInstanceOf(SessionStore);
     });
 
-    it('should create dotnet session using DotnetAdapterPolicy', () => {
+    it('should create dotnet session with DOTNET language', () => {
       const factory = new SessionStoreFactory();
       const store = factory.create();
 

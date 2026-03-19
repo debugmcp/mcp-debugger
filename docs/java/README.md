@@ -22,7 +22,7 @@ JdiDapServer is a ~2600-line Java program that:
 ## Prerequisites
 
 1. **JDK 21 or higher** installed from [adoptium.net](https://adoptium.net/) or your OS package manager
-2. **`java` and `javac` on your PATH**, or `JAVA_HOME` set
+2. **`java` on your PATH** (or `JAVA_HOME` set) for running the JDI bridge; **`javac`** is additionally needed to compile the bridge on first use and to compile your target Java sources with debug info
 
 Verify your installation:
 ```bash
@@ -50,7 +50,7 @@ If you use a build tool:
 
 ### Launch Mode
 
-JDI bridge spawns the JVM and connects via JDI. Pass `mainClass` and `classpath` directly.
+JDI bridge spawns the JVM and connects via JDI. The adapter derives `mainClass` from the `program` field in the launch configuration and transparently forwards `classpath`, `sourcePath`, `cwd`, `env`, and `args`.
 
 ```
 use_mcp_tool(

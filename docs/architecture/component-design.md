@@ -91,7 +91,10 @@ protected setupProxyEventHandlers(
 
   // Named functions for each event
   const handleStopped = (threadId: number | undefined, reason: string) => {
-    // Handle auto-continue for stopOnEntry=false
+    // Design intent: auto-continue for stopOnEntry=false on 'entry' stops.
+    // Note: The concrete SessionManager.handleAutoContinue() currently throws
+    // because it needs session-specific context refactoring. Non-entry stops
+    // transition to PAUSED.
     if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
       this.handleAutoContinue().catch(err => { /* log error */ });
     } else {
@@ -241,11 +244,11 @@ The worker implements a strict state machine:
 
 ```typescript
 enum ProxyState {
-  UNINITIALIZED,   // Initial state
-  INITIALIZING,    // Setting up adapter
-  CONNECTED,       // Ready for debugging
-  SHUTTING_DOWN,   // Cleanup in progress
-  TERMINATED       // Final state
+  UNINITIALIZED = 'uninitialized',
+  INITIALIZING = 'initializing',
+  CONNECTED = 'connected',
+  SHUTTING_DOWN = 'shutting_down',
+  TERMINATED = 'terminated'
 }
 ```
 
@@ -408,7 +411,7 @@ export const ErrorMessages = {
 
 ## Dependency Injection System
 
-**Location**: Interface definitions in `packages/shared/src/interfaces/` (e.g., `filesystem.ts`, `external-dependencies.ts`, `process-interfaces.ts`). The `SessionManagerDependencies` aggregate is defined in `src/session/session-manager-core.ts`.
+**Location**: Shared low-level interface contracts exist in `packages/shared/src/interfaces/` and app-local interface modules under `src/interfaces/`. The application's concrete dependency graph and public `Dependencies` shape are defined in `src/container/dependencies.ts`. The `SessionManagerDependencies` aggregate is defined in `src/session/session-manager-core.ts`.
 
 ### Overview
 The dependency injection system enables comprehensive testing by abstracting all external dependencies behind interfaces.

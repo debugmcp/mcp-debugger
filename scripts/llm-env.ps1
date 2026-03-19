@@ -157,7 +157,11 @@ function docker {
         # Check if --progress is already specified
         if ($argsString -notmatch '--progress') {
             # Insert --progress=plain after "build"
-            $newArgs = @($args[0]) + @('--progress=plain') + $args[1..($args.Length - 1)]
+            if ($args.Length -le 1) {
+                $newArgs = @($args[0]) + @('--progress=plain')
+            } else {
+                $newArgs = @($args[0]) + @('--progress=plain') + $args[1..($args.Length - 1)]
+            }
             & docker.exe @newArgs
         }
         else {

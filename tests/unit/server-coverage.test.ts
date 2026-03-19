@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DebugMcpServer } from '../../src/server';
 import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { SessionLifecycleState } from '@debugmcp/shared';
-import { SessionTerminatedError, SessionNotFoundError, ProxyNotRunningError } from '../../src/errors/debug-errors.js';
+import { SessionTerminatedError, ProxyNotRunningError } from '../../src/errors/debug-errors.js';
 
 describe('Server Coverage - Error Paths and Edge Cases', () => {
   let server: DebugMcpServer;

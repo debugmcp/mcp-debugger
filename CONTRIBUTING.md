@@ -289,7 +289,7 @@ mcp-debugger/
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
 │   ├── adapters/          # Adapter loading and registry
-│   ├── cli/               # CLI commands and setup
+│   ├── cli/               # Reusable CLI wiring (commands, setup, error handlers)
 │   ├── container/         # Dependency injection
 │   ├── proxy/             # DAP proxy components
 │   ├── session/           # Session management

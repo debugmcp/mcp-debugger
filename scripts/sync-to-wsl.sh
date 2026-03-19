@@ -3,7 +3,7 @@
 # Sync MCP Debugger project from Windows to WSL2
 # This script should be run from within WSL2
 #
-# Usage: ./scripts/sync-to-wsl.sh [--no-install] [--no-build] [--clean]
+# Usage: ./scripts/sync-to-wsl.sh [/path/to/project] [--no-install] [--no-build] [--clean]
 #
 
 set -e  # Exit on error
@@ -13,13 +13,18 @@ set -e  # Exit on error
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # If running from /tmp (copied by .cmd wrapper), use a default or parameter
 if [[ "$SCRIPT_DIR" == "/tmp" ]]; then
-    # Try to detect from current directory or use parameter
-    if [ -n "$1" ] && [ -d "$1" ]; then
-        WINDOWS_PROJECT_PATH="$1"
-    else
+    # Skip over any --prefixed options to find the path argument
+    WINDOWS_PROJECT_PATH=""
+    for _arg in "$@"; do
+        if [[ "$_arg" != --* ]] && [ -d "$_arg" ]; then
+            WINDOWS_PROJECT_PATH="$_arg"
+            break
+        fi
+    done
+    if [ -z "$WINDOWS_PROJECT_PATH" ]; then
         # Default to common WSL mount paths
-        echo "Please specify the Windows project path as first argument"
-        echo "Usage: $0 /mnt/c/path/to/debug-mcp-server [options]"
+        echo "Please specify the Windows project path as an argument"
+        echo "Usage: $0 [--no-install] [--no-build] [--clean] /mnt/c/path/to/debug-mcp-server"
         exit 1
     fi
 else
@@ -54,7 +59,7 @@ for arg in "$@"; do
             shift
             ;;
         --help|-h)
-            echo "Usage: $0 [--no-install] [--no-build] [--clean]"
+            echo "Usage: $0 [/path/to/project] [--no-install] [--no-build] [--clean]"
             echo "  --no-install  Skip npm install"
             echo "  --no-build    Skip npm run build"
             echo "  --clean       Remove destination before sync (full copy)"

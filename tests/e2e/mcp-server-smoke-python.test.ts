@@ -219,7 +219,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Python characteristic: No need to refresh references
-    console.log('[Python Smoke Test] Getting variables after step (stable references)...');
+    console.log('[Python Smoke Test] Getting stack trace after step to verify execution continued...');
     const afterStepStack = await callToolSafely(mcpClient!, 'get_stack_trace', { sessionId });
     
     if (afterStepStack.stackFrames && (afterStepStack.stackFrames as any[]).length > 0) {
@@ -438,7 +438,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
       if (stackResult.stackFrames && (stackResult.stackFrames as any[]).length > 1) {
         const frames = stackResult.stackFrames as any[];
         console.log(`[Python Smoke Test] Stack depth after step_into: ${frames.length}`);
-        // Should now have factorial frame on top
+        // Stack should have depth > 1 after stepping into a function call
         expect(frames.length).toBeGreaterThan(1);
       }
     } else {

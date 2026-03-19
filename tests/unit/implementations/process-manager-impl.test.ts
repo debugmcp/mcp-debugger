@@ -31,7 +31,7 @@ vi.mock('util', () => ({
 
 // Now import the class and mocked functions
 import { ProcessManagerImpl } from '../../../src/implementations/process-manager-impl.js';
-import { spawn, exec } from 'child_process';
+import { spawn } from 'child_process';
 
 describe('ProcessManagerImpl', () => {
   let processManager: ProcessManagerImpl;

@@ -103,7 +103,7 @@ enum MockErrorScenario {
 }
 ```
 
-Error scenarios are activated via `setErrorScenario()` on the `MockDebugAdapter` instance:
+Error scenarios are controlled at runtime via `setErrorScenario()` on the `MockDebugAdapter` instance (which accepts a single `MockErrorScenario` value). While `MockAdapterConfig.errorScenarios` exists as a type field, current runtime behavior is driven only by `setErrorScenario()`:
 
 - **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code, which triggers an `AdapterError` with `ENVIRONMENT_INVALID` during `initialize()`.
 - **CONNECTION_TIMEOUT**: Causes `connect()` to throw an `AdapterError` with `CONNECTION_TIMEOUT` (recoverable).
@@ -141,11 +141,9 @@ const scenario: MockScenario = {
   steps: [
     { action: 'launch', args: { script: 'variables.mock', stopOnEntry: true } },
     { action: 'waitForStop' },
-    { action: 'getStackTrace', expected: { frameCount: 3 } },
+    { action: 'getStackTrace', expected: { frameCount: 2 } },
     { action: 'getScopes', args: { frameId: 0 } },
-    { action: 'getVariables', args: { variablesReference: 1000 } },
-    { action: 'expandVariable', args: { name: 'complexObject' } },
-    { action: 'getVariables', args: { variablesReference: 1001 } }
+    { action: 'getVariables', args: { variablesReference: 1000 } }
   ]
 };
 ```
@@ -198,11 +196,7 @@ interface MockAdapterConfig {
 }
 ```
 
-Default supported features (when none are specified):
-- `CONDITIONAL_BREAKPOINTS`
-- `FUNCTION_BREAKPOINTS`
-- `VARIABLE_PAGING`
-- `SET_VARIABLE`
+Default supported features are determined by the constructor-normalized config. The `getCapabilities()` method builds a DAP capability object with hardcoded true values and dynamic flags keyed off `supportsFeature` for function breakpoints, conditional breakpoints, hover evaluation, set-variable, and log points. Refer to the mock adapter source for the exact default set.
 
 Usage:
 
@@ -224,7 +218,7 @@ const adapter = factory.createAdapter(dependencies);
 The mock adapter includes a separate process (`mock-adapter-process.ts`) that simulates a real DAP server. It supports both stdio (default) and TCP transport:
 
 ```
-Usage: node mock-adapter-process.js [--port <port>] [--host <host>] [--session <id>]
+Usage: node mock-adapter-process.js [--port=<port>] [--host=<host>] [--session=<id>]
 ```
 
 The process implements a `DAPConnection` class that handles Content-Length framed DAP messages over streams. In TCP mode, it creates a `net.Server` and allows client reconnection.

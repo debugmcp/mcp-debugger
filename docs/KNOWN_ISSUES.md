@@ -2,7 +2,7 @@
 
 ## Rust debugging inside Docker is disabled
 
-The `mcp-debugger-docker` image now ships only the Python and JavaScript adapters. CodeLLDB had chronic DWARF/symbol issues with binaries compiled outside the container, so the image is built with `DEBUG_MCP_DISABLE_LANGUAGES=rust` and the server refuses to create Rust sessions in that environment. Use the local stdio, SSE, or packed deployments for Rust debugging where the adapter runs on the same host as the toolchain.
+The `mcp-debugger-docker` image disables Rust by default via `MCP_DISABLE_LANGUAGES`. CodeLLDB had chronic DWARF/symbol issues with binaries compiled outside the container. Rust Docker debugging is supported behind the `DOCKER_ENABLE_RUST=true` gate in tests, but is not enabled by default in the production image. Use the local stdio, SSE, or packed deployments for Rust debugging where the adapter runs on the same host as the toolchain.
 
 ## Test Failures in Act Environment
 
@@ -23,10 +23,10 @@ As of July 2025, there are 3 tests that fail when running with Act (local GitHub
 
 ### 3. Python Discovery Platform Mismatch
 - **File**: `tests/adapters/python/integration/python-discovery.test.ts`
-- **Test**: "should show clear error message when Python is not found on Windows"
-- **Issue**: Test forces platform to 'win32' but runs on Linux in Act
-- **Root Cause**: Test expects Windows `py` command but Act runs on Linux
-- **Solution**: Make test platform-aware or use proper mocking strategy
+- **Test**: "should find Python on Windows without explicit path"
+- **Issue**: This is a Windows-only success-path discovery test that returns early on non-Windows platforms
+- **Root Cause**: Test is deliberately Windows-only; it does not mock platform or assert error messages
+- **Solution**: Test works correctly on Windows; on other platforms it is skipped
 
 ## Running Tests Locally
 

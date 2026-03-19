@@ -54,7 +54,7 @@ describe('SessionManager - Path Resolution', () => {
       }
     });
 
-    it('should normalize backslashes to forward slashes', async () => {
+    it('should preserve path components with backslash separators', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
         pythonPath: 'python'
@@ -118,7 +118,7 @@ describe('SessionManager - Path Resolution', () => {
       expect(bp.file).toBe(absolutePath);
     });
 
-    it('should normalize paths across different OS', async () => {
+    it('should preserve path components with mixed separators', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
         pythonPath: 'python'

@@ -1,7 +1,7 @@
 /**
- * Comprehensive MCP Debugger Test - All 19 Tools x All Languages
+ * Comprehensive MCP Debugger Test - All 18 Tools x All Languages
  *
- * Tests every MCP tool against every available language adapter.
+ * Broad coverage of MCP tools across available language adapters.
  * Produces a detailed matrix report (PASS/FAIL/SKIP per tool per language).
  *
  * Run:
@@ -84,7 +84,7 @@ const LANGUAGES: LangDef[] = [
   { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go toolchain not installed' },
 ];
 
-/* ---------- all 19 tools ---------- */
+/* ---------- all 18 tools ---------- */
 
 const ALL_TOOLS = [
   'list_supported_languages',

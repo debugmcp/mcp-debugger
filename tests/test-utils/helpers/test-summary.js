@@ -42,6 +42,9 @@ async function testSummary() {
     
     if (!results.testResults || results.testResults.length === 0) {
       console.log('No test results to analyze.');
+      if (fs.existsSync(jsonFile)) {
+        fs.unlinkSync(jsonFile);
+      }
       return;
     }
     

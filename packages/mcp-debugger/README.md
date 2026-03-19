@@ -51,9 +51,12 @@ Analyzes a Rust executable to determine whether it was built with the GNU or MSV
 
 ## Options
 
+### Common options (all commands)
 - `--log-level <level>` - Set log level (error, warn, info, debug)
 - `--log-file <path>` - Log to file instead of console
-- `--port <number>` - Port for SSE mode (default: 3001)
+
+### SSE-only options
+- `-p, --port <number>` - Port for SSE mode (default: 3001)
 
 ## Documentation
 

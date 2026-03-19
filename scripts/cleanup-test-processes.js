@@ -41,15 +41,9 @@ function executeCommand(cmd, silent = false) {
 }
 
 function getProcessList() {
-  if (isWindows) {
-    // Windows: Use WMIC to get process info
-    const cmd = 'wmic process get ProcessId,ParentProcessId,CommandLine /format:csv';
-    return executeCommand(cmd, true) || '';
-  } else {
-    // Unix: Use ps to get process info
-    const cmd = 'ps aux';
-    return executeCommand(cmd, true) || '';
-  }
+  // Unix: Use ps to get process info
+  const cmd = 'ps aux';
+  return executeCommand(cmd, true) || '';
 }
 
 function findMcpProcesses() {
@@ -71,20 +65,11 @@ function findMcpProcesses() {
   for (const line of lines) {
     for (const pattern of patterns) {
       if (line.match(new RegExp(pattern, 'i'))) {
-        // Extract PID based on platform
+        // Extract PID from Unix ps format: USER PID %CPU %MEM ...
         let pid;
-        if (isWindows) {
-          // CSV format: node,ProcessId,ParentProcessId,CommandLine
-          const parts = line.split(',');
-          if (parts.length > 2) {
-            pid = parts[1];
-          }
-        } else {
-          // Unix ps format: USER PID %CPU %MEM ...
-          const parts = line.trim().split(/\s+/);
-          if (parts.length > 1) {
-            pid = parts[1];
-          }
+        const parts = line.trim().split(/\s+/);
+        if (parts.length > 1) {
+          pid = parts[1];
         }
 
         if (pid && !isNaN(pid)) {
@@ -103,31 +88,23 @@ function findMcpProcesses() {
 
 function killProcess(pid) {
   try {
-    if (isWindows) {
-      execSync(`taskkill /F /PID ${pid}`, { stdio: 'pipe' });
-    } else {
-      // Try graceful kill first, then force
+    process.kill(pid, 'SIGTERM');
+    // Give it a moment to die gracefully
+    setTimeout(() => {
       try {
-        process.kill(pid, 'SIGTERM');
-        // Give it a moment to die gracefully
-        setTimeout(() => {
-          try {
-            process.kill(pid, 'SIGKILL');
-          } catch (e) {
-            // Process already dead, that's fine
-          }
-        }, 100);
+        process.kill(pid, 'SIGKILL');
       } catch (e) {
-        // Process might already be dead
+        // Process already dead, that's fine
       }
-    }
+    }, 100);
     return true;
   } catch (error) {
+    // Process might already be dead
     return false;
   }
 }
 
-// Main cleanup logic (only called on non-Windows, non-CI environments)
+// Main cleanup logic (invoked below only on non-Windows, non-CI environments)
 function cleanup() {
   console.log('Searching for orphaned test processes...');
 

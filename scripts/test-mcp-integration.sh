@@ -51,7 +51,7 @@ run_test "initialize" \
 
 # Test 2: Clean output (no logs)
 echo -n "Testing clean output (no logs)... "
-output=$(echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' | timeout 1 node "$PROJECT_DIR/dist/index.js" stdio 2>&1)
+output=$(echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' | timeout 1 node "$PROJECT_DIR/dist/index.js" stdio 2>&1 || true)
 # Check that output is valid JSON and contains no log timestamps
 if echo "$output" | python3 -m json.tool > /dev/null 2>&1 && ! echo "$output" | grep -q "^\[.*\]"; then
     echo -e "${GREEN}✓ PASSED${NC}"
@@ -69,7 +69,7 @@ run_test "tools/list" \
 
 # Test 4: Without stdio argument (should auto-detect)
 echo -n "Testing auto-detection (no stdio arg)... "
-output=$(echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' | timeout 2 node "$PROJECT_DIR/dist/index.js" 2>&1)
+output=$(echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' | timeout 2 node "$PROJECT_DIR/dist/index.js" 2>&1 || true)
 if echo "$output" | python3 -m json.tool > /dev/null 2>&1; then
     echo -e "${GREEN}✓ PASSED${NC}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -80,8 +80,9 @@ fi
 
 # Test 5: Claude CLI integration
 echo -n "Testing Claude CLI integration... "
-if /home/ubuntu/.claude/local/claude mcp list 2>/dev/null | grep -q "mcp-debugger"; then
-    if /home/ubuntu/.claude/local/claude mcp list 2>/dev/null | grep -q "mcp-debugger.*✓ Connected"; then
+CLAUDE_CLI=$(command -v claude 2>/dev/null || echo "claude")
+if $CLAUDE_CLI mcp list 2>/dev/null | grep -q "mcp-debugger"; then
+    if $CLAUDE_CLI mcp list 2>/dev/null | grep -q "mcp-debugger.*✓ Connected"; then
         echo -e "${GREEN}✓ PASSED${NC} (Connected)"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else

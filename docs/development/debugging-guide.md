@@ -68,25 +68,20 @@ LOG_LEVEL=debug LOG_FILE=debug.log node dist/index.js
 
 **Symptoms**: Server exits immediately or hangs
 
+**Important**: The entrypoint (`src/index.ts`) silences nearly all `console` methods at module load to protect stdio/IPC transports. Adding `console.log` to the entrypoint will produce no output. Use the Winston logger or write to a file instead.
+
 **Debug Steps**:
 
 ```typescript
-// Add to src/index.ts
-console.log('[DEBUG] Starting server with args:', process.argv);
-console.log('[DEBUG] Environment:', {
-  NODE_ENV: process.env.NODE_ENV,
-  DEBUG: process.env.DEBUG,
-  PATH: process.env.PATH
-});
+// In src/index.ts — use the logger, not console (console is silenced)
+import fs from 'fs';
+// Write diagnostics to a file since console output is suppressed
+fs.appendFileSync('/tmp/mcp-debug-startup.log',
+  `[DEBUG] Starting server with args: ${process.argv.join(' ')}\n`);
 
-// Check transport initialization
-try {
-  await server.start();
-  console.log('[DEBUG] Server started successfully');
-} catch (error) {
-  console.error('[DEBUG] Server start failed:', error);
-  console.error('[DEBUG] Stack:', error.stack);
-}
+// Transport startup is managed in src/cli/stdio-command.ts or src/cli/sse-command.ts,
+// not in DebugMcpServer.start() (which only logs startup/build info).
+// To debug transport binding, add logger calls to the CLI command handlers.
 ```
 
 ### 2. Proxy Process Issues
@@ -169,18 +164,14 @@ this.dapClient.on('receive', (message) => {
 });
 
 // Track request lifecycle
+// Note: There are two layers of request correlation:
+// - Raw DAP responses (in MinimalDapClient): correlated by `request_seq`
+// - Proxy-to-parent `dapResponse` envelopes (in ProxyManager): correlated by `requestId`
 console.log('[DEBUG] Sending DAP request:', {
   command,
-  requestId,
+  request_seq,  // For raw DAP responses
+  requestId,    // For proxy dapResponse envelopes
   args: JSON.stringify(args)
-});
-
-// In response handler
-console.log('[DEBUG] DAP response received:', {
-  requestId: message.requestId,
-  success: message.success,
-  command: pending?.command,
-  elapsed: Date.now() - requestStartTime
 });
 ```
 
@@ -363,46 +354,33 @@ afterEach(() => {
 
 ### 2. Diagnostic Commands
 
-Add diagnostic tools to the server:
+To add diagnostic tools, extend the `registerTools()` method in `src/server.ts`. Tools are registered via `ListToolsRequestSchema` and `CallToolRequestSchema` request handlers, not via a standalone `addTool()` API:
 
 ```typescript
-// Add diagnostic tool
-server.addTool({
-  name: 'debug_diagnostics',
-  description: 'Get diagnostic information',
-  inputSchema: { type: 'object', properties: {} },
-  handler: async () => {
-    return {
-      sessions: sessionManager.getAllSessions(),
-      processInfo: {
-        pid: process.pid,
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        versions: process.versions
-      },
-      activeProxies: getActiveProxyCount()
-    };
-  }
-});
+// Inside registerTools() in src/server.ts, add to the tools array in ListToolsRequestSchema handler:
+{ name: 'debug_diagnostics', description: 'Get diagnostic information',
+  inputSchema: { type: 'object', properties: {} } },
+
+// And add a case in the CallToolRequestSchema handler's switch:
+case 'debug_diagnostics':
+  return {
+    content: [{ type: 'text', text: JSON.stringify({
+      pid: process.pid,
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      versions: process.versions
+    }, null, 2) }]
+  };
 ```
 
 ### 3. Health Checks
 
-```typescript
-// Add health endpoint for SSE mode
-if (transport === 'sse') {
-  const healthServer = http.createServer((req, res) => {
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        status: 'healthy',
-        sessions: sessionManager.getAllSessions().length,
-        uptime: process.uptime()
-      }));
-    }
-  });
-  healthServer.listen(port + 1);
-}
+The SSE command handler (`src/cli/sse-command.ts`) already exposes a `GET /health` endpoint on the same port as the SSE server. No separate server is needed:
+
+```bash
+# Query the built-in health endpoint (default port 3001)
+curl http://localhost:3001/health
+# Returns: { "status": "ok", "mode": "sse", "connections": N, "sessions": [...] }
 ```
 
 ## Debugging Checklists

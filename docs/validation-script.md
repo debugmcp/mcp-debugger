@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `validate-push.js` script tests your repository in a clean clone to simulate exactly what CI will see. This helps catch issues before they reach CI/CD pipelines.
+The `validate-push.js` script tests your repository in a clean clone to simulate CI against the current committed state. It warns about uncommitted changes but intentionally excludes them from the clone/test run. This helps catch issues before they reach CI/CD pipelines.
 
 ## What It Catches
 

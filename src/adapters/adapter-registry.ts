@@ -118,8 +118,10 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
           // Register but also use the loadedFactory directly to avoid undefined from map lookup
           await this.register(language, loadedFactory);
           factory = loadedFactory;
-        } catch {
-          // If load fails, include dynamically detected languages (installed ones)
+        } catch (err) {
+          // Re-throw registration errors as-is; only convert loader failures to AdapterNotFoundError
+          if (err instanceof AdapterNotFoundError) throw err;
+          if (this.factories.has(language)) throw err;
           const available = await this.listLanguages().catch(() => this.getSupportedLanguages());
           throw new AdapterNotFoundError(language, available);
         }
@@ -295,7 +297,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   }
 
   /**
-   * Dispose all created adapters and clear registry
+   * Dispose all created adapters, clear factories, and reset registry
    */
   async disposeAll(): Promise<void> {
     const disposePromises: Promise<void>[] = [];

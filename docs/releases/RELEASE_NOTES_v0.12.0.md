@@ -82,7 +82,7 @@ The previously unimplemented `get_source_context` tool is now fully functional:
 
 **No migration required!** All changes are backward compatible. Your existing code continues to work, and new features are optional additions to responses.
 
-> **Note on relative paths:** The server uses a TRUE HANDS-OFF approach to path handling. Relative paths are passed unchanged to the debug adapter, which resolves them from its own working directory. The file existence check (added in this release) resolves relative paths from `process.cwd()` for validation only; the original path is always forwarded unmodified.
+> **Note on path handling:** In host mode, the `SimpleFileChecker` requires absolute paths for file existence checks; relative paths are rejected. In container mode, paths are resolved against the configured workspace root (`MCP_WORKSPACE_ROOT`). After validation, the server passes the resolved effective path (not the original raw path) to the session manager.
 
 ### 📖 Documentation
 

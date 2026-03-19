@@ -20,7 +20,6 @@ First, create a Python debug session:
 
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="create_debug_session",
   arguments={
     "language": "python",
@@ -37,7 +36,6 @@ Set breakpoints in your code before starting execution:
 
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="set_breakpoint",
   arguments={
     "sessionId": "your-session-id",
@@ -51,7 +49,6 @@ You can also set conditional breakpoints:
 
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="set_breakpoint",
   arguments={
     "sessionId": "your-session-id",
@@ -68,7 +65,6 @@ Start debugging your Python script:
 
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="start_debugging",
   arguments={
     "sessionId": "your-session-id",
@@ -85,7 +81,6 @@ When execution pauses at a breakpoint, you can:
 #### Step Over (execute current line and pause at next line)
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="step_over",
   arguments={
     "sessionId": "your-session-id"
@@ -96,7 +91,6 @@ use_mcp_tool(
 #### Step Into (go into functions called on current line)
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="step_into",
   arguments={
     "sessionId": "your-session-id"
@@ -107,7 +101,6 @@ use_mcp_tool(
 #### Step Out (run until exiting current function)
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="step_out",
   arguments={
     "sessionId": "your-session-id"
@@ -118,7 +111,6 @@ use_mcp_tool(
 #### Continue (run until next breakpoint)
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="continue_execution",
   arguments={
     "sessionId": "your-session-id"
@@ -129,7 +121,6 @@ use_mcp_tool(
 #### Pause (pause a running program)
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="pause_execution",
   arguments={
     "sessionId": "your-session-id"
@@ -144,7 +135,6 @@ When paused, you can examine the program's state:
 #### Get Local Variables
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="get_variables",
   arguments={
     "sessionId": "your-session-id",
@@ -156,7 +146,6 @@ use_mcp_tool(
 #### Get Global Variables
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="get_variables",
   arguments={
     "sessionId": "your-session-id",
@@ -168,7 +157,6 @@ use_mcp_tool(
 #### Evaluate Expressions
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="evaluate_expression",
   arguments={
     "sessionId": "your-session-id",
@@ -180,7 +168,6 @@ use_mcp_tool(
 #### View Stack Trace
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="get_stack_trace",
   arguments={
     "sessionId": "your-session-id"
@@ -191,7 +178,6 @@ use_mcp_tool(
 #### Get Source Context
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="get_source_context",
   arguments={
     "sessionId": "your-session-id",
@@ -208,7 +194,6 @@ When finished debugging, close the session:
 
 ```
 use_mcp_tool(
-  server_name="debug-mcp-server",
   tool_name="close_debug_session",
   arguments={
     "sessionId": "your-session-id"
@@ -222,4 +207,4 @@ use_mcp_tool(
 2. If the debugger doesn't stop at a breakpoint, ensure the file path is correct and absolute
 3. Use source context to see code around your current position
 4. The stack trace shows the call hierarchy that led to the current position
-5. Expression evaluation runs in the context of the current stack frame
+5. Expressions are evaluated against the current paused debug context (current frame when available), with the evaluation context defaulting to `'variables'`

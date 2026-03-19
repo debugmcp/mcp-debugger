@@ -258,14 +258,20 @@ export async function runCargoBuild(
       errorOutput += data.toString();
     });
     
+    let settled = false;
+
     buildProcess.on('error', (error) => {
+      if (settled) return;
+      settled = true;
       resolve({
         success: false,
         output: `Build failed: ${error.message}`
       });
     });
-    
+
     buildProcess.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
       const fullOutput = output + errorOutput;
       resolve({
         success: code === 0,

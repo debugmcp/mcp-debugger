@@ -164,12 +164,18 @@ export class GenericAdapterManager {
     try {
       if (!process.killed) {
         this.logger.info(`[AdapterManager] Sending SIGTERM to adapter process PID: ${process.pid}`);
+
+        // Track actual termination via exit event (process.killed only indicates signal was sent)
+        let exited = false;
+        const onExit = () => { exited = true; };
+        process.once('exit', onExit);
+
         process.kill('SIGTERM');
 
         // Wait a short period for graceful exit
         await new Promise(resolve => setTimeout(resolve, 300));
 
-        if (!process.killed) {
+        if (!exited) {
           this.logger.warn(`[AdapterManager] Adapter process PID: ${process.pid} did not exit after SIGTERM. Sending SIGKILL.`);
           try {
             process.kill('SIGKILL');

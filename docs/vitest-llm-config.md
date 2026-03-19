@@ -10,10 +10,7 @@ The default Vitest output can generate 500KB+ of console logs, which overwhelms 
 
 ### 1. vitest.config.ts
 
-Added console filtering and reporter configuration:
-- `onConsoleLog` callback filters noise patterns while preserving errors
-- `fileParallelism: false` ensures sequential output
-- Configurable reporters based on environment
+The root `vitest.config.ts` configures globals, environment, coverage, and resolve aliases. Console filtering and reporter settings are applied via npm scripts and utility wrappers rather than directly in the config file.
 
 ### 2. NPM Scripts
 
@@ -40,7 +37,7 @@ Added console filtering and reporter configuration:
 #### show-failures.js
 - Runs tests and shows only failures
 - Includes clean error messages
-- Cross-platform compatible
+- Uses `child_process.spawn` with shell execution
 
 #### test-results-analyzer.js
 - Analyzes existing JSON results
@@ -89,18 +86,14 @@ While preserving:
 ## Additional Enhancements
 
 ### Path Compatibility
-All utility scripts use separate arguments for file paths to handle spaces in directory names:
+Scripts that spawn Vitest (such as `test-summary.js` and `show-failures.js`) use separate arguments for file paths to handle spaces in directory names:
 ```javascript
 // Instead of: ['--outputFile=' + jsonFile]
 // We use: ['--outputFile', jsonFile]
 ```
 
-### Log Level Configuration
-The test setup file (`tests/vitest.setup.ts`) sets environment variables to reduce log noise:
-```javascript
-process.env.LOG_LEVEL = 'error';
-process.env.DEBUG_MCP_LOG_LEVEL = 'error';
-```
+### Console Silencing Override
+The test setup file (`tests/vitest.setup.ts`) deletes `process.env.CONSOLE_OUTPUT_SILENCED` so unit tests default to visible console output unless a test explicitly sets silencing.
 
 ## Results
 

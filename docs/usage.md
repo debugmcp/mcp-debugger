@@ -333,7 +333,7 @@ You can also evaluate arbitrary expressions in the current debug context:
 ### File Paths
 - The server uses centralized path resolution via `SimpleFileChecker` for existence validation only
 - In container mode, paths are resolved against the workspace root (default `/workspace/`) for the existence check, then the resolved path is passed to the debug adapter
-- In host mode, paths must be absolute -- relative paths are rejected early with a clear error message
+- In host mode, `SimpleFileChecker` rejects non-absolute resolved paths during preflight existence checks (relative paths may still pass through other code paths)
 - Use forward slashes (/) or escaped backslashes (\\\\) in JSON
 
 ## Common Errors and Solutions
@@ -360,7 +360,7 @@ You can also evaluate arbitrary expressions in the current debug context:
 
 All 19 tools are fully implemented, including:
 
-- **pause_execution**: Sends a DAP pause request to halt a running program. The session must be in the `running` state.
+- **pause_execution**: Sends a DAP pause request and returns immediately; paused state is updated asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
 - **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. Automatically uses the current frame when `frameId` is not specified. Expressions with side effects are allowed (can modify program state).
 
 ## Best Practices

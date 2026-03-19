@@ -25,7 +25,6 @@ Logged when an MCP tool is invoked.
     "line": 42,
     "condition": "x > 10"
   },
-  "timestamp": 1736180100123
 }
 ```
 
@@ -48,7 +47,6 @@ Logged when a tool completes successfully.
     "file": "path/to/file.py",
     "line": 42
   },
-  "timestamp": 1736180100456
 }
 ```
 
@@ -65,7 +63,6 @@ Logged when a tool encounters an error.
   "sessionId": "abc-123-def-456",
   "sessionName": "My Debug Session",
   "error": "Failed to connect to debugger",
-  "timestamp": 1736180100789
 }
 ```
 
@@ -90,7 +87,6 @@ Logged when the debugger state changes (paused, running, stopped).
     "function": "process_data"
   },
   "threadId": 1,
-  "timestamp": 1736180101123
 }
 ```
 
@@ -117,7 +113,6 @@ Logged for breakpoint lifecycle events.
   "file": "/workspace/src/main.py",
   "line": 42,
   "verified": true,
-  "timestamp": 1736180102123
 }
 ```
 
@@ -160,7 +155,6 @@ Logged when variables are retrieved.
       "value": "[1, 2, 3, 4, 5]"
     }
   ],
-  "timestamp": 1736180103123
 }
 ```
 
@@ -179,7 +173,6 @@ Logged when a new debug session is created.
   "sessionName": "My Debug Session",
   "language": "python",
   "executablePath": "/usr/bin/python3",
-  "timestamp": 1736180090123
 }
 ```
 
@@ -195,7 +188,6 @@ Logged when a debug session is terminated.
   "sessionId": "abc-123-def-456",
   "sessionName": "My Debug Session",
   "duration": 310000,
-  "timestamp": 1736180400123
 }
 ```
 
@@ -214,7 +206,6 @@ Logged to capture stdout/stderr from the debugged program.
   "sessionName": "My Debug Session",
   "category": "stdout",
   "output": "Processing item 42...\n",
-  "timestamp": 1736180104123
 }
 ```
 
@@ -265,10 +256,9 @@ To prevent excessively large log entries:
    }
    ```
 
-3. **Request/Response objects**: Exclude sensitive fields
-   - Remove `executablePath` absolute paths
-   - Exclude environment variables
-   - Sanitize file paths to relative when possible
+3. **Request/Response objects**: Targeted sanitization
+   - `adapterCommand.env` is automatically sanitized (replaced with a placeholder) via `sanitizePayloadForLogging`
+   - Other request/response fields are not generically scrubbed; sanitization is intentionally targeted, not a general deep traversal
 
 ## Parsing Guidelines for TUI
 
@@ -278,9 +268,9 @@ To prevent excessively large log entries:
    const stateChanges = logs.filter(log => log.message === 'debug:state');
    ```
 
-2. **Chronological Ordering**: Use `timestamp` (milliseconds) for precise ordering
+2. **Chronological Ordering**: Use the ISO 8601 `timestamp` string for ordering
    ```javascript
-   logs.sort((a, b) => a.timestamp - b.timestamp);
+   logs.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
    ```
 
 3. **Session Grouping**: Group logs by `sessionId` for multi-session support

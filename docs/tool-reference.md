@@ -35,11 +35,8 @@ Creates a new debugging session.
 
 **Parameters:**
 - `language` (string, required): The programming language to debug. Supported languages: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`.
-- `name` (string, optional): A descriptive name for the debug session. Defaults to `"{language}-debug-{timestamp}"` (e.g., `"python-debug-1710000000000"`).
+- `name` (string, optional): A descriptive name for the debug session. Defaults to `"session-<8 chars>"` (e.g., `"session-a4d1acc8"`).
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
-- `host` (string, optional): Host for remote debugging (triggers attach mode when `port` is also provided, default: `"localhost"`).
-- `port` (number, optional): Debug port for remote debugging (triggers attach mode when provided).
-- `timeout` (number, optional): Connection timeout in milliseconds for attach mode (default: 30000).
 
 **Response:**
 ```json
@@ -90,8 +87,11 @@ Lists all active debugging sessions.
 
 **Session States:**
 - `"created"`: Session created but not started
+- `"initializing"`: Debug session starting up
 - `"running"`: Actively debugging
 - `"paused"`: Paused at breakpoint or step
+- `"terminated"`: Session has ended
+- `"error"`: Session encountered an error
 
 ---
 
@@ -276,7 +276,7 @@ Continues execution until the next breakpoint or program end.
 
 ### pause_execution
 
-Pauses a running program. The debugger sends a DAP pause request to halt execution, then waits for the stopped event.
+Pauses a running program. The debugger sends a DAP pause request and returns immediately; the paused state is updated asynchronously when the stopped event arrives.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.

@@ -22,9 +22,9 @@ sequenceDiagram
     PM->>Parent: initialize + launch
     
     Note over Parent: js-debug starts Node.js
-    Parent-->>PM: startDebugging request
-    Note over PM: Creates child session
-    PM->>Child: Adopt with __pendingTargetId
+    Parent-->>PM: reverse startDebugging request
+    Note over PM: Begins child-session adoption flow
+    PM->>Child: Connect, initialize, configure, attach (keyed by __pendingTargetId)
     
     Note over Child: Node.js hits breakpoint
     Child-->>PM: stopped event
@@ -55,11 +55,13 @@ sequenceDiagram
 │  └────────┬────────┘                                        │
 │           │                                                 │
 │  ┌────────▼──────────────────────────── ┐                   │
-│  │    JavaScript Adapter                │                   │
+│  │    Proxy Layer                       │                   │
 │  │  ┌────────────────────────────┐      │                   │
 │  │  │  ChildSessionManager       │      │                   │
+│  │  │  (src/proxy/)              │      │                   │
 │  │  │  - Handles startDebugging  │      │                   │
 │  │  │  - Routes commands         │      │                   │
+│  │  │  - Event bridging          │      │                   │
 │  │  └────────────────────────────┘      │                   │
 │  └──────────────────────────────────────┘                   │
 │                                                             │
@@ -86,20 +88,22 @@ sequenceDiagram
 ## Key Components
 
 ### 1. ProxyManager
-- Manages IPC communication with the proxy worker process
-- The proxy worker then uses TCP to communicate with the js-debug adapter
-- Handles DAP protocol translation
-- Manages request/response tracking
+- Launches and manages the proxy process lifecycle
+- Routes IPC messages and DAP request/response correlation around the spawned proxy
+- Coordinates adapter launch synchronization
+- Manages request/response tracking with timeouts
 
 ### 2. ChildSessionManager
+Located in `src/proxy/child-session-manager.ts` (proxy layer, not JavaScript adapter internal).
 - Detects and adopts child sessions via `__pendingTargetId`
 - Routes commands between parent and child sessions
-- Maintains session state synchronization
+- Coordinates connection, DAP handshake, configuration replay, attach retry, and event bridging
+- Tracks active child session for command routing
 
 ### 3. Parent Session
 - Handles adapter initialization
 - Manages launch configuration
-- Creates child process for debugging
+- Triggers adapter-created child targets via reverse `startDebugging` requests, which the proxy/client layer then adopts
 
 ### 4. Child Session
 - Actual debugging target (Node.js process)
@@ -129,7 +133,7 @@ Client → SessionManager → ProxyManager → Child → Node.js
 
 ## Implementation Notes
 
-1. **Session Adoption**: The key innovation is detecting when js-debug creates a child session and adopting it seamlessly.
+1. **Session Adoption**: The key innovation is detecting when js-debug issues a reverse `startDebugging` request and then running a multi-step adoption flow: connect child client, initialize, configure, attach (with retries), post-attach initialization, and optional stop enforcement.
 
 2. **Command Routing**: Commands are intelligently routed based on session state:
    - Initialization commands → Parent session
@@ -141,7 +145,7 @@ Client → SessionManager → ProxyManager → Child → Node.js
 
 ## Future Enhancements
 
-- **Chrome Debugging**: Add `chrome-pwa` adapter support
+- **Browser Debugging**: Add Chrome/browser debugging support (the current adapter uses `pwa-node` for Node.js)
 - **Remote Debugging**: Support attaching to remote Node.js processes
 - **Workspace Support**: Handle multi-root workspaces
 - **Source Map Improvements**: Enhanced TypeScript source map resolution

@@ -94,7 +94,7 @@ When running in **stdio mode** (the default for MCP clients), the server suppres
 3. Look for messages about Python detection and debugpy availability
 4. Monitor DAP (Debug Adapter Protocol) communication logs
 
-When running in **SSE mode** (`node dist/index.js sse`), logs are printed to the terminal as usual.
+When running in **SSE mode** (`node dist/index.js sse`), console output is also silenced by the current entrypoint. Use `--log-file` for diagnostics in all transport modes.
 
 ## Next Steps
 

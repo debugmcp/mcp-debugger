@@ -56,7 +56,6 @@ public class JdiDapServer {
     // --- IO ---
     private volatile OutputStream clientOut;
     private volatile boolean running = true;
-    private volatile boolean configurationDone = false;
     private volatile boolean launchSuspended = false; // true if we launched with suspend=y
     private volatile boolean stopOnEntry = true; // whether to stop on entry in launch mode
 
@@ -642,7 +641,6 @@ public class JdiDapServer {
     }
 
     private void handleConfigurationDone(int reqSeq, Map<String, Object> args) {
-        configurationDone = true;
         sendResponse(reqSeq, "configurationDone", true, new HashMap<>());
 
         if (launchSuspended) {

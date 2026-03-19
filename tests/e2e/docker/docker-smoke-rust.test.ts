@@ -5,8 +5,6 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   buildDockerImage,
@@ -17,8 +15,6 @@ import {
 import { parseSdkToolResult } from '../smoke-test-utils.js';
 import { prepareRustExample } from '../rust-example-utils.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const DOCKER_RUST_ENABLED = process.env.DOCKER_ENABLE_RUST === 'true';
 
 if (!DOCKER_RUST_ENABLED) {

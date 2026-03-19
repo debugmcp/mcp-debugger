@@ -15,7 +15,7 @@ The JavaScript adapter was experiencing consistent `ECONNREFUSED` errors when at
 - **Result**: Connection attempts failed because IPv4 and IPv6 addresses are not interchangeable
 
 ### The Solution
-Use `'localhost'` instead of `'127.0.0.1'` when connecting to debug adapters that may prefer IPv6. In the current codebase, the general `adapterHost` in `src/session/session-manager-operations.ts` is `'127.0.0.1'`, but the js-debug child session configuration in `JsDebugAdapterPolicy` uses `'localhost'` where IPv6 compatibility matters.
+Use `'localhost'` instead of `'127.0.0.1'` when connecting to debug adapters that may prefer IPv6. The JavaScript adapter implementation defaults host to `'127.0.0.1'` (in `packages/adapter-javascript/src/javascript-debug-adapter.ts`), while `JsDebugAdapterPolicy` uses `'127.0.0.1'` for explicit attach requests in child sessions.
 
 **Key Files:**
 - `src/session/session-manager-operations.ts` - General adapter host configuration
@@ -45,9 +45,9 @@ The js-debug adapter **only supports TCP transport mode**. It does NOT support s
 ### Command Syntax
 js-debug uses **positional argument syntax** for TCP mode:
 ```typescript
-// Correct syntax for js-debug
-const args = [adapterPath, String(port)];
-// Example: ['vendor/js-debug/vsDebugServer.cjs', '5678']
+// Correct syntax for js-debug (port and host are positional)
+const args = [adapterPath, String(port), host];
+// Example: ['vendor/js-debug/vsDebugServer.cjs', '5678', '127.0.0.1']
 ```
 
 **NOT:**
@@ -81,9 +81,9 @@ buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     );
   }
 
-  // Use positional port argument
-  const args = [adapterPath, String(port)];
-  
+  // Use positional port and host arguments
+  const args = [adapterPath, String(port), host];
+
   return { command: nodePath, args, env };
 }
 ```
@@ -110,7 +110,7 @@ The ProxyManager validates the transport configuration:
 
 | Adapter | Transport | Syntax |
 |---------|-----------|--------|
-| **JavaScript (js-debug)** | TCP only | `[path, String(port)]` |
+| **JavaScript (js-debug)** | TCP only | `[path, String(port), host]` |
 | **Python (debugpy)** | TCP preferred | `['--listen', 'host:port']` |
 | **Rust (CodeLLDB)** | TCP | Adapter-specific |
 | **Go (Delve)** | TCP | `['dap', '--listen', 'host:port']` |
@@ -159,8 +159,8 @@ If experiencing connection failures:
 
 3. **Review adapter command:**
    ```typescript
-   // Should be positional argument
-   args: [adapterPath, String(port)]
+   // Should be positional arguments (port and host)
+   args: [adapterPath, String(port), host]
    ```
 
 4. **Check logs:**

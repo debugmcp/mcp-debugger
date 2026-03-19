@@ -106,28 +106,25 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
     expect(sessionId).toBeTruthy();
   });
 
-  it('should list Go adapter in available adapters', async () => {
+  it('should list Go adapter in supported languages', async () => {
     // This tests adapter-loader.ts integration
-    console.log('[Go Smoke Test] Listing available adapters...');
-    
-    // Note: This tool may not exist, but if it does, it should include 'go'
-    // The adapter-loader.listAvailableAdapters() should include Go
+    console.log('[Go Smoke Test] Listing supported languages...');
+
     try {
       const listResult = await mcpClient!.callTool({
-        name: 'list_adapters', // If this tool exists
+        name: 'list_supported_languages',
         arguments: {}
       });
-      
+
       const listResponse = parseSdkToolResult(listResult);
       if (listResponse.adapters) {
         const adapters = listResponse.adapters as Array<{ name: string }>;
         const goAdapter = adapters.find(a => a.name === 'go');
         expect(goAdapter).toBeDefined();
-        console.log('[Go Smoke Test] Go adapter found in available adapters');
+        console.log('[Go Smoke Test] Go adapter found in supported languages');
       }
     } catch (error) {
-      // Tool may not exist, that's okay - we're testing integration points
-      console.log('[Go Smoke Test] list_adapters tool not available (expected)');
+      console.log('[Go Smoke Test] list_supported_languages tool failed:', error);
     }
   });
 

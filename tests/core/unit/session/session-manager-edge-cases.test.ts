@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import { DebugLanguage } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 describe('SessionManager - Edge Cases and Error Scenarios', () => {

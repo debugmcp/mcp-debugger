@@ -161,8 +161,8 @@ Client Request → Server → SessionManager
 - `getLocalScopeName()` returns `['Locals']`
 
 **RustAdapterPolicy**:
-- `resolveExecutablePath()` checks `CARGO_PATH` env var
-- `validateExecutable()` runs `codelldb --version`
+- `resolveExecutablePath()` prefers an explicitly provided path, then `CARGO_PATH` env var, otherwise returns `undefined` to let downstream adapter discovery decide. Despite the name, this does not resolve the vendored CodeLLDB path; actual adapter spawn path selection happens in `getAdapterSpawnConfig()`.
+- `validateExecutable()` checks filesystem existence of the candidate executable, then spawns it with `--version` and verifies stdout contains `codelldb`
 - `getAdapterSpawnConfig()` resolves a vendored CodeLLDB binary based on platform/arch
 - `getLocalScopeName()` returns `['Local', 'Locals']`
 
@@ -177,7 +177,7 @@ Client Request → Server → SessionManager
 - `resolveExecutablePath()` checks `JAVA_HOME` env var, constructs `$JAVA_HOME/bin/java`
 - `isNonFileSourceIdentifier()` detects Java FQCNs (no path separators, does not end with `.java`) so the server skips file existence checks
 - `getInitializationBehavior()` returns `{ sendLaunchBeforeConfig: true }` because JdiDapServer sends `'initialized'` during initialize
-- `filterStackFrames()` removes JDK internal frames (`java.*`, `javax.*`, `sun.*`)
+- `filterStackFrames()` removes JDK internal frames (`java.*`, `javax.*`, `sun.*`) and frames with file paths containing `/jdk/` or `/rt.jar/`
 
 **DotnetAdapterPolicy**:
 - `resolveExecutablePath()` checks `NETCOREDBG_PATH` env var, defaults to `'netcoredbg'`
@@ -186,7 +186,7 @@ Client Request → Server → SessionManager
 - `extractLocalVariables()` filters out C# compiler-generated variables (`<>`, `CS$<>`, `$VB$`, `<>t__`, `<>s__`) unless `includeSpecial` is true
 - `getLocalScopeName()` returns `['Locals']`
 - `filterStackFrames()` removes frames with no source file and `System.*`/`Microsoft.*` frames
-- Uses TCP-to-stdio bridge on all platforms (works around a netcoredbg server mode bug)
+- Supports TCP-to-stdio bridge launches when upstream provides `adapterCommand`; falls back to direct `netcoredbg --interpreter=vscode --server=<port>` mode otherwise. The policy itself does not create the bridge command; it trusts upstream code (`DotnetDebugAdapter.buildAdapterCommand`) to supply `adapterCommand` when bridge mode is required.
 
 **MockAdapterPolicy**:
 - `resolveExecutablePath()` returns `providedPath || 'mock'`

@@ -5,7 +5,6 @@
  * complex initialization to allow synchronous, deterministic testing
  */
 
-import { EventEmitter } from 'events';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { IFileSystem, ILogger, IProxyProcessLauncher } from '@debugmcp/shared';

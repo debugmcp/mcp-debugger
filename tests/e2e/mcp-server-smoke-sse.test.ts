@@ -185,7 +185,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
             }
           }, TEST_TIMEOUT);
           
-          // Listen for server output to confirm it started
+          // Capture server output for diagnostics
           const handleStdout = (data: Buffer) => {
             const output = data.toString();
             stdout += output;

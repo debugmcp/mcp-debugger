@@ -8,7 +8,7 @@ Python debug adapter for MCP Debugger using debugpy. This package provides:
   - getPythonVersion
   - setDefaultCommandFinder (testing)
   - CommandNotFoundError (error type)
-  - CommandFinder (interface)
+  - CommandFinder (TypeScript type export only, not a runtime value)
 
 ## Install (workspace)
 This package is intended to be used within the monorepo via pnpm workspaces.

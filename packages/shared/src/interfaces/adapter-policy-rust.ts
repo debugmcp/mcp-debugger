@@ -296,7 +296,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
     
     let platformDir = '';
     if (platform === 'win32') {
-      platformDir = 'win32-x64';
+      platformDir = arch === 'arm64' ? 'win32-arm64' : 'win32-x64';
     } else if (platform === 'darwin') {
       platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
     } else if (platform === 'linux') {

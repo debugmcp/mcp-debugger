@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Java backend** – replaced KDA (kotlin-debug-adapter) and stdio-tcp-bridge with a single JDI bridge (`JdiDapServer.java`) using `com.sun.jdi.*` directly; zero external dependencies, compiles on first use
-- **Java minimum JDK** – bumped from JDK 11+ to JDK 21+ to match `--release 21` compilation target
+- **Java minimum JDK** – recommended JDK 21+ to match `--release 21` bridge compilation target; the adapter warns (but does not error) when Java is below 21, and the runtime adapter validates Java 11+ as the minimum
 - Removed dead `sendConfigDoneWithAttach`/`sendConfigDoneWithLaunch` code paths
 
 ### Fixed
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Java frame ID collisions** – replaced arithmetic encoding (`threadId * 100000 + frameIndex`) with lookup-table approach
 - **Java breakpoint IDs** – added unique, monotonically increasing breakpoint IDs per DAP spec
 - **Java thread safety** – used `ConcurrentHashMap` and `AtomicInteger` for shared state; added `synchronized` blocks for frame cache access
-- **Java short-circuit evaluation** – `&&` and `||` now properly short-circuit
+- **Java boolean operators** – `&&` and `||` parsing now consumes tokens correctly; note that the RHS is still evaluated for JDI side effects before deciding the result value
 - **Java thread discovery** – discover JVM threads via DAP threads request instead of hardcoding threadId=1
 - **Java variable access** – document and enforce `javac -g` requirement for LocalVariableTable (JDI needs it for local variable inspection)
 - Block EventSource phantom reconnection in SSE transport

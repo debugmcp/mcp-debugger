@@ -1,6 +1,6 @@
 /**
- * DAP Proxy Core - Pure business logic without side effects
- * 
+ * DAP Proxy Core - Proxy runner with process lifecycle and communication management
+ *
  * This module contains the core proxy runner functionality that can be
  * instantiated and controlled programmatically without auto-execution.
  */
@@ -35,8 +35,8 @@ export interface ProxyRunnerOptions {
 }
 
 /**
- * Core proxy runner that encapsulates all proxy logic
- * without auto-execution or environment detection
+ * Core proxy runner that encapsulates proxy logic
+ * with configurable communication channels
  */
 export class ProxyRunner {
   private worker: DapProxyWorker;

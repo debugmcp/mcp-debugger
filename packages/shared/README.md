@@ -19,9 +19,11 @@ npm install @debugmcp/shared
 #### Debug Adapter Interfaces
 - `IDebugAdapter` - Core interface for all debug adapter implementations
 - `AdapterState` - Enumeration of adapter states
-- `AdapterCapabilities` - DAP capabilities structure
 - `AdapterConfig` - Configuration for adapter instances
-- `AdapterCommand` - Command structure for launching adapters
+
+#### Debug Adapter Types
+- `AdapterCapabilities` - Shared capabilities type/contract mirroring DAP capability flags
+- `AdapterCommand` - Launch/config type for adapter commands
 
 #### External Dependencies
 - `IFileSystem` - File system operations interface
@@ -71,13 +73,13 @@ npm install @debugmcp/shared
 
 ### Base Classes
 
-- `BaseAdapterFactory` - Abstract base class for adapter factories
+- `AdapterFactory` - Factory base class exported from `src/factories/adapter-factory.ts` (note: `BaseAdapterFactory` exists in `src/interfaces/adapter-registry.ts` as an optional abstract convenience implementation but is not re-exported from the package root)
 
 ### Enumerations
 
 - `DebugLanguage` - Supported debug languages (Python, JavaScript, Rust, Go, Java, Dotnet, Mock)
 - `AdapterState` - Adapter lifecycle states
-- `SessionState` - Session states (legacy, deprecated — use `SessionLifecycleState` + `ExecutionState` dual-state model)
+- `SessionState` - Session states (legacy compatibility; prefer `SessionLifecycleState` + `ExecutionState` for new code)
 - `AdapterErrorCode` - Error codes for adapter operations
 
 ## Usage Examples
@@ -112,14 +114,14 @@ export class MyDebugAdapter implements IDebugAdapter {
 
 ```typescript
 import {
-  BaseAdapterFactory,
+  AdapterFactory,
   IDebugAdapter,
   AdapterDependencies,
   AdapterMetadata,
   DebugLanguage
 } from '@debugmcp/shared';
 
-export class MyAdapterFactory extends BaseAdapterFactory {
+export class MyAdapterFactory extends AdapterFactory {
   createAdapter(dependencies: AdapterDependencies): IDebugAdapter {
     return new MyDebugAdapter(dependencies);
   }
@@ -138,23 +140,30 @@ export class MyAdapterFactory extends BaseAdapterFactory {
 ### Using Session Types
 
 ```typescript
-import { 
-  SessionState, 
+import {
+  SessionLifecycleState,
+  ExecutionState,
   DebugSessionInfo,
-  Breakpoint 
+  Breakpoint
 } from '@debugmcp/shared';
 
-function handleSessionState(session: DebugSessionInfo) {
-  switch (session.state) {
-    case SessionState.RUNNING:
-      console.log('Session is running');
+// Preferred: use the dual-state model
+function handleSessionLifecycle(lifecycle: SessionLifecycleState) {
+  switch (lifecycle) {
+    case SessionLifecycleState.CREATED:
+      console.log('Session created');
       break;
-    case SessionState.PAUSED:
-      console.log('Session is paused');
+    case SessionLifecycleState.ACTIVE:
+      console.log('Session active');
       break;
-    // ... handle other states
+    case SessionLifecycleState.TERMINATED:
+      console.log('Session terminated');
+      break;
   }
 }
+
+// SessionState is available for backward compatibility
+import { SessionState } from '@debugmcp/shared';
 ```
 
 ## Development

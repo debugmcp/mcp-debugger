@@ -90,7 +90,7 @@ Run the test suite to ensure everything is set up correctly:
 npm test
 ```
 
-All tests should pass. If any fail, check the error messages for missing dependencies.
+Most tests should pass. Some environment-specific or known-regression tests (e.g., JavaScript Docker smoke tests) may be expected to fail; see `scripts/test-docker-local.sh` for details. If unexpected failures occur, check the error messages for missing dependencies.
 
 ## Development Workflow
 

@@ -10,7 +10,7 @@ Goals:
 
 ## Modular by default
 
-The MCP Debugger ships without auto-installing optional adapters. Only required adapters (mock, python) are part of the default build. JavaScript is available as an optional adapter in a separate package:
+The MCP Debugger ships without auto-installing optional adapters. The adapter loader has a hardcoded known-adapter registry for all seven languages (mock, python, javascript, rust, go, java, dotnet), but not all are built by default. JavaScript is available as an optional adapter in a separate package:
 
 - Package name: `@debugmcp/adapter-javascript`
 - Factory export: `JavascriptAdapterFactory`
@@ -48,7 +48,7 @@ At runtime, the adapter loader attempts to resolve and dynamically import the pa
 
 Additionally, the dev container bootstrapping path includes:
 - `src/container/dependencies.ts` entries to `tryRegister('javascript', 'JavascriptAdapterFactory')`
-- This ensures local monorepo builds resolve to `node_modules/@debugmcp/adapter-javascript/dist/index.js`
+- This ensures local monorepo builds resolve via relative import `../node_modules/@debugmcp/adapter-javascript/dist/index.js`
 
 ## Shared language metadata
 
@@ -58,7 +58,7 @@ The shared model defines:
 - Default executable: `node` (resolved via utility logic in the adapter)
 
 Unit tests were updated to reflect the addition:
-- `tests/core/unit/session/models.test.ts` now expects five languages (python, javascript, rust, go, mock) and verifies inclusion of `javascript`.
+- `tests/core/unit/session/models.test.ts` now expects seven languages (python, javascript, rust, go, java, dotnet, mock) and verifies inclusion of `javascript`.
 
 ## Verification steps
 
@@ -81,7 +81,7 @@ Unit tests were updated to reflect the addition:
 
 js-debug requires a short handoff period before clients can issue requests such as `threads` or `continue`. Previously this logic lived inside `ProxyManager`, which meant the core layer tracked a `jsDebugLaunchPending` flag, timers, and DAP event heuristics. The refactor introduces a shared hook so that the JavaScript adapter owns the behavior:
 
-- The adapter implements `createLaunchBarrier('launch')`, returning a `JsDebugLaunchBarrier` (`packages/adapter-javascript/src/utils/js-debug-launch-barrier.ts`).
+- The adapter implements `createLaunchBarrier(command, args?)`, returning a `JsDebugLaunchBarrier` when the command is `'launch'` (`packages/adapter-javascript/src/utils/js-debug-launch-barrier.ts`).
 - `ProxyManager` delegates coordination to the barrier. It forwards proxy status updates, DAP events, and exit notifications without embedding language-specific branches.
 - The barrier resolves once js-debug emits a `stopped` event or the transport connection is confirmed (`adapter_connected` after a short delay); it rejects if the proxy exits prematurely.
 - Tests cover both sides: the adapter suite asserts the barrier’s behavior, and `tests/unit/proxy/proxy-manager-message-handling.test.ts` verifies that launch requests are treated as fire-and-forget when a barrier is returned.

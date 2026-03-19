@@ -249,7 +249,7 @@ Delve supports several launch modes:
 Go programs use goroutines for concurrency. Delve natively handles goroutines, and the MCP tools reflect this:
 
 - Stack traces show the goroutine context for each frame
-- Runtime/system goroutine frames are filtered out by default (use `includeInternals: true` in `get_stack_trace` to see them)
+- Internal runtime and testing frames (paths containing `/runtime/` or `/testing/`) are filtered out by default (use `includeInternals: true` in `get_stack_trace` to see them)
 - Variable inspection works within the current goroutine's stack frame
 
 Note: The MCP tools do not expose goroutine-specific commands (listing goroutines, switching between goroutines, or setting goroutine-scoped breakpoints). These are Delve-internal capabilities not surfaced through the MCP tool interface.
@@ -262,7 +262,7 @@ Delve can break on Go panics and fatal errors at the DAP level. However, the MCP
 
 1. **Always build with debug flags**: Use `-gcflags="all=-N -l"` to disable optimizations
 2. **Absolute paths**: Use absolute paths for file references in breakpoints
-3. **Goroutine filtering**: System goroutines are filtered by default for cleaner stack traces
+3. **Internal frame filtering**: Frames from Go runtime/testing paths are filtered by default for cleaner stack traces
 4. **Stop on entry**: Delve has a quirk with "unknown goroutine 1" - the adapter defaults `stopOnEntry=false` to avoid this
 5. **Variable inspection**: Pointers are automatically dereferenced, slices show length/capacity, maps show key-value pairs
 6. **Test debugging**: Use `mode: "test"` to debug Go test functions

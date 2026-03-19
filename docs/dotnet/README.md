@@ -49,9 +49,11 @@ export NETCOREDBG_PATH=/path/to/netcoredbg
 Or add the netcoredbg directory to your PATH.
 
 **Discovery order**: The adapter searches for netcoredbg in this order:
-1. `NETCOREDBG_PATH` environment variable
-2. `which netcoredbg` (searches PATH)
-3. Common install locations (platform-specific)
+1. `NETCOREDBG_X86_PATH` environment variable (for x86 attach targets)
+2. `NETCOREDBG_PATH` environment variable
+3. Caller-provided preferred path (if any)
+4. `which netcoredbg` (searches PATH)
+5. Hardcoded platform-specific candidate paths
 
 ### PDB Symbol Requirements
 
@@ -245,12 +247,12 @@ dotnet build
 
 1. Create debug session with `language: "dotnet"`
 2. Set breakpoint at line 9
-3. Start debugging with `program: "bin/Debug/net8.0/dotnet.dll"`
+3. Start debugging with `program: "bin/Debug/net8.0/HelloWorld.dll"`
 4. When stopped at breakpoint, inspect variables: `a=10`, `b=20`
 
 ## Docker Support
 
-.NET debugging is **disabled in Docker** (`DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet`). Host-compiled Windows .NET binaries (with Windows PDB symbols) cannot be debugged inside a Linux container. The container would need the program recompiled for Linux with Portable PDB symbols, which isn't practical for the typical workflow.
+.NET debugging is **disabled in Docker** (`MCP_DISABLE_LANGUAGES=rust,go,dotnet`). Host-compiled Windows .NET binaries (with Windows PDB symbols) cannot be debugged inside a Linux container. The container would need the program recompiled for Linux with Portable PDB symbols, which isn't practical for the typical workflow.
 
 ## Troubleshooting
 

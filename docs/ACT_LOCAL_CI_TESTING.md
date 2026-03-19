@@ -10,12 +10,13 @@ Act (https://github.com/nektos/act) allows you to run GitHub Actions locally, wh
 
 ## Installation
 
-Act has been installed on this system:
-```bash
-# Version installed
-act --version  # 0.2.81
+Act must be installed on your system. The project helper script (`scripts/act-test.sh`) relies on an external `act` CLI being available without pinning a specific version.
 
-# Installation method used
+```bash
+# Check installed version
+act --version
+
+# Example installation (see Act docs for latest methods)
 curl -s https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash
 sudo mv ./bin/act /usr/local/bin/
 ```

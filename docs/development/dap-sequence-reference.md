@@ -64,11 +64,13 @@ When describing debugger state, common terms are used across many tools, even if
 
 There isn’t an official enforced naming convention for these states in all debuggers’ code, but the concepts are consistent. For example, a debugger might implement an internal state machine with enum values like `STATE_RUNNING`, `STATE_PAUSED`, `STATE_TERMINATED`. The DAP events map onto these concepts: a `stopped` event signals the transition to *paused*, a `continued` event or a continue response signals *running*, and a `terminated` event signals *terminated*.
 
-**Note on mcp-debugger’s state model:** The project uses a dual-state approach:
-* **SessionLifecycleState**: Tracks the session’s existence — `created` → `active` → `terminated`
-* **ExecutionState**: Tracks the debuggee’s fine-grained execution — `initializing` → `running` ⇄ `paused` → `terminated` | `error`
+**Note on mcp-debugger’s state model:** The project uses `SessionState` as the primary driving state model (`CREATED` → `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `STOPPED` | `ERROR`), stored directly on each `ManagedSession` and checked throughout the codebase.
 
-A legacy `SessionState` enum exists for backward compatibility but the dual-state model is canonical.
+A dual-state overlay is derived from `SessionState` via `mapLegacyState()` in `_updateSessionState()`:
+* **SessionLifecycleState**: `CREATED` → `ACTIVE` → `TERMINATED` (coarse lifecycle)
+* **ExecutionState**: `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `ERROR` (fine-grained execution)
+
+These derived `sessionLifecycle` and `executionState` fields are kept in sync as a secondary representation, but `SessionState` is the actively used model.
 
 **All debuggers distinguish**:
 
@@ -117,6 +119,8 @@ This sequence (paused → continued → exited → terminated) is the typical fl
 * **Program runs to end without any breakpoints:** In this case, there would be no `stopped` event at all. The sequence would simply be: the program runs → exits → adapter sends `exited` → adapter sends `terminated`. From the user perspective, the debug session just ends when the program finishes (perhaps the console closes or a message like "Process exited with code 0" is shown, then the session terminates).
 
 * **User stops the program manually:** If the user presses a "Stop" button, the client might send a `terminate` request or `disconnect` request to the adapter. The adapter will then end the program (e.g., kill the process if it launched it, or detach if attached). The adapter still should send a `terminated` event to signal the session is ending (even if the stop was user-initiated). If the program was killed, an `exited` event may or may not be sent depending on if the adapter was able to capture an exit code (sometimes a forced kill might not have a meaningful exit code, but typically it would be treated as exit code 0 or a specific code). The sequence in that scenario: (User stop request) → adapter possibly sends `terminated` immediately (and kills process) → maybe an `exited` if there is an exit code to report. The key is that `terminated` is always emitted once debugging stops.
+
+  **Note on mcp-debugger event handling:** In this project there are two layers of event processing. Raw DAP events (`terminated`, `exited`, `continued`) are forwarded as corresponding local events with empty args via `handleDapEvent()`. Separately, proxy status messages (`adapter_exited`, `dap_connection_closed`, `terminated`) are normalized by `handleStatusMessage()` into a unified local `exit` event with `[code || 1, signal || undefined]`. This means a proxy status `terminated` becomes an `exit` event, while a raw DAP `terminated` event remains a `terminated` event.
 
 * **Exception causes program to end:** If the debuggee crashes or encounters an unhandled exception that terminates it, the adapter might first send a `stopped` event with reason `exception` (if it breaks on the exception). If the user doesn’t intervene and the program truly crashes/exits, the adapter will then send the `exited` and `terminated`. In some configurations, adapters are set to break on all uncaught exceptions – giving a chance to inspect – which would be a `stopped` event, and if the user then continues, the program may immediately exit, leading to the exit/terminated events as usual.
 

@@ -83,7 +83,7 @@ describe('Auto Mock Generation', () => {
       expect(mock.hasFeature()).toBe(false);
     });
 
-    it('should handle getter methods with undefined default', () => {
+    it('should handle methods returning objects with undefined default', () => {
       const mock = createMockFromInterface(TestClass);
 
       expect(mock.getConfig()).toBeUndefined();

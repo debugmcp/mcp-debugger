@@ -29,25 +29,18 @@ export abstract class SessionManagerData extends SessionManagerCore {
    */
   protected selectPolicy(language: string | DebugLanguage): AdapterPolicy {
     switch (language) {
-      case 'python':
       case DebugLanguage.PYTHON:
         return PythonAdapterPolicy;
-      case 'javascript':
       case DebugLanguage.JAVASCRIPT:
         return JsDebugAdapterPolicy;
-      case 'rust':
       case DebugLanguage.RUST:
         return RustAdapterPolicy;
-      case 'go':
       case DebugLanguage.GO:
         return GoAdapterPolicy;
-      case 'dotnet':
       case DebugLanguage.DOTNET:
         return DotnetAdapterPolicy;
-      case 'java':
       case DebugLanguage.JAVA:
         return JavaAdapterPolicy;
-      case 'mock':
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
       default:

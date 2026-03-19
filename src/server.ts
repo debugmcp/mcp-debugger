@@ -35,7 +35,7 @@ import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
 import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
 
-const DEFAULT_LANGUAGES = Object.freeze(['python', 'mock'] as const);
+const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
 
 function getDefaultLanguages(): string[] {
   return [...DEFAULT_LANGUAGES];
@@ -188,7 +188,7 @@ export class DebugMcpServer {
         const langs = await maybeList.call(adapterRegistry);
         if (Array.isArray(langs) && langs.length > 0) {
           const normalized =
-            process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, 'python') : langs;
+            process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, DebugLanguage.PYTHON) : langs;
           return filter(normalized);
         }
       } catch (e) {
@@ -200,13 +200,13 @@ export class DebugMcpServer {
     if (langs.length > 0) {
       // In container runtime, ensure python is advertised even if not yet registered (preload may be async)
       if (process.env.MCP_CONTAINER === 'true') {
-        return filter(ensureLanguage(langs, 'python'));
+        return filter(ensureLanguage(langs, DebugLanguage.PYTHON));
       }
       return filter(langs);
     }
     // Final fallback to known defaults for UX (ensure python listed in container)
     if (process.env.MCP_CONTAINER === 'true') {
-      return filter(ensureLanguage(getDefaultLanguages(), 'python'));
+      return filter(ensureLanguage(getDefaultLanguages(), DebugLanguage.PYTHON));
     }
     return filter(getDefaultLanguages());
   }
@@ -218,24 +218,24 @@ export class DebugMcpServer {
     // Map to metadata - in future, this info can come directly from adapter registry
     return languages.map((lang: string) => {
       switch (lang) {
-        case 'python':
+        case DebugLanguage.PYTHON:
           return {
-            id: 'python',
+            id: DebugLanguage.PYTHON,
             displayName: 'Python',
             version: '1.0.0',
             requiresExecutable: true,
             defaultExecutable: 'python'
           };
-        case 'mock':
+        case DebugLanguage.MOCK:
           return {
-            id: 'mock',
+            id: DebugLanguage.MOCK,
             displayName: 'Mock',
             version: '1.0.0',
             requiresExecutable: false
           };
-        case 'javascript':
+        case DebugLanguage.JAVASCRIPT:
           return {
-            id: 'javascript',
+            id: DebugLanguage.JAVASCRIPT,
             displayName: 'JavaScript/TypeScript',
             version: '1.0.0',
             requiresExecutable: true,
@@ -272,7 +272,7 @@ export class DebugMcpServer {
     const supported = await this.getSupportedLanguagesAsync();
     const requested = params.language as unknown as string;
     const isContainer = process.env.MCP_CONTAINER === 'true';
-    const allowInContainer = isContainer && requested === 'python'; // ensure python allowed in container
+    const allowInContainer = isContainer && requested === DebugLanguage.PYTHON; // ensure python allowed in container
     if (isLanguageDisabled(requested)) {
       throw new McpError(
         McpErrorCode.InvalidParams,
@@ -614,10 +614,10 @@ export class DebugMcpServer {
             case 'create_debug_session': {
               // Ensure requested language is among dynamically supported ones
               const supported = await this.getSupportedLanguagesAsync();
-              const lang = (args.language || 'python') as DebugLanguage;
+              const lang = (args.language || DebugLanguage.PYTHON) as DebugLanguage;
               const requested = lang as unknown as string;
               const isContainer = process.env.MCP_CONTAINER === 'true';
-              const allowInContainer = isContainer && requested === 'python';
+              const allowInContainer = isContainer && requested === DebugLanguage.PYTHON;
               if (!allowInContainer && !supported.includes(lang)) {
                 throw new UnsupportedLanguageError(lang, supported);
               }
@@ -928,15 +928,13 @@ export class DebugMcpServer {
               }
               
               const sessionName = this.getSessionName(args.sessionId);
-              const sessionCreatedAt = Date.now(); // In real implementation, would track creation time
               const closed = await this.closeDebugSession(args.sessionId);
-              
+
               if (closed) {
                 // Log session closure
                 this.logger.info('session:closed', {
                   sessionId: args.sessionId,
                   sessionName: sessionName,
-                  duration: Date.now() - sessionCreatedAt,
                   timestamp: Date.now()
                 });
               }
@@ -1128,7 +1126,7 @@ export class DebugMcpServer {
               break;
             }
             case 'evaluate_expression': {
-              result = await this.handleEvaluateExpression(args as { sessionId: string; expression: string });
+              result = await this.handleEvaluateExpression(args as { sessionId: string; expression: string; frameId?: number });
               break;
             }
             case 'get_source_context': {

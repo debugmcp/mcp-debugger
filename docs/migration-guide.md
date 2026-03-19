@@ -19,8 +19,7 @@ This release introduces dynamic discovery and loading of language adapters at ru
 - Adapters are treated as optional dependencies in consumers
 - The core discovers and loads adapters on demand:
   - Package naming: `@debugmcp/adapter-<language>`
-  - Factory class export: `<CapitalizedLanguage>AdapterFactory`
-  - Default export (adapter package): `{ name: '<language>', factory: <Language>AdapterFactory }`
+  - Factory class export: `<CapitalizedLanguage>AdapterFactory` (named export; the loader looks up this class name via convention)
 
 ### 🔧 User Guidance
 - Install core only:
@@ -130,7 +129,7 @@ The mcp-debugger has undergone a major architectural change: the transformation 
 }
 ```
 
-**⚠️ Breaking Change**: `pythonPath` is no longer supported. You must use `executablePath`.
+**⚠️ Breaking Change**: `pythonPath` is no longer the primary parameter. Use `executablePath` instead. The server's `ToolArguments` still includes legacy parameters for normalization, but `executablePath` is the preferred/current parameter.
 
 #### Language Support
 
@@ -221,8 +220,8 @@ If you've built tools on top of mcp-debugger:
 
 2. **Handle multiple languages**:
    ```typescript
-   // Check supported languages
-   const languages = sessionManager.getSupportedLanguages();
+   // Check supported languages (via MCP tool call)
+   const languages = await mcp.call('list_supported_languages');
    
    // Validate before creating session
    if (!languages.includes(userLanguage)) {
@@ -236,9 +235,9 @@ If you want to add support for a new language:
 
 1. **Create an adapter** following the [Adapter Development Guide](./architecture/adapter-development-guide.md)
 
-2. **Register your adapter**: Adapters are now dynamically loaded by convention. Place your adapter package at `packages/adapter-<language>/` and export a factory class named `<Language>AdapterFactory`. The `AdapterLoader` will discover and register it automatically at runtime.
+2. **Register your adapter**: Adapters are now dynamically loaded by convention. Place your adapter package at `packages/adapter-<language>/` and export a named factory class named `<Language>AdapterFactory`. The `AdapterLoader` attempts to import `@debugmcp/adapter-<language>` and falls back to `node_modules/` and `packages/` directory paths.
 
-3. **Current language enum** (in `packages/shared/src/models/index.ts`):
+3. **Current language enum** (in `@debugmcp/shared` models):
    ```typescript
    enum DebugLanguage {
      PYTHON = 'python',
@@ -286,14 +285,15 @@ interface DebugSession {
 
 **New**:
 ```typescript
-interface SessionInfo {
-  sessionId: string;
+// Sessions are managed internally as ManagedSession objects;
+// the public-facing type is DebugSessionInfo from @debugmcp/shared
+interface DebugSessionInfo {
+  id: string;
   language: DebugLanguage;
   name: string;
   state: SessionState;
-  config: SessionConfig;
   createdAt: Date;
-  proxyPort?: number;
+  updatedAt: Date;
 }
 ```
 
@@ -308,7 +308,8 @@ sessionManager.on('pythonStarted', handler);
 
 **New**:
 ```typescript
-sessionManager.on('adapterConnected', handler);
+// Event names are adapter-lifecycle based (e.g., 'stopped', 'terminated', 'adapter-configured')
+sessionManager.on('stopped', handler);
 ```
 
 ## Removed Features

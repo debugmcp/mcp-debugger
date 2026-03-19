@@ -8,7 +8,7 @@ The MCP Debugger uses a typed error system to provide consistent, maintainable, 
 
 ### Typed Error Classes
 
-All errors extend from the MCP SDK's `McpError` class and are defined in `src/errors/debug-errors.ts`:
+Typed debugger-domain errors extend from the MCP SDK's `McpError` class and are defined in `src/errors/debug-errors.ts`. Note that not all failures in the stack are represented as these typed errors; some paths return structured `DebugResult` failure objects or normalize generic errors:
 
 ```typescript
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
@@ -116,7 +116,8 @@ await expect(operations.continue('invalid'))
 // Or check specific properties
 await expect(operations.continue('invalid'))
   .rejects.toMatchObject({
-    code: McpErrorCode.InvalidParams,
+    code: ErrorCode.InvalidParams,  // import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
+                                     // or import { McpErrorCode } from 'src/errors/debug-errors' for the local alias
     sessionId: 'invalid'
   });
 ```
@@ -215,10 +216,12 @@ async getVariables(sessionId: string, ref: number): Promise<Variable[]> {
 Control operations throw errors for clear failure signaling:
 
 ```typescript
-// continue, stepOver, stepInto, stepOut throw when:
-// - Session not found
-// - Session terminated
-// - No active proxy
+// continue, stepOver, stepInto, stepOut throw typed errors for infrastructure failures:
+// - Session not found → SessionNotFoundError
+// - Session terminated → SessionTerminatedError
+// - No active proxy → ProxyNotRunningError
+// For user-action preconditions (e.g., not paused, missing thread id),
+// they return a failed DebugResult rather than throwing.
 
 async continue(sessionId: string): Promise<DebugResult> {
   const session = this.getSession(sessionId);
@@ -274,7 +277,7 @@ If you're updating existing code to use typed errors:
 
 1. **Use typed errors** for all new error cases
 2. **Test error types**, not error messages
-3. **Use fake timers** for all timeout tests
+3. **Use fake timers** for unit tests covering timer-driven logic (integration tests may use real but shortened timeouts)
 4. **Separate unit tests** (mocked, fast) from integration tests (real, slower)
 5. **Return empty data** for non-critical data retrieval failures
 6. **Throw errors** for control flow operations that must succeed

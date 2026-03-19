@@ -27,7 +27,7 @@ High-level modules depend on abstractions, not concrete implementations.
 
 **Location**: `src/session/session-manager-core.ts`
 
-> **Note**: `SessionManager` is a thin facade class (in `session-manager.ts`) that extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`.
+> **Note**: `SessionManager` (in `session-manager.ts`) extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`. While `SessionManager` is mostly a facade, it currently overrides `handleAutoContinue()` with a placeholder implementation that throws at runtime.
 
 ```typescript
 // Define dependencies interface
@@ -200,8 +200,12 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   const proxyManagerFactory = new ProxyManagerFactory(proxyProcessLauncher, fileSystem, logger);
   const sessionStoreFactory = new SessionStoreFactory();
 
-  // Adapter registry (with dynamic loading enabled)
-  const adapterRegistry = new AdapterRegistry({ validateOnRegister: false, ... });
+  // Adapter registry (with dynamic loading enabled, overrides forbidden)
+  const adapterRegistry = new AdapterRegistry({
+    validateOnRegister: false,
+    allowOverride: false,
+    enableDynamicLoading: true
+  });
 
   return {
     fileSystem, processManager, networkManager, logger, environment,

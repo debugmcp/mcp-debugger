@@ -58,7 +58,7 @@ cache.set(language, factory);
   - Registers the loaded factory and immediately uses it
 - Provides:
   - `getSupportedLanguages()` for currently registered factories
-  - `listLanguages()` for dynamically installed adapter languages
+  - `listLanguages()` returns registered languages plus loader-known/discoverable adapter names when dynamic loading is enabled (not just installed adapters)
   - `listAvailableAdapters()` for installed metadata (name, package, description)
 - Enforces instance limits and auto-dispose timers
 
@@ -143,7 +143,7 @@ sequenceDiagram
   - AdapterRegistry keeps a map of active adapters per language and can auto-dispose idle adapters
 - Preloading vs Lazy:
   - Prefer lazy for most cases to keep cold-start minimal
-  - You can preload specific adapters by calling `listLanguages()` early (to prime the loader) or constructing sessions on startup if your environment benefits from it
+  - Calling `listLanguages()` early probes discoverability/availability, but actual registry registration and adapter initialization still occur on `create(...)` or explicit `loadAdapter(...)` paths. To truly preload, construct sessions or call `loadAdapter()` on startup if your environment benefits from it.
 
 ## Container Considerations
 
@@ -167,7 +167,7 @@ sequenceDiagram
   - Fix: `npm install @debugmcp/adapter-<language>`, rebuild/redeploy
 - Factory class not found
   - Cause: Adapter doesn’t export `<Language>AdapterFactory` as a named class
-  - Fix: Ensure `export class <Language>AdapterFactory ...` is present and the default export contains `{ name, factory }` if you expose both
+  - Fix: Ensure `export class <Language>AdapterFactory ...` is present as a named export
 - Adapter not discoverable in container
   - Check that the adapter package and its runtime deps exist in the final runtime image
   - Verify that `which` and `isexe` are both present if used by your adapter
@@ -193,7 +193,7 @@ flowchart TD
   A[Adapter not loading?] --> B{Is package installed?}
   B -- No --> C[npm install @debugmcp/adapter-<lang>]
   B -- Yes --> D{Factory exported? <Lang>AdapterFactory}
-  D -- No --> E[Fix export structure: class + default { name, factory }]
+  D -- No --> E[Fix export: named class &lt;Lang&gt;AdapterFactory]
   D -- Yes --> F{Container stdio clean?}
   F -- No --> G[Enable stdio silencer; remove console output]
   F -- Yes --> H[Check /app/logs/stdout-raw.log & stdin-raw.log]
@@ -205,13 +205,12 @@ flowchart TD
 ## Adapter Package Convention
 
 - Package name: `@debugmcp/adapter-<language>`
-- Default export:
+- Named export required:
   ```ts
   // dist/index.js (compiled)
   export { <Language>AdapterFactory } from './<Language>AdapterFactory.js';
-  export default { name: '<language>', factory: <Language>AdapterFactory };
   ```
-- Class name must match `<CapitalizedLanguage>AdapterFactory`
+- Class name must match `<CapitalizedLanguage>AdapterFactory` (the loader looks for this named export)
 
 ## Appendix: Example Loader Error Messages
 

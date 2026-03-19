@@ -32,7 +32,7 @@
 
 ### Current Limitations
 1. **Initial System Breakpoints:** Windows debugging starts at system functions, requiring one continue command to reach user code
-2. **MSVC Toolchain:** Limited to control flow debugging due to PDB symbol incompatibility
+2. **MSVC Toolchain:** Limited to control flow debugging. CodeLLDB's native PDB reader is enabled on Windows (`LLDB_USE_NATIVE_PDB_READER=1`), but MSVC binaries are treated as compatibility-limited. Behavior depends on the `RUST_MSVC_BEHAVIOR` setting (warnings/errors/continue)
 3. **Path Resolution:** Requires absolute paths for reliable operation
 4. **Binary Path Discovery:** Different build configurations produce executables in different locations
 
@@ -65,7 +65,7 @@ Based on comprehensive testing with real-world Rust examples:
 
 ## Status: WIP
 
-The Rust adapter is functional and performant for production use with the GNU toolchain. MSVC toolchain support remains limited due to upstream CodeLLDB constraints. Active development focuses on improving Windows-specific behaviors and path handling.
+The Rust adapter is functional and performant for production use with the GNU toolchain. MSVC toolchain support remains limited due to upstream CodeLLDB constraints. Planned work includes improving Windows-specific behaviors and path handling. Note: the `handleAutoContinue()` hook for auto-continuing through system breakpoints is currently a placeholder and will throw if invoked.
 
 ---
 *Performance metrics based on testing with Windows 11, Rust 1.91.1, and CodeLLDB 1.11.8*

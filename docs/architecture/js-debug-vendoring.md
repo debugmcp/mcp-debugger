@@ -36,12 +36,11 @@ This note documents a recurring startup failure with the JavaScript debug adapte
     - `js-debug/src/watchdog.js`
     - other files/assets…
 
-## Provisional vendoring strategy (search-and-copy + build-time check)
+## Vendoring strategy (search-and-copy + build-time check) -- IMPLEMENTED
 
-Applies to our vendoring script at:
-- `packages/adapter-javascript/scripts/build-js-debug.js`
+The vendoring script at `packages/adapter-javascript/scripts/build-js-debug.js` already implements the strategy described below, including recursive sidecar discovery via `findAllByBasename`, hard-fail checks for `bootloader.js` and `hash.js`, and writing a vendored `package.json` with `type: 'commonjs'`.
 
-After extracting the js-debug artifact and selecting the server entry (the primary vendor file is `vsDebugServer.js` in the dist directory; `vsDebugServer.cjs` is also produced as a CommonJS mirror):
+The vendored canonical filename is always `vsDebugServer.js`, but the script may source it from several upstream layouts (e.g., `dist/vsDebugServer.js`, `dist/src/dapDebugServer.js`, `extension/src/dapDebugServer.js`) before BFS fallback. A `vsDebugServer.cjs` CommonJS mirror is also produced.
 
 1) Search for support files in the extraction tree:
    - Look for filenames exactly:
@@ -153,7 +152,7 @@ If upstream packaging changes and the simple search-and-copy cannot find the sup
   - Our script could support selecting artifact type (release tarball vs VSIX). Note: redistribution/licensing and network stability should be evaluated.
 
 - Option D: Build-from-source fallback
-  - Already supported by our script via `JS_DEBUG_BUILD_FROM_SOURCE=true`.
+  - Supported by our script via `JS_DEBUG_BUILD_FROM_SOURCE=true`, which selects a `prebuilt-then-source` strategy (attempts prebuilt vendoring first, then falls back to source build). It is not a pure source-only mode.
   - Building from source allows us to locate `vsDebugServer.js` or `src/dapDebugServer.js` deterministically and gather support files in one pass.
   - Adds build time and tooling requirements (git/node/pm), but is robust.
 
@@ -200,5 +199,5 @@ If upstream packaging changes and the simple search-and-copy cannot find the sup
 
 - OS: Windows 11 x64 (repro)
 - Node: v22.x
-- Launch mode: DAP `pwa-node` via `node vendor/js-debug/vsDebugServer.cjs <port>`
+- Launch mode: DAP `pwa-node` via `node vendor/js-debug/vsDebugServer.cjs <port> <host>` (the adapter passes both port and host positionally; host defaults to `127.0.0.1`)
 - Current policy: Prefer not to pin `JS_DEBUG_VERSION` unless stability demands it.

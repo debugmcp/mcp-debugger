@@ -279,7 +279,7 @@ Full DAP capabilities declaration.
 
 Manages debug sessions and coordinates adapters with ProxyManager.
 
-**Source**: [src/session/session-manager.ts](../../src/session/session-manager.ts)
+**Source**: [src/session/session-manager.ts](../../src/session/session-manager.ts) (thin facade); actual implementations are in `src/session/session-manager-operations.ts`, `src/session/session-manager-data.ts`, and `src/session/session-manager-core.ts`.
 
 ### Core Methods
 
@@ -291,7 +291,7 @@ Creates a new debug session.
 {
   language: DebugLanguage;
   name?: string;
-  config?: Partial<LaunchConfig>;
+  executablePath?: string;
 }
 ```
 
@@ -315,10 +315,10 @@ Starts debugging for a session.
 
 **Returns**: Debug result with success status
 
-#### `setBreakpoints(sessionId: string, file: string, breakpoints: SourceBreakpoint[]): Promise<Breakpoint[]>`
-Sets breakpoints in a file.
+#### `setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint>`
+Sets a breakpoint in a file. Internally sends a DAP `setBreakpoints` request for all breakpoints in the same source file.
 
-**Returns**: Array of verified breakpoints with actual locations
+**Returns**: Breakpoint information
 
 #### `continue(sessionId: string, threadId?: number): Promise<void>`
 Resumes execution from a breakpoint.
@@ -347,19 +347,19 @@ Gets variable scopes for a stack frame.
 #### `getVariables(sessionId: string, variablesReference: number): Promise<Variable[]>`
 Gets variables in a scope.
 
-#### `evaluateExpression(sessionId: string, expression: string, frameId?: number): Promise<string>`
-Evaluates an expression in the current context.
+#### `evaluateExpression(sessionId: string, expression: string, frameId?: number, context?: string): Promise<EvaluateResult>`
+Evaluates an expression in the current context. Returns a structured `EvaluateResult` with `result`, `type`, `variablesReference`, and optional error text.
 
 ### Session Management
 
-#### `getSession(sessionId: string): SessionInfo | null`
+#### `getSession(sessionId: string): ManagedSession | undefined`
 Retrieves session information.
 
-#### `listSessions(): SessionInfo[]`
+#### `getAllSessions(): DebugSessionInfo[]`
 Lists all active sessions.
 
-#### `deleteSession(sessionId: string): Promise<void>`
-Removes a session and cleans up resources.
+#### `closeSession(sessionId: string): Promise<boolean>`
+Tears down the proxy and removes the session from the store.
 
 ## ProxyManager API
 
@@ -369,10 +369,10 @@ Manages debug adapter process lifecycle and DAP communication.
 
 ### Key Methods
 
-#### `constructor(adapter: IDebugAdapter, config: ProxyConfig)`
-Creates a new ProxyManager with an adapter.
+#### `constructor(adapter, launcher, fileSystem, logger, runtimeEnv?)`
+Creates a new ProxyManager with an adapter and injected dependencies (process launcher, filesystem, logger, optional runtime environment).
 
-#### `start(config: StartConfig): Promise<void>`
+#### `start(config: ProxyConfig): Promise<void>`
 Starts the debug adapter process and establishes connection.
 
 #### `sendDapRequest(command: string, args?: any): Promise<any>`
@@ -380,6 +380,12 @@ Sends a DAP request and waits for response.
 
 #### `stop(): Promise<void>`
 Stops the debug adapter process and cleans up.
+
+#### `getCurrentThreadId(): number | null`
+Returns the currently tracked thread ID.
+
+#### `isRunning(): boolean`
+Returns whether the proxy process is running.
 
 ### Events
 
@@ -465,6 +471,7 @@ enum DebugLanguage {
   RUST = 'rust',
   GO = 'go',
   JAVA = 'java',
+  DOTNET = 'dotnet',
   MOCK = 'mock',
 }
 
@@ -535,12 +542,9 @@ const sessionInfo = await sessionManager.createSession({
   name: 'My Debug Session'
 });
 
-// 2. Set breakpoints
-await sessionManager.setBreakpoints(
-  sessionInfo.sessionId,
-  'app.py',
-  [{ line: 10 }, { line: 20 }]
-);
+// 2. Set breakpoints (one call per breakpoint)
+await sessionManager.setBreakpoint(sessionInfo.sessionId, 'app.py', 10);
+await sessionManager.setBreakpoint(sessionInfo.sessionId, 'app.py', 20);
 
 // 3. Start debugging
 await sessionManager.startDebugging({
@@ -567,11 +571,11 @@ class MyAdapter extends EventEmitter implements IDebugAdapter {
 }
 
 // Register it
-const registry = new AdapterRegistry(dependencies);
+const registry = new AdapterRegistry({ enableDynamicLoading: false });
 registry.register('mylang', new MyAdapterFactory());
 
 // Use it
-const adapter = registry.create('mylang', config);
+const adapter = await registry.create('mylang', config);
 ```
 
 ## Best Practices

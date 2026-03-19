@@ -60,18 +60,15 @@ Use AdapterPolicy when you need:
 ```typescript
 // packages/shared/src/interfaces/adapter-policy-go.ts
 export const GoAdapterPolicy: AdapterPolicy = {
-  getDapAdapterConfiguration(): AdapterConfiguration {
-    return {
-      type: 'dlv-dap',
-      supportedProtocols: ['tcp'],
-      defaultPort: 38697
-    };
+  getDapAdapterConfiguration() {
+    return { type: 'dlv-dap' };
   },
-  
+
   resolveExecutablePath(providedPath?: string): string | undefined {
-    return providedPath || 'dlv';
+    // Priority: provided path > DLV_PATH env var > default 'dlv'
+    return providedPath || process.env.DLV_PATH || 'dlv';
   },
-  
+
   filterStackFrames(frames: StackFrame[], includeInternals = false): StackFrame[] {
     if (includeInternals) return frames;
     // Filter Go runtime and testing framework frames
@@ -79,11 +76,6 @@ export const GoAdapterPolicy: AdapterPolicy = {
       !f.file?.includes('runtime/') && !f.file?.includes('/testing/')
     );
   },
-
-  resolveExecutablePath(providedPath?: string): string | undefined {
-    // Priority: provided path > DLV_PATH env var > default 'dlv'
-    return providedPath || process.env.DLV_PATH || 'dlv';
-  }
 };
 ```
 
@@ -146,7 +138,7 @@ class SessionManagerOperations {
     const session = this.getSession(sessionId);
     
     // 1. Create IDebugAdapter for core debugging
-    const adapter = await this.adapterRegistry.create(session.language);
+    const adapter = await this.adapterRegistry.create(session.language, config);
     
     // 2. Get AdapterPolicy for session behaviors  
     const policy = this.selectPolicy(session.language);
@@ -159,8 +151,8 @@ class SessionManagerOperations {
       await policy.validateExecutable(executablePath);
     }
     
-    // 5. Create ProxyManager with adapter
-    const proxyManager = new ProxyManager(adapter);
+    // 5. Create ProxyManager with adapter via factory (requires additional injected deps)
+    const proxyManager = this.proxyManagerFactory.create(adapter);
     
     // 6. Use policy for handshake if needed
     if (policy.performHandshake) {
@@ -219,12 +211,14 @@ SessionManager
 
 ## Migration Path for New Languages
 
-### Step 1: Start with AdapterPolicy
+### Step 1: Implement IDebugAdapter (required)
+Practical language support requires a registered `IDebugAdapter`. `AdapterPolicy` augments behavior but does not replace adapter creation in the current architecture.
+
+### Step 2: Create AdapterPolicy for language-specific session behaviors
 ```typescript
-// Quick win - basic support
 export const NewLanguagePolicy: AdapterPolicy = {
-  getDapAdapterConfiguration(): AdapterConfiguration {
-    return { type: 'debug-adapter-name', ... };
+  getDapAdapterConfiguration() {
+    return { type: 'debug-adapter-name' };
   },
   resolveExecutablePath(): string | undefined {
     return 'language-executable';
@@ -232,13 +226,13 @@ export const NewLanguagePolicy: AdapterPolicy = {
 };
 ```
 
-### Step 2: Add to selectPolicy()
+### Step 3: Add to selectPolicy()
 ```typescript
 case 'newlang':
   return NewLanguagePolicy;
 ```
 
-### Step 3: Implement IDebugAdapter
+### Step 4: Implement IDebugAdapter (full)
 ```typescript
 // Full implementation for complete support
 export class NewLanguageAdapter implements IDebugAdapter {
@@ -246,7 +240,7 @@ export class NewLanguageAdapter implements IDebugAdapter {
 }
 ```
 
-### Step 4: Register with AdapterRegistry
+### Step 5: Register with AdapterRegistry
 ```typescript
 registry.register('newlang', NewLanguageAdapterFactory);
 ```
@@ -289,7 +283,7 @@ describe('GoAdapterPolicy', () => {
 - **IDebugAdapter**: Core debugging infrastructure (heavyweight, stateful, process management)
 - **AdapterPolicy**: Session management behaviors (20+ methods with state management hooks for adapter-specific tracking)
 - **Both needed**: For complete language support
-- **Start simple**: Begin with AdapterPolicy for quick wins
-- **Grow as needed**: Add IDebugAdapter for full support
+- **IDebugAdapter required**: Language support requires a registered adapter for adapter creation
+- **Grow as needed**: Add AdapterPolicy for language-specific session behaviors
 
 The dual-pattern architecture provides flexibility and clean separation of concerns, making the codebase maintainable and extensible.

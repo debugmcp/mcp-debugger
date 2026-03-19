@@ -413,8 +413,7 @@ describe('WhichCommandFinder integration', () => {
       };
       const previousFinder = setDefaultCommandFinder(finder);
 
-      // First Python validation passes, first debugpy check (no debugpy)
-      // Second Python validation passes, second debugpy check (has debugpy)
+      // First debugpy check fails (no debugpy), second debugpy check succeeds
       spawnMock.mockImplementation(() => {
         callCount++;
         if (callCount === 1) {

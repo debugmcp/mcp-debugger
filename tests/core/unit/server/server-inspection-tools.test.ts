@@ -23,7 +23,6 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('Server Inspection Tools Tests', () => {
-  let debugServer: DebugMcpServer;
   let mockServer: any;
   let mockSessionManager: any;
   let mockDependencies: any;
@@ -45,7 +44,7 @@ describe('Server Inspection Tools Tests', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    debugServer = new DebugMcpServer();
+    new DebugMcpServer();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
   });
 

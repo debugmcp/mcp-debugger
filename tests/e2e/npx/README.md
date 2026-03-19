@@ -1,6 +1,6 @@
 # NPX Distribution E2E Tests
 
-Tests for the npx "no-install" distribution channel using npm pack.
+Tests for the packaged npm distribution artifact intended for npx/npm-exec usage. Note: the test harness actually launches the globally installed CLI directly with Node.js rather than executing the `npx` command itself, to avoid Windows `npx.cmd`/`cmd.exe` resolution issues.
 
 ## What These Tests Do
 

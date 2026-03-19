@@ -54,7 +54,7 @@ If you're on Windows and want the quickest path to a working GNU toolchain + dll
 pwsh scripts/setup/windows-rust-debug.ps1
 ```
 
-The script installs the `stable-gnu` toolchain (via rustup), exposes `dlltool.exe` from rustup's self-contained directory, builds the bundled Rust examples, and runs the Rust smoke tests by default. Add `-SkipTests` to opt out of running tests. Add `-UpdateUserPath` if you want the dlltool path persisted to your user PATH/DLLTOOL variables.
+The script installs the `stable-gnu` toolchain (via rustup), sets up `dlltool.exe` (preferring MSYS2/MinGW when available, falling back to rustup's self-contained copy), builds the bundled Rust examples, and runs the Rust smoke tests by default. Add `-SkipTests` to opt out of running tests. Add `-UpdateUserPath` if you want the dlltool path persisted to your user PATH/DLLTOOL variables.
 
 The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (via winget + pacman) so `cargo +stable-gnu` has a fully functional `dlltool/ld/as` stack. If MSYS2 is already installed, it simply reuses it; otherwise it guides you through installing it (or warns so you can install manually).
 - 🧪 **Mock adapter for testing** – Test without external dependencies
@@ -98,8 +98,8 @@ cd mcp-debugger
 # Run the installation script
 ./scripts/install-claude-mcp.sh
 
-# Verify the connection
-/home/ubuntu/.claude/local/claude mcp list
+# Verify the connection (use 'claude mcp list' if claude is on your PATH)
+claude mcp list
 ```
 
 **Important**: The `stdio` argument is required to prevent console output from corrupting the JSON-RPC protocol. See [CLAUDE.md](CLAUDE.md) for detailed setup and troubleshooting.
@@ -202,9 +202,9 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 Version 0.10.0 introduces a clean adapter pattern that separates language-agnostic core functionality from language-specific implementations:
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│ MCP Client  │────▶│ SessionManager│────▶│ AdapterRegistry │
-└─────────────┘     └──────────────┘     └─────────────────┘
+┌─────────────┐     ┌────────────────┐     ┌──────────────┐     ┌─────────────────┐
+│ MCP Client  │────▶│ DebugMcpServer │────▶│SessionManager│────▶│ AdapterRegistry │
+└─────────────┘     └────────────────┘     └──────────────┘     └─────────────────┘
                             │                      │
                             ▼                      ▼
                     ┌──────────────┐      ┌─────────────────┐

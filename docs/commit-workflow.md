@@ -129,8 +129,9 @@ git cf -m "WIP: quick fix"      # Fast commit (PI check only)
 
 ### "Command not found" Error
 ```bash
-# Make the script executable
+# Make the script executable (only needed if invoking directly)
 chmod +x scripts/safe-commit.sh
+# The script accepts --skip-tests as its first argument; all other args are forwarded to git.
 ```
 
 ### Personal Info Check Keeps Failing

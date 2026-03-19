@@ -112,9 +112,10 @@ private setupProxyEventHandlers(
 ```
 
 Benefits of WeakMap:
-- Automatic garbage collection when session is deleted
-- No need to manually clean up if session object is lost
-- Prevents memory leaks from forgotten handlers
+- Handler bookkeeping entries become eligible for garbage collection once their `ManagedSession` key is unreachable
+- Avoids retaining bookkeeping data for sessions that no longer exist
+
+Note: WeakMap only governs the bookkeeping map's keys. It does **not** automatically remove listeners from the `proxyManager` emitter. Explicit listener removal via `cleanupProxyEventHandlers` is still required to prevent handler leaks.
 
 ### 3. Comprehensive Cleanup Pattern
 
@@ -242,14 +243,19 @@ private handleDapEvent(message: ProxyDapEventMessage): void {
 
 ```typescript
 // Named function for stopped event
-const handleStopped = (threadId: number, reason: string) => {
+const handleStopped = (threadId: number | undefined, reason: string) => {
   this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
 
-  // Transition session to PAUSED — the client must explicitly call
-  // continue_execution to resume. There is no auto-continue mechanism.
-  this._updateSessionState(session, SessionState.PAUSED);
+  // Auto-continue on entry stops when stopOnEntry=false
+  if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
+    this.handleAutoContinue().catch(err => { /* log error */ });
+  } else {
+    this._updateSessionState(session, SessionState.PAUSED);
+  }
 };
 ```
+
+Note: `SessionManagerCore` defines the auto-continue design intent for entry stops, but the concrete `SessionManager` facade currently overrides `handleAutoContinue()` with a throwing placeholder (`throw new Error('handleAutoContinue not yet implemented')`), so auto-continue on entry is not functional in the public class at this time.
 
 ### Event-Based Lifecycle Management
 
@@ -322,35 +328,56 @@ return new Promise((resolve) => {
 **Location**: `src/session/session-manager-operations.ts`
 
 ```typescript
-// Wait for adapter to be configured or first stop event
+// Wait for adapter to be configured, first stop event, or termination
+// Readiness can be satisfied by: stopped, adapter-configured, terminated, exited, or exit events.
+// Synchronous post-listener state checks avoid missing already-fired events.
 const waitForReady = new Promise<void>((resolve) => {
   let resolved = false;
-  
-  const handleStopped = () => {
-    if (!resolved) {
-      resolved = true;
-      this.logger.info(`[SessionManager] Session ${sessionId} stopped on entry`);
-      resolve();
-    }
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const cleanup = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    session.proxyManager?.removeListener('stopped', handleStopped);
+    session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+    session.proxyManager?.removeListener('terminated', handleTerminated);
+    session.proxyManager?.removeListener('exited', handleExited);
+    session.proxyManager?.removeListener('exit', handleExit);
   };
-  
+
+  const handleStopped = () => {
+    if (!resolved) { resolved = true; cleanup(); resolve(); }
+  };
   const handleConfigured = () => {
     if (!resolved && !dapLaunchArgs?.stopOnEntry) {
-      resolved = true;
-      this.logger.info(`[SessionManager] Session ${sessionId} running (stopOnEntry=false)`);
-      resolve();
+      resolved = true; cleanup(); resolve();
     }
   };
-  
+  const handleTerminated = () => {
+    if (!resolved) { resolved = true; cleanup(); resolve(); }
+  };
+  const handleExited = () => {
+    if (!resolved) { resolved = true; cleanup(); resolve(); }
+  };
+  const handleExit = () => {
+    if (!resolved) { resolved = true; cleanup(); resolve(); }
+  };
+
   session.proxyManager?.once('stopped', handleStopped);
   session.proxyManager?.once('adapter-configured', handleConfigured);
-  
+  session.proxyManager?.once('terminated', handleTerminated);
+  session.proxyManager?.once('exited', handleExited);
+  session.proxyManager?.once('exit', handleExit);
+
+  // Synchronous post-listener state check to avoid missing already-fired events
+  const currentState = this._getSessionById(sessionId).state;
+  if (currentState === SessionState.PAUSED || currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
+    resolved = true; cleanup(); resolve(); return;
+  }
+
   // Timeout after 30 seconds
-  setTimeout(() => {
+  timeoutId = setTimeout(() => {
     if (!resolved) {
-      resolved = true;
-      session.proxyManager?.removeListener('stopped', handleStopped);
-      session.proxyManager?.removeListener('adapter-configured', handleConfigured);
+      resolved = true; cleanup();
       this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
       resolve();
     }
@@ -417,7 +444,7 @@ it('should clean up event handlers on stop', async () => {
 
 1. **Use Named Functions** - Makes debugging easier and prevents duplicate handlers
 2. **Always Clean Up** - Remove event listeners when no longer needed
-3. **Use WeakMap for Tracking** - Automatic cleanup when parent object is GC'd
+3. **Use WeakMap for Tracking** - Bookkeeping entries become GC-eligible when key is unreachable (but explicit listener removal is still required)
 4. **Type Your Events** - Define interfaces for event names and parameters
 5. **Handle Race Conditions** - Use flags to prevent multiple resolutions
 6. **Set Timeouts** - Prevent hanging on events that never fire

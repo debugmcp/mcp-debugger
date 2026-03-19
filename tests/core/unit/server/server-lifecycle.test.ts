@@ -47,14 +47,6 @@ describe('Server Lifecycle Tests', () => {
   describe('Server Start', () => {
     it('should start server with stdio transport', async () => {
       debugServer = new DebugMcpServer();
-      
-      await debugServer.start();
-      
-      expect(mockDependencies.logger.info).toHaveBeenCalledWith(expect.stringContaining('[MCP Server] Started at'));
-    });
-
-    it('should start server and log startup message', async () => {
-      debugServer = new DebugMcpServer();
 
       await debugServer.start();
 

@@ -15,7 +15,7 @@ This guide provides solutions for common issues you might encounter when setting
    "command": "node",
    "args": ["C:\\path\\to\\mcp-debugger\\dist\\index.js", "stdio"]
    ```
-   Ensure the path points to the correct location of the built server. The entry point is `dist/index.js` when building from source. (The NPX package `@debugmcp/mcp-debugger` uses `dist/cli` internally.)
+   Ensure the path points to the correct location of the built server. The entry point is `dist/index.js` when building from source. (The NPX package `@debugmcp/mcp-debugger` exposes `dist/cli` as the executable shim, which loads `dist/cli.mjs`.)
 
 2. Check for spaces in file paths:
    - Windows paths with spaces require proper quoting

@@ -13,6 +13,8 @@ The "spawn EINVAL" error in Node.js typically indicates that there's an invalid 
 
 ## Launcher Options
 
+> **Note:** These launchers use `dist/index.js` which is the correct entry point when building from source. If you installed via npm/npx, use the `mcp-debugger` CLI command instead (the package exposes `dist/cli` as its executable shim, which loads `dist/cli.mjs`).
+
 We've created several alternative launchers to address potential issues. Here's a comparison of the different approaches:
 
 ### 1. Simple Batch Script (`simple-run.cmd`)

@@ -1216,9 +1216,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   async evaluateExpression(
     sessionId: string,
     expression: string,
-    frameId?: number,
-    context: 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables' = 'variables'
+    frameId?: number
   ): Promise<EvaluateResult> {
+    const context = 'variables';
     const session = this._getSessionById(sessionId);
     this.logger.info(
       `[SM evaluateExpression ${sessionId}] Entered. Expression: "${this.truncateForLog(
@@ -1476,8 +1476,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
         this.logger.info(`[SessionManager] Set session ${sessionId} to PAUSED after attach (stopOnEntry=${attachConfig.stopOnEntry})`);
       } else {
-        // JVM is already running (suspend=n), keep RUNNING state
-        this.logger.info(`[SessionManager] Keeping session ${sessionId} as RUNNING (stopOnEntry=false, process started with suspend=n)`);
+        // JVM is already running (suspend=n), set RUNNING state
+        this._updateSessionState(session, SessionState.RUNNING);
+        finalState = SessionState.RUNNING;
+        this.logger.info(`[SessionManager] Set session ${sessionId} to RUNNING (stopOnEntry=false, process started with suspend=n)`);
       }
 
       return {

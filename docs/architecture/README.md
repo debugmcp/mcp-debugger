@@ -144,13 +144,13 @@ adapter.on('stateChanged', (oldState, newState) => {
 
 ### Path Handling Complexity
 
-**Theory**: Adapters handle path translation cleanly  
-**Reality**: Path handling was abandoned entirely. **TRUE HANDS-OFF** approach - no path manipulation whatsoever. Debug adapters handle paths natively.
+**Theory**: Adapters handle path translation cleanly
+**Reality**: Adapter-facing source-path translation was minimized and largely delegated to the debug adapters. However, path handling still occurs in several places (e.g., proxy script discovery, absolute path resolution for breakpoints, container path resolution via `SimpleFileChecker`/`resolvePathForRuntime`). The approach is to avoid unnecessary cross-platform path manipulation rather than eliminating all path logic.
 
 ### State Management
 
-**Theory**: Clean state transitions following VALID_TRANSITIONS  
-**Reality**: Real adapters (like Python) don't enforce strict transitions. The mock adapter was made more permissive to match real-world behavior.
+**Theory**: Clean state transitions following VALID_TRANSITIONS
+**Reality**: Some adapters use simpler or looser state models than earlier expectations. The mock adapter policy still maintains explicit initialized/configuration state transitions via `createInitialState()`, `updateStateOnCommand()`, and `updateStateOnEvent()`.
 
 ### DAP Event Sequences
 
@@ -193,6 +193,9 @@ handleDapEvent(event: DebugProtocol.Event): void {
 }
 
 // ✅ Correct: Update internal state
+// Note: Paused execution is primarily modeled at the session/proxy
+// orchestration layer. At the adapter level, DEBUGGING indicates
+// an active debug session (which may be paused or running).
 handleDapEvent(event: DebugProtocol.Event): void {
   if (event.event === 'stopped') {
     this.currentThreadId = event.body?.threadId;

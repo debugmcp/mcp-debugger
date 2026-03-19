@@ -41,8 +41,8 @@ The script uses TAP (Test Anything Protocol) reporter with intelligent filtering
 # Force CI mode to prevent dynamic updates
 $env:CI = 'true'
 
-# Use TAP reporter with coverage
-npm test -- --reporter=tap --coverage
+# Plain npm test is rewritten to:
+npm.cmd run test:coverage -- --reporter=tap
 
 # Filter to show only:
 # - TAP header (version, test count)
@@ -60,9 +60,11 @@ npm test -- --reporter=tap --coverage
 # All npm commands work naturally - no need to remember npm.cmd
 npm run build      # Works perfectly (pass-through)
 npm install        # Works perfectly (pass-through)
-npm test           # Automatically optimized (failures + coverage only)
+npm test           # Automatically optimized: plain `npm test` is rewritten to
+                   # `npm.cmd run test:coverage -- --reporter=tap`
+                   # (targeted `npm test <args>` with extra args are forwarded directly)
 npm test:unit      # Optimized unit tests
-npm test:int       # Optimized integration tests
+npm test:int       # Alias for test:integration (runs npm.cmd run test:integration -- --reporter=tap)
 npm test:e2e       # Optimized e2e tests
 
 # Original commands still available if needed

@@ -597,13 +597,13 @@ You can also specify the Go path explicitly in your debug configuration.`;
     if (cached?.version) {
       return cached.version;
     }
-    
+
     const version = await getGoVersion(goPath);
-    
-    if (version && cached) {
-      cached.version = version;
+
+    if (version) {
+      this.goPathCache.set(goPath, { path: goPath, version, timestamp: Date.now() });
     }
-    
+
     return version;
   }
   
@@ -615,11 +615,11 @@ You can also specify the Go path explicitly in your debug configuration.`;
     if (cached?.version) {
       return cached.version;
     }
-    
+
     const version = await getDelveVersion(dlvPath);
-    
-    if (version && cached) {
-      cached.version = version;
+
+    if (version) {
+      this.delvePathCache.set(dlvPath, { path: dlvPath, version, timestamp: Date.now() });
     }
     
     return version;

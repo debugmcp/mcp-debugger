@@ -218,7 +218,7 @@ For technical details and planned improvements, see [TypeScript Source Map Inves
 
 ### Other Limitations
 
-- Chrome debugging (`chrome-pwa`) not yet supported (Node.js only)
+- Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
 - Remote debugging requires manual configuration
 - Some advanced DAP features may not be exposed through MCP tools
 

@@ -10,9 +10,10 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 echo "Installing mcp-debugger for Claude Code..."
 echo "Project directory: $PROJECT_DIR"
 
-# Check if Claude CLI is available
-if ! command -v /home/ubuntu/.claude/local/claude &> /dev/null; then
-    echo "Error: Claude CLI not found at /home/ubuntu/.claude/local/claude"
+# Detect Claude CLI location
+CLAUDE_CLI=$(command -v claude 2>/dev/null || echo "")
+if [ -z "$CLAUDE_CLI" ]; then
+    echo "Error: Claude CLI not found on PATH"
     echo "Please ensure Claude Code is installed first."
     exit 1
 fi
@@ -25,17 +26,17 @@ npm run build
 
 # Remove any existing configuration
 echo "Removing any existing mcp-debugger configuration..."
-/home/ubuntu/.claude/local/claude mcp remove mcp-debugger 2>/dev/null || true
+$CLAUDE_CLI mcp remove mcp-debugger 2>/dev/null || true
 
 # Add the MCP server with proper configuration
 echo "Adding mcp-debugger to Claude Code..."
-/home/ubuntu/.claude/local/claude mcp add-json mcp-debugger \
+$CLAUDE_CLI mcp add-json mcp-debugger \
   "{\"type\":\"stdio\",\"command\":\"node\",\"args\":[\"$PROJECT_DIR/dist/index.js\",\"stdio\"],\"env\":{}}"
 
 # Verify the configuration
 echo "Verifying installation..."
 sleep 1
-if /home/ubuntu/.claude/local/claude mcp list | grep -q "mcp-debugger.*✓ Connected"; then
+if $CLAUDE_CLI mcp list | grep -q "mcp-debugger.*✓ Connected"; then
     echo "✅ Success! mcp-debugger is connected and ready to use."
     echo ""
     echo "Available debugging languages:"
@@ -58,7 +59,7 @@ else
     echo ""
     echo "Next steps:"
     echo "  1. Restart Claude Code for the changes to take effect"
-    echo "  2. Run '/home/ubuntu/.claude/local/claude mcp list' to verify connection"
+    echo "  2. Run '$CLAUDE_CLI mcp list' to verify connection"
     echo ""
     echo "If connection still fails after restart, check:"
     echo "  - $PROJECT_DIR/docs/MCP_CLAUDE_CODE_INTEGRATION.md for troubleshooting"

@@ -1,10 +1,10 @@
 /**
  * Cross-Transport Parity Test
- * 
+ *
  * Ensures that debug operations produce identical results across:
  * - STDIO transport
  * - SSE transport
- * - Docker transport (if available)
+ * - Docker transport: not yet implemented
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -58,6 +58,10 @@ class TransportTester {
       });
 
       const timeout = setTimeout(() => {
+        clearInterval(checkReady);
+        if (this.sseServer && !this.sseServer.killed) {
+          this.sseServer.kill('SIGKILL');
+        }
         reject(new Error('SSE server startup timeout'));
       }, 15000);
 
@@ -273,9 +277,9 @@ class TransportTester {
       console.log('  Connected via SSE');
 
       const result = await this.runDebugSequence(client);
-      
+
       await client.close();
-      
+
       return {
         transport: 'SSE',
         success: result.errors.length === 0,
@@ -287,6 +291,8 @@ class TransportTester {
         success: false,
         error: error instanceof Error ? error.message : String(error)
       };
+    } finally {
+      await this.teardownSSE();
     }
   }
 

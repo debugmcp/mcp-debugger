@@ -47,7 +47,7 @@ export function getWorkspaceRoot(environment: IEnvironment): string {
  * @returns The resolved absolute path appropriate for the runtime
  * 
  * Host mode: Returns the input path unchanged
- * Container mode: Always prefixes with workspace root (simple, no validation)
+ * Container mode: Ensures path is under workspace root (idempotent, no validation)
  */
 export function resolvePathForRuntime(inputPath: string, environment: IEnvironment): string {
   // Host mode: pass through unchanged

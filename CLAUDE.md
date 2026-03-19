@@ -149,12 +149,12 @@ npm run act:full     # Run full CI workflow
 1. **Accept all paths as-is** - No interpretation of Windows vs Linux paths
 2. **Path resolution and existence checking** - For immediate LLM UX feedback (`SimpleFileChecker`)
 3. **Container mode: Simple prefix** - Only `/workspace/` prepend for existence checks
-4. **Pass original paths unchanged** - To debug adapter (debugpy handles path resolution)
+4. **Pass resolved effective paths** - `src/server.ts` validates paths via `SimpleFileChecker` and passes the resolved `effectivePath` to SessionManager
 5. **No cross-platform logic** - Avoids unsolvable edge cases and complexity
 
 **Key Files:**
 - `src/utils/simple-file-checker.ts` - Path resolution (via `resolvePathForRuntime`), relative-path rejection in host mode, and file existence checking
-- `src/server.ts` - Uses SimpleFileChecker for validation, passes original paths to SessionManager
+- `src/server.ts` - Uses SimpleFileChecker for validation, passes the resolved `effectivePath` to SessionManager
 
 **Rationale:** Cross-platform path handling is theoretically impossible due to ambiguous edge cases. The debug adapter and OS know best how to handle paths for their environment.
 
@@ -290,7 +290,7 @@ When debugging issues:
 1. Enable debug logging: `DEBUG=* node dist/index.js`
 2. Check proxy process output in logs
 3. Verify language-specific requirements (e.g., `python -m debugpy --version`)
-4. Use `--dry-run` flag to test configuration without starting debug session
+4. Use `dryRunSpawn: true` in `start_debugging` tool arguments to test configuration without starting a real debug session
 
 ## Adding New Language Adapters
 
@@ -340,7 +340,7 @@ packages/adapter-{language}/
 - JDK 21+ must be installed (`java` and `javac` on PATH, or `JAVA_HOME` set)
 - Uses JDI bridge (`JdiDapServer.java`) — a single Java file compiled on first use via `javac`
 - **Must compile target code with `javac -g`** for variable inspection (includes `LocalVariableTable`)
-- Launch mode: Pass `mainClass` and `classpath` directly — JDI bridge spawns the JVM and connects via JDI
+- Launch mode: The adapter derives `mainClass` from the `program` field in the launch config and transparently forwards `classpath`, `sourcePath`, `cwd`, `env`, and `args` — JDI bridge spawns the JVM and connects via JDI
 - Attach mode: Connect to JVM with JDWP agent (`-agentlib:jdwp=...`). JDI bridge handles deferred breakpoints natively via `ClassPrepareRequest`
 - Zero external dependencies — JDI (`com.sun.jdi.*`) ships with every JDK
 - See `docs/java/README.md` for architecture details
@@ -465,9 +465,9 @@ Once connected, the following 19 MCP tools become available:
 ### Troubleshooting MCP Connection
 - **If server shows "Failed to connect"**:
   - Ensure the `stdio` argument is included in the configuration
-  - The server outputs logs to stdout by default, which corrupts JSON-RPC communication
+  - The server silences console output at startup to protect stdio/IPC transports, but misconfigured builds or third-party code may still produce output
   - Use the `add-json` command shown above to properly configure with the stdio argument
-  - Note: The server includes auto-detection logic for STDIO mode (checks for pipe input and absence of transport args), but explicit `stdio` argument is most reliable
+  - Note: The `stdio` command is the default subcommand (`isDefault: true` in CLI setup), so explicitly passing `stdio` is optional but recommended for clarity
 - **Test the server manually**:
   ```bash
   echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{},"sampling":{}},"clientInfo":{"name":"test","version":"1.0.0"}},"id":1}' | node dist/index.js stdio

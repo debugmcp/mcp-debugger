@@ -100,7 +100,7 @@ Supporting types (selected)
 
 Events
 - DAP events: `'stopped' | 'continued' | 'terminated' | 'exited' | 'thread' | 'output' | 'breakpoint' | 'module'`
-- Lifecycle: `'initialized' | 'connected' | 'disconnected' | 'error'`
+- Lifecycle: `'initialized' | 'connected' | 'disconnected' | 'error'` (note: `'error'` carries an `Error` payload)
 - State changes: `'stateChanged'` with `(oldState, newState)`
 
 Example (minimal)
@@ -193,12 +193,10 @@ export class ExampleAdapterFactory extends AdapterFactory {
 
 Export convention (required for dynamic loader)
 - Package name: `@debugmcp/adapter-<language>`
-- Default export structure (from adapter package entry):
+- The loader requires a **named export** matching `<CapitalizedLanguage>AdapterFactory` (e.g., `python` -> `PythonAdapterFactory`, `javascript` -> `JavascriptAdapterFactory`). It instantiates this class with a zero-arg constructor. A default export is optional and not used by the loader.
 ```typescript
 export { ExampleAdapterFactory } from './ExampleAdapterFactory.js';
-export default { name: 'example', factory: ExampleAdapterFactory };
 ```
-- The loader expects a named class `<CapitalizedLanguage>AdapterFactory`
 
 ## AdapterLoader
 
@@ -243,8 +241,8 @@ Key runtime behavior
   - Sets up auto-dispose based on adapter state changes
 - Introspection
   - `getSupportedLanguages(): string[]` — currently registered factories
-  - `listLanguages(): Promise<string[]>` — installed languages via loader
-  - `listAvailableAdapters(): Promise<AdapterMetadata[]>` — installed metadata via loader
+  - `listLanguages(): Promise<string[]>` — returns registered languages plus dynamically discoverable adapter names when dynamic loading is enabled (not just installed adapters)
+  - `listAvailableAdapters(): Promise<AdapterMetadata[]>` — merges loader metadata with registered languages, marking registered languages as installed
   - `getAdapterInfo(language)` / `getAllAdapterInfo()`
 - Lifecycle
   - `disposeAll()` — disposes all adapters and clears registry
@@ -272,7 +270,7 @@ Dynamic loader error messages
 
 Troubleshooting checklist
 - `npm ls @debugmcp/adapter-*` to verify installation
-- Confirm export structure `{ name: '<lang>', factory: <Lang>AdapterFactory }`
+- Confirm named export of `<Lang>AdapterFactory` class
 - Check container runtime deps (e.g., `which` + `isexe` if used)
 - For stdio transport, ensure stdout is NDJSON-only; use provided preloader
 - Increase logging (server debug; `DEBUG=mcp:*` in clients if supported)
@@ -301,8 +299,8 @@ packages/adapter-example/
 
 Entry export (`src/index.ts`)
 ```typescript
+// Named export required by the dynamic loader
 export { ExampleAdapterFactory } from './ExampleAdapterFactory.js';
-export default { name: 'example', factory: ExampleAdapterFactory };
 ```
 
 Installation and discovery

@@ -7,7 +7,7 @@ Key points
 - Exports `JavascriptAdapterFactory` as the entry point for dynamic loading
 - Full `JavascriptDebugAdapter` implementation (~810 lines) with comprehensive DAP integration
 - Real utilities: `detectTsRunners`, `transformConfig`, TypeScript detection
-- Vendor folder for js-debug (bundled `vsDebugServer.cjs` / `vsDebugServer.js`)
+- Vendor folder for js-debug (bundled `vsDebugServer.js` with `.cjs` twin and sidecars)
 - Uses .js suffix on relative TS imports to match ESM resolution
 
 Status and scope
@@ -21,9 +21,9 @@ Build and test
 
 Validation
 - Node.js 18+ required
-- Requires bundled js-debug vendor file at vendor/js-debug/vsDebugServer.cjs (or vsDebugServer.js)
+- Requires bundled js-debug vendor file at vendor/js-debug/vsDebugServer.js
 - Optional TypeScript runners: tsx or ts-node recommended; absence only results in a warning
-- The factory-level validation is fast and has no side effects; it does not spawn processes or touch network
+- The factory-level validation does not spawn processes or touch the network, but it does perform filesystem checks (e.g., `fs.existsSync` for the vendored adapter and TypeScript runner detection)
 - To vendor js-debug, use the build:adapter script when available: pnpm -w -F @debugmcp/adapter-javascript run build:adapter
 
 Structure
@@ -79,12 +79,16 @@ Bash (source fallback example):
 
 Expected outputs
 - vendor/js-debug/vsDebugServer.js
+- vendor/js-debug/vsDebugServer.cjs (CommonJS twin)
+- vendor/js-debug/bootloader.js (required sidecar)
+- vendor/js-debug/hash.js (required sidecar)
+- vendor/js-debug/package.json (forces `type: 'commonjs'`)
 - vendor/js-debug/vsDebugServer.js.sha256
 - vendor/js-debug/manifest.json (metadata: source, repo, version, asset, sha256, fetchedAt)
 
 Determinism and safety
 - The script writes the artifact and checksum into vendor/js-debug/
-- Safe re-runs: if the artifact already exists, the script exits 0 unless `JS_DEBUG_FORCE_REBUILD=true` is set
+- Safe re-runs: if `vsDebugServer.js` and required sidecars (`bootloader.js`, `hash.js`) already exist, the script exits 0 unless `JS_DEBUG_FORCE_REBUILD=true` is set
 - The script does not run automatically in CI or on postinstall
 
 Validation

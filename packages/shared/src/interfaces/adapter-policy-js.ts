@@ -610,7 +610,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    */
   getInitializationBehavior: () => {
     return {
-      deferConfigDone: true,          // Must defer configurationDone until after launch/attach
+      deferConfigDone: true,          // Inject configurationDone before launch/attach when ordering requires it
       addRuntimeExecutable: true,      // Needs to add runtimeExecutable to launch args
       trackInitializeResponse: true,   // Must track initialize response separately
       requiresInitialStop: true,       // Must ensure initial stop after launch/attach

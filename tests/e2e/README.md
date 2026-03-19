@@ -10,12 +10,11 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Verifies HTTP/SSE connection and debugging workflow
 - Tests spawning from different working directories
 
-### 2. `mcp-server-smoke-container.test.ts`
-- Tests containerized deployment
+### 2. Docker smoke tests (`docker/` subdirectory)
+- Tests containerized deployment for Python, JavaScript, Go, Rust, Java, and .NET
 - Verifies Docker setup works end-to-end
-- Tests path translation (host paths → container paths)
+- Tests path translation (host paths to container paths), session lifecycle, core debug actions, and cleanup
 - Includes Docker availability check with graceful skip
-- Tests volume mounting and environment variable handling
 
 ### 3. `mcp-server-smoke-javascript.test.ts`
 - Tests JavaScript adapter through MCP interface
@@ -91,7 +90,7 @@ npm run test:e2e:smoke
 
 # Run individual smoke test
 npx vitest run tests/e2e/mcp-server-smoke-sse.test.ts
-npx vitest run tests/e2e/mcp-server-smoke-container.test.ts
+npx vitest run tests/e2e/docker/  # Docker smoke tests
 npx vitest run tests/e2e/mcp-server-smoke-javascript.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-python.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-go.test.ts

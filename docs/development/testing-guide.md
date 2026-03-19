@@ -56,7 +56,7 @@ The coverage configuration (from `vitest.config.ts`) uses the `istanbul` provide
 
 ### Test File Organization
 
-Tests mirror the source code structure:
+Tests generally follow the source code structure, though there are multiple test root patterns:
 
 ```
 src/session/session-manager.ts
@@ -68,6 +68,8 @@ src/proxy/proxy-manager.ts
 → tests/unit/proxy/proxy-manager-message-handling.test.ts
 → tests/unit/proxy/proxy-manager.branch-coverage.test.ts
 ```
+
+Note: The repository uses several test root directories (`tests/core/unit/`, `tests/unit/`, `tests/test-utils/`, etc.) rather than a single mirrored convention.
 
 ### Basic Test Structure
 
@@ -197,6 +199,8 @@ it('should emit events correctly', async () => {
 #### 5. Testing with Fake Process Implementation
 
 ```typescript
+// Located at: tests/implementations/test/fake-process-launcher.ts
+// Import path varies by test file location, e.g.:
 import { FakeProxyProcessLauncher } from '../../implementations/test/fake-process-launcher.js';
 
 it('should handle process messages', async () => {
@@ -258,13 +262,15 @@ Integration tests use real implementations where possible:
 
 ```typescript
 // tests/core/unit/session/session-manager-workflow.test.ts
-import { createMockSessionManagerDependencies } from '../../../test-utils/helpers/test-dependencies.js';
+// Note: Session workflow tests use createMockDependencies from a local helper,
+// not createMockSessionManagerDependencies from test-utils/helpers/test-dependencies.ts
+import { createMockDependencies } from './session-manager-test-utils.js';
 
 describe('Session Manager Workflow', () => {
   let sessionManager: SessionManager;
 
   beforeEach(async () => {
-    const deps = createMockSessionManagerDependencies();
+    const deps = createMockDependencies();
 
     sessionManager = new SessionManager(
       { logDirBase: '/tmp/test-logs' },

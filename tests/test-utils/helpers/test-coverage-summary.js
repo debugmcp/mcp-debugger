@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * Runs tests with coverage and displays a minimal summary
+ * Runs tests with coverage, displays a minimal summary, and exits with the test result code
  */
 async function testCoverageSummary() {
   const jsonFile = path.join(process.cwd(), 'test-results.json');
@@ -34,9 +34,12 @@ async function testCoverageSummary() {
   
   const startTime = Date.now();
   
-  await new Promise((resolve) => {
-    testProcess.on('close', resolve);
+  const childExitCode = await new Promise((resolve) => {
+    testProcess.on('close', (code) => resolve(code));
   });
+  if (childExitCode != null && childExitCode !== 0) {
+    process.exitCode = childExitCode;
+  }
   
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   

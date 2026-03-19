@@ -14,7 +14,7 @@ The error handling system is designed to:
 
 ### Location: `src/utils/error-messages.ts`
 
-All user-facing error messages are centralized in a single module:
+Reusable timeout-related error message factories are centralized in this module. Other user-facing error text (e.g., from worker, proxy, or session error paths) is defined inline elsewhere in the codebase. The module's primary invariant is consistency for timeout messages: callers should source timeout text from here instead of inlining strings.
 
 ```typescript
 export const ErrorMessages = {
@@ -89,6 +89,13 @@ setupGlobalErrorHandlers(
   // Graceful shutdown on signals
   process.on('SIGTERM', () => {
     this.logger.info('[ProxyRunner] Received SIGTERM, shutting down gracefully');
+    errorShutdown().finally(() => {
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGINT', () => {
+    this.logger.info('[ProxyRunner] Received SIGINT, shutting down gracefully');
     errorShutdown().finally(() => {
       process.exit(0);
     });
@@ -185,7 +192,11 @@ interface DebugResult {
   success: boolean;
   state: SessionState;
   error?: string;
-  data?: any;
+  data?: unknown;
+  canContinue?: boolean;
+  // Machine-readable error identity for tests and callers (avoid string assertions)
+  errorType?: string; // e.g., 'PythonNotFoundError'
+  errorCode?: number; // e.g., -32602 (MCP InvalidParams)
 }
 ```
 
@@ -408,7 +419,7 @@ it('should clean up on error', async () => {
 
 ## Best Practices
 
-1. **Use Centralized Error Messages** - Always use `ErrorMessages` for user-facing errors
+1. **Use Centralized Error Messages** - Use `ErrorMessages` for timeout-related errors to ensure consistency
 2. **Include Context** - Add sessionId, operation name, and relevant data
 3. **Log Before Throwing** - Log errors with full context before propagating
 4. **Clean Up on Error** - Always release resources and reset state

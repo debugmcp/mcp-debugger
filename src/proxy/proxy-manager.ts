@@ -11,15 +11,21 @@ import {
   ILogger
 } from '@debugmcp/shared';
 import { IProxyProcessLauncher, IProxyProcess } from '@debugmcp/shared';
-import { 
-  createInitialState, 
-  handleProxyMessage, 
+import {
+  createInitialState,
+  handleProxyMessage,
   isValidProxyMessage,
   DAPSessionState,
   addPendingRequest,
   removePendingRequest,
   clearPendingRequests
 } from '../dap-core/index.js';
+import type {
+  ProxyStatusMessage,
+  ProxyDapEventMessage,
+  ProxyDapResponseMessage,
+  ProxyMessage
+} from '../dap-core/types.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { sanitizePayloadForLogging, sanitizeStderr } from '../utils/env-sanitizer.js';
 import { ProxyConfig } from './proxy-config.js';
@@ -34,12 +40,13 @@ export interface ProxyManagerEvents {
   'continued': () => void;
   'terminated': () => void;
   'exited': () => void;
-  
+
   // Proxy lifecycle events
   'initialized': () => void;
+  'init-received': () => void;
   'error': (error: Error) => void;
   'exit': (code: number | null, signal?: string) => void;
-  
+
   // Status events
   'dry-run-complete': (command: string, script: string) => void;
   'adapter-configured': () => void;
@@ -73,42 +80,6 @@ export interface IProxyManager extends EventEmitter {
   getDryRunSnapshot(): { command?: string; script?: string } | undefined;
 }
 
-// Message types from proxy
-type ProxyStatusMessage =
-  | { type: 'status'; sessionId: string; status: 'proxy_minimal_ran_ipc_test'; message?: string }
-  | { type: 'status'; sessionId: string; status: 'init_received'; data?: unknown }
-  | { type: 'status'; sessionId: string; status: 'dry_run_complete'; command: string; script: string; data?: unknown }
-  | { type: 'status'; sessionId: string; status: 'adapter_configured_and_launched'; data?: unknown }
-  | { type: 'status'; sessionId: string; status: 'adapter_connected'; data?: unknown }
-  | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; data?: unknown };
-
-type ProxyDapEventMessage = { 
-  type: 'dapEvent'; 
-  sessionId: string; 
-  event: string; 
-  body?: unknown; 
-  data?: unknown 
-};
-
-type ProxyDapResponseMessage = { 
-  type: 'dapResponse'; 
-  sessionId: string; 
-  requestId: string; 
-  success: boolean; 
-  response?: DebugProtocol.Response; 
-  body?: unknown; 
-  error?: string;
-  data?: unknown;
-};
-
-type ProxyErrorMessage = { 
-  type: 'error'; 
-  sessionId: string; 
-  message: string; 
-  data?: unknown 
-};
-
-type ProxyMessage = ProxyStatusMessage | ProxyDapEventMessage | ProxyDapResponseMessage | ProxyErrorMessage;
 
 interface ProxyRuntimeEnvironment {
   moduleUrl: string;

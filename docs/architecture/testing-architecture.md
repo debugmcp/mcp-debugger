@@ -6,7 +6,7 @@ This document describes the testing architecture, patterns, and strategies used 
 
 ### Technology Stack
 - **Test Runner**: Vitest 3.x
-- **Coverage Tool**: @vitest/coverage-v8
+- **Coverage Tool**: Istanbul (via `@vitest/coverage-istanbul`)
 - **Assertion Library**: Vitest's built-in expect
 - **Mocking**: Vitest's vi mocking utilities
 - **Configuration**: `vitest.config.ts`
@@ -44,28 +44,13 @@ tests/
 
 The project uses sophisticated fake implementations for testing process-spawning code:
 
+`FakeProxyProcess` extends `FakeProcess` (which provides base lifecycle fields and event simulation) and specializes it for `IProxyProcess`. The `sendCommand` method serializes commands to JSON and routes them through the inherited `send` method.
+
 ```typescript
-export class FakeProxyProcess extends EventEmitter implements IProxyProcess {
-  pid: number;
-  killed = false;
-  private messageQueue: any[] = [];
-  sentCommands: any[] = [];
-
-  simulateMessage(message: any): void {
-    this.emit('message', message);
-  }
-
-  simulateExit(code: number | null, signal?: string | null): void {
-    this.emit('exit', code, signal);
-  }
-
-  sendCommand(command: any): void {
-    this.sentCommands.push(command);
-    if (typeof command === 'object') {
-      this.emit('message', JSON.stringify(command));
-    }
-  }
-}
+// Simplified usage example:
+const fakeProxy = new FakeProxyProcess();
+fakeProxy.simulateMessage({ type: 'status', status: 'adapter_configured' });
+fakeProxy.simulateExit(0);
 ```
 
 This pattern enables testing complex process interactions without spawning real processes.
@@ -219,23 +204,16 @@ export function createMockFileSystem(): IFileSystem {
 
 Ensures tests don't conflict on network ports:
 
+The port manager exports a singleton `portManager` instance with `PortRange`-based allocation anchored at base port 5679:
+
 ```typescript
-export class TestPortManager {
-  private static basePort = 30000;
-  private static currentPort = TestPortManager.basePort;
-  private static allocatedPorts = new Set<number>();
+import { portManager, PortRange } from './port-manager';
 
-  static getNextPort(): number {
-    const port = this.currentPort++;
-    this.allocatedPorts.add(port);
-    return port;
-  }
+// Get a single port for unit tests
+const port = portManager.getPort(PortRange.UNIT_TESTS);
 
-  static reset(): void {
-    this.currentPort = this.basePort;
-    this.allocatedPorts.clear();
-  }
-}
+// Get multiple ports
+const [port1, port2] = portManager.getPorts(2, PortRange.UNIT_TESTS);
 ```
 
 ## Integration Testing Strategy

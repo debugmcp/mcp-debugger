@@ -107,11 +107,11 @@ graph TB
 The proxy system follows a three-layer architecture:
 
 #### a. ProxyRunner (`src/proxy/dap-proxy-core.ts`)
-- **Purpose**: Pure business logic without side effects
+- **Purpose**: Orchestration/lifecycle code that centralizes worker startup, transport setup, and process-level error handling. Despite its framing, this file performs real side effects (touches `process`, timers, stdio, IPC, and exits the process).
 - **Features**:
   - Configurable communication channels (IPC/stdin)
   - Message processing pipeline
-  - Global error handling setup
+  - Global error handling setup (including `SIGTERM` and `SIGINT`)
   
 #### b. ProxyWorker (`src/proxy/dap-proxy-worker.ts`)
 - **Purpose**: Core worker implementing debugging logic
@@ -119,11 +119,11 @@ The proxy system follows a three-layer architecture:
   ```typescript
   // From src/proxy/dap-proxy-interfaces.ts
   enum ProxyState {
-    UNINITIALIZED,
-    INITIALIZING,
-    CONNECTED,
-    SHUTTING_DOWN,
-    TERMINATED
+    UNINITIALIZED = 'uninitialized',
+    INITIALIZING = 'initializing',
+    CONNECTED = 'connected',
+    SHUTTING_DOWN = 'shutting_down',
+    TERMINATED = 'terminated'
   }
   ```
 - **Responsibilities**:
@@ -172,7 +172,7 @@ sequenceDiagram
     PW->>DA: setBreakpoints
     DA-->>PW: initialized event
     PW-->>PM: adapter-configured
-    PM-->>SM: state: RUNNING
+    PM-->>SM: state: RUNNING (when stopOnEntry=false)
     SM-->>C: Debug started
     
     Note over DA,TGT: Script execution begins
@@ -213,7 +213,7 @@ sequenceDiagram
 1. **Dependency Injection** - All major components use constructor injection
 2. **Factory Pattern** - ProxyManagerFactory, SessionStoreFactory for testability
 3. **Event-Driven** - Extensive EventEmitter usage with proper cleanup
-4. **Functional Core** - Pure functions in dap-core for state management
+4. **Functional Core** - Pure functions in `src/dap-core/*` for state management (note: `src/proxy/dap-proxy-core.ts` is orchestration code, not part of the pure functional core)
 5. **Error Boundaries** - Centralized error handling with user-friendly messages
 
 ## Deployment Options

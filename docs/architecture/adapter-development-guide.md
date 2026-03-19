@@ -31,7 +31,7 @@ packages/adapter-<language>/
 Naming conventions:
 - Package name: `@debugmcp/adapter-<language>`
 - Factory class: `<CapitalizedLanguage>AdapterFactory` (e.g., `PythonAdapterFactory`)
-- Default export: `{ name: '<language>', factory: <Language>AdapterFactory }`
+- The dynamic loader looks for a **named export** matching `<CapitalizedLanguage>AdapterFactory` and instantiates it directly. A default export is optional and not required by the loader.
 
 Why? The dynamic loader expects the package name and factory class name to follow these conventions.
 
@@ -88,8 +88,8 @@ packages/
 - Extend `AdapterFactory` from `@debugmcp/shared`
 - Implement `createAdapter(dependencies)`
 
-5) Export from `src/index.ts` with the required default shape
-- Must export named factory class and default `{ name, factory }`
+5) Export from `src/index.ts`
+- Must export the named factory class (the dynamic loader requires this). A default export is optional.
 
 6) Add TypeScript configuration
 - File: `tsconfig.json`
@@ -218,8 +218,10 @@ export class ExampleAdapterFactory extends AdapterFactory {
 
 src/index.ts
 ```typescript
+// The named export is required by the dynamic loader
 export { ExampleAdapterFactory } from './ExampleAdapterFactory.js';
-export default { name: 'example', factory: ExampleAdapterFactory };
+// Re-export adapter class and other public API as needed
+export { ExampleAdapter } from './ExampleAdapter.js';
 ```
 
 ---
@@ -343,7 +345,7 @@ Common errors & fixes
 - `MODULE_NOT_FOUND` / `ERR_MODULE_NOT_FOUND`
   - Not installed in the runtime. Fix: `npm install @debugmcp/adapter-<language>` and rebuild image/app
 - `Factory class <Language>AdapterFactory not found`
-  - Export mismatch. Ensure you export the named class and default `{ name, factory }` in your entry
+  - Export mismatch. Ensure you export the named factory class from your package entry
 - Adapter not listed by `list_supported_languages`
   - Verify npm installation (`npm ls @debugmcp/adapter-*`)
   - Confirm package’s `exports` and `type: "module"` are correct
@@ -355,14 +357,14 @@ Common errors & fixes
 Debugging dynamic loading
 - Increase server logging (debug level) and watch loader logs
 - Note: `DEBUG=mcp:*` is misleading in STDIO mode because console output is silenced to protect JSON-RPC framing. Use `--log-file <path>` instead to capture verbose logs to disk
-- Confirm default export shape in the compiled `dist/index.js`
+- Confirm named factory class export in the compiled `dist/index.js`
 - Validate `@debugmcp/shared` peer version compatibility with the core
 
 Troubleshooting flow
 ```
 Adapter not loading?
 ├── npm ls @debugmcp/adapter-*
-├── Verify export structure { name: '<lang>', factory: <Lang>AdapterFactory }
+├── Verify named export of <Lang>AdapterFactory class
 ├── Check compiled dist/index.js exists and is ESM
 ├── Check stdout purity in stdio (no logs)
 └── Inspect /app/logs/stdout-raw.log and stdin-raw.log (container)
@@ -374,7 +376,7 @@ Adapter not loading?
 
 - [ ] `IDebugAdapter` fully implemented
 - [ ] Factory extends `AdapterFactory` and validates environment (if needed)
-- [ ] Export conventions followed (`@debugmcp/adapter-<language>`, factory class name, default export)
+- [ ] Export conventions followed (`@debugmcp/adapter-<language>`, named factory class export)
 - [ ] TypeScript built to `dist/` (ESM)
 - [ ] Unit and integration tests pass
 - [ ] Adapter discovers and loads dynamically

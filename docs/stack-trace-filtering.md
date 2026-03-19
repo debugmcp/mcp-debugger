@@ -62,12 +62,12 @@ The filtering is implemented using the existing `AdapterPolicy` system:
 
 4. **SessionManagerData** (`src/session/session-manager-data.ts`)
    - Applies filtering based on session language via `selectPolicy()`
-   - Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied (currently JavaScript and Go)
+   - Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied (including JavaScript, Go, .NET, and any other adapter policies that define this method)
 
 ### Edge Cases Handled
 - **All frames internal**: At least the first frame is retained
 - **No frames**: Returns empty array as before
-- **Python/Other languages**: No filtering applied (only languages whose AdapterPolicy implements `filterStackFrames` are filtered)
+- **Other languages**: No filtering applied unless their AdapterPolicy implements `filterStackFrames`
 
 ## Benefits
 1. **Cleaner Stack Traces**: Users see their code immediately, not framework internals

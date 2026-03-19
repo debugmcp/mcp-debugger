@@ -1,5 +1,5 @@
 /**
- * Unit tests for session migration from pythonPath to executablePath
+ * Unit tests verifying sessions use executablePath (not legacy pythonPath)
  */
 import { describe, it, expect } from 'vitest';
 import { SessionStore, CreateSessionParams } from '../../../../src/session/session-store.js';
@@ -9,7 +9,7 @@ describe('Session Migration Verification', () => {
   it('should not accept pythonPath parameter', () => {
     const store = new SessionStore();
     
-    // TypeScript should prevent this at compile time
+    // Verify that sessions use executablePath (not the old pythonPath)
     const params = {
       language: DebugLanguage.PYTHON,
       executablePath: '/usr/bin/python3'

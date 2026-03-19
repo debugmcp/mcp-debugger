@@ -21,7 +21,7 @@ The `dist/` directory contains the compiled TypeScript output and is the source 
   - Creates `packages/mcp-debugger/dist/cli.mjs` - self-contained CLI bundle (~3MB)
   - Creates `packages/mcp-debugger/dist/proxy/proxy-bundle.cjs` - self-contained proxy bundle
   - Copies compiled proxy, errors, adapters, session, and utils directories from root dist
-  - Copies js-debug adapter for JavaScript debugging support
+  - Copies vendored js-debug assets from `packages/adapter-javascript/vendor/js-debug` into `packages/mcp-debugger/dist/vendor/js-debug`
 
 ### Scripts That Require Fresh Builds
 The following scripts now include `npm run build` to ensure fresh artifacts:
@@ -119,8 +119,8 @@ The project uses two bundling tools for different purposes:
 - **CJS output**: Proxy bundle uses `.cjs` for CommonJS (required by child process)
 
 **esbuild** (for root-level bundles):
-- Used by `scripts/bundle.js` to create `dist/bundle.cjs` (main server) and `dist/proxy-bundle.cjs` (proxy)
-- These root bundles are used in Docker builds and direct execution scenarios
+- Used by `scripts/bundle.js` to create `dist/bundle.cjs` (main server) and `dist/proxy/proxy-bundle.cjs` (proxy)
+- These root bundles are available for direct execution scenarios. Note: The Docker entrypoint uses `node dist/index.js`, not the esbuild bundle
 
 ### Build Artifacts Management
 Build artifacts are properly managed via `.gitignore`:

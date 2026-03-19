@@ -5,18 +5,18 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 ## Before Tagging
 
 ### Automated (via `npm run release:dry-run`)
-- [ ] All package versions match (`package.json` in root, shared, adapter-python, adapter-javascript, adapter-rust, adapter-go, adapter-java, adapter-dotnet, adapter-mock, mcp-debugger)
+- [ ] Package versions match (the dry-run script checks root plus the packages listed in its `PUBLISHED_PKGS`; adapter-go, adapter-java, and adapter-dotnet may not be included in the automated check yet)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
 - [ ] `npm run build` succeeds
 - [ ] `npm run test:unit` passes
-- [ ] `npm pack --dry-run` succeeds for all published packages
+- [ ] `npm pack --dry-run` succeeds for packages in `PUBLISHED_PKGS` (see `scripts/release-dry-run.sh`)
 - [ ] `release.yml` has `setup-java` (JDI bridge compiles with `--release 21`)
 - [ ] `release.yml` has `setup-go` (Go adapter needs Delve)
 - [ ] `release.yml` changelog extraction strips `v` prefix (`refs/tags/v}` not `refs/tags/}`)
 
 ### Manual
-- [ ] **npm trusted publishing configured** — each `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). No token needed — OIDC handles auth.
+- [ ] **npm trusted publishing configured** — each `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). Note: the release dry-run script still checks for `NPM_TOKEN` as a repository secret.
 - [ ] **Docker Hub credentials** — `DOCKER_USERNAME` and `DOCKER_PASSWORD` secrets are current
 - [ ] **PyPI token** — `PYPI_TOKEN` secret is current
 - [ ] `release.yml` default ref updated to current tag (for workflow_dispatch reruns)

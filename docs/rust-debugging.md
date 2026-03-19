@@ -40,7 +40,7 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 
 ### Useful environment flags
 
-- `CODELLDB_VERSION`: override the release tag (defaults to `1.11.8`)
+- `CODELLDB_VERSION`: override the release tag (the runtime resolver defaults to `1.11.0` when reading vendored version metadata fails)
 - `CODELLDB_FORCE_REBUILD=true`: ignore cached binaries and re-download
 - `CODELLDB_PLATFORMS=win32-x64,linux-x64,linux-arm64,darwin-x64,darwin-arm64`: vendor specific platforms (comma-separated)
 - `CODELLDB_VENDOR_ALL=false`: opt out of the "vendor every platform" default and fall back to host-only downloads
@@ -149,7 +149,7 @@ For a Cargo project with arguments:
 
 Our test suite uses `tests/e2e/rust-example-utils.ts` to make sure every rust smoke test compiles and reuses binaries deterministically. The helper does three things you can mirror in your own workflows:
 
-1. **Build with the GNU toolchain when available.** On Windows it looks up `dlltool.exe` (via `@debugmcp/adapter-rust`’s `findDlltoolExecutable`) and runs `cargo +stable-gnu build --target x86_64-pc-windows-gnu`. If that fails it falls back to the platform’s default triple (MSVC on Windows, glibc or musl elsewhere). You can follow the same pattern manually:
+1. **Build with the GNU toolchain when available.** On Windows it looks up `dlltool.exe` (via `@debugmcp/adapter-rust`’s `findDlltoolExecutable`) and runs `cargo +stable-gnu build --target x86_64-pc-windows-gnu`. If that fails it logs a warning and falls back to an explicit MSVC-targeted build (`+stable-msvc build --target x86_64-pc-windows-msvc`). You can follow the same pattern manually:
    ```powershell
    # GNU-preferred build on Windows
    rustup target add x86_64-pc-windows-gnu
@@ -167,7 +167,7 @@ Our test suite uses `tests/e2e/rust-example-utils.ts` to make sure every rust sm
    Tokio/async builds use exactly the same rule—the helper’s `prepareRustExample('async_example')` just compiles a different crate and returns `{ sourcePath, binaryPath }` so the smoke tests can reuse those paths.
 3. **Cache builds between tests.** Once an example has been compiled, the helper stores both paths in-memory so the rest of the suite can run without triggering another `cargo build`. For local work you can emulate this with Cargo’s default incremental builds: as long as you relaunch the same `target/<triple>/debug/<binary>` the MCP `start_debugging` call does not care when the binary was produced.
 
-> **Tip:** Users can reuse the same helper logic by importing `prepareRustExample` inside custom E2E scripts, or by replicating its approach in their own build tooling. The important detail is that breakpoints reference source (`src/main.rs`) while `start_debugging.scriptPath` references the compiled executable. This is true for synchronous and async (Tokio) binaries alike.
+> **Tip:** The `prepareRustExample` function is an internal test helper, not a supported public utility. You can replicate its approach in your own build tooling. The important detail is that breakpoints reference source (`src/main.rs`) while `start_debugging.scriptPath` references the compiled executable. This is true for synchronous and async (Tokio) binaries alike.
 
 ## Cargo Integration
 
@@ -331,8 +331,8 @@ If CodeLLDB is not found:
 cd packages/adapter-rust
 npm run build:adapter
 
-# Check if it was downloaded
-ls vendor/codelldb*/
+# Check if it was downloaded (fixed layout under vendor/codelldb/)
+ls vendor/codelldb/
 ```
 
 ### Async Code Debugging Issues

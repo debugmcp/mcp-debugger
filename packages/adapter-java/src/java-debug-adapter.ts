@@ -419,7 +419,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   getInstallationInstructions(): string {
     return `Java Debugging Setup:
 
-1. Install JDK 21 or higher:
+1. Install JDK 11 or higher (JDK 21+ recommended):
    - All platforms: Download from https://adoptium.net/
    - macOS: brew install openjdk
    - Ubuntu: sudo apt install openjdk-17-jdk
@@ -431,7 +431,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
 
 3. Verify installation:
    java -version
-   # Should show JDK 21+
+   # Should show JDK 11+
 
 4. Ensure JAVA_HOME is set (optional but recommended):
    export JAVA_HOME=/path/to/jdk`;
