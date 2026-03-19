@@ -1360,8 +1360,8 @@ describe('DapProxyWorker', () => {
         new Error('Connection lost')
       );
 
-      // This would need to be done after connected state
-      // Since we're testing error handling, the test shows the pattern
+      // Verify the mock was configured to reject
+      await expect(mockDapClient.sendRequest('threads')).rejects.toThrow('Connection lost');
     });
   });
 

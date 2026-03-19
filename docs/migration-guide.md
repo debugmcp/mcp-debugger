@@ -1,7 +1,7 @@
 # mcp-debugger Migration Guide
 
 > **📌 UPDATED DOCUMENTATION**
-> This migration guide covers changes through v0.15.0, including dynamic adapter loading and major UX improvements.
+> This migration guide covers changes through v0.18.1, including dynamic adapter loading and major UX improvements.
 
 ## What's New in v0.15.0
 
@@ -13,6 +13,8 @@ This release introduces dynamic discovery and loading of language adapters at ru
   - `@debugmcp/adapter-javascript`
   - `@debugmcp/adapter-rust`
   - `@debugmcp/adapter-go`
+  - `@debugmcp/adapter-java`
+  - `@debugmcp/adapter-dotnet`
   - `@debugmcp/adapter-mock`
 - Adapters are treated as optional dependencies in consumers
 - The core discovers and loads adapters on demand:
@@ -146,6 +148,8 @@ enum DebugLanguage {
   JAVASCRIPT = 'javascript',
   RUST = 'rust',
   GO = 'go',
+  JAVA = 'java',
+  DOTNET = 'dotnet',
   MOCK = 'mock',  // For testing
 }
 ```
@@ -241,6 +245,8 @@ If you want to add support for a new language:
      JAVASCRIPT = 'javascript',
      RUST = 'rust',
      GO = 'go',
+     JAVA = 'java',
+     DOTNET = 'dotnet',
      MOCK = 'mock',
      MYLANG = 'mylang'  // Add your language
    }
@@ -388,7 +394,7 @@ await mcp.startDebugging({
 ```typescript
 // Verify adapter is being used
 const languages = await mcp.getSupportedLanguages();
-console.log('Supported:', languages);  // Should include 'python', 'javascript', 'rust', 'go', 'mock'
+console.log('Supported:', languages);  // Should include 'python', 'javascript', 'rust', 'go', 'java', 'dotnet', 'mock'
 ```
 
 ### 3. Event Handling Test

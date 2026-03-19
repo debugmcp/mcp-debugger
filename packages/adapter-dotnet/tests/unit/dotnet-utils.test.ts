@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import path from 'node:path';
 
 // Mock child_process before importing the module
 vi.mock('child_process', async () => {

@@ -147,13 +147,13 @@ npm run act:full     # Run full CI workflow
 **The project uses a TRUE HANDS-OFF approach to path handling:**
 
 1. **Accept all paths as-is** - No interpretation of Windows vs Linux paths
-2. **File existence check only** - For immediate LLM UX feedback (`SimpleFileChecker`)
-3. **Container mode: Simple prefix** - Only `/workspace/` prepend for existence checks  
+2. **Path resolution and existence checking** - For immediate LLM UX feedback (`SimpleFileChecker`)
+3. **Container mode: Simple prefix** - Only `/workspace/` prepend for existence checks
 4. **Pass original paths unchanged** - To debug adapter (debugpy handles path resolution)
 5. **No cross-platform logic** - Avoids unsolvable edge cases and complexity
 
 **Key Files:**
-- `src/utils/simple-file-checker.ts` - Only path-related logic (existence checking)
+- `src/utils/simple-file-checker.ts` - Path resolution (via `resolvePathForRuntime`), relative-path rejection in host mode, and file existence checking
 - `src/server.ts` - Uses SimpleFileChecker for validation, passes original paths to SessionManager
 
 **Rationale:** Cross-platform path handling is theoretically impossible due to ambiguous edge cases. The debug adapter and OS know best how to handle paths for their environment.
@@ -176,9 +176,12 @@ The codebase follows a **layered architecture with dependency injection** and **
    - **Language Adapters** (`packages/adapter-*`): Language-specific implementations
    - Supports both pre-registered and dynamically loaded adapters
 
-3. **SessionManager** (`src/session/session-manager.ts`)
-   - Central orchestrator for debug sessions
-   - Manages session lifecycle and state
+3. **SessionManager** (`src/session/`)
+   - Central orchestrator for debug sessions, implemented as a 4-class inheritance hierarchy:
+     - `SessionManagerCore` (`session-manager-core.ts`): Lifecycle, state management, event handling, dependency wiring
+     - `SessionManagerData` (`session-manager-data.ts`): Data retrieval (variables, stack traces, scopes) and adapter policy selection via `selectPolicy()`
+     - `SessionManagerOperations` (`session-manager-operations.ts`): Debug operations (start, step, continue, breakpoints, attach/detach)
+     - `SessionManager` (`session-manager.ts`): Final composition class that extends SessionManagerOperations
    - Coordinates ProxyManager instances (one per session)
    - Handles breakpoint management and queuing
 
@@ -188,10 +191,11 @@ The codebase follows a **layered architecture with dependency injection** and **
    - Implements typed event system for DAP events
    - Handles request/response correlation with timeouts
 
-5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`)
+5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`, `src/proxy/minimal-dap.ts`)
    - **ProxyCore**: Pure business logic, message processing
    - **ProxyWorker**: Core worker handling debugging operations
-   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`)
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`). Note: Java is fully wired to `JavaAdapterPolicy` in `selectPolicy()` (not falling through to `DefaultAdapterPolicy`).
+   - **ChildSessionManager** (`src/proxy/child-session-manager.ts`): Manages DAP child sessions within a single proxy process. Currently used by the js-debug adapter (`childSessionStrategy: 'launchWithPendingTarget'`), which spawns a child debug session for the actual debuggee while the parent session manages the launch orchestration.
    - Implements full Debug Adapter Protocol (DAP) communication
 
 ### Key Patterns
@@ -222,16 +226,20 @@ The system supports dynamic adapter loading through:
 
 ### State Management
 
-Sessions use a **dual-state model**:
+Sessions use **`SessionState`** as the primary state model, stored directly on each `ManagedSession` and checked throughout the codebase:
+- **SessionState**: `CREATED` → `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `TERMINATED` | `ERROR`
+
+A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived from `SessionState` via `mapLegacyState()` in `_updateSessionState()`:
 - **SessionLifecycleState**: `CREATED` → `ACTIVE` → `TERMINATED` (coarse lifecycle)
 - **ExecutionState**: `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `TERMINATED` | `ERROR` (fine-grained execution)
-- A legacy `SessionState` enum exists for backward compatibility but the dual-state model is canonical
+
+`SessionState` is the actively used model; the dual-state fields are kept in sync as a secondary representation.
 
 ## Important Files and Directories
 
 ### Core System
 - `src/server.ts` - Main MCP server implementation
-- `src/session/session-manager.ts` - Core session orchestration
+- `src/session/` - Session management (4-class hierarchy: `session-manager-core.ts` → `session-manager-data.ts` → `session-manager-operations.ts` → `session-manager.ts`)
 - `src/proxy/proxy-manager.ts` - Proxy process management
 - `src/proxy/dap-proxy-worker.ts` - Debug adapter protocol implementation
 
@@ -449,7 +457,7 @@ Once connected, the following 19 MCP tools become available:
 - `evaluate_expression` - Evaluate expressions in debug context
 - `get_source_context` - Get source code around current position
 
-**Dev proxy only** (available when using Option 5):
+**Dev proxy only** (these 3 tools are injected by the dev proxy process itself, not by the main mcp-debugger server):
 - `dev_restart_debugger` - Restart the backend (pass `rebuild: true` to build first)
 - `dev_rebuild_and_restart` - Run `npm run build` then restart the backend
 - `dev_server_status` - Check backend state, PID, uptime, tool count

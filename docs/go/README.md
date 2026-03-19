@@ -188,10 +188,9 @@ When paused, you can examine the program's state:
 ```
 use_mcp_tool(
   server_name="debug-mcp-server",
-  tool_name="get_variables",
+  tool_name="get_local_variables",
   arguments={
-    "sessionId": "your-session-id",
-    "scope": "local"
+    "sessionId": "your-session-id"
   }
 )
 ```
@@ -245,23 +244,19 @@ Delve supports several launch modes:
 - **`replay`**: Replay a recorded trace
 - **`core`**: Debug a core dump
 
-### Goroutine Management
+### Goroutine-Aware Debugging
 
-Go programs use goroutines for concurrency. The debugger can:
+Go programs use goroutines for concurrency. Delve natively handles goroutines, and the MCP tools reflect this:
 
-- Inspect all goroutines
-- Filter system/runtime goroutines
-- Set breakpoints in specific goroutines
-- Navigate goroutine stacks
+- Stack traces show the goroutine context for each frame
+- Runtime/system goroutine frames are filtered out by default (use `includeInternals: true` in `get_stack_trace` to see them)
+- Variable inspection works within the current goroutine's stack frame
 
-### Exception Breakpoints
+Note: The MCP tools do not expose goroutine-specific commands (listing goroutines, switching between goroutines, or setting goroutine-scoped breakpoints). These are Delve-internal capabilities not surfaced through the MCP tool interface.
 
-Delve supports breaking on Go panics and fatal errors:
+### Exception Handling
 
-- **Unrecovered Panics**: Break when a panic is not recovered
-- **Fatal Throws**: Break on runtime fatal errors
-
-These can be configured in the launch arguments or set during the session.
+Delve can break on Go panics and fatal errors at the DAP level. However, the MCP tool interface does not currently expose a dedicated tool for configuring exception breakpoints. Panic/fatal-error breakpoints can be requested via `dapLaunchArgs` if the Delve DAP server supports the corresponding exception filter names.
 
 ## Debugging Tips
 

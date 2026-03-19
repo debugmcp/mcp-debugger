@@ -308,7 +308,7 @@ export function autoValidateMock<T extends object>(
   mock: any,
   realClass: new (...args: any[]) => T,
   className: string
-): void {
+): T {
   // Store original mock for restoration
   const originalMock = { ...mock };
 

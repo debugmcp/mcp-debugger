@@ -1,6 +1,6 @@
 # Getting Started with Debug MCP Server
 
-This guide will walk you through testing the Debug MCP Server locally with a simple Python example. The server also supports JavaScript, Rust, Go, and Java debugging -- see the language-specific guides for details.
+This guide will walk you through testing the Debug MCP Server locally with a simple Python example. The server also supports JavaScript, Rust, Go, Java, and .NET/C# debugging -- see the language-specific guides for details.
 
 ## Prerequisites
 
@@ -87,11 +87,14 @@ If you encounter issues, you can check the server status in VS Code:
 
 ## Understanding the Server Logs
 
-The server outputs logs to the terminal where you launched it. These logs can provide valuable debugging information:
+When running in **stdio mode** (the default for MCP clients), the server suppresses all console output to avoid corrupting the JSON-RPC protocol stream. Logs are only written when a `--log-file` path is specified. To inspect logs:
 
-- Check for any "error" level logs
-- Look for messages about Python detection and debugpy availability
-- Monitor DAP (Debug Adapter Protocol) communication logs
+1. Configure a log file in your MCP settings: `"args": ["dist/index.js", "stdio", "--log-file", "/path/to/debug.log"]`
+2. Check the log file for "error" level entries
+3. Look for messages about Python detection and debugpy availability
+4. Monitor DAP (Debug Adapter Protocol) communication logs
+
+When running in **SSE mode** (`node dist/index.js sse`), logs are printed to the terminal as usual.
 
 ## Next Steps
 

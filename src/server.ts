@@ -88,6 +88,7 @@ interface ToolArguments {
   expression?: string;
   linesContext?: number;
   includeInternals?: boolean;
+  includeSpecial?: boolean;
   // Attach-related parameters
   port?: number;
   host?: string;
@@ -166,8 +167,6 @@ export class DebugMcpServer {
   public server: Server;
   private sessionManager: SessionManager;
   private logger;
-  private constructorOptions: DebugMcpServerOptions;
-  private supportedLanguages: string[] = [];
   private fileChecker: SimpleFileChecker;
   private lineReader: LineReader;
   private environment: IEnvironment;
@@ -424,8 +423,6 @@ export class DebugMcpServer {
   }
 
   constructor(options: DebugMcpServerOptions = {}) {
-    this.constructorOptions = options;
-    
     const containerConfig: ContainerConfig = {
       logLevel: options.logLevel,
       logFile: options.logFile,
@@ -1480,7 +1477,7 @@ export class DebugMcpServer {
   }
 
   /**
-   * Public methods for server lifecycle management
+   * Public methods for server lifecycle and configuration
    */
   public async start(): Promise<void> {
     // For MCP servers, start is handled by transport

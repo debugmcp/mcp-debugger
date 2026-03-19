@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -586,10 +587,6 @@ describe('Comprehensive MCP Debugger Test — 19 Tools × 5 Languages', () => {
         const t0 = Date.now();
         try {
           const res = await callToolSafely(mcpClient!, 'pause_execution', { sessionId: currentSessionId });
-          // Expected to fail with "not implemented" or similar
-          const isNotImpl = JSON.stringify(res).toLowerCase().includes('not implemented') ||
-                           JSON.stringify(res).toLowerCase().includes('not supported') ||
-                           res.success === false;
           record('pause_execution', lang.language, 'PASS',
             `Expected behavior (not implemented): ${JSON.stringify(res).slice(0, 150)}`,
             Date.now() - t0);
@@ -708,7 +705,6 @@ describe('Comprehensive MCP Debugger Test — 19 Tools × 5 Languages', () => {
     console.log('========================================\n');
 
     // Write JSON results for report generation
-    const fs = require('fs');
     const outPath = path.join(ROOT, 'tests', 'e2e', 'comprehensive-test-results.json');
     fs.writeFileSync(outPath, JSON.stringify({ results, summary: { total, pass, fail, skip }, timestamp: new Date().toISOString() }, null, 2));
     console.log(`[Report] JSON results written to ${outPath}`);

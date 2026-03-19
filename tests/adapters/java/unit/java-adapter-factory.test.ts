@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
-import fs from 'node:fs';
 import type { AdapterDependencies } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { JavaAdapterFactory, JavaDebugAdapter } from '@debugmcp/adapter-java';

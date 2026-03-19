@@ -1,10 +1,6 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * Runs tests with coverage and displays a minimal summary
@@ -25,13 +21,11 @@ async function testCoverageSummary() {
   });
   
   // Capture output but don't display verbose logs
-  let dots = '';
   testProcess.stdout.on('data', (data) => {
     const output = data.toString();
     // Extract only the dots/progress indicators
     const progressMatch = output.match(/[·.xX!*]+/g);
     if (progressMatch) {
-      dots += progressMatch.join('');
       process.stdout.write(progressMatch.join(''));
     }
   });
@@ -49,15 +43,27 @@ async function testCoverageSummary() {
   // Read and parse results
   try {
     // Parse test results
+    let suiteSummary = {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0
+    };
     let testSummary = {
       totalTests: 0,
       passed: 0,
       failed: 0,
       skipped: 0
     };
-    
+
     if (fs.existsSync(jsonFile)) {
       const results = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+      suiteSummary = {
+        total: results.numTotalTestSuites || 0,
+        passed: results.numPassedTestSuites || 0,
+        failed: results.numFailedTestSuites || 0,
+        skipped: results.numPendingTestSuites || 0
+      };
       testSummary = {
         totalTests: results.numTotalTests || 0,
         passed: results.numPassedTests || 0,
@@ -65,7 +71,7 @@ async function testCoverageSummary() {
         skipped: results.numPendingTests || 0
       };
     }
-    
+
     // Parse coverage results
     let coverageSummary = {
       statements: 0,
@@ -89,14 +95,14 @@ async function testCoverageSummary() {
     // Display minimal summary
     console.log('\n');
     console.log('─'.repeat(70));
-    console.log(`Test Files  ${testSummary.failed > 0 ? testSummary.failed + ' failed |' : ''} ${testSummary.passed} passed`);
+    console.log(`Test Files  ${suiteSummary.failed > 0 ? suiteSummary.failed + ' failed |' : ''} ${suiteSummary.passed} passed`);
     console.log(`     Tests  ${testSummary.failed > 0 ? testSummary.failed + ' failed |' : ''} ${testSummary.passed} passed${testSummary.skipped > 0 ? ' | ' + testSummary.skipped + ' skipped' : ''}`);
     console.log(`  Duration  ${duration}s`);
     console.log(`  Coverage  ${coverageSummary.statements.toFixed(2)}% stmts | ${coverageSummary.branches.toFixed(1)}% branch | ${coverageSummary.functions.toFixed(2)}% funcs | ${coverageSummary.lines.toFixed(1)}% lines`);
     console.log('─'.repeat(70));
-    
+
     // Exit code based on test results
-    const exitCode = testSummary.failed > 0 ? 1 : 0;
+    const exitCode = suiteSummary.failed > 0 || testSummary.failed > 0 ? 1 : 0;
     
     // Clean up
     if (fs.existsSync(jsonFile)) {

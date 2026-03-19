@@ -123,7 +123,7 @@ describe('ComponentToTest', () => {
 
 ```typescript
 // Using test utilities
-import { createMockLogger, createMockFileSystem } from '../../utils/test-utils.js';
+import { createMockLogger, createMockFileSystem } from '../../test-utils/helpers/test-dependencies.js';
 
 const mockLogger = createMockLogger();
 const mockFileSystem = createMockFileSystem();
@@ -197,7 +197,7 @@ it('should emit events correctly', async () => {
 #### 5. Testing with Fake Process Implementation
 
 ```typescript
-import { FakeProxyProcessLauncher } from '../../../tests/implementations/test/fake-process-launcher.js';
+import { FakeProxyProcessLauncher } from '../../implementations/test/fake-process-launcher.js';
 
 it('should handle process messages', async () => {
   const fakeLauncher = new FakeProxyProcessLauncher();
@@ -247,7 +247,7 @@ describe('error handling', () => {
 
   it('should use centralized error messages', async () => {
     await expect(component.operationWithTimeout())
-      .rejects.toThrow(ErrorMessages.operationTimeout(30));
+      .rejects.toThrow(ErrorMessages.proxyInitTimeout(30));
   });
 });
 ```

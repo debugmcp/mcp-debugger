@@ -282,14 +282,10 @@ Create a `.env` file for development:
 
 ```bash
 # Logging
-LOG_LEVEL=debug
-LOG_FILE=./logs/debug.log
+DEBUG_MCP_LOG_LEVEL=debug
 
 # Python
 PYTHON_PATH=python
-
-# Server
-MCP_SERVER_PORT=6111
 
 # Testing
 TEST_TIMEOUT=30000
@@ -299,11 +295,12 @@ TEST_TIMEOUT=30000
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `LOG_LEVEL` | Logging level (error, warn, info, debug) | `info` |
-| `LOG_FILE` | Path to log file | None (console only) |
+| `DEBUG_MCP_LOG_LEVEL` | Logging level (error, warn, info, debug) | `info` |
 | `PYTHON_PATH` | Path to Python executable | Auto-detected |
-| `MCP_SERVER_PORT` | SSE port for server | `3001` |
-| `DEBUG` | Enable debug output | `false` |
+| `DLV_PATH` | Path to Delve debugger (Go) | Auto-detected |
+| `NETCOREDBG_PATH` | Path to netcoredbg (.NET) | Auto-detected |
+| `JAVA_HOME` | Path to JDK installation (Java) | Auto-detected |
+| `DEBUG` | Enable debug output (e.g., `DEBUG=debug-mcp:*`) | Not set |
 
 ## Troubleshooting Setup Issues
 

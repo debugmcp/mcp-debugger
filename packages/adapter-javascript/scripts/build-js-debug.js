@@ -359,7 +359,8 @@ function execCmd(cmd, args, opts = {}) {
     const child = spawn(cmd, args, {
       cwd: opts.cwd || PKG_ROOT,
       stdio: opts.stdio || 'pipe',
-      shell: useShellFallback || false
+      shell: useShellFallback || false,
+      ...(opts.env ? { env: opts.env } : {})
     });
 
     let stdout = '';
@@ -442,11 +443,13 @@ async function buildFromSource(version) {
 
     // Locate built server entry and normalize
     const candidate = path.join(tmp, 'dist', 'vsDebugServer.js');
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-    const found = await findServerEntry(tmp);
-    return found.abs;
+    const sourcePath = fs.existsSync(candidate) ? candidate : (await findServerEntry(tmp)).abs;
+
+    // Copy to a permanent location before the temp directory is cleaned up
+    const permanentDir = await makeTmpDir('js-debug-built-');
+    const permanentPath = path.join(permanentDir, path.basename(sourcePath));
+    await fsp.copyFile(sourcePath, permanentPath);
+    return permanentPath;
   } finally {
     await safeRmRf(tmp);
   }

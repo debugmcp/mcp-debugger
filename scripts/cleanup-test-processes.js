@@ -3,8 +3,8 @@
 /**
  * Test Process Cleanup Script
  *
- * Cleans up orphaned processes after test suite execution.
- * Cross-platform compatible (Windows/Linux/macOS).
+ * Cleans up orphaned processes after test suite execution on Linux/macOS.
+ * Skipped on Windows (automatic cleanup) and in CI environments.
  *
  * This addresses a known issue where proxy-bootstrap processes
  * can become orphaned on Unix systems during test execution.
@@ -58,11 +58,13 @@ function findMcpProcesses() {
 
   // Patterns to match MCP-related processes
   // More specific to avoid killing unrelated processes
+  // Escape projectRoot for safe use in regex (backslashes, dots, etc.)
+  const escapedRoot = projectRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patterns = [
-    `${projectRoot}.*proxy-bootstrap`,  // Specific to this project
-    `${projectRoot}.*dap-proxy`,
-    `vitest.*${projectRoot}`,           // Vitest running in this project
-    `debugpy.*${projectRoot}`,          // debugpy spawned by this project
+    `${escapedRoot}.*proxy-bootstrap`,  // Specific to this project
+    `${escapedRoot}.*dap-proxy`,
+    `vitest.*${escapedRoot}`,           // Vitest running in this project
+    `debugpy.*${escapedRoot}`,          // debugpy spawned by this project
   ];
 
   const lines = processList.split('\n');
@@ -125,14 +127,8 @@ function killProcess(pid) {
   }
 }
 
-// Main cleanup logic
+// Main cleanup logic (only called on non-Windows, non-CI environments)
 function cleanup() {
-  // Skip on Windows - not needed due to process model
-  if (isWindows) {
-    console.log('✓ Windows: Process cleanup not needed (automatic)');
-    return;
-  }
-
   console.log('Searching for orphaned test processes...');
 
   const mcpProcesses = findMcpProcesses();

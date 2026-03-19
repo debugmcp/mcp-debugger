@@ -1125,8 +1125,8 @@ public class JdiDapServer {
     }
 
     private void handleClassPrepared(ReferenceType refType) {
-        // Look up deferred breakpoints via the sourcePath stored on the ClassPrepareRequest
-        // that triggered this event. Fall back to scanning all deferred entries by className.
+        // Look up deferred breakpoints by scanning all deferred entries whose className matches
+        // the prepared ReferenceType (full name or simple name).
         // The CPR property is set in handleSetBreakpoints / registerPendingBreakpoints.
         Map<String, Object> bpInfo = null;
 

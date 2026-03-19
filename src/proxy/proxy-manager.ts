@@ -968,7 +968,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       case 'dap_connection_closed':
       case 'terminated':
         this.logger.info(`[ProxyManager] Status: ${message.status}`);
-        this.emit('exit', message.code || 1, message.signal || undefined);
+        this.emit('exit', message.code ?? 1, message.signal || undefined);
         break;
     }
   }

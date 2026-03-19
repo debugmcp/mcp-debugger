@@ -21,7 +21,7 @@ The event management system is designed to:
 ```typescript
 export interface ProxyManagerEvents {
   // DAP events
-  'stopped': (threadId: number, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
+  'stopped': (threadId: number | undefined, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
   'continued': () => void;
   'terminated': () => void;
   'exited': () => void;
@@ -75,13 +75,16 @@ private setupProxyEventHandlers(
   const handlers = new Map<string, (...args: any[]) => void>();
 
   // Named function for stopped event
-  const handleStopped = (threadId: number, reason: string) => {
+  const handleStopped = (threadId: number | undefined, reason: string) => {
     this.logger.debug(`[SessionManager] 'stopped' event handler called for session ${sessionId}`);
     this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
 
-    // Transition session to PAUSED — the client must explicitly call
-    // continue_execution to resume. There is no auto-continue mechanism.
-    this._updateSessionState(session, SessionState.PAUSED);
+    // Handle auto-continue for stopOnEntry=false
+    if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
+      this.handleAutoContinue().catch(err => { /* log error */ });
+    } else {
+      this._updateSessionState(session, SessionState.PAUSED);
+    }
   };
   proxyManager.on('stopped', handleStopped);
   handlers.set('stopped', handleStopped);
@@ -90,6 +93,11 @@ private setupProxyEventHandlers(
   const handleContinued = () => {
     this.logger.debug(`[SessionManager] 'continued' event handler called for session ${sessionId}`);
     this.logger.info(`[ProxyManager ${sessionId}] Continued event`);
+
+    // Guard against stale continued events arriving after a breakpoint stop.
+    if (session.state === SessionState.PAUSED) {
+      return; // Keep PAUSED state
+    }
     this._updateSessionState(session, SessionState.RUNNING);
   };
   proxyManager.on('continued', handleContinued);
@@ -197,12 +205,14 @@ private handleDapEvent(message: ProxyDapEventMessage): void {
 
   switch (message.event) {
     case 'stopped':
-      const threadId = message.body?.threadId;
-      const reason = message.body?.reason || 'unknown';
-      if (threadId) {
-        this.currentThreadId = threadId;
+      const stoppedBody = message.body as { threadId?: number; reason?: string } | undefined;
+      const threadIdMaybe = (typeof stoppedBody?.threadId === 'number') ? stoppedBody!.threadId! : undefined;
+      const reason = stoppedBody?.reason || 'unknown';
+      if (typeof threadIdMaybe === 'number') {
+        this.currentThreadId = threadIdMaybe;
       }
-      this.emit('stopped', threadId, reason, message.body);
+      // Do not fabricate a threadId; emit undefined if adapter omitted it
+      this.emit('stopped', threadIdMaybe, reason, stoppedBody);
       break;
     
     case 'continued':
@@ -219,7 +229,7 @@ private handleDapEvent(message: ProxyDapEventMessage): void {
     
     // Forward other events as generic DAP events
     default:
-      this.emit('dap-event' as any, message.event, message.body);
+      this.emit('dap-event', message.event, message.body);
   }
 }
 ```

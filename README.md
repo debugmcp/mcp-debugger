@@ -16,7 +16,7 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.18.0: Java debugging via JDI bridge with launch and attach modes! Plus Go debugging with Delve.
+> 🆕 Version 0.18.1: Java debugging via JDI bridge with launch and attach modes! Plus Go debugging with Delve.
 
 > 🆕 Version 0.17.0: Rust debugging support! Debug Rust programs with CodeLLDB on Linux/macOS, including Cargo projects, async code, and full variable inspection—plus step commands now return the active source context so agents keep their place automatically.
 
@@ -40,7 +40,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
 - 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger
-- 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Linux/macOS; Windows not supported)
+- 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Linux/macOS/Windows with GNU toolchain)
 - 🐹 **Go debugging via Delve** – Full DAP support for Go programs
 - ☕ **Java debugging via JDI bridge** – Launch and attach modes with JDK 21+
 > WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
@@ -54,7 +54,7 @@ If you're on Windows and want the quickest path to a working GNU toolchain + dll
 pwsh scripts/setup/windows-rust-debug.ps1
 ```
 
-The script installs the `stable-gnu` toolchain (via rustup), exposes `dlltool.exe` from rustup's self-contained directory, builds the bundled Rust examples, and (optionally) runs the Rust smoke tests. Add `-UpdateUserPath` if you want the dlltool path persisted to your user PATH/DLLTOOL variables.
+The script installs the `stable-gnu` toolchain (via rustup), exposes `dlltool.exe` from rustup's self-contained directory, builds the bundled Rust examples, and runs the Rust smoke tests by default. Add `-SkipTests` to opt out of running tests. Add `-UpdateUserPath` if you want the dlltool path persisted to your user PATH/DLLTOOL variables.
 
 The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (via winget + pacman) so `cargo +stable-gnu` has a fully functional `dlltool/ld/as` stack. If MSYS2 is already installed, it simply reuses it; otherwise it guides you through installing it (or warns so you can install manually).
 - 🧪 **Mock adapter for testing** – Test without external dependencies
@@ -110,7 +110,7 @@ cd mcp-debugger
 docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
-> ⚠️ The Docker image ships Python, JavaScript, Go, and Java adapters. Rust debugging requires the local, SSE, or packed deployments where the adapter runs next to your toolchain.
+> ⚠️ The Docker image ships Python, JavaScript, Go, Java, and .NET adapters. Rust debugging requires the local, SSE, or packed deployments where the adapter runs next to your toolchain. Note: adapters are loaded dynamically at runtime — only those whose toolchain is installed and detected will be reported as available by `list_supported_languages`.
 
 ### Using npm
 
@@ -440,12 +440,12 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.18.0 with six language adapters and polished multi-language distribution
+- ✅ **Production Ready**: v0.18.1 with six language adapters and polished multi-language distribution
 - ✅ **Clean architecture** with adapter pattern
 - ✅ **JavaScript/Node.js**: Full debugging loop via js-debug
 - ✅ **Go**: Full debugging support via Delve DAP
 - ✅ **Java**: Launch and attach modes via JDI bridge
-- 🦀 **Rust**: Full support on Linux/macOS; Windows not supported (MSVC/CodeLLDB incompatibility)
+- 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires GNU toolchain; MSVC is not supported by CodeLLDB)
 - 🚧 **Coming Soon**: Ruby, C/C++, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
 

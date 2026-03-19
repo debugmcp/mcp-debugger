@@ -44,6 +44,7 @@ export async function findJavaExecutable(preferredPath?: string): Promise<string
  */
 export async function validateJavaExecutable(javaPath: string): Promise<boolean> {
   return new Promise((resolve) => {
+    let settled = false;
     try {
       const child = spawn(javaPath, ['-version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -52,9 +53,19 @@ export async function validateJavaExecutable(javaPath: string): Promise<boolean>
       let hasOutput = false;
       child.stderr?.on('data', () => { hasOutput = true; });
       child.stdout?.on('data', () => { hasOutput = true; });
-      child.on('error', () => resolve(false));
-      child.on('exit', (code) => resolve(code === 0 && hasOutput));
+      child.on('error', () => {
+        if (settled) return;
+        settled = true;
+        resolve(false);
+      });
+      child.on('exit', (code) => {
+        if (settled) return;
+        settled = true;
+        resolve(code === 0 && hasOutput);
+      });
     } catch {
+      if (settled) return;
+      settled = true;
       resolve(false);
     }
   });
@@ -67,6 +78,7 @@ export async function getJavaVersion(javaPath?: string): Promise<string | null> 
   const cmd = javaPath || 'java';
 
   return new Promise((resolve) => {
+    let settled = false;
     try {
       const child = spawn(cmd, ['-version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -81,8 +93,14 @@ export async function getJavaVersion(javaPath?: string): Promise<string | null> 
         output += data.toString();
       });
 
-      child.on('error', () => resolve(null));
+      child.on('error', () => {
+        if (settled) return;
+        settled = true;
+        resolve(null);
+      });
       child.on('exit', (code) => {
+        if (settled) return;
+        settled = true;
         if (code !== 0) {
           resolve(null);
           return;
@@ -99,6 +117,8 @@ export async function getJavaVersion(javaPath?: string): Promise<string | null> 
         }
       });
     } catch {
+      if (settled) return;
+      settled = true;
       resolve(null);
     }
   });

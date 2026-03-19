@@ -53,24 +53,31 @@ export async function resolveCargoProject(projectPath: string): Promise<{
  */
 export async function getCargoTargets(projectPath: string): Promise<CargoTarget[]> {
   return new Promise((resolve) => {
+    let settled = false;
     const metadataProcess = spawn('cargo', ['metadata', '--format-version', '1'], {
       cwd: projectPath,
       shell: true
     });
-    
+
     let output = '';
-    
+
     metadataProcess.stdout?.on('data', (data) => {
       output += data.toString();
     });
-    
-    metadataProcess.on('error', () => resolve([]));
+
+    metadataProcess.on('error', () => {
+      if (settled) return;
+      settled = true;
+      resolve([]);
+    });
     metadataProcess.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
       if (code === 0 && output) {
         try {
           const metadata = JSON.parse(output);
           const targets: CargoTarget[] = [];
-          
+
           // Extract targets from packages
           for (const pkg of metadata.packages) {
             if (pkg.manifest_path.startsWith(projectPath)) {
@@ -83,7 +90,7 @@ export async function getCargoTargets(projectPath: string): Promise<CargoTarget[
               }
             }
           }
-          
+
           resolve(targets);
         } catch {
           resolve([]);
@@ -113,35 +120,40 @@ export async function runCargoTest(
   testName?: string
 ): Promise<{ success: boolean; output: string }> {
   return new Promise((resolve) => {
+    let settled = false;
     const args = ['test'];
     if (testName) {
       args.push(testName);
     }
-    
+
     const testProcess = spawn('cargo', args, {
       cwd: projectPath,
       shell: true
     });
-    
+
     let output = '';
     let errorOutput = '';
-    
+
     testProcess.stdout?.on('data', (data) => {
       output += data.toString();
     });
-    
+
     testProcess.stderr?.on('data', (data) => {
       errorOutput += data.toString();
     });
-    
+
     testProcess.on('error', (error) => {
+      if (settled) return;
+      settled = true;
       resolve({
         success: false,
         output: `Test failed: ${error.message}`
       });
     });
-    
+
     testProcess.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
       resolve({
         success: code === 0,
         output: output + errorOutput
@@ -223,7 +235,7 @@ async function getAllRustFiles(dir: string): Promise<string[]> {
 }
 
 /**
- * Run Cargo build with specified arguments
+ * Run cargo with specified arguments and return the build result
  */
 export async function runCargoBuild(
   projectPath: string,
@@ -264,7 +276,7 @@ export async function runCargoBuild(
 }
 
 /**
- * Get the default binary name from Cargo.toml
+ * Get the default binary name from Cargo metadata targets
  */
 export async function getDefaultBinary(projectPath: string): Promise<string> {
   const cargoProject = await resolveCargoProject(projectPath);
@@ -329,14 +341,15 @@ export async function buildCargoProject(
   }
   
   return new Promise((resolve) => {
+    let settled = false;
     const buildProcess = spawn('cargo', args, {
       cwd: projectRoot,
       shell: true
     });
-    
+
     let stdout = '';
     let stderr = '';
-    
+
     buildProcess.stdout?.on('data', (data) => {
       const msg = data.toString();
       stdout += msg;
@@ -345,18 +358,22 @@ export async function buildCargoProject(
         logger?.info?.(`[Rust Build] ${msg.trim()}`);
       }
     });
-    
+
     buildProcess.stderr?.on('data', (data) => {
       stderr += data.toString();
     });
-    
+
     buildProcess.on('error', (error) => {
+      if (settled) return;
+      settled = true;
       const errorMsg = `Build process error: ${error.message}`;
       logger?.error?.(`[Rust Debugger] ${errorMsg}`);
       resolve({ success: false, error: errorMsg });
     });
-    
+
     buildProcess.on('exit', async (code) => {
+      if (settled) return;
+      settled = true;
       if (code === 0) {
         try {
           const binaryName = await getDefaultBinary(projectRoot);
@@ -366,7 +383,7 @@ export async function buildCargoProject(
             buildMode,
             process.platform === 'win32' ? `${binaryName}.exe` : binaryName
           );
-          
+
           logger?.info?.(`[Rust Debugger] Build successful: ${binaryPath}`);
           resolve({ success: true, binaryPath });
         } catch (error) {

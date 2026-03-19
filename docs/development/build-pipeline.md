@@ -81,7 +81,7 @@ The DAP proxy runs as a separate child process and requires its own bundle for c
 
 Both bundles include all necessary dependencies (using tsup's `noExternal` flag), allowing the application to run without requiring node_modules installation.
 
-The proxy bootstrap (`src/proxy/proxy-bootstrap.js`) has been simplified:
+The proxy bootstrap (`src/proxy/proxy-bootstrap.js`, compiled to `dist/proxy/proxy-bootstrap.js`) has been simplified:
 - **If bundle exists**: Uses the bundled proxy (`proxy-bundle.cjs`)
 - **If no bundle**: Uses the unbundled proxy files (development mode)
 - **No environment variables required**: Simply checks for bundle file existence

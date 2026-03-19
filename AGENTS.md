@@ -17,7 +17,7 @@
 
 ## Coding Style & Naming Conventions
 - Source files use ES modules, TypeScript strict mode, and two-space indentation; prefer `PascalCase` for classes, `camelCase` for functions, and `SCREAMING_SNAKE_CASE` for constants.
-- Align new utilities with the patterns in `src/utils/` (pure functions with explicit exports).
+- Align new utilities with the patterns in `src/utils/` (utility modules — mix of pure functions and service classes — with explicit exports).
 - ESLint (`eslint.config.js`) enforces import order, logger usage, and null checks—run it before opening a PR.
 - Avoid default exports; monorepo packages rely on named exports for tree shaking and test isolation.
 
@@ -29,6 +29,6 @@
 
 ## Commit & Pull Request Guidelines
 - Follow the existing history: short present-tense subject lines (`feat(scope): ...`, `chore: ...`) with details in the body when needed.
-- Run `scripts/safe-commit.sh` (or the `pnpm commit:safe` alias) before pushing — this runs a mandatory personal information check and then commits (use `--skip-tests` to bypass other pre-commit hooks while keeping the personal info check).
+- Run `scripts/safe-commit.sh` (or the `pnpm commit:safe` alias) before pushing — this runs a mandatory personal information check and then commits (use `--skip-tests` to pass `git commit --no-verify`, which bypasses ALL pre-commit hooks including linting and tests, while the script still runs its own personal info check).
 - PRs should describe behavior changes, reference GitHub issues or roadmap items, link relevant artifacts (logs, screenshots), and highlight test commands executed.
 - Update affected docs or examples alongside code so downstream agents stay in sync.

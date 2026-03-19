@@ -301,6 +301,8 @@ export const RustAdapterPolicy: AdapterPolicy = {
       platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
     } else if (platform === 'linux') {
       platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
+    } else {
+      throw new Error(`Unsupported platform: ${platform}`);
     }
     
     const codelldbPath = payload.executablePath ||

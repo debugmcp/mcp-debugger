@@ -19,17 +19,16 @@ Status snapshot as of **2025‑11‑22**:
 ### Medium priority
 
 3. **Pause execution (`pause_execution`)**
-   - Current proxy still returns “not yet implemented”
-   - Design work in progress to integrate with proxy lifecycle hooks
+   - ✅ Implemented and wired through the proxy API
 
 4. **Source context (`get_source_context`)**
    - Returns limited context today; needs streaming + caching for large files
 
 ### Lower priority
 
-5. **Remote debugging**
-   - API surface exists (host/port) but not wired up
-   - Will follow once adapter transport abstraction is solidified
+5. **Remote debugging / attach mode**
+   - ✅ Attach mode is implemented via the `attach_to_process` tool (supports host/port connections)
+   - ⏳ Further remote scenarios (e.g., cross-machine attach, SSH tunneling) remain on the backlog
 
 ## ✅ Recently Delivered
 
@@ -44,7 +43,7 @@ Status snapshot as of **2025‑11‑22**:
 ### Q4 2025
 - Ship GA-level expression evaluation (better previews, richer errors)
 - Tighten conditional breakpoint UX across adapters
-- Expose pause execution through the proxy API
+- ✅ Pause execution exposed through the proxy API
 
 ### Q1 2026
 - Adapter-specific hinting for common runtime failures
@@ -52,7 +51,7 @@ Status snapshot as of **2025‑11‑22**:
 - Watch expressions prototype
 
 ### Q2 2026
-- Remote debugging (attach scenarios, container support)
+- Remote debugging enhancements (cross-machine attach, SSH tunneling, container attach)
 - Debug console commands routed through adapters
 - Publish adapter SDK / authoring guide
 
@@ -88,4 +87,4 @@ Want to help? Start by:
 
 ---
 
-*Last updated: 2025‑02‑09*
+*Last updated: 2026‑03‑18*

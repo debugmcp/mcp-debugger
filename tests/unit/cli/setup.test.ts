@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Command } from 'commander';
-import { createCLI, setupStdioCommand, setupSSECommand, StdioHandler, SSEHandler } from '../../../src/cli/setup.js';
+import { createCLI, setupStdioCommand, setupSSECommand } from '../../../src/cli/setup.js';
 
 describe('CLI Setup', () => {
   describe('createCLI', () => {

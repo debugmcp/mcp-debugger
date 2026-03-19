@@ -35,7 +35,7 @@ The Debug MCP Server uses a **TRUE HANDS-OFF** approach to path handling. When r
 Once the image is built, you can run the server with volume mounts:
 
 ```bash
-docker run -i --rm -v /path/to/your/project:/workspace:rw mcp-debugger:local
+docker run -i --rm -v /path/to/your/project:/workspace:rw mcp-debugger:local stdio
 ```
 
 ### Recommended Configuration for Claude
@@ -174,7 +174,7 @@ Then reference files as `project1/file.py` or `project2/script.js`.
 To expose the debugpy port for remote debugging:
 
 ```bash
-docker run -i --rm -p 5679:5679 -v /path/to/project:/workspace:rw mcp-debugger:local
+docker run -i --rm -p 5679:5679 -v /path/to/project:/workspace:rw mcp-debugger:local stdio
 ```
 
 In the MCP settings:
@@ -187,7 +187,8 @@ In the MCP settings:
   "5679:5679",
   "-v",
   "/path/to/project:/workspace:rw",
-  "mcp-debugger:local"
+  "mcp-debugger:local",
+  "stdio"
 ]
 ```
 

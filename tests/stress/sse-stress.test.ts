@@ -291,7 +291,7 @@ describeStress('SSE Transport Stress Tests', () => {
     let operationCount = 0;
     const errors: string[] = [];
     
-    // Keep connection alive and perform operations for 30 seconds
+    // Keep connection alive and perform operations for 15 seconds
     const startTime = Date.now();
     const DURATION = 15000; // 15 seconds
     

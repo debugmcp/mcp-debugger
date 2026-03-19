@@ -109,6 +109,5 @@ When using both servers with Claude in VS Code:
 - Ensure the token is correctly set in the MCP settings
 
 ### General Issues
-- Only one server can be used at a time in each prompt
 - Make sure to specify the correct `server_name` in your `use_mcp_tool` calls
 - Restart VS Code if the servers show as disconnected

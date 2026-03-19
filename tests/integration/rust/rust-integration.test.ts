@@ -46,8 +46,8 @@ describe('Rust Adapter Integration', () => {
     sessionId = session.id;
   });
   
-  it('should handle Cargo project debugging', async () => {
-    // Verifies session creation; full Cargo debugging requires a compiled Rust project
+  it('should verify Rust session persists after creation', async () => {
+    // Verifies session persists; full Cargo debugging requires a compiled Rust project
     expect(sessionId).toBeDefined();
     
     const session = sessionManager.getSession(sessionId);
@@ -55,8 +55,8 @@ describe('Rust Adapter Integration', () => {
     expect(session?.language).toBe(DebugLanguage.RUST);
   });
   
-  it('should set breakpoints in Rust files', async () => {
-    // Uses example project; full verification requires a compiled binary
+  it('should queue breakpoint in Rust source file', async () => {
+    // Queues breakpoint; full verification requires a compiled binary
     const testFile = 'examples/rust/hello_world/src/main.rs';
     
     // Skip if test file doesn't exist

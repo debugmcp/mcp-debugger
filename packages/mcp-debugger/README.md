@@ -28,29 +28,26 @@ mcp-debugger stdio
 mcp-debugger sse --port 3001
 ```
 
-## Optional Adapters
+## Batteries-Included Adapters
 
-To debug specific languages, install the corresponding adapter packages:
+All language adapters are bundled into the CLI package. No separate installation is needed. The following adapters are included:
 
+- **Python** (`@debugmcp/adapter-python`) - Python debugging via debugpy
+- **JavaScript** (`@debugmcp/adapter-javascript`) - JavaScript/Node.js debugging via js-debug
+- **Rust** (`@debugmcp/adapter-rust`) - Rust debugging via CodeLLDB
+- **Go** (`@debugmcp/adapter-go`) - Go debugging via Delve
+- **Java** (`@debugmcp/adapter-java`) - Java debugging via JDI bridge
+- **.NET** (`@debugmcp/adapter-dotnet`) - .NET debugging via netcoredbg
+- **Mock** (`@debugmcp/adapter-mock`) - Mock adapter for testing
+
+You still need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Go + Delve, JDK 21+, .NET SDK + netcoredbg).
+
+### Check Rust binary compatibility
 ```bash
-# Python debugging support
-npm install -g @debugmcp/adapter-python
-
-# JavaScript/Node.js debugging support
-npm install -g @debugmcp/adapter-javascript
-
-# Rust debugging support
-npm install -g @debugmcp/adapter-rust
-
-# Go debugging support
-npm install -g @debugmcp/adapter-go
-
-# Java debugging support
-npm install -g @debugmcp/adapter-java
-
-# Mock adapter for testing
-npm install -g @debugmcp/adapter-mock
+mcp-debugger check-rust-binary <path-to-binary>
 ```
+
+Analyzes a Rust executable to determine whether it was built with the GNU or MSVC toolchain and reports CodeLLDB debugging compatibility.
 
 ## Options
 

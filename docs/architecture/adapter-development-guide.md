@@ -44,6 +44,11 @@ Why? The dynamic loader expects the package name and factory class name to follo
 packages/
   adapter-mock/
   adapter-python/
+  adapter-javascript/
+  adapter-rust/
+  adapter-go/
+  adapter-java/
+  adapter-dotnet/
   adapter-yourlang/        ← new package here
 ```
 

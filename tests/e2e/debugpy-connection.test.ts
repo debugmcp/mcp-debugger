@@ -12,17 +12,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import * as net from 'net';
-import { promisify } from 'util';
-import { exec as execCallback } from 'child_process';
 import * as path from 'path';
 import { writeFile, rm, stat } from 'node:fs/promises'; // Native promise-based fs
-import { existsSync as nativeNodeExistsSync } from 'node:fs'; 
+import { existsSync as nativeNodeExistsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
 // No mocking of python-utils - E2E tests should use real Python discovery
-
-const exec = promisify(execCallback);
 const TEST_TIMEOUT = 60000;
 
 let mcpSdkClient: Client | null = null;
@@ -226,9 +222,8 @@ describe('MCP Server connecting to debugpy', () => {
               break;
             }
           }
-        } catch (e) { 
-          // Connection error - let it propagate
-          throw e;
+        } catch {
+          // Connection error - retry until timeout
         }
         await new Promise(resolve => setTimeout(resolve, 500));
       }

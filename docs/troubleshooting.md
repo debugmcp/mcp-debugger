@@ -13,9 +13,9 @@ This guide provides solutions for common issues you might encounter when setting
 1. Verify the command path in your MCP settings:
    ```json
    "command": "node",
-   "args": ["C:\\path\\to\\mcp-debugger\\dist\\cli", "stdio"]
+   "args": ["C:\\path\\to\\mcp-debugger\\dist\\index.js", "stdio"]
    ```
-   Ensure the path points to the correct location of the built server.
+   Ensure the path points to the correct location of the built server. The entry point is `dist/index.js` when building from source. (The NPX package `@debugmcp/mcp-debugger` uses `dist/cli` internally.)
 
 2. Check for spaces in file paths:
    - Windows paths with spaces require proper quoting
@@ -36,12 +36,12 @@ This guide provides solutions for common issues you might encounter when setting
 **Solutions**:
 
 1. Check if the path exists:
-   - Verify that the `dist` directory and `cli` entry point exist
+   - Verify that the `dist` directory and `index.js` entry point exist
    - Run `npm run build` if the dist folder is missing
 
 2. Fix path formatting:
    - Windows paths might need backslashes instead of forward slashes
-   - Ensure your MCP settings point to the correct path for `dist/index.js`
+   - Ensure your MCP settings point to `dist/index.js` (monorepo root) or use the NPX command `npx @debugmcp/mcp-debugger stdio`
 
 3. Use quotes for paths with spaces:
    - If your path contains spaces, ensure it's properly quoted in the command

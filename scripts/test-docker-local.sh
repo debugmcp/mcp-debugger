@@ -34,20 +34,12 @@ echo ""
 # Build the project first
 echo "Building the project..."
 npm run build
-if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Build failed${NC}"
-    exit 1
-fi
 echo -e "${GREEN}✓ Build successful${NC}"
 echo ""
 
 # Build the Docker image
 echo "Building Docker image..."
 docker build -t mcp-debugger:test .
-if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ Docker build failed${NC}"
-    exit 1
-fi
 echo -e "${GREEN}✓ Docker image built${NC}"
 echo ""
 

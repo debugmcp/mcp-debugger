@@ -49,9 +49,9 @@ These tests work on Windows, Linux, and macOS without modification.
 ✅ All adapters are included in bundle
 
 ### Distribution Channel
-✅ Global installation works  
-✅ npx can locate and run the package  
-✅ MCP server starts correctly  
+✅ Global installation works
+✅ Server starts via global install and direct Node.js invocation
+✅ MCP server starts correctly
 ✅ All tools are available
 
 ### Language Support

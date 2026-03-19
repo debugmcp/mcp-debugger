@@ -19,7 +19,7 @@ The core components handle session management, process lifecycle, and DAP commun
 
 ### 2. Debug Adapter Interface
 
-The **[IDebugAdapter](../../src/adapters/debug-adapter-interface.ts)** interface defines the contract that all language adapters must implement:
+The **[IDebugAdapter](../../packages/shared/src/interfaces/debug-adapter.ts)** interface defines the contract that all language adapters must implement:
 
 ```typescript
 export interface IDebugAdapter extends EventEmitter {
@@ -47,9 +47,13 @@ export interface IDebugAdapter extends EventEmitter {
 
 Each supported language implements the IDebugAdapter interface:
 
-- **[MockDebugAdapter](../../src/adapters/mock/mock-debug-adapter.ts)** - Reference implementation for testing
-- **[PythonDebugAdapter](../../src/adapters/python/python-debug-adapter.ts)** - Python/debugpy support
-- Future: NodeDebugAdapter, GoDebugAdapter, etc.
+- **[MockDebugAdapter](../../packages/adapter-mock/)** - Reference implementation for testing
+- **[PythonDebugAdapter](../../packages/adapter-python/)** - Python/debugpy support
+- **[JavascriptDebugAdapter](../../packages/adapter-javascript/)** - JavaScript/Node.js support
+- **[RustDebugAdapter](../../packages/adapter-rust/)** - Rust/CodeLLDB support
+- **[GoDebugAdapter](../../packages/adapter-go/)** - Go/Delve support
+- **[JavaDebugAdapter](../../packages/adapter-java/)** - Java/JDI support
+- **[DotnetDebugAdapter](../../packages/adapter-dotnet/)** - .NET/netcoredbg support
 
 ### 4. Adapter Registry
 
@@ -75,13 +79,14 @@ sequenceDiagram
     
     Client->>Server: create_debug_session(language='python')
     Server->>SM: createSession(language)
-    SM->>AR: create(language)
-    AR->>Adapter: new PythonDebugAdapter()
-    
+    SM-->>Client: sessionInfo (no adapter created yet)
+
     Client->>Server: start_debugging(sessionId)
     Server->>SM: startDebugging()
+    SM->>AR: create(language, config)
+    AR->>Adapter: factory.create(config)
     SM->>Adapter: validateEnvironment()
-    SM->>PM: new ProxyManager(adapter)
+    SM->>PM: proxyManagerFactory.create(adapter)
     PM->>Adapter: buildAdapterCommand()
     PM->>DAP: spawn debug adapter
     
@@ -234,7 +239,7 @@ async endSession(exitCode: number) {
 
 - Read the [Adapter Development Guide](./adapter-development-guide.md) to create your own adapter
 - Check the [API Reference](./api-reference.md) for detailed interface documentation
-- Review the [Mock Adapter](../../src/adapters/mock/mock-debug-adapter.ts) as a working example
+- Review the [Mock Adapter](../../packages/adapter-mock/) as a working example
 - See [Migration Guide](../migration-guide.md) for upgrading from older versions
 
 ## Version History

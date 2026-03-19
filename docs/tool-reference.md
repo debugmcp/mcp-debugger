@@ -16,13 +16,13 @@ This document provides a complete reference for all tools available in mcp-debug
    - [step_into](#step_into)
    - [step_out](#step_out)
    - [continue_execution](#continue_execution)
-   - [pause_execution](#pause_execution) *(Not Implemented)*
+   - [pause_execution](#pause_execution)
 4. [State Inspection](#state-inspection)
    - [get_stack_trace](#get_stack_trace)
    - [get_scopes](#get_scopes)
    - [get_variables](#get_variables)
    - [get_local_variables](#get_local_variables)
-   - [evaluate_expression](#evaluate_expression) *(Not Implemented)*
+   - [evaluate_expression](#evaluate_expression)
    - [get_source_context](#get_source_context)
 
 ---
@@ -34,11 +34,12 @@ This document provides a complete reference for all tools available in mcp-debug
 Creates a new debugging session.
 
 **Parameters:**
-- `language` (string, required): The programming language to debug. Supported languages: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"mock"`.
-- `name` (string, optional): A descriptive name for the debug session. Defaults to `"Debug-{timestamp}"`.
+- `language` (string, required): The programming language to debug. Supported languages: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`.
+- `name` (string, optional): A descriptive name for the debug session. Defaults to `"{language}-debug-{timestamp}"` (e.g., `"python-debug-1710000000000"`).
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
-- `host` (string, optional): Host for remote debugging *(not implemented)*.
-- `port` (number, optional): Port for remote debugging *(not implemented)*.
+- `host` (string, optional): Host for remote debugging (triggers attach mode when `port` is also provided, default: `"localhost"`).
+- `port` (number, optional): Debug port for remote debugging (triggers attach mode when provided).
+- `timeout` (number, optional): Connection timeout in milliseconds for attach mode (default: 30000).
 
 **Response:**
 ```json
@@ -167,9 +168,10 @@ Starts debugging a script.
 - `sessionId` (string, required): The ID of the debug session.
 - `scriptPath` (string, required): Path to the script to debug.
 - `args` (array of strings, optional): Command line arguments for the script.
-- `dapLaunchArgs` (object, optional): Additional DAP launch arguments:
+- `dapLaunchArgs` (object, optional): Standard DAP launch arguments:
   - `stopOnEntry` (boolean): Stop at first line
   - `justMyCode` (boolean): Debug only user code
+- `adapterLaunchConfig` (object, optional): Adapter-specific launch configuration overrides. Use this for language-specific settings that go beyond standard DAP arguments (e.g., `mainClass` and `classpath` for Java, `buildCommand` for Rust).
 - `dryRunSpawn` (boolean, optional): Test spawn without actually starting
 
 **Response:**
@@ -272,20 +274,27 @@ Continues execution until the next breakpoint or program end.
 
 ---
 
-### pause_execution ❌
+### pause_execution
 
-**Status:** Not Implemented
+Pauses a running program. The debugger sends a DAP pause request to halt execution, then waits for the stopped event.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
 
-**Error Response:**
+**Response:**
 ```json
 {
-  "code": -32603,
-  "message": "MCP error -32603: Pause execution not yet implemented with proxy."
+  "success": true,
+  "state": "paused",
+  "data": {
+    "message": "Execution paused"
+  }
 }
 ```
+
+**Notes:**
+- The session must be in a `"running"` state; pausing an already-paused session returns success immediately with `"Already paused"`
+- After pausing, you can inspect variables, evaluate expressions, and step through code
 
 ---
 
@@ -413,7 +422,7 @@ Gets variables within a scope.
 
 ### get_local_variables
 
-Gets local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack→scopes→variables manually.
+Gets local variables by traversing all stack frames and their scopes, then using the language adapter's policy to extract the relevant local variables. This is a convenience tool that collects scopes and variables across all frames (not just the top frame) so that closures and outer-scope locals are included, then returns the filtered result without needing to manually call stack→scopes→variables.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
@@ -531,7 +540,7 @@ Gets local variables for the current stack frame. This is a convenience tool tha
 
 **Notes:**
 - Session must be paused at a breakpoint for this tool to work
-- The tool automatically uses the top frame of the call stack
+- The tool traverses all frames in the call stack and collects scopes/variables from each, then uses the adapter policy to extract relevant locals (the reported frame is still the top frame)
 - When `includeSpecial` is true, all variables including internals are returned
 - This is especially useful for AI agents that need quick access to current local state
 
@@ -700,7 +709,7 @@ All tools follow consistent error patterns:
 
 ### Common Error Scenarios
 1. **Session not found**: Occurs when a session terminates unexpectedly
-2. **Invalid language**: Language must be one of the 6 supported languages (python, javascript, rust, go, java, mock)
+2. **Invalid language**: Language must be one of the supported languages (python, javascript, rust, go, java, dotnet, mock)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables
 
@@ -716,4 +725,4 @@ All tools follow consistent error patterns:
 
 ---
 
-*Last updated: 2025-10-10 based on actual testing with mcp-debugger v0.15.4*
+*Last updated: 2026-03-18 based on source code review of mcp-debugger v0.18.1*

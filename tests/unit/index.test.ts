@@ -54,7 +54,7 @@ describe('index.ts', () => {
   describe('createDebugMcpServer', () => {
     it('should create a new DebugMcpServer instance with given options', () => {
       const mockServer = { server: 'instance' };
-      vi.mocked(DebugMcpServer).mockReturnValue(mockServer as any);
+      vi.mocked(DebugMcpServer).mockImplementation(function() { return mockServer as any; });
 
       const options = { logLevel: 'debug', logFile: '/tmp/test.log' };
       const result = createDebugMcpServer(options);

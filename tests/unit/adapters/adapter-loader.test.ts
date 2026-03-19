@@ -5,9 +5,7 @@
  * for the adapter loading system.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { AdapterLoader, AdapterMetadata } from '../../../src/adapters/adapter-loader.js';
-import { IAdapterFactory } from '@debugmcp/shared';
-import { createLogger } from '../../../src/utils/logger.js';
+import { AdapterLoader } from '../../../src/adapters/adapter-loader.js';
 import type { ModuleLoader } from '../../../src/adapters/adapter-loader.js';
 import type { Mock } from 'vitest';
 
@@ -52,7 +50,7 @@ describe('AdapterLoader', () => {
   describe('loadAdapter', () => {
     it('should successfully load and cache an adapter', async () => {
       const mockFactory = createMockAdapterFactory('python');
-      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
       const mockModule = { PythonAdapterFactory: mockFactoryClass };
 
       // Configure mock module loader
@@ -78,7 +76,7 @@ describe('AdapterLoader', () => {
 
     it('should use fallback paths when primary import fails', async () => {
       const mockFactory = createMockAdapterFactory('mock');
-      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
       const mockModule = { MockAdapterFactory: mockFactoryClass };
 
       let loadCount = 0;
@@ -105,7 +103,7 @@ describe('AdapterLoader', () => {
 
     it('should try createRequire as final fallback', async () => {
       const mockFactory = createMockAdapterFactory('mock');
-      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
       const mockModule = { MockAdapterFactory: mockFactoryClass };
 
       // Module loader will fail on all paths
@@ -179,7 +177,7 @@ describe('AdapterLoader', () => {
 
     it('should successfully load and cache a javascript adapter', async () => {
       const mockFactory = createMockAdapterFactory('javascript');
-      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
       const mockModule = { JavascriptAdapterFactory: mockFactoryClass };
 
       // Configure mock module loader
@@ -205,7 +203,7 @@ describe('AdapterLoader', () => {
 
     it('should use fallback paths when primary import fails for javascript', async () => {
       const mockFactory = createMockAdapterFactory('javascript');
-      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
       const mockModule = { JavascriptAdapterFactory: mockFactoryClass };
 
       let loadCount = 0;
@@ -234,7 +232,7 @@ describe('AdapterLoader', () => {
   describe('isAdapterAvailable', () => {
     it('should return true when adapter can be loaded', async () => {
       const mockFactory = createMockAdapterFactory('python');
-      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
       const mockModule = { PythonAdapterFactory: mockFactoryClass };
 
       (mockModuleLoader.load as Mock).mockResolvedValue(mockModule);
@@ -258,7 +256,7 @@ describe('AdapterLoader', () => {
 
     it('should cache successful availability checks', async () => {
       const mockFactory = createMockAdapterFactory('mock');
-      const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
       const mockModule = { MockAdapterFactory: mockFactoryClass };
 
       (mockModuleLoader.load as Mock).mockResolvedValue(mockModule);
@@ -277,7 +275,7 @@ describe('AdapterLoader', () => {
     it('should return metadata for known adapters with availability status', async () => {
       // Setup mocks for different availability scenarios
       const mockPythonFactory = createMockAdapterFactory('python');
-      const pythonModule = { PythonAdapterFactory: vi.fn(() => mockPythonFactory) };
+      const pythonModule = { PythonAdapterFactory: vi.fn(function() { return mockPythonFactory; }) };
 
       (mockModuleLoader.load as Mock).mockImplementation((path: string) => {
         if (path === '@debugmcp/adapter-python') {
@@ -372,7 +370,7 @@ describe('AdapterLoader', () => {
   // Monorepo fallback should mark javascript installed:true when packages/adapter-javascript/dist exists
   it('should mark javascript installed:true when resolved from monorepo packages fallback', async () => {
     const mockFactory = createMockAdapterFactory('javascript');
-    const mockFactoryClass = vi.fn().mockReturnValue(mockFactory);
+    const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
     const jsModule = { JavascriptAdapterFactory: mockFactoryClass };
 
     // Primary package import fails
@@ -434,9 +432,9 @@ describe('AdapterLoader', () => {
 
       (mockModuleLoader.load as Mock).mockImplementation((path: string) => {
         if (path === '@debugmcp/adapter-python') {
-          return Promise.resolve({ PythonAdapterFactory: vi.fn().mockReturnValue(mockPythonFactory) });
+          return Promise.resolve({ PythonAdapterFactory: vi.fn().mockImplementation(function() { return mockPythonFactory; }) });
         } else if (path === '@debugmcp/adapter-mock') {
-          return Promise.resolve({ MockAdapterFactory: vi.fn().mockReturnValue(mockMockFactory) });
+          return Promise.resolve({ MockAdapterFactory: vi.fn().mockImplementation(function() { return mockMockFactory; }) });
         }
         throw new Error('Module not found');
       });

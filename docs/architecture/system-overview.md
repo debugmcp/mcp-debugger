@@ -23,7 +23,7 @@ graph TB
     end
 
     subgraph "Debug Adapter Layer"
-        DA[Debug Adapter<br/>debugpy / js-debug / CodeLLDB / Delve / JDI]
+        DA[Debug Adapter<br/>debugpy / js-debug / CodeLLDB / Delve / JDI / netcoredbg]
         TGT[Target Process<br/>Script or Binary]
     end
 

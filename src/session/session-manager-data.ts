@@ -13,6 +13,7 @@ import {
   RustAdapterPolicy,
   GoAdapterPolicy,
   DotnetAdapterPolicy,
+  JavaAdapterPolicy,
   MockAdapterPolicy,
   DebugLanguage
 } from '@debugmcp/shared';
@@ -43,6 +44,9 @@ export abstract class SessionManagerData extends SessionManagerCore {
       case 'dotnet':
       case DebugLanguage.DOTNET:
         return DotnetAdapterPolicy;
+      case 'java':
+      case DebugLanguage.JAVA:
+        return JavaAdapterPolicy;
       case 'mock':
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;

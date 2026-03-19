@@ -110,6 +110,10 @@ export default defineConfig({
         // CLI entry points - handle process-level stdio, not unit-testable
         'packages/mcp-debugger/src/cli-entry.ts',
         'packages/mcp-debugger/dist/packages/mcp-debugger/src/cli-entry.js',
+        // Module init side-effects only (import statements that register adapters)
+        'packages/mcp-debugger/src/batteries-included.ts',
+        // Script entry point — process.argv parsing only, logic in netcoredbg-bridge-core.ts
+        'packages/adapter-dotnet/src/utils/netcoredbg-bridge.ts',
         // Error definitions - mostly class constructors and type guards
         'src/errors/debug-errors.ts',
         // Proxy entry point - separate process
@@ -120,23 +124,10 @@ export default defineConfig({
         'packages/shared/src/index.ts',
         'packages/shared/src/models/index.ts'
       ],
-      include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}'],
-      // Prevent Istanbul from tracking files multiple times
-      // when they're imported through different resolution paths
-      all: false  // Don't include all files, only those actually imported
+      include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}']
     },
     testTimeout: 30000,
-    pool: 'threads',
-    poolOptions: {
-      threads: {
-        singleThread: true, // Important for process spawning tests
-        maxThreads: 1,
-        minThreads: 1
-      }
-    },
-    testTransformMode: {
-      web: ['src/**/*.ts', 'packages/**/src/**/*.ts'] // Ensure TypeScript files in src are transformed
-    }
+    maxWorkers: 1, // Important for process spawning tests (was singleThread: true)
   },
   resolve: {
     extensions: ['.ts', '.js', '.json', '.node'], // Add .ts for resolution

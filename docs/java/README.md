@@ -62,7 +62,7 @@ use_mcp_tool(
       "mainClass": "MyProgram",
       "classpath": "/path/to/classes",
       "cwd": "/path/to/project",
-      "stopOnEntry": false
+      "stopOnEntry": true
     }
   }
 )
@@ -93,7 +93,7 @@ use_mcp_tool(
   arguments={
     "sessionId": "your-session-id",
     "port": 5005,
-    "host": "127.0.0.1",
+    "host": "localhost",
     "sourcePaths": ["/path/to/source"]
   }
 )
@@ -101,7 +101,7 @@ use_mcp_tool(
 
 Key attach arguments:
 - `port` (required): JDWP debug port
-- `host`: Target hostname (default: `127.0.0.1`)
+- `host`: Target hostname (default: `localhost`)
 - `sourcePaths`: Directories containing `.java` source files for source mapping
 
 ## Debugging Workflow
@@ -164,10 +164,10 @@ use_mcp_tool(tool_name="get_local_variables", arguments={"sessionId": "..."})
 # Get call stack
 use_mcp_tool(tool_name="get_stack_trace", arguments={"sessionId": "..."})
 
-# Evaluate an expression
+# Evaluate an expression (frameId is optional; defaults to top frame)
 use_mcp_tool(
   tool_name="evaluate_expression",
-  arguments={"sessionId": "...", "expression": "x + y"}
+  arguments={"sessionId": "...", "expression": "x + y", "frameId": 0}
 )
 ```
 
@@ -227,7 +227,7 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 
 1. Create debug session with `language: "java"`
 2. Set breakpoints on desired lines
-3. Attach with `port: 5005`, `host: "127.0.0.1"`, `sourcePaths: ["."]`
+3. Attach with `port: 5005`, `host: "localhost"`, `sourcePaths: ["."]`
 4. Continue execution to resume the suspended JVM
 5. Wait for breakpoint to fire, then inspect variables
 

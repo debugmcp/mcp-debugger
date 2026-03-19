@@ -33,7 +33,7 @@ describe('Server Language Discovery Tests', () => {
     vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
 
     mockServer = createMockServer();
-    vi.mocked(Server).mockImplementation(() => mockServer as any);
+    vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
 
     // Extend the mock adapter registry with all required methods
     mockAdapterRegistry = {
@@ -51,7 +51,7 @@ describe('Server Language Discovery Tests', () => {
     mockDependencies.adapterRegistry = mockAdapterRegistry;
 
     mockSessionManager = createMockSessionManager(mockAdapterRegistry);
-    vi.mocked(SessionManager).mockImplementation(() => mockSessionManager as any);
+    vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
   });
 
   afterEach(() => {
@@ -153,7 +153,7 @@ describe('Server Language Discovery Tests', () => {
     it('should handle undefined adapter registry gracefully', async () => {
       mockDependencies.adapterRegistry = undefined;
       mockSessionManager = createMockSessionManager(undefined);
-      vi.mocked(SessionManager).mockImplementation(() => mockSessionManager as any);
+      vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);

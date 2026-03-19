@@ -59,12 +59,7 @@ vi.mock('../../src/proxy/minimal-dap.js', () => ({
 
 describe('ChildSessionManager', () => {
   let manager: ChildSessionManager;
-  let mockParentClient: MockMinimalDapClient;
-  
-  beforeEach(() => {
-    mockParentClient = new MockMinimalDapClient('localhost', 9229);
-  });
-  
+
   describe('JavaScript policy (multi-session)', () => {
     beforeEach(() => {
       manager = new ChildSessionManager({

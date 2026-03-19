@@ -51,10 +51,11 @@ export class CommandNotFoundError extends Error {
  * Find the netcoredbg executable.
  *
  * Priority:
- * 1. NETCOREDBG_PATH environment variable
- * 2. User-specified preferred path
- * 3. Search PATH using 'which'
- * 4. Common installation locations
+ * 1. NETCOREDBG_X86_PATH environment variable (when targeting x86)
+ * 2. NETCOREDBG_PATH environment variable
+ * 3. User-specified preferred path
+ * 4. Search PATH using 'which'
+ * 5. Common installation locations
  *
  * @param preferredPath Optional user-specified path
  * @param logger Optional logger for diagnostics

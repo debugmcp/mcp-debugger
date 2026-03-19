@@ -166,7 +166,7 @@ export async function checkDelveDapSupport(dlvPath: string): Promise<{ supported
 
     child.on('error', (err) => resolve({ supported: false, stderr: err.message }));
     child.on('exit', (code) => {
-      // If dlv dap --help returns 0 or shows help, DAP is supported
+      // If dlv dap --help exits with code 0, DAP is supported
       resolve({
         supported: code === 0,
         stderr: stderrOutput.trim() || undefined

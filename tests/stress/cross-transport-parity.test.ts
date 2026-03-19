@@ -227,15 +227,6 @@ class TransportTester {
         version: '1.0.0'
       });
 
-      const serverProcess = spawn('node', [
-        path.join(PROJECT_ROOT, 'dist', 'index.js'),
-        'stdio',
-        '--log-level', 'error'
-      ], {
-        stdio: 'pipe',
-        cwd: PROJECT_ROOT
-      });
-
       const transport = new StdioClientTransport({
         command: process.execPath,
         args: [
@@ -251,7 +242,6 @@ class TransportTester {
       const result = await this.runDebugSequence(client);
       
       await client.close();
-      serverProcess.kill();
 
       return {
         transport: 'STDIO',

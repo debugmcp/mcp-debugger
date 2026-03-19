@@ -35,13 +35,13 @@ describe('Server Control Tools Tests', () => {
     vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
     
     mockServer = createMockServer();
-    vi.mocked(Server).mockImplementation(() => mockServer as any);
-    
+    vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
+
     const mockStdioTransport = createMockStdioTransport();
-    vi.mocked(StdioServerTransport).mockImplementation(() => mockStdioTransport as any);
-    
+    vi.mocked(StdioServerTransport).mockImplementation(function() { return mockStdioTransport as any; });
+
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
-    vi.mocked(SessionManager).mockImplementation(() => mockSessionManager as any);
+    vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
     
     debugServer = new DebugMcpServer();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;

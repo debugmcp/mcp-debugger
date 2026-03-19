@@ -51,7 +51,7 @@ export const ErrorMessages = {
 
 ### 1. Process-Level Error Handling
 
-**Location**: `src/proxy/dap-proxy-core.ts` (lines 211-258)
+**Location**: `src/proxy/dap-proxy-core.ts`
 
 ```typescript
 setupGlobalErrorHandlers(
@@ -98,7 +98,7 @@ setupGlobalErrorHandlers(
 
 ### 2. Component-Level Error Handling
 
-**Example**: SessionManager error handling (`src/session/session-manager.ts`, lines 474-502)
+**Example**: SessionManager error handling (`src/session/session-manager-operations.ts`)
 
 ```typescript
 async startDebugging(
@@ -141,7 +141,7 @@ async startDebugging(
 
 ### 3. Timeout Error Handling
 
-**Example**: ProxyManager DAP request timeout (`src/proxy/proxy-manager.ts`, lines 283-293)
+**Example**: ProxyManager DAP request timeout (`src/proxy/proxy-manager.ts`)
 
 ```typescript
 // Timeout handler
@@ -153,7 +153,7 @@ setTimeout(() => {
 }, 35000);
 ```
 
-**Example**: SessionManager step operation timeout (`src/session/session-manager.ts`, lines 616-643)
+**Example**: SessionManager step operation timeout (`src/session/session-manager-operations.ts`)
 
 ```typescript
 return new Promise((resolve) => {
@@ -209,7 +209,7 @@ return {
 
 ### Event Handler Error Management
 
-**Location**: `src/session/session-manager.ts` (lines 313-344)
+**Location**: `src/session/session-manager-core.ts`
 
 ```typescript
 private cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
@@ -324,24 +324,33 @@ catch (error) {
 
 ### 3. Retry with Backoff
 
-**Example**: Connection retry pattern
+**Example**: Init command retry pattern (`src/proxy/proxy-manager.ts`, `sendInitWithRetry`)
 
 ```typescript
-async connectWithRetry(host: string, port: number, maxRetries = 5): Promise<IDapClient> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await this.connect(host, port);
-    } catch (error) {
-      if (attempt === maxRetries) {
-        throw error;
-      }
-      
-      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-      this.logger.warn(`Connection attempt ${attempt} failed, retrying in ${delay}ms`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+private async sendInitWithRetry(initCommand: object): Promise<void> {
+  const maxRetries = 5;
+  const delays = [500, 1000, 2000, 4000, 8000]; // Generous backoff for Windows CI
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const timeoutMs = delays[Math.min(attempt, delays.length - 1)];
+
+    // Send command and wait for 'init-received' event or timeout
+    const received = await new Promise<boolean>((resolve, reject) => {
+      // ... listen for init-received, timeout after timeoutMs
+    });
+
+    if (received) {
+      this.logger.info(`Init command acknowledged on attempt ${attempt + 1}`);
+      return;
+    }
+
+    // Wait before retry
+    if (attempt < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]));
     }
   }
-  throw new Error('Should not reach here');
+
+  throw new Error(`Failed to initialize proxy after ${maxRetries + 1} attempts`);
 }
 ```
 
@@ -442,7 +451,7 @@ try {
   await riskyOperation();
 } catch (error) {
   this.logger.error('Risk operation failed', { error, context });
-  throw new Error(ErrorMessages.operationFailed(error.message));
+  throw error; // Re-throw with original message after logging
 } finally {
   await releaseResource(resource);
 }

@@ -110,7 +110,7 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
     const tsnodeMissing = new Error("Cannot find module 'ts-node'");
     expect(adapter.translateErrorMessage(tsnodeMissing)).toMatch(/Install tsx or ts-node/i);
 
-    // txs missing (alternate spelling in message)
+    // tsx missing
     const tsxMissing = new Error("Cannot find module 'tsx'");
     expect(adapter.translateErrorMessage(tsxMissing)).toMatch(/Install tsx or ts-node/i);
 

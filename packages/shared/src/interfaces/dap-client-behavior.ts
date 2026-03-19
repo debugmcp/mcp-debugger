@@ -40,7 +40,7 @@ export interface DapClientContext {
 export interface DapClientBehavior {
   /**
    * Handle reverse requests from the debug adapter
-   * @returns true if the request was handled, false to use default handling
+   * @returns A ReverseRequestResult indicating whether the request was handled
    */
   handleReverseRequest?(
     request: DebugProtocol.Request, 

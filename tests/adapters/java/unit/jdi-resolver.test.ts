@@ -33,7 +33,6 @@ const mockExecFileSync = vi.mocked(execFileSync);
 describe('jdi-resolver', () => {
   const originalJdiBridgeDir = process.env.JDI_BRIDGE_DIR;
   const originalJavaHome = process.env.JAVA_HOME;
-  const originalPlatform = process.platform;
 
   beforeEach(() => {
     vi.clearAllMocks();

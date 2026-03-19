@@ -20,9 +20,9 @@
     "@vscode/debugprotocol": "^1.68.0"
   },
   "devDependencies": {
-    "@types/node": "^22.15.29",
-    "typescript": "^5.2.2",
-    "vitest": "^3.2.1"
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   },
   "peerDependencies": {
     "@debugmcp/shared": "0.18.1"

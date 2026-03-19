@@ -62,7 +62,8 @@ class DAPConnection {
       const contentLength = parseInt(contentLengthMatch[1], 10);
       const messageStart = idx + 4;
       
-      if (this.messageBuffer.length < messageStart + contentLength) break;
+      const body = this.messageBuffer.substring(messageStart);
+      if (Buffer.byteLength(body, 'utf8') < contentLength) break;
       
       const messageContent = this.messageBuffer.substring(messageStart, messageStart + contentLength);
       this.messageBuffer = this.messageBuffer.substring(messageStart + contentLength);

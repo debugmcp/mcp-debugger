@@ -58,19 +58,23 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 ### 10. `mcp-server-smoke-java-inner-class.test.ts`
 - Tests Java inner class debugging through MCP interface
 
-### 11. `mcp-server-smoke-javascript-sse.test.ts`
+### 11. `mcp-server-smoke-dotnet.test.ts`
+- Tests .NET/C# adapter through MCP interface
+- Validates .NET debugging behavior via netcoredbg
+
+### 12. `mcp-server-smoke-javascript-sse.test.ts`
 - Tests JavaScript adapter over SSE transport
 - Validates SSE connection with JavaScript debugging workflow
 
-### 12. `comprehensive-mcp-tools.test.ts`
+### 13. `comprehensive-mcp-tools.test.ts`
 - Comprehensive tests for all MCP tool operations
 - Validates full debugging tool coverage end-to-end
 
-### 13. `debugpy-connection.test.ts`
+### 14. `debugpy-connection.test.ts`
 - Tests direct debugpy connection behavior
 - Validates DAP protocol communication with debugpy
 
-### 14. `smoke-test-utils.ts`
+### 15. `smoke-test-utils.ts`
 - Shared utilities for all smoke tests
 - Common debug sequence execution
 - Docker and SSE helper functions
@@ -96,6 +100,7 @@ npx vitest run tests/e2e/mcp-server-smoke-java.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-java-attach.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-java-evaluate.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-java-inner-class.test.ts
+npx vitest run tests/e2e/mcp-server-smoke-dotnet.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-javascript-sse.test.ts
 npx vitest run tests/e2e/comprehensive-mcp-tools.test.ts
 npx vitest run tests/e2e/debugpy-connection.test.ts
@@ -115,6 +120,10 @@ npx vitest run tests/e2e/debugpy-connection.test.ts
 - JDK 21+ must be installed (`java` and `javac` on PATH, or `JAVA_HOME` set)
 - Target code must be compiled with `javac -g` for variable inspection
 
+### For .NET Tests
+- .NET 6+ SDK must be installed
+- netcoredbg must be installed (set `NETCOREDBG_PATH` or add to PATH)
+
 ### For Rust Tests
 - Rust toolchain must be installed (rustc, cargo)
 - Uses vendored CodeLLDB debug adapter (auto-downloaded during `pnpm install`)
@@ -130,7 +139,7 @@ npx vitest run tests/e2e/debugpy-connection.test.ts
 
 The smoke tests provide comprehensive coverage of:
 1. **Transport Methods**: stdio, SSE, JavaScript-SSE, containerized stdio
-2. **Language Adapters**: All 6 adapters (Python, JavaScript, Rust, Go, Java, Mock)
+2. **Language Adapters**: All 7 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Mock)
 3. **Path Resolution**: Different working directories, path translation, absolute vs relative paths
 4. **Environment Handling**: Container environment variables, volume mounts
 5. **Error Scenarios**: Proper cleanup on failure, detailed error logging

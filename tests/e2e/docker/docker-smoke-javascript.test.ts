@@ -1,16 +1,19 @@
 /**
  * Docker JavaScript Smoke Tests
- * 
+ *
  * Tests JavaScript debugging functionality when running in a Docker container.
- * These tests should FAIL initially due to the known regression, then PASS after the fix.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { promisify } from 'util';
+import { exec } from 'child_process';
 import { buildDockerImage, createDockerMcpClient, hostToContainerPath, getDockerLogs } from './docker-test-utils.js';
 import { parseSdkToolResult } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -152,7 +155,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
           console.log('[Docker JS] Container logs (last 200 lines):');
           // Try to get more logs
           try {
-            const { stdout } = await (await import('child_process')).exec(
+            const { stdout } = await execAsync(
               `docker logs ${containerName} --tail 200 2>&1`,
               { encoding: 'utf8' }
             );
@@ -164,7 +167,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
         
         // Also check if we can get the actual log file from container
         try {
-          const { stdout: logFileContent } = await (await import('child_process')).exec(
+          const { stdout: logFileContent } = await execAsync(
             `docker exec ${containerName} cat /tmp/docker-test.log 2>&1`,
             { encoding: 'utf8' }
           );

@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { DebugSessionInfo, StackFrame, Variable } from '@debugmcp/shared';
-import { DebugProtocol } from '@vscode/debugprotocol'; 
-import { spawn, ChildProcess } from 'child_process';
+import { StackFrame, Variable } from '@debugmcp/shared';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import fs from 'node:fs'; // Import the native fs module
-import { fileURLToPath } from 'url'; 
+import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'; // Removed StdioClientTransportParameters
-import { ServerResult } from '@modelcontextprotocol/sdk/types.js'; 
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ensurePythonOnPath } from './env-utils.js';
 
 // --- SDK-based MCP Client for Testing ---

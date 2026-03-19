@@ -11,17 +11,18 @@
 | Mode | Tests | Pass | Fail | Notes |
 |------|-------|------|------|-------|
 | Local SSE | 15 | 15 | 0 | All languages + edge cases |
-| Docker | 5 planned | 0 | 0 | **Blocked by entrypoint bug** |
+| Docker | 5 planned | 0 | 0 | **Was blocked by entrypoint bug (now resolved)** |
 | NPX Tarball | 5 | 5 | 0 | Python + JS + schema validation |
 
-**Overall: 20/20 tests passed across working modes. 1 critical Docker bug found.**
+**Overall: 20/20 tests passed across working modes. 1 Docker bug found and subsequently resolved.**
 
 ---
 
-## Bug: Docker Entrypoint Quoting Corruption (CRITICAL)
+## Bug: Docker Entrypoint Quoting Corruption (RESOLVED)
 
-**File:** `Dockerfile` line 149
-**Severity:** Critical - Docker SSE mode completely broken, stdio works only by accident
+**File:** `Dockerfile` (previously line 149)
+**Severity:** Was Critical - Docker SSE mode was completely broken, stdio worked only by accident
+**Status:** RESOLVED - The `printf`-generated `entry.sh` has been replaced with a `COPY` of `scripts/docker-entry.sh`.
 
 ### Root Cause
 
@@ -149,12 +150,12 @@ chmod +x /app/entry.sh
 
 ---
 
-## Docker Testing (blocked)
+## Docker Testing (unblocked)
 
 - **Image exists:** `mcp-debugger:local` built successfully
-- **Entrypoint bug:** Prevents SSE mode; stdio works by accident
-- **Existing Docker e2e tests use stdio transport** (docker-test-utils.ts), which is why CI passes despite the bug
-- **Recommendation:** Fix entrypoint, then test SSE mode in Docker
+- **Entrypoint bug:** Resolved - `entry.sh` is now COPYed from `scripts/docker-entry.sh` instead of generated via printf
+- **Existing Docker e2e tests use stdio transport** (docker-test-utils.ts)
+- Docker SSE mode should now work correctly with the fixed entrypoint
 
 ---
 
@@ -173,7 +174,7 @@ chmod +x /app/entry.sh
 
 ## Recommendations
 
-1. **Fix Docker entrypoint** (critical) - Replace printf-generated entry.sh with a COPY'd file
+1. ~~**Fix Docker entrypoint** (critical)~~ - DONE: Replaced printf-generated entry.sh with COPY of `scripts/docker-entry.sh`
 2. **Investigate Go start_debugging returning `state: error`** - May need to report initial state differently
 3. **Consider fast-fail for operations on terminated sessions** - Currently waits ~38s timeout
 4. **Clarify `evaluate_expression` error semantics** - `success: true` with `type: SyntaxError` may confuse LLM consumers

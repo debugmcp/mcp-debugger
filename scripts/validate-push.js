@@ -171,7 +171,7 @@ async function validatePush(options = {}) {
     log('\nCommon causes:', colors.yellow);
     log('  • Files exist locally but are not committed (check git status)');
     log('  • Build artifacts committed that shouldn\'t be');
-    log('  • Dependencies out of sync with package-lock');
+    log('  • Dependencies out of sync with pnpm-lock.yaml');
     log('  • Tests that only pass with local state\n');
     
     if (!config.keepTemp) {

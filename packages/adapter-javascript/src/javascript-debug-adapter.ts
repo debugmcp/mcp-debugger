@@ -431,8 +431,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     const runtimeExecutableWasOverridden = typeof runtimeExecutableOverride === 'string' && runtimeExecutableOverride.length > 0;
 
 
-    // transformLaunchConfig is synchronous (interface contract). We use synchronous-only
-    // fs helpers (detectBinary) for runtime discovery — no async or deasync patterns.
+    // We use synchronous-only fs helpers (detectBinary) for runtime discovery.
     // Override > auto-detect (tsx/ts-node via detectBinary) > fallback to 'node'.
 
     // Synchronous detection using detectBinary (fs-only, no async)
@@ -503,10 +502,8 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     if (finalArgs.length > 0) {
       result.runtimeArgs = finalArgs;
     }
-    // Normalize Node inspector flags and enable single-session adoption in js-debug.
-    // If an --inspect/--inspect-brk flag is present, ensure it's explicit with a port
-    // and set attachSimplePort so js-debug adopts the target in this same DAP session
-    // (avoiding a reverse 'startDebugging' request).
+    // Normalize Node inspector flags for js-debug.
+    // If an --inspect/--inspect-brk flag is present, ensure it includes an explicit port.
     if (isNodeRuntime) {
       const findInspectIndex = () =>
         finalArgs.findIndex(

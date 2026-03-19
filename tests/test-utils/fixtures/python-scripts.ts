@@ -119,7 +119,7 @@ def main():
     # Division by zero (will be caught)
     result2 = divide(5, 0)
     
-    # Uncaught exception (for testing breakpoints on exceptions)
+    # Caught exception (for testing breakpoints on exceptions)
     values = [1, 2, 3]
     try:
         # This will raise IndexError

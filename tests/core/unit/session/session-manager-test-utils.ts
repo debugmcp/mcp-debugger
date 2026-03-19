@@ -27,15 +27,15 @@ vi.mock('./dist/implementations/index.js', () => ({
   DebugTargetLauncherImpl: vi.fn(),
 })); 
 
-vi.mock('./dist/proxy/proxy-manager.js', () => ({ 
-  ProxyManager: vi.fn().mockImplementation(() => ({
+vi.mock('./dist/proxy/proxy-manager.js', () => ({
+  ProxyManager: vi.fn().mockImplementation(function() { return ({
     on: vi.fn(),
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     sendDapRequest: vi.fn().mockResolvedValue({ success: true }),
     isRunning: vi.fn().mockReturnValue(false),
     getCurrentThreadId: vi.fn().mockReturnValue(null),
-  })),
+  }); }),
 }));
 
 /**

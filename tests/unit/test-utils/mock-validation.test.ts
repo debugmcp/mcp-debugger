@@ -2,7 +2,7 @@
  * Tests for automatic mock generation and validation
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   createMockFromInterface,
   validateMockInterface,

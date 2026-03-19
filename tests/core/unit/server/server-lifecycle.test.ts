@@ -31,13 +31,13 @@ describe('Server Lifecycle Tests', () => {
     vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
     
     mockServer = createMockServer();
-    vi.mocked(Server).mockImplementation(() => mockServer as any);
-    
+    vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
+
     const mockStdioTransport = createMockStdioTransport();
-    vi.mocked(StdioServerTransport).mockImplementation(() => mockStdioTransport as any);
-    
+    vi.mocked(StdioServerTransport).mockImplementation(function() { return mockStdioTransport as any; });
+
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
-    vi.mocked(SessionManager).mockImplementation(() => mockSessionManager as any);
+    vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
   });
 
   afterEach(() => {
@@ -53,7 +53,7 @@ describe('Server Lifecycle Tests', () => {
       expect(mockDependencies.logger.info).toHaveBeenCalledWith(expect.stringContaining('[MCP Server] Started at'));
     });
 
-    it('should start server successfully on second invocation', async () => {
+    it('should start server and log startup message', async () => {
       debugServer = new DebugMcpServer();
 
       await debugServer.start();
@@ -86,7 +86,7 @@ describe('Server Lifecycle Tests', () => {
       expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
     });
 
-    it('should handle errors when closing server during stop', async () => {
+    it('should stop server and log shutdown message', async () => {
       debugServer = new DebugMcpServer();
       mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
       

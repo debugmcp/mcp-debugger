@@ -16,13 +16,13 @@ Runs all checks:
 - ✅ Build artifact check (fast)
 - 🐌 Tests and builds (can be slow)
 
-### Fast Commit (Skip Tests Only)
+### Fast Commit (Skip Git Hooks)
 ```bash
 npm run commit:fast -- -m "feat: add new feature"
 ```
-Runs only:
+Uses `git commit --no-verify` internally, which bypasses **all** Git hooks (pre-commit, commit-msg, etc.), then manually runs only:
 - ✅ Personal information check (fast)
-- ⚡ Skips other pre-commit checks
+- ⚡ Skips all other checks (pre-commit hooks, build verification, tests)
 
 ## Why This Exists
 

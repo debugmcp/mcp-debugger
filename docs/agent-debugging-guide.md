@@ -1,6 +1,6 @@
 # MCP Debugger Usage Guide for AI Agents
 
-This guide explains how to correctly use the MCP Debugger tools when testing JavaScript and Python debugging functionality.
+This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, JavaScript, Rust, Go, Java, .NET/C#).
 
 ## Key Concepts
 
@@ -98,8 +98,10 @@ set_breakpoint(sessionId=session_id, file="/path/to/test.py", line=3)
 start_debugging(sessionId=session_id, scriptPath="/path/to/test.py")
 # Stops at line 3
 
-# 4. Get scopes
-scopes = get_scopes(sessionId=session_id, frameId=0)
+# 4. Get scopes (use the actual frame ID from get_stack_trace, not a hardcoded value)
+stack = get_stack_trace(sessionId=session_id)
+frame_id = stack["stackFrames"][0]["id"]  # Use the top frame's actual ID
+scopes = get_scopes(sessionId=session_id, frameId=frame_id)
 # Returns: [{"name":"Locals","variablesReference":3}, {"name":"Globals","variablesReference":4}]
 
 # 5. Get variables (first level)
@@ -164,8 +166,8 @@ if "variablesReference" in vars:
 
 5. **Frame context matters**:
    - If `evaluate_expression` fails, check you're using the correct frame
-   - Use `get_stack_trace` to find the right frame ID
-   - The top frame (index 0) is usually what you want
+   - Use `get_stack_trace` to find the right frame ID -- use the `id` field from the stack frame object, not the array index
+   - The top frame (first element in the `stackFrames` array) is usually what you want, but its `id` is assigned by the debug adapter and is NOT necessarily 0
 
 ## Testing Checklist
 
@@ -180,11 +182,108 @@ if "variablesReference" in vars:
 - [ ] Continue execution resumes properly
 - [ ] Session closes cleanly
 
+## Rust Debugging
+
+**Prerequisites**: Rust toolchain (rustc, cargo) installed. CodeLLDB debug adapter is vendored automatically during `pnpm install`.
+
+**Testing sequence:**
+```python
+# 1. Create session
+session_id = create_debug_session(language="rust")
+
+# 2. Set breakpoint (use absolute path to the source file)
+set_breakpoint(sessionId=session_id, file="/path/to/src/main.rs", line=5)
+
+# 3. Start debugging (scriptPath is the source file; the adapter compiles it)
+start_debugging(sessionId=session_id, scriptPath="/path/to/src/main.rs")
+
+# 4. Get stack trace and use actual frame IDs
+stack = get_stack_trace(sessionId=session_id)
+frame_id = stack["stackFrames"][0]["id"]
+
+# 5. Inspect variables
+get_local_variables(sessionId=session_id)
+```
+
+## Go Debugging
+
+**Prerequisites**: Go 1.18+ installed. Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`.
+
+**Testing sequence:**
+```python
+# 1. Create session
+session_id = create_debug_session(language="go")
+
+# 2. Set breakpoint
+set_breakpoint(sessionId=session_id, file="/path/to/main.go", line=10)
+
+# 3. Start debugging
+start_debugging(sessionId=session_id, scriptPath="/path/to/main.go")
+
+# 4. Inspect variables
+get_local_variables(sessionId=session_id)
+```
+
+## Java Debugging
+
+**Prerequisites**: JDK 21+ installed. Uses JDI bridge (compiled automatically on first use).
+
+**Key notes:**
+- Compile target code with `javac -g` for full variable inspection
+- For breakpoints, you can use a fully-qualified class name (e.g., `"com.example.MyClass"`) instead of a file path
+- Use `adapterLaunchConfig` to pass `mainClass` and `classpath`
+
+**Testing sequence:**
+```python
+# 1. Create session
+session_id = create_debug_session(language="java")
+
+# 2. Set breakpoint (using FQCN)
+set_breakpoint(sessionId=session_id, file="com.example.Main", line=10)
+
+# 3. Start debugging with adapter-specific config
+start_debugging(
+    sessionId=session_id,
+    scriptPath="/path/to/Main.java",
+    adapterLaunchConfig={"mainClass": "com.example.Main", "classpath": "/path/to/classes"}
+)
+
+# 4. Inspect variables
+get_local_variables(sessionId=session_id)
+```
+
+## .NET/C# Debugging
+
+**Prerequisites**: .NET 6+ SDK installed. netcoredbg must be installed (set `NETCOREDBG_PATH` or add to PATH).
+
+**Key notes:**
+- PDB symbols must be in Portable format (compile with `/debug:portable`)
+- Uses TCP-to-stdio bridge on all platforms
+
+**Testing sequence:**
+```python
+# 1. Create session
+session_id = create_debug_session(language="dotnet")
+
+# 2. Set breakpoint
+set_breakpoint(sessionId=session_id, file="/path/to/Program.cs", line=10)
+
+# 3. Start debugging
+start_debugging(sessionId=session_id, scriptPath="/path/to/Program.cs")
+
+# 4. Inspect variables
+get_local_variables(sessionId=session_id)
+```
+
 ## Summary
 
-The MCP Debugger is fully functional for both JavaScript and Python. The key insights are:
+The MCP Debugger is fully functional for Python, JavaScript, Rust, Go, Java, and .NET/C#. The key insights are:
 - **JavaScript**: Automatically skips Node.js internals - works as expected
 - **Python**: Use variablesReference to expand variable containers
-- **Both**: Ensure proper state and context for operations
+- **Rust**: CodeLLDB adapter is vendored; supports both MSVC and GNU toolchains
+- **Go**: Uses Delve's native DAP support
+- **Java**: Use FQCN for breakpoints, pass `mainClass`/`classpath` via `adapterLaunchConfig`
+- **.NET**: Requires netcoredbg; uses TCP-to-stdio bridge
+- **All languages**: Use actual frame IDs from `get_stack_trace` (not hardcoded 0), and ensure proper state and context for operations
 
 Following this guide will help you successfully test and use all debugging features without encountering the previously reported issues.

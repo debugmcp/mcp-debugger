@@ -12,7 +12,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
   executeDebugSequence,
-  waitForPort
+  waitForHealthEndpoint
 } from './smoke-test-utils.js';
 
 const execAsync = promisify(execCallback);
@@ -211,7 +211,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           // Also consider the server ready once the port is accepting connections (deterministic readiness)
           void (async () => {
             try {
-              const ok = await waitForPort(port, TEST_TIMEOUT);
+              const ok = await waitForHealthEndpoint(port, TEST_TIMEOUT);
               if (ok && !hasStarted) {
                 hasStarted = true;
                 clearTimeout(timeout);
@@ -274,7 +274,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
       
       // 2. Wait for server to be ready (health check)
       console.log(`[SSE Smoke Test] Checking server health on port ${serverPort}...`);
-      const serverReady = await waitForPort(serverPort, TEST_TIMEOUT);
+      const serverReady = await waitForHealthEndpoint(serverPort, TEST_TIMEOUT);
       if (!serverReady) {
         throw new Error(`Server health check failed on port ${serverPort}`);
       }
@@ -339,7 +339,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
       
       // 2. Wait for server to be ready (health check)
       console.log(`[SSE Smoke Test] Checking server health on port ${serverPort}...`);
-      const serverReady = await waitForPort(serverPort, TEST_TIMEOUT);
+      const serverReady = await waitForHealthEndpoint(serverPort, TEST_TIMEOUT);
       if (!serverReady) {
         // Additional debugging when health check fails
         if (sseServerProcess && !sseServerProcess.killed) {

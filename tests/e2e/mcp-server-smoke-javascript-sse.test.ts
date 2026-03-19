@@ -30,7 +30,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
-  waitForPort,
+  waitForHealthEndpoint,
   parseSdkToolResult
 } from './smoke-test-utils.js';
 
@@ -193,7 +193,7 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
           // Also consider the server ready once the port is accepting connections
           void (async () => {
             try {
-              const ok = await waitForPort(port, TEST_TIMEOUT);
+              const ok = await waitForHealthEndpoint(port, TEST_TIMEOUT);
               if (ok && !hasStarted) {
                 hasStarted = true;
                 clearTimeout(timeout);
@@ -436,7 +436,7 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
       
       // 2. Wait for server to be ready
       console.log(`[JS SSE Test] Checking server health on port ${serverPort}...`);
-      const serverReady = await waitForPort(serverPort, TEST_TIMEOUT);
+      const serverReady = await waitForHealthEndpoint(serverPort, TEST_TIMEOUT);
       if (!serverReady) {
         throw new Error(`Server health check failed on port ${serverPort}`);
       }
@@ -500,7 +500,7 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
     
     try {
       serverPort = await startSSEServer();
-      const serverReady = await waitForPort(serverPort, TEST_TIMEOUT);
+      const serverReady = await waitForHealthEndpoint(serverPort, TEST_TIMEOUT);
       if (!serverReady) {
         throw new Error(`Server health check failed on port ${serverPort}`);
       }

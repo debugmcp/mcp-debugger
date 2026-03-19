@@ -118,7 +118,7 @@ This factory pattern allows SessionManager to create ProxyManager instances with
 
 ### Core External Dependencies
 
-**Location**: `src/interfaces/external-dependencies.ts`
+**Location**: `packages/shared/src/interfaces/` (e.g., `filesystem.ts`, `external-dependencies.ts`)
 
 ```typescript
 // File system operations
@@ -156,7 +156,7 @@ export interface ILogger {
 
 ### Process-Specific Interfaces
 
-**Location**: `src/interfaces/process-interfaces.ts`
+**Location**: `packages/shared/src/interfaces/process-interfaces.ts`
 
 ```typescript
 export interface IProxyProcess extends IProcess {
@@ -216,6 +216,10 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 **Location**: `tests/test-utils/helpers/test-dependencies.ts`
 
 ```typescript
+// Returns a Dependencies object (defined in tests/test-utils/helpers/test-dependencies.ts)
+// containing: fileSystem, processManager, networkManager, logger,
+//             processLauncher, proxyProcessLauncher, debugTargetLauncher,
+//             proxyManagerFactory, sessionStoreFactory
 export async function createTestDependencies(): Promise<Dependencies> {
   const logger = createMockLogger();
   const fileSystem = createMockFileSystem();
@@ -404,10 +408,11 @@ For expensive dependencies:
 ```typescript
 export class LazyProxyManagerFactory implements IProxyManagerFactory {
   private instance?: IProxyManager;
-  
-  create(): IProxyManager {
+
+  create(adapter?: IDebugAdapter): IProxyManager {
     if (!this.instance) {
       this.instance = new ProxyManager(
+        adapter || null,
         this.launcher,
         this.fileSystem,
         this.logger

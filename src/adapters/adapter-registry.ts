@@ -366,6 +366,8 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     // Listen for adapter state changes
     adapter.on('stateChanged', (oldState, newState) => {
       if (newState === 'disconnected' || newState === 'error') {
+        // Clear any existing dispose timer before scheduling a new one
+        this.clearDisposeTimer(adapter);
         // Start dispose timer
         const timer = setTimeout(() => {
           adapter.dispose().catch(err => {
@@ -408,11 +410,12 @@ export function getAdapterRegistry(config?: AdapterRegistryConfig): AdapterRegis
 /**
  * Reset the singleton instance (mainly for testing)
  */
-export function resetAdapterRegistry(): void {
+export async function resetAdapterRegistry(): Promise<void> {
   if (registryInstance) {
-    registryInstance.disposeAll().catch(() => {
+    const instance = registryInstance;
+    registryInstance = null;
+    await instance.disposeAll().catch(() => {
       // Ignore errors during reset
     });
-    registryInstance = null;
   }
 }

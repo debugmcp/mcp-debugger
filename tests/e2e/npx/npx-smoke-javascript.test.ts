@@ -20,11 +20,10 @@ describe.sequential('NPX: JavaScript Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;
-  let tarballPath: string | null = null;
 
   beforeAll(async () => {
     console.log('[NPX JavaScript] Building and packing npm package...');
-    tarballPath = await buildAndPackNpmPackage();
+    const tarballPath = await buildAndPackNpmPackage();
     
     console.log('[NPX JavaScript] Installing package globally...');
     await installPackageGlobally(tarballPath);

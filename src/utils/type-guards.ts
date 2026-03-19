@@ -87,7 +87,7 @@ export function hasValidAdapterCommand(payload: ProxyInitPayload): boolean {
 
 /**
  * Validates ProxyInitPayload
- * Ensures all required fields are present and valid
+ * Checks that all required fields are present and have the correct types
  */
 export function validateProxyInitPayload(payload: unknown): ProxyInitPayload {
   if (!payload || typeof payload !== 'object') {

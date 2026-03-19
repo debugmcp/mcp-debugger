@@ -19,7 +19,6 @@ import { prepareRustExample } from '../rust-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ROOT = path.resolve(__dirname, '../../..');
 const DOCKER_RUST_ENABLED = process.env.DOCKER_ENABLE_RUST === 'true';
 
 if (!DOCKER_RUST_ENABLED) {

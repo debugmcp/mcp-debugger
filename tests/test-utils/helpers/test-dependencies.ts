@@ -69,8 +69,7 @@ export async function createTestDependencies(): Promise<Dependencies> {
   const processManager = createMockProcessManager();
   const networkManager = createMockNetworkManager();
   
-  // Note: These will be imported from tests/implementations/test/ after we move them
-  const { FakeProcessLauncher, FakeProxyProcessLauncher, FakeDebugTargetLauncher } = 
+  const { FakeProcessLauncher, FakeProxyProcessLauncher, FakeDebugTargetLauncher } =
     await import('../../implementations/test/fake-process-launcher.ts');
   
   const processLauncher = new FakeProcessLauncher();

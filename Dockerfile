@@ -147,7 +147,7 @@ RUN mkdir -p /app/node_modules/@debugmcp/adapter-java/java/out && \
 # Use a minimal set - the bundle already includes most dependencies
 COPY --from=builder /app/node_modules/@vscode /app/node_modules/@vscode
 COPY --from=builder /app/node_modules/which /app/node_modules/which
-COPY --from=builder /app/node_modules/.pnpm/isexe@3.1.1/node_modules/isexe /app/node_modules/isexe
+COPY --from=builder /app/node_modules/.pnpm/isexe@4.0.0/node_modules/isexe /app/node_modules/isexe
 
 # Expose ports
 EXPOSE 3000 5679

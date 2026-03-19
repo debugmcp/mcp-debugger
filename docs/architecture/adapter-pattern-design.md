@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 6 languages (Python, JavaScript, Rust, Go, Java, and Mock). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
+The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 7 languages (Python, JavaScript, Rust, Go, Java, .NET/C#, and Mock). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
 
 1. **IDebugAdapter Interface**: Complete adapter implementations for full language support
 2. **AdapterPolicy Interface**: Lightweight policies for language-specific session management behaviors
@@ -84,10 +84,11 @@ graph TD
     
     subgraph "Language Adapters"
         PA[PythonAdapter]
-        NA[NodeAdapter]
+        NA[JavascriptAdapter]
         RA[RustAdapter]
         GA[GoAdapter]
         JA[JavaAdapter]
+        DA[DotnetAdapter]
         MA[MockAdapter]
     end
 
@@ -96,6 +97,7 @@ graph TD
     AR --> RA
     AR --> GA
     AR --> JA
+    AR --> DA
     AR --> MA
     
     style AD fill:#9cf,stroke:#333,stroke-width:2px
@@ -218,7 +220,7 @@ sequenceDiagram
     SM->>A: validateEnvironment()
     A-->>SM: {valid: true}
     
-    SM->>PM: new ProxyManager(adapter, ...)
+    SM->>PM: proxyManagerFactory.create(adapter)
     SM->>PM: start(config)
     
     PM->>A: buildAdapterCommand(config)
@@ -285,11 +287,11 @@ sequenceDiagram
 3. Extract Python-specific code from SessionManager
 4. Update ProxyManager to accept adapters
 
-### Phase 4: Integration
-1. Update SessionManager to use AdapterRegistry
-2. Update server.ts to remove language validation
-3. Add backward compatibility layer
-4. Update all tests
+### Phase 4: Integration (COMPLETED)
+1. SessionManager uses AdapterRegistry for dynamic adapter creation
+2. server.ts delegates language validation to AdapterRegistry (dynamic, not hardcoded)
+3. All language adapters load dynamically via `@debugmcp/adapter-<language>` packages
+4. Tests updated across the board
 
 ## Component Responsibilities
 
@@ -366,7 +368,7 @@ sequenceDiagram
   "name": "create_debug_session",
   "inputSchema": {
     "properties": {
-      "language": { "enum": ["python", "javascript", "rust", "go", "java", "mock"] },
+      "language": { "enum": ["python", "javascript", "rust", "go", "java", "dotnet", "mock"] },
       "executablePath": { "type": "string" }
     }
   }
@@ -470,10 +472,11 @@ if (!adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)) {
    ```typescript
    export enum DebugLanguage {
      PYTHON = 'python',
-     NODE = 'node',
+     JAVASCRIPT = 'javascript',
      RUST = 'rust',
      GO = 'go',
      JAVA = 'java',
+     DOTNET = 'dotnet',
      MOCK = 'mock'
    }
    ```

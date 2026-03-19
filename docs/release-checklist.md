@@ -5,7 +5,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 ## Before Tagging
 
 ### Automated (via `npm run release:dry-run`)
-- [ ] All package versions match (`package.json` in root, shared, adapter-mock, adapter-python, adapter-javascript, mcp-debugger)
+- [ ] All package versions match (`package.json` in root, shared, adapter-python, adapter-javascript, adapter-rust, adapter-go, adapter-java, adapter-dotnet, adapter-mock, mcp-debugger)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
 - [ ] `npm run build` succeeds

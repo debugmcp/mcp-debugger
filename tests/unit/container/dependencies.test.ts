@@ -22,26 +22,26 @@ vi.mock('../../../src/utils/logger.js', () => ({
 }));
 
 vi.mock('../../../src/implementations/index.js', () => ({
-  FileSystemImpl: vi.fn(() => fileSystemInstance),
-  ProcessManagerImpl: vi.fn(() => processManagerInstance),
-  NetworkManagerImpl: vi.fn(() => networkManagerInstance),
-  ProcessLauncherImpl: vi.fn(() => processLauncherInstance),
-  ProxyProcessLauncherImpl: vi.fn(() => proxyProcessLauncherInstance),
-  DebugTargetLauncherImpl: vi.fn(() => debugTargetLauncherInstance)
+  FileSystemImpl: vi.fn(function() { return fileSystemInstance; }),
+  ProcessManagerImpl: vi.fn(function() { return processManagerInstance; }),
+  NetworkManagerImpl: vi.fn(function() { return networkManagerInstance; }),
+  ProcessLauncherImpl: vi.fn(function() { return processLauncherInstance; }),
+  ProxyProcessLauncherImpl: vi.fn(function() { return proxyProcessLauncherInstance; }),
+  DebugTargetLauncherImpl: vi.fn(function() { return debugTargetLauncherInstance; })
 }));
 
 const environmentInstance = { tag: 'env' };
 vi.mock('../../../src/implementations/environment-impl.js', () => ({
-  ProcessEnvironment: vi.fn(() => environmentInstance)
+  ProcessEnvironment: vi.fn(function() { return environmentInstance; })
 }));
 
 vi.mock('../../../src/factories/proxy-manager-factory.js', () => ({
-  ProxyManagerFactory: vi.fn(() => proxyManagerFactoryInstance),
+  ProxyManagerFactory: vi.fn(function() { return proxyManagerFactoryInstance; }),
   ProxyManagerFactoryDependencies: {}
 }));
 
 vi.mock('../../../src/factories/session-store-factory.js', () => ({
-  SessionStoreFactory: vi.fn(() => sessionStoreFactoryInstance)
+  SessionStoreFactory: vi.fn(function() { return sessionStoreFactoryInstance; })
 }));
 
 class AdapterRegistryMock {

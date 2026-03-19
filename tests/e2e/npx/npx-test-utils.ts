@@ -271,7 +271,7 @@ async function resolveGlobalCliEntry(): Promise<string> {
 }
 
 /**
- * Create an MCP client connected via npx
+ * Create an MCP client connected via global install
  */
 export async function createNpxMcpClient(config: NpxTestConfig = {}): Promise<{
   client: Client;

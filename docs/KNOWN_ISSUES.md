@@ -9,20 +9,20 @@ The `mcp-debugger-docker` image now ships only the Python and JavaScript adapter
 As of July 2025, there are 3 tests that fail when running with Act (local GitHub Actions simulator) but may pass in the actual GitHub Actions CI environment. These tests have been temporarily skipped with `.skip` to allow the project to be pushed to GitHub for further investigation.
 
 ### 1. Container Smoke Test - Timeout Issue
-- **File**: `tests/e2e/mcp-server-smoke-container.test.ts`
-- **Test**: "should successfully debug fibonacci.py in containerized server"
+- **File**: `tests/e2e/docker/docker-smoke-python.test.ts` (and other `docker-smoke-*.test.ts` files)
+- **Test**: Container-based debugging smoke tests
 - **Issue**: Test times out after 60 seconds in Act environment
 - **Likely Cause**: Docker operations are slower in Act's Docker-in-Docker setup
 - **Solution**: May need to increase timeout or optimize Docker image loading
 
 ### 2. Container Test Environment Issue
-- **File**: `tests/e2e/mcp-server-smoke-container.test.ts`
+- **File**: `tests/e2e/docker/docker-smoke-python.test.ts`
 - **Issue**: Container tests may fail in Act's Docker-in-Docker environment
 - **Cause**: Volume mount complexities in nested container environments
 - **Solution**: Tests work in real Docker environments; Act limitations only
 
 ### 3. Python Discovery Platform Mismatch
-- **File**: `tests/integration/python-real-discovery.test.ts`
+- **File**: `tests/adapters/python/integration/python-discovery.test.ts`
 - **Test**: "should show clear error message when Python is not found on Windows"
 - **Issue**: Test forces platform to 'win32' but runs on Linux in Act
 - **Root Cause**: Test expects Windows `py` command but Act runs on Linux

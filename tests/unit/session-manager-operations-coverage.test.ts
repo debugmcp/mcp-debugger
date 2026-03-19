@@ -1684,21 +1684,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
   });
 
   describe('Multi-Breakpoint DAP Aggregation', () => {
-    /**
-     * Helper: set a breakpoint and return DAP response with given verified BPs.
-     * The mock returns all requested BPs as verified with their original lines.
-     */
-    function mockDapSetBreakpointsResponse(bpCount: number) {
-      mockProxyManager.sendDapRequest.mockResolvedValue({
-        body: {
-          breakpoints: Array.from({ length: bpCount }, (_, i) => ({
-            verified: true,
-            line: 0, // will be overridden per-test
-          }))
-        }
-      });
-    }
-
     /** Helper to extract the breakpoints array from the last sendDapRequest call. */
     function getLastDapBreakpoints(): Array<{ line: number; condition?: string }> {
       const calls = mockProxyManager.sendDapRequest.mock.calls;

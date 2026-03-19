@@ -34,7 +34,7 @@ vi.mock('../../../../src/container/dependencies.js', () => ({
 }));
 
 vi.mock('../../../../src/session/session-manager.js', () => ({
-  SessionManager: vi.fn().mockImplementation(() => ({
+  SessionManager: vi.fn().mockImplementation(function() { return ({
     createSession: vi.fn(),
     closeSession: vi.fn(),
     closeAllSessions: vi.fn(),
@@ -49,7 +49,7 @@ vi.mock('../../../../src/session/session-manager.js', () => ({
     stepOver: vi.fn(),
     stepInto: vi.fn(),
     stepOut: vi.fn()
-  }))
+  }); })
 }));
 
 // Import the schema we need to check against

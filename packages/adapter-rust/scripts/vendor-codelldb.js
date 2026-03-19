@@ -16,10 +16,9 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { Transform } from 'stream';
+import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createWriteStream, createReadStream } from 'fs';
-import fetch from 'node-fetch';
 import extractZip from 'extract-zip';
 import ProgressBar from 'progress';
 import { fileURLToPath } from 'url';
@@ -302,12 +301,15 @@ function computeSha256(filePath) {
 async function downloadFile(url, destPath, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
       const response = await fetch(url, {
-        timeout: 30000, // 30 second timeout
+        signal: controller.signal,
         headers: {
           'User-Agent': 'debugmcp/adapter-rust'
         }
       });
+      clearTimeout(timeout);
       log(`HTTP response: ${response.status} ${response.statusText}, content-type=${response.headers.get('content-type')}, content-length=${response.headers.get('content-length')}, encoding=${response.headers.get('content-encoding') ?? '<none>'}`);
       
       if (!response.ok) {
@@ -337,10 +339,11 @@ async function downloadFile(url, destPath, maxRetries = 3) {
       }
 
       await fs.mkdir(path.dirname(destPath), { recursive: true });
+      const bodyStream = Readable.fromWeb(response.body);
       if (progressTap) {
-        await pipeline(response.body, progressTap, createWriteStream(destPath));
+        await pipeline(bodyStream, progressTap, createWriteStream(destPath));
       } else {
-        await pipeline(response.body, createWriteStream(destPath));
+        await pipeline(bodyStream, createWriteStream(destPath));
       }
 
       // Validate downloaded file size when Content-Length is provided

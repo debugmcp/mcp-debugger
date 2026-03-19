@@ -4,7 +4,16 @@ This document provides detailed design information for the major components of t
 
 ## SessionManager
 
-**Location**: `src/session/session-manager.ts`
+**Location**: `src/session/session-manager.ts` (facade), with logic split across a 4-class hierarchy:
+
+| Class | File | Responsibility |
+|-------|------|----------------|
+| `SessionManagerCore` | `src/session/session-manager-core.ts` | Lifecycle, state management, event handler setup/cleanup, dependency injection |
+| `SessionManagerData` | `src/session/session-manager-data.ts` | Data retrieval: variables, stack traces, scopes, local variables; `selectPolicy()` |
+| `SessionManagerOperations` | `src/session/session-manager-operations.ts` | Debug operations: start, step, continue, pause, breakpoints, attach/detach, evaluate |
+| `SessionManager` | `src/session/session-manager.ts` | Thin facade that extends `SessionManagerOperations` and implements `handleAutoContinue` |
+
+The inheritance chain is: `SessionManagerCore` -> `SessionManagerData` -> `SessionManagerOperations` -> `SessionManager`.
 
 ### Overview
 SessionManager is the central orchestrator for all debug sessions. It implements a facade pattern, providing a simplified interface for complex debugging operations while managing the lifecycle of ProxyManager instances.
@@ -33,29 +42,40 @@ SessionManager is the central orchestrator for all debug sessions. It implements
 
 ```typescript
 class SessionManager {
-  // Session lifecycle
+  // Session lifecycle (from SessionManagerCore)
   async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo>
-  async startDebugging(sessionId: string, scriptPath: string, scriptArgs?: string[], dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, dryRunSpawn?: boolean): Promise<DebugResult>
   async closeSession(sessionId: string): Promise<boolean>
   async closeAllSessions(): Promise<void>
-  
-  // Debugging operations
+
+  // Query (from SessionManagerCore)
+  public getSession(sessionId: string): ManagedSession | undefined
+  public getAllSessions(): DebugSessionInfo[]
+  public getSessionPolicy(sessionId: string): AdapterPolicy
+
+  // Data retrieval (from SessionManagerData)
+  async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]>
+  async getStackTrace(sessionId: string, threadId?: number, includeInternals?: boolean): Promise<StackFrame[]>
+  async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]>
+  async getLocalVariables(sessionId: string, includeSpecial?: boolean): Promise<{ variables: Variable[]; frame: {...} | null; scopeName: string | null }>
+
+  // Debug operations (from SessionManagerOperations)
+  async startDebugging(sessionId: string, scriptPath: string, scriptArgs?: string[], dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, dryRunSpawn?: boolean, adapterLaunchConfig?: Record<string, unknown>): Promise<DebugResult>
   async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint>
   async stepOver(sessionId: string): Promise<DebugResult>
   async stepInto(sessionId: string): Promise<DebugResult>
   async stepOut(sessionId: string): Promise<DebugResult>
   async continue(sessionId: string): Promise<DebugResult>
-  
-  // Inspection
-  async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]>
-  async getStackTrace(sessionId: string, threadId?: number): Promise<StackFrame[]>
-  async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]>
-  
-  // Query
-  public getSession(sessionId: string): ManagedSession | undefined
-  public getAllSessions(): DebugSessionInfo[]
+  async pause(sessionId: string): Promise<DebugResult>
+  async evaluateExpression(sessionId: string, expression: string, frameId?: number, context?: string): Promise<EvaluateResult>
+  async attachToProcess(sessionId: string, attachConfig: {...}): Promise<DebugResult>
+  async detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>
+
+  // Adapter registry (from SessionManagerCore)
+  public adapterRegistry: IAdapterRegistry
 }
 ```
+
+**Note:** `handleAutoContinue()` is an abstract method in `SessionManagerCore`. The concrete `SessionManager` class overrides it but currently throws `"handleAutoContinue not yet implemented: requires session context refactoring"`.
 
 ### Event Handler Pattern
 
@@ -246,12 +266,11 @@ From the `handleInitCommand` method (lines 67-124):
    this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
    ```
 
-3. **Path Validation**
+3. **Payload Validation** (via `validateProxyInitPayload` in `src/utils/type-guards.ts`)
    ```typescript
-   if (!path.isAbsolute(payload.scriptPath)) {
-     throw new Error(`Script path is not absolute: ${payload.scriptPath}`);
-   }
-   const scriptExists = await this.dependencies.fileSystem.pathExists(payload.scriptPath);
+   // Validates required fields: cmd, sessionId, executablePath, adapterHost,
+   // adapterPort, logDir, scriptPath. Also validates adapterCommand and launchConfig if present.
+   const validatedPayload = validateProxyInitPayload(payload);
    ```
 
 4. **Dry Run Handling**
@@ -389,7 +408,7 @@ export const ErrorMessages = {
 
 ## Dependency Injection System
 
-**Location**: `src/interfaces/external-dependencies.ts`
+**Location**: Interface definitions in `packages/shared/src/interfaces/` (e.g., `filesystem.ts`, `external-dependencies.ts`, `process-interfaces.ts`). The `SessionManagerDependencies` aggregate is defined in `src/session/session-manager-core.ts`.
 
 ### Overview
 The dependency injection system enables comprehensive testing by abstracting all external dependencies behind interfaces.
@@ -407,7 +426,7 @@ The dependency injection system enables comprehensive testing by abstracting all
 2. **Factory Interfaces**
    ```typescript
    export interface IProxyManagerFactory {
-     create(): IProxyManager;
+     create(adapter?: IDebugAdapter): IProxyManager;
    }
    export interface ISessionStoreFactory {
      create(): SessionStore;

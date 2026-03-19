@@ -289,7 +289,7 @@ class ChildProcessMock {
     respondToInit?: boolean,
     initDelay?: number,
     simulateError?: boolean
-  } = {}): MockChildProcess {
+  } = {}): { get: () => MockChildProcess | null } {
     const {
       respondToInit = true,
       initDelay = 50,

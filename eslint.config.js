@@ -60,7 +60,7 @@ export default [
     },
   },
 
-  // TS project-aware settings for repo TS sources and tests
+  // Node.js globals for TS/test sources
   {
     files: ["src/**/*.ts", "packages/*/src/**/*.ts", "tests/**/*.ts"],
     languageOptions: {
@@ -78,7 +78,7 @@ export default [
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-unused-vars": "warn",
       "@typescript-eslint/ban-ts-comment": "warn",
-      // Catch unhandled promises - exactly the issue we just fixed!
+      // Catch unhandled promises - prevents fire-and-forget async calls that silently swallow errors
       "@typescript-eslint/no-floating-promises": "error"
     }
   },
@@ -99,6 +99,8 @@ export default [
     rules: {
       "no-unused-vars": "off",
       "no-useless-escape": "off",
+      "no-useless-assignment": "off",
+      "preserve-caught-error": "off",
       "@typescript-eslint/no-unused-vars": "off",
       "@typescript-eslint/no-require-imports": "off"
     }

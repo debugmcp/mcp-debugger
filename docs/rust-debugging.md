@@ -26,7 +26,7 @@ The Rust adapter bundles the CodeLLDB binaries into `packages/adapter-rust/vendo
 - `pnpm --filter @debugmcp/adapter-rust run build:adapter`
 - `node packages/adapter-rust/scripts/vendor-codelldb.js`
 
-> **New default:** the vendoring script now downloads **all supported platforms** (win32-x64, linux-{x86_64,arm64}, darwin-{x64,arm64}) so Docker builds can reuse the same artifacts. Set `CODELLDB_VENDOR_ALL=false` if you only want the host platform.
+> **New default:** the vendoring script now downloads **all supported platforms** (win32-x64, linux-x64, linux-arm64, darwin-x64, darwin-arm64) so Docker builds can reuse the same artifacts. Set `CODELLDB_VENDOR_ALL=false` if you only want the host platform.
 
 ### Manual control
 
@@ -40,9 +40,9 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 
 ### Useful environment flags
 
-- `CODELLDB_VERSION`: override the release tag (defaults to `1.11.0`)
+- `CODELLDB_VERSION`: override the release tag (defaults to `1.11.8`)
 - `CODELLDB_FORCE_REBUILD=true`: ignore cached binaries and re-download
-- `CODELLDB_PLATFORMS=win32-x64,linux-x64`: vendor specific platforms
+- `CODELLDB_PLATFORMS=win32-x64,linux-x64,linux-arm64,darwin-x64,darwin-arm64`: vendor specific platforms (comma-separated)
 - `CODELLDB_VENDOR_ALL=false`: opt out of the "vendor every platform" default and fall back to host-only downloads
 - `CODELLDB_VENDOR_LOCAL_ONLY=true`: disable network downloads entirely and fail if the requested platform isn't already vendored (used by Docker builds that copy pre-fetched artifacts)
 - `CODELLDB_KEEP_TEMP=true`: retain the downloaded VSIX and extracted temp folders for inspection
@@ -137,8 +137,8 @@ For a Cargo project with arguments:
     "args": ["--verbose", "input.txt"],
     "dapLaunchArgs": {
       "cargo": {
-        "target": "debug",
-        "args": ["arg1", "arg2"]
+        "bin": "my_program",
+        "release": false
       }
     }
   }
@@ -179,15 +179,23 @@ The Rust adapter provides special support for Cargo projects:
 {
   "dapLaunchArgs": {
     "cargo": {
-      "target": "debug",      // or "release"
-      "args": ["--help"],     // Program arguments
-      "env": {                // Environment variables
-        "RUST_LOG": "debug"
-      }
+      "bin": "my_program",   // Binary target name
+      "release": false        // false for debug build, true for release
+    },
+    "args": ["--help"],       // Program arguments (top-level, not inside cargo)
+    "env": {                  // Environment variables
+      "RUST_LOG": "debug"
     }
   }
 }
 ```
+
+The `cargo` object supports these fields:
+- `bin`: Binary target name
+- `example`: Example target name
+- `test`: Test target name
+- `release`: Build in release mode (boolean, default: false)
+- `build`: Whether to build before debugging (boolean)
 
 ### Workspace Support
 
@@ -196,8 +204,7 @@ For Cargo workspaces with multiple packages:
 {
   "dapLaunchArgs": {
     "cargo": {
-      "target": "debug",
-      "package": "my-crate"  // Specify which crate to debug
+      "bin": "my-crate"    // Specify which binary target to debug
     }
   }
 }
@@ -271,7 +278,7 @@ async fn main() {
   "tool": "get_variables",
   "arguments": {
     "sessionId": "your-session-id",
-    "scope": 5  // Local scope reference
+    "scope": 5
   }
 }
 ```

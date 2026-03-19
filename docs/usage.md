@@ -326,14 +326,14 @@ You can also evaluate arbitrary expressions in the current debug context:
 - Common mistake: Using frame ID instead of variablesReference
 
 ### Breakpoint Behavior
-- Breakpoints always show `"verified": false` until debugging starts
+- Breakpoints initially show `"verified": false` because verification happens asynchronously by the debug adapter once the module is loaded (e.g., debugpy verifies after the script starts)
 - Avoid setting breakpoints on non-executable lines (comments, blank lines)
 - Best lines for breakpoints: assignments, function calls, conditionals
 
 ### File Paths
-- The server uses a hands-off approach to paths: paths are passed unchanged to the debug adapter
-- In container mode, `/workspace/` is prepended for file existence checks only
-- In host mode, use absolute paths (relative paths are rejected)
+- The server uses centralized path resolution via `SimpleFileChecker` for existence validation only
+- In container mode, paths are resolved against the workspace root (default `/workspace/`) for the existence check, then the resolved path is passed to the debug adapter
+- In host mode, paths must be absolute -- relative paths are rejected early with a clear error message
 - Use forward slashes (/) or escaped backslashes (\\\\) in JSON
 
 ## Common Errors and Solutions
@@ -356,36 +356,12 @@ You can also evaluate arbitrary expressions in the current debug context:
 ```
 **Solution**: Use the `variablesReference` from `get_scopes`, not the frame ID.
 
-## Partially Implemented Features
+## Fully Implemented Features
 
-1. **pause_execution**: Returns "Pause execution not yet implemented with proxy"
+All 19 tools are fully implemented, including:
 
-## Recently Implemented Features (v0.13.0)
-
-### evaluate_expression
-The `evaluate_expression` tool is now fully functional, allowing you to:
-- Evaluate arbitrary expressions in the current debug context
-- Automatically uses the current frame when `frameId` is not specified
-- Modify program state (expressions with side effects are allowed)
-- Get detailed type information and variablesReference for complex objects
-
-Example usage:
-```json
-// Tool: evaluate_expression
-// Request:
-{
-  "sessionId": "your-session-id",
-  "expression": "len([1, 2, 3]) * 2"
-}
-// Response:
-{
-  "success": true,
-  "result": "6",
-  "type": "int",
-  "variablesReference": 0,
-  "message": "Evaluated expression: len([1, 2, 3]) * 2"
-}
-```
+- **pause_execution**: Sends a DAP pause request to halt a running program. The session must be in the `running` state.
+- **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. Automatically uses the current frame when `frameId` is not specified. Expressions with side effects are allowed (can modify program state).
 
 ## Best Practices
 
@@ -397,4 +373,4 @@ Example usage:
 
 ---
 
-*Last updated: 2025-09-11 - Updated with evaluate_expression implementation (v0.13.0)*
+*Last updated: 2026-03-18 - All tools including pause_execution and evaluate_expression are fully implemented (v0.18.1)*

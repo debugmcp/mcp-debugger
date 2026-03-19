@@ -20,7 +20,6 @@ import {
   AdapterCapabilities,
   ExceptionBreakpointFilter
 } from '@debugmcp/shared';
-import { DebugLanguage } from '@debugmcp/shared';
 
 describe('debug-adapter-interface', () => {
   describe('AdapterState enum', () => {

@@ -221,13 +221,14 @@ Logged to capture stdout/stderr from the debugged program.
 ## Field Definitions
 
 ### Common Fields
-- `timestamp`: ISO 8601 string timestamp for display
+- `timestamp` (ISO 8601 string): Human-readable timestamp for display (e.g. `"2025-01-06T16:15:00.123Z"`)
 - `level`: Log level (info, debug, error, warn)
 - `namespace`: Logger namespace for categorization
 - `message`: Log type identifier for parsing
 - `sessionId`: Unique session identifier (UUID)
 - `sessionName`: Human-readable session name
-- `timestamp`: Unix timestamp in milliseconds (for sorting)
+
+> **Note:** Earlier versions of this spec showed a second `timestamp` field (Unix milliseconds) alongside the ISO 8601 string. In practice the JSON entries contain a single `timestamp` field in ISO 8601 format. Use `Date.parse()` or equivalent for sorting.
 
 ### Tool-specific Fields
 - `tool`: Name of the MCP tool

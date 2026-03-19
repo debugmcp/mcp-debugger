@@ -20,7 +20,7 @@ This document explains the AdapterPolicy pattern and how it relates to the main 
 - **Purpose**: Language-specific policies for session management
 - **Scope**: Lightweight behaviors used by SessionManager and DAP proxy layer
 - **Location**: `packages/shared/src/interfaces/adapter-policy-*.ts`
-- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `MockAdapterPolicy`
+- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`
 
 ## AdapterPolicy Interface
 
@@ -29,7 +29,7 @@ The `AdapterPolicy` interface is defined in `packages/shared/src/interfaces/adap
 ```typescript
 export interface AdapterPolicy {
   // === Identity ===
-  name: string;                              // e.g., 'default', 'python', 'js-debug', 'rust', 'go', 'java', 'mock'
+  name: string;                              // e.g., 'default', 'python', 'js-debug', 'rust', 'go', 'java', 'dotnet', 'mock'
 
   // === Child Session / Multi-session Support ===
   supportsReverseStartDebugging: boolean;
@@ -53,6 +53,7 @@ export interface AdapterPolicy {
     requiresInitialStop?: boolean;
     defaultStopOnEntry?: boolean;
     sendLaunchBeforeConfig?: boolean;
+    sendAttachBeforeInitialized?: boolean;
   };
   getDapClientBehavior(): DapClientBehavior;
 
@@ -138,6 +139,7 @@ Client Request → Server → SessionManager
 | `RustAdapterPolicy` | `adapter-policy-rust.ts` | `'rust'` | `'lldb'` | No | No |
 | `GoAdapterPolicy` | `adapter-policy-go.ts` | `'go'` | `'dlv-dap'` | No | No |
 | `JavaAdapterPolicy` | `adapter-policy-java.ts` | `'java'` | `'java'` | No | No |
+| `DotnetAdapterPolicy` | `adapter-policy-dotnet.ts` | `'dotnet'` | `'coreclr'` | No | No |
 | `MockAdapterPolicy` | `adapter-policy-mock.ts` | `'mock'` | `'mock'` | No | No |
 
 ### Key Differences Between Policies
@@ -168,13 +170,23 @@ Client Request → Server → SessionManager
 - `resolveExecutablePath()` checks `DLV_PATH` env var, defaults to `'dlv'`
 - `getInitializationBehavior()` returns `{ defaultStopOnEntry: false, sendLaunchBeforeConfig: true }` to work around Delve's "unknown goroutine" quirk
 - `filterStackFrames()` removes `/runtime/` and `/testing/` frames
-- `getLocalScopeName()` returns `['Locals', 'Arguments']`
+- `extractLocalVariables()` only retrieves the `Locals` scope (not `Arguments`), filtering out `_`-prefixed internal variables unless `includeSpecial` is true
+- `getLocalScopeName()` returns `['Locals', 'Arguments']` (for reporting purposes, but `extractLocalVariables` only uses `Locals`)
 
 **JavaAdapterPolicy**:
 - `resolveExecutablePath()` checks `JAVA_HOME` env var, constructs `$JAVA_HOME/bin/java`
 - `isNonFileSourceIdentifier()` detects Java FQCNs (no path separators, does not end with `.java`) so the server skips file existence checks
 - `getInitializationBehavior()` returns `{ sendLaunchBeforeConfig: true }` because JdiDapServer sends `'initialized'` during initialize
 - `filterStackFrames()` removes JDK internal frames (`java.*`, `javax.*`, `sun.*`)
+
+**DotnetAdapterPolicy**:
+- `resolveExecutablePath()` checks `NETCOREDBG_PATH` env var, defaults to `'netcoredbg'`
+- `getDapAdapterConfiguration()` returns `{ type: 'coreclr' }`
+- `getInitializationBehavior()` returns `{ sendAttachBeforeInitialized: false }` (standard DAP sequence)
+- `extractLocalVariables()` filters out C# compiler-generated variables (`<>`, `CS$<>`, `$VB$`, `<>t__`, `<>s__`) unless `includeSpecial` is true
+- `getLocalScopeName()` returns `['Locals']`
+- `filterStackFrames()` removes frames with no source file and `System.*`/`Microsoft.*` frames
+- Uses TCP-to-stdio bridge on all platforms (works around a netcoredbg server mode bug)
 
 **MockAdapterPolicy**:
 - `resolveExecutablePath()` returns `providedPath || 'mock'`
@@ -207,6 +219,9 @@ export class SessionManagerData extends SessionManagerCore {
       case 'java':
       case DebugLanguage.JAVA:
         return JavaAdapterPolicy;
+      case 'dotnet':
+      case DebugLanguage.DOTNET:
+        return DotnetAdapterPolicy;
       case 'mock':
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;

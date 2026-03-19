@@ -1,6 +1,5 @@
 // Test SSE connection with proper session handling
 import http from 'http';
-import https from 'https';
 
 const SSE_URL = 'http://localhost:3001/sse';
 

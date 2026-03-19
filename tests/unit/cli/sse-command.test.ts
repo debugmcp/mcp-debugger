@@ -51,7 +51,7 @@ describe('SSE Command Handler', () => {
     originalProcessOn = process.on;
 
     // Setup mock transport
-    MockedSSEServerTransport.mockImplementation((path: string, res: any) => {
+    MockedSSEServerTransport.mockImplementation(function(path: string, res: any) {
       mockTransport = {
         sessionId: 'test-session-' + Math.random().toString(36).substring(7),
         close: vi.fn(),
@@ -59,14 +59,14 @@ describe('SSE Command Handler', () => {
         onerror: null,
         handlePostMessage: vi.fn().mockResolvedValue(undefined),
         // Add helper methods for testing
-        triggerClose: function() { 
-          if (this.onclose) this.onclose(); 
+        triggerClose: function() {
+          if (this.onclose) this.onclose();
         },
-        triggerError: function(err: Error) { 
-          if (this.onerror) this.onerror(err); 
+        triggerError: function(err: Error) {
+          if (this.onerror) this.onerror(err);
         }
       };
-      
+
       return mockTransport;
     });
   });
@@ -735,8 +735,8 @@ describe('SSE Command Handler', () => {
         callback();
       });
 
-      // Trigger SIGINT
-      sigintHandler();
+      // Trigger SIGINT (gracefulShutdown is async, so await it)
+      await sigintHandler();
 
       expect(mockLogger.info).toHaveBeenCalledWith('Shutting down SSE server...');
       expect(mockSession1.transport.close).toHaveBeenCalled();

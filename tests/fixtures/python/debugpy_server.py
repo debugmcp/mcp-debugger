@@ -5,7 +5,6 @@ This file simulates a minimal debugpy server that listens for DAP connections.
 """
 
 import sys
-import time
 import signal
 import socket
 import json

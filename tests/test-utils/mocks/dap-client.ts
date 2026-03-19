@@ -71,6 +71,7 @@ export class MockDapClient extends EventEmitter {
     
     // Reset default implementations
     this.connect.mockResolvedValue(undefined);
+    this.disconnect.mockResolvedValue(undefined);
     this.sendRequest.mockResolvedValue({});
   }
   
@@ -125,5 +126,5 @@ export const mockDapClient = new MockDapClient();
 
 // Export default for use with vi.mock
 export default {
-  DebugAdapterClient: vi.fn().mockImplementation(() => mockDapClient)
+  DebugAdapterClient: vi.fn().mockImplementation(function() { return mockDapClient; })
 };

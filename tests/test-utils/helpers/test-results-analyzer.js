@@ -1,9 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * Analyzes test results from JSON file
@@ -186,7 +182,6 @@ class TestResultsAnalyzer {
         const failed = tests.filter(t => t.status === 'failed').length;
         const skipped = tests.filter(t => t.status === 'pending').length;
         
-        const status = failed > 0 ? '✗' : '✓';
         const statusColor = failed > 0 ? '❌' : '✅';
         
         console.log(`  ${statusColor} ${file} (${duration}ms)`);

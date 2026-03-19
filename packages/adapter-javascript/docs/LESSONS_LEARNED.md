@@ -15,12 +15,13 @@ The JavaScript adapter was experiencing consistent `ECONNREFUSED` errors when at
 - **Result**: Connection attempts failed because IPv4 and IPv6 addresses are not interchangeable
 
 ### The Solution
-Changed `adapterHost` from `'127.0.0.1'` to `'localhost'` in the session manager.
+Use `'localhost'` instead of `'127.0.0.1'` when connecting to debug adapters that may prefer IPv6. In the current codebase, the general `adapterHost` in `src/session/session-manager-operations.ts` is `'127.0.0.1'`, but the js-debug child session configuration in `JsDebugAdapterPolicy` uses `'localhost'` where IPv6 compatibility matters.
 
-**Files Modified:**
-- `src/session/session-manager-operations.ts` (2 locations in the file)
+**Key Files:**
+- `src/session/session-manager-operations.ts` - General adapter host configuration
+- `packages/shared/src/interfaces/adapter-policy-js.ts` - JS-specific child session host
 
-**Why This Works:**
+**Why `'localhost'` Works:**
 - The hostname `'localhost'` resolves to BOTH IPv4 (`127.0.0.1`) and IPv6 (`::1`)
 - Node.js networking stack tries both address families automatically
 - This ensures compatibility regardless of which address family the debug adapter prefers
@@ -111,6 +112,10 @@ The ProxyManager validates the transport configuration:
 |---------|-----------|--------|
 | **JavaScript (js-debug)** | TCP only | `[path, String(port)]` |
 | **Python (debugpy)** | TCP preferred | `['--listen', 'host:port']` |
+| **Rust (CodeLLDB)** | TCP | Adapter-specific |
+| **Go (Delve)** | TCP | `['dap', '--listen', 'host:port']` |
+| **Java (JDI bridge)** | TCP | TCP server on allocated port |
+| **.NET (netcoredbg)** | TCP via bridge | stdio netcoredbg behind TCP bridge |
 | **Mock** | Both | Configurable for testing |
 
 ### Key Takeaway

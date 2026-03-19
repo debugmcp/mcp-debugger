@@ -22,9 +22,9 @@ vi.mock('fs-extra', () => {
       stat: vi.fn(),
       unlink: vi.fn(),
       ensureDirSync: vi.fn(),
-      readJson: vi.fn(), // Keep existing from original mock
-      writeJson: vi.fn(), // Keep existing from original mock
-      copySync: vi.fn(), // Keep existing from original mock
+      readJson: vi.fn(),
+      writeJson: vi.fn(),
+      copySync: vi.fn(),
       // Add any other functions from fs-extra that FileSystemImpl might use,
       // even if not directly tested here, to prevent unexpected errors.
       // For now, this covers what's explicitly in the tests.

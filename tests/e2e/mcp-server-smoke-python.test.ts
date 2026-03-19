@@ -103,7 +103,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
     sessionId = createResponse.sessionId as string;
     console.log(`[Python Smoke Test] Session created: ${sessionId}`);
 
-    // 2. Set breakpoint (Python: should verify immediately)
+    // 2. Set breakpoint (initially returns verified: false; verified on launch)
     console.log('[Python Smoke Test] Setting breakpoint at line 32...');
     const bpResult = await mcpClient!.callTool({
       name: 'set_breakpoint',

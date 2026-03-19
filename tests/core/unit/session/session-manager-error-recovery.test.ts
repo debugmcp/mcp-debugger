@@ -116,18 +116,16 @@ describe('SessionManager - Error Recovery', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should handle DAP command response timeouts', async () => {
-      const session = await sessionManager.createSession({ 
+    it('should return empty variables when session is in RUNNING state', async () => {
+      const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
         pythonPath: 'python'
       });
-      
-      // Start session but don't pause it
+
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
-      
-      // Session state should be PAUSED by default (stopOnEntry=true)
-      // But we'll simulate RUNNING state to test the empty array return
+
+      // Force RUNNING state to test the empty array return
       const managedSession = sessionManager.getSession(session.id);
       if (managedSession) {
         managedSession.state = SessionState.RUNNING;

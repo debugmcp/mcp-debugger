@@ -221,7 +221,7 @@ export async function handleSSECommand(
     });
 
     // Handle graceful shutdown
-    const gracefulShutdown = () => {
+    const gracefulShutdown = async () => {
       logger.info('Shutting down SSE server...');
 
       // Close all SSE connections
@@ -236,9 +236,11 @@ export async function handleSSECommand(
       const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (sharedDebugServer) {
         logger.info('Stopping shared Debug MCP Server...');
-        sharedDebugServer.stop().catch((error) => {
+        try {
+          await sharedDebugServer.stop();
+        } catch (error) {
           logger.error('Error stopping shared Debug MCP Server:', error);
-        });
+        }
       }
 
       server.close(() => {

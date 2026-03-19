@@ -144,7 +144,7 @@ First, get the stack trace:
 // Response shows we're in calculate_average function
 ```
 
-Then get scopes:
+Then get scopes (use the actual `id` from the stack trace response, not a hardcoded value):
 
 ```json
 // Tool: get_scopes

@@ -17,7 +17,7 @@ function norm(p: unknown): string {
   return typeof p === 'string' ? (p as string).replace(/\\+/g, '/') : '';
 }
 
-describe('JavascriptDebugAdapter private runtime helpers (edge coverage)', () => {
+describe('JavascriptDebugAdapter public runtime helpers (edge coverage)', () => {
   let adapter: JavascriptDebugAdapter;
 
   beforeEach(() => {

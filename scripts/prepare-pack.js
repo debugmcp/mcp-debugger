@@ -53,7 +53,7 @@ function resolveWorkspaceDeps(pkg, versions) {
     const result = {};
     for (const [name, version] of Object.entries(deps)) {
       if (version.startsWith('workspace:')) {
-        // workspace:* or workspace:~ -> use exact version
+        // any workspace: prefix -> use exact version
         const concreteVersion = versions[name];
         if (!concreteVersion) {
           throw new Error(`Cannot resolve workspace dependency ${name}`);

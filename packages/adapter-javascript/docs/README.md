@@ -7,13 +7,13 @@ Key points
 - Exports `JavascriptAdapterFactory` as the entry point for dynamic loading
 - Full `JavascriptDebugAdapter` implementation (~810 lines) with comprehensive DAP integration
 - Real utilities: `detectTsRunners`, `transformConfig`, TypeScript detection
-- Vendor folder for js-debug (bundled `vsDebugServer.js` / `vsDebugServer.cjs`)
+- Vendor folder for js-debug (bundled `vsDebugServer.cjs` / `vsDebugServer.js`)
 - Uses .js suffix on relative TS imports to match ESM resolution
 
 Status and scope
 - This is a fully implemented adapter supporting JavaScript and TypeScript debugging
 - Environment validation includes Node.js detection, vendor file verification, and optional TypeScript runner detection
-- `DebugLanguage.JAVASCRIPT` is a full member of the enum (6 languages: Python, JavaScript, Rust, Go, Java, Mock)
+- `DebugLanguage.JAVASCRIPT` is a full member of the enum (7 languages: Python, JavaScript, Rust, Go, Java, Dotnet, Mock)
 
 Build and test
 - Build: pnpm -w -F @debugmcp/adapter-javascript run build
@@ -21,7 +21,7 @@ Build and test
 
 Validation
 - Node.js 18+ required
-- Requires bundled js-debug vendor file at vendor/js-debug/vsDebugServer.js (or vsDebugServer.cjs)
+- Requires bundled js-debug vendor file at vendor/js-debug/vsDebugServer.cjs (or vsDebugServer.js)
 - Optional TypeScript runners: tsx or ts-node recommended; absence only results in a warning
 - The factory-level validation is fast and has no side effects; it does not spawn processes or touch network
 - To vendor js-debug, use the build:adapter script when available: pnpm -w -F @debugmcp/adapter-javascript run build:adapter
@@ -40,7 +40,7 @@ Notes
 
 ## Vendoring js-debug
 
-Populate the Microsoft js-debug adapter into this package so that validation passes and later tasks can spawn it via `--stdio`.
+Populate the Microsoft js-debug adapter into this package so that validation passes and later tasks can spawn it via TCP (positional port argument).
 
 Prereqs
 - Node 18+ for the vendoring script (uses global `fetch` and AbortController)
@@ -90,7 +90,7 @@ Determinism and safety
 Validation
 - After vendoring, `JavascriptAdapterFactory.validate()` should pass the vendor check locally. It looks for:
   - vendor/js-debug/vsDebugServer.js (relative to the package source/dist layout)
-- Runtime Node requirement for validation remains 14+ (the vendoring script itself requires Node 18+)
+- Runtime Node requirement: the package declares `engines.node >= 18` in package.json (the factory-level validation currently checks for 14+ as a lower bound, but Node 18+ is required in practice)
 
 Troubleshooting
 - 403 rate limit or forbidden

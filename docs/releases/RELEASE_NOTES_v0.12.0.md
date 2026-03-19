@@ -82,6 +82,8 @@ The previously unimplemented `get_source_context` tool is now fully functional:
 
 **No migration required!** All changes are backward compatible. Your existing code continues to work, and new features are optional additions to responses.
 
+> **Note on relative paths:** The server uses a TRUE HANDS-OFF approach to path handling. Relative paths are passed unchanged to the debug adapter, which resolves them from its own working directory. The file existence check (added in this release) resolves relative paths from `process.cwd()` for validation only; the original path is always forwarded unmodified.
+
 ### 📖 Documentation
 
 - [AI Integration Guide](./docs/ai-integration.md) - Learn how to leverage the new features
