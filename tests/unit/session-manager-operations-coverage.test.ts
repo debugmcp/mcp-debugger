@@ -2322,4 +2322,118 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(frames[0].name).toBe('MyApp.Main');
     });
   });
+
+  describe('listThreads', () => {
+    it('should return mapped threads from DAP response', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          threads: [
+            { id: 1, name: 'main' },
+            { id: 2, name: 'AWT-EventQueue-0' },
+          ]
+        }
+      });
+
+      const threads = await operations.listThreads('test-session');
+
+      expect(threads).toEqual([
+        { id: 1, name: 'main' },
+        { id: 2, name: 'AWT-EventQueue-0' },
+      ]);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('threads', {});
+    });
+
+    it('should return empty array when DAP response has no threads', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const threads = await operations.listThreads('test-session');
+
+      expect(threads).toEqual([]);
+    });
+
+    it('should throw SessionTerminatedError for terminated session', async () => {
+      mockSession.sessionLifecycle = SessionLifecycleState.TERMINATED;
+
+      await expect(operations.listThreads('test-session'))
+        .rejects.toBeInstanceOf(SessionTerminatedError);
+    });
+
+    it('should throw ProxyNotRunningError when proxy is not running', async () => {
+      mockProxyManager.isRunning.mockReturnValue(false);
+
+      await expect(operations.listThreads('test-session'))
+        .rejects.toBeInstanceOf(ProxyNotRunningError);
+    });
+
+    it('should throw ProxyNotRunningError when proxy manager is null', async () => {
+      mockSession.proxyManager = null;
+
+      await expect(operations.listThreads('test-session'))
+        .rejects.toBeInstanceOf(ProxyNotRunningError);
+    });
+  });
+
+  describe('pause with threadId', () => {
+    it('should pass specific threadId to DAP request', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const result = await operations.pause('test-session', 42);
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 42 });
+    });
+
+    it('should default threadId to 0 when not provided', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const result = await operations.pause('test-session');
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 0 });
+    });
+  });
+
+  describe('setBreakpoint with suspendPolicy', () => {
+    it('should include suspendPolicy in DAP setBreakpoints request', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [{ verified: true, line: 10, id: 1 }]
+        }
+      });
+
+      await operations.setBreakpoint('test-session', 'test.py', 10, undefined, 'thread');
+
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'setBreakpoints',
+        expect.objectContaining({
+          breakpoints: expect.arrayContaining([
+            expect.objectContaining({ line: 10, suspendPolicy: 'thread' })
+          ])
+        })
+      );
+    });
+
+    it('should not include suspendPolicy when not provided', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockResolvedValue({
+        body: {
+          breakpoints: [{ verified: true, line: 10, id: 1 }]
+        }
+      });
+
+      await operations.setBreakpoint('test-session', 'test.py', 10);
+
+      const call = mockProxyManager.sendDapRequest.mock.calls.find(
+        (c: any[]) => c[0] === 'setBreakpoints'
+      );
+      expect(call).toBeDefined();
+      const bpArg = call![1].breakpoints[0];
+      expect(bpArg).not.toHaveProperty('suspendPolicy');
+    });
+  });
 });

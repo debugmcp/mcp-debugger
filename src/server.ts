@@ -1237,11 +1237,6 @@ export class DebugMcpServer {
     } catch (error) {
       this.logger.error('Failed to list threads', { error });
       if (error instanceof McpError) throw error;
-      if (error instanceof SessionTerminatedError ||
-          error instanceof SessionNotFoundError ||
-          error instanceof ProxyNotRunningError) {
-        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-      }
       throw new McpError(McpErrorCode.InternalError, `Failed to list threads: ${(error as Error).message}`);
     }
   }

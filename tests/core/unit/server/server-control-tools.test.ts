@@ -517,5 +517,15 @@ describe('Server Control Tools Tests', () => {
         }
       })).rejects.toThrow(McpError);
     });
+
+    it('should reject list_threads with missing sessionId', async () => {
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_threads',
+          arguments: {}
+        }
+      })).rejects.toThrow('Missing required sessionId');
+    });
   });
 });

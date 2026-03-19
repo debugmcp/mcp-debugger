@@ -730,6 +730,77 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     });
   });
 
+  describe('handleListThreads', () => {
+    it('should return threads on success', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.listThreads = vi.fn().mockResolvedValue([
+        { id: 1, name: 'main' },
+        { id: 2, name: 'worker-1' },
+      ]);
+
+      const result = await (server as any).handleListThreads({ sessionId: 'test-session' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.threads).toHaveLength(2);
+      expect(payload.threads[0]).toEqual({ id: 1, name: 'main' });
+    });
+
+    it('should re-throw McpError subclasses (SessionTerminatedError etc.)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      const { SessionTerminatedError } = await import('../../src/errors/debug-errors');
+      mockSessionManager.listThreads = vi.fn().mockRejectedValue(new SessionTerminatedError('test-session'));
+
+      await expect((server as any).handleListThreads({ sessionId: 'test-session' }))
+        .rejects.toThrow(McpError);
+    });
+
+    it('should throw McpError for unknown errors', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.listThreads = vi.fn().mockRejectedValue(new Error('unexpected'));
+
+      await expect((server as any).handleListThreads({ sessionId: 'test-session' }))
+        .rejects.toThrow('Failed to list threads: unexpected');
+    });
+  });
+
+  describe('handlePause with threadId', () => {
+    it('should pass threadId to session manager pause', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.pause = vi.fn().mockResolvedValue({ success: true, state: 'paused' });
+
+      const result = await (server as any).handlePause({ sessionId: 'test-session', threadId: 7 });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session', 7);
+    });
+
+    it('should pass undefined threadId when not provided', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      mockSessionManager.pause = vi.fn().mockResolvedValue({ success: true, state: 'paused' });
+
+      await (server as any).handlePause({ sessionId: 'test-session' });
+
+      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session', undefined);
+    });
+  });
+
   describe('Evaluate Expression Edge Cases', () => {
     it('should handle expression evaluation in terminated session', async () => {
       mockSessionManager.getSession.mockReturnValue({
