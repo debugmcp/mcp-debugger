@@ -26,14 +26,14 @@ function createMockChildProcess() {
   return cp;
 }
 
-/** Wait for the TCP server to start listening */
-function waitForListening(server: net.Server): Promise<void> {
+/** Wait for the TCP server to start listening; returns the OS-assigned port */
+function waitForListening(server: net.Server): Promise<number> {
   return new Promise((resolve, reject) => {
     if (server.listening) {
-      resolve();
+      resolve((server.address() as net.AddressInfo).port);
       return;
     }
-    server.once('listening', resolve);
+    server.once('listening', () => resolve((server.address() as net.AddressInfo).port));
     server.once('error', reject);
   });
 }
@@ -60,11 +60,7 @@ describe('netcoredbg-bridge-core', () => {
   let stderrChunks: string[];
   let stderrStream: NodeJS.WritableStream;
 
-  // Pick a random high port to avoid collisions
-  let port: number;
-
   beforeEach(() => {
-    port = 40000 + Math.floor(Math.random() * 10000);
     mockCp = createMockChildProcess();
     spawnFn = vi.fn().mockReturnValue(mockCp);
     stderrChunks = [];
@@ -78,16 +74,16 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('creates a TCP server on the specified port', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
     await waitForListening(bridge.server);
     expect(bridge.server.listening).toBe(true);
     const addr = bridge.server.address() as net.AddressInfo;
-    expect(addr.port).toBe(port);
+    expect(addr.port).toBeGreaterThan(0);
   });
 
   it('spawns netcoredbg with correct args on first connection', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
     await tick();
@@ -103,8 +99,8 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('forwards TCP data → netcoredbg stdin', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
     await tick();
@@ -119,8 +115,8 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('forwards netcoredbg stdout → TCP socket', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
     await tick();
@@ -137,8 +133,8 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('rejects second TCP connection (single-client)', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client1 = await connectClient(port);
     await tick();
@@ -156,8 +152,8 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('cleans up on TCP socket close', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
     await tick();
@@ -169,8 +165,8 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('cleans up on netcoredbg exit', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
     await tick();
@@ -185,8 +181,8 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('handles netcoredbg spawn error', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
     await tick();
@@ -202,8 +198,8 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('logs netcoredbg stderr to stderr stream', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', port, { spawnFn, stderr: stderrStream });
-    await waitForListening(bridge.server);
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
     await tick();
