@@ -17,9 +17,11 @@ graph TB
 
     subgraph "Proxy Management Layer"
         PM[ProxyManager<br/>proxy-manager.ts]
-        PC[ProxyRunner<br/>dap-proxy-core.ts]
-        PW[ProxyWorker<br/>dap-proxy-worker.ts]
-        PPM[GenericAdapterManager<br/>dap-proxy-adapter-manager.ts]
+        subgraph "Spawned proxy child process"
+            PC[ProxyRunner<br/>dap-proxy-core.ts]
+            PW[ProxyWorker<br/>dap-proxy-worker.ts]
+            PPM[GenericAdapterManager<br/>dap-proxy-adapter-manager.ts]
+        end
     end
 
     subgraph "Debug Adapter Layer"
@@ -59,7 +61,7 @@ graph TB
   - Manage server lifecycle and transport modes
   - Route debugging commands to SessionManager
 
-### 2. SessionManager (`src/session/session-manager.ts`, thin facade over `session-manager-core.ts` + `session-manager-operations.ts`)
+### 2. SessionManager (`src/session/session-manager.ts`, thin facade over a 4-class hierarchy: `session-manager-core.ts` → `session-manager-data.ts` → `session-manager-operations.ts` → `session-manager.ts`)
 - **Purpose**: Central orchestrator for debug sessions
 - **Key Dependencies**:
   ```typescript
@@ -79,7 +81,7 @@ graph TB
   - Create and manage debug session lifecycle
   - Coordinate ProxyManager instances (one per session)
   - Handle breakpoint management and state synchronization
-  - Provide high-level debugging operations (step, continue, evaluate)
+  - Provide high-level debugging operations (step, continue, evaluateExpression)
 
 ### 3. ProxyManager (`src/proxy/proxy-manager.ts`)
 - **Purpose**: Manages communication with debug proxy process

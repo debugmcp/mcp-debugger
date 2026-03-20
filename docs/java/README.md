@@ -21,7 +21,7 @@ JdiDapServer is a ~2600-line Java program that:
 
 ## Prerequisites
 
-1. **JDK 21 or higher** installed from [adoptium.net](https://adoptium.net/) or your OS package manager
+1. **JDK 21+ recommended** (installed from [adoptium.net](https://adoptium.net/) or your OS package manager). The adapter factory emits a warning for JDK versions below 21 but does not block execution; lower versions may work in practice.
 2. **`java` on your PATH** (or `JAVA_HOME` set) for running the JDI bridge; **`javac`** is additionally needed to compile the bridge on first use and to compile your target Java sources with debug info
 
 Verify your installation:
@@ -70,7 +70,7 @@ use_mcp_tool(
 
 Key launch arguments:
 - `mainClass` (required): Fully qualified class name with `main()` method
-- `classpath` (required): Directory or classpath containing compiled `.class` files
+- `classpath`: Directory or classpath containing compiled `.class` files (typically needed; not enforced at the adapter layer but the JVM will not find your classes without it)
 - `cwd`: Working directory for the launched JVM
 - `stopOnEntry`: Whether to pause at the first line of `main()`
 

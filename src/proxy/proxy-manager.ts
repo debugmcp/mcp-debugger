@@ -124,6 +124,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private activeLaunchBarrier: AdapterLaunchBarrier | null = null;
   private activeLaunchBarrierRequestId: string | null = null;
   private proxyMessageCounter = 0;
+  private exitEmitted = false;
 
   constructor(
     private adapter: IDebugAdapter | null,  // Optional adapter for language-agnostic support
@@ -401,6 +402,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       setTimeout(() => {
         if (this.pendingDapRequests.has(requestId)) {
           this.pendingDapRequests.delete(requestId);
+          if (this.dapState) {
+            this.dapState = removePendingRequest(this.dapState, requestId);
+          }
           if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
             this.clearActiveLaunchBarrier();
           }
@@ -939,7 +943,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       case 'dap_connection_closed':
       case 'terminated':
         this.logger.info(`[ProxyManager] Status: ${message.status}`);
-        this.emit('exit', message.code ?? 1, message.signal || undefined);
+        if (!this.exitEmitted) {
+          this.exitEmitted = true;
+          this.emit('exit', message.code ?? 1, message.signal || undefined);
+        }
         break;
     }
   }
@@ -967,7 +974,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.pendingDapRequests.clear();
 
     // Emit exit event
-    this.emit('exit', code, signal || undefined);
+    if (!this.exitEmitted) {
+      this.exitEmitted = true;
+      this.emit('exit', code, signal || undefined);
+    }
 
     // Clean up
     this.cleanup();
@@ -1004,6 +1014,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.currentThreadId = null;
     this.stderrBuffer = [];
     this.sessionId = null;
+    this.exitEmitted = false;
   }
 
   private setActiveLaunchBarrier(barrier: AdapterLaunchBarrier, requestId: string): void {

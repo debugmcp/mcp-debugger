@@ -8,7 +8,7 @@ Tests for the packaged npm distribution artifact intended for npx/npm-exec usage
 2. **Create npm package** - Runs `npm pack` to create tarball
 3. **Install globally** - Installs the package from tarball
 4. **Test via global install** - Runs the MCP server using global installation and direct Node.js invocation (not npx)
-5. **Verify all adapters work** - Tests Python and JavaScript adapters
+5. **Verify Python and JavaScript adapters work** - Tests Python and JavaScript adapters
 
 ## Why This Is Important
 

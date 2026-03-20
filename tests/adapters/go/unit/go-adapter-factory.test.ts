@@ -178,10 +178,8 @@ describe('GoAdapterFactory', () => {
     });
 
     it('should return error when Delve is not found', async () => {
-      let goFound = false;
       vi.spyOn(fs.promises, 'access').mockImplementation(async (p) => {
         if (p.toString().includes('go') && !p.toString().includes('dlv')) {
-          goFound = true;
           return undefined;
         }
         throw new Error('Not found');

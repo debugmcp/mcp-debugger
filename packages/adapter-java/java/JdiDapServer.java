@@ -796,9 +796,11 @@ public class JdiDapServer {
                             }
                         }
                     } else {
-                        // Expandable object reference
+                        // Expandable object or array reference
                         ObjectReference objRef = varRefMap.get(varRef);
-                        if (objRef != null) {
+                        if (objRef instanceof ArrayReference) {
+                            variables = getArrayElements((ArrayReference) objRef);
+                        } else if (objRef != null) {
                             variables = getObjectFields(objRef);
                         }
                     }
@@ -836,6 +838,33 @@ public class JdiDapServer {
             vars.add(v);
         } catch (InvalidStackFrameException e) {
             // Frame became invalid (thread resumed)
+        }
+        return vars;
+    }
+
+    private List<Map<String, Object>> getArrayElements(ArrayReference arr) {
+        List<Map<String, Object>> vars = new ArrayList<>();
+        try {
+            int length = arr.length();
+            for (int i = 0; i < length; i++) {
+                Value val = arr.getValue(i);
+                String valStr = val == null ? "null" : val.toString();
+                String typeName = val == null ? "null" : val.type().name();
+                Map<String, Object> v = new HashMap<>();
+                v.put("name", "[" + i + "]");
+                v.put("value", valStr);
+                v.put("type", typeName);
+                if (val instanceof ObjectReference && !(val instanceof StringReference)) {
+                    int ref = nextVarRef.getAndIncrement();
+                    varRefMap.put(ref, (ObjectReference) val);
+                    v.put("variablesReference", ref);
+                } else {
+                    v.put("variablesReference", 0);
+                }
+                vars.add(v);
+            }
+        } catch (Exception e) {
+            // Ignore errors accessing array elements
         }
         return vars;
     }

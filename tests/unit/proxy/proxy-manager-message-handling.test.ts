@@ -12,7 +12,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { TestProxyManager } from '../test-utils/test-proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
-import { DebugLanguage, type IDebugAdapter } from '@debugmcp/shared';
+import { DebugLanguage, type IDebugAdapter, type IProxyProcess } from '@debugmcp/shared';
 import { createMockLogger, createMockFileSystem } from '../test-utils/mock-factories.js';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { createInitialState } from '../../../src/dap-core/index.js';

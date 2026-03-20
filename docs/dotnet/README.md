@@ -78,7 +78,7 @@ use_mcp_tool(
     "dapLaunchArgs": {
       "program": "/path/to/bin/Debug/net8.0/MyApp.dll",
       "cwd": "/path/to/project",
-      "stopAtEntry": true
+      "stopOnEntry": true
     }
   }
 )
@@ -87,7 +87,7 @@ use_mcp_tool(
 Key launch arguments:
 - `program` (required): Path to the compiled .dll or .exe
 - `cwd`: Working directory for the launched process
-- `stopAtEntry`: Whether to pause at the program entry point
+- `stopOnEntry`: Whether to pause at the program entry point
 - `args`: Command-line arguments to pass to the program
 
 **Important**: You must compile the project first with `dotnet build` before launching the debugger. The `program` path should point to the compiled output (typically `bin/Debug/net8.0/YourApp.dll`).
@@ -154,7 +154,7 @@ use_mcp_tool(
     "scriptPath": "/path/to/Program.cs",
     "dapLaunchArgs": {
       "program": "/path/to/bin/Debug/net8.0/MyApp.dll",
-      "stopAtEntry": false
+      "stopOnEntry": false
     }
   }
 )

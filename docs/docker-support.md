@@ -98,7 +98,7 @@ Here's the recommended configuration for your MCP settings file:
 
 ## Rust support in Docker
 
-> ⚠️ **Rust debugging is not supported inside the Docker image by default.** The container uses `MCP_DISABLE_LANGUAGES` to disable the Rust adapter, so the MCP tools will not advertise `rust` as an available language.
+> ⚠️ **Rust debugging is not supported inside the Docker image by default.** The container uses `DEBUG_MCP_DISABLE_LANGUAGES` to disable the Rust adapter, so the MCP tools will not advertise `rust` as an available language.
 
 Why? CodeLLDB inside the container could not reliably interpret DWARF data for binaries compiled on the host (Windows/WSL/macOS). Rather than forcing every user to rebuild their projects with a matching Linux toolchain, we recommend running Rust sessions via the local/stdio, SSE, or packed deployments—where the debugger runs next to the toolchain that produced the binary. The Docker variant remains the best choice for Python and JavaScript debugging and now ships a slimmer image (no CodeLLDB payload).
 

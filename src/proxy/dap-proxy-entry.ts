@@ -38,7 +38,7 @@ if (shouldAutoExecute(executionMode)) {
   // Setup global error handlers
   runner.setupGlobalErrorHandlers(
     () => runner.stop(),
-    () => runner.getWorker()['currentSessionId'] // Access private field for error messages
+    () => (runner?.getWorker() as any)?.currentSessionId ?? 'unknown' // Access private field for error messages
   );
 
   // Start the runner

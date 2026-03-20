@@ -43,7 +43,7 @@ function createMockProcess(pid = 12345): MockChildProcess {
   return proc;
 }
 
-describe('ProcessAdapter', () => {
+describe('ProcessLauncherImpl', () => {
   let processLauncher: ProcessLauncherImpl;
   let processManager: ProcessManagerImpl;
   let mockChildProcess: MockChildProcess;

@@ -147,8 +147,8 @@ export class AdapterLoader {
 
     const results: AdapterMetadata[] = [];
     for (const a of known) {
-      // Try to check availability, but don't fail if adapter can't be loaded immediately
-      // Adapters are loaded on-demand, so we mark as available if it's in the known list
+      // Check if adapter is currently loadable; don't fail if not — adapters are loaded
+      // on-demand, so unavailability here just means installed=false in the metadata
       let installed = false;
       try {
         installed = await this.isAdapterAvailable(a.name);

@@ -69,15 +69,15 @@ if (!session.proxyManager?.isRunning()) {
 
 ### Pattern 2: Error Propagation
 
-The error handling follows a three-layer pattern:
+The error handling uses a mixed strategy across three layers:
 
-1. **Implementation Layer** - Throws typed errors
-2. **Server Layer** - Catches and serializes for MCP protocol
-3. **Client Layer** - Receives readable error messages
+1. **Implementation Layer** - Uses typed `McpError` subclasses (e.g., `SessionNotFoundError`) for infrastructure failures (unknown session, terminated session, proxy not running), and returns structured `DebugResult` failure objects for operation-level failures (e.g., session not paused, missing thread ID)
+2. **Server Layer** - Catches and serializes `McpError` instances for MCP protocol; `DebugResult` failures are returned as successful tool responses with `success: false`
+3. **Client Layer** - Receives either a readable MCP error message or a structured failure result, depending on which layer the failure originated in
 
 ```typescript
-// Implementation (throws typed error)
-async continue(sessionId: string): Promise<void> {
+// Implementation (throws typed error for infrastructure failures)
+async continue(sessionId: string): Promise<DebugResult> {
   const session = this.getSession(sessionId);
   if (!session) {
     throw new SessionNotFoundError(sessionId);
@@ -183,10 +183,9 @@ describe('ProxyManager - Integration', () => {
 Some operations return empty data instead of throwing errors for better UX:
 
 ```typescript
-// getVariables, getStackTrace, getScopes return [] when:
-// - No active proxy
-// - Session not paused
-// - DAP request fails
+// getVariables, getStackTrace, getScopes:
+// - Unknown session ID → throws SessionNotFoundError
+// - Valid session but not paused, no active proxy, or DAP request fails → returns []
 
 async getVariables(sessionId: string, ref: number): Promise<Variable[]> {
   const session = this.getSession(sessionId);

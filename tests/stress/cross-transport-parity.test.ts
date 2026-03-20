@@ -42,10 +42,8 @@ interface TransportTestResult {
 
 class TransportTester {
   private sseServer: ChildProcess | null = null;
-  private ssePort: number = 0;
-  
+
   async setupSSETransport(port: number): Promise<void> {
-    this.ssePort = port;
     return new Promise((resolve, reject) => {
       this.sseServer = spawn('node', [
         path.join(PROJECT_ROOT, 'dist', 'index.js'),

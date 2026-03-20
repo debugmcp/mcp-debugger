@@ -411,7 +411,8 @@ async function detectRepoPackageManager(repoDir) {
 }
 
 /**
- * Build from source fallback. Only invoked when explicitly requested.
+ * Build from source fallback. Invoked when explicitly requested, or as a
+ * fallback when the prebuilt release download fails.
  */
 async function buildFromSource(version) {
   const tmp = await makeTmpDir('js-debug-src-');

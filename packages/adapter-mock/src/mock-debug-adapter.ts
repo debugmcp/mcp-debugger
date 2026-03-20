@@ -40,8 +40,6 @@ export interface MockAdapterConfig {
   // Behavior configuration
   supportedFeatures?: DebugFeature[];  // Which DAP features to support
 
-  // Error simulation
-  errorScenarios?: MockErrorScenario[]; // Enabled error scenarios
 }
 
 /**
@@ -135,7 +133,6 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
         DebugFeature.VARIABLE_PAGING,
         DebugFeature.SET_VARIABLE
       ],
-      errorScenarios: config.errorScenarios ?? [],
     };
   }
   

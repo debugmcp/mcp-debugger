@@ -400,7 +400,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
 let registryInstance: AdapterRegistry | null = null;
 
 /**
- * Get the singleton adapter registry instance
+ * Get or create the singleton adapter registry instance
  */
 export function getAdapterRegistry(config?: AdapterRegistryConfig): AdapterRegistry {
   if (!registryInstance) {

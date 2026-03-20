@@ -220,7 +220,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       );
     }
 
-    // Find java executable
+    // Build java executable path from JAVA_HOME or default
     /* istanbul ignore next -- platform-specific executable name */
     const javaExe = process.platform === 'win32' ? 'java.exe' : 'java';
     const javaCmd = process.env.JAVA_HOME

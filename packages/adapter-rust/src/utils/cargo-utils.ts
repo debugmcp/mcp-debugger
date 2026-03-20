@@ -80,7 +80,9 @@ export async function getCargoTargets(projectPath: string): Promise<CargoTarget[
 
           // Extract targets from packages
           for (const pkg of metadata.packages) {
-            if (pkg.manifest_path.startsWith(projectPath)) {
+            const normalizedManifest = path.normalize(pkg.manifest_path);
+            const normalizedProject = path.normalize(projectPath);
+            if (normalizedManifest === normalizedProject || normalizedManifest.startsWith(normalizedProject + path.sep)) {
               for (const target of pkg.targets) {
                 targets.push({
                   name: target.name,
@@ -240,7 +242,7 @@ async function getAllRustFiles(dir: string): Promise<string[]> {
 export async function runCargoBuild(
   projectPath: string,
   args: string[]
-): Promise<{ success: boolean; output: string; binaryPath?: string }> {
+): Promise<{ success: boolean; output: string }> {
   return new Promise((resolve) => {
     const buildProcess = spawn('cargo', args, {
       cwd: projectPath,

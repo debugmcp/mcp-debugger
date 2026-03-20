@@ -43,7 +43,7 @@ vi.mock('./dist/proxy/proxy-manager.js', () => ({
  */
 export function createMockEnvironment(overrides?: Partial<Record<string, string>>): IEnvironment {
   return {
-    get: vi.fn((key: string) => overrides?.[key] || process.env[key]),
+    get: vi.fn((key: string) => overrides?.[key] ?? process.env[key]),
     getAll: vi.fn(() => ({ ...process.env, ...overrides })),
     getCurrentWorkingDirectory: vi.fn(() => process.cwd())
   };

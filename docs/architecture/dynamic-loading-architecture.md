@@ -58,7 +58,7 @@ cache.set(language, factory);
   - Registers the loaded factory and immediately uses it
 - Provides:
   - `getSupportedLanguages()` for currently registered factories
-  - `listLanguages()` returns registered languages plus loader-known/discoverable adapter names when dynamic loading is enabled (not just installed adapters)
+  - `listLanguages()` returns registered languages plus the hardcoded known-adapter catalog entries (not true filesystem or package discovery) when dynamic loading is enabled (not just installed adapters)
   - `listAvailableAdapters()` for installed metadata (name, package, description)
 - Enforces instance limits and auto-dispose timers
 
@@ -144,6 +144,7 @@ sequenceDiagram
 - Preloading vs Lazy:
   - Prefer lazy for most cases to keep cold-start minimal
   - Calling `listLanguages()` early probes discoverability/availability, but actual registry registration and adapter initialization still occur on `create(...)` or explicit `loadAdapter(...)` paths. To truly preload, construct sessions or call `loadAdapter()` on startup if your environment benefits from it.
+  - **Container mode exception**: When `MCP_CONTAINER=true`, startup pre-registers all known adapters (mock, python, javascript, rust, go, java, dotnet) via `tryRegister` calls in `dependencies.ts`, so the first `create(...)` call does not incur a dynamic import cost.
 
 ## Container Considerations
 

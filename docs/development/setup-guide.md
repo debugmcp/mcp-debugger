@@ -173,7 +173,7 @@ node dist/index.js sse -p 3001
 node dist/index.js sse -p 3001 --log-level debug --log-file ./logs/debug.log
 ```
 
-Note: In STDIO mode, console output is silenced to avoid corrupting JSON-RPC protocol communication. Use `--log-file` to capture logs.
+Note: Console output is silenced for both STDIO and SSE modes at process startup to avoid corrupting protocol communication. Use `--log-file` to capture logs.
 
 ## VS Code Setup
 

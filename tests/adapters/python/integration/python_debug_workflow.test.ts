@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { StackFrame, Variable } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';

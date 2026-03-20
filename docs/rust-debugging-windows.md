@@ -46,7 +46,7 @@ Debugging Compatibility:
 To enable full debugging, rebuild with GNU toolchain:
   rustup target add x86_64-pc-windows-gnu
   cargo clean
-  cargo +stable-gnu build
+  cargo +stable-gnu build --target x86_64-pc-windows-gnu
 ```
 
 When the command reports `Toolchain: GNU`, the executable is ready for full CodeLLDB support.
@@ -66,10 +66,10 @@ When the command reports `Toolchain: GNU`, the executable is ready for full Code
 3. Build with the GNU target:
    ```bash
    cargo clean
-   cargo +stable-gnu build
+   cargo +stable-gnu build --target x86_64-pc-windows-gnu
    ```
 
-The resulting binaries (in `target/debug` by default) contain DWARF debug info. Re-run `mcp-debugger check-rust-binary` to confirm.
+The resulting binaries (in `target/x86_64-pc-windows-gnu/debug`) contain DWARF debug info. Re-run `mcp-debugger check-rust-binary` to confirm.
 
 > **Tip:** For scripts or CI, set `RUSTFLAGS="-C debuginfo=2"` to ensure full debug symbols even if profiles are customised.
 
@@ -81,7 +81,7 @@ When the MCP Rust adapter detects an MSVC build:
 
 - Breakpoints and stepping still work because CodeLLDB can control the process.
 - Variable inspection becomes unreliable: strings, vectors, async state machines, and complex structs typically appear as `<variable not available>` or show corrupted memory.
-- Session startup emits a structured warning (`MSVC_TOOLCHAIN_DETECTED`) with instructions to continue with limited support or rebuild with GNU.
+- Session startup throws a structured error (`MSVC_TOOLCHAIN_DETECTED`) with instructions to continue with limited support or rebuild with GNU.
 
 These issues stem from LLDB's partial support for Microsoft's PDB format. There is currently no safe or redistributable alternative debugger we can bundle, so focusing on the GNU toolchain provides the best overall experience.
 

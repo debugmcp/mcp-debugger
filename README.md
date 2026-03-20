@@ -90,9 +90,11 @@ Add to your MCP settings configuration:
 
 For Claude Code users, we provide an automated installation script:
 
+> **Prerequisite**: The Claude CLI must be installed and available on your PATH before running the installation script. See [Claude Code documentation](https://claude.ai/code) for installation instructions.
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mcp-debugger.git
+git clone https://github.com/debugmcp/mcp-debugger.git
 cd mcp-debugger
 
 # Run the installation script

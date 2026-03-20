@@ -181,7 +181,7 @@ The codebase follows a **layered architecture with dependency injection** and **
      - `SessionManagerCore` (`session-manager-core.ts`): Lifecycle, state management, event handling, dependency wiring
      - `SessionManagerData` (`session-manager-data.ts`): Data retrieval (variables, stack traces, scopes) and adapter policy selection via `selectPolicy()`
      - `SessionManagerOperations` (`session-manager-operations.ts`): Debug operations (start, step, continue, breakpoints, attach/detach)
-     - `SessionManager` (`session-manager.ts`): Final composition class that extends SessionManagerOperations
+     - `SessionManager` (`session-manager.ts`): Final composition class that extends SessionManagerOperations. Note: `handleAutoContinue()` currently throws — auto-continue is not yet implemented
    - Coordinates ProxyManager instances (one per session)
    - Handles breakpoint management and queuing
 
@@ -192,9 +192,9 @@ The codebase follows a **layered architecture with dependency injection** and **
    - Handles request/response correlation with timeouts
 
 5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`, `src/proxy/minimal-dap.ts`)
-   - **ProxyCore**: Pure business logic, message processing
-   - **ProxyWorker**: Core worker handling debugging operations
-   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`). Note: Java is fully wired to `JavaAdapterPolicy` in `selectPolicy()` (not falling through to `DefaultAdapterPolicy`).
+   - **ProxyRunner** (`dap-proxy-core.ts`): Pure business logic, message processing
+   - **DapProxyWorker** (`dap-proxy-worker.ts`): Core worker handling debugging operations
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`). Note: Java is fully wired to `JavaAdapterPolicy` in `DapProxyWorker.selectAdapterPolicy()` (not falling through to `DefaultAdapterPolicy`).
    - **ChildSessionManager** (`src/proxy/child-session-manager.ts`): Manages DAP child sessions within a single proxy process. Currently used by the js-debug adapter (`childSessionStrategy: 'launchWithPendingTarget'`), which spawns a child debug session for the actual debuggee while the parent session manages the launch orchestration.
    - Implements full Debug Adapter Protocol (DAP) communication
 
@@ -227,7 +227,7 @@ The system supports dynamic adapter loading through:
 ### State Management
 
 Sessions use **`SessionState`** as the primary state model, stored directly on each `ManagedSession` and checked throughout the codebase:
-- **SessionState**: `CREATED` → `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `TERMINATED` | `ERROR`
+- **SessionState**: `CREATED` → `INITIALIZING` → `READY` → `RUNNING` ⇄ `PAUSED` → `STOPPED` | `ERROR`
 
 A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived from `SessionState` via `mapLegacyState()` in `_updateSessionState()`:
 - **SessionLifecycleState**: `CREATED` → `ACTIVE` → `TERMINATED` (coarse lifecycle)

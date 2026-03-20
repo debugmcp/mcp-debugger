@@ -231,6 +231,18 @@ act -j build-and-test
 
 ## Project-Specific Notes
 
+### Prerequisites: Local Docker Image
+
+Before running Act jobs that reference the `mcp-debugger:local` image (e.g., container tests), you must build the image locally:
+
+```bash
+npm run docker-build
+# or equivalently:
+docker build -t mcp-debugger:local .
+```
+
+Act does not build local Docker images automatically; if `mcp-debugger:local` is not present, container-related jobs will fail with a "image not found" error.
+
 ### Test Execution
 The CI runs `npm run test:ci-no-python` which excludes Python integration tests. To test with Python:
 ```bash

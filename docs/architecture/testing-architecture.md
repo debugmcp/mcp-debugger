@@ -49,7 +49,7 @@ The project uses sophisticated fake implementations for testing process-spawning
 ```typescript
 // Simplified usage example:
 const fakeProxy = new FakeProxyProcess();
-fakeProxy.simulateMessage({ type: 'status', status: 'adapter_configured' });
+fakeProxy.simulateMessage({ type: 'status', status: 'adapter_configured_and_launched' });
 fakeProxy.simulateExit(0);
 ```
 

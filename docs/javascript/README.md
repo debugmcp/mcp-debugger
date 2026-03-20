@@ -120,14 +120,14 @@ You can provide custom DAP launch arguments:
 
 ### Child Process Debugging
 
-The adapter automatically attaches to child processes:
+The adapter can attach to child processes, but `autoAttachChildProcesses` defaults to `false`. To enable automatic child process attachment, pass it explicitly in `dapLaunchArgs`:
 
 ```javascript
 // parent.js
 const { spawn } = require('child_process');
 
 const child = spawn('node', ['child.js']);
-// Debugger will automatically attach to child.js
+// Debugger will only attach to child.js if autoAttachChildProcesses is set to true
 ```
 
 ### Conditional Breakpoints
@@ -182,16 +182,18 @@ Enable detailed logging to troubleshoot issues:
 
 ```json
 {
-  "tool": "create_debug_session",
+  "tool": "start_debugging",
   "params": {
-    "language": "javascript",
-    "name": "Debug with Logging",
+    "sessionId": "session-id",
+    "scriptPath": "app.js",
     "dapLaunchArgs": {
       "trace": true
     }
   }
 }
 ```
+
+Note: `trace` is a DAP launch argument passed when starting the debug session, not a session-creation option.
 
 ## Known Limitations
 
@@ -234,8 +236,9 @@ See `/examples/javascript/` for complete examples:
 
 The JavaScript adapter uses:
 - **Vendor**: Microsoft's `js-debug` from VSCode
+- **Entry point**: The factory launches `vsDebugServer.cjs` as its first priority; `vsDebugServer.js` is used as a fallback if the `.cjs` file is not present
 - **Protocol**: Debug Adapter Protocol (DAP)
 - **Transport**: TCP for DAP communication between the proxy and the js-debug adapter process
-- **Version**: Compatible with Node.js 18+
+- **Version**: The factory enforces Node.js 14+ as a minimum requirement; Node.js 18+ is recommended for best compatibility
 
 For adapter development details, see the [Adapter Development Guide](../architecture/adapter-development-guide.md).

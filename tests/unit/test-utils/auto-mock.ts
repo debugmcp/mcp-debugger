@@ -1,7 +1,7 @@
 /**
  * Automatic mock generation utilities
  *
- * Provides tools to automatically generate mocks from interfaces
+ * Provides tools to automatically generate mocks from class implementations
  * and validate that mocks match their real implementations.
  */
 
@@ -131,7 +131,7 @@ export function createMockFromInterface<T extends object>(
 }
 
 /**
- * Validates that a mock object matches the interface of a real implementation.
+ * Validates that a mock object matches the shape of a real implementation.
  * Throws an error if there are missing methods or property mismatches.
  *
  * @param mock The mock object to validate
@@ -220,7 +220,7 @@ export function validateMockInterface<T extends object>(
 }
 
 /**
- * Creates a validated mock that is guaranteed to match the real interface.
+ * Creates a validated mock that is guaranteed to match the real implementation.
  * Combines mock creation with validation.
  *
  * @param realImplementation The real class or instance to mock
@@ -286,49 +286,4 @@ export function createEventEmitterMock<T extends object>(
 
     ...additionalMethods
   } as any;
-}
-
-/**
- * Decorator to automatically validate mocks in tests
- * Use in beforeEach to ensure mocks stay in sync
- *
- * @example
- * ```typescript
- * beforeEach(() => {
- *   mockProxyManager = createEventEmitterMock({
- *     start: vi.fn(),
- *     stop: vi.fn()
- *   });
- *
- *   autoValidateMock(mockProxyManager, ProxyManager, 'ProxyManager');
- * });
- * ```
- */
-export function autoValidateMock<T extends object>(
-  mock: any,
-  realClass: new (...args: any[]) => T,
-  className: string
-): T {
-  // Store original mock for restoration
-  const originalMock = { ...mock };
-
-  // Add validation that runs on first use
-  const handler: ProxyHandler<any> = {
-    get(target, prop, receiver) {
-      // Validate on first method access
-      if (!target._validated) {
-        try {
-          validateMockInterface(originalMock, realClass, className);
-          target._validated = true;
-        } catch (error) {
-          console.error(`Mock validation failed on first use: ${error}`);
-          throw error;
-        }
-      }
-      return Reflect.get(target, prop, receiver);
-    }
-  };
-
-  // Return a proxy that validates on first use
-  return new Proxy(mock, handler);
 }

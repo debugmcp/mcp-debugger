@@ -161,7 +161,7 @@ Our test suite uses `tests/e2e/rust-example-utils.ts` to make sure every rust sm
    ```
 2. **Resolve the correct binary path for `start_debugging`.** Breakpoints should always reference the `.rs` source file (absolute paths avoid MCP resolution issues), but `start_debugging.scriptPath` must point to the compiled artifact:
    - Windows GNU: `examples/rust/<name>/target/x86_64-pc-windows-gnu/debug/<name>.exe`
-   - Windows MSVC fallback: `examples/rust/<name>/target/debug/<name>.exe`
+   - Windows MSVC fallback: `examples/rust/<name>/target/x86_64-pc-windows-msvc/debug/<name>.exe`
    - Unix-like hosts: `examples/rust/<name>/target/debug/<name>`
 
    Tokio/async builds use exactly the same rule—the helper’s `prepareRustExample('async_example')` just compiles a different crate and returns `{ sourcePath, binaryPath }` so the smoke tests can reuse those paths.

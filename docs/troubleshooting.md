@@ -173,8 +173,8 @@ This guide provides solutions for common issues you might encounter when setting
    - Make sure Python is in PATH or specified via PYTHON_PATH
 
 3. Ensure debugpy communication works:
-   - Port conflicts can cause issues (default: 5679)
-   - Check if another process is using the same port
+   - Session ports are dynamically allocated by the OS (port 0 is requested, so each session gets a unique port); port 5679 is only used by Docker test fixtures and is not the default session port
+   - Check server logs if a session fails to start — the assigned port will be logged
 
 ## Communication Issues
 

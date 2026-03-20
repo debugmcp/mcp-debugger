@@ -13,7 +13,7 @@ import { whichInPath, isWindows } from './executable-resolver.js';
 
 export type TsRunnerDetection = { tsx?: string; tsNode?: string };
 
-let cached: TsRunnerDetection | null = null;
+const cachedByCwd = new Map<string, TsRunnerDetection>();
 
 // Default filesystem instance for production use
 let defaultFileSystem: FileSystem = new NodeFileSystem();
@@ -27,7 +27,7 @@ export function setDefaultFileSystem(fileSystem: FileSystem): void {
 }
 
 export function clearCache(): void {
-  cached = null;
+  cachedByCwd.clear();
 }
 
 function toAbs(p: string): string {
@@ -77,13 +77,15 @@ export async function detectTsRunners(
   cwd: string = process.cwd(),
   fileSystem: FileSystem = defaultFileSystem
 ): Promise<TsRunnerDetection> {
-  if (cached) {
-    return cached;
+  const hit = cachedByCwd.get(cwd);
+  if (hit) {
+    return hit;
   }
 
   const tsx = detectBinary('tsx', cwd, fileSystem);
   const tsNode = detectBinary('ts-node', cwd, fileSystem);
 
-  cached = { tsx, tsNode };
-  return cached;
+  const result: TsRunnerDetection = { tsx, tsNode };
+  cachedByCwd.set(cwd, result);
+  return result;
 }

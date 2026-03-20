@@ -32,7 +32,7 @@ const createAdapterStub = () => {
   };
 };
 
-const createFactory = (overrides: Partial<ReturnType<typeof getFactory>> = {}) => {
+const createFactory = (overrides: Partial<ReturnType<typeof createFactory>> = {}) => {
   const adapter = createAdapterStub();
   return {
     validate: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),

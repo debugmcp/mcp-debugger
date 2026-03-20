@@ -148,8 +148,6 @@ async function getCachedTarballPath(fingerprint: string): Promise<string | null>
 }
 
 export interface NpxTestConfig {
-  packagePath?: string;
-  useGlobal?: boolean;
   logLevel?: string;
 }
 
@@ -271,7 +269,7 @@ async function resolveGlobalCliEntry(): Promise<string> {
 }
 
 /**
- * Create an MCP client connected via global install
+ * Create an MCP client running the globally-installed CLI entry directly
  */
 export async function createNpxMcpClient(config: NpxTestConfig = {}): Promise<{
   client: Client;
@@ -280,7 +278,7 @@ export async function createNpxMcpClient(config: NpxTestConfig = {}): Promise<{
 }> {
   const logLevel = config.logLevel || 'info';
 
-  console.log('[NPX Test] Starting MCP server via npx...');
+  console.log('[NPX Test] Starting MCP server via globally-installed CLI entry...');
 
   // Resolve the globally-installed CLI entry and run it directly via process.execPath.
   // This bypasses npx.cmd → cmd.exe resolution which fails on Windows with ENOENT.

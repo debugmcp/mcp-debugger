@@ -2,11 +2,11 @@
 
 ## Rust debugging inside Docker is disabled
 
-The `mcp-debugger-docker` image disables Rust by default via `MCP_DISABLE_LANGUAGES`. CodeLLDB had chronic DWARF/symbol issues with binaries compiled outside the container. Rust Docker debugging is supported behind the `DOCKER_ENABLE_RUST=true` gate in tests, but is not enabled by default in the production image. Use the local stdio, SSE, or packed deployments for Rust debugging where the adapter runs on the same host as the toolchain.
+The `mcp-debugger-docker` image disables Rust by default via `DEBUG_MCP_DISABLE_LANGUAGES`. CodeLLDB had chronic DWARF/symbol issues with binaries compiled outside the container. Rust Docker debugging is supported behind the `DOCKER_ENABLE_RUST=true` gate in tests, but is not enabled by default in the production image. Use the local stdio, SSE, or packed deployments for Rust debugging where the adapter runs on the same host as the toolchain.
 
 ## Test Failures in Act Environment
 
-As of July 2025, there are 3 tests that fail when running with Act (local GitHub Actions simulator) but may pass in the actual GitHub Actions CI environment. These tests have been temporarily skipped with `.skip` to allow the project to be pushed to GitHub for further investigation.
+As of July 2025, there are 3 tests that fail when running with Act (local GitHub Actions simulator) but may pass in the actual GitHub Actions CI environment. These tests are conditionally skipped via `describe.skipIf(SKIP_DOCKER_TESTS)` to allow the project to be pushed to GitHub for further investigation.
 
 ### 1. Container Smoke Test - Timeout Issue
 - **File**: `tests/e2e/docker/docker-smoke-python.test.ts` (and other `docker-smoke-*.test.ts` files)
@@ -26,7 +26,7 @@ As of July 2025, there are 3 tests that fail when running with Act (local GitHub
 - **Test**: "should find Python on Windows without explicit path"
 - **Issue**: This is a Windows-only success-path discovery test that returns early on non-Windows platforms
 - **Root Cause**: Test is deliberately Windows-only; it does not mock platform or assert error messages
-- **Solution**: Test works correctly on Windows; on other platforms it is skipped
+- **Solution**: Test works correctly on Windows; on non-Windows platforms the test returns early without executing Windows-specific assertions
 
 ## Running Tests Locally
 

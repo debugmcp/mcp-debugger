@@ -285,7 +285,7 @@ Pauses a running program. The debugger sends a DAP pause request and returns imm
 ```json
 {
   "success": true,
-  "state": "paused",
+  "state": "running",
   "data": {
     "message": "Execution paused"
   }
@@ -293,6 +293,7 @@ Pauses a running program. The debugger sends a DAP pause request and returns imm
 ```
 
 **Notes:**
+- The `"state"` field in the response reflects the session state at the moment the pause request is acknowledged, which is still `"running"`. The state transitions to `"paused"` asynchronously when the stopped event arrives from the debug adapter; poll `list_debug_sessions` or wait for subsequent tool calls to observe the paused state.
 - The session must be in a `"running"` state; pausing an already-paused session returns success immediately with `"Already paused"`
 - After pausing, you can inspect variables, evaluate expressions, and step through code
 

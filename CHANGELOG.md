@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Java backend** – replaced KDA (kotlin-debug-adapter) and stdio-tcp-bridge with a single JDI bridge (`JdiDapServer.java`) using `com.sun.jdi.*` directly; zero external dependencies, compiles on first use
-- **Java minimum JDK** – recommended JDK 21+ to match `--release 21` bridge compilation target; the adapter warns (but does not error) when Java is below 21, and the runtime adapter validates Java 11+ as the minimum
+- **Java minimum JDK** – recommended JDK 21+ to match `--release 21` bridge compilation target; the adapter warns (but does not error) when Java is below 21, and the runtime adapter warns when Java is below version 11
 - Removed dead `sendConfigDoneWithAttach`/`sendConfigDoneWithLaunch` code paths
 
 ### Fixed
@@ -287,7 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Jest test runner and all Jest-related dependencies
 - Obsolete test files and configurations
-- python-utils.ts (functionality integrated elsewhere)
+- python-utils.ts from core (refactored and consolidated into `packages/adapter-python/src/utils/python-utils.ts`)
 - Various deprecated provider and protocol files
 
 ## [0.1.0] - 2025-05-27

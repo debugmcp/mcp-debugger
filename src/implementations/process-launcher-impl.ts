@@ -589,7 +589,6 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
  */
 export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
   constructor(
-    private processLauncher: IProcessLauncher,
     private processManager: IProcessManager
   ) {}
 
@@ -680,7 +679,6 @@ export class ProcessLauncherFactoryImpl {
   }
   
   createProxyProcessLauncher(): IProxyProcessLauncher {
-    const processLauncher = this.createProcessLauncher();
-    return new ProxyProcessLauncherImpl(processLauncher, this.processManager);
+    return new ProxyProcessLauncherImpl(this.processManager);
   }
 }

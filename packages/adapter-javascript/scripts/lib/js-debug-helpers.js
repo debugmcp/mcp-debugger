@@ -32,8 +32,8 @@ function getArchiveType(name) {
 /**
  * Selects the best js-debug asset from the provided GitHub release assets.
  * Preference order:
- *  1) Names matching /(js-debug-(server|dap).*\.(?:tar\.gz|tgz|zip))$/i
- *  2) Fallback names matching /(js-debug.*\.(?:tar\.gz|tgz|zip))$/i
+ *  1) Names matching /(js-debug-(server|dap).*\.(?:tar\.gz|tgz|zip|vsix))$/i
+ *  2) Fallback names matching /(js-debug.*\.(?:tar\.gz|tgz|zip|vsix))$/i
  * Within any matching set, prefer archive type: .tgz/.tar.gz over .zip.
  *
  * @param {Array<{name?: string, browser_download_url?: string, url?: string, download_url?: string}>} assets

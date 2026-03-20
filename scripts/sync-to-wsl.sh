@@ -48,15 +48,12 @@ for arg in "$@"; do
     case $arg in
         --no-install)
             NO_INSTALL=true
-            shift
             ;;
         --no-build)
             NO_BUILD=true
-            shift
             ;;
         --clean)
             CLEAN_SYNC=true
-            shift
             ;;
         --help|-h)
             echo "Usage: $0 [/path/to/project] [--no-install] [--no-build] [--clean]"

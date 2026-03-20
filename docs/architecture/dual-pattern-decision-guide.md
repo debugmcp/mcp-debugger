@@ -52,7 +52,7 @@ Use AdapterPolicy when you need:
 - **Language-specific session behaviors**
 - **Validation logic and environment checks**
 - **Data filtering or transformation**
-- **Policy methods with managed state** (20+ methods including state management via `createInitialState`, `updateStateOnCommand`, `updateStateOnEvent`, etc.)
+- **Policy methods with managed state** (20+ methods including state management via `createInitialState`, `updateStateOnCommand`, `updateStateOnResponse`, `updateStateOnEvent`, etc.)
 - **Quick language-specific decisions**
 
 ### AdapterPolicy Example: Adding Go Support
@@ -91,12 +91,9 @@ export const GoAdapterPolicy: AdapterPolicy = {
 ### Scenario 2: Customizing Existing Language
 **Need**: Change how Python variables are displayed
 
-**Solution**: Modify PythonAdapterPolicy
+**Solution**: Create a derived policy using spread syntax
 ```typescript
-// Just update the policy
-PythonAdapterPolicy.extractLocalVariables = (frames, scopes, vars) => {
-  // Custom extraction logic
-};
+const MyPythonPolicy: AdapterPolicy = { ...PythonAdapterPolicy, extractLocalVariables: (frames, scopes, vars) => { /* custom */ } };
 ```
 
 ### Scenario 3: Complex Handshake Protocol
@@ -143,12 +140,15 @@ class SessionManagerOperations {
     // 2. Get AdapterPolicy for session behaviors  
     const policy = this.selectPolicy(session.language);
     
-    // 3. Use adapter for environment validation
-    await adapter.validateEnvironment();
-    
-    // 4. Use policy for executable validation
+    // 3. Environment validation is implicit in adapter creation;
+    //    startDebugging does not call validateEnvironment() directly.
+
+    // 4. Use policy for executable validation (returns Promise<boolean>)
     if (policy.validateExecutable) {
-      await policy.validateExecutable(executablePath);
+      const executableValid = await policy.validateExecutable(executablePath);
+      if (!executableValid) {
+        throw new Error(`Executable not valid: ${executablePath}`);
+      }
     }
     
     // 5. Create ProxyManager with adapter via factory (requires additional injected deps)
@@ -198,7 +198,7 @@ SessionManager
 ❌ Skip environment validation
 
 ### DO: AdapterPolicy
-✅ Use the state management hooks (`createInitialState`, `updateStateOnCommand`, `updateStateOnEvent`) for adapter-specific state tracking
+✅ Use the state management hooks (`createInitialState`, `updateStateOnCommand`, `updateStateOnResponse`, `updateStateOnEvent`) for adapter-specific state tracking
 ✅ Make methods optional when sensible
 ✅ Return sensible defaults
 ✅ Keep logic focused on adapter-specific concerns
@@ -232,7 +232,7 @@ case 'newlang':
   return NewLanguagePolicy;
 ```
 
-### Step 4: Implement IDebugAdapter (full)
+### Step 4: Complete IDebugAdapter Implementation
 ```typescript
 // Full implementation for complete support
 export class NewLanguageAdapter implements IDebugAdapter {
@@ -281,7 +281,7 @@ describe('GoAdapterPolicy', () => {
 ## Summary
 
 - **IDebugAdapter**: Core debugging infrastructure (heavyweight, stateful, process management)
-- **AdapterPolicy**: Session management behaviors (20+ methods with state management hooks for adapter-specific tracking)
+- **AdapterPolicy**: Session management behaviors (20+ methods with state management hooks: `createInitialState`, `updateStateOnCommand`, `updateStateOnResponse`, `updateStateOnEvent`, etc.)
 - **Both needed**: For complete language support
 - **IDebugAdapter required**: Language support requires a registered adapter for adapter creation
 - **Grow as needed**: Add AdapterPolicy for language-specific session behaviors

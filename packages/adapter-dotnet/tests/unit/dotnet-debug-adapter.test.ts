@@ -3,8 +3,7 @@ import type { AdapterDependencies } from '@debugmcp/shared';
 import {
   DebugLanguage,
   AdapterState,
-  DebugFeature,
-  AdapterErrorCode
+  DebugFeature
 } from '@debugmcp/shared';
 import { DotnetDebugAdapter } from '../../src/DotnetDebugAdapter.js';
 import { findNetcoredbgExecutable, findPdb2PdbExecutable, convertPdbsToTemp, getProcessExecutableDir, getProcessArchitecture } from '../../src/utils/dotnet-utils.js';

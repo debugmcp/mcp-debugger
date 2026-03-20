@@ -154,16 +154,16 @@ class ChildProcessMock {
       // Call the callback with success
       if (callback) {
         setTimeout(() => {
-          callback(null, result);
+          callback(null, result.stdout, result.stderr);
         }, 10);
       }
-      
+
       // Return a mock child process
       const childProcess = new MockChildProcess();
       this.mockProcesses.push(childProcess);
       return childProcess;
     });
-    
+
     // Default implementation for execSync
     this.execSync.mockImplementation((command: string, options = {}) => {
       return Buffer.from('mock stdout output');
@@ -271,10 +271,10 @@ class ChildProcessMock {
       // Call the callback with success
       if (callback) {
         setTimeout(() => {
-          callback(null, result);
+          callback(null, result.stdout, result.stderr);
         }, 10);
       }
-      
+
       // Return a mock child process
       const childProcess = new MockChildProcess();
       this.mockProcesses.push(childProcess);

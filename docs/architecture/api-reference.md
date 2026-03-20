@@ -147,7 +147,7 @@ Command to install the debug adapter.
 ### Debug Configuration Methods
 
 #### `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>`
-Converts generic config to language-specific format (async since v2.1.0).
+Converts generic config to language-specific format (async to permit build/compilation steps before launch).
 
 **Parameters**: Generic launch configuration
 **Returns**: Promise resolving to language-specific configuration with additional fields
@@ -332,7 +332,7 @@ Steps into a function call.
 #### `stepOut(sessionId: string, threadId?: number): Promise<void>`
 Steps out of the current function.
 
-#### `pause(sessionId: string): Promise<void>`
+#### `pause(sessionId: string, threadId?: number): Promise<DebugResult>`
 Pauses execution.
 
 #### `terminate(sessionId: string): Promise<void>`
@@ -349,6 +349,8 @@ Gets variables in a scope.
 
 #### `evaluateExpression(sessionId: string, expression: string, frameId?: number, context?: string): Promise<EvaluateResult>`
 Evaluates an expression in the current context. Returns a structured `EvaluateResult` with `result`, `type`, `variablesReference`, and optional error text.
+
+**Note**: The `context` parameter is accepted by the API but the DAP `evaluate` request is always sent with `context: 'variables'` internally, regardless of the value passed.
 
 ### Session Management
 
@@ -389,10 +391,10 @@ Returns whether the proxy process is running.
 
 ### Events
 
-ProxyManager forwards all DAP events from the adapter:
-- `stopped`, `continued`, `terminated`, `exited`
-- `thread`, `output`, `breakpoint`, `module`
-- Plus adapter lifecycle events
+ProxyManager forwards DAP events from the adapter:
+- Individually typed and re-emitted: `stopped`, `continued`, `terminated`, `exited`, `initialized`
+- All other DAP events (including `thread`, `output`, `breakpoint`, `module`, etc.) are forwarded as the generic `dap-event` event with `(event: string, body: unknown)` signature
+- Plus adapter lifecycle events: `error`, `exit`, `dry-run-complete`, `adapter-configured`
 
 ## AdapterRegistry API
 
@@ -553,9 +555,12 @@ await sessionManager.startDebugging({
   launchConfig: { stopOnEntry: true }
 });
 
-// 4. Listen for events
-sessionManager.on('stopped', (event) => {
-  console.log('Paused at:', event.body.reason);
+// 4. Listen for events via the ProxyManager for the session
+// Note: SessionManager is not an EventEmitter. Subscribe to events through
+// the ProxyManager associated with the session, or poll session state.
+const session = sessionManager.getSession(sessionInfo.sessionId);
+session?.proxyManager?.on('stopped', (threadId, reason) => {
+  console.log('Paused at:', reason);
 });
 
 // 5. Continue execution

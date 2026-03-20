@@ -14,7 +14,7 @@ The MCP Debugger ships without auto-installing optional adapters. The adapter lo
 
 - Package name: `@debugmcp/adapter-javascript`
 - Factory export: `JavascriptAdapterFactory`
-- Vendor dependency: `packages/adapter-javascript/vendor/js-debug/vsDebugServer.js` (primary entry; `vsDebugServer.cjs` is also produced as a CJS mirror)
+- Vendor dependency: `packages/adapter-javascript/vendor/js-debug/vsDebugServer.cjs` (primary runtime entry used at runtime; `vsDebugServer.js` is the canonical vendored source from the upstream build)
 
 There is no automatic install/build on first use. This keeps the core lightweight and reduces unexpected network operations.
 
@@ -48,14 +48,14 @@ At runtime, the adapter loader attempts to resolve and dynamically import the pa
 
 Additionally, the dev container bootstrapping path includes:
 - `src/container/dependencies.ts` entries to `tryRegister('javascript', 'JavascriptAdapterFactory')`
-- This ensures local monorepo builds resolve via relative import `../node_modules/@debugmcp/adapter-javascript/dist/index.js`
+- This ensures local monorepo builds resolve via a file URL constructed as `new URL(..., import.meta.url).href` pointing to `../node_modules/@debugmcp/adapter-javascript/dist/index.js`
 
 ## Shared language metadata
 
 The shared model defines:
 - `DebugLanguage.JAVASCRIPT = 'javascript'`
-- Display name: JavaScript/TypeScript
-- Default executable: `node` (resolved via utility logic in the adapter)
+
+The display name ("JavaScript/TypeScript") and default executable (`node`) are defined in the adapter implementation (`packages/adapter-javascript/`) and its factory metadata, not in the shared model itself. The shared model only carries the language enum value.
 
 Unit tests were updated to reflect the addition:
 - `tests/core/unit/session/models.test.ts` now expects seven languages (python, javascript, rust, go, java, dotnet, mock) and verifies inclusion of `javascript`.
@@ -84,7 +84,7 @@ js-debug requires a short handoff period before clients can issue requests such 
 - The adapter implements `createLaunchBarrier(command, args?)`, returning a `JsDebugLaunchBarrier` when the command is `'launch'` (`packages/adapter-javascript/src/utils/js-debug-launch-barrier.ts`).
 - `ProxyManager` delegates coordination to the barrier. It forwards proxy status updates, DAP events, and exit notifications without embedding language-specific branches.
 - The barrier resolves once js-debug emits a `stopped` event or the transport connection is confirmed (`adapter_connected` after a short delay); it rejects if the proxy exits prematurely.
-- Tests cover both sides: the adapter suite asserts the barrier’s behavior, and `tests/unit/proxy/proxy-manager-message-handling.test.ts` verifies that launch requests are treated as fire-and-forget when a barrier is returned.
+- Tests cover both sides: the adapter suite asserts the barrier’s behavior, and `tests/unit/proxy/proxy-manager-message-handling.test.ts` verifies both barrier modes — fire-and-forget (barrier returned, launch proceeds without awaiting response) AND await-response (no barrier, normal request/response correlation) — when a barrier is or is not returned.
 
 This approach keeps the core proxy orchestration language-agnostic while allowing adapters to implement bespoke synchronization when necessary.
 
@@ -106,4 +106,4 @@ Adapter exports include:
   - `detectTsRunners` -- detects available TypeScript runners (ts-node, tsx, etc.) in the environment.
   - `transformConfig` -- transforms generic launch config into js-debug-specific configuration.
 
-Ensure `packages/adapter-javascript/package.json` points `main/types/exports` to `dist` and includes `vendor/js-debug` in the `files` array for publishing.
+Ensure `packages/adapter-javascript/package.json` has an `exports` map with a `"."` entry pointing to `./dist/index.js` (ESM import condition), a `types` field pointing to `./dist/index.d.ts`, and includes both `dist` and `vendor/js-debug` in the `files` array for publishing. A `main` field may also be present for legacy CJS consumers but ESM (`exports`) takes precedence in Node.js 12+.

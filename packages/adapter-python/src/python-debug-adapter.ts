@@ -604,9 +604,9 @@ You can also specify the Python path explicitly in your debug configuration.`;
 
     const version = await getPythonVersion(pythonPath);
 
-    // Update cache
-    if (version && cached) {
-      cached.version = version;
+    // Update cache — store explicitly under the pythonPath key to avoid key mismatch
+    if (version) {
+      this.pythonPathCache.set(pythonPath, { ...(cached ?? {}), version, path: pythonPath, timestamp: Date.now() });
     }
 
     return version;
@@ -633,16 +633,14 @@ You can also specify the Python path explicitly in your debug configuration.`;
       child.on('error', () => resolve(false));
       child.on('exit', (code) => {
         const hasDebugpy = code === 0 && output.trim().length > 0;
-        
-        // Update cache
-        if (cached) {
-          cached.hasDebugpy = hasDebugpy;
-        }
-        
+
+        // Update cache — store explicitly under the pythonPath key to avoid key mismatch
+        this.pythonPathCache.set(pythonPath, { ...(cached ?? {}), hasDebugpy, path: pythonPath, timestamp: Date.now() });
+
         if (hasDebugpy) {
           this.dependencies.logger?.info(`[PythonDebugAdapter] debugpy version: ${output.trim()}`);
         }
-        
+
         resolve(hasDebugpy);
       });
     });

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { createInitialState } from '../../../src/dap-core/index.js';
 import type { ProxyConfig } from '../../../src/proxy/proxy-config.js';
-import { DebugLanguage, type IProxyProcess, type IProxyProcessLauncher, type IFileSystem, type ILogger, type IDebugAdapter } from '@debugmcp/shared';
+import { DebugLanguage, type IProxyProcess, type IProxyProcessLauncher, type IFileSystem, type ILogger, type IDebugAdapter, type AdapterLaunchBarrier } from '@debugmcp/shared';
 
 class FakeProxyProcess extends EventEmitter implements IProxyProcess {
   pid = 4242;

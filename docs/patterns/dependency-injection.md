@@ -13,7 +13,7 @@ The dependency injection (DI) pattern is used throughout the codebase to:
 ## Core Principles
 
 ### 1. Constructor Injection
-All dependencies are injected through constructors, making them explicit and immutable.
+Core service dependencies are injected through constructors, making them explicit and immutable.
 
 ### 2. Interface Segregation
 Dependencies are defined as focused interfaces, not concrete implementations.
@@ -169,7 +169,7 @@ export interface IProxyProcessLauncher {
   launchProxy(
     scriptPath: string,
     sessionId: string,
-    env?: NodeJS.ProcessEnv
+    env?: Record<string, string>
   ): IProxyProcess;
 }
 ```
@@ -193,7 +193,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 
   // Process launchers
   const processLauncher = new ProcessLauncherImpl(processManager);
-  const proxyProcessLauncher = new ProxyProcessLauncherImpl(processLauncher, processManager);
+  const proxyProcessLauncher = new ProxyProcessLauncherImpl(processManager);
   const debugTargetLauncher = new DebugTargetLauncherImpl(processLauncher, networkManager);
 
   // Factories

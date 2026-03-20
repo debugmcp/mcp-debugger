@@ -20,24 +20,6 @@ import { ISessionStoreFactory } from '../../../src/factories/session-store-facto
 import { MockSessionStoreFactory } from '../../../src/factories/session-store-factory.js';
 import { MockProxyManagerFactory } from '../../../src/factories/proxy-manager-factory.js';
 import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
-import { DebugMcpServer, DebugMcpServerOptions } from '../../../src/server.js';
-import { SessionManagerDependencies } from '../../../src/session/session-manager.js';
-import { createMockAdapterRegistry } from '../mocks/mock-adapter-registry.js';
-
-/**
- * Creates a DebugMcpServer configured for testing
- * @param options Additional options to override defaults
- * @returns A new DebugMcpServer instance configured for tests
- */
-export function createTestServer(options: DebugMcpServerOptions = {}): DebugMcpServer {
-  // Always use 'error' log level for tests unless explicitly overridden
-  const testOptions: DebugMcpServerOptions = {
-    logLevel: 'error',
-    ...options
-  };
-  
-  return new DebugMcpServer(testOptions);
-}
 
 /**
  * Complete set of application dependencies
@@ -57,57 +39,6 @@ export interface Dependencies {
   // Factories
   proxyManagerFactory: IProxyManagerFactory;
   sessionStoreFactory: ISessionStoreFactory;
-}
-
-/**
- * Creates test dependencies with fake/mock implementations
- * @returns Complete dependency container for testing
- */
-export async function createTestDependencies(): Promise<Dependencies> {
-  const logger = createMockLogger();
-  const fileSystem = createMockFileSystem();
-  const processManager = createMockProcessManager();
-  const networkManager = createMockNetworkManager();
-  
-  const { FakeProcessLauncher, FakeProxyProcessLauncher, FakeDebugTargetLauncher } =
-    await import('../../implementations/test/fake-process-launcher.ts');
-  
-  const processLauncher = new FakeProcessLauncher();
-  const proxyProcessLauncher = new FakeProxyProcessLauncher();
-  const debugTargetLauncher = new FakeDebugTargetLauncher();
-  
-  const proxyManagerFactory = new MockProxyManagerFactory();
-  proxyManagerFactory.createFn = () => new MockProxyManager();
-  const sessionStoreFactory = new MockSessionStoreFactory();
-  
-  return {
-    fileSystem,
-    processManager,
-    networkManager,
-    logger,
-    processLauncher,
-    proxyProcessLauncher,
-    debugTargetLauncher,
-    proxyManagerFactory,
-    sessionStoreFactory
-  };
-}
-
-/**
- * Creates mock SessionManager dependencies for testing
- * @returns Complete SessionManagerDependencies with all mocks
- */
-export function createMockSessionManagerDependencies(): SessionManagerDependencies {
-  return {
-    fileSystem: createMockFileSystem(),
-    networkManager: createMockNetworkManager(),
-    logger: createMockLogger(),
-    proxyManagerFactory: new MockProxyManagerFactory(),
-    sessionStoreFactory: new MockSessionStoreFactory(),
-    debugTargetLauncher: createMockDebugTargetLauncher(),
-    environment: createMockEnvironment(),
-    adapterRegistry: createMockAdapterRegistry()
-  };
 }
 
 /**
@@ -211,28 +142,4 @@ export function createMockEnvironment(): IEnvironment {
     getAll: vi.fn(() => ({ ...process.env })),
     getCurrentWorkingDirectory: vi.fn(() => process.cwd())
   };
-}
-
-
-/**
- * Create a full adapter registry for testing
- * @returns Adapter registry with Python adapter
- */
-export async function createFullAdapterRegistry() {
-  // Dynamic imports to avoid require() usage
-  const { getAdapterRegistry, resetAdapterRegistry } = await import('../../../src/adapters/adapter-registry.js');
-  const { PythonAdapterFactory } = await import('@debugmcp/adapter-python');
-  const { MockAdapterFactory } = await import('@debugmcp/adapter-mock');
-  
-  // Reset any existing registry
-  resetAdapterRegistry();
-  
-  // Get a fresh registry instance
-  const registry = getAdapterRegistry();
-  
-  // Register adapters
-  await registry.register('python', new PythonAdapterFactory());
-  await registry.register('mock', new MockAdapterFactory());
-  
-  return registry;
 }

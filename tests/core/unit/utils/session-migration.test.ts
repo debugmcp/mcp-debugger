@@ -6,7 +6,7 @@ import { SessionStore, CreateSessionParams } from '../../../../src/session/sessi
 import { DebugLanguage } from '@debugmcp/shared';
 
 describe('Session Migration Verification', () => {
-  it('should not accept pythonPath parameter', () => {
+  it('should use executablePath instead of legacy pythonPath', () => {
     const store = new SessionStore();
     
     // Verify that sessions use executablePath (not the old pythonPath)
@@ -68,7 +68,7 @@ describe('Session Migration Verification', () => {
     }
   });
   
-  it('should validate that all API endpoints use executablePath', () => {
+  it('should verify API interfaces use executablePath', () => {
     // This test documents the migration is complete
     // All the following interfaces should use executablePath:
     

@@ -160,6 +160,7 @@ enum DebugLanguage {
 No changes to environment variables. The following still work:
 - `DEBUG_MCP_LOG_LEVEL` - Logging level (default: `info`)
 - `MCP_CONTAINER` - Set to `true` in container mode (forces log path to `/app/logs/`)
+- `MCP_WORKSPACE_ROOT` - Workspace root path used for container-mode path resolution (default: `/workspace/`); set this when mounting your project at a non-default path
 - `CONSOLE_OUTPUT_SILENCED` - Set to `1` to suppress console output (auto-set in stdio mode)
 
 #### Launch Configuration

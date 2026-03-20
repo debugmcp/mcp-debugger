@@ -4,6 +4,8 @@ This guide covers how to debug the MCP Debug Server itself during development. Y
 
 ## Overview
 
+> **Warning**: `console.log`, `console.error`, and all other `console` methods are silenced at process startup (in both STDIO and SSE modes) to protect stdio/IPC transports from being corrupted by unexpected output. Any `console.*` calls you add to server or proxy code will produce no output. Use `this.logger.debug(...)` (or another Winston logger method) for in-process logging, or write directly to a file (e.g., `fs.appendFileSync('/tmp/debug.log', ...)`) for low-level startup diagnostics.
+
 Debugging a debug server presents unique challenges:
 - Multiple processes (server, proxy, debug adapter)
 - Cross-process communication via IPC

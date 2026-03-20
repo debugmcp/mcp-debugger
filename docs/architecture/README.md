@@ -13,7 +13,7 @@ The mcp-debugger has undergone a major architectural transformation, evolving fr
 
 The core components handle session management, process lifecycle, and DAP communication without any language-specific knowledge:
 
-- **[SessionManager](../../src/session/session-manager.ts)** - Orchestrates debug sessions
+- **[SessionManager](../../src/session/session-manager.ts)** - Thin public facade over the session manager hierarchy (orchestration in `session-manager-operations.ts` and `session-manager-core.ts`)
 - **[ProxyManager](../../src/proxy/proxy-manager.ts)** - Manages DAP proxy processes
 - **[SessionStore](../../src/session/session-store.ts)** - Persistent session storage
 
@@ -62,7 +62,7 @@ The **[AdapterRegistry](../../src/adapters/adapter-registry.ts)** manages availa
 ```typescript
 registry.register('python', new PythonAdapterFactory());
 registry.register('mock', new MockAdapterFactory());
-// Future: registry.register('node', new NodeAdapterFactory());
+// registry.register('javascript', new JavascriptAdapterFactory());
 ```
 
 ## Data Flow Architecture
@@ -79,7 +79,7 @@ sequenceDiagram
     
     Client->>Server: create_debug_session(language='python')
     Server->>SM: createSession(language)
-    SM-->>Client: sessionInfo (no adapter created yet)
+    SM-->>Client: sessionInfo (adapter instance not yet created, but executable path is resolved via policy)
 
     Client->>Server: start_debugging(sessionId)
     Server->>SM: startDebugging()
@@ -223,15 +223,15 @@ if (event.event === 'stopped') {
 
 ### 3. Missing Terminated Event
 
-Always send `terminated` when ending a session:
+Adapters that need to synthesize session-end events (e.g., a mock adapter or one whose underlying runtime does not emit `terminated`) should send both `exited` and `terminated`. When the real debug adapter process sends these events over DAP, ProxyManager forwards them automatically — adapters in that case do not need to emit them manually.
 
 ```typescript
-// ❌ Wrong: Only sending exited
+// ❌ Wrong: Only sending exited (when synthesizing events manually)
 async endSession() {
   this.emit('exited', { exitCode: 0 });
 }
 
-// ✅ Correct: Send both exited and terminated
+// ✅ Correct: Send both exited and terminated (when synthesizing events manually)
 async endSession(exitCode: number) {
   this.emit('exited', { exitCode });
   this.emit('terminated');

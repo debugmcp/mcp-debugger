@@ -84,7 +84,7 @@ Both bundles include all necessary dependencies (using tsup's `noExternal` flag)
 The proxy bootstrap (`src/proxy/proxy-bootstrap.js`, compiled to `dist/proxy/proxy-bootstrap.js`) has been simplified:
 - **If bundle exists**: Uses the bundled proxy (`proxy-bundle.cjs`)
 - **If no bundle**: Uses the unbundled proxy files (development mode)
-- **No environment variables required**: Simply checks for bundle file existence
+- **Bootstrap sets `DAP_PROXY_WORKER=true`**: The proxy bootstrap sets this environment variable before spawning the proxy worker process; simply checks for bundle file existence to decide which proxy to use
 
 ### Why Separate Bundles?
 - The proxy runs as a **separate child process** for DAP communication
@@ -120,7 +120,7 @@ The project uses two bundling tools for different purposes:
 
 **esbuild** (for root-level bundles):
 - Used by `scripts/bundle.js` to create `dist/bundle.cjs` (main server) and `dist/proxy/proxy-bundle.cjs` (proxy)
-- These root bundles are available for direct execution scenarios. Note: The Docker entrypoint uses `node dist/index.js`, not the esbuild bundle
+- These root bundles are available for direct execution scenarios. Note: The Docker entrypoint (`scripts/docker-entry.sh`) runs `dist/bundle.cjs`, not `dist/index.js`
 
 ### Build Artifacts Management
 Build artifacts are properly managed via `.gitignore`:

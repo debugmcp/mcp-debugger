@@ -142,7 +142,7 @@ describe('SessionManager - Error Recovery', () => {
         pythonPath: 'python'
       });
       
-      // Make proxy fail to start
+      // Make proxy fail to start (simulates immediate startup failure)
       dependencies.mockProxyManager.shouldFailStart = true;
       
       const result = await sessionManager.startDebugging(session.id, 'test.py');

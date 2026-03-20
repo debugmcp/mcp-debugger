@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the structured logging format used by mcp-debugger for visualization purposes. All logs are written to `logs/debug-mcp-server.log` in JSON format for easy parsing by the Terminal UI visualizer. In container mode (`MCP_CONTAINER=true`), logs are written to `/app/logs/debug-mcp-server.log` instead.
+This document defines the structured logging format used by mcp-debugger for visualization purposes. Main server structured logs are written to `logs/debug-mcp-server.log` in JSON format for easy parsing by the Terminal UI visualizer. In container mode (`MCP_CONTAINER=true`), logs are written to `/app/logs/debug-mcp-server.log` instead. Note: other log files may exist alongside this file (e.g., proxy process logs, rotated log files with numeric suffixes) — only `debug-mcp-server.log` follows this structured JSON specification.
 
 ## Log Entry Types
 

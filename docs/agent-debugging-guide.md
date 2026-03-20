@@ -50,7 +50,8 @@ set_breakpoint(sessionId=session_id, file="/path/to/test.js", line=3)
 
 # 3. Start debugging
 start_debugging(sessionId=session_id, scriptPath="/path/to/test.js")
-# Will stop at line 3 automatically - no Node.js internals!
+# Should stop at line 3 if the breakpoint is hit; if the debugger stops at
+# a Node.js internal frame first, use continue_execution to advance to user code.
 
 # 4. Get stack trace
 get_stack_trace(sessionId=session_id)

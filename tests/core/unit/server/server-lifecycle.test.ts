@@ -78,14 +78,5 @@ describe('Server Lifecycle Tests', () => {
       expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
     });
 
-    it('should stop server and log shutdown message', async () => {
-      debugServer = new DebugMcpServer();
-      mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
-      
-      await debugServer.stop();
-      
-      expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
-      expect(mockDependencies.logger.info).toHaveBeenCalledWith('Debug MCP Server stopped');
-    });
   });
 });

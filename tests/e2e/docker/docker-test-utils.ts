@@ -185,8 +185,13 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
 }
 
 /**
- * Convert host path to container path
- * The container expects RELATIVE paths from /workspace
+ * Convert a host path to the relative path the container expects (rooted at /workspace).
+ * Handles four cases:
+ *  1) Already relative (no leading slash or drive letter) — returned as-is
+ *  2) Starts with /workspace/ — strips the /workspace/ prefix
+ *  3) Absolute path under the host examples directory — returns path relative to examples/
+ *  4) Absolute path under the project root starting with /examples/ — strips /examples/ prefix
+ * Falls back to basename for any other absolute path.
  */
 export function hostToContainerPath(hostPath: string, workspaceMount = '/workspace'): string {
   // Normalize the path to use forward slashes
@@ -197,9 +202,10 @@ export function hostToContainerPath(hostPath: string, workspaceMount = '/workspa
     return normalizedPath;
   }
   
-  // If it starts with /workspace/, strip it to get relative path
-  if (normalizedPath.startsWith('/workspace/')) {
-    return normalizedPath.substring('/workspace/'.length);
+  // If it starts with workspaceMount/, strip it to get relative path
+  const workspaceMountPrefix = workspaceMount + '/';
+  if (normalizedPath.startsWith(workspaceMountPrefix)) {
+    return normalizedPath.substring(workspaceMountPrefix.length);
   }
   
   // Extract relative path from examples directory

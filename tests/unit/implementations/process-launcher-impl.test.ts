@@ -112,7 +112,7 @@ describe('ProxyProcessLauncherImpl', () => {
   });
 
   it('creates a proxy process adapter that resolves initialization messages', async () => {
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-1');
 
     const promise = proxyProcess.waitForInitialization(1000);
@@ -123,7 +123,7 @@ describe('ProxyProcessLauncherImpl', () => {
   });
 
   it('rejects initialization promise on early exit', async () => {
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-2');
 
     const promise = proxyProcess.waitForInitialization(100);
@@ -136,7 +136,7 @@ describe('ProxyProcessLauncherImpl', () => {
   it('throws when child send fails', () => {
     child.send = vi.fn().mockReturnValue(false);
 
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-3');
 
     expect(() => proxyProcess.sendCommand({ foo: 'bar' })).toThrow(/Failed to send/);
@@ -152,7 +152,7 @@ describe('ProxyProcessLauncherImpl', () => {
     process.env.JEST_WORKER_ID = '2';
 
     const spawnSpy = vi.spyOn(processManager, 'spawn');
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     launcher.launchProxy('./dist/proxy.js', 'session-env');
 
     const options = spawnSpy.mock.calls[0]?.[2] as any;
@@ -184,7 +184,7 @@ describe('ProxyProcessLauncherImpl', () => {
     const spawnSpy = vi.spyOn(processManager, 'spawn');
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
 
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     launcher.launchProxy('./dist/proxy.js', 'session-container');
 
     const options = spawnSpy.mock.calls[0]?.[2] as any;
@@ -199,7 +199,7 @@ describe('ProxyProcessLauncherImpl', () => {
   });
 
   it('reuses initialization promise for concurrent callers', async () => {
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-concurrent');
 
     const promiseSpy = vi.spyOn(proxyProcess as any, 'createInitializationPromise');
@@ -218,7 +218,7 @@ describe('ProxyProcessLauncherImpl', () => {
   });
 
   it('marks initialization as failed when killed during wait', async () => {
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-kill');
 
     const pending = proxyProcess.waitForInitialization(1000);
@@ -232,7 +232,7 @@ describe('ProxyProcessLauncherImpl', () => {
   });
 
   it('fails initialization when process exits before wait is requested', async () => {
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-early-exit');
 
     child.emit('exit', 1, null);
@@ -241,7 +241,7 @@ describe('ProxyProcessLauncherImpl', () => {
   });
 
   it('returns false when child kill throws', () => {
-    const launcher = new ProxyProcessLauncherImpl({} as any, processManager);
+    const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-kill-error');
 
     child.kill = vi.fn(() => {

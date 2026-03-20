@@ -22,7 +22,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
   },
   
   /**
-   * Extract local variables for Python, filtering out special variables by default
+   * Extract local variables for Python, filtering out most special variables by default (preserves common dunders like __name__, __file__, __doc__)
    */
   extractLocalVariables: (
     stackFrames: StackFrame[],
@@ -85,7 +85,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
   },
   
   /**
-   * Python uses "Locals" for local variables scope
+   * Python uses "Locals" (or "Local") for local variables scope
    */
   getLocalScopeName: (): string[] => {
     return ['Locals'];

@@ -118,13 +118,13 @@ adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT);
 
 ### Scenario 1: Basic Debugging Flow
 ```typescript
+// Note: Without stopOnEntry: true, launch runs to the first breakpoint directly.
+// There is no 'entry' stop — the first stop is at the breakpoint.
 const scenario: MockScenario = {
   name: 'basic-debugging',
   steps: [
     { action: 'setBreakpoint', args: { file: 'main.mock', line: 5 } },
     { action: 'launch', args: { script: 'main.mock' } },
-    { action: 'waitForStop', expected: { reason: 'entry' } },
-    { action: 'continue' },
     { action: 'waitForStop', expected: { reason: 'breakpoint', line: 5 } },
     { action: 'stepOver' },
     { action: 'waitForStop', expected: { reason: 'step', line: 6 } },

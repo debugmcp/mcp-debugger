@@ -263,17 +263,17 @@ From the `handleInitCommand` method (lines 67-124):
    }
    ```
 
-2. **Logger Creation**
-   ```typescript
-   const logPath = path.join(payload.logDir, `proxy-${payload.sessionId}.log`);
-   this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
-   ```
-
-3. **Payload Validation** (via `validateProxyInitPayload` in `src/utils/type-guards.ts`)
+2. **Payload Validation** (via `validateProxyInitPayload` in `src/utils/type-guards.ts`)
    ```typescript
    // Validates required fields: cmd, sessionId, executablePath, adapterHost,
    // adapterPort, logDir, scriptPath. Also validates adapterCommand and launchConfig if present.
    const validatedPayload = validateProxyInitPayload(payload);
+   ```
+
+3. **Logger Creation**
+   ```typescript
+   const logPath = path.join(payload.logDir, `proxy-${payload.sessionId}.log`);
+   this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
    ```
 
 4. **Dry Run Handling**
@@ -353,7 +353,7 @@ SessionStore provides centralized storage and management for debug sessions with
 ```typescript
 class SessionStore {
   // Creation
-  createSession(params: SessionCreateParams): DebugSessionInfo
+  createSession(params: CreateSessionParams): DebugSessionInfo
   
   // Retrieval
   get(sessionId: string): ManagedSession | undefined

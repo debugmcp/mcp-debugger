@@ -201,7 +201,7 @@ export class ExampleAdapterFactory extends AdapterFactory {
       name: 'example',
       displayName: 'Example',
       description: 'Example adapter',
-      minimumDebuggerVersion: '0.18.0'
+      minimumDebuggerVersion: '0.18.1'
     });
   }
 
@@ -231,7 +231,7 @@ export { ExampleAdapter } from './ExampleAdapter.js';
 Unit tests (Vitest)
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ExampleAdapter } from '../src/ExampleAdapter';
+import { ExampleAdapter } from '../src/ExampleAdapter.js';
 
 describe('ExampleAdapter', () => {
   let adapter: ExampleAdapter;
@@ -284,9 +284,10 @@ Developer workflow (monorepo)
   - pnpm -w run build:adapters:all
 - Build only the JavaScript adapter and vendor js-debug:
   - pnpm -w run dev:js
-  - Equivalent steps:
-    - pnpm -w -F @debugmcp/adapter-javascript build
-    - pnpm -w -F @debugmcp/adapter-javascript run build:adapter
+  - Note: `dev:js` is NOT equivalent to running the two steps below in isolation — it orchestrates both in the correct order with the right environment. The individual steps are:
+    - `pnpm -w -F @debugmcp/adapter-javascript build` — compiles TypeScript sources to `dist/`
+    - `pnpm -w -F @debugmcp/adapter-javascript run build:adapter` — vendors the js-debug server binary
+  - Both steps are required; running only one will leave the adapter incomplete.
 - After building, list_supported_languages should show:
   - available includes javascript with installed:true
   - languages contains a JavaScript/TypeScript entry with defaultExecutable: node

@@ -410,7 +410,7 @@ class MockDebugAdapterProcess {
       }
     }
     
-    this.breakpoints.set(args.source.path || 'unknown', breakpoints);
+    this.breakpoints.set(args.source?.path || 'unknown', breakpoints);
     
     this.sendResponse({
       seq: 0,

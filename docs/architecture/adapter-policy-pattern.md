@@ -174,7 +174,7 @@ Client Request → Server → SessionManager
 - `getLocalScopeName()` returns `['Locals', 'Arguments']` (for reporting purposes, but `extractLocalVariables` only uses `Locals`)
 
 **JavaAdapterPolicy**:
-- `resolveExecutablePath()` checks `JAVA_HOME` env var, constructs `$JAVA_HOME/bin/java`
+- `resolveExecutablePath()` constructs `$JAVA_HOME/bin/java(.exe)` when `JAVA_HOME` is set, otherwise falls back to `'java'`
 - `isNonFileSourceIdentifier()` detects Java FQCNs (no path separators, does not end with `.java`) so the server skips file existence checks
 - `getInitializationBehavior()` returns `{ sendLaunchBeforeConfig: true }` because JdiDapServer sends `'initialized'` during initialize
 - `filterStackFrames()` removes JDK internal frames (`java.*`, `javax.*`, `sun.*`) and frames with file paths containing `/jdk/` or `/rt.jar/`
@@ -191,7 +191,7 @@ Client Request → Server → SessionManager
 **MockAdapterPolicy**:
 - `resolveExecutablePath()` returns `providedPath || 'mock'`
 - `filterStackFrames()` returns all frames unfiltered
-- `extractLocalVariables()` returns all variables from the first scope
+- `extractLocalVariables()` returns all variables from the first scope of the top stack frame
 - `getDapClientBehavior()` returns minimal config with `childInitTimeout: 1000` (shorter for testing)
 
 ## Usage in Session Management
@@ -204,25 +204,18 @@ Session management classes use a `selectPolicy()` method to get the appropriate 
 export class SessionManagerData extends SessionManagerCore {
   protected selectPolicy(language: string | DebugLanguage): AdapterPolicy {
     switch (language) {
-      case 'python':
       case DebugLanguage.PYTHON:
         return PythonAdapterPolicy;
-      case 'javascript':
       case DebugLanguage.JAVASCRIPT:
         return JsDebugAdapterPolicy;
-      case 'rust':
       case DebugLanguage.RUST:
         return RustAdapterPolicy;
-      case 'go':
       case DebugLanguage.GO:
         return GoAdapterPolicy;
-      case 'java':
       case DebugLanguage.JAVA:
         return JavaAdapterPolicy;
-      case 'dotnet':
       case DebugLanguage.DOTNET:
         return DotnetAdapterPolicy;
-      case 'mock':
       case DebugLanguage.MOCK:
         return MockAdapterPolicy;
       default:

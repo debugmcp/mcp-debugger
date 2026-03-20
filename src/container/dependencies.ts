@@ -84,7 +84,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   
   // Create process launchers
   const processLauncher = new ProcessLauncherImpl(processManager);
-  const proxyProcessLauncher = new ProxyProcessLauncherImpl(processLauncher, processManager);
+  const proxyProcessLauncher = new ProxyProcessLauncherImpl(processManager);
   const debugTargetLauncher = new DebugTargetLauncherImpl(processLauncher, networkManager);
   
   // Create factories

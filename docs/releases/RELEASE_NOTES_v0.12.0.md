@@ -86,9 +86,9 @@ The previously unimplemented `get_source_context` tool is now fully functional:
 
 ### 📖 Documentation
 
-- [AI Integration Guide](./docs/ai-integration.md) - Learn how to leverage the new features
-- [Tool Reference](./docs/tool-reference.md) - Updated with new response formats
-- [Troubleshooting](./docs/troubleshooting.md) - New path resolution section
+- [AI Integration Guide](../ai-integration.md) - Learn how to leverage the new features
+- [Tool Reference](../tool-reference.md) - Updated with new response formats
+- [Troubleshooting](../troubleshooting.md) - New path resolution section
 
 ### 🙏 Acknowledgments
 

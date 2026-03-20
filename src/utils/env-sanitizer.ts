@@ -34,7 +34,7 @@ export function sanitizeEnvForLogging(env: Record<string, string>): Record<strin
 }
 
 /**
- * Deep-sanitize a proxy init payload or command object before logging.
+ * Shallow-sanitize a proxy init payload or command object before logging.
  * Specifically targets the `adapterCommand.env` field which contains process.env.
  */
 export function sanitizePayloadForLogging(payload: unknown): unknown {

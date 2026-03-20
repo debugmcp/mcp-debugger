@@ -46,7 +46,7 @@ export function createMockAdapterRegistry(): IAdapterRegistry {
       supportedLanguages.includes(lang)
     ),
     
-    create: vi.fn().mockImplementation(async (language: string) => ({
+    create: vi.fn().mockImplementation(async (language: string, _config?: unknown) => ({
       language: language as DebugLanguage,
       name: `${language} Debug Adapter`,
       

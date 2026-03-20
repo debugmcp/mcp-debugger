@@ -264,7 +264,7 @@ Delve can break on Go panics and fatal errors at the DAP level. However, the MCP
 2. **Absolute paths**: Use absolute paths for file references in breakpoints
 3. **Internal frame filtering**: Frames from Go runtime/testing paths are filtered by default for cleaner stack traces
 4. **Stop on entry**: Delve has a quirk with "unknown goroutine 1" - the adapter defaults `stopOnEntry=false` to avoid this
-5. **Variable inspection**: Pointers are automatically dereferenced, slices show length/capacity, maps show key-value pairs
+5. **Variable inspection**: Delve's DAP output automatically dereferences pointers, and represents slices with length/capacity and maps as key-value pairs
 6. **Test debugging**: Use `mode: "test"` to debug Go test functions
 
 ## Example: Debugging a Go Program

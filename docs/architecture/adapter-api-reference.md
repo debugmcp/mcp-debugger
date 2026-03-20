@@ -54,7 +54,7 @@ Launch coordination (optional)
   - Typical use: js-debug’s launch flow resolves when a `stopped` event or `adapter_connected` status arrives; the adapter signals readiness via the barrier without forcing `ProxyManager` to know about JavaScript specifics.
 
 Debug configuration
-- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async since v2.1.0)
+- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch)
 - `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
  
 ### AdapterLaunchBarrier helper
@@ -241,7 +241,7 @@ Key runtime behavior
   - Sets up auto-dispose based on adapter state changes
 - Introspection
   - `getSupportedLanguages(): string[]` — currently registered factories
-  - `listLanguages(): Promise<string[]>` — returns registered languages plus dynamically discoverable adapter names when dynamic loading is enabled (not just installed adapters)
+  - `listLanguages(): Promise<string[]>` — returns registered languages plus the hardcoded known-adapter catalog when dynamic loading is enabled (not just installed adapters)
   - `listAvailableAdapters(): Promise<AdapterMetadata[]>` — merges loader metadata with registered languages, marking registered languages as installed
   - `getAdapterInfo(language)` / `getAllAdapterInfo()`
 - Lifecycle

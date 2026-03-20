@@ -98,32 +98,36 @@ AI agents can now explore code without debugging:
 
 ```python
 # Good: Check context before setting breakpoint
-response = set_breakpoint(file="script.py", line=10)
+# Note: In host mode, absolute paths are required. Relative paths are rejected.
+response = set_breakpoint(file="/absolute/path/to/script.py", line=10)
 if "# " in response["context"]["lineContent"]:
     # This is a comment, try the next line
-    response = set_breakpoint(file="script.py", line=11)
+    response = set_breakpoint(file="/absolute/path/to/script.py", line=11)
 ```
 
 ### 2. Path Handling
 
 ```python
-# Good: Use absolute paths when possible
+# Good: Use absolute paths (required in host mode)
 set_breakpoint(file="C:/projects/myapp/src/main.py", line=20)
 
-# Also good: Handle path errors gracefully
+# Important: In host mode, relative paths (e.g., "main.py") are rejected
+# with a "File not found" or "relative paths not allowed" error.
+# Always use absolute paths when running outside a container.
 try:
-    set_breakpoint(file="main.py", line=20)
+    set_breakpoint(file="C:/projects/myapp/src/main.py", line=20)
 except McpError as e:
     if "File not found" in str(e):
         # Extract resolved path from error message
-        # Try with correct path
+        # Try with correct absolute path
 ```
 
 ### 3. Code Navigation
 
 ```python
 # Explore before debugging
-context = get_source_context(file="module.py", line=100, linesContext=20)
+# Note: In host mode, file paths must be absolute
+context = get_source_context(sessionId=session_id, file="/absolute/path/to/module.py", line=100, linesContext=20)
 
 # Analyze the context
 for line_info in context["surrounding"]:
@@ -142,9 +146,10 @@ Here's how an AI agent can use these features together:
 session = create_debug_session(language="python", name="Smart Debug")
 
 # 2. Explore the code first
+# Note: In host mode, absolute paths are required for all file arguments
 context = get_source_context(
     sessionId=session["sessionId"],
-    file="buggy_code.py",
+    file="/absolute/path/to/buggy_code.py",
     line=50,
     linesContext=15
 )
@@ -160,7 +165,7 @@ for line_info in context["surrounding"]:
 for line_num in good_lines[:3]:  # Set up to 3 breakpoints
     bp_response = set_breakpoint(
         sessionId=session["sessionId"],
-        file="buggy_code.py",
+        file="/absolute/path/to/buggy_code.py",
         line=line_num
     )
     print(f"Breakpoint at line {line_num}: {bp_response['context']['lineContent']}")
@@ -168,7 +173,7 @@ for line_num in good_lines[:3]:  # Set up to 3 breakpoints
 # 5. Start debugging
 start_debugging(
     sessionId=session["sessionId"],
-    scriptPath="buggy_code.py"
+    scriptPath="/absolute/path/to/buggy_code.py"
 )
 ```
 

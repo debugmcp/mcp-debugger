@@ -244,26 +244,24 @@ sequenceDiagram
     participant C as MCP Client
     participant SM as SessionManager
     participant PM as ProxyManager
-    participant A as Adapter
+    participant PW as ProxyWorker (IPC)
     participant AP as Adapter Process
-    
+
     C->>SM: stepOver(sessionId)
     SM->>PM: sendDapRequest('next', {threadId})
-    
-    PM->>A: sendDapRequest('next', {threadId})
-    A->>A: Transform if needed
-    A->>AP: DAP next request
-    
-    AP-->>A: DAP response
-    A->>A: Transform if needed
-    A-->>PM: response
-    
+
+    PM->>PW: IPC message (next, {threadId})
+    PW->>AP: DAP next request
+
+    AP-->>PW: DAP response
+    PW-->>PM: IPC response
+
     PM-->>SM: response
-    
-    AP->>A: stopped event
-    A->>PM: emit('stopped', event)
+
+    AP->>PW: stopped event (DAP)
+    PW->>PM: IPC event (stopped)
     PM->>SM: emit('stopped', event)
-    
+
     SM-->>C: {success: true}
 ```
 
@@ -289,7 +287,7 @@ sequenceDiagram
 
 ### Phase 4: Integration (COMPLETED)
 1. SessionManager uses AdapterRegistry for adapter creation (dynamic loading occurs when `enableDynamicLoading` is enabled or in container mode)
-2. server.ts delegates language validation to AdapterRegistry (dynamic, not hardcoded)
+2. server.ts delegates language validation to AdapterRegistry (primarily dynamic via AdapterRegistry, with a hardcoded fallback to `[PYTHON, MOCK]` when discovery is unavailable)
 3. Language adapters load via `@debugmcp/adapter-<language>` packages (dynamically when enabled, or pre-registered)
 4. Tests updated across the board
 
