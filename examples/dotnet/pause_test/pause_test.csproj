@@ -1,12 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Exclude sub-projects (pause_test/) from this compilation -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);pause_test/**</DefaultItemExcludes>
   </PropertyGroup>
 
 </Project>

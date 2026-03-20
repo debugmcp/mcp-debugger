@@ -230,8 +230,11 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
 
   getInitializationBehavior: () => {
     return {
-      // netcoredbg follows the standard DAP sequence:
-      // initialize → initialized event → attach/launch → configurationDone
+      // netcoredbg sends the `initialized` event immediately after the
+      // `initialize` response — before any launch/attach request.
+      // We must defer configurationDone handling and send launch first,
+      // because netcoredbg requires launch before configurationDone.
+      sendLaunchBeforeConfig: true,
       sendAttachBeforeInitialized: false
     };
   },

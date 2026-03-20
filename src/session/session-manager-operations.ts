@@ -1180,8 +1180,24 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
 
     try {
-      // DAP pause request: threadId 0 pauses all threads, specific ID pauses only that thread
-      await session.proxyManager.sendDapRequest('pause', { threadId: threadId ?? 0 });
+      this.logger.debug(`[SessionManager] pauseExecution: sending DAP pause for session=${sessionId} currentState=${session.state}`);
+      // DAP pause request: threadId 0 should pause all threads per DAP spec,
+      // but some adapters (e.g. netcoredbg) reject threadId=0 with E_INVALIDARG.
+      // When no explicit threadId is provided, discover one via a threads request.
+      let effectiveThreadId = threadId ?? 0;
+      if (effectiveThreadId === 0) {
+        try {
+          const threadsResp = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+          const threads = threadsResp?.body?.threads;
+          if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
+            effectiveThreadId = threads[0].id;
+            this.logger.info(`[SessionManager pause] Auto-discovered threadId=${effectiveThreadId} for pause`);
+          }
+        } catch {
+          // threads request failed — fall through with threadId=0
+        }
+      }
+      await session.proxyManager.sendDapRequest('pause', { threadId: effectiveThreadId });
 
       this.logger.info(
         `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`

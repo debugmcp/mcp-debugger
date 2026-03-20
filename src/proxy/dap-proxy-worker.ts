@@ -552,12 +552,27 @@ export class DapProxyWorker {
         this.sendDapEvent('output', body);
       },
       onStopped: async (body) => {
-        this.logger!.info('[Worker] DAP event: stopped', body);
-        // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
-        // to ensure thread data is fresh before stackTrace requests.
-        // We await this before forwarding the stopped event so that
-        // getStackTrace has thread data available.
-        if (this.dapClient && this.adapterPolicy?.name === 'java') {
+        this.logger!.info(`[Worker] DAP event: stopped reason=${body.reason} threadId=${body.threadId} allThreadsStopped=${body.allThreadsStopped}`);
+        // Some adapters (e.g. Delve for Go, JDI bridge for Java) may omit threadId
+        // from stopped events or need fresh thread data. When threadId is missing,
+        // issue a 'threads' request to discover a valid thread and populate the body.
+        if (this.dapClient && typeof body.threadId !== 'number') {
+          try {
+            const resp = await this.dapClient.sendRequest('threads', {});
+            this.logger!.info('[Worker] Auto-discovered threads after stopped event (no threadId)', resp);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const threads = (resp as any)?.body?.threads;
+            if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
+              body.threadId = threads[0].id;
+              this.logger!.info(`[Worker] Set missing threadId to ${body.threadId} from threads response`);
+            }
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger!.warn('[Worker] Failed to auto-discover threads:', msg);
+          }
+        } else if (this.dapClient && this.adapterPolicy?.name === 'java') {
+          // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
+          // to ensure thread data is fresh before stackTrace requests.
           try {
             const resp = await this.dapClient.sendRequest('threads', {});
             this.logger!.info('[Worker] Pre-fetched threads after stopped event', resp);
@@ -577,11 +592,11 @@ export class DapProxyWorker {
         this.sendDapEvent('thread', body);
       },
       onExited: (body) => {
-        this.logger!.info('[Worker] DAP event: exited (debuggee)', body);
+        this.logger!.info(`[Worker] DAP event: exited exitCode=${body.exitCode}`);
         this.sendDapEvent('exited', body);
       },
       onTerminated: (body) => {
-        this.logger!.info('[Worker] DAP event: terminated (session)', body);
+        this.logger!.info(`[Worker] DAP event: terminated body=${JSON.stringify(body)}`);
         this.sendDapEvent('terminated', body);
         this.shutdown();
       },

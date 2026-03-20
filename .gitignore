@@ -145,6 +145,8 @@ examples/rust/**/.debug-mcp-linux-build
 # .NET build artifacts
 examples/dotnet/bin/
 examples/dotnet/obj/
+examples/dotnet/pause_test/bin/
+examples/dotnet/pause_test/obj/
 
 # Java build artifacts
 examples/java/*.class

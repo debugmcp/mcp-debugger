@@ -367,8 +367,24 @@ export class DebugMcpServer {
   public async getStackTrace(sessionId: string, includeInternals: boolean = false): Promise<StackFrame[]> {
     this.validateSession(sessionId);
     const session = this.sessionManager.getSession(sessionId);
-    const currentThreadId = session?.proxyManager?.getCurrentThreadId();
-    if (!session || !session.proxyManager || typeof currentThreadId !== 'number') {
+    if (!session || !session.proxyManager) {
+        throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
+    }
+    let currentThreadId = session.proxyManager.getCurrentThreadId();
+    // If no thread ID is known (e.g. adapter omitted threadId from stopped event),
+    // try to discover one via a 'threads' DAP request.
+    if (typeof currentThreadId !== 'number') {
+      try {
+        const threadsResp = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+        const threads = threadsResp?.body?.threads;
+        if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
+          currentThreadId = threads[0].id;
+        }
+      } catch {
+        // threads request failed — fall through to error
+      }
+    }
+    if (typeof currentThreadId !== 'number') {
         throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
     }
     return this.sessionManager.getStackTrace(sessionId, currentThreadId, includeInternals);
