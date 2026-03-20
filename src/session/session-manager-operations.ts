@@ -758,7 +758,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     sessionId: string,
     file: string,
     line: number,
-    condition?: string
+    condition?: string,
+    suspendPolicy?: 'all' | 'thread'
   ): Promise<Breakpoint> {
     const session = this._getSessionById(sessionId);
 
@@ -774,7 +775,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `[SessionManager setBreakpoint] Using validated file path "${file}" for session ${sessionId}`
     );
 
-    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, verified: false };
+    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, suspendPolicy, verified: false };
 
     if (!session.breakpoints) session.breakpoints = new Map();
     session.breakpoints.set(bpId, newBreakpoint);
@@ -800,7 +801,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             'setBreakpoints',
             {
               source: { path: file },
-              breakpoints: allBpsForFile.map(bp => ({ line: bp.line, condition: bp.condition })),
+              breakpoints: allBpsForFile.map(bp => ({
+                line: bp.line,
+                condition: bp.condition,
+                ...(bp.suspendPolicy ? { suspendPolicy: bp.suspendPolicy } : {}),
+              })),
             }
           );
         if (
@@ -1151,7 +1156,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
-  async pause(sessionId: string): Promise<DebugResult> {
+  async pause(sessionId: string, threadId?: number): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
 
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
@@ -1175,8 +1180,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
 
     try {
-      // DAP pause request uses threadId 0 to pause all threads
-      await session.proxyManager.sendDapRequest('pause', { threadId: 0 });
+      // DAP pause request: threadId 0 pauses all threads, specific ID pauses only that thread
+      await session.proxyManager.sendDapRequest('pause', { threadId: threadId ?? 0 });
 
       this.logger.info(
         `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`
@@ -1192,6 +1197,21 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       );
       throw error;
     }
+  }
+
+  async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>> {
+    const session = this._getSessionById(sessionId);
+
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      throw new ProxyNotRunningError(sessionId, 'listThreads');
+    }
+
+    const response = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+    return (response?.body?.threads ?? []).map(t => ({ id: t.id, name: t.name }));
   }
 
   /**

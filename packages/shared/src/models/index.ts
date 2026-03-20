@@ -210,6 +210,8 @@ export interface Breakpoint {
   line: number;
   /** Conditional expression (if any) */
   condition?: string;
+  /** Suspend policy: 'all' suspends all threads (default), 'thread' only suspends the event thread */
+  suspendPolicy?: 'all' | 'thread';
   /** Whether the breakpoint is verified */
   verified: boolean;
   /** Validation message from DAP adapter */

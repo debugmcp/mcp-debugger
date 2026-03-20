@@ -82,6 +82,7 @@ describe('Server Control Tools Tests', () => {
         'test-session',
         expect.stringContaining('/path/to/test.py'),
         10,
+        undefined,
         undefined
       );
       
@@ -124,14 +125,52 @@ describe('Server Control Tools Tests', () => {
         'test-session',
         expect.stringContaining('/path/to/test.py'),
         20,
-        'x > 10'
+        'x > 10',
+        undefined
+      );
+    });
+
+    it('should pass suspendPolicy to SessionManager', async () => {
+      const mockBreakpoint = {
+        id: 'bp-3',
+        file: '/path/to/test.py',
+        line: 30,
+        suspendPolicy: 'thread' as const,
+        verified: true
+      };
+
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.setBreakpoint.mockResolvedValue(mockBreakpoint);
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: {
+            sessionId: 'test-session',
+            file: '/path/to/test.py',
+            line: 30,
+            suspendPolicy: 'thread'
+          }
+        }
+      });
+
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+        'test-session',
+        expect.stringContaining('/path/to/test.py'),
+        30,
+        undefined,
+        'thread'
       );
     });
 
     it('should handle SessionManager errors', async () => {
       // Mock getSession to return null - session not found
       mockSessionManager.getSession.mockReturnValue(null);
-      
+
       const result = await callToolHandler({
         method: 'tools/call',
         params: {
@@ -398,7 +437,31 @@ describe('Server Control Tools Tests', () => {
 
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);
-      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session');
+      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session', undefined);
+    });
+
+    it('should pause a specific thread when threadId is provided', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.pause.mockResolvedValue({
+        success: true,
+        state: 'paused'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'pause_execution',
+          arguments: { sessionId: 'test-session', threadId: 42 }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.pause).toHaveBeenCalledWith('test-session', 42);
     });
 
     it('should handle pause on non-existent session', async () => {
@@ -411,6 +474,57 @@ describe('Server Control Tools Tests', () => {
           arguments: { sessionId: 'non-existent' }
         }
       })).rejects.toThrow(McpError);
+    });
+  });
+
+  describe('list_threads', () => {
+    it('should list threads successfully', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'paused',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.listThreads.mockResolvedValue([
+        { id: 1, name: 'main' },
+        { id: 2, name: 'AWT-EventQueue-0' },
+      ]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_threads',
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.threads).toHaveLength(2);
+      expect(content.threads[0]).toEqual({ id: 1, name: 'main' });
+      expect(content.threads[1]).toEqual({ id: 2, name: 'AWT-EventQueue-0' });
+      expect(mockSessionManager.listThreads).toHaveBeenCalledWith('test-session');
+    });
+
+    it('should handle list_threads on non-existent session', async () => {
+      mockSessionManager.getSession.mockReturnValue(null);
+
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_threads',
+          arguments: { sessionId: 'test-session' }
+        }
+      })).rejects.toThrow(McpError);
+    });
+
+    it('should reject list_threads with missing sessionId', async () => {
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_threads',
+          arguments: {}
+        }
+      })).rejects.toThrow('Missing required sessionId');
     });
   });
 });

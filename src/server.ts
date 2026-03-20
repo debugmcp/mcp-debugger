@@ -98,6 +98,8 @@ interface ToolArguments {
   stopOnEntry?: boolean;
   justMyCode?: boolean;
   terminateProcess?: boolean;
+  suspendPolicy?: 'all' | 'thread';
+  threadId?: number;
 }
 
 /**
@@ -335,14 +337,14 @@ export class DebugMcpServer {
     return this.sessionManager.closeSession(sessionId);
   }
 
-  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint> {
+  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string, suspendPolicy?: 'all' | 'thread'): Promise<Breakpoint> {
     this.validateSession(sessionId);
 
     // Check if the adapter handles non-file source identifiers (e.g. Java FQCNs)
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     if (policy.isNonFileSourceIdentifier?.(file)) {
       this.logger.info(`[DebugMcpServer.setBreakpoint] Non-file source identifier detected: ${file}`);
-      return this.sessionManager.setBreakpoint(sessionId, file, line, condition);
+      return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
     }
 
     // Check file exists for immediate feedback
@@ -354,7 +356,7 @@ export class DebugMcpServer {
     this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${fileCheck.effectivePath} (original: ${file})`);
 
     // Pass the effective path (which has been resolved for container) to session manager
-    return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition);
+    return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition, suspendPolicy);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -527,7 +529,7 @@ export class DebugMcpServer {
           { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions', inputSchema: { type: 'object', properties: {} } },
-          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: ['sessionId', 'file', 'line'] } },
           { name: 'start_debugging', description: 'Start debugging a script', inputSchema: { 
               type: 'object', 
               properties: { 
@@ -581,7 +583,8 @@ export class DebugMcpServer {
           { name: 'step_into', description: 'Step into', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'step_out', description: 'Step out', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'continue_execution', description: 'Continue execution', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'pause_execution', description: 'Pause a running program', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'pause_execution', description: 'Pause a running program', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, threadId: { type: 'number', description: 'Thread ID to pause. If omitted or 0, pauses all threads. Only supported by the Java/JDI adapter.' } }, required: ['sessionId'] } },
+          { name: 'list_threads', description: 'List all threads in the debugged process', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
           { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' } }, required: ['sessionId'] } },
           { name: 'get_stack_trace', description: 'Get stack trace', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' } }, required: ['sessionId'] } },
@@ -699,7 +702,7 @@ export class DebugMcpServer {
               }
               
               try {
-                const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition);
+                const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition, args.suspendPolicy);
                 
                 // Log breakpoint event
                 this.logger.info('debug:breakpoint', {
@@ -1040,7 +1043,14 @@ export class DebugMcpServer {
               break;
             }
             case 'pause_execution': {
-              result = await this.handlePause(args as { sessionId: string });
+              result = await this.handlePause(args as { sessionId: string; threadId?: number });
+              break;
+            }
+            case 'list_threads': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
+              }
+              result = await this.handleListThreads(args as { sessionId: string });
               break;
             }
             case 'get_variables': {
@@ -1197,10 +1207,10 @@ export class DebugMcpServer {
     }
   }
 
-  private async handlePause(args: { sessionId: string }): Promise<ServerResult> {
+  private async handlePause(args: { sessionId: string; threadId?: number }): Promise<ServerResult> {
     try {
       this.validateSession(args.sessionId);
-      const result = await this.sessionManager.pause(args.sessionId);
+      const result = await this.sessionManager.pause(args.sessionId, args.threadId);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       this.logger.error('Failed to pause execution', { error });
@@ -1211,6 +1221,18 @@ export class DebugMcpServer {
         return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
       }
       throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
+    }
+  }
+
+  private async handleListThreads(args: { sessionId: string }): Promise<ServerResult> {
+    try {
+      this.validateSession(args.sessionId);
+      const threads = await this.sessionManager.listThreads(args.sessionId);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, threads }) }] };
+    } catch (error) {
+      this.logger.error('Failed to list threads', { error });
+      if (error instanceof McpError) throw error;
+      throw new McpError(McpErrorCode.InternalError, `Failed to list threads: ${(error as Error).message}`);
     }
   }
 
