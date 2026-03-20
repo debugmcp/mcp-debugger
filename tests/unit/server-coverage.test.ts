@@ -157,11 +157,52 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         .rejects.toThrow('Cannot get stack trace: no active proxy');
     });
 
-    it('should handle getStackTrace without current thread', async () => {
+    it('should handle getStackTrace without current thread — falls back to threads request', async () => {
+      const mockProxy = {
+        getCurrentThreadId: () => null,
+        isRunning: () => true,
+        sendDapRequest: vi.fn().mockResolvedValue({ body: { threads: [{ id: 5, name: 'main' }] } })
+      };
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
-        proxyManager: { getCurrentThreadId: () => null }
+        proxyManager: mockProxy
+      });
+      mockSessionManager.getStackTrace.mockResolvedValue([{ id: 1, name: 'main', file: 'test.go', line: 10 }]);
+
+      const result = await server.getStackTrace('test-session');
+
+      expect(mockProxy.sendDapRequest).toHaveBeenCalledWith('threads', {});
+      expect(mockSessionManager.getStackTrace).toHaveBeenCalledWith('test-session', 5, false);
+      expect(result).toHaveLength(1);
+    });
+
+    it('should throw when getStackTrace has no thread and threads request fails', async () => {
+      const mockProxy = {
+        getCurrentThreadId: () => null,
+        isRunning: () => true,
+        sendDapRequest: vi.fn().mockRejectedValue(new Error('not connected'))
+      };
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        proxyManager: mockProxy
+      });
+
+      await expect(server.getStackTrace('test-session'))
+        .rejects.toThrow('Cannot get stack trace: no active proxy');
+    });
+
+    it('should throw when getStackTrace has no thread and threads response is empty', async () => {
+      const mockProxy = {
+        getCurrentThreadId: () => null,
+        isRunning: () => true,
+        sendDapRequest: vi.fn().mockResolvedValue({ body: { threads: [] } })
+      };
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        proxyManager: mockProxy
       });
 
       await expect(server.getStackTrace('test-session'))

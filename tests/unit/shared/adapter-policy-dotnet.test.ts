@@ -290,6 +290,11 @@ describe('DotnetAdapterPolicy', () => {
     expect(behavior.sendAttachBeforeInitialized).toBe(false);
   });
 
+  it('getInitializationBehavior has sendLaunchBeforeConfig true (netcoredbg sends initialized before launch)', () => {
+    const behavior = DotnetAdapterPolicy.getInitializationBehavior();
+    expect(behavior.sendLaunchBeforeConfig).toBe(true);
+  });
+
   // ===== DAP client behavior =====
 
   it('getDapClientBehavior returns expected defaults', () => {

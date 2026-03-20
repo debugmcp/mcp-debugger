@@ -2371,9 +2371,41 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 42 });
     });
 
-    it('should default threadId to 0 when not provided', async () => {
+    it('should auto-discover threadId when not provided', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockProxyManager.sendDapRequest.mockResolvedValue({});
+      // First call: threads request returns thread list
+      // Second call: pause request
+      mockProxyManager.sendDapRequest
+        .mockResolvedValueOnce({ body: { threads: [{ id: 7, name: 'Main' }] } })
+        .mockResolvedValueOnce({});
+
+      const result = await operations.pause('test-session');
+
+      expect(result.success).toBe(true);
+      // Should have called threads first, then pause with discovered threadId
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('threads', {});
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 7 });
+    });
+
+    it('should fall back to threadId=0 when threads request fails', async () => {
+      mockSession.state = SessionState.RUNNING;
+      // threads request fails, pause succeeds
+      mockProxyManager.sendDapRequest
+        .mockRejectedValueOnce(new Error('not connected'))
+        .mockResolvedValueOnce({});
+
+      const result = await operations.pause('test-session');
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 0 });
+    });
+
+    it('should fall back to threadId=0 when threads response has no threads', async () => {
+      mockSession.state = SessionState.RUNNING;
+      // threads returns empty list, pause succeeds
+      mockProxyManager.sendDapRequest
+        .mockResolvedValueOnce({ body: { threads: [] } })
+        .mockResolvedValueOnce({});
 
       const result = await operations.pause('test-session');
 

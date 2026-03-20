@@ -115,6 +115,36 @@ describe('ProxyManager Message Handling', () => {
       expect(capturedThreadId).toBe(1);
     });
 
+    it('should update currentThreadId when stopped event includes threadId', () => {
+      // Initially null
+      expect(proxyManager.getCurrentThreadId()).toBeNull();
+
+      // Stopped event with valid threadId
+      proxyManager.simulateStoppedEvent(42, 'pause');
+
+      expect(proxyManager.getCurrentThreadId()).toBe(42);
+    });
+
+    it('should not update currentThreadId when stopped event has no threadId (worker auto-discovers)', () => {
+      // Set a known threadId first
+      proxyManager.simulateStoppedEvent(10, 'breakpoint');
+      expect(proxyManager.getCurrentThreadId()).toBe(10);
+
+      // Stopped event with undefined threadId (before worker auto-discovery would populate it)
+      // The proxy-manager should preserve the old value
+      const stoppedMessage = {
+        type: 'dapEvent',
+        sessionId: 'test-session',
+        event: 'stopped',
+        body: { reason: 'pause', allThreadsStopped: true }
+        // Note: no threadId in body
+      };
+      proxyManager.simulateMessage(stoppedMessage);
+
+      // currentThreadId should still be 10 (not overwritten to undefined/null)
+      expect(proxyManager.getCurrentThreadId()).toBe(10);
+    });
+
     it('should handle continued DAP events', () => {
       let continuedEmitted = false;
 
