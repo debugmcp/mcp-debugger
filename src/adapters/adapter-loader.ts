@@ -149,14 +149,7 @@ export class AdapterLoader {
     for (const a of known) {
       // Check if adapter is currently loadable; don't fail if not — adapters are loaded
       // on-demand, so unavailability here just means installed=false in the metadata
-      let installed = false;
-      try {
-        installed = await this.isAdapterAvailable(a.name);
-      } catch {
-        // If availability check fails, still include in list since adapters load on-demand
-        // The actual load will happen when loadAdapter is called
-        installed = false;
-      }
+      const installed = await this.isAdapterAvailable(a.name);
       results.push({ ...a, installed });
     }
     return results;
@@ -168,14 +161,16 @@ export class AdapterLoader {
 
   // Try multiple fallback locations (node_modules first, then packages for non-container/dev images)
   private getFallbackModulePaths(language: string): string[] {
+    const lang = language.toLowerCase();
     return [
-      new URL(`../../node_modules/@debugmcp/adapter-${language}/dist/index.js`, import.meta.url).href,
-      new URL(`../../packages/adapter-${language}/dist/index.js`, import.meta.url).href
+      new URL(`../../node_modules/@debugmcp/adapter-${lang}/dist/index.js`, import.meta.url).href,
+      new URL(`../../packages/adapter-${lang}/dist/index.js`, import.meta.url).href
     ];
   }
- 
+
   private getFactoryClassName(language: string): string {
-    const capitalized = language.charAt(0).toUpperCase() + language.slice(1);
+    const lower = language.toLowerCase();
+    const capitalized = lower.charAt(0).toUpperCase() + lower.slice(1);
     return `${capitalized}AdapterFactory`;
   }
 }

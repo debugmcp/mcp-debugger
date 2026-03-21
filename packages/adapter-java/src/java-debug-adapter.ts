@@ -358,7 +358,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     switch (event.event) {
       case 'stopped':
         this.transitionTo(AdapterState.DEBUGGING);
-        if (event.body?.threadId) {
+        if (event.body?.threadId != null) {
           this.currentThreadId = event.body.threadId;
         }
         this.emit('stopped', event);
@@ -393,7 +393,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   handleDapResponse(_response: DebugProtocol.Response): void {
-    // No-op: responses handled by ProxyManager
+    // No-op: DAP responses handled by the proxy layer
   }
 
   // ===== Connection Management =====

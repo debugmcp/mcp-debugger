@@ -140,7 +140,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
         if (typeof Factory === 'function') {
           // We need a constructor type that returns IAdapterFactory
           type AdapterFactoryConstructor = new () => IAdapterFactory;
-          adapterRegistry.register(lang, new (Factory as AdapterFactoryConstructor)());
+          return adapterRegistry.register(lang, new (Factory as AdapterFactoryConstructor)());
         }
       }).catch(() => {
         // Optional in container; ignore failures

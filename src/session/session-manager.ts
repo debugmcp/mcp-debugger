@@ -34,6 +34,9 @@ export class SessionManager extends SessionManagerOperations {
    * sessionId as a parameter or capture it from the event handler context.
    */
   protected async handleAutoContinue(): Promise<void> {
-    throw new Error('handleAutoContinue not yet implemented: requires session context refactoring');
+    // Not yet implemented: requires session context refactoring.
+    // Log a warning instead of throwing, so the session stays paused
+    // rather than producing an unhandled error.
+    this.logger.warn('[SessionManager] handleAutoContinue called but not yet implemented — session will remain paused');
   }
 }

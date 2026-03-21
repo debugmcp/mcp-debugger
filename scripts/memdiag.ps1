@@ -29,7 +29,7 @@ $sumPrivate = (Get-Process | Measure-Object -Property PrivateMemorySize64 -Sum).
 $sumWS      = (Get-Process | Measure-Object -Property WorkingSet64 -Sum).Sum
 
 Write-Host ("System Memory: Total {0} GB, Free {1} GB" -f $totalGB, $freeGB)
-Write-Host ("Committed: {0:N2}/{1:N2} GB ({2:P0})" -f (GB $commit), (GB $commitLimit), ($commit / $commitLimit))
+Write-Host ("Committed: {0:N2}/{1:N2} GB ({2:P0})" -f (GB $commit), (GB $commitLimit), $(if ($commitLimit -gt 0) { $commit / $commitLimit } else { 0 }))
 Write-Host ("Pagefile Usage: {0:N1}%  |  Memory Compression: {1:N2} GB" -f $pagefilePct, (GB $compressedB))
 Write-Host ("Kernel Pools -> Nonpaged {0:N2} GB, Paged {1:N2} GB" -f (GB $np), (GB $pp))
 Write-Host ("File Cache: {0:N2} GB  |  Standby: {1:N2} GB" -f (GB $cache), (GB ($standbyNorm + $standbyRes + $standbyCore)))

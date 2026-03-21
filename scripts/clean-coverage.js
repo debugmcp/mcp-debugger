@@ -37,6 +37,12 @@ async function cleanCoverage() {
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
 
+    // The rm may have succeeded partially — check if the directory still exists
+    if (!existsSync(COVERAGE_DIR)) {
+      console.log('[Clean Coverage] Coverage directory removed');
+      return;
+    }
+
     // If removal failed due to permissions, try escalation strategies when available.
     const stats = statSync(COVERAGE_DIR);
     const isRootOwned = typeof stats.uid === 'number' && stats.uid === 0;

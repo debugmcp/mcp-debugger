@@ -123,7 +123,7 @@ while ($true) {
     # Console status
     $status = ("[{0}] Commit {1:N2}/{2:N2} GB ({3:N1}%), Free {4} GB, Standby {5} GB, Delta {6:N2} GB" -f `
       $ts, (GB $commit), (GB $commitLimit), $commitPct, $freeGB, (GB ($standbyNorm + $standbyRes + $standbyCore)), (GB $delta))
-    if (($commit / $commitLimit) -ge 0.95) {
+    if ($commitLimit -gt 0 -and ($commit / $commitLimit) -ge 0.95) {
       Write-Warning $status
     } else {
       Write-Host $status

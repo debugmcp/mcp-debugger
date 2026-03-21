@@ -344,7 +344,7 @@ public class JdiDapServer {
             try {
                 vm = connector.attach(connArgs);
                 break;
-            } catch (ConnectException e) {
+            } catch (IOException e) {
                 if (System.currentTimeMillis() > deadline) throw e;
                 Thread.sleep(200);
             }
