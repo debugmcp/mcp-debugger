@@ -11,7 +11,7 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Tests spawning from different working directories
 
 ### 2. Docker smoke tests (`docker/` subdirectory)
-- Tests containerized deployment for Python, JavaScript, Go, Rust, Java, and .NET
+- Tests containerized deployment for Python, JavaScript, and Rust
 - Verifies Docker setup works end-to-end
 - Tests path translation (host paths to container paths), session lifecycle, core debug actions, and cleanup
 - Includes Docker availability check with graceful skip
@@ -20,7 +20,7 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Tests JavaScript adapter through MCP interface
 - Validates known quirks:
   - Breakpoints may report "unverified" initially but still work
-  - Stack traces include Node internal frames
+  - Stack trace retrieval uses `includeInternals: false` to filter out Node internal frames
   - Variable references change after steps (refresh pattern required)
 - Tests core functionality: breakpoints, stepping, variables, expressions
 - Multiple test scenarios including multiple breakpoints and step-into

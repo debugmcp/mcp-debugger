@@ -13,19 +13,14 @@ function isVendorPath(p: unknown): boolean {
 
 describe('JavascriptAdapterFactory.validate (edge branches)', () => {
   const originalPath = process.env.PATH;
-  let versionDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    versionDescriptor = Object.getOwnPropertyDescriptor(process, 'version');
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     process.env.PATH = originalPath;
-    if (versionDescriptor) {
-      Object.defineProperty(process, 'version', versionDescriptor);
-    }
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });

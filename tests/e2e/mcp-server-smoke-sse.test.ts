@@ -55,7 +55,9 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           
           await new Promise<void>((resolve) => {
             const checkInterval = setInterval(() => {
-              if (!proc || proc.killed || Date.now() - shutdownStart > gracefulShutdownTimeout) {
+              // Note: proc.killed is true as soon as a signal is sent, not when the process exits.
+              // Use exitCode as a more reliable indicator of actual process termination.
+              if (!proc || proc.exitCode !== null || Date.now() - shutdownStart > gracefulShutdownTimeout) {
                 clearInterval(checkInterval);
                 resolve();
               }
@@ -342,7 +344,9 @@ describe('MCP Server E2E SSE Smoke Test', () => {
       const serverReady = await waitForHealthEndpoint(serverPort, TEST_TIMEOUT);
       if (!serverReady) {
         // Additional debugging when health check fails
-        if (sseServerProcess && !sseServerProcess.killed) {
+        // Note: proc.killed is true as soon as a signal is sent, not when the process exits.
+        // Use exitCode as a more reliable indicator of actual process termination.
+        if (sseServerProcess && sseServerProcess.exitCode === null) {
           console.error('[SSE Smoke Test] Server process is still running but health check failed');
         } else {
           console.error('[SSE Smoke Test] Server process has exited');

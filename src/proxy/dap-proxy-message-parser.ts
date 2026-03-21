@@ -174,11 +174,4 @@ export class MessageParser {
     return obj as unknown as TerminatePayload;
   }
 
-  /**
-   * Helper to check if a message is a string that needs parsing
-   */
-  static isStringMessage(message: unknown): message is string {
-    return typeof message === 'string';
-  }
-
 }

@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { DebugSessionInfo, DebugLanguage, SessionState } from '@debugmcp/shared';
@@ -24,7 +24,6 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('Server Session Tools Tests', () => {
-  let debugServer: DebugMcpServer;
   let mockServer: any;
   let mockSessionManager: any;
   let mockDependencies: any;
@@ -43,7 +42,7 @@ describe('Server Session Tools Tests', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
     
-    debugServer = new DebugMcpServer();
+    new DebugMcpServer();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
   });
 

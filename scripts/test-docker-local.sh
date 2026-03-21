@@ -91,10 +91,7 @@ fi
 echo ""
 echo "====================================="
 
-# Expected state before fix:
-# - Python should PASS
-# - JavaScript should FAIL
-# This confirms our tests are working properly
+# JavaScript may FAIL due to a known regression. Both passing is the desired outcome.
 
 if [ $PYTHON_RESULT -eq 0 ] && [ $JS_RESULT -ne 0 ]; then
     echo -e "${YELLOW}⚠️  Tests are in expected state: Python works, JavaScript has known regression${NC}"

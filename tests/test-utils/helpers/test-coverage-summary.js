@@ -61,6 +61,9 @@ async function testCoverageSummary() {
 
     if (fs.existsSync(jsonFile)) {
       const results = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+      // Note: These field names (numTotalTestSuites, numPassedTests, etc.) match the
+      // Vitest JSON reporter output format (--reporter=json). If the reporter changes
+      // or a different output format is used, these fields may not be populated.
       suiteSummary = {
         total: results.numTotalTestSuites || 0,
         passed: results.numPassedTestSuites || 0,

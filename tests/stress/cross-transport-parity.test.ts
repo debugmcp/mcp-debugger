@@ -4,7 +4,6 @@
  * Ensures that debug operations produce identical results across:
  * - STDIO transport
  * - SSE transport
- * - Docker transport: not yet implemented
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

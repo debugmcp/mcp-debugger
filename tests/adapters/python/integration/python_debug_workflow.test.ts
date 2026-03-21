@@ -21,7 +21,7 @@ async function startTestServer(): Promise<void> {
     console.log(`[Test Setup] Server script path for SDK StdioClientTransport: ${serverScriptPath}`); 
 
     client = new Client({
-        name: "jest-mcp-test-client",
+        name: "mcp-test-client",
         version: "0.1.0",
         capabilities: { tools: {} } 
     });

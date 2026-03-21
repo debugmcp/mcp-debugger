@@ -105,7 +105,7 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
   transport: StdioClientTransport;
   cleanup: () => Promise<void>;
 }> {
-  const imageName = config.imageName || 'mcp-debugger:test';
+  const imageName = config.imageName || DEFAULT_IMAGE;
   const containerName = config.containerName || `mcp-debugger-test-${Date.now()}`;
   const workspaceMount = config.workspaceMount || path.resolve(ROOT, 'examples');
   const logLevel = config.logLevel || 'info';

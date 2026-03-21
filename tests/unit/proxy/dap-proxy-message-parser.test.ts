@@ -366,12 +366,4 @@ describe('MessageParser', () => {
     });
   });
 
-  describe('helper functions', () => {
-    it('isStringMessage should identify strings', () => {
-      expect(MessageParser.isStringMessage('test')).toBe(true);
-      expect(MessageParser.isStringMessage(123)).toBe(false);
-      expect(MessageParser.isStringMessage({})).toBe(false);
-      expect(MessageParser.isStringMessage(null)).toBe(false);
-    });
-  });
 });

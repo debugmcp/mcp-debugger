@@ -35,9 +35,8 @@ export class ProxyManagerFactory implements IProxyManagerFactory {
 }
 
 /**
- * Mock implementation of ProxyManager factory for testing
- * This creates a simple stub that should be replaced by test code
- * with the actual MockProxyManager from tests/mocks/mock-proxy-manager.ts
+ * Mock implementation of ProxyManager factory for testing.
+ * Tests must set createFn before calling create().
  */
 export class MockProxyManagerFactory implements IProxyManagerFactory {
   public createdManagers: IProxyManager[] = [];
@@ -52,7 +51,7 @@ export class MockProxyManagerFactory implements IProxyManagerFactory {
       return manager;
     }
     
-    // Return a minimal stub if no custom create function is provided
+    // Throw if no custom create function was provided
     throw new Error('MockProxyManagerFactory requires createFn to be set in tests');
   }
 }

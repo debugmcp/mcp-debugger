@@ -847,7 +847,7 @@ describe('DapProxyWorker', () => {
         })
       );
 
-      connectionHandlers.onStopped?.({ reason: 'breakpoint' });
+      await connectionHandlers.onStopped?.({ reason: 'breakpoint' });
       expect(mockMessageSender.send).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'dapEvent',

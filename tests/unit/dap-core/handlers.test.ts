@@ -7,7 +7,6 @@ import {
   isValidProxyMessage,
   createInitialState,
   DAPSessionState,
-  ProxyMessage,
   ProxyStatusMessage,
   ProxyErrorMessage,
   ProxyDapEventMessage

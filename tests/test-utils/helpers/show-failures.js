@@ -32,6 +32,7 @@ async function showFailures() {
     
     if (!results.testResults || results.testResults.length === 0) {
       console.log('No test results to analyze.');
+      fs.unlinkSync(jsonFile);
       return;
     }
     

@@ -169,8 +169,10 @@ export class FakeDebugTargetLauncher implements IDebugTargetLauncher {
       process,
       debugPort: port,
       terminate: async () => {
-        process.kill('SIGTERM');
-        await new Promise(resolve => process.once('exit', resolve));
+        await new Promise<void>(resolve => {
+          process.once('exit', () => resolve());
+          process.kill('SIGTERM');
+        });
       }
     };
     

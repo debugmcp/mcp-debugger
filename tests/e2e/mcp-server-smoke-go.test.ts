@@ -117,14 +117,23 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       });
 
       const listResponse = parseSdkToolResult(listResult);
-      if (listResponse.adapters) {
-        const adapters = listResponse.adapters as Array<{ name: string }>;
-        const goAdapter = adapters.find(a => a.name === 'go');
+      // Response may contain 'adapters' or 'languages' array depending on server version
+      const adapters = listResponse.adapters as Array<{ name: string; id?: string }> | undefined;
+      const languages = listResponse.languages as Array<{ name?: string; id?: string } | string> | undefined;
+      const allAdapters = adapters || languages;
+      if (allAdapters) {
+        const goAdapter = allAdapters.find((a: { name?: string; id?: string } | string) =>
+          typeof a === 'string' ? a === 'go' : (a.name === 'go' || a.id === 'go')
+        );
         expect(goAdapter).toBeDefined();
         console.log('[Go Smoke Test] Go adapter found in supported languages');
+      } else {
+        // Tool responded but with unexpected format — log and pass for smoke test
+        console.log('[Go Smoke Test] list_supported_languages response:', JSON.stringify(listResponse).slice(0, 200));
       }
     } catch (error) {
       console.log('[Go Smoke Test] list_supported_languages tool failed:', error);
+      throw error;
     }
   });
 

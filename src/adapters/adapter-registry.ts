@@ -226,7 +226,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   }
 
   /**
-   * List languages that are actually installed and available via dynamic loader
+   * List all known languages from static registration and dynamic discovery
    */
   async listLanguages(): Promise<string[]> {
     const registered = this.getSupportedLanguages();
@@ -345,9 +345,12 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
    */
   private async createDependencies(config: AdapterConfig): Promise<AdapterDependencies> {
     const { createProductionDependencies } = await import('../container/dependencies.js');
+    const logFile = config.logDir && config.sessionId
+      ? `${config.logDir}/${config.sessionId}.log`
+      : undefined;
     const deps = createProductionDependencies({
       logLevel: 'debug',
-      logFile: `${config.logDir}/${config.sessionId}.log`
+      ...(logFile ? { logFile } : {})
     });
     
     return {
@@ -395,7 +398,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
 }
 
 /**
- * Create a singleton instance of the adapter registry
+ * Singleton storage for the adapter registry
  */
 let registryInstance: AdapterRegistry | null = null;
 

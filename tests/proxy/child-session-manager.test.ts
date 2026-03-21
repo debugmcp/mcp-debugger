@@ -8,8 +8,6 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy } from '@debugmcp/shared';
 import { JsDebugAdapterPolicy, PythonAdapterPolicy, DefaultAdapterPolicy } from '@debugmcp/shared';
 import { ChildSessionManager } from '../../src/proxy/child-session-manager.js';
-import type { MinimalDapClient } from '../../src/proxy/minimal-dap.js';
-
 // Mock MinimalDapClient
 class MockMinimalDapClient extends EventEmitter {
   host: string;
@@ -103,7 +101,7 @@ describe('ChildSessionManager', () => {
     });
     
     it('should mirror breakpoints when policy requires', () => {
-      const storeBreakpointsSpy = vi.spyOn(manager as any, 'storedBreakpoints', 'get')
+      vi.spyOn(manager as any, 'storedBreakpoints', 'get')
         .mockReturnValue(new Map());
       
       const breakpoints: DebugProtocol.SourceBreakpoint[] = [

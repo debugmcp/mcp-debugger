@@ -202,12 +202,12 @@ describe('Comprehensive MCP Debugger Test — 19 Tools × 5 Languages', () => {
   for (const lang of LANGUAGES) {
     describe(`Language: ${lang.language}`, () => {
       if (!lang.available) {
-        // Skip entire language
-        it.skip(`SKIP — ${lang.skipReason}`, () => {
-          for (const tool of ALL_TOOLS.filter(t => t !== 'list_supported_languages' && t !== 'list_debug_sessions')) {
-            record(tool, lang.language, 'SKIP', lang.skipReason!);
-          }
-        });
+        // Skip entire language — record() calls are outside it.skip() because
+        // the callback body of it.skip() never executes
+        for (const tool of ALL_TOOLS.filter(t => t !== 'list_supported_languages' && t !== 'list_debug_sessions')) {
+          record(tool, lang.language, 'SKIP', lang.skipReason!);
+        }
+        it.skip(`SKIP — ${lang.skipReason}`, () => {});
         return;
       }
 

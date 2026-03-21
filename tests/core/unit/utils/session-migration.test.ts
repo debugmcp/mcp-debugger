@@ -23,7 +23,7 @@ describe('Session Migration Verification', () => {
     expect(managedSession).not.toHaveProperty('pythonPath');
   });
   
-  it('should work with all supported languages using executablePath', () => {
+  it('should work with Python and Mock languages using executablePath', () => {
     const store = new SessionStore();
     
     // Test Python
@@ -69,38 +69,36 @@ describe('Session Migration Verification', () => {
   });
   
   it('should verify API interfaces use executablePath', () => {
-    // This test documents the migration is complete
-    // All the following interfaces should use executablePath:
-    
+    // Illustrative examples of executablePath usage
+
     // 1. CreateSessionParams
     const createParams: CreateSessionParams = {
       language: DebugLanguage.PYTHON,
-      executablePath: '/usr/bin/python3'  // ✓ Uses executablePath
+      executablePath: '/usr/bin/python3'
     };
-    
-    // 2. ProxyConfig
+
+    // 2. Illustrative example of ProxyConfig-like usage
     const proxyConfig = {
       sessionId: 'test',
       language: DebugLanguage.PYTHON,
-      executablePath: '/usr/bin/python3',  // ✓ Uses executablePath
+      executablePath: '/usr/bin/python3',
       adapterHost: 'localhost',
       adapterPort: 5678,
       logDir: '/tmp',
       scriptPath: 'test.py'
     };
-    
-    // 3. ProxyInitPayload
+
+    // 3. Illustrative example of ProxyInitPayload-like usage
     const proxyPayload = {
       cmd: 'init' as const,
       sessionId: 'test',
-      executablePath: '/usr/bin/python3',  // ✓ Uses executablePath
+      executablePath: '/usr/bin/python3',
       adapterHost: 'localhost',
       adapterPort: 5678,
       logDir: '/tmp',
       scriptPath: 'test.py'
     };
-    
-    // All interfaces have been migrated successfully
+
     expect(createParams.executablePath).toBeDefined();
     expect(proxyConfig.executablePath).toBeDefined();
     expect(proxyPayload.executablePath).toBeDefined();

@@ -85,7 +85,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
   },
   
   /**
-   * Python uses "Locals" (or "Local") for local variables scope
+   * Python uses "Locals" for local variables scope
    */
   getLocalScopeName: (): string[] => {
     return ['Locals'];

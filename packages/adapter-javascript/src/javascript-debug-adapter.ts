@@ -637,7 +637,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   }
 
   handleDapResponse(): void {
-    // No-op for Task 1
+    // No-op: DAP responses handled by the proxy layer
   }
 
   // ===== Connection Management =====

@@ -114,6 +114,18 @@ async function resolveBinaryPath(
     if (existsSync(gnuPath)) {
       return gnuPath;
     }
+
+    // Also probe the MSVC target path
+    const msvcPath = path.join(
+      exampleRoot,
+      'target',
+      'x86_64-pc-windows-msvc',
+      'debug',
+      `${binaryName}${extension}`
+    );
+    if (existsSync(msvcPath)) {
+      return msvcPath;
+    }
   }
   return path.join(exampleRoot, 'target', 'debug', `${binaryName}${extension}`);
 }
