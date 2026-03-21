@@ -140,7 +140,7 @@ protected cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProx
 **Location**: `src/proxy/proxy-manager.ts`
 
 ### Overview
-ProxyManager handles the spawning and communication with debug proxy processes. It implements a robust message passing system with timeout handling and state management.
+ProxyManager spawns and communicates with a debug proxy worker process over IPC (Inter-Process Communication). The proxy worker process, in turn, manages the actual debug adapter. ProxyManager does not communicate directly with the debug adapter; instead, it sends commands to the proxy worker via IPC messages, and the proxy worker relays them to the debug adapter over DAP.
 
 ### Key Design Decisions
 
@@ -265,8 +265,8 @@ From the `handleInitCommand` method (lines 67-124):
 
 2. **Payload Validation** (via `validateProxyInitPayload` in `src/utils/type-guards.ts`)
    ```typescript
-   // Validates required fields: cmd, sessionId, executablePath, adapterHost,
-   // adapterPort, logDir, scriptPath. Also validates adapterCommand and launchConfig if present.
+   // Checks field presence and performs limited structural validation (e.g., verifying
+   // required fields exist and are non-null). Does not perform full runtime type validation.
    const validatedPayload = validateProxyInitPayload(payload);
    ```
 
@@ -449,6 +449,11 @@ The dependency injection system enables comprehensive testing by abstracting all
      adapterRegistry: IAdapterRegistry;
    }
    ```
+
+   The top-level `Dependencies` container (in `src/container/dependencies.ts`) also includes launcher services that are used by the proxy and session layers:
+   - `processLauncher: IProcessLauncher` -- general-purpose process spawning
+   - `proxyProcessLauncher: IProxyProcessLauncher` -- spawning proxy worker child processes
+   - `debugTargetLauncher: IDebugTargetLauncher` -- spawning the debug target (uses `processLauncher` and `networkManager`)
 
 ### Benefits
 

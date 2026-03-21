@@ -15,7 +15,7 @@ The JavaScript adapter was experiencing consistent `ECONNREFUSED` errors when at
 - **Result**: Connection attempts failed because IPv4 and IPv6 addresses are not interchangeable
 
 ### The Solution
-Use `'localhost'` instead of `'127.0.0.1'` when connecting to debug adapters that may prefer IPv6. The JavaScript adapter implementation defaults host to `'127.0.0.1'` (in `packages/adapter-javascript/src/javascript-debug-adapter.ts`), while `JsDebugAdapterPolicy` uses `'127.0.0.1'` for explicit attach requests in child sessions.
+The fix involves two distinct layers. For child-session creation (e.g., the `JavascriptDebugAdapter.buildAdapterCommand` host default), `'localhost'` is used so that Node.js can resolve to both IPv4 and IPv6 automatically. For DAP attach requests within child sessions, `JsDebugAdapterPolicy` uses `'127.0.0.1'` explicitly to match the address family expected by the child debug target. The session manager (`session-manager-operations.ts`) also uses `'127.0.0.1'` as the `adapterHost` for all adapters.
 
 **Key Files:**
 - `src/session/session-manager-operations.ts` - General adapter host configuration
@@ -90,11 +90,11 @@ buildAdapterCommand(config: AdapterConfig): AdapterCommand {
 
 **In the Session Manager:**
 ```typescript
-// Must use localhost (not 127.0.0.1) and provide valid port
+// Uses 127.0.0.1 as the adapter host (session-manager-operations.ts)
 await proxyManager.start({
   sessionId,
   language: DebugLanguage.JAVASCRIPT,
-  adapterHost: 'localhost',  // Not '127.0.0.1'!
+  adapterHost: '127.0.0.1',  // Matches current implementation
   adapterPort: allocatedPort, // Must be > 0
   // ...
 });

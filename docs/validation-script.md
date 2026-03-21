@@ -4,9 +4,9 @@
 
 The `validate-push.js` script tests your repository in a clean clone to simulate CI against the current committed state. It warns about uncommitted changes but intentionally excludes them from the clone/test run. This helps catch issues before they reach CI/CD pipelines.
 
-## What It Catches
+## What It Helps Reveal
 
-- **Files that exist locally but aren't committed** (like our proxy-bootstrap.js issue)
+- **When local success depends on uncommitted files** (e.g., a generated file like proxy-bootstrap.js that exists locally but is not in the committed tree)
 - Build artifacts that shouldn't be committed
 - Dependencies out of sync with lock files
 - Tests that only pass with local state

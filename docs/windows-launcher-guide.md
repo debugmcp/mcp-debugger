@@ -34,25 +34,27 @@ node dist\index.js stdio
 
 ```javascript
 #!/usr/bin/env node
-try {
-  console.log('Starting Debug MCP Server via direct launcher...');
-  import('./dist/index.js')
-    .then(() => {
-      console.log('Server loaded successfully');
-    })
-    .catch(error => {
-      console.error('Failed to load server module:', error);
-      process.exit(1);
-    });
-} catch (error) {
-  console.error('Launcher error:', error);
+const { spawn } = require('child_process');
+const path = require('path');
+
+// Spawn `node dist/index.js stdio` as a child process, forwarding stdio
+const child = spawn(
+  process.execPath,
+  [path.join(__dirname, 'dist', 'index.js'), 'stdio'],
+  { stdio: 'inherit', cwd: __dirname }
+);
+
+child.on('exit', (code) => process.exit(code ?? 1));
+child.on('error', (err) => {
+  console.error('Launcher error:', err);
   process.exit(1);
-}
+});
 ```
 
 **Benefits**:
 - Avoids command-line path handling completely
-- Uses native JavaScript import mechanism
+- Spawns the server as a child process with the required `stdio` argument
+- Forwards all stdio streams to the child
 
 ### 3. PowerShell Script (`mcp-launcher.ps1`)
 
@@ -104,9 +106,9 @@ When configuring your MCP settings file:
 "command": "C:\\path\\to\\mcp-debugger\\simple-run.cmd"
 ```
 
-2. **With Quotes (For complex paths)**:
+2. **With Spaces in Path**:
 ```json
-"command": "\"C:\\Program Files\\mcp-debugger\\run-debug-server.cmd\""
+"command": "C:\\Program Files\\mcp-debugger\\run-debug-server.cmd"
 ```
 
 3. **Direct node invocation**:

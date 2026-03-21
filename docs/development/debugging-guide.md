@@ -93,8 +93,8 @@ fs.appendFileSync('/tmp/mcp-debug-startup.log',
 **Debug Steps**:
 
 ```typescript
-// In ProxyManager.start()
-console.log('[DEBUG] Spawning proxy with:', {
+// In ProxyManager.start() — use this.logger, not console (console is silenced)
+this.logger.debug('[DEBUG] Spawning proxy with:', {
   script: proxyScriptPath,
   sessionId: config.sessionId,
   env: Object.keys(env)
@@ -102,15 +102,15 @@ console.log('[DEBUG] Spawning proxy with:', {
 
 // Monitor process events
 this.proxyProcess.on('spawn', () => {
-  console.log('[DEBUG] Proxy spawned, PID:', this.proxyProcess.pid);
+  this.logger.debug('[DEBUG] Proxy spawned, PID:', this.proxyProcess.pid);
 });
 
 this.proxyProcess.on('error', (err) => {
-  console.error('[DEBUG] Proxy error:', err);
+  this.logger.error('[DEBUG] Proxy error:', err);
 });
 
 this.proxyProcess.stderr?.on('data', (data) => {
-  console.error('[DEBUG] Proxy STDERR:', data.toString());
+  this.logger.error('[DEBUG] Proxy STDERR:', data.toString());
 });
 ```
 
@@ -121,32 +121,26 @@ this.proxyProcess.stderr?.on('data', (data) => {
 **Debug Steps**:
 
 ```typescript
-// In proxy message handler
+// In proxy message handler — use this.logger, not console (console is silenced)
 private handleProxyMessage(rawMessage: unknown): void {
-  console.log('[DEBUG] Raw message:', JSON.stringify(rawMessage, null, 2));
-  
+  this.logger.debug('[DEBUG] Raw message:', JSON.stringify(rawMessage, null, 2));
+
   if (!isValidProxyMessage(rawMessage)) {
-    console.warn('[DEBUG] Invalid message format:', {
+    this.logger.warn('[DEBUG] Invalid message format:', {
       type: typeof rawMessage,
       keys: rawMessage ? Object.keys(rawMessage) : null
     });
     return;
   }
-  
+
   const message = rawMessage as ProxyMessage;
-  console.log('[DEBUG] Parsed message type:', message.type);
+  this.logger.debug('[DEBUG] Parsed message type:', message.type);
 }
 
-// In proxy process
-process.on('message', (msg) => {
-  console.log('[DEBUG Proxy] Received from parent:', msg);
-});
+// In proxy process — use the proxy's logger instance
+this.logger.debug('[DEBUG Proxy] Received from parent:', msg);
 
-if (process.send) {
-  const testMsg = { type: 'test', data: 'hello' };
-  console.log('[DEBUG Proxy] Sending test message:', testMsg);
-  process.send(testMsg);
-}
+this.logger.debug('[DEBUG Proxy] Sending test message:', testMsg);
 ```
 
 ### 4. DAP Protocol Issues
@@ -156,20 +150,20 @@ if (process.send) {
 **Debug Steps**:
 
 ```typescript
-// Log all DAP traffic
+// Log all DAP traffic — use this.logger, not console (console is silenced)
 this.dapClient.on('send', (message) => {
-  console.log('[DAP →]', JSON.stringify(message, null, 2));
+  this.logger.debug('[DAP send]', JSON.stringify(message, null, 2));
 });
 
 this.dapClient.on('receive', (message) => {
-  console.log('[DAP ←]', JSON.stringify(message, null, 2));
+  this.logger.debug('[DAP recv]', JSON.stringify(message, null, 2));
 });
 
 // Track request lifecycle
 // Note: There are two layers of request correlation:
 // - Raw DAP responses (in MinimalDapClient): correlated by `request_seq`
 // - Proxy-to-parent `dapResponse` envelopes (in ProxyManager): correlated by `requestId`
-console.log('[DEBUG] Sending DAP request:', {
+this.logger.debug('[DEBUG] Sending DAP request:', {
   command,
   request_seq,  // For raw DAP responses
   requestId,    // For proxy dapResponse envelopes
@@ -184,20 +178,20 @@ console.log('[DEBUG] Sending DAP request:', {
 **Debug Steps**:
 
 ```typescript
-// Add state transition logging
+// Add state transition logging — use this.logger, not console (console is silenced)
 private _updateSessionState(session: ManagedSession, newState: SessionState): void {
   const oldState = session.state;
-  console.log('[DEBUG] State transition:', {
+  this.logger.debug('[DEBUG] State transition:', {
     sessionId: session.id,
     oldState,
     newState,
     stack: new Error().stack?.split('\n')[2] // Caller
   });
-  
+
   if (!this.isValidTransition(oldState, newState)) {
-    console.error('[DEBUG] Invalid state transition!');
+    this.logger.error('[DEBUG] Invalid state transition!');
   }
-  
+
   this.sessionStore.updateState(session.id, newState);
 }
 ```
@@ -298,21 +292,22 @@ node --inspect-brk node_modules/.bin/vitest run tests/unit/session/session-manag
 
 ```typescript
 it('should complete operation', async () => {
-  // Add progress logging
+  // In test files, console methods are available (silencing only applies to
+  // the server/proxy processes, not the vitest runner).
   console.log('[TEST] Starting operation');
-  
+
   const checkpoints = [];
   const addCheckpoint = (name: string) => {
     checkpoints.push({ name, time: Date.now() });
     console.log(`[TEST] Checkpoint: ${name}`);
   };
-  
+
   addCheckpoint('start');
   await operation1();
   addCheckpoint('after-op1');
   await operation2();
   addCheckpoint('after-op2');
-  
+
   // If timeout, log checkpoints
   process.on('uncaughtException', () => {
     console.log('[TEST] Checkpoints:', checkpoints);
@@ -429,10 +424,10 @@ curl http://localhost:3001/health
    }
    ```
 
-2. **Add Temporary Logging**
+2. **Add Temporary Logging** (remember: all `console` methods are silenced at startup)
    ```typescript
    const DEBUG_THIS = true;
-   if (DEBUG_THIS) console.log('[TEMP]', { data });
+   if (DEBUG_THIS) this.logger.debug('[TEMP]', { data });
    ```
 
 3. **Binary Search for Issues**
@@ -462,4 +457,4 @@ Debugging the MCP Debug Server requires:
 - Using appropriate debugging tools
 - Following systematic debugging approach
 
-Remember: When debugging gets tough, add more logging! 📝
+Remember: When debugging gets tough, add more logging via the Winston logger (not `console`, which is silenced at startup).

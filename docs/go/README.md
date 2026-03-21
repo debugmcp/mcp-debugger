@@ -254,16 +254,16 @@ Go programs use goroutines for concurrency. Delve natively handles goroutines, a
 
 Note: The MCP tools do not expose goroutine-specific commands (listing goroutines, switching between goroutines, or setting goroutine-scoped breakpoints). These are Delve-internal capabilities not surfaced through the MCP tool interface.
 
-### Exception Handling
+### Exception Breakpoints
 
-Delve can break on Go panics and fatal errors at the DAP level. However, the MCP tool interface does not currently expose a dedicated tool for configuring exception breakpoints. Panic/fatal-error breakpoints can be requested via `dapLaunchArgs` if the Delve DAP server supports the corresponding exception filter names.
+The Go adapter supports exception breakpoints with two built-in filters: `panic` (break on panic, enabled by default) and `fatal` (break on fatal errors, enabled by default). These are declared in the adapter's capabilities and sent to Delve during session configuration. Custom exception breakpoint configuration can also be provided via `dapLaunchArgs`.
 
 ## Debugging Tips
 
 1. **Always build with debug flags**: Use `-gcflags="all=-N -l"` to disable optimizations
 2. **Absolute paths**: Use absolute paths for file references in breakpoints
 3. **Internal frame filtering**: Frames from Go runtime/testing paths are filtered by default for cleaner stack traces
-4. **Stop on entry**: Delve has a quirk with "unknown goroutine 1" - the adapter defaults `stopOnEntry=false` to avoid this
+4. **Stop on entry**: Delve has a quirk with "unknown goroutine 1" -- `stopOnEntry=false` is a global session-manager default (not Go-specific), but the Go adapter policy also enforces this default to avoid Delve's goroutine issue when the user has not explicitly specified `stopOnEntry`
 5. **Variable inspection**: Delve's DAP output automatically dereferences pointers, and represents slices with length/capacity and maps as key-value pairs
 6. **Test debugging**: Use `mode: "test"` to debug Go test functions
 

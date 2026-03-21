@@ -57,12 +57,16 @@ Each supported language implements the IDebugAdapter interface:
 
 ### 4. Adapter Registry
 
-The **[AdapterRegistry](../../src/adapters/adapter-registry.ts)** manages available adapters:
+The **[AdapterRegistry](../../src/adapters/adapter-registry.ts)** manages available adapters through two mechanisms: explicit registration and dynamic loading. Factories can be pre-registered at startup, or loaded on demand via `AdapterLoader` when `enableDynamicLoading` is enabled (or `MCP_CONTAINER=true`):
 
 ```typescript
+// Explicit registration
 registry.register('python', new PythonAdapterFactory());
 registry.register('mock', new MockAdapterFactory());
-// registry.register('javascript', new JavascriptAdapterFactory());
+
+// Dynamic loading happens automatically when create() is called
+// for a language without a pre-registered factory
+const adapter = await registry.create('go', config); // loads @debugmcp/adapter-go on demand
 ```
 
 ## Data Flow Architecture
@@ -78,8 +82,10 @@ sequenceDiagram
     participant DAP as Debug Adapter Process
     
     Client->>Server: create_debug_session(language='python')
+    Server->>Server: Validate language via getSupportedLanguagesAsync()
     Server->>SM: createSession(language)
-    SM-->>Client: sessionInfo (adapter instance not yet created, but executable path is resolved via policy)
+    SM->>SM: SessionStore.createSession(params)
+    SM-->>Client: sessionInfo (adapter instance not yet created)
 
     Client->>Server: start_debugging(sessionId)
     Server->>SM: startDebugging()
@@ -111,10 +117,12 @@ class ProxyManager {
 // After: ProxyManager delegates to adapters
 class ProxyManager {
   constructor(private adapter: IDebugAdapter) {}
-  
-  private async spawnDebugAdapter() {
-    const command = this.adapter.buildAdapterCommand(this.config);
-    // ... spawn using command
+
+  async start(config: ProxyConfig) {
+    // adapter.buildAdapterCommand() provides the spawn command
+    // adapter.prepareSpawnContext() sets up environment/args
+    // ProxyManager spawns the proxy worker process, which in turn
+    // spawns the debug adapter using the adapter-provided command
   }
 }
 ```
@@ -145,7 +153,7 @@ adapter.on('stateChanged', (oldState, newState) => {
 ### Path Handling Complexity
 
 **Theory**: Adapters handle path translation cleanly
-**Reality**: Adapter-facing source-path translation was minimized and largely delegated to the debug adapters. However, path handling still occurs in several places (e.g., proxy script discovery, absolute path resolution for breakpoints, container path resolution via `SimpleFileChecker`/`resolvePathForRuntime`). The approach is to avoid unnecessary cross-platform path manipulation rather than eliminating all path logic.
+**Reality**: Path handling is centralized in utility modules rather than delegated to individual debug adapters. `SimpleFileChecker` and `resolvePathForRuntime` in `src/utils/` handle path resolution, file existence checks, and container-mode prefix logic. Path handling also occurs in proxy script discovery and absolute path resolution for breakpoints. The approach is to use centralized path utilities to avoid duplicating cross-platform logic, while leaving runtime-specific path interpretation to the OS and debug adapter.
 
 ### State Management
 

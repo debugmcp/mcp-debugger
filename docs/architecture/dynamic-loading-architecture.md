@@ -8,8 +8,9 @@ Scope: Adapter discovery, lazy loading, caching, error handling, and container c
 The mcp-debugger server discovers and loads debug adapters dynamically at runtime instead of compiling them into the core. This makes the core smaller, enables optional adapter installation, and keeps startup time fast while still supporting many languages.
 
 High-level flow:
-- Client calls an MCP tool (e.g., create_debug_session)
-- SessionManager requests an adapter from AdapterRegistry
+- Client calls `create_debug_session` to create a session (no adapter loading yet)
+- Client calls `start_debugging` to begin debugging
+- During `start_debugging`, SessionManager requests an adapter from AdapterRegistry
 - AdapterRegistry uses AdapterLoader to dynamically import the adapter package by language name
 - A factory from the adapter package constructs a concrete IDebugAdapter instance
 - Instance is cached and reused subject to limits and auto-dispose rules
@@ -75,8 +76,8 @@ flowchart TD
 
 ## Loading Process (Step-by-step)
 
-1) Client calls an MCP tool (e.g., `create_debug_session` with `language = "python"`).
-2) `SessionManager` requests an adapter from `AdapterRegistry.create(language, config)`.
+1) Client calls `create_debug_session` with `language = "python"`. The server validates language support and creates a session record, but does not load the adapter yet.
+2) Client calls `start_debugging`. During `startProxyManager`, `SessionManager` requests an adapter from `AdapterRegistry.create(language, config)`.
 3) Registry checks for a registered factory. If not found:
    - If dynamic enabled, it calls `AdapterLoader.loadAdapter(language)`.
    - Otherwise throws `AdapterNotFoundError`.
@@ -87,7 +88,7 @@ flowchart TD
 5) On successful import:
    - Extracts `<Language>AdapterFactory` class.
    - Constructs the factory and returns it to registry.
-   - Registry runs factory `validate()` (if configured) and registers it.
+   - Registry runs factory `validate()` if `validateOnRegister` is enabled (configurable; production may disable it for faster startup) and registers it.
 6) Registry constructs an adapter instance via the factory, initializes it, and returns it.
 7) Subsequent requests benefit from in-memory cache (in both Registry and Loader).
 
@@ -99,7 +100,7 @@ sequenceDiagram
   participant Loader
   participant Package as @debugmcp/adapter-<lang>
 
-  Client->>Server: create_debug_session(language)
+  Client->>Server: start_debugging(sessionId, script)
   Server->>Registry: create(language, config)
   alt factory present
     Registry-->>Server: adapter instance
@@ -123,9 +124,10 @@ sequenceDiagram
 ## Error Handling
 
 - If the adapter package is not installed:
-  - `MODULE_NOT_FOUND` or `ERR_MODULE_NOT_FOUND` is observed
+  - `MODULE_NOT_FOUND` or `ERR_MODULE_NOT_FOUND` is observed from the Node import
   - AdapterLoader throws a message including a suggested npm install command:
     - `npm install @debugmcp/adapter-<language>`
+  - When this error propagates through AdapterRegistry, it is normalized to an `AdapterNotFoundError`
 - If the factory class is not found:
   - Loader throws: `Factory class <Name> not found`
   - Ensure the adapter exports the expected named class
@@ -144,7 +146,7 @@ sequenceDiagram
 - Preloading vs Lazy:
   - Prefer lazy for most cases to keep cold-start minimal
   - Calling `listLanguages()` early probes discoverability/availability, but actual registry registration and adapter initialization still occur on `create(...)` or explicit `loadAdapter(...)` paths. To truly preload, construct sessions or call `loadAdapter()` on startup if your environment benefits from it.
-  - **Container mode exception**: When `MCP_CONTAINER=true`, startup pre-registers all known adapters (mock, python, javascript, rust, go, java, dotnet) via `tryRegister` calls in `dependencies.ts`, so the first `create(...)` call does not incur a dynamic import cost.
+  - **Container mode exception**: When `MCP_CONTAINER=true`, startup pre-registers known adapters (mock, python, javascript, rust, go, java) via `tryRegister` calls in `dependencies.ts`, so the first `create(...)` call does not incur a dynamic import cost. Note that dotnet is not pre-registered in container mode.
 
 ## Container Considerations
 
@@ -183,7 +185,7 @@ sequenceDiagram
   - Run `DEBUG=mcp:*` in your client environment if supported
 - Verify adapter presence:
   - `npm ls @debugmcp/adapter-*`
-  - Call `list_supported_languages` tool to see what the server reports
+  - Call `list_supported_languages` tool to see what the server reports. Note that this tool may include known but uninstalled adapters (marked with `installed: false`) when dynamic loading is enabled, since it merges the hardcoded known-adapter catalog with actually registered factories.
 - Use the diagnostic client:
   - `node scripts/diagnose-stdio-client.mjs` verifies connect → list → create → close flow
 

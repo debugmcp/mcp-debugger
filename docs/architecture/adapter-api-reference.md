@@ -26,7 +26,8 @@ Key properties
 
 Lifecycle
 - `initialize(): Promise<void>` — Prepare resources and validate environment
-- `dispose(): Promise<void>` — Cleanup resources and connections
+- `disconnect(): Promise<void>` — Disconnect from the debug adapter (closes the DAP connection but does not fully tear down the adapter)
+- `dispose(): Promise<void>` — Full cleanup: releases all resources, resets state to UNINITIALIZED, and emits a `'disposed'` event. This is distinct from `disconnect()`, which only closes the connection.
 
 State
 - `getState(): AdapterState` — Current adapter state (see enum)
@@ -100,7 +101,7 @@ Supporting types (selected)
 
 Events
 - DAP events: `'stopped' | 'continued' | 'terminated' | 'exited' | 'thread' | 'output' | 'breakpoint' | 'module'`
-- Lifecycle: `'initialized' | 'connected' | 'disconnected' | 'error'` (note: `'error'` carries an `Error` payload)
+- Lifecycle: `'initialized' | 'connected' | 'disconnected' | 'disposed' | 'error'` (note: `'error'` carries an `Error` payload; `'disposed'` is emitted by `dispose()` after full cleanup)
 - State changes: `'stateChanged'` with `(oldState, newState)`
 
 Example (minimal)
@@ -193,7 +194,8 @@ export class ExampleAdapterFactory extends AdapterFactory {
 
 Export convention (required for dynamic loader)
 - Package name: `@debugmcp/adapter-<language>`
-- The loader requires a **named export** matching `<CapitalizedLanguage>AdapterFactory` (e.g., `python` -> `PythonAdapterFactory`, `javascript` -> `JavascriptAdapterFactory`). It instantiates this class with a zero-arg constructor. A default export is optional and not used by the loader.
+- The loader requires a **named export** matching `<CapitalizedLanguage>AdapterFactory` (e.g., `python` -> `PythonAdapterFactory`, `javascript` -> `JavascriptAdapterFactory`). It instantiates this class with a zero-arg constructor.
+- Some adapter packages also expose a default export for plugin-style loading (e.g., `adapter-go` and `adapter-java` export `{ name, factory }` as default). The dynamic loader does not use the default export, but it may be useful for custom integration scenarios.
 ```typescript
 export { ExampleAdapterFactory } from './ExampleAdapterFactory.js';
 ```
@@ -207,9 +209,9 @@ Purpose: Discover and dynamically import an adapter package by language at runti
 Public methods
 - `loadAdapter(language: string): Promise<IAdapterFactory>`
   - Attempts `import('@debugmcp/adapter-<language>')`
-  - Falls back to URLs relative to the runtime bundle:
-    - `../node_modules/@debugmcp/adapter-<language>/dist/index.js`
-    - `../packages/adapter-<language>/dist/index.js`
+  - Falls back to URLs relative to the loader's own module location (using `import.meta.url`):
+    - `../../node_modules/@debugmcp/adapter-<language>/dist/index.js`
+    - `../../packages/adapter-<language>/dist/index.js`
   - Also attempts `createRequire` + `fileURLToPath` fallback
   - Extracts `<Language>AdapterFactory` named export, instantiates it, caches it
   - Throws with informative message on `MODULE_NOT_FOUND` or missing factory
@@ -240,9 +242,9 @@ Key runtime behavior
   - Creates dependencies and adapter, calls `initialize()`, tracks active instance
   - Sets up auto-dispose based on adapter state changes
 - Introspection
-  - `getSupportedLanguages(): string[]` — currently registered factories
-  - `listLanguages(): Promise<string[]>` — returns registered languages plus the hardcoded known-adapter catalog when dynamic loading is enabled (not just installed adapters)
-  - `listAvailableAdapters(): Promise<AdapterMetadata[]>` — merges loader metadata with registered languages, marking registered languages as installed
+  - `getSupportedLanguages(): string[]` — currently registered factories (concrete implementation method, not part of `IAdapterRegistry` interface)
+  - `listLanguages(): Promise<string[]>` — returns registered languages plus the hardcoded known-adapter catalog when dynamic loading is enabled (concrete implementation method)
+  - `listAvailableAdapters(): Promise<AdapterMetadata[]>` — merges loader metadata with registered languages, marking registered languages as installed (concrete implementation method)
   - `getAdapterInfo(language)` / `getAllAdapterInfo()`
 - Lifecycle
   - `disposeAll()` — disposes all adapters and clears registry

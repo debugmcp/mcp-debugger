@@ -14,7 +14,7 @@ The MCP Debugger ships without auto-installing optional adapters. The adapter lo
 
 - Package name: `@debugmcp/adapter-javascript`
 - Factory export: `JavascriptAdapterFactory`
-- Vendor dependency: `packages/adapter-javascript/vendor/js-debug/vsDebugServer.cjs` (primary runtime entry used at runtime; `vsDebugServer.js` is the canonical vendored source from the upstream build)
+- Vendor dependency: `packages/adapter-javascript/vendor/js-debug/vsDebugServer.cjs` (primary runtime entry used at runtime; `vsDebugServer.js` is the canonical vendored source from the upstream build). Note that the factory's `validate()` method checks for `.js` files during validation, while the runtime `buildAdapterCommand()` uses the `.cjs` entry point.
 
 There is no automatic install/build on first use. This keeps the core lightweight and reduces unexpected network operations.
 
@@ -25,8 +25,8 @@ You have two ways to include the JavaScript adapter during development:
 1) Build just the JS adapter (recommended for local iteration)
 - Vendoring/build:
   - `pnpm -w -F @debugmcp/adapter-javascript build`
-  - `pnpm -w -F @debugmcp/adapter-javascript run build:adapter`
-- This compiles the adapter and ensures the vendored `js-debug` server is present.
+- The `build` script runs `tsc -b` and then automatically triggers vendoring via the `postbuild` hook (which runs `build-js-debug.js`). There is no need to run `build:adapter` separately after `build`.
+- Running `pnpm -w -F @debugmcp/adapter-javascript run build:adapter` is only needed if you want to re-vendor js-debug without recompiling TypeScript.
 
 2) Build all adapters (for contributors who want everything)
 - Run the “all adapters” helper:
@@ -46,9 +46,9 @@ The server includes a catalog entry for JavaScript:
 
 At runtime, the adapter loader attempts to resolve and dynamically import the package. If available, it registers `JavascriptAdapterFactory`. If not found, it reports `installed: false` but still lists the adapter as “available”.
 
-Additionally, the dev container bootstrapping path includes:
+Additionally, the container bootstrapping path includes:
 - `src/container/dependencies.ts` entries to `tryRegister('javascript', 'JavascriptAdapterFactory')`
-- This ensures local monorepo builds resolve via a file URL constructed as `new URL(..., import.meta.url).href` pointing to `../node_modules/@debugmcp/adapter-javascript/dist/index.js`
+- When the primary `import()` fails, the `AdapterLoader` constructs fallback file URLs relative to its own module location (via `import.meta.url`) pointing to `../../node_modules/@debugmcp/adapter-javascript/dist/index.js` and `../../packages/adapter-javascript/dist/index.js`
 
 ## Shared language metadata
 
@@ -106,4 +106,8 @@ Adapter exports include:
   - `detectTsRunners` -- detects available TypeScript runners (ts-node, tsx, etc.) in the environment.
   - `transformConfig` -- transforms generic launch config into js-debug-specific configuration.
 
-Ensure `packages/adapter-javascript/package.json` has an `exports` map with a `"."` entry pointing to `./dist/index.js` (ESM import condition), a `types` field pointing to `./dist/index.d.ts`, and includes both `dist` and `vendor/js-debug` in the `files` array for publishing. A `main` field may also be present for legacy CJS consumers but ESM (`exports`) takes precedence in Node.js 12+.
+The `packages/adapter-javascript/package.json` manifest includes:
+- `"exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } }` -- ESM import with type declarations
+- `"main": "dist/index.js"` -- fallback for legacy resolution
+- `"types": "dist/index.d.ts"` -- top-level types field
+- `"files": ["dist", "vendor/js-debug"]` -- published artifacts include both compiled code and vendored js-debug

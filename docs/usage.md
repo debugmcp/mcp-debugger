@@ -34,8 +34,22 @@ Add the server to your MCP settings:
 {
   "mcpServers": {
     "mcp-debugger": {
+      "command": "mcp-debugger",
+      "args": ["stdio"],
+      "disabled": false,
+      "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
+    }
+  }
+}
+```
+
+If running from a source checkout instead of a global install, use the CLI entrypoint:
+```json
+{
+  "mcpServers": {
+    "mcp-debugger": {
       "command": "node",
-      "args": ["C:/path/to/mcp-debugger/dist/index.js", "stdio", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],
+      "args": ["C:/path/to/mcp-debugger/packages/mcp-debugger/dist/cli", "stdio"],
       "disabled": false,
       "autoApprove": ["create_debug_session", "set_breakpoint", "get_variables"]
     }
@@ -331,8 +345,8 @@ You can also evaluate arbitrary expressions in the current debug context:
 - Best lines for breakpoints: assignments, function calls, conditionals
 
 ### File Paths
-- The server uses centralized path resolution via `SimpleFileChecker` for existence validation only
-- In container mode, paths are resolved against the workspace root (default `/workspace/`) for the existence check, then the resolved path is passed to the debug adapter
+- The server uses `SimpleFileChecker` for both path validation and resolution. It returns a `FileExistenceResult` containing the `effectivePath` (the resolved path actually used downstream). The server passes this `effectivePath` to SessionManager for all subsequent operations (breakpoints, launch, source context)
+- In container mode, `resolvePathForRuntime()` rewrites paths to be under the workspace root (default `/workspace/`), then `SimpleFileChecker` validates existence at that resolved location
 - In host mode, `SimpleFileChecker` rejects non-absolute resolved paths during preflight existence checks (relative paths may still pass through other code paths)
 - Use forward slashes (/) or escaped backslashes (\\\\) in JSON
 
@@ -361,7 +375,7 @@ You can also evaluate arbitrary expressions in the current debug context:
 All 19 tools are fully implemented, including:
 
 - **pause_execution**: Sends a DAP pause request and returns immediately; paused state is updated asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
-- **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. Automatically uses the current frame when `frameId` is not specified. Expressions with side effects are allowed (can modify program state).
+- **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. When `frameId` is not specified, the server infers it by fetching the stack trace and using the topmost frame -- this works reliably only when a single frame exists or the top frame is the desired context. Callers should provide `frameId` explicitly when debugging code with multiple stack frames. Expressions with side effects are allowed (can modify program state).
 
 ## Best Practices
 

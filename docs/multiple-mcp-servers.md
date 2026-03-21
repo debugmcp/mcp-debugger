@@ -13,7 +13,8 @@ Both servers can be configured in the same MCP settings file. The configuration 
       "autoApprove": [],
       "disabled": false,
       "timeout": 60,
-      "command": "c:/path/to/mcp-debugger/simple-run.cmd",
+      "command": "mcp-debugger",
+      "args": ["stdio"],
       "transportType": "stdio"
     },
     "github": {

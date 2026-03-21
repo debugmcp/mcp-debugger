@@ -202,7 +202,7 @@ export function createMockFileSystem(): IFileSystem {
 
 **Location**: `tests/test-utils/helpers/port-manager.ts`
 
-Ensures tests don't conflict on network ports:
+Coordinates port reservations within the test process to avoid conflicts between concurrent tests. Note that the port manager only tracks reservations within its own process -- it does not guarantee OS-level port availability (another process could be using the same port). It provides a best-effort mechanism to prevent tests from stepping on each other.
 
 The port manager exports a singleton `portManager` instance with `PortRange`-based allocation anchored at base port 5679:
 

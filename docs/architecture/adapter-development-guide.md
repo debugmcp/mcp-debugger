@@ -81,7 +81,7 @@ packages/
 
 3) Implement `IDebugAdapter` (core contract)
 - File: `src/<Language>Adapter.ts`
-- Use `packages/shared/src/interfaces/debug-adapter.ts` for signatures
+- Import interfaces from the `@debugmcp/shared` package root (e.g., `import { IDebugAdapter, AdapterState } from '@debugmcp/shared'`), not from deep paths like `@debugmcp/shared/src/interfaces/debug-adapter`
 
 4) Implement the factory extending `AdapterFactory`
 - File: `src/<Language>AdapterFactory.ts`
@@ -261,7 +261,7 @@ Local linking
 
 ## Publishing
 
-- Build to `dist/` (`tsc -p tsconfig.json`)
+- Build to `dist/` (`tsc -p tsconfig.json`). If your adapter has a `postbuild` script (e.g., for vendoring external binaries like js-debug), the `build` command already triggers it automatically.
 - Publish to npm (`npm publish`)
 - SemVer policy:
   - Avoid breaking `IDebugAdapter` contracts across minor versions

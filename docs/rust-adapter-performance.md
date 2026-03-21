@@ -19,7 +19,7 @@
 
 | Toolchain | Performance | Variable Inspection | Async Support | Overall Status |
 |-----------|-------------|-------------------|---------------|----------------|
-| **GNU (x86_64-pc-windows-gnu)** | Excellent | Full | Full | ✅ Production Ready |
+| **GNU (x86_64-pc-windows-gnu)** | Excellent | Full | Full | ✅ Production Ready (auto-continue through initial system breakpoints is not yet implemented) |
 | **MSVC (x86_64-pc-windows-msvc)** | Good | Limited | Limited | ⚠️ Control Flow Only |
 
 ## Known Performance Characteristics
@@ -58,7 +58,7 @@ Based on comprehensive testing with real-world Rust examples:
 
 ## Recommendations for Optimal Performance
 
-1. **Use GNU Toolchain:** `rustup target add x86_64-pc-windows-gnu`
+1. **Use GNU Toolchain:** Install the GNU toolchain with `rustup toolchain install stable-gnu` and add the target with `rustup target add x86_64-pc-windows-gnu`, then build with `cargo +stable-gnu build --target x86_64-pc-windows-gnu`
 2. **Build with Debug Symbols:** Ensure `debug = true` in Cargo.toml
 3. **Use Absolute Paths:** Until relative path resolution is improved
 4. **Pre-vendor CodeLLDB:** Run `pnpm vendor:adapters` during setup

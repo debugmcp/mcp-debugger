@@ -67,8 +67,8 @@ Vendoring tips
   - Bash:           JS_DEBUG_FORCE_REBUILD=true JS_DEBUG_LOCAL_PATH=/abs/path/vsDebugServer.js pnpm -w -F @debugmcp/adapter-javascript run build:adapter
 
 Notes on normalization
-- Upstream js-debug now ships the DAP server as js-debug/src/dapDebugServer.js (prebuilt) or dist/src/dapDebugServer.js (source build on newer tags).
-- The vendoring script automatically normalizes either file to the canonical path: vendor/js-debug/vsDebugServer.js.
+- The vendoring script searches multiple upstream layouts in priority order: dist/vsDebugServer.js, dist/src/dapDebugServer.js, extension/src/dapDebugServer.js, and js-debug/src/dapDebugServer.js. It falls back to a BFS search for any file named dapDebugServer.js or vsDebugServer.js.
+- The vendoring script automatically normalizes the found file to the canonical path: vendor/js-debug/vsDebugServer.js.
 - For source builds on Windows/macOS/Linux, large Playwright downloads are skipped by setting PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 during install.
 
 Windows (source fallback example):
@@ -95,6 +95,7 @@ Validation
 - After vendoring, `JavascriptAdapterFactory.validate()` should pass the vendor check locally. It looks for:
   - vendor/js-debug/vsDebugServer.js (relative to the package source/dist layout)
 - Runtime Node requirement: the package declares `engines.node >= 18` in package.json (the factory-level validation currently checks for 14+ as a lower bound, but Node 18+ is required in practice)
+- Runtime command construction: `JavascriptDebugAdapter.buildAdapterCommand` prefers `vsDebugServer.cjs` for CommonJS compatibility, falling back to `vsDebugServer.js` if the `.cjs` variant is not found
 
 Troubleshooting
 - 403 rate limit or forbidden

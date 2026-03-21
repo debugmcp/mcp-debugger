@@ -133,11 +133,11 @@ This guide provides solutions for common issues you might encounter when setting
    ```
 
 3. **Container Mode**: When running in Docker, paths are prefixed with the workspace root:
-   - The workspace root is configurable via `MCP_WORKSPACE_ROOT` environment variable (defaults to `/workspace/`)
+   - The `MCP_WORKSPACE_ROOT` environment variable must be set in container mode (there is no code default; the Docker image may set it, e.g., to `/workspace`)
    - Host: `test.py` → Container: `/workspace/test.py`
    - The debugger handles this translation automatically
 
-4. **Host Mode**: Relative paths are rejected -- always use absolute paths when running outside Docker
+4. **Host Mode**: Relative paths are rejected by `SimpleFileChecker` for file-based operations (e.g., `set_breakpoint`, `start_debugging`) -- always use absolute paths when running outside Docker
 
 ## Debugging Session Issues
 

@@ -22,9 +22,9 @@ MCP Client → MCP Server → SessionManager → ProxyManager → ProxyWorker
 
 - **DotnetAdapterFactory** (`src/DotnetAdapterFactory.ts`): Implements `IAdapterFactory` for dependency injection. Creates adapter instances and provides metadata.
 
-- **DotnetAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-dotnet.ts`): DAP proxy policy encoding netcoredbg-specific behaviors — DAP sequence, scope naming, variable filtering, stack frame filtering, and executable resolution. Note: this policy does not itself create the bridge command; it trusts upstream code (`DotnetDebugAdapter.buildAdapterCommand`) to supply `payload.adapterCommand` when bridge mode is required.
+- **DotnetAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-dotnet.ts`): DAP proxy policy encoding netcoredbg-specific behaviors — DAP sequence, scope naming, variable filtering, stack frame filtering, and executable resolution. The policy has a built-in fallback in `getAdapterSpawnConfig`: when `payload.adapterCommand` is missing (i.e., the bridge command was not supplied by `DotnetDebugAdapter.buildAdapterCommand`), it launches netcoredbg directly in `--server` mode. Note: this direct mode may not work reliably on all platforms due to a known connection bug.
 
-- **netcoredbg-bridge** (`src/utils/netcoredbg-bridge.ts`): TCP-to-stdio bridge that works around a netcoredbg `--server=PORT` bug on Windows. Listens on a TCP port, spawns netcoredbg in stdio mode, and forwards DAP messages bidirectionally.
+- **netcoredbg-bridge** (`src/utils/netcoredbg-bridge.ts`): TCP-to-stdio bridge that works around a netcoredbg `--server=PORT` bug on Windows. Listens on a TCP port and spawns netcoredbg lazily on first client connection in stdio mode, forwarding DAP messages bidirectionally. The adapter also depends on the bundled `netcoredbg-bridge.js` script (compiled from this source) which is resolved at runtime from multiple candidate paths.
 
 - **dotnet-utils** (`src/utils/dotnet-utils.ts`): Utility functions for netcoredbg discovery, PDB format detection, and Windows PDB to Portable PDB conversion via Pdb2Pdb.
 
@@ -65,13 +65,13 @@ The utility function `findNetcoredbgExecutable` in `dotnet-utils.ts` uses a more
 1. `NETCOREDBG_X86_PATH` environment variable (for x86 attach targets)
 2. `NETCOREDBG_PATH` environment variable
 3. Caller-provided preferred path
-4. `which netcoredbg` (searches PATH)
-5. Hardcoded platform-specific candidate paths
+4. `which netcoredbg` (searches PATH) — only when no target architecture is requested
+5. Hardcoded platform-specific candidate paths (architecture-aware)
 
 ## DAP Protocol Details
 
 - **Adapter ID:** `coreclr` (for both .NET Core and .NET Framework)
-- **DAP sequence:** Standard — `initialize → initialized event → attach/launch → configurationDone`
+- **DAP sequence:** netcoredbg requires launch/attach before configurationDone (`sendLaunchBeforeConfig: true`) — `initialize → initialized event → launch/attach → configurationDone`
 - **Handshake:** No strict handshake required (`requiresStrictHandshake: false`)
 - **Local scope name:** `Locals`
 - **Safety:** `terminateDebuggee` is always `false` when detaching from attached processes

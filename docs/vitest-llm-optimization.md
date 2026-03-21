@@ -88,7 +88,7 @@ npm.cmd test       # Bypass optimization
 ```
 TAP version 13
 1..48
-not ok 5 - tests/integration/python_debug_workflow.test.ts # time=731.82ms {
+not ok 5 - tests/adapters/python/integration/python_debug_workflow.test.ts # time=731.82ms {
     1..1
     not ok 1 - Python Debugging Workflow - Integration Test # time=731.22ms {
         1..2
@@ -146,7 +146,7 @@ Docker's default BuildKit output creates dynamic progress updates that result in
 ```
 
 ### Solution
-The script automatically adds `--progress=plain` to all `docker build` commands:
+The script automatically adds `--progress=plain` to all `docker build` commands, only when no `--progress` flag is already supplied:
 ```powershell
 docker build -t myimage .
 # Automatically becomes:

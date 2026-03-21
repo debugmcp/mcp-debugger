@@ -32,7 +32,7 @@ The mcp-debugger architecture uses both patterns in complementary roles:
 - **Scope**: Language-specific behaviors for session management
 - **Lifecycle**: Static/singleton pattern
 - **Responsibility**: Validation, filtering, extraction policies
-- **Location**: `packages/shared/src/interfaces/adapter-policy-*.ts`
+- **Location**: Policy implementations are in `packages/shared/src/interfaces/adapter-policy-*.ts`. Policy selection logic lives in two places: `session-manager-data.ts` (via `selectPolicy()`) for session-level data operations, and `dap-proxy-worker.ts` (via `selectAdapterPolicy()`) for proxy-level adapter behavior.
 - **State**: Stateless policy object
 
 ### Pattern Interaction
@@ -191,9 +191,8 @@ sequenceDiagram
     participant SS as SessionStore
     
     C->>S: create_debug_session(language='python')
+    S->>S: Validate language via getSupportedLanguagesAsync()
     S->>SM: createSession({language, name})
-    SM->>AR: isLanguageSupported('python')
-    AR-->>SM: true
     SM->>SS: createSession(params)
     SS-->>SM: sessionInfo
     SM-->>S: sessionInfo
@@ -286,8 +285,8 @@ sequenceDiagram
 4. Update ProxyManager to accept adapters
 
 ### Phase 4: Integration (COMPLETED)
-1. SessionManager uses AdapterRegistry for adapter creation (dynamic loading occurs when `enableDynamicLoading` is enabled or in container mode)
-2. server.ts delegates language validation to AdapterRegistry (primarily dynamic via AdapterRegistry, with a hardcoded fallback to `[PYTHON, MOCK]` when discovery is unavailable)
+1. SessionManager always uses AdapterRegistry for adapter creation. Dynamic loading only changes how missing factories are resolved: when `enableDynamicLoading` is enabled (or in container mode), the registry delegates to `AdapterLoader` to import the package on demand; otherwise, only pre-registered factories are available.
+2. server.ts validates language support via `getSupportedLanguagesAsync()`, which queries the AdapterRegistry. A hardcoded fallback to `[PYTHON, MOCK]` exists when dynamic discovery is unavailable.
 3. Language adapters load via `@debugmcp/adapter-<language>` packages (dynamically when enabled, or pre-registered)
 4. Tests updated across the board
 
@@ -372,6 +371,8 @@ sequenceDiagram
   }
 }
 ```
+
+**Note**: The `language` enum in the tool schema is dynamically generated from the languages discovered by the AdapterRegistry (via `getSupportedLanguagesAsync()`). The list above represents the current defaults but may vary based on which adapter packages are installed.
 
 **Note**: The `pythonPath` parameter has been deprecated. Callers should use `executablePath`. Some internal compatibility/migration support for legacy Python-oriented configs still exists via `ConfigMigration` in the shared contracts.
 

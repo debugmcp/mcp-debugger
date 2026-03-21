@@ -108,12 +108,14 @@ if "# " in response["context"]["lineContent"]:
 ### 2. Path Handling
 
 ```python
-# Good: Use absolute paths (required in host mode)
+# Good: Use absolute paths for operations that validate via SimpleFileChecker
+# (set_breakpoint, start_debugging, get_source_context)
 set_breakpoint(file="C:/projects/myapp/src/main.py", line=20)
 
-# Important: In host mode, relative paths (e.g., "main.py") are rejected
-# with a "File not found" or "relative paths not allowed" error.
-# Always use absolute paths when running outside a container.
+# Important: In host mode, operations that validate paths via SimpleFileChecker
+# reject relative paths with a "relative paths not allowed" error.
+# Not all operations go through SimpleFileChecker (e.g., evaluate_expression
+# does not validate file paths). Use absolute paths for file-based operations.
 try:
     set_breakpoint(file="C:/projects/myapp/src/main.py", line=20)
 except McpError as e:

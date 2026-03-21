@@ -2,7 +2,7 @@
 
 ## Overview
 
-The MCP Debugger uses a typed error system to provide consistent, maintainable, and testable error handling throughout the application. This guide documents the patterns and best practices for error handling.
+The MCP Debugger uses a typed error system for specific backend and session-manager failure modes (unknown session, terminated session, proxy not running, missing runtime). Not all error paths use these typed errors; many operation-level failures return structured `DebugResult` objects with `success: false`, and some paths normalize generic errors. This guide documents the patterns and best practices for error handling.
 
 ## Error System Architecture
 
@@ -30,7 +30,7 @@ export class SessionNotFoundError extends McpError {
 |------------|----------|------------|
 | `SessionNotFoundError` | Session doesn't exist | `InvalidParams` |
 | `SessionTerminatedError` | Operation on terminated session | `InvalidRequest` |
-| `ProxyNotRunningError` | Debug proxy not active | `InvalidRequest` |
+| `ProxyNotRunningError` | Debug proxy not active | `InvalidRequest` | Note: `operation` is included in the MCP error payload (`data: { sessionId, operation }`) but is not stored as a class property (`this.operation` does not exist) |
 | `LanguageRuntimeNotFoundError` | Language runtime missing | `InvalidParams` |
 | `PythonNotFoundError` | Python specifically not found | `InvalidParams` |
 | `DebugSessionCreationError` | Failed to create session | `InternalError` |
@@ -71,9 +71,9 @@ if (!session.proxyManager?.isRunning()) {
 
 The error handling uses a mixed strategy across three layers:
 
-1. **Implementation Layer** - Uses typed `McpError` subclasses (e.g., `SessionNotFoundError`) for infrastructure failures (unknown session, terminated session, proxy not running), and returns structured `DebugResult` failure objects for operation-level failures (e.g., session not paused, missing thread ID)
-2. **Server Layer** - Catches and serializes `McpError` instances for MCP protocol; `DebugResult` failures are returned as successful tool responses with `success: false`
-3. **Client Layer** - Receives either a readable MCP error message or a structured failure result, depending on which layer the failure originated in
+1. **Implementation Layer (Backend)** - Uses typed `McpError` subclasses (e.g., `SessionNotFoundError`, `ProxyNotRunningError`) for infrastructure failures (unknown session, terminated session, proxy not running). These are defined in `src/errors/debug-errors.ts`. Operation-level failures (e.g., session not paused, missing thread ID) return structured `DebugResult` objects with `success: false` rather than throwing.
+2. **Server Layer** - The MCP server (`src/server.ts`) may also throw `McpError` directly (e.g., for invalid parameters before reaching the session manager). The MCP SDK serializes all `McpError` instances into protocol-level error responses. `DebugResult` failures are returned as successful tool responses with `success: false`.
+3. **Client Layer** - Receives either a protocol-level MCP error (from typed backend errors or server-level `McpError`) or a structured failure result with `success: false`, depending on which layer the failure originated in
 
 ```typescript
 // Implementation (throws typed error for infrastructure failures)

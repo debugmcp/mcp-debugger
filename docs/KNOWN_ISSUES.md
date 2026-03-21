@@ -6,7 +6,9 @@ The `mcp-debugger-docker` image disables Rust by default via `DEBUG_MCP_DISABLE_
 
 ## Test Failures in Act Environment
 
-As of July 2025, there are 3 tests that fail when running with Act (local GitHub Actions simulator) but may pass in the actual GitHub Actions CI environment. These tests are conditionally skipped via `describe.skipIf(SKIP_DOCKER_TESTS)` to allow the project to be pushed to GitHub for further investigation.
+There are 3 tests that fail when running with Act (local GitHub Actions simulator) but may pass in the actual GitHub Actions CI environment. These tests use two different gating mechanisms:
+- **`describe.skipIf(SKIP_DOCKER_TESTS)`**: Skips entire test suites at the Vitest framework level based on the `SKIP_DOCKER_TESTS` environment variable (used by Docker smoke tests).
+- **Runtime platform checks** (e.g., `if (process.platform !== 'win32') { return; }`): Individual tests return early within the test body when the current platform does not match expectations (used by the Python discovery test).
 
 ### 1. Container Smoke Test - Timeout Issue
 - **File**: `tests/e2e/docker/docker-smoke-python.test.ts` (and other `docker-smoke-*.test.ts` files)

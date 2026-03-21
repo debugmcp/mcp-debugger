@@ -80,7 +80,7 @@ pip3 install debugpy
 npm run build
 ```
 
-This compiles TypeScript files to JavaScript in the `dist/` directory.
+This compiles TypeScript files to JavaScript in the `dist/` directory. For the CLI distribution package (`packages/mcp-debugger/`), a separate bundling script produces self-contained bundles (`cli.mjs` and `proxy-bundle.cjs`) using tsup.
 
 ### 5. Verify Installation
 
@@ -173,7 +173,7 @@ node dist/index.js sse -p 3001
 node dist/index.js sse -p 3001 --log-level debug --log-file ./logs/debug.log
 ```
 
-Note: Console output is silenced for both STDIO and SSE modes at process startup to avoid corrupting protocol communication. Use `--log-file` to capture logs.
+Note: Console output is unconditionally silenced at process startup for all transport modes (STDIO and SSE) to prevent any stray output from corrupting protocol communication. Use `--log-file` to capture logs.
 
 ## VS Code Setup
 
@@ -297,6 +297,7 @@ TEST_TIMEOUT=30000
 |----------|-------------|---------|
 | `DEBUG_MCP_LOG_LEVEL` | Logging level (error, warn, info, debug) | `info` |
 | `PYTHON_PATH` | Path to Python executable | Auto-detected |
+| `PYTHON_EXECUTABLE` | Alternative to `PYTHON_PATH` for Python executable path (checked as fallback) | Auto-detected |
 | `DLV_PATH` | Path to Delve debugger (Go) | Auto-detected |
 | `NETCOREDBG_PATH` | Path to netcoredbg (.NET) | Auto-detected |
 | `JAVA_HOME` | Path to JDK installation (Java) | Auto-detected |

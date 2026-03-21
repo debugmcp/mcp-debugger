@@ -13,7 +13,7 @@ This guide explains how to correctly use the MCP Debugger tools when testing deb
 **How it works:**
 - The multi-session architecture properly routes evaluate commands to the active debugging context
 - You can immediately evaluate expressions when stopped at breakpoints
-- Note: auto-continue on entry is currently a placeholder and may not skip Node.js internals automatically; you may need to use `continue_execution` if stopped at an internal location
+- Note: auto-continue on entry is not implemented (`handleAutoContinue()` logs a warning and returns without continuing). If the debugger stops at an internal location on entry, you must use `continue_execution` manually to advance to user code
 
 ### Python Variable Inspection
 
@@ -116,9 +116,10 @@ if vars.get("variablesReference"):
 # 7. Evaluate expressions
 evaluate_expression(sessionId=session_id, expression="a")  # Returns: "1"
 evaluate_expression(sessionId=session_id, expression="a + b")  # Returns: "3"
-# Note: Expressions may mutate program state (e.g., "x = 5" may work in some
-# debugpy contexts). The server does not reject statements, but the debug
-# adapter may impose its own limitations.
+# Note: The evaluate_expression tool uses the 'variables' context by default,
+# which is intended for watch-style evaluation. Whether state-mutating
+# expressions (e.g., "x = 5") work depends entirely on the debug adapter;
+# debugpy may or may not allow mutations in this context.
 ```
 
 ## Common Issues and Solutions
@@ -228,7 +229,7 @@ get_local_variables(sessionId=session_id)
 
 ## Java Debugging
 
-**Prerequisites**: JDK 21+ installed. Uses JDI bridge (compiled automatically on first use).
+**Prerequisites**: JDK 21+ installed. Uses JDI bridge -- the adapter attempts to locate pre-compiled bridge classes and may compile them on demand at command-build time if not found.
 
 **Key notes:**
 - Compile target code with `javac -g` for full variable inspection

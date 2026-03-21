@@ -26,7 +26,7 @@ The Rust adapter bundles the CodeLLDB binaries into `packages/adapter-rust/vendo
 - `pnpm --filter @debugmcp/adapter-rust run build:adapter`
 - `node packages/adapter-rust/scripts/vendor-codelldb.js`
 
-> **New default:** the vendoring script now downloads **all supported platforms** (win32-x64, linux-x64, linux-arm64, darwin-x64, darwin-arm64) so Docker builds can reuse the same artifacts. Set `CODELLDB_VENDOR_ALL=false` if you only want the host platform.
+> **Default behavior:** Locally, the vendoring script downloads **all supported platforms** (win32-x64, linux-x64, linux-arm64, darwin-x64, darwin-arm64) so Docker builds can reuse the same artifacts. Set `CODELLDB_VENDOR_ALL=false` to vendor only the current host platform. In CI environments, the script vendors only the current platform unless `CODELLDB_VENDOR_ALL=true` is explicitly set.
 
 ### Manual control
 
@@ -161,7 +161,7 @@ Our test suite uses `tests/e2e/rust-example-utils.ts` to make sure every rust sm
    ```
 2. **Resolve the correct binary path for `start_debugging`.** Breakpoints should always reference the `.rs` source file (absolute paths avoid MCP resolution issues), but `start_debugging.scriptPath` must point to the compiled artifact:
    - Windows GNU: `examples/rust/<name>/target/x86_64-pc-windows-gnu/debug/<name>.exe`
-   - Windows MSVC fallback: `examples/rust/<name>/target/x86_64-pc-windows-msvc/debug/<name>.exe`
+   - Windows MSVC fallback: `examples/rust/<name>/target/debug/<name>.exe`
    - Unix-like hosts: `examples/rust/<name>/target/debug/<name>`
 
    Tokio/async builds use exactly the same rule—the helper’s `prepareRustExample('async_example')` just compiles a different crate and returns `{ sourcePath, binaryPath }` so the smoke tests can reuse those paths.
@@ -195,7 +195,6 @@ The `cargo` object supports these fields:
 - `example`: Example target name
 - `test`: Test target name
 - `release`: Build in release mode (boolean, default: false)
-- `build`: Whether to build before debugging (boolean)
 
 ### Workspace Support
 
@@ -366,7 +365,7 @@ ls vendor/codelldb/
 
 ### Expression Evaluation
 
-Coming soon - evaluate Rust expressions in the current context:
+Evaluate Rust expressions in the current debug context. Note that CodeLLDB evaluates expressions through LLDB, so some Rust-specific syntax (e.g., closures, trait methods) may not be supported:
 ```json
 {
   "tool": "evaluate_expression",

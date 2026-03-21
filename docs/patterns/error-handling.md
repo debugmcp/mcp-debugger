@@ -42,7 +42,7 @@ export const ErrorMessages = {
 
 ### Benefits of Centralization
 
-1. **Consistency** - All errors follow the same format
+1. **Consistency** - Timeout-related errors follow a consistent centralized format defined in error-messages.ts
 2. **Maintainability** - Easy to update error messages
 3. **Testability** - Can verify exact error messages in tests
 4. **User Experience** - Consistent troubleshooting guidance
@@ -51,18 +51,24 @@ export const ErrorMessages = {
 
 ### 1. Process-Level Error Handling
 
-**Location**: `src/proxy/dap-proxy-core.ts`
+Two implementations of global error handlers exist in the codebase:
+
+1. **`ProxyRunner.setupGlobalErrorHandlers()`** (`src/proxy/dap-proxy-core.ts`) -- Logs errors and sends IPC messages, but does **not** call `process.exit()` for unhandled rejections. Used when the entry point wires up error handling through the ProxyRunner instance.
+
+2. **`setupGlobalErrorHandlers()` standalone function** (`src/proxy/dap-proxy-dependencies.ts`) -- A standalone function that logs errors, sends IPC messages, and **always exits the process** after shutdown (including for unhandled rejections). Used by `dap-proxy-entry.ts` as the default process bootstrap.
+
+**ProxyRunner version** (`src/proxy/dap-proxy-core.ts`):
 
 ```typescript
 setupGlobalErrorHandlers(
   errorShutdown: () => Promise<void>,
   getCurrentSessionId: () => string | null
 ): void {
-  // Uncaught exception handler
+  // Uncaught exception handler - exits after shutdown
   process.on('uncaughtException', (error: Error) => {
     this.logger.error('[ProxyRunner] Uncaught exception:', error);
     const sessionId = getCurrentSessionId() || 'unknown';
-    
+
     this.dependencies.messageSender.send({
       type: 'error',
       message: `Proxy uncaught exception: ${error.message}`,
@@ -74,11 +80,11 @@ setupGlobalErrorHandlers(
     });
   });
 
-  // Unhandled rejection handler
+  // Unhandled rejection handler - logs but does NOT exit
   process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
     this.logger.error('[ProxyRunner] Unhandled rejection:', { reason, promise });
     const sessionId = getCurrentSessionId() || 'unknown';
-    
+
     this.dependencies.messageSender.send({
       type: 'error',
       message: `Proxy unhandled rejection: ${reason}`,
@@ -101,6 +107,16 @@ setupGlobalErrorHandlers(
     });
   });
 }
+```
+
+**Standalone version** (`src/proxy/dap-proxy-dependencies.ts`) exits after shutdown for **all** error types, including unhandled rejections:
+
+```typescript
+process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+  logger.error('[Proxy Worker UNHANDLED_REJECTION] Reason:', reason);
+  messageSender.send({ type: 'error', message: `...`, sessionId: '...' });
+  shutdownFn().finally(() => process.exit(1));  // exits the process
+});
 ```
 
 ### 2. Component-Level Error Handling

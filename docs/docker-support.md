@@ -22,11 +22,11 @@ npm run docker-build
 
 ### Why /workspace?
 
-The Debug MCP Server resolves paths through centralized container path utilities. When running in a container (`MCP_CONTAINER=true`), paths are resolved against the configured workspace root (`MCP_WORKSPACE_ROOT`, default `/workspace/`) via `SimpleFileChecker`, and the server passes the resolved effective path onward. This means:
+The Debug MCP Server resolves paths through centralized container path utilities (`src/utils/container-path-utils.ts`). When running in a container (`MCP_CONTAINER=true`), the server performs centralized container path rewriting: `resolvePathForRuntime()` rewrites paths to be under the workspace root (`MCP_WORKSPACE_ROOT`, default `/workspace/`). Non-workspace absolute paths (e.g., `/home/user/test.py`) are rewritten to fall under the workspace root rather than being rejected. `SimpleFileChecker` then validates existence and returns the resolved `effectivePath`, which the server passes downstream to the debug adapter. This means:
 - Your project files must be mounted at `/workspace`
 - The LLM can provide any path format (relative, absolute, Windows, Linux)
-- The server does NO path interpretation or cross-platform conversion
-- Debug adapter (debugpy) handles all path resolution natively
+- The server rewrites paths to the container workspace root, not cross-platform conversion
+- Debug adapter handles its own path resolution natively after receiving the rewritten path
 
 ## Running the Server with Docker
 
@@ -53,14 +53,8 @@ Here's the recommended configuration for your MCP settings file:
         "-i",
         "-v",
         "/path/to/your/project:/workspace:rw",
-        "-v",
-        "/path/to/temp:/tmp:rw",
         "mcp-debugger:local",
-        "stdio",
-        "--log-level",
-        "debug",
-        "--log-file",
-        "/tmp/mcp-debugger-docker.log"
+        "stdio"
       ],
       "autoApprove": [
         "create_debug_session",
@@ -93,7 +87,7 @@ Here's the recommended configuration for your MCP settings file:
 ### Important Notes:
 - Replace `/path/to/your/project` with the actual path to the project you want to debug
 - The `:rw` suffix allows read-write access (required for debugging)
-- The temp directory mount is optional but useful for log files. Note: the current Docker entrypoint hardcodes `--log-level debug` and does not forward additional CLI flags from `docker run`
+- The Docker entrypoint (`scripts/docker-entry.sh`) runs `dist/bundle.cjs` and passes through command-line arguments (e.g., `stdio`). It does not hardcode `--log-level` or `--log-file`
 - When using the debugger, provide paths relative to the project root (e.g., `examples/test.py` not `/workspace/examples/test.py`)
 
 ## Rust support in Docker
@@ -217,7 +211,7 @@ This ensures all dependencies needed for both Node.js execution and Python debug
 2. **Path resolution problems**:
    - The server expects paths relative to `/workspace`
    - If you provide `test.py`, the server looks for `/workspace/test.py`
-   - Absolute paths like `/home/user/test.py` won't work in container mode
+   - Non-workspace absolute paths like `/home/user/test.py` are rewritten under the workspace root (e.g., `/workspace/home/user/test.py`), which is unlikely to exist -- use relative paths or paths already under `/workspace` instead
 
 3. **Permission issues**: 
    - On Unix-based systems, you might need to adjust file permissions

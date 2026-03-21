@@ -37,7 +37,7 @@ The following scripts now include `npm run build` to ensure fresh artifacts:
 
 #### Container Scripts
 - **`test:e2e:container`**: Builds fresh Docker image (includes `--no-cache`)
-- **`docker-build`**: Builds Docker image (builds inside container)
+- **`docker-build`**: Runs `docker build`; the Dockerfile itself builds from source during image creation (multi-stage build)
 
 ### Scripts That DON'T Require Builds
 These scripts work directly with source files or don't execute code:
@@ -83,7 +83,7 @@ Both bundles include all necessary dependencies (using tsup's `noExternal` flag)
 
 The proxy bootstrap (`src/proxy/proxy-bootstrap.js`, compiled to `dist/proxy/proxy-bootstrap.js`) has been simplified:
 - **If bundle exists**: Uses the bundled proxy (`proxy-bundle.cjs`)
-- **If no bundle**: Uses the unbundled proxy files (development mode)
+- **If no bundle**: Falls back to `dap-proxy-entry.js` (the unbundled proxy entrypoint for development mode)
 - **Bootstrap sets `DAP_PROXY_WORKER=true`**: The proxy bootstrap sets this environment variable before spawning the proxy worker process; simply checks for bundle file existence to decide which proxy to use
 
 ### Why Separate Bundles?
@@ -120,7 +120,7 @@ The project uses two bundling tools for different purposes:
 
 **esbuild** (for root-level bundles):
 - Used by `scripts/bundle.js` to create `dist/bundle.cjs` (main server) and `dist/proxy/proxy-bundle.cjs` (proxy)
-- These root bundles are available for direct execution scenarios. Note: The Docker entrypoint (`scripts/docker-entry.sh`) runs `dist/bundle.cjs`, not `dist/index.js`
+- These root bundles are available for direct execution scenarios. The two Docker-related entrypoints use different files: `scripts/docker-entry.sh` (used by the production Dockerfile) runs `dist/bundle.cjs`, while `docker/docker-entrypoint.sh` (a legacy test entrypoint) runs `dist/index.js`
 
 ### Build Artifacts Management
 Build artifacts are properly managed via `.gitignore`:

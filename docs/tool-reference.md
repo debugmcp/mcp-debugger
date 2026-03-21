@@ -34,7 +34,7 @@ This document provides a complete reference for all tools available in mcp-debug
 Creates a new debugging session.
 
 **Parameters:**
-- `language` (string, required): The programming language to debug. Supported languages: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`.
+- `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. Defaults include: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are available.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"session-<8 chars>"` (e.g., `"session-a4d1acc8"`).
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 
@@ -690,15 +690,27 @@ Gets source code context around a specific line in a file.
 
 ---
 
+## Additional Tools
+
+The following tools are also available but are not fully documented with examples here:
+
+- **list_supported_languages**: Lists all supported debugging languages with metadata (installed status, display name, default executable). Takes no parameters.
+- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, and adapter-specific attach configuration.
+- **detach_from_process**: Detaches the debugger from an attached process. Parameters include `sessionId` and optional `terminateProcess` flag.
+- **list_threads**: Lists all threads in the debug session. Parameters include `sessionId`.
+
 ## Error Handling
 
-All tools follow consistent error patterns:
+Tools can return errors in two formats:
 
-### Common Error Codes
+1. **MCP transport errors**: Standard JSON-RPC error responses with numeric error codes. These indicate protocol-level failures.
+2. **Application-level failures**: JSON payloads with `{ "success": false, "error": "..." }`. Most tool failures use this format, where the HTTP/transport layer succeeds but the operation itself failed.
+
+### Common Error Codes (MCP transport errors)
 - `-32603`: Internal error (feature not implemented, session not found, etc.)
 - `-32602`: Invalid parameters
 
-### Error Response Format
+### MCP Error Response Format
 ```json
 {
   "code": -32603,
@@ -708,9 +720,18 @@ All tools follow consistent error patterns:
 }
 ```
 
+### Application-Level Error Format
+```json
+{
+  "success": false,
+  "error": "Session is not paused",
+  "message": "Cannot get local variables. The session must be paused at a breakpoint."
+}
+```
+
 ### Common Error Scenarios
 1. **Session not found**: Occurs when a session terminates unexpectedly
-2. **Invalid language**: Language must be one of the supported languages (python, javascript, rust, go, java, dotnet, mock)
+2. **Invalid language**: Language must be one of the supported languages (discovered dynamically from installed adapters)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables
 

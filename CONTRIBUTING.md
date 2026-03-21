@@ -310,7 +310,7 @@ mcp-debugger/
 - **DAP Proxy**: Handles communication with debug adapters via DAP protocol
 - **Adapter Registry**: Dynamically loads and manages language-specific adapters
 - **Adapter Policies**: Language-specific behavior via policy pattern
-- **MCP Tools**: Implements the 19 MCP protocol tools
+- **MCP Tools**: Implements the 20 MCP protocol tools
 
 ## 🏃 Running the Demo
 

@@ -190,11 +190,10 @@ interface MockAdapterConfig {
 
   // Behavior configuration
   supportedFeatures?: DebugFeature[];  // Which DAP features to support
-
-  // Error simulation
-  errorScenarios?: MockErrorScenario[]; // Enabled error scenarios
 }
 ```
+
+Note: Error scenarios are not part of `MockAdapterConfig`. They are controlled at runtime via `adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT)` on the `MockDebugAdapter` instance.
 
 Default supported features are determined by the constructor-normalized config. The `getCapabilities()` method builds a DAP capability object with hardcoded true values and dynamic flags keyed off `supportsFeature` for function breakpoints, conditional breakpoints, hover evaluation, set-variable, and log points. Refer to the mock adapter source for the exact default set.
 
@@ -206,16 +205,17 @@ const factory = new MockAdapterFactory({
   supportedFeatures: [
     DebugFeature.CONDITIONAL_BREAKPOINTS,
     DebugFeature.FUNCTION_BREAKPOINTS
-  ],
-  errorScenarios: [MockErrorScenario.CONNECTION_TIMEOUT]
+  ]
 });
 
 const adapter = factory.createAdapter(dependencies);
+// Error scenarios are set on the adapter instance at runtime:
+adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT);
 ```
 
 ## Mock Adapter Process
 
-The mock adapter includes a separate process (`mock-adapter-process.ts`) that simulates a real DAP server. It supports both stdio (default) and TCP transport:
+The mock adapter includes a separate process (`mock-adapter-process.ts`) that simulates a real DAP server. While the process supports both stdio and TCP transport, the `MockDebugAdapter.buildAdapterCommand()` always launches it in TCP mode (passing `--port` and `--host` arguments). Stdio mode is available for standalone testing but is not used by the adapter in normal operation:
 
 ```
 Usage: node mock-adapter-process.js [--port=<port>] [--host=<host>] [--session=<id>]

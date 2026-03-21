@@ -3,6 +3,8 @@
 > **📌 UPDATED DOCUMENTATION**
 > This migration guide covers changes through v0.18.1, including dynamic adapter loading and major UX improvements.
 
+**Version Note**: As of v0.18.1, the .NET adapter (`@debugmcp/adapter-dotnet`) remains at version 0.18.0 while other adapter packages are at 0.18.1. This does not affect functionality.
+
 ## What's New in v0.15.0
 
 ### ✅ Dynamic Adapter Loading (No Breaking Changes)
@@ -236,7 +238,7 @@ If you want to add support for a new language:
 
 1. **Create an adapter** following the [Adapter Development Guide](./architecture/adapter-development-guide.md)
 
-2. **Register your adapter**: Adapters are now dynamically loaded by convention. Place your adapter package at `packages/adapter-<language>/` and export a named factory class named `<Language>AdapterFactory`. The `AdapterLoader` attempts to import `@debugmcp/adapter-<language>` and falls back to `node_modules/` and `packages/` directory paths.
+2. **Register your adapter**: Adapters are now dynamically loaded by convention. Place your adapter package at `packages/adapter-<language>/` and export a named factory class named `<Language>AdapterFactory`. The `AdapterLoader` attempts to import `@debugmcp/adapter-<language>` and falls back to built module entrypoints at `node_modules/@debugmcp/adapter-<language>/dist/index.js` and `packages/adapter-<language>/dist/index.js`.
 
 3. **Current language enum** (in `@debugmcp/shared` models):
    ```typescript

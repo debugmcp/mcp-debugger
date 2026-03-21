@@ -130,26 +130,52 @@ use_mcp_tool(
 
 ### 5. Examine Program State
 
-When paused, you can examine the program's state:
+When paused, you can examine the program's state using the `get_stack_trace` -> `get_scopes` -> `get_variables` sequence. Each step returns numeric handles that feed into the next:
 
-#### Get Local Variables
+#### Step 1: Get the Stack Trace
 ```
 use_mcp_tool(
-  tool_name="get_variables",
+  tool_name="get_stack_trace",
   arguments={
-    "sessionId": "your-session-id",
-    "scope": "local"
+    "sessionId": "your-session-id"
   }
 )
 ```
+This returns stack frames, each with a numeric `id` (the frame ID).
 
-#### Get Global Variables
+#### Step 2: Get Scopes for a Frame
+Use the `id` from the top stack frame:
+```
+use_mcp_tool(
+  tool_name="get_scopes",
+  arguments={
+    "sessionId": "your-session-id",
+    "frameId": 3
+  }
+)
+```
+This returns scopes (e.g., "Locals", "Globals"), each with a numeric `variablesReference`.
+
+#### Step 3: Get Variables for a Scope
+Use the `variablesReference` from a scope (not the frame ID):
 ```
 use_mcp_tool(
   tool_name="get_variables",
   arguments={
     "sessionId": "your-session-id",
-    "scope": "global"
+    "scope": 5
+  }
+)
+```
+The `scope` parameter is the numeric `variablesReference` from `get_scopes`.
+
+#### Shortcut: Get Local Variables
+For convenience, `get_local_variables` performs the full stack->scopes->variables traversal in a single call:
+```
+use_mcp_tool(
+  tool_name="get_local_variables",
+  arguments={
+    "sessionId": "your-session-id"
   }
 )
 ```

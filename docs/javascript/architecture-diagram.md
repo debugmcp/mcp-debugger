@@ -94,7 +94,7 @@ sequenceDiagram
 - Manages request/response tracking with timeouts
 
 ### 2. ChildSessionManager
-Located in `src/proxy/child-session-manager.ts` (proxy layer, not JavaScript adapter internal).
+Located in `src/proxy/child-session-manager.ts` (proxy layer, not JavaScript adapter internal). Supports only one active child session at a time.
 - Detects and adopts child sessions via `__pendingTargetId`
 - Routes commands between parent and child sessions
 - Coordinates connection, DAP handshake, configuration replay, attach retry, and event bridging
@@ -135,9 +135,7 @@ Client → SessionManager → ProxyManager → Child → Node.js
 
 1. **Session Adoption**: The key innovation is detecting when js-debug issues a reverse `startDebugging` request and then running a multi-step adoption flow: connect child client, initialize, configure, attach (with retries), post-attach initialization, and optional stop enforcement.
 
-2. **Command Routing**: Commands are intelligently routed based on session state:
-   - Initialization commands → Parent session
-   - Debugging commands → Child session
+2. **Command Routing**: Commands are routed based on the adapter policy's `dapBehavior.childRoutedCommands` set. Commands listed in `childRoutedCommands` (e.g., stepping, variables, breakpoints) are sent to the child session; all other commands go to the parent session.
 
 3. **Event Propagation**: Events from the child session bubble up through the ProxyManager to the client.
 

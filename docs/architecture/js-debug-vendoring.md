@@ -1,4 +1,4 @@
-# [PROVISIONAL] js-debug vendoring and bootloader.js runtime requirement
+# js-debug vendoring and bootloader.js runtime requirement
 
 Status: IMPLEMENTED
 Last Updated: 2025-10-02
@@ -189,11 +189,10 @@ If upstream packaging changes and the simple search-and-copy cannot find the sup
   - Ensure logs include success lines from vendoring and explicit confirmation that `bootloader.js` exists.
   - Fail fast on missing bootloader with actionable message.
 
-## Open items
+## Ongoing maintenance
 
 - Confirm whether watchdog.js is required in all modes; keep copying it if present.
 - Monitor upstream release notes for any packaging change involving `vsDebugServer.(c)js`, `src/`, or bootloader pathing.
-- Revisit this document once the mitigation is fully implemented and the E2E tests pass across platforms. Remove PROVISIONAL when stable.
 
 ## Environment notes
 

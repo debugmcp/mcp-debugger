@@ -28,6 +28,7 @@ npm install @debugmcp/shared
 #### External Dependencies
 - `IFileSystem` - File system operations interface
 - `IProcessManager` - Process management interface
+- `IProcessLauncher` - Process launching interface (used by `AdapterDependencies` for adapter process spawning)
 - `INetworkManager` - Network operations interface
 - `ILogger` - Logging interface
 - `IEnvironment` - Environment information interface
@@ -36,7 +37,7 @@ npm install @debugmcp/shared
 #### Adapter Registry
 - `IAdapterFactory` - Factory interface for creating adapters
 - `IAdapterRegistry` - Registry for managing adapter factories
-- `AdapterDependencies` - Dependencies required by adapters
+- `AdapterDependencies` - Dependencies required by adapters (uses `processLauncher: IProcessLauncher`, not `IProcessManager`)
 - `AdapterMetadata` - Metadata about adapter implementations
 
 #### Adapter Policies

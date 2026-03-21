@@ -195,30 +195,26 @@ Enable detailed logging to troubleshoot issues:
 
 Note: `trace` is a DAP launch argument passed when starting the debug session, not a session-creation option.
 
+## TypeScript Support
+
+The adapter has built-in TypeScript support. When the factory validates the environment, it auto-detects `tsx` and `ts-node` in both `node_modules/.bin` and system PATH. If a TypeScript runner is found, you can debug `.ts` files directly:
+
+```json
+{
+  "tool": "start_debugging",
+  "params": {
+    "sessionId": "session-id",
+    "scriptPath": "app.ts",
+    "args": []
+  }
+}
+```
+
+Source maps are supported automatically when debugging compiled JavaScript -- breakpoints set in `.ts` files will resolve to the correct location in the generated `.js` if source maps are present.
+
+If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an error), and you can still debug compiled `.js` files with source maps. For technical details, see [TypeScript Source Map Investigation](./typescript-source-map-investigation.md).
+
 ## Known Limitations
-
-### TypeScript Source Mapping
-
-TypeScript debugging is functional. The adapter supports TypeScript through runtime transpilers (tsx, ts-node) which are auto-detected, and through compiled JavaScript files with source maps.
-
-**Current Workaround Options:**
-
-1. **Debug the compiled JavaScript directly** - Set breakpoints in the `.js` files instead of `.ts`
-2. **Use runtime transpilers** - Tools like `tsx` or `ts-node` that handle TypeScript at runtime:
-   ```json
-   {
-     "tool": "start_debugging",
-     "params": {
-       "sessionId": "session-id",
-       "scriptPath": "app.ts",  // Works with tsx/ts-node installed
-       "args": []
-     }
-   }
-   ```
-
-For technical details and planned improvements, see [TypeScript Source Map Investigation](./typescript-source-map-investigation.md).
-
-### Other Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
 - Remote debugging requires manual configuration
@@ -236,7 +232,7 @@ See `/examples/javascript/` for complete examples:
 
 The JavaScript adapter uses:
 - **Vendor**: Microsoft's `js-debug` from VSCode
-- **Entry point**: The factory launches `vsDebugServer.cjs` as its first priority; `vsDebugServer.js` is used as a fallback if the `.cjs` file is not present
+- **Vendor artifacts**: `vsDebugServer.js` is the canonical vendored artifact produced by the build script. `vsDebugServer.cjs` is a CommonJS compatibility duplicate created alongside it. The factory's validation checks for `.js` (the canonical path), while runtime command construction prefers `.cjs` for CommonJS child-process compatibility
 - **Protocol**: Debug Adapter Protocol (DAP)
 - **Transport**: TCP for DAP communication between the proxy and the js-debug adapter process
 - **Version**: The factory enforces Node.js 14+ as a minimum requirement; Node.js 18+ is recommended for best compatibility

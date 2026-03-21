@@ -18,7 +18,7 @@
 ## Coding Style & Naming Conventions
 - Source files use ES modules, TypeScript strict mode, and two-space indentation; prefer `PascalCase` for classes, `camelCase` for functions, and `SCREAMING_SNAKE_CASE` for constants.
 - Align new utilities with the patterns in `src/utils/` (utility modules — mix of pure functions and service classes — with explicit exports).
-- ESLint (`eslint.config.js`) enforces import order, logger usage, and null checks—run it before opening a PR.
+- ESLint (`eslint.config.js`) enforces TypeScript recommended rules, unused-variable patterns, and environment-specific overrides (e.g., relaxed rules for test files and mock utilities)—run it before opening a PR.
 - Avoid default exports; monorepo packages rely on named exports for tree shaking and test isolation.
 
 ## Testing Guidelines

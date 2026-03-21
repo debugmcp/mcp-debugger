@@ -81,7 +81,7 @@ When the MCP Rust adapter detects an MSVC build:
 
 - Breakpoints and stepping still work because CodeLLDB can control the process.
 - Variable inspection becomes unreliable: strings, vectors, async state machines, and complex structs typically appear as `<variable not available>` or show corrupted memory.
-- Session startup throws a structured error (`MSVC_TOOLCHAIN_DETECTED`) with instructions to continue with limited support or rebuild with GNU.
+- Session startup behavior depends on the `RUST_MSVC_BEHAVIOR` setting (default: `warn`). With `error` behavior, the adapter throws a structured error (`MSVC_TOOLCHAIN_DETECTED`). With the default `warn` behavior, the adapter logs a warning and proceeds. With `continue` behavior, the adapter also proceeds with a warning.
 
 These issues stem from LLDB's partial support for Microsoft's PDB format. There is currently no safe or redistributable alternative debugger we can bundle, so focusing on the GNU toolchain provides the best overall experience.
 
@@ -90,7 +90,7 @@ These issues stem from LLDB's partial support for Microsoft's PDB format. There 
 ## Frequently Asked Questions
 
 ### Can I debug MSVC builds anyway?
-Yes, but expect limited inspection. The adapter logs a warning and lets you continue if you accept the degraded experience (`RUST_MSVC_BEHAVIOR=continue`).
+Yes, but expect limited inspection. Setting `RUST_MSVC_BEHAVIOR=continue` makes the adapter warn and proceed with the MSVC binary despite limited variable support.
 
 ### What about Visual Studio Code?
 VS Code's C++ extension ships Microsoft's `cppvsdbg` adapter, which understands PDB files. If you must stay on MSVC, debug within VS Code instead of MCP.
@@ -105,7 +105,7 @@ Yes. Many teams build release artifacts with MSVC but keep a GNU build profile j
 
 ## Related Resources
 
-- [`mcp-debugger check-rust-binary`](../src/cli/commands/check-rust-binary.ts) — CLI entry point
+- [`mcp-debugger check-rust-binary`](https://github.com/debugmcp/mcp-debugger/blob/main/src/cli/commands/check-rust-binary.ts) — CLI entry point
 - [Rust toolchain book](https://doc.rust-lang.org/book/ch01-03-hello-cargo.html#installing-rustup) — Installing and managing toolchains
 - [CodeLLDB project](https://github.com/vadimcn/vscode-lldb) — Upstream debugger documentation
 

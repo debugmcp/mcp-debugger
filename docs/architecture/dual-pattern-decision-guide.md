@@ -29,19 +29,21 @@ Use IDebugAdapter when you need:
 export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.GO;
   readonly name = 'Go Debug Adapter';
-  
+
   async validateEnvironment(): Promise<ValidationResult> {
     // Check for dlv (Delve debugger)
   }
-  
+
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     // Build dlv command line
   }
-  
+
   async sendDapRequest<T>(command: string, args?: unknown): Promise<T> {
-    // Send DAP requests to Delve
+    // Intentional stub — DAP request forwarding is handled by the DAP client
+    // in the proxy layer, not by the adapter. This throws at runtime.
+    throw new Error('DAP request forwarding not implemented - handled by DAP client');
   }
-  
+
   // ... full IDebugAdapter implementation
 }
 ```
@@ -99,11 +101,11 @@ const MyPythonPolicy: AdapterPolicy = { ...PythonAdapterPolicy, extractLocalVari
 ### Scenario 3: Complex Handshake Protocol
 **Need**: Handle multi-session negotiation (like JavaScript)
 
-**Solution**: Use AdapterPolicy.performHandshake()
+**Solution**: Use AdapterPolicy.performHandshake(). Currently only `JsDebugAdapterPolicy` implements this method -- it handles the js-debug multi-session setup (child session negotiation, launch with pending target, etc.). Other policies do not implement `performHandshake`.
 ```typescript
 export const ComplexLanguagePolicy: AdapterPolicy = {
   async performHandshake(context: HandshakeContext): Promise<void> {
-    // Complex handshake logic
+    // Complex handshake logic (currently only implemented by JsDebugAdapterPolicy)
     // Access to proxyManager, sessionId, etc.
   }
 };
@@ -129,32 +131,30 @@ class CustomAdapter implements IDebugAdapter {
 ### How They Work Together
 
 ```typescript
-// During session initialization
+// During session initialization (simplified from startProxyManager + startDebugging)
 class SessionManagerOperations {
   async startDebugging(sessionId: string) {
     const session = this.getSession(sessionId);
-    
-    // 1. Create IDebugAdapter for core debugging
-    const adapter = await this.adapterRegistry.create(session.language, config);
-    
-    // 2. Get AdapterPolicy for session behaviors  
-    const policy = this.selectPolicy(session.language);
-    
-    // 3. Environment validation is implicit in adapter creation;
-    //    startDebugging does not call validateEnvironment() directly.
 
-    // 4. Use policy for executable validation (returns Promise<boolean>)
-    if (policy.validateExecutable) {
-      const executableValid = await policy.validateExecutable(executablePath);
-      if (!executableValid) {
-        throw new Error(`Executable not valid: ${executablePath}`);
-      }
-    }
-    
-    // 5. Create ProxyManager with adapter via factory (requires additional injected deps)
-    const proxyManager = this.proxyManagerFactory.create(adapter);
-    
-    // 6. Use policy for handshake if needed
+    // startProxyManager flow:
+    // 1. Create session log directory
+    // 2. Find free port for adapter
+    // 3. Collect queued breakpoints
+    // 4. Merge launch args (default + user-provided + adapterLaunchConfig)
+    // 5. Create IDebugAdapter via AdapterRegistry
+    const adapter = await this.adapterRegistry.create(session.language, config);
+
+    // 6. Build adapter command and create ProxyManager via factory
+    const proxyManager = this.proxyManagerFactory.create(/* injected deps */);
+
+    // 7. Start proxy process (spawns child process, sends init payload)
+    await proxyManager.start(proxyConfig);
+
+    // Back in startDebugging:
+    // 8. Get AdapterPolicy for session behaviors
+    const policy = this.selectPolicy(session.language);
+
+    // 9. Use policy for handshake if needed (currently only JsDebugAdapterPolicy)
     if (policy.performHandshake) {
       await policy.performHandshake({ proxyManager, sessionId });
     }

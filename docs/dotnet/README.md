@@ -18,6 +18,8 @@ MCP Client → MCP Server → SessionManager → ProxyManager → ProxyWorker
 
 The adapter uses a TCP-to-stdio bridge on all platforms to work around a netcoredbg `--server=PORT` bug (originally discovered on Windows) where the TCP connection drops after the DAP initialize sequence. The bridge spawns netcoredbg in stdio mode (which works reliably) and exposes a TCP socket for the proxy to connect to.
 
+The proxy worker dynamically selects the `DotnetAdapterPolicy` based on the adapter command provided in the init payload (via `DapProxyWorker.selectAdapterPolicy()`), which determines .NET-specific DAP handshake behavior.
+
 ## Prerequisites
 
 ### .NET SDK
@@ -52,7 +54,7 @@ Or add the netcoredbg directory to your PATH.
 1. `NETCOREDBG_X86_PATH` environment variable (for x86 attach targets)
 2. `NETCOREDBG_PATH` environment variable
 3. Caller-provided preferred path (if any)
-4. `which netcoredbg` (searches PATH)
+4. `which netcoredbg` (searches PATH) -- only used when no target architecture is requested, since PATH binaries have unpredictable architecture
 5. Hardcoded platform-specific candidate paths
 
 ### PDB Symbol Requirements
@@ -85,12 +87,12 @@ use_mcp_tool(
 ```
 
 Key launch arguments:
-- `program` (required): Path to the compiled .dll or .exe
+- `program` (required): Path to the compiled assembly or executable (.dll or .exe), not the source file. This is the runtime target that netcoredbg will launch.
 - `cwd`: Working directory for the launched process
 - `stopOnEntry`: Whether to pause at the program entry point
 - `args`: Command-line arguments to pass to the program
 
-**Important**: You must compile the project first with `dotnet build` before launching the debugger. The `program` path should point to the compiled output (typically `bin/Debug/net8.0/YourApp.dll`).
+**Important**: You must compile the project first with `dotnet build` before launching the debugger. The `program` path should point to the compiled output (typically `bin/Debug/net8.0/YourApp.dll`), not to a `.cs` source file.
 
 ### Attach Mode
 
@@ -252,7 +254,7 @@ dotnet build
 
 ## Docker Support
 
-.NET debugging is **disabled in Docker** (`MCP_DISABLE_LANGUAGES=rust,go,dotnet`). Host-compiled Windows .NET binaries (with Windows PDB symbols) cannot be debugged inside a Linux container. The container would need the program recompiled for Linux with Portable PDB symbols, which isn't practical for the typical workflow.
+.NET debugging is **disabled in Docker** (`DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet`). Host-compiled Windows .NET binaries (with Windows PDB symbols) cannot be debugged inside a Linux container. The container would need the program recompiled for Linux with Portable PDB symbols, which isn't practical for the typical workflow.
 
 ## Troubleshooting
 

@@ -182,7 +182,7 @@ Client Request → Server → SessionManager
 **DotnetAdapterPolicy**:
 - `resolveExecutablePath()` checks `NETCOREDBG_PATH` env var, defaults to `'netcoredbg'`
 - `getDapAdapterConfiguration()` returns `{ type: 'coreclr' }`
-- `getInitializationBehavior()` returns `{ sendAttachBeforeInitialized: false }` (standard DAP sequence)
+- `getInitializationBehavior()` returns `{ sendLaunchBeforeConfig: true, sendAttachBeforeInitialized: false }` (netcoredbg requires launch before configurationDone)
 - `extractLocalVariables()` filters out C# compiler-generated variables (`<>`, `CS$<>`, `$VB$`, `<>t__`, `<>s__`) unless `includeSpecial` is true
 - `getLocalScopeName()` returns `['Locals']`
 - `filterStackFrames()` removes frames with no source file and `System.*`/`Microsoft.*` frames

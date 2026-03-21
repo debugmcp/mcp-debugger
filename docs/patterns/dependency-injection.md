@@ -118,7 +118,7 @@ This factory pattern allows SessionManager to create ProxyManager instances with
 
 ### Core External Dependencies
 
-**Location**: `packages/shared/src/interfaces/` (e.g., `filesystem.ts`, `external-dependencies.ts`)
+**Location**: `packages/shared/src/interfaces/external-dependencies.ts` (defines `IFileSystem`, `IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`) and `packages/shared/src/interfaces/process-interfaces.ts` (defines `IProcessLauncher`, `IProxyProcessLauncher`)
 
 ```typescript
 // File system operations
@@ -133,10 +133,17 @@ export interface IFileSystem {
   // ... more methods
 }
 
-// Process management
+// Process management (used by SessionManager-level dependencies)
 export interface IProcessManager {
   spawn(command: string, args?: string[], options?: SpawnOptions): IChildProcess;
   exec(command: string): Promise<{ stdout: string; stderr: string }>;
+}
+
+// Process launching (used by AdapterDependencies — note this is a different interface)
+// IProcessLauncher is in process-interfaces.ts and is what adapters receive.
+// IProcessManager is in external-dependencies.ts and is the lower-level system abstraction.
+export interface IProcessLauncher {
+  launch(config: ProcessLaunchConfig): IChildProcess;
 }
 
 // Network operations
@@ -224,7 +231,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 // containing: fileSystem, processManager, networkManager, logger,
 //             processLauncher, proxyProcessLauncher, debugTargetLauncher,
 //             proxyManagerFactory, sessionStoreFactory
-export async function createTestDependencies(): Promise<Dependencies> {
+export async function createMockDependencies(): Promise<Dependencies> {
   const logger = createMockLogger();
   const fileSystem = createMockFileSystem();
   const processManager = createMockProcessManager();

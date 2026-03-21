@@ -174,7 +174,8 @@ sequenceDiagram
     PW->>DA: setBreakpoints
     DA-->>PW: initialized event
     PW-->>PM: adapter-configured
-    PM-->>SM: state: RUNNING (when stopOnEntry=false)
+    PM-->>SM: adapter-configured event
+    Note over SM: Transition to RUNNING via adapter-configured handler (when stopOnEntry=false),<br/>or via auto-continue from entry stop
     SM-->>C: Debug started
     
     Note over DA,TGT: Script execution begins
@@ -255,13 +256,13 @@ The project uses a dual-bundle approach for distribution:
 - Built with tsup using `noExternal: [/./]`
 - Includes all workspace dependencies
 - ESM format for modern Node.js compatibility
-- Entry point for npx distribution
+- Entry point for npx distribution (the npm package exposes `./dist/cli` as the bin shim, which loads `cli.mjs`)
 
 ### Proxy Bundle (`proxy-bundle.cjs`)
 - Separate bundle for the DAP proxy process
 - CommonJS format for child process compatibility
 - Includes all proxy dependencies (fs-extra, winston, etc.)
-- Auto-detected by proxy bootstrap (no env vars needed)
+- Auto-detected by proxy bootstrap. The `DAP_PROXY_WORKER` environment variable is set internally by the bootstrap to signal worker-mode detection to the proxy entry point.
 
 This architecture enables:
 - Zero-dependency npx distribution
@@ -271,7 +272,7 @@ This architecture enables:
 
 ## Security Considerations
 
-1. **Process Isolation** - Each debug session runs in separate process
+1. **Process Isolation** - Each debug session gets its own proxy worker process. The target process behavior depends on mode: in launch mode, the proxy worker spawns the debug adapter which in turn launches the target; in attach mode, the target is an external process that the adapter connects to.
 2. **Path Validation** - Script paths validated before execution
 3. **Timeout Protection** - All operations have configurable timeouts
 4. **Resource Cleanup** - Automatic cleanup of orphaned processes
@@ -281,7 +282,7 @@ This architecture enables:
 - **Startup Time**: ~1-2s for session initialization
 - **Command Latency**: <100ms for most DAP commands
 - **Memory Usage**: ~50MB base + ~20MB per active session
-- **Concurrent Sessions**: Limited by system resources
+- **Concurrent Sessions**: Limited by system resources. In SSE mode, the MCP SDK uses a single transport connection, so concurrent tool calls from a single client are serialized. Multiple independent clients can connect in SSE mode for true concurrency. STDIO mode supports a single client connection.
 
 ## Error Handling Strategy
 
