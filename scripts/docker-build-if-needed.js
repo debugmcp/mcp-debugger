@@ -71,8 +71,16 @@ async function main() {
     // Also verify that Docker can actually build (e.g., buildx is available)
     execSync('docker buildx version', { stdio: 'ignore' });
   } catch {
-    console.log('[Docker Build] Docker not available or not fully functional - skipping build');
+    console.log('[Docker Build] Docker CLI not installed - skipping build');
     return;
+  }
+
+  // Docker CLI exists — now verify the daemon is actually running
+  try {
+    execSync('docker info', { stdio: 'ignore' });
+  } catch {
+    console.error('[Docker Build] ERROR: Docker Desktop is not running. Please start Docker Desktop and try again.');
+    process.exit(1);
   }
 
   await waitForPackLockIfNeeded();
