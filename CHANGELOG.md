@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-03-22
+
+### Added
+- **.NET/C# debug adapter** — full debugging via netcoredbg with launch/attach modes, conditional breakpoints, exception breakpoints, TCP-to-stdio bridge, and Portable PDB support (PR #24, contributed by [@bob7123](https://github.com/bob7123))
+- **`list_threads` MCP tool** — list all threads in the debugged process (20 MCP tools total)
+- **`pause_execution` enhanced** — optional `threadId` parameter to pause a specific thread
+- **Java pause command** — `pause_execution` support for Java adapter
+- **Java per-breakpoint suspend policy** — control thread suspension behavior per breakpoint (PR #25, contributed by [@Finomosec](https://github.com/Finomosec))
+- **Batteries-included CLI bundle** — Rust, Java, and .NET adapters now bundled in `@debugmcp/mcp-debugger`
+- Pause test programs for Go, .NET, Java
+- Regression tests for Go and .NET pause fixes
+- Adapter registry, server coverage, and Go policy unit tests
+- Bridge fallback and bundle asset verification tests
+- Disconnect/detach safety tests
+
+### Fixed
+- Go and .NET pause workflow failures
+- Latent bugs in adapter loader, mock DAP parser, Java adapter, and Docker entrypoint
+- Fail fast with clear error when Docker daemon is not running
+- netcoredbg bridge path resolution for spaces in paths and NPX bundle variants
+- `dapLaunchArgs.program` preservation for compiled languages
+- Comprehensive osoji audit remediations (runtime bugs, dead code, stale docs)
+- 0% coverage files addressed after Vitest 4 upgrade
+
+### Changed
+- Adapter loading, error handling, logging, and language-specific documentation updated
+- Test robustness improvements and dead code removal
+
 ## [0.18.1] - 2026-03-11
 
 ### Added

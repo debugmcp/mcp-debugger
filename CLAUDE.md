@@ -438,7 +438,7 @@ After adding the MCP server:
 - **Status Check**: After restart, type `/mcp` in Claude Code to see connected servers
 
 ### Available Tools After Integration
-Once connected, the following 19 MCP tools become available:
+Once connected, the following 20 MCP tools become available:
 - `create_debug_session` - Start a new debug session
 - `list_debug_sessions` - List active debug sessions
 - `list_supported_languages` - Show available language adapters
@@ -450,6 +450,7 @@ Once connected, the following 19 MCP tools become available:
 - `step_over`, `step_into`, `step_out` - Step through code
 - `continue_execution` - Continue running
 - `pause_execution` - Pause a running program
+- `list_threads` - List all threads in a debug session
 - `get_variables` - Inspect variables in scope
 - `get_local_variables` - Get local variables in current frame
 - `get_stack_trace` - Inspect call stack
