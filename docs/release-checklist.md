@@ -5,7 +5,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 ## Before Tagging
 
 ### Automated (via `npm run release:dry-run`)
-- [ ] Package versions match (the dry-run script checks root plus the packages listed in its `PUBLISHED_PKGS`; adapter-go, adapter-java, and adapter-dotnet may not be included in the automated check yet)
+- [ ] Package versions match (the dry-run script checks root plus all workspace packages including adapter-dotnet)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
 - [ ] `npm run build` succeeds
@@ -16,7 +16,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 - [ ] `release.yml` changelog extraction strips `v` prefix (`refs/tags/v}` not `refs/tags/}`)
 
 ### Manual
-- [ ] **npm trusted publishing configured** — each `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). Note: the release dry-run script still checks for `NPM_TOKEN` as a repository secret.
+- [ ] **npm trusted publishing configured** — each published `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). npm auth is via OIDC — no `NPM_TOKEN` secret needed.
 - [ ] **Docker Hub credentials** — `DOCKER_USERNAME` and `DOCKER_PASSWORD` secrets are current
 - [ ] **PyPI token** — `PYPI_TOKEN` secret is current
 - [ ] `release.yml` default ref updated to current tag (for workflow_dispatch reruns)

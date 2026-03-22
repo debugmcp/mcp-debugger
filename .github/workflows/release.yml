@@ -291,8 +291,8 @@ jobs:
     
     - name: Publish to npm (workspaces)
       run: |
-        # Authenticate npm
-        npm config set //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+        # Auth via OIDC trusted publishing (id-token: write + setup-node registry-url)
+        # No NPM_TOKEN needed — GitHub Actions identity is verified by npm directly
 
         # Publish packages in dependency order if the target version does NOT yet exist
         # --provenance adds signed build attestation (requires id-token: write)
@@ -319,8 +319,6 @@ jobs:
         else
           npm publish -w @debugmcp/mcp-debugger --access public --provenance --tag ${NPM_TAG}
         fi
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   create-release:
     name: Create GitHub Release

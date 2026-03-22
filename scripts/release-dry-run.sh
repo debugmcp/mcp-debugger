@@ -102,22 +102,15 @@ for pkg_dir in "${PUBLISHED_PKGS[@]}"; do
   fi
 done
 
-# --- 6. Check npm token and GitHub secrets ---
+# --- 6. Check GitHub secrets (npm uses OIDC trusted publishing, no token needed) ---
 echo ""
-echo "── npm authentication ──"
-
-# Test local npm login
-if npm whoami > /dev/null 2>&1; then
-  NPM_USER=$(npm whoami)
-  pass "Local npm login: $NPM_USER"
-else
-  warn "Not logged in to npm locally"
-fi
+echo "── Publishing credentials ──"
+echo "  npm: OIDC trusted publishing (no token needed)"
 
 if command -v gh > /dev/null 2>&1; then
-  # Check secrets exist
+  # Check secrets exist (npm uses OIDC, only Docker and PyPI need tokens)
   SECRETS_LIST=$(gh secret list 2>/dev/null || echo "")
-  for secret in NPM_TOKEN DOCKER_USERNAME DOCKER_PASSWORD PYPI_TOKEN; do
+  for secret in DOCKER_USERNAME DOCKER_PASSWORD PYPI_TOKEN; do
     if echo "$SECRETS_LIST" | grep -q "^${secret}"; then
       pass "GitHub secret $secret exists"
     else
