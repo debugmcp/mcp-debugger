@@ -16,7 +16,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 - [ ] `release.yml` changelog extraction strips `v` prefix (`refs/tags/v}` not `refs/tags/}`)
 
 ### Manual
-- [ ] **npm trusted publishing configured** — each published `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). npm auth is via OIDC — no `NPM_TOKEN` secret needed.
+- [ ] **npm trusted publishing configured** — each published `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). Auth uses a granular access token via `NPM_TOKEN` secret; trusted publishing enables provenance verification.
 - [ ] **Docker Hub credentials** — `DOCKER_USERNAME` and `DOCKER_PASSWORD` secrets are current
 - [ ] **PyPI token** — `PYPI_TOKEN` secret is current
 - [ ] `release.yml` default ref updated to current tag (for workflow_dispatch reruns)

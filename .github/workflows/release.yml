@@ -291,11 +291,11 @@ jobs:
     
     - name: Publish to npm (workspaces)
       run: |
-        # Auth via OIDC trusted publishing (id-token: write + setup-node registry-url)
-        # No NPM_TOKEN needed — GitHub Actions identity is verified by npm directly
+        # Auth via NPM_TOKEN (granular access token scoped to @debugmcp packages)
+        # --provenance adds signed build attestation (requires id-token: write)
+        # Trusted publisher config on npmjs.com verifies provenance against this repo
 
         # Publish packages in dependency order if the target version does NOT yet exist
-        # --provenance adds signed build attestation (requires id-token: write)
         if npm view @debugmcp/shared@${SHARED_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/shared@${SHARED_VERSION} already exists, skipping"
         else
@@ -319,6 +319,8 @@ jobs:
         else
           npm publish -w @debugmcp/mcp-debugger --access public --provenance --tag ${NPM_TAG}
         fi
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   create-release:
     name: Create GitHub Release

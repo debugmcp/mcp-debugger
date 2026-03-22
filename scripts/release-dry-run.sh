@@ -102,15 +102,14 @@ for pkg_dir in "${PUBLISHED_PKGS[@]}"; do
   fi
 done
 
-# --- 6. Check GitHub secrets (npm uses OIDC trusted publishing, no token needed) ---
+# --- 6. Check GitHub secrets ---
 echo ""
 echo "── Publishing credentials ──"
-echo "  npm: OIDC trusted publishing (no token needed)"
 
 if command -v gh > /dev/null 2>&1; then
-  # Check secrets exist (npm uses OIDC, only Docker and PyPI need tokens)
+  # Check secrets exist (NPM_TOKEN = granular access token for npm publish)
   SECRETS_LIST=$(gh secret list 2>/dev/null || echo "")
-  for secret in DOCKER_USERNAME DOCKER_PASSWORD PYPI_TOKEN; do
+  for secret in NPM_TOKEN DOCKER_USERNAME DOCKER_PASSWORD PYPI_TOKEN; do
     if echo "$SECRETS_LIST" | grep -q "^${secret}"; then
       pass "GitHub secret $secret exists"
     else
