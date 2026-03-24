@@ -123,8 +123,10 @@ class TestResultsAnalyzer {
             lines.forEach(line => {
               if (line.includes('at ') || line.includes('node_modules')) {
                 inStackTrace = true;
+              } else {
+                inStackTrace = false;
               }
-              
+
               if (!inStackTrace && line.trim()) {
                 console.log(`   ${line}`);
               }
@@ -177,7 +179,7 @@ class TestResultsAnalyzer {
     Object.keys(testsByDir).sort().forEach(dir => {
       console.log(`\n📁 ${dir}/`);
       
-      testsByDir[dir].forEach(({ file, path, tests, duration }) => {
+      testsByDir[dir].forEach(({ file, path: filePath, tests, duration }) => {
         const passed = tests.filter(t => t.status === 'passed').length;
         const failed = tests.filter(t => t.status === 'failed').length;
         const skipped = tests.filter(t => t.status === 'pending').length;

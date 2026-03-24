@@ -136,7 +136,7 @@ describe('SessionManager - Error Recovery', () => {
       expect(variables).toEqual([]);
     });
 
-    it('should cleanup properly after timeout', async () => {
+    it('should cleanup properly after startup failure', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
         pythonPath: 'python'

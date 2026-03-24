@@ -15,6 +15,8 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Verifies Docker setup works end-to-end
 - Tests path translation (host paths to container paths), session lifecycle, core debug actions, and cleanup
 - Includes Docker availability check with graceful skip
+- Includes `docker-entrypoint.test.ts` for testing the Docker entrypoint script
+- Includes `docker-smoke-rust.test.ts` for Rust-specific container tests
 
 ### 3. `mcp-server-smoke-javascript.test.ts`
 - Tests JavaScript adapter through MCP interface
@@ -79,6 +81,15 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Docker and SSE helper functions
 - Cross-platform compatibility utilities
 
+### 16. `rust-example-utils.ts`
+- Shared utilities for Rust E2E tests
+- Rust example project building and management
+
+### 17. NPX smoke tests (`npx/` subdirectory)
+- `npx-smoke-python.test.ts` - Tests Python debugging via the npx distribution
+- `npx-smoke-javascript.test.ts` - Tests JavaScript debugging via the npx distribution
+- `npx-test-utils.ts` - Shared utilities for NPX smoke tests
+
 ## Running the Tests
 
 ```bash
@@ -103,6 +114,7 @@ npx vitest run tests/e2e/mcp-server-smoke-dotnet.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-javascript-sse.test.ts
 npx vitest run tests/e2e/comprehensive-mcp-tools.test.ts
 npx vitest run tests/e2e/debugpy-connection.test.ts
+npx vitest run tests/e2e/npx/  # NPX smoke tests
 ```
 
 ## Prerequisites

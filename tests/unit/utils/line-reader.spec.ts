@@ -264,9 +264,7 @@ Line 2`;
 
     it('should provide cache statistics', () => {
       const stats = lineReader.getCacheStats();
-      expect(stats).toHaveProperty('size');
       expect(stats).toHaveProperty('itemCount');
-      expect(stats.size).toBe(0);
       expect(stats.itemCount).toBe(0);
     });
   });

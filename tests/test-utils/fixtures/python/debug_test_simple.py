@@ -1,5 +1,5 @@
 import sys
-import time # Added for sleep
+import time
 
 # Simple script for debugging tests
 

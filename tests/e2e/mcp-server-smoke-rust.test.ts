@@ -1,8 +1,5 @@
 /**
  * Rust Adapter Smoke Test via MCP Interface
- *
- * Reproduces the current Rust debugging failure so we can iterate locally
- * instead of relying on manual user sessions.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';

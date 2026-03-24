@@ -443,8 +443,8 @@ describe('MCP Server Python Debugging Smoke Test', () => {
       }
     } else {
       console.log('[Python Smoke Test] Step into operation did not succeed, but that is acceptable');
-      // Still consider this a pass - the operation was attempted
-      expect(true).toBe(true);
+      // Verify the step_into result reported failure explicitly
+      expect(stepIntoResult.success).toBe(false);
     }
     
     // Close session

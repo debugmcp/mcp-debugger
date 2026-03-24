@@ -248,7 +248,7 @@ describe('python-utils', () => {
         vi.unstubAllGlobals();
       });
 
-      it('should use where.exe (not where) on Windows to avoid PowerShell alias conflict', async () => {
+      it('should look up python commands via the command finder', async () => {
         // With the new implementation, we're using the 'which' npm package
         // which handles the where.exe vs where issue internally
         mockCommandFinder.setResponse('python', 'C:\\Python\\python.exe');

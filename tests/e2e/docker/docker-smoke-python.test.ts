@@ -232,7 +232,9 @@ describe.skipIf(SKIP_DOCKER)('Docker: Python Debugging Smoke Tests', () => {
     const variablesAfter = varsAfter.variables as any[];
     const varAAfter = variablesAfter.find(v => v.name === 'a');
     const varBAfter = variablesAfter.find(v => v.name === 'b');
-    
+
+    expect(varAAfter).toBeDefined();
+    expect(varBAfter).toBeDefined();
     expect(varAAfter.value).toBe('2');
     expect(varBAfter.value).toBe('1');
     

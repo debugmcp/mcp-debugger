@@ -189,7 +189,7 @@ describe('ProxyManager Message Handling', () => {
 
       proxyManager.on('exited', () => {
         exitedEmitted = true;
-        capturedCode = 0; // Default to 0 for test
+        capturedCode = 0; // ProxyManager emits 'exited' without args; exit code is in the DAP body
       });
 
       proxyManager.simulateMessage(exitedMessage);
@@ -435,7 +435,7 @@ describe('ProxyManager Message Handling', () => {
       expect(result2.success).toBe(true);
     });
 
-    it('should handle request timeout', async () => {
+    it('should handle normal request completion', async () => {
       // For TestProxyManager, timeouts are not simulated
       // Just verify normal operation
       const response = await proxyManager.sendDapRequest('threads');
@@ -936,7 +936,6 @@ describe('ProxyManager Message Handling', () => {
     });
   });
 
-});
   describe('IPC smoke test status', () => {
     it('kills proxy process when minimal proxy test status arrives', () => {
       const logger = createMockLogger();
@@ -961,3 +960,4 @@ describe('ProxyManager Message Handling', () => {
       expect(kill).toHaveBeenCalled();
     });
   });
+});

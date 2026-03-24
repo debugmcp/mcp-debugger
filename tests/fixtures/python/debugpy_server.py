@@ -117,7 +117,6 @@ def main():
     
     parser = argparse.ArgumentParser(description='Mock debugpy server for testing')
     parser.add_argument('--port', type=int, default=5678, help='Port to listen on')
-    parser.add_argument('--no-wait', action='store_true', help='Do not wait for debugger to attach (compatibility flag)')
 
     args = parser.parse_args()
     port = args.port

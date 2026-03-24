@@ -1091,7 +1091,7 @@ describe('DapProxyWorker', () => {
       // In the current implementation, without proper connection, it may reject
       // This test mainly verifies the JS adapter policy is selected and working
       // The actual queueing behavior depends on connection state
-      expect(responses.length).toBeGreaterThanOrEqual(0);
+      expect(responses.length).toBeGreaterThanOrEqual(1);
     });
   });
 

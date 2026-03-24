@@ -19,7 +19,7 @@ async function testSummary() {
     cwd: process.cwd()
   });
   
-  // Capture output but don't display it
+  // Suppress stdout/stderr output from vitest
   testProcess.stdout.on('data', () => {});
   testProcess.stderr.on('data', () => {});
   

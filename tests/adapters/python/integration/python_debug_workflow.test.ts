@@ -54,9 +54,7 @@ async function startTestServer(): Promise<void> {
         env: filteredEnv, // Pass filtered environment to the server process
     });
 
-    // StdioClientTransport will log its own stderr/stdout from the child process if configured.
-    // We don't need to manually attach to serverProcess.stderr anymore if transport handles it.
-    // The transport also manages the lifecycle of the spawned process.
+    // StdioClientTransport manages server process lifecycle and stderr.
 
     try {
         console.log('[Test Server] Attempting to connect SDK client (which will spawn server)...');

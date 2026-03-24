@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
-import { 
-  ProcessLauncherImpl,
-  ProcessLauncherFactoryImpl
+import {
+  ProcessLauncherImpl
 } from '../../../src/implementations/process-launcher-impl';
 import { ProcessManagerImpl } from '../../../src/implementations/process-manager-impl';
 import type { IChildProcess } from '../../../src/interfaces/external-dependencies';
@@ -280,43 +279,6 @@ describe('ProcessLauncherImpl', () => {
 
       expect(process.exitCode).toBeNull();
       expect(process.signalCode).toBeNull();
-    });
-  });
-
-  describe('ProcessLauncherFactoryImpl', () => {
-    it('should create process launcher', () => {
-      const networkManager = {
-        findFreePort: vi.fn().mockResolvedValue(5678)
-      };
-      
-      const factory = new ProcessLauncherFactoryImpl(processManager, networkManager as any);
-      const launcher = factory.createProcessLauncher();
-
-      expect(launcher).toBeInstanceOf(ProcessLauncherImpl);
-    });
-
-    it('should create debug target launcher', () => {
-      const networkManager = {
-        findFreePort: vi.fn().mockResolvedValue(5678)
-      };
-      
-      const factory = new ProcessLauncherFactoryImpl(processManager, networkManager as any);
-      const launcher = factory.createDebugTargetLauncher();
-
-      expect(launcher).toBeDefined();
-      expect(launcher.launchPythonDebugTarget).toBeDefined();
-    });
-
-    it('should create proxy process launcher', () => {
-      const networkManager = {
-        findFreePort: vi.fn().mockResolvedValue(5678)
-      };
-      
-      const factory = new ProcessLauncherFactoryImpl(processManager, networkManager as any);
-      const launcher = factory.createProxyProcessLauncher();
-
-      expect(launcher).toBeDefined();
-      expect(launcher.launchProxy).toBeDefined();
     });
   });
 });

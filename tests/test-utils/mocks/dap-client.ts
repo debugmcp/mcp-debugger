@@ -41,6 +41,10 @@ export class MockDapClient extends EventEmitter {
   
   // Event handlers
   private eventHandlers: Map<string, Function[]> = new Map();
+
+  // Per-command mock responses and errors
+  private mockResponses: Map<string, any> = new Map();
+  private mockErrors: Map<string, Error> = new Map();
   
   constructor() {
     super();
@@ -67,6 +71,8 @@ export class MockDapClient extends EventEmitter {
     
     // Clear all registered event handlers
     this.eventHandlers.clear();
+    this.mockResponses.clear();
+    this.mockErrors.clear();
     this.removeAllListeners();
     
     // Reset default implementations
@@ -76,31 +82,40 @@ export class MockDapClient extends EventEmitter {
   }
   
   /**
-   * Set specific mock implementations for different request types
+   * Set specific mock implementations for different request types.
+   * Multiple calls accumulate per-command responses in a map.
    */
   mockRequest(command: string, response: any): void {
-    this.sendRequest.mockImplementation((cmd: string, ...args: any[]) => {
-      if (cmd === command) {
-        return Promise.resolve(response);
-      }
-      return Promise.resolve({}); // Default response
-    });
+    this.mockResponses.set(command, response);
+    this._updateSendRequestMock();
   }
-  
+
   /**
    * Simulate a DAP event
    */
   simulateEvent(event: DapEvent, data: any = {}): void {
     this.emit(event, data);
   }
-  
+
   /**
-   * Simulate an error during a DAP request
+   * Simulate an error during a DAP request.
+   * Multiple calls accumulate per-command errors in a map.
    */
   simulateRequestError(command: string, error: Error): void {
+    this.mockErrors.set(command, error);
+    this._updateSendRequestMock();
+  }
+
+  /**
+   * Update sendRequest mock to reflect accumulated responses and errors.
+   */
+  private _updateSendRequestMock(): void {
     this.sendRequest.mockImplementation((cmd: string, ...args: any[]) => {
-      if (cmd === command) {
-        return Promise.reject(error);
+      if (this.mockErrors.has(cmd)) {
+        return Promise.reject(this.mockErrors.get(cmd));
+      }
+      if (this.mockResponses.has(cmd)) {
+        return Promise.resolve(this.mockResponses.get(cmd));
       }
       return Promise.resolve({}); // Default response
     });

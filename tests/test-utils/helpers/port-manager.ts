@@ -10,9 +10,9 @@ const BASE_PORT = 5679;
 
 // Port ranges for different test types
 export enum PortRange {
-  UNIT_TESTS = 0,      // 5679-5779
-  INTEGRATION = 100,   // 5779-5879
-  E2E = 200,           // 5879-5979
+  UNIT_TESTS = 0,      // 5679-5778
+  INTEGRATION = 100,   // 5779-5878
+  E2E = 200,           // 5879-5978
 }
 
 class TestPortManager {
@@ -59,7 +59,7 @@ class TestPortManager {
     }
     
     // If all ports are used, throw an error
-    throw new Error(`No available test ports in range ${rangeStart}-${rangeEnd}`);
+    throw new Error(`No available test ports in range ${rangeStart}-${rangeEnd} (fallback range ${this.basePort}-${this.basePort + 999} also exhausted)`);
   }
   
   /**

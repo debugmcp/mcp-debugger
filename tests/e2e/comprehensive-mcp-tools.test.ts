@@ -395,7 +395,7 @@ describe('Comprehensive MCP Debugger Test — 20 Tools × 5 Languages', () => {
               });
               const vars = (varsRes as any).variables ?? [];
               const varNames = vars.map((v: any) => v.name).join(', ');
-              record('get_variables', lang.language, vars.length >= 0 ? 'PASS' : 'FAIL',
+              record('get_variables', lang.language, vars.length > 0 ? 'PASS' : 'FAIL',
                 `${vars.length} vars: ${varNames.slice(0, 100)}`,
                 Date.now() - t0);
             } catch (err: any) {

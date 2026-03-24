@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { 
   SessionStoreFactory, 
   MockSessionStoreFactory, 
@@ -9,10 +9,6 @@ import { SessionStore, CreateSessionParams } from '../../../../src/session/sessi
 import { DebugLanguage } from '@debugmcp/shared';
 
 describe('SessionStoreFactory', () => {
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('SessionStoreFactory', () => {
     it('should create SessionStore instance', () => {
       const factory = new SessionStoreFactory();
