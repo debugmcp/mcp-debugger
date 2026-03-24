@@ -165,7 +165,7 @@ async function startDebugpyServer(port = 5679): Promise<ChildProcess> {
   const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
   console.log(`[E2E SETUP INFO] Using Python executable: ${pythonPath}`);
   
-  const pythonProcess = spawn(pythonPath, ['-u', serverScriptPath, '--port', port.toString(), '--no-wait'], { stdio: 'pipe' });
+  const pythonProcess = spawn(pythonPath, ['-u', serverScriptPath, '--port', port.toString()], { stdio: 'pipe' });
   pythonProcess.stdout?.on('data', (data) => console.log(`[DebugPy Server] ${data.toString().trim()}`));
   pythonProcess.stderr?.on('data', (data) => console.error(`[DebugPy Server Error] ${data.toString().trim()}`));
   return new Promise((resolve, reject) => {
