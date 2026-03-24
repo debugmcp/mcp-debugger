@@ -617,7 +617,9 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
       }
     }
 
-    // Ensure the proxy knows it's not in test mode
+    // Belt-and-suspenders: explicitly delete test-runner env vars that may have
+    // survived the conditional copy above (e.g. if they were in process.env but
+    // not filtered by the loop guard). The proxy must never think it's in a test.
     delete processEnv.NODE_ENV;
     delete processEnv.VITEST;
     delete processEnv.JEST_WORKER_ID;
@@ -658,27 +660,4 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     return new ProxyProcessAdapter(childProcess, sessionId);
   }
 
-}
-
-/**
- * Production implementation of IProcessLauncherFactory
- */
-export class ProcessLauncherFactoryImpl {
-  constructor(
-    private processManager: IProcessManager,
-    private networkManager: INetworkManager
-  ) {}
-  
-  createProcessLauncher(): IProcessLauncher {
-    return new ProcessLauncherImpl(this.processManager);
-  }
-  
-  createDebugTargetLauncher(): IDebugTargetLauncher {
-    const processLauncher = this.createProcessLauncher();
-    return new DebugTargetLauncherImpl(processLauncher, this.networkManager);
-  }
-  
-  createProxyProcessLauncher(): IProxyProcessLauncher {
-    return new ProxyProcessLauncherImpl(this.processManager);
-  }
 }

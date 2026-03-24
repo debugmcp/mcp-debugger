@@ -88,13 +88,3 @@ export interface IProxyProcess extends IProcess {
   sendCommand(command: object): void;
   waitForInitialization(timeout?: number): Promise<void>;
 }
-
-/**
- * Factory for creating process launchers
- * Allows for easy swapping between production and test implementations
- */
-export interface IProcessLauncherFactory {
-  createProcessLauncher(): IProcessLauncher;
-  createDebugTargetLauncher(): IDebugTargetLauncher;
-  createProxyProcessLauncher(): IProxyProcessLauncher;
-}

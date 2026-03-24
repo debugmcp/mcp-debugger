@@ -124,10 +124,7 @@ export type {
   
   // Proxy process interfaces
   IProxyProcessLauncher,
-  IProxyProcess,
-  
-  // Factory
-  IProcessLauncherFactory
+  IProxyProcess
 } from './interfaces/process-interfaces.js';
 
 // ===== Models =====
