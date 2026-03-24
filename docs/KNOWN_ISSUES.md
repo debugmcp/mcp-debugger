@@ -13,7 +13,7 @@ There are 3 tests that fail when running with Act (local GitHub Actions simulato
 ### 1. Container Smoke Test - Timeout Issue
 - **File**: `tests/e2e/docker/docker-smoke-python.test.ts` (and other `docker-smoke-*.test.ts` files)
 - **Test**: Container-based debugging smoke tests
-- **Issue**: Test times out after 60 seconds in Act environment
+- **Issue**: Tests time out in Act environment (timeouts vary: 240s for setup, 120s for main operations, 60s for simple tests)
 - **Likely Cause**: Docker operations are slower in Act's Docker-in-Docker setup
 - **Solution**: May need to increase timeout or optimize Docker image loading
 

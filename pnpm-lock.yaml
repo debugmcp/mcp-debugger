@@ -75,9 +75,6 @@ importers:
       '@vscode/debugadapter-testsupport':
         specifier: ^1.68.0
         version: 1.68.0
-      baseline-browser-mapping:
-        specifier: ^2.10.8
-        version: 2.10.8
       c8:
         specifier: ^11.0.0
         version: 11.0.0

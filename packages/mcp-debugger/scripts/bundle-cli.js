@@ -247,6 +247,8 @@ async function bundleCLI() {
     const tgzFiles = fs.readdirSync(path.join(packageRoot, 'package'))
       .filter(f => f.endsWith('.tgz'));
     if (tgzFiles.length > 0) {
+      // Note: lexicographic sort may misorder semver (e.g., 0.9.0 > 0.10.0).
+      // For robustness, derive from package.json version if precise ordering matters.
       const latestTgz = tgzFiles.sort().pop();
       fs.copyFileSync(
         path.join(packageRoot, 'package', latestTgz),

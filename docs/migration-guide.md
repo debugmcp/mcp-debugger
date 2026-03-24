@@ -1,9 +1,7 @@
 # mcp-debugger Migration Guide
 
 > **📌 UPDATED DOCUMENTATION**
-> This migration guide covers changes through v0.18.1, including dynamic adapter loading and major UX improvements.
-
-**Version Note**: As of v0.18.1, the .NET adapter (`@debugmcp/adapter-dotnet`) remains at version 0.18.0 while other adapter packages are at 0.18.1. This does not affect functionality.
+> This migration guide covers changes through v0.19.0, including dynamic adapter loading and major UX improvements.
 
 ## What's New in v0.15.0
 
@@ -24,17 +22,13 @@ This release introduces dynamic discovery and loading of language adapters at ru
   - Factory class export: `<CapitalizedLanguage>AdapterFactory` (named export; the loader looks up this class name via convention)
 
 ### 🔧 User Guidance
-- Install core only:
+- Install the package (adapter packages are bundled as optional dependencies):
   ```bash
   npm install @debugmcp/mcp-debugger
   ```
-- Install core + Python adapter:
-  ```bash
-  npm install @debugmcp/mcp-debugger @debugmcp/adapter-python
-  ```
 - Verify availability:
   - Call the `list_supported_languages` tool (from your MCP client) to see which adapters are discoverable
-  - If a language is missing, install its adapter package
+  - All adapter packages are included as optional dependencies of `@debugmcp/mcp-debugger` and are installed automatically when available
 
 ### 🐳 Container Notes
 - Stdout in stdio mode must be NDJSON-only; the runtime preloads a silencer that mirrors logs to `/app/logs` without altering protocol
@@ -194,7 +188,7 @@ If you're using mcp-debugger for Python debugging, you **must** update your code
 2. **Update type imports** (if using TypeScript):
    ```diff
    - import { PythonDebugSession } from 'mcp-debugger';
-   + import { SessionInfo } from 'mcp-debugger';
+   + import { DebugSessionInfo } from '@debugmcp/shared';
    ```
 
 3. **No changes needed for**:

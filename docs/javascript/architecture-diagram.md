@@ -119,23 +119,23 @@ Client → SessionManager → ProxyManager → Parent → Child → Node.js
 
 ### Getting Variables
 ```
-Client → SessionManager → ProxyManager → ChildSessionManager → Child → Node.js
+Client → SessionManager → ProxyManager → ChildSessionManager → MinimalDapClient → Child → Node.js
                                               ↑
-                                    (Routes to active child)
+                                    (Routed via MinimalDapClient to active child)
 ```
 
 ### Stepping Through Code
 ```
-Client → SessionManager → ProxyManager → Child → Node.js
-                              ↑
-                    (Direct routing after adoption)
+Client → SessionManager → ProxyManager → ChildSessionManager → MinimalDapClient → Child → Node.js
+                                              ↑
+                                    (Routed via MinimalDapClient to active child)
 ```
 
 ## Implementation Notes
 
 1. **Session Adoption**: The key innovation is detecting when js-debug issues a reverse `startDebugging` request and then running a multi-step adoption flow: connect child client, initialize, configure, attach (with retries), post-attach initialization, and optional stop enforcement.
 
-2. **Command Routing**: Commands are routed based on the adapter policy's `dapBehavior.childRoutedCommands` set. Commands listed in `childRoutedCommands` (e.g., stepping, variables, breakpoints) are sent to the child session; all other commands go to the parent session.
+2. **Command Routing**: Commands are routed based on the adapter policy's `dapBehavior.childRoutedCommands` set. Commands listed in `childRoutedCommands` (e.g., stepping, variables) are sent to the child session; all other commands go to the parent session. Breakpoints are NOT child-routed -- they are set on the parent session and then mirrored to the child session via `mirrorBreakpointsToChild`.
 
 3. **Event Propagation**: Events from the child session bubble up through the ProxyManager to the client.
 

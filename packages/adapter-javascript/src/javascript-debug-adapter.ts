@@ -409,7 +409,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     if (isTS) {
       result.sourceMaps = true;
-      const outFiles = determineOutFiles(program, Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined);
+      const outFiles = determineOutFiles(Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined);
       result.outFiles = outFiles;
       result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
     } else {
@@ -417,7 +417,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       result.sourceMaps = sm;
       const userOut = Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined;
       if (sm) {
-        result.outFiles = determineOutFiles(program, userOut);
+        result.outFiles = determineOutFiles(userOut);
         result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
       } else if (userOut) {
         // If user explicitly provided outFiles while sourceMaps false, pass through
@@ -496,7 +496,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // Append any user-provided args last and normalize/dedupe
     let finalArgs = this.normalizeAndDedupeArgs([...computedArgs, ...userRuntimeArgs]);
 
-    // Do not force Node inspector flags here; rely on adapter's stopOnEntry behavior.
+    // Normalize Node inspector flags: add --inspect-brk only when stopOnEntry is true
 
     result.runtimeExecutable = runtimeExecutableSync;
     if (finalArgs.length > 0) {
@@ -565,33 +565,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   // ===== DAP Protocol Operations =====
 
-  async sendDapRequest<T extends DebugProtocol.Response>(command: string, args?: unknown): Promise<T> {
-    // Minimal validation only; transport handled by ProxyManager
-    try {
-      const logger = this.dependencies.logger;
-      logger?.debug?.(`sendDapRequest: ${command}`);
-
-      // Clone top-level and nested source to avoid mutating original args
-      let req: Record<string, unknown> | undefined;
-      if (args && typeof args === 'object') {
-        const base = args as Record<string, unknown>;
-        const source = base.source && typeof base.source === 'object'
-          ? { ...(base.source as Record<string, unknown>) }
-          : undefined;
-        req = { ...base, source };
-      }
-
-      if (command === 'setBreakpoints' && req && typeof req.source === 'object' && req.source) {
-        const src = req.source as Record<string, unknown>;
-        const p = src.path;
-        if (typeof p === 'string') {
-          src.path = path.resolve(p);
-        }
-      }
-    } catch {
-      // ignore validation/logging errors
-    }
-
+  async sendDapRequest<T extends DebugProtocol.Response>(_command: string, _args?: unknown): Promise<T> {
     // Transport handled by ProxyManager
     return {} as T;
   }

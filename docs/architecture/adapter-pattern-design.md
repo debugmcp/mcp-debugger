@@ -51,6 +51,9 @@ if (policy.validateExecutable) {
   await policy.validateExecutable(executablePath);
 }
 if (policy.performHandshake) {
+  // performHandshake runs AFTER the proxy process has started and DAP initialization
+  // is complete. It handles adapter-specific post-init coordination (e.g., js-debug
+  // child session negotiation).
   await policy.performHandshake(context);
 }
 ```
@@ -216,13 +219,13 @@ sequenceDiagram
     SM->>AR: create(language, config)
     AR->>A: new PythonAdapter(deps)
     AR-->>SM: adapter
-    
-    SM->>A: validateEnvironment()
-    A-->>SM: {valid: true}
-    
+
     SM->>PM: proxyManagerFactory.create(adapter)
     SM->>PM: start(config)
-    
+
+    Note over PM,A: start() calls validateEnvironment() internally
+    PM->>A: validateEnvironment()
+    A-->>PM: {valid: true}
     PM->>A: buildAdapterCommand(config)
     A-->>PM: {command, args, env}
     
@@ -308,7 +311,7 @@ sequenceDiagram
 - Language-specific path handling
 - DAP message transformation (if needed)
 
-### AdapterRegistry (New Component)
+### AdapterRegistry
 - Adapter registration and discovery
 - Language support checking
 - Adapter instance creation

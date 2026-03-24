@@ -32,7 +32,7 @@ function npm {
                 if ($foundTest) {
                     $testArgs += $arg
                 }
-                if ($arg -eq 'test' -or ($arg -eq 'run' -and $args[1] -eq 'test')) {
+                if ($arg -eq 'test') {
                     $foundTest = $true
                 }
             }
@@ -100,9 +100,9 @@ function npm {
             if ($_ -match '^TAP version' -or $_ -match '^\d+\.\.\d+$' -or $_ -match '^#' -or $_ -match '^\s*%') { $_ }
             elseif ($_ -match '^not ok') { $inFailure = $true; $_ }
             elseif ($inFailure -and $_ -match '^\s+') { $_ }
-            elseif ($inFailure -and $_ -match '^(ok|not ok)') { 
-                $inFailure = $false
-                if ($_ -match '^not ok') { $_ }
+            elseif ($inFailure -and $_ -match '^(ok|not ok)') {
+                $inFailure = ($_ -match '^not ok')
+                if ($inFailure) { $_ }
             }
             elseif ($_ -match '^ok') { }
             else { $_ }
@@ -116,9 +116,9 @@ function npm {
             if ($_ -match '^TAP version' -or $_ -match '^\d+\.\.\d+$' -or $_ -match '^#' -or $_ -match '^\s*%') { $_ }
             elseif ($_ -match '^not ok') { $inFailure = $true; $_ }
             elseif ($inFailure -and $_ -match '^\s+') { $_ }
-            elseif ($inFailure -and $_ -match '^(ok|not ok)') { 
-                $inFailure = $false
-                if ($_ -match '^not ok') { $_ }
+            elseif ($inFailure -and $_ -match '^(ok|not ok)') {
+                $inFailure = ($_ -match '^not ok')
+                if ($inFailure) { $_ }
             }
             elseif ($_ -match '^ok') { }
             else { $_ }
@@ -132,9 +132,9 @@ function npm {
             if ($_ -match '^TAP version' -or $_ -match '^\d+\.\.\d+$' -or $_ -match '^#' -or $_ -match '^\s*%') { $_ }
             elseif ($_ -match '^not ok') { $inFailure = $true; $_ }
             elseif ($inFailure -and $_ -match '^\s+') { $_ }
-            elseif ($inFailure -and $_ -match '^(ok|not ok)') { 
-                $inFailure = $false
-                if ($_ -match '^not ok') { $_ }
+            elseif ($inFailure -and $_ -match '^(ok|not ok)') {
+                $inFailure = ($_ -match '^not ok')
+                if ($inFailure) { $_ }
             }
             elseif ($_ -match '^ok') { }
             else { $_ }

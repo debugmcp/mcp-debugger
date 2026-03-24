@@ -81,7 +81,7 @@ When the MCP Rust adapter detects an MSVC build:
 
 - Breakpoints and stepping still work because CodeLLDB can control the process.
 - Variable inspection becomes unreliable: strings, vectors, async state machines, and complex structs typically appear as `<variable not available>` or show corrupted memory.
-- Session startup behavior depends on the `RUST_MSVC_BEHAVIOR` setting (default: `warn`). With `error` behavior, the adapter throws a structured error (`MSVC_TOOLCHAIN_DETECTED`). With the default `warn` behavior, the adapter logs a warning and proceeds. With `continue` behavior, the adapter also proceeds with a warning.
+- Session startup behavior depends on the `RUST_MSVC_BEHAVIOR` setting (default: `warn`). With `error` behavior, the adapter throws an `AdapterError` with code `ENVIRONMENT_INVALID`. With the default `warn` behavior, the adapter logs a warning and proceeds. With `continue` behavior, the adapter silently proceeds (no warning logged).
 
 These issues stem from LLDB's partial support for Microsoft's PDB format. There is currently no safe or redistributable alternative debugger we can bundle, so focusing on the GNU toolchain provides the best overall experience.
 

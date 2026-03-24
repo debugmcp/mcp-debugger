@@ -1,6 +1,6 @@
 # .NET/C# Debugging with Debug MCP Server
 
-The Debug MCP Server provides .NET debugging through [netcoredbg](https://github.com/Samsung/netcoredbg), Samsung's MIT-licensed .NET debugger that implements the Debug Adapter Protocol (DAP). Supports both .NET Core/.NET 5+ and .NET Framework 4.x.
+The Debug MCP Server provides .NET debugging through [netcoredbg](https://github.com/Samsung/netcoredbg), Samsung's MIT-licensed .NET debugger that implements the Debug Adapter Protocol (DAP). Supports both .NET Core/.NET 5+ and .NET Framework 4.8.
 
 ## Architecture
 

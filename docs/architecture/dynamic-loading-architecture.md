@@ -88,7 +88,7 @@ flowchart TD
 5) On successful import:
    - Extracts `<Language>AdapterFactory` class.
    - Constructs the factory and returns it to registry.
-   - Registry runs factory `validate()` if `validateOnRegister` is enabled (configurable; production may disable it for faster startup) and registers it.
+   - Registry runs factory `validate()` if `validateOnRegister` is enabled (configurable; production ALWAYS disables it via `validateOnRegister: false` for faster startup) and registers it.
 6) Registry constructs an adapter instance via the factory, initializes it, and returns it.
 7) Subsequent requests benefit from in-memory cache (in both Registry and Loader).
 

@@ -84,7 +84,7 @@ Both bundles include all necessary dependencies (using tsup's `noExternal` flag)
 The proxy bootstrap (`src/proxy/proxy-bootstrap.js`, compiled to `dist/proxy/proxy-bootstrap.js`) has been simplified:
 - **If bundle exists**: Uses the bundled proxy (`proxy-bundle.cjs`)
 - **If no bundle**: Falls back to `dap-proxy-entry.js` (the unbundled proxy entrypoint for development mode)
-- **Bootstrap sets `DAP_PROXY_WORKER=true`**: The proxy bootstrap sets this environment variable before spawning the proxy worker process; simply checks for bundle file existence to decide which proxy to use
+- **Bootstrap sets `DAP_PROXY_WORKER=true`**: This environment variable is set internally by the bootstrap to signal worker-mode detection to the proxy entry point; the bootstrap simply checks for bundle file existence to decide which proxy to use
 
 ### Why Separate Bundles?
 - The proxy runs as a **separate child process** for DAP communication

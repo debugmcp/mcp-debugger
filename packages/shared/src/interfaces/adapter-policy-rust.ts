@@ -317,7 +317,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
         `codelldb${platform === 'win32' ? '.exe' : ''}`
       );
     
-    // CodeLLDB uses stdio for communication by default
+    // CodeLLDB is spawned with TCP port for DAP communication
     return {
       command: codelldbPath,
       args: [

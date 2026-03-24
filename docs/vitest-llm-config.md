@@ -37,7 +37,7 @@ The root `vitest.config.ts` configures globals, environment, coverage, and resol
 #### show-failures.js
 - Runs tests and shows only failures
 - Includes clean error messages
-- Uses `child_process.spawn` with shell execution
+- Uses `child_process.spawn` with `stdio: 'inherit'` (test output streams directly to the console) and `shell: true`
 
 #### test-results-analyzer.js
 - Analyzes existing JSON results

@@ -285,6 +285,7 @@ mcp-debugger/
 │   ├── adapter-rust/      # Rust adapter (CodeLLDB)
 │   ├── adapter-go/        # Go adapter (Delve)
 │   ├── adapter-java/      # Java adapter (JDI bridge)
+│   ├── adapter-dotnet/    # .NET/C# adapter (netcoredbg)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
@@ -295,6 +296,7 @@ mcp-debugger/
 │   ├── session/           # Session management
 │   └── utils/             # Utility functions
 ├── tests/                 # Test files
+│   ├── unit/             # Unit tests
 │   ├── core/             # Core unit and integration tests
 │   ├── adapters/         # Adapter-specific tests
 │   ├── e2e/              # End-to-end tests

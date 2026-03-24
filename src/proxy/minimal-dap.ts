@@ -67,9 +67,6 @@ export class MinimalDapClient extends EventEmitter {
 
   // When set, the very next configurationDone send will not be deferred
   private suppressNextConfigDoneDeferral = false;
-  // Mirror of active children tracked for policy context
-  // Child lifecycle is managed by ChildSessionManager; we only retain a view for policy consumers.
-
   private readonly timers: {
     setTimeout: typeof setTimeout;
     clearTimeout: typeof clearTimeout;
@@ -203,7 +200,7 @@ export class MinimalDapClient extends EventEmitter {
       debugInfo.event = (message as DebugProtocol.Event).event;
     }
     
-    // DIAGNOSTIC: Enhanced logging for ALL messages
+    // Log all incoming DAP messages
     logger.info(`[MinimalDapClient] DAP message: ${message.type}`, debugInfo);
     if (message.type === 'request') {
       const req = message as DebugProtocol.Request;

@@ -28,7 +28,7 @@ Use IDebugAdapter when you need:
 // packages/adapter-go/src/go-debug-adapter.ts
 export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.GO;
-  readonly name = 'Go Debug Adapter';
+  readonly name = 'Go Debug Adapter (Delve)';
 
   async validateEnvironment(): Promise<ValidationResult> {
     // Check for dlv (Delve debugger)
@@ -115,6 +115,9 @@ export const ComplexLanguagePolicy: AdapterPolicy = {
 **Need**: Language requires custom DAP messages
 
 **Solution**: Implement in IDebugAdapter
+
+> **Note:** In practice, `sendDapRequest` in existing adapters is a stub that throws -- DAP request forwarding is handled by the DAP client in the proxy layer, not by the adapter. This example shows a hypothetical pattern if adapter-level request interception were needed.
+
 ```typescript
 class CustomAdapter implements IDebugAdapter {
   async sendDapRequest<T>(command: string, args?: unknown): Promise<T> {
@@ -144,17 +147,24 @@ class SessionManagerOperations {
     // 5. Create IDebugAdapter via AdapterRegistry
     const adapter = await this.adapterRegistry.create(session.language, config);
 
-    // 6. Build adapter command and create ProxyManager via factory
-    const proxyManager = this.proxyManagerFactory.create(/* injected deps */);
+    // 6. Validate environment via adapter
+    await adapter.validateEnvironment();
 
-    // 7. Start proxy process (spawns child process, sends init payload)
+    // 7. Build adapter command
+    const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
+
+    // 8. Create ProxyManager via factory and setup event handlers
+    const proxyManager = this.proxyManagerFactory.create(adapter);
+    this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs);
+
+    // 9. Start proxy process (spawns child process, sends init payload)
     await proxyManager.start(proxyConfig);
 
     // Back in startDebugging:
-    // 8. Get AdapterPolicy for session behaviors
+    // 10. Get AdapterPolicy for session behaviors
     const policy = this.selectPolicy(session.language);
 
-    // 9. Use policy for handshake if needed (currently only JsDebugAdapterPolicy)
+    // 11. Use policy for handshake if needed (currently only JsDebugAdapterPolicy)
     if (policy.performHandshake) {
       await policy.performHandshake({ proxyManager, sessionId });
     }
@@ -228,7 +238,7 @@ export const NewLanguagePolicy: AdapterPolicy = {
 
 ### Step 3: Add to selectPolicy()
 ```typescript
-case 'newlang':
+case DebugLanguage.NEWLANG:
   return NewLanguagePolicy;
 ```
 

@@ -1,4 +1,4 @@
-# Debug Adapter Development Guide (v0.18.0)
+# Debug Adapter Development Guide (v0.19.0)
 
 Audience: Adapter authors who want to add a new language to mcp-debugger  
 Scope: Full end-to-end instructions to build, test, publish, and troubleshoot a language adapter for the dynamic loading system.
@@ -66,15 +66,18 @@ packages/
   },
   "files": ["dist"],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -b tsconfig.json",
     "clean": "rimraf dist"
   },
+  "dependencies": {
+    "@debugmcp/shared": "workspace:*"
+  },
   "peerDependencies": {
-    "@debugmcp/shared": "^0.18.0"
+    "@debugmcp/shared": "0.19.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
   }
 }
 ```
@@ -97,6 +100,7 @@ packages/
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "composite": true,
     "outDir": "dist",
     "rootDir": "src",
     "module": "NodeNext",
@@ -198,8 +202,10 @@ import { ExampleAdapter } from './ExampleAdapter.js';
 export class ExampleAdapterFactory extends AdapterFactory {
   constructor() {
     super({
-      name: 'example',
+      language: 'example',
       displayName: 'Example',
+      version: '0.1.0',
+      author: 'mcp-debugger team',
       description: 'Example adapter',
       minimumDebuggerVersion: '0.18.1'
     });
@@ -261,7 +267,7 @@ Local linking
 
 ## Publishing
 
-- Build to `dist/` (`tsc -p tsconfig.json`). If your adapter has a `postbuild` script (e.g., for vendoring external binaries like js-debug), the `build` command already triggers it automatically.
+- Build to `dist/` (`tsc -b tsconfig.json`). If your adapter has a `postbuild` script (e.g., for vendoring external binaries like js-debug), the `build` command already triggers it automatically.
 - Publish to npm (`npm publish`)
 - SemVer policy:
   - Avoid breaking `IDebugAdapter` contracts across minor versions

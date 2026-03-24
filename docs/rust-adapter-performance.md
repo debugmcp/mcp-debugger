@@ -32,7 +32,7 @@
 
 ### Current Limitations
 1. **Initial System Breakpoints:** Windows debugging starts at system functions, requiring one continue command to reach user code
-2. **MSVC Toolchain:** Limited to control flow debugging. CodeLLDB's native PDB reader is enabled on Windows (`LLDB_USE_NATIVE_PDB_READER=1`), but MSVC binaries are treated as compatibility-limited. Behavior depends on the `RUST_MSVC_BEHAVIOR` setting (warnings/errors/continue)
+2. **MSVC Toolchain:** Limited to control flow debugging. CodeLLDB's native PDB reader is enabled on Windows (`LLDB_USE_NATIVE_PDB_READER=1`), but MSVC binaries are treated as compatibility-limited. Behavior depends on the `RUST_MSVC_BEHAVIOR` setting (`warn`/`error`/`continue`)
 3. **Path Resolution:** Requires absolute paths for reliable operation
 4. **Binary Path Discovery:** Different build configurations produce executables in different locations
 

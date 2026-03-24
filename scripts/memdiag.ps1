@@ -173,7 +173,7 @@ Get-Process -Name MemoryCompression, Vmmem, "com.docker.backend", "wslservice", 
 Write-Host ""
 # Handles can indicate leaks
 Write-Host "Top by Handle Count (leak indicator):"
-Get-Process | Sort-Object Handles -Descending | Select-Object -First 20 |
+Get-Process | Sort-Object Handles -Descending | Select-Object -First $TopN |
   Select-Object Name, Id, Handles,
     @{Name='WSMB'; Expression={[math]::Round($_.WorkingSet64 / 1MB, 1)}} |
   Format-Table -AutoSize

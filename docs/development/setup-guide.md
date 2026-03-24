@@ -105,6 +105,7 @@ mcp-debugger/
 │   ├── adapter-rust/      # Rust adapter (CodeLLDB)
 │   ├── adapter-go/        # Go adapter (Delve)
 │   ├── adapter-java/      # Java debug adapter (JDI)
+│   ├── adapter-dotnet/    # .NET debug adapter (netcoredbg)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code

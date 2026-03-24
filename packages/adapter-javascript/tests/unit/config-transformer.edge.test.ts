@@ -88,8 +88,7 @@ describe('utils/config-transformer.edge: tolerant JSON parse and defaults', () =
   });
 
   it('determineOutFiles: when user not provided, returns default pattern', () => {
-    // Program path included to touch code path; determineOutFiles ignores it but branch is covered
-    const res = determineOutFiles(path.join(programDir, 'main.ts'));
+    const res = determineOutFiles();
     expect(res).toEqual(['**/*.js', '!**/node_modules/**']);
   });
 });

@@ -75,7 +75,7 @@ class SessionManager {
 }
 ```
 
-**Note:** `handleAutoContinue()` is an abstract method in `SessionManagerCore`. The concrete `SessionManager` class overrides it but currently throws `"handleAutoContinue not yet implemented: requires session context refactoring"`.
+**Note:** `handleAutoContinue()` is an abstract method in `SessionManagerCore`. The concrete `SessionManager` class overrides it but currently logs a warning and leaves the session paused rather than implementing auto-continue.
 
 ### Event Handler Pattern
 
@@ -92,8 +92,8 @@ protected setupProxyEventHandlers(
   // Named functions for each event
   const handleStopped = (threadId: number | undefined, reason: string) => {
     // Design intent: auto-continue for stopOnEntry=false on 'entry' stops.
-    // Note: The concrete SessionManager.handleAutoContinue() currently throws
-    // because it needs session-specific context refactoring. Non-entry stops
+    // Note: The concrete SessionManager.handleAutoContinue() currently logs a warning
+    // and does not actually continue (session stays paused). Non-entry stops
     // transition to PAUSED.
     if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
       this.handleAutoContinue().catch(err => { /* log error */ });
@@ -151,7 +151,6 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
 
 2. **Message Type System**
    - Strongly typed messages using TypeScript discriminated unions
-   - From lines 92-117:
    ```typescript
    type ProxyMessage = 
      | ProxyStatusMessage 
@@ -163,7 +162,6 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
 3. **Functional Core Integration**
    - Uses pure functions from dap-core for state management
    - Commands pattern for side effects
-   - From lines 426-456:
    ```typescript
    const result = handleProxyMessage(this.dapState, message);
    
@@ -192,7 +190,7 @@ private pendingDapRequests = new Map<string, {
   command: string;
 }>();
 
-// Timeout handler (line 290)
+// Timeout handler
 setTimeout(() => {
   if (this.pendingDapRequests.has(requestId)) {
     this.pendingDapRequests.delete(requestId);
@@ -254,7 +252,7 @@ enum ProxyState {
 
 ### Initialization Sequence
 
-From the `handleInitCommand` method (lines 67-124):
+From the `handleInitCommand` method:
 
 1. **State Validation**
    ```typescript
@@ -286,7 +284,7 @@ From the `handleInitCommand` method (lines 67-124):
 
 ### DAP Event Handling
 
-The worker sets up comprehensive DAP event handlers (lines 198-248):
+The worker sets up comprehensive DAP event handlers:
 
 ```typescript
 private setupDapEventHandlers(): void {
@@ -313,7 +311,7 @@ private setupDapEventHandlers(): void {
 The worker uses `CallbackRequestTracker` for timeout handling:
 
 ```typescript
-// Track request (line 301)
+// Track request
 this.requestTracker.track(payload.requestId, payload.dapCommand);
 
 try {

@@ -97,6 +97,7 @@ graph TB
     'terminated': () => void;
     'exited': () => void;
     'initialized': () => void;
+    'init-received': () => void;
     'error': (error: Error) => void;
     'exit': (code: number | null, signal?: string) => void;
     'dry-run-complete': (command: string, script: string) => void;

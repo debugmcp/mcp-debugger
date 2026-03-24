@@ -5,7 +5,7 @@ This package provides a fully functional JavaScript/TypeScript debug adapter for
 Key points
 - ESM TypeScript project with dist/ output and type declarations
 - Exports `JavascriptAdapterFactory` as the entry point for dynamic loading
-- Full `JavascriptDebugAdapter` implementation (~810 lines) with comprehensive DAP integration
+- Full `JavascriptDebugAdapter` implementation (~760 lines) with comprehensive DAP integration
 - Real utilities: `detectTsRunners`, `transformConfig`, TypeScript detection
 - Vendor folder for js-debug (bundled `vsDebugServer.js` with `.cjs` twin and sidecars)
 - Uses .js suffix on relative TS imports to match ESM resolution
@@ -29,7 +29,7 @@ Validation
 Structure
 - src/index.ts exports the factory by name: `JavascriptAdapterFactory`
 - src/javascript-adapter-factory.ts extends the shared BaseAdapterFactory
-- src/javascript-debug-adapter.ts provides full DAP integration (~810 lines)
+- src/javascript-debug-adapter.ts provides full DAP integration (~760 lines)
 - src/utils/typescript-detector.ts — TypeScript detection and runner discovery (`detectTsRunners`)
 - src/utils/config-transformer.ts — Launch configuration transformation (`transformConfig`)
 - src/types/* — TypeScript types for adapter configuration

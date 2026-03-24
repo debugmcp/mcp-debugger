@@ -60,7 +60,7 @@ The vendored canonical filename is always `vsDebugServer.js`, but the script may
    - Keep existing logic to copy `.wasm`, `.map`, `.json`, `.node` from near the selected entry (and/or from known sidecar locations).
    - This is orthogonal to bootloader/watchdog and should remain intact.
 
-### Pseudocode snippet (integration point)
+### Reference implementation (already in build-js-debug.js)
 
 Insert this after locating `found.abs` (the selected adapter entry) and before declaring success:
 
@@ -152,7 +152,7 @@ If upstream packaging changes and the simple search-and-copy cannot find the sup
   - Our script could support selecting artifact type (release tarball vs VSIX). Note: redistribution/licensing and network stability should be evaluated.
 
 - Option D: Build-from-source fallback
-  - Supported by our script via `JS_DEBUG_BUILD_FROM_SOURCE=true`, which selects a `prebuilt-then-source` strategy (attempts prebuilt vendoring first, then falls back to source build). It is not a pure source-only mode.
+  - The default vendoring mode is `prebuilt-only` (fetch a prebuilt artifact, fail if unavailable). Setting `JS_DEBUG_BUILD_FROM_SOURCE=true` switches to `prebuilt-then-source` (attempts prebuilt vendoring first, then falls back to source build). It is not a pure source-only mode.
   - Building from source allows us to locate `vsDebugServer.js` or `src/dapDebugServer.js` deterministically and gather support files in one pass.
   - Adds build time and tooling requirements (git/node/pm), but is robust.
 

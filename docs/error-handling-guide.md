@@ -237,6 +237,21 @@ async continue(sessionId: string): Promise<DebugResult> {
 }
 ```
 
+### Session Cleanup Operations
+
+`closeSession()` uses soft error handling -- it returns `false` instead of throwing for not-found or already-terminated sessions. This ensures cleanup operations (including `closeAllSessions()`) are idempotent and do not propagate errors for sessions that have already been cleaned up:
+
+```typescript
+async closeSession(sessionId: string): Promise<boolean> {
+  const session = this.sessionStore.get(sessionId);
+  if (!session) {
+    this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
+    return false; // Soft failure, no throw
+  }
+  // ... cleanup logic
+}
+```
+
 ## Migration Guide
 
 If you're updating existing code to use typed errors:

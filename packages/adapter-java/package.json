@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "build:ci": "tsc -p tsconfig.json",
+    "build:ci": "tsc -p tsconfig.json --noEmitOnError",
     "build:adapter": "node scripts/compile-jdi-bridge.js",
     "clean": "rimraf dist java/out",
     "test": "vitest run"

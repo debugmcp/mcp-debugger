@@ -19,7 +19,7 @@ Status snapshot as of **2025‑11‑22**:
 ### Medium priority
 
 3. **Pause execution (`pause_execution`)**
-   - ✅ Implemented and wired through the proxy API
+   - ✅ Implemented, wired through the proxy API, and exposed as an MCP tool
 
 4. **Source context (`get_source_context`)**
    - Returns limited context today; needs streaming + caching for large files
@@ -32,6 +32,7 @@ Status snapshot as of **2025‑11‑22**:
 
 ## ✅ Recently Delivered
 
+- **v0.19.0** – .NET/C# debugging via netcoredbg with TCP-to-stdio bridge; Portable PDB support
 - **v0.18.0** – Go debugging via Delve DAP; Java debugging via JDI bridge with launch and attach modes
 - **v0.17.0** – Rust adapter backed by CodeLLDB plus richer stepping responses with inline source context
 - **v0.16.0** – First-class JavaScript adapter with TypeScript detection, js‑debug vendoring, and adapter policy orchestration
@@ -56,7 +57,7 @@ Status snapshot as of **2025‑11‑22**:
 - Publish adapter SDK / authoring guide
 
 ### Beyond 2026
-- Additional language adapters (C++, Ruby)
+- Additional language adapters (C++, Ruby, Kotlin)
 - Advanced breakpoint types (data / function)
 - Time-travel debugging exploration
 - IDE integrations (VS Code extension, JetBrains Gateway)
@@ -77,6 +78,7 @@ Want to help? Start by:
 
 ## 🗓 Version History (high level)
 
+- **v0.19.0** – .NET/C# adapter (netcoredbg); TCP-to-stdio bridge
 - **v0.18.0** – Go adapter (Delve DAP); Java adapter (JDI bridge)
 - **v0.17.0** – Rust adapter (Alpha), inline source context in stepping tools
 - **v0.16.0** – JavaScript adapter, session policy orchestration, handshake instrumentation

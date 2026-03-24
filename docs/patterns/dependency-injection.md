@@ -27,7 +27,7 @@ High-level modules depend on abstractions, not concrete implementations.
 
 **Location**: `src/session/session-manager-core.ts`
 
-> **Note**: `SessionManager` (in `session-manager.ts`) extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`. While `SessionManager` is mostly a facade, it currently overrides `handleAutoContinue()` with a placeholder implementation that throws at runtime.
+> **Note**: `SessionManager` (in `session-manager.ts`) extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`. While `SessionManager` is mostly a facade, it currently overrides `handleAutoContinue()` with a stub that logs a warning and leaves the session paused (it does not throw).
 
 ```typescript
 // Define dependencies interface
@@ -143,7 +143,7 @@ export interface IProcessManager {
 // IProcessLauncher is in process-interfaces.ts and is what adapters receive.
 // IProcessManager is in external-dependencies.ts and is the lower-level system abstraction.
 export interface IProcessLauncher {
-  launch(config: ProcessLaunchConfig): IChildProcess;
+  launch(command: string, args: string[], options?: IProcessOptions): IProcess;
 }
 
 // Network operations
@@ -154,10 +154,10 @@ export interface INetworkManager {
 
 // Logging
 export interface ILogger {
-  info(message: string, meta?: any): void;
-  error(message: string, meta?: any): void;
-  debug(message: string, meta?: any): void;
-  warn(message: string, meta?: any): void;
+  info(message: string, meta?: unknown): void;
+  error(message: string, meta?: unknown): void;
+  debug(message: string, meta?: unknown): void;
+  warn(message: string, meta?: unknown): void;
 }
 ```
 

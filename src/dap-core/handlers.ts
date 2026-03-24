@@ -245,8 +245,7 @@ function handleDapResponse(
     };
   }
 
-  // This will be expanded in Phase 3
-  // For now, just log and emit basic events
+  // Remove pending request and return updated state (no additional side-effects)
   return {
     commands: [],
     newState: removePendingRequest(state, message.requestId)

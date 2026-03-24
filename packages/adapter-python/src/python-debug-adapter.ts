@@ -272,12 +272,24 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
     // Add common Python installation paths
     if (process.platform === 'win32') {
       paths.push(
+        'C:\\Python313',
+        'C:\\Python312',
+        'C:\\Python311',
+        'C:\\Python310',
         'C:\\Python39',
         'C:\\Python38',
         'C:\\Python37',
+        'C:\\Program Files\\Python313',
+        'C:\\Program Files\\Python312',
+        'C:\\Program Files\\Python311',
+        'C:\\Program Files\\Python310',
         'C:\\Program Files\\Python39',
         'C:\\Program Files\\Python38',
         'C:\\Program Files\\Python37',
+        `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python313`,
+        `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python312`,
+        `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python311`,
+        `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python310`,
         `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python39`,
         `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python38`,
         `${process.env.LOCALAPPDATA}\\Programs\\Python\\Python37`
@@ -402,7 +414,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   async connect(host: string, port: number): Promise<void> {
     // Connection is handled by ProxyManager
-    // Store connection info for debugging purposes
+    // Mark adapter as connected
     this.dependencies.logger?.debug(`[PythonDebugAdapter] Connect request to ${host}:${port}`);
     
     this.connected = true;

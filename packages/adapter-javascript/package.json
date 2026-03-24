@@ -1,7 +1,7 @@
 {
   "name": "@debugmcp/adapter-javascript",
   "version": "0.19.0",
-  "description": "JavaScript/TypeScript debug adapter skeleton for MCP debugger (Task 1 scaffolding)",
+  "description": "JavaScript/TypeScript debug adapter for MCP debugger",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

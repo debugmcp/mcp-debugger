@@ -153,7 +153,7 @@ if "variablesReference" in vars:
 
 1. **Always check session state** before operations:
    - Must be `PAUSED` for: evaluate, step operations, get variables
-   - Must be `RUNNING` or `PAUSED` for: set breakpoint
+   - For `set_breakpoint`: session must not be `TERMINATED` (breakpoints can be set in any non-terminated state, including before debugging starts)
 
 2. **Use absolute paths** for file references to avoid ambiguity
 
@@ -234,7 +234,7 @@ get_local_variables(sessionId=session_id)
 **Key notes:**
 - Compile target code with `javac -g` for full variable inspection
 - For breakpoints, you can use a fully-qualified class name (e.g., `"com.example.MyClass"`) instead of a file path
-- Use `adapterLaunchConfig` to pass `mainClass` and `classpath`
+- Use `dapLaunchArgs` to pass `mainClass` and `classpath`
 
 **Testing sequence:**
 ```python
@@ -248,7 +248,7 @@ set_breakpoint(sessionId=session_id, file="com.example.Main", line=10)
 start_debugging(
     sessionId=session_id,
     scriptPath="/path/to/Main.java",
-    adapterLaunchConfig={"mainClass": "com.example.Main", "classpath": "/path/to/classes"}
+    dapLaunchArgs={"mainClass": "com.example.Main", "classpath": "/path/to/classes"}
 )
 
 # 4. Inspect variables

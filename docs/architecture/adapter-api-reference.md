@@ -1,6 +1,6 @@
 # Adapter API Reference
 
-Status: v0.18.0
+Status: v0.19.0
 Audience: Adapter authors and maintainers  
 Source of truth: `@debugmcp/shared` interfaces and current implementation in `src/adapters/*`
 
@@ -115,7 +115,7 @@ export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
   private state: AdapterState = AdapterState.UNINITIALIZED;
 
   async initialize() { this.state = AdapterState.READY; this.emit('initialized'); }
-  async dispose() { this.state = AdapterState.DISCONNECTED; this.emit('disconnected'); }
+  async dispose() { this.state = AdapterState.UNINITIALIZED; this.emit('disposed'); }
   getState() { return this.state; }
   isReady() { return this.state === AdapterState.READY || this.state === AdapterState.DEBUGGING; }
   getCurrentThreadId() { return null; }
@@ -174,8 +174,10 @@ import { ExampleAdapter } from './ExampleAdapter';
 export class ExampleAdapterFactory extends AdapterFactory {
   constructor() {
     super({
-      name: 'example',
+      language: 'example',
       displayName: 'Example',
+      version: '0.1.0',
+      author: 'mcp-debugger team',
       description: 'Example adapter',
       minimumDebuggerVersion: '0.14.0',
     });
@@ -242,7 +244,7 @@ Key runtime behavior
   - Creates dependencies and adapter, calls `initialize()`, tracks active instance
   - Sets up auto-dispose based on adapter state changes
 - Introspection
-  - `getSupportedLanguages(): string[]` — currently registered factories (concrete implementation method, not part of `IAdapterRegistry` interface)
+  - `getSupportedLanguages(): string[]` — currently registered factories (part of the `IAdapterRegistry` interface)
   - `listLanguages(): Promise<string[]>` — returns registered languages plus the hardcoded known-adapter catalog when dynamic loading is enabled (concrete implementation method)
   - `listAvailableAdapters(): Promise<AdapterMetadata[]>` — merges loader metadata with registered languages, marking registered languages as installed (concrete implementation method)
   - `getAdapterInfo(language)` / `getAllAdapterInfo()`

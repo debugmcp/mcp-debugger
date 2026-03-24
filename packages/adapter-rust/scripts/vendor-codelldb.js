@@ -416,7 +416,7 @@ async function extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName) {
     
     // Ensure the main executable remains executable on Unix targets
     const targetBinaryPath = path.join(targetAdapterDir, path.basename(platformInfo.binaryPath));
-    if (platform !== 'win32-x64' && await fileExists(targetBinaryPath)) {
+    if (platform !== 'win32-x64' && await pathExists(targetBinaryPath)) {
       await fs.chmod(targetBinaryPath, 0o755);
     }
     
@@ -490,15 +490,6 @@ async function pathExists(fsPath) {
   }
 }
 
-async function fileExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Check if platform is already vendored with correct version
  */
@@ -545,9 +536,7 @@ async function downloadAndExtract(platform) {
     return false;
   }
   
-  const vsixCandidates = Array.isArray(platformInfo.vsixNames)
-    ? platformInfo.vsixNames
-    : [platformInfo.vsixName].filter(Boolean);
+  const vsixCandidates = platformInfo.vsixNames;
   
   if (vsixCandidates.length === 0) {
     logWarn(`No VSIX candidates configured for ${platform}`);

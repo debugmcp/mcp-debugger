@@ -1,8 +1,9 @@
 /**
  * JavaAdapterPolicy - policy for Java Debug Adapter (JDI bridge / JdiDapServer)
  *
- * JdiDapServer speaks DAP over TCP natively using JDI. No special initialization
- * hacks are needed — standard DAP flow like Python/debugpy.
+ * JdiDapServer speaks DAP over TCP natively using JDI. It uses a non-standard
+ * init ordering (sendLaunchBeforeConfig: true) because JdiDapServer emits
+ * "initialized" during the initialize handshake, before the launch request.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';

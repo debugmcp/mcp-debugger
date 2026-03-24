@@ -239,7 +239,7 @@ export abstract class SessionManagerCore {
       // Handle auto-continue for stopOnEntry=false
       if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
         this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false)`);
-        // Import the continue method from operations when needed
+        // Delegate to subclass handleAutoContinue() implementation
         this.handleAutoContinue().catch(err => {
           this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
         });

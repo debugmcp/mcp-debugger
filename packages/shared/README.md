@@ -74,7 +74,7 @@ npm install @debugmcp/shared
 
 ### Base Classes
 
-- `AdapterFactory` - Factory base class exported from `src/factories/adapter-factory.ts` (note: `BaseAdapterFactory` exists in `src/interfaces/adapter-registry.ts` as an optional abstract convenience implementation but is not re-exported from the package root)
+- `AdapterFactory` - Factory base class exported from `src/factories/adapter-factory.ts` (note: `BaseAdapterFactory` from `src/interfaces/adapter-registry.ts` is also re-exported from the package root via `index.ts`)
 
 ### Enumerations
 

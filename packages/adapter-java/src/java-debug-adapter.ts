@@ -2,8 +2,8 @@
  * Java Debug Adapter implementation using JDI bridge (JdiDapServer)
  *
  * JdiDapServer is a single-file Java program that implements a minimal DAP
- * server using JDI (com.sun.jdi.*) directly. It speaks DAP over TCP natively,
- * eliminating the need for a stdio-tcp bridge.
+ * server using JDI (com.sun.jdi.*) directly. It speaks DAP over TCP natively.
+ * TCP connection management is handled by the external DAP proxy layer.
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -438,7 +438,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   getMissingExecutableError(): string {
-    return `Java not found. Please ensure JDK 21+ is installed and available in PATH.
+    return `Java not found. Please ensure JDK 11+ is installed and available in PATH.
 
 Download from: https://adoptium.net/
 

@@ -64,7 +64,7 @@ npm test           # Automatically optimized: plain `npm test` is rewritten to
                    # `npm.cmd run test:coverage -- --reporter=tap`
                    # (targeted `npm test <args>` with extra args are forwarded directly)
 npm test:unit      # Optimized unit tests
-npm test:int       # Alias for test:integration (runs npm.cmd run test:integration -- --reporter=tap)
+npm test:int       # Alias for test:integration (runs npm.cmd run test:integration -- --coverage --reporter=tap)
 npm test:e2e       # Optimized e2e tests
 
 # Original commands still available if needed
@@ -113,11 +113,15 @@ All files          |   90.39 |    84.81 |   91.83 |   90.55 |
 ## Technical Details
 
 ### TAP Filtering Logic
+
+**Note:** There are two independent TAP filtering implementations: one in `scripts/llm-env.ps1` (PowerShell, for Windows/dev use) and one in `scripts/llm-env.sh` (Bash, for CI/Linux use). Both follow the same logic but may differ in edge-case handling.
+
 1. Always show TAP header and test plan
 2. Track nested test structure with depth counter
 3. When `ok X - file.ts` seen → skip entire block
 4. When `not ok X - file.ts` seen → show entire block
-5. Always show coverage report at end
+5. Comment lines (prefixed with `#`) are always shown (e.g., TAP diagnostics, bail-out messages)
+6. Always show coverage report at end
 
 ### Key Regex Patterns
 - Failed test file: `^not ok \d+ - .*\.ts`

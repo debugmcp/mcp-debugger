@@ -103,7 +103,7 @@ enum MockErrorScenario {
 }
 ```
 
-Error scenarios are controlled at runtime via `setErrorScenario()` on the `MockDebugAdapter` instance (which accepts a single `MockErrorScenario` value). While `MockAdapterConfig.errorScenarios` exists as a type field, current runtime behavior is driven only by `setErrorScenario()`:
+Error scenarios are controlled at runtime via `setErrorScenario()` on the `MockDebugAdapter` instance (which accepts a single `MockErrorScenario` value). `MockAdapterConfig` does not have an `errorScenarios` field; error scenarios are set exclusively via the runtime method:
 
 - **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code, which triggers an `AdapterError` with `ENVIRONMENT_INVALID` during `initialize()`.
 - **CONNECTION_TIMEOUT**: Causes `connect()` to throw an `AdapterError` with `CONNECTION_TIMEOUT` (recoverable).
@@ -195,7 +195,7 @@ interface MockAdapterConfig {
 
 Note: Error scenarios are not part of `MockAdapterConfig`. They are controlled at runtime via `adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT)` on the `MockDebugAdapter` instance.
 
-Default supported features are determined by the constructor-normalized config. The `getCapabilities()` method builds a DAP capability object with hardcoded true values and dynamic flags keyed off `supportsFeature` for function breakpoints, conditional breakpoints, hover evaluation, set-variable, and log points. Refer to the mock adapter source for the exact default set.
+Default supported features are determined by the constructor-normalized config (defaults: `CONDITIONAL_BREAKPOINTS`, `FUNCTION_BREAKPOINTS`, `VARIABLE_PAGING`, `SET_VARIABLE`). The `getCapabilities()` method builds a DAP capability object with hardcoded true values and dynamic flags keyed off `supportsFeature` for function breakpoints, conditional breakpoints, hover evaluation, set-variable, and log points. Refer to the mock adapter source for the exact default set.
 
 Usage:
 

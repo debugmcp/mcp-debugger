@@ -55,7 +55,7 @@ Two implementations of global error handlers exist in the codebase:
 
 1. **`ProxyRunner.setupGlobalErrorHandlers()`** (`src/proxy/dap-proxy-core.ts`) -- Logs errors and sends IPC messages, but does **not** call `process.exit()` for unhandled rejections. Used when the entry point wires up error handling through the ProxyRunner instance.
 
-2. **`setupGlobalErrorHandlers()` standalone function** (`src/proxy/dap-proxy-dependencies.ts`) -- A standalone function that logs errors, sends IPC messages, and **always exits the process** after shutdown (including for unhandled rejections). Used by `dap-proxy-entry.ts` as the default process bootstrap.
+2. **`setupGlobalErrorHandlers()` standalone function** (`src/proxy/dap-proxy-dependencies.ts`) -- A standalone function that logs errors, sends IPC messages, and **always exits the process** after shutdown (including for unhandled rejections). Available as an alternative bootstrap path. Note: `dap-proxy-entry.ts` actually uses `runner.setupGlobalErrorHandlers()` (the ProxyRunner instance method), not this standalone function.
 
 **ProxyRunner version** (`src/proxy/dap-proxy-core.ts`):
 

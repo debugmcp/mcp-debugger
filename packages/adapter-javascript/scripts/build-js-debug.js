@@ -260,10 +260,10 @@ async function sampleFiles(rootDir, limit) {
 /**
  * Locate the DAP server entry within extracted or built contents and normalize to our canonical filename.
  * Prefers, in order:
- *  - js-debug/src/dapDebugServer.js (prebuilt js-debug-dap archives)
+ *  - dist/vsDebugServer.js (Node/CJS bundle)
  *  - dist/src/dapDebugServer.js (built from source on newer tags)
  *  - extension/src/dapDebugServer.js (VSIX packaging)
- *  - dist/vsDebugServer.js (older tags)
+ *  - js-debug/src/dapDebugServer.js (prebuilt js-debug-dap archives)
  * Falls back to BFS search for any file named dapDebugServer.js or vsDebugServer.js.
  */
 async function findServerEntry(rootDir) {

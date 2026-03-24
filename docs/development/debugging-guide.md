@@ -178,21 +178,20 @@ this.logger.debug('[DEBUG] Sending DAP request:', {
 **Debug Steps**:
 
 ```typescript
-// Add state transition logging — use this.logger, not console (console is silenced)
-private _updateSessionState(session: ManagedSession, newState: SessionState): void {
-  const oldState = session.state;
-  this.logger.debug('[DEBUG] State transition:', {
-    sessionId: session.id,
-    oldState,
-    newState,
-    stack: new Error().stack?.split('\n')[2] // Caller
-  });
+// Actual implementation in src/session/session-manager-core.ts
+protected _updateSessionState(session: ManagedSession, newState: SessionState): void {
+  if (session.state === newState) return;
+  this.logger.info(`[SM _updateSessionState ${session.id}] State change: ${session.state} -> ${newState}`);
 
-  if (!this.isValidTransition(oldState, newState)) {
-    this.logger.error('[DEBUG] Invalid state transition!');
-  }
-
+  // Update legacy state
   this.sessionStore.updateState(session.id, newState);
+
+  // Update new state model based on legacy state
+  const { lifecycle, execution } = mapLegacyState(newState);
+  this.sessionStore.update(session.id, {
+    sessionLifecycle: lifecycle,
+    executionState: execution
+  });
 }
 ```
 
@@ -246,9 +245,8 @@ import fs from 'fs';
 
 function takeHeapSnapshot(label: string) {
   const fileName = `heap-${label}-${Date.now()}.heapsnapshot`;
-  const stream = fs.createWriteStream(fileName);
-  v8.writeHeapSnapshot(stream);
-  console.log(`[DEBUG] Heap snapshot written to ${fileName}`);
+  const writtenPath = v8.writeHeapSnapshot(fileName);
+  console.log(`[DEBUG] Heap snapshot written to ${writtenPath}`);
 }
 
 // Usage
@@ -258,6 +256,8 @@ takeHeapSnapshot('after-session-create');
 ```
 
 ### 5. Event Tracing
+
+> **Note:** In stdio/IPC transport mode, `console.log` is silenced at startup to protect the JSON-RPC protocol. Event tracing output will not appear unless you use the SSE transport or redirect logging to a file.
 
 ```typescript
 // Trace all events

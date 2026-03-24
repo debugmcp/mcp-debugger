@@ -88,8 +88,8 @@ export default defineConfig({
     // Disable file parallelism for cleaner output
     fileParallelism: false,
     coverage: {
-      provider: 'istanbul', // Changed from 'v8' to 'istanbul'
-      reporter: ['text', 'json', 'html', 'json-summary'], // Added 'json-summary' for coverage-summary.json
+      provider: 'istanbul',
+      reporter: ['text', 'json', 'html', 'json-summary'],
       reportsDirectory: './coverage',
       reportOnFailure: true,
       exclude: [
@@ -127,10 +127,10 @@ export default defineConfig({
       include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}']
     },
     testTimeout: 30000,
-    maxWorkers: 1, // Important for process spawning tests (was singleThread: true)
+    maxWorkers: 1, // Required for process spawning tests
   },
   resolve: {
-    extensions: ['.ts', '.js', '.json', '.node'], // Add .ts for resolution
+    extensions: ['.ts', '.js', '.json', '.node'], // Resolve TypeScript sources directly
     alias: [
       // Map relative imports ending with .js to .ts (e.g., ../../../src/foo.js -> ../../../src/foo.ts)
       { find: /^(\.{1,2}\/.+)\.js$/, replacement: '$1.ts' },

@@ -18,7 +18,7 @@ npm run docker-build
 
 ## IMPORTANT: Mount Path Requirement
 
-**When running the Debug MCP Server in a Docker container, you should mount your project files to `/workspace` inside the container.** This is the default and recommended mount point. The container sets `MCP_WORKSPACE_ROOT=/workspace` by default, which is used for path resolution. The `/workspace` directory is optional -- the server will still work from the image's default working directory, but path resolution will use whatever `MCP_WORKSPACE_ROOT` is set to.
+**When running the Debug MCP Server in a Docker container, you should mount your project files to `/workspace` inside the container.** This is the default and recommended mount point. The container sets `MCP_WORKSPACE_ROOT=/workspace` and `MCP_CONTAINER=true` by default. `MCP_CONTAINER=true` enables container-mode behaviors such as path rewriting and pre-loading of known adapters, while `MCP_WORKSPACE_ROOT` is used for path resolution. The `/workspace` directory is optional -- the server will still work from the image's default working directory, but path resolution will use whatever `MCP_WORKSPACE_ROOT` is set to.
 
 ### Why /workspace?
 
@@ -225,9 +225,9 @@ This ensures all dependencies needed for both Node.js execution and Python debug
    - Use `docker stop <container_id>` to stop a container
 
 2. **Port already in use**:
-   - If port 5678 is already in use, you can map to a different port:
+   - If port 5679 is already in use, you can map to a different port:
    ```
-   docker run -i --rm -p 5679:5678 mcp-debugger:local
+   docker run -i --rm -p 5680:5679 mcp-debugger:local
    ```
 
 3. **Build failures**:

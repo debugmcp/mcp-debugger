@@ -1,5 +1,5 @@
 /**
- * Placeholder type for js-debug configuration (will be refined in later tasks)
+ * Generic configuration type for js-debug launch/attach arguments.
  *
  * @since 0.1.0
  */

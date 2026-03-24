@@ -712,7 +712,10 @@ class MockDebugAdapterProcess {
       command: request.command,
       success: true
     });
-    
+
+    // In TCP server mode, don't exit the process on disconnect
+    if (this.server) return;
+
     setTimeout(() => {
       process.exit(0);
     }, 100);

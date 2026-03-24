@@ -59,9 +59,10 @@ This guide provides solutions for common issues you might encounter when setting
    python --version
    ```
 
-2. Set the PYTHON_PATH environment variable:
+2. Set the PYTHON_PATH or PYTHON_EXECUTABLE environment variable:
    - Windows: `set PYTHON_PATH=C:\path\to\python.exe`
    - Unix: `export PYTHON_PATH=/path/to/python`
+   - Alternative: `PYTHON_EXECUTABLE` is also checked as a fallback if `PYTHON_PATH` is not set
 
 3. Specify Python path directly in the debug session:
    - When creating a debug session through Claude, specify the executablePath

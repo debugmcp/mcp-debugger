@@ -197,10 +197,9 @@ export class LineReader {
   /**
    * Get cache statistics
    */
-  getCacheStats(): { size: number; itemCount: number } {
+  getCacheStats(): { itemCount: number } {
     return {
-      size: this.fileCache.size,
-      itemCount: this.fileCache.size // LRUCache uses 'size' for item count
+      itemCount: this.fileCache.size
     };
   }
 }

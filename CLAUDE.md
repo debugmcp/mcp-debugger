@@ -287,7 +287,7 @@ The project uses Vitest with three test levels:
 ## Common Debugging Scenarios
 
 When debugging issues:
-1. Enable debug logging: `DEBUG=* node dist/index.js`
+1. Enable debug logging: `DEBUG=debug-mcp:* node dist/index.js`
 2. Check proxy process output in logs
 3. Verify language-specific requirements (e.g., `python -m debugpy --version`)
 4. Use `dryRunSpawn: true` in `start_debugging` tool arguments to test configuration without starting a real debug session

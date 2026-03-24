@@ -8,7 +8,7 @@ export { JavascriptAdapterFactory } from './javascript-adapter-factory.js';
 // Adapter
 export { JavascriptDebugAdapter } from './javascript-debug-adapter.js';
 
-// Utils (placeholders for future tasks)
+// Utils
 export { resolveNodeExecutable } from './utils/executable-resolver.js';
 export { detectTsRunners } from './utils/typescript-detector.js';
 export { transformConfig } from './utils/config-transformer.js';

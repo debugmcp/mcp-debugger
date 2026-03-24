@@ -14,10 +14,10 @@ Python debug adapter for MCP Debugger using debugpy. This package provides:
 This package is intended to be used within the monorepo via pnpm workspaces.
 
 ## Build
-npm run build -w @debugmcp/adapter-python
+pnpm --filter @debugmcp/adapter-python run build
 
 ## Test
-npm test -w @debugmcp/adapter-python
+pnpm --filter @debugmcp/adapter-python run test
 
 Note: The package tests do not require Python to be installed. Integration and e2e tests live in the main suite and exercise real Python/debugpy if available.
 

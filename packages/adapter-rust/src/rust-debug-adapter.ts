@@ -903,7 +903,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     
     // Handle preLaunchTask for building
     if (rustConfig.preLaunchTask === 'cargo build' || rustConfig.cargo?.build) {
-      // Note: Actual building would be handled by the session manager or a pre-launch task
+      // TODO: implement actual cargo build trigger for preLaunchTask
       this.dependencies.logger?.info('[RustDebugAdapter] Cargo build requested before debugging');
     }
 
@@ -929,7 +929,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     command: string, 
     args?: unknown
   ): Promise<T> {
-    // This will be handled by ProxyManager
+    // Note: This is a no-op stub; actual DAP forwarding is done by ProxyManager.
     // Adapter just needs to validate the request is appropriate for Rust/LLDB
     
     this.dependencies.logger?.debug(`[RustDebugAdapter] DAP request: ${command}`);
@@ -984,7 +984,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   async connect(host: string, port: number): Promise<void> {
     // Connection is handled by ProxyManager
-    // Store connection info for debugging purposes
+    // Mark adapter as connected
     this.dependencies.logger?.debug(`[RustDebugAdapter] Connect request to ${host}:${port}`);
     
     this.connected = true;

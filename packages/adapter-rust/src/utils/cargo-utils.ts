@@ -82,7 +82,7 @@ export async function getCargoTargets(projectPath: string): Promise<CargoTarget[
           for (const pkg of metadata.packages) {
             const normalizedManifest = path.normalize(pkg.manifest_path);
             const normalizedProject = path.normalize(projectPath);
-            if (normalizedManifest === normalizedProject || normalizedManifest.startsWith(normalizedProject + path.sep)) {
+            if (normalizedManifest === path.join(normalizedProject, 'Cargo.toml') || normalizedManifest.startsWith(normalizedProject + path.sep)) {
               for (const target of pkg.targets) {
                 targets.push({
                   name: target.name,

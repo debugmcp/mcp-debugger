@@ -30,7 +30,7 @@ function exec(command, cwd = process.cwd()) {
       stdio: 'pipe' 
     });
   } catch (error) {
-    throw new Error(`Command failed: ${command}\n${error.message}`);
+    throw new Error(`Command failed: ${command}\n${error.message}`, { cause: error });
   }
 }
 
@@ -41,7 +41,7 @@ function execWithOutput(command, cwd = process.cwd()) {
       stdio: 'inherit' 
     });
   } catch (error) {
-    throw new Error(`Command failed: ${command}`);
+    throw new Error(`Command failed: ${command}`, { cause: error });
   }
 }
 

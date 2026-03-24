@@ -95,6 +95,7 @@ export class UnsupportedLanguageError extends McpError {
  */
 export class ProxyNotRunningError extends McpError {
   public readonly sessionId: string;
+  public readonly operation: string;
 
   constructor(sessionId: string, operation: string) {
     super(
@@ -103,6 +104,7 @@ export class ProxyNotRunningError extends McpError {
       { sessionId, operation }
     );
     this.sessionId = sessionId;
+    this.operation = operation;
   }
 }
 

@@ -177,6 +177,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `attach_to_process` | Attach debugger to a running process | ✅ Implemented |
 | `detach_from_process` | Detach debugger from a process | ✅ Implemented |
 | `get_stack_trace` | Get the current stack trace | ✅ Implemented |
+| `list_threads` | List all threads in the debug session | ✅ Implemented |
 | `get_scopes` | Get variable scopes for a frame | ✅ Implemented |
 | `get_variables` | Get variables in a scope | ✅ Implemented |
 | `get_local_variables` | Get local variables in current frame | ✅ Implemented |

@@ -290,7 +290,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     }
 
     // Otherwise, build the debugpy command
-    const pythonPath = payload.executablePath || 'python';
+    const pythonPath = payload.executablePath || (process.platform === 'win32' ? 'python' : 'python3');
     
     return {
       command: pythonPath,

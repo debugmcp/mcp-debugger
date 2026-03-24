@@ -207,7 +207,7 @@ Truncation is applied in targeted locations rather than as a generic deep traver
 1. **Variable values in `get_variables` logging**: Individual variable `value` strings are truncated at 200 characters, and only the first 10 variables are included in the log entry.
 
 2. **Request/Response objects**: Targeted sanitization via `sanitizePayloadForLogging`:
-   - `adapterCommand.env` is automatically sanitized (replaced with a placeholder)
+   - `adapterCommand.env` is sanitized by `sanitizeEnvForLogging`, which checks each key against a list of sensitive patterns (e.g., `api_key`, `secret`, `token`, `password`, `credential`, `auth`, `session_id`, `access_key`, `signing`, `private_key`). Matching keys have their values replaced with `[REDACTED]`; non-matching keys are passed through unchanged
    - Other request/response fields are not generically scrubbed; sanitization is intentionally targeted
 
 There is no generic array truncation (e.g., "show first 5 items") applied across all log entries.

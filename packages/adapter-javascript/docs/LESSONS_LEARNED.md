@@ -33,7 +33,7 @@ Created `tests/manual/test-jsdebug-transport.js` to verify:
 - ✅ TCP mode works with IPv6
 
 ### Key Takeaway
-**Always use `'localhost'` instead of `'127.0.0.1'` when connecting to debug adapters.** This ensures compatibility with adapters that may prefer IPv6 (like js-debug) or IPv4 (like debugpy).
+**Use `'localhost'` for adapter spawn commands** (e.g., `buildAdapterCommand` host default) so Node.js can resolve to both IPv4 and IPv6. However, the session manager (`session-manager-operations.ts`) uses `'127.0.0.1'` as the `adapterHost` for all adapters, and `JsDebugAdapterPolicy` uses `'127.0.0.1'` for DAP attach requests within child sessions. The choice depends on the layer and what the target expects.
 
 ---
 
@@ -111,7 +111,7 @@ The ProxyManager validates the transport configuration:
 | Adapter | Transport | Syntax |
 |---------|-----------|--------|
 | **JavaScript (js-debug)** | TCP only | `[path, String(port), host]` |
-| **Python (debugpy)** | TCP preferred | `['--listen', 'host:port']` |
+| **Python (debugpy)** | TCP preferred | `['--host', host, '--port', String(port)]` |
 | **Rust (CodeLLDB)** | TCP | Adapter-specific |
 | **Go (Delve)** | TCP | `['dap', '--listen', 'host:port']` |
 | **Java (JDI bridge)** | TCP | TCP server on allocated port |
@@ -142,11 +142,9 @@ If experiencing connection failures:
 
 1. **Check the host configuration:**
    ```typescript
-   // Bad
-   adapterHost: '127.0.0.1'
-   
-   // Good
-   adapterHost: 'localhost'
+   // For adapter spawn commands (buildAdapterCommand), prefer 'localhost'
+   // For session-manager adapterHost and child-session attach, '127.0.0.1' is used
+   adapterHost: '127.0.0.1'  // Used in session-manager-operations.ts
    ```
 
 2. **Verify port configuration:**
@@ -204,4 +202,4 @@ When developing adapters for other debug protocols:
 ---
 
 **Last Updated:** October 1, 2025  
-**Version:** JavaScript Adapter v0.1.0
+**Version:** JavaScript Adapter v1.0.0

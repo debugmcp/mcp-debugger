@@ -1,7 +1,7 @@
 # mcp-debugger Architecture Overview
 
-> **⚠️ DRAFT DOCUMENTATION**  
-> This documentation is based on mcp-debugger v0.10.0 architecture and will be refined based on real-world adapter development feedback.
+> **⚠️ DRAFT DOCUMENTATION**
+> This documentation is based on the current mcp-debugger architecture and will be refined based on real-world adapter development feedback.
 
 ## From Python-Specific to Multi-Language Platform
 
@@ -13,7 +13,7 @@ The mcp-debugger has undergone a major architectural transformation, evolving fr
 
 The core components handle session management, process lifecycle, and DAP communication without any language-specific knowledge:
 
-- **[SessionManager](../../src/session/session-manager.ts)** - Thin public facade over the session manager hierarchy (orchestration in `session-manager-operations.ts` and `session-manager-core.ts`)
+- **[SessionManager](../../src/session/session-manager.ts)** - Thin public facade over the session manager hierarchy (`session-manager-core.ts` → `session-manager-data.ts` → `session-manager-operations.ts` → `session-manager.ts`)
 - **[ProxyManager](../../src/proxy/proxy-manager.ts)** - Manages DAP proxy processes
 - **[SessionStore](../../src/session/session-store.ts)** - Persistent session storage
 
@@ -116,7 +116,13 @@ class ProxyManager {
 
 // After: ProxyManager delegates to adapters
 class ProxyManager {
-  constructor(private adapter: IDebugAdapter) {}
+  constructor(
+    private adapter: IDebugAdapter | null,
+    private proxyProcessLauncher: IProxyProcessLauncher,
+    private fileSystem: IFileSystem,
+    private logger: ILogger,
+    runtimeEnv?: ProxyRuntimeEnvironment
+  ) {}
 
   async start(config: ProxyConfig) {
     // adapter.buildAdapterCommand() provides the spawn command
@@ -183,7 +189,7 @@ The adapter pattern adds minimal overhead:
 
 The refactoring improved testability:
 
-- **808 passing tests** (100% success rate)
+- **1200+ passing tests** (100% success rate)
 - **Mock adapter** enables integration testing without external dependencies
 - **Type safety** throughout with TypeScript strict mode
 - **Comprehensive test coverage** for all components
@@ -255,7 +261,11 @@ async endSession(exitCode: number) {
 
 ## Version History
 
-- **v0.10.0** - Current architecture with adapter pattern
+- **v0.19.0** - .NET/C# adapter, 7 language adapters total
+- **v0.18.0** - Go adapter, Java adapter
+- **v0.17.0** - Rust adapter
+- **v0.16.0** - JavaScript adapter
+- **v0.10.0** - Multi-language architecture with adapter pattern
 - **v0.9.x** - Python-specific implementation
 - **v0.8.x** - Initial MCP server implementation
 

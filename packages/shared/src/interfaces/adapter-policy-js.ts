@@ -599,10 +599,10 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     
     return commandStr.includes('js-debug') || 
            commandStr.includes('pwa-node') ||
-           commandStr.includes('vsDebugServer') ||
-           argsStr.includes('js-debug') || 
+           commandStr.includes('vsdebugserver') ||
+           argsStr.includes('js-debug') ||
            argsStr.includes('pwa-node') ||
-           argsStr.includes('vsDebugServer');
+           argsStr.includes('vsdebugserver');
   },
 
   /**

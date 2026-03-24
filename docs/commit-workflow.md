@@ -20,9 +20,9 @@ Runs all checks:
 ```bash
 npm run commit:fast -- -m "feat: add new feature"
 ```
-Uses `git commit --no-verify` internally, which bypasses **all** Git hooks (pre-commit, commit-msg, etc.), then manually runs only:
-- ✅ Personal information check (fast)
-- ⚡ Skips all other checks (pre-commit hooks, build verification, tests)
+Manually runs the personal information check first, then uses `git commit --no-verify` internally, which bypasses **all** Git hooks (pre-commit, commit-msg, etc.):
+- ✅ Personal information check runs FIRST (fast)
+- ⚡ Then commits with --no-verify, skipping all other checks (pre-commit hooks, build verification, tests)
 
 ## Why This Exists
 

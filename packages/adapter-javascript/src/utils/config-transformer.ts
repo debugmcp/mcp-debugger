@@ -25,7 +25,7 @@ export function setDefaultFileSystem(fileSystem: FileSystem): void {
  * - If userOutFiles provided and non-empty, return it as-is.
  * - Else default to the common JS pattern including all .js files and excluding node_modules.
  */
-export function determineOutFiles(_programPath: string, userOutFiles?: string[]): string[] {
+export function determineOutFiles(userOutFiles?: string[]): string[] {
   if (Array.isArray(userOutFiles) && userOutFiles.length > 0) {
     return userOutFiles;
   }

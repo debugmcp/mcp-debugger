@@ -58,11 +58,7 @@ export class MockAdapterFactory implements IAdapterFactory {
     
     // Mock adapter has no real requirements, but we can simulate some checks
     try {
-      // Check if Node.js is available (always true in our environment)
-      if (!process.version) {
-        errors.push('Node.js runtime not detected');
-      }
-      
+      // No real requirements for mock adapter
     } catch (error) {
       errors.push(`Validation error: ${error instanceof Error ? error.message : String(error)}`);
     }

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - `src/` contains the TypeScript CLI and server core that power the Debug MCP runtime.
-- `packages/` hosts workspace modules (`@debugmcp/shared`, `adapter-mock`, `adapter-python`, `adapter-javascript`, `adapter-rust`, `adapter-go`, `mcp-debugger`) with their own `src/` trees.
+- `packages/` hosts workspace modules (`@debugmcp/shared`, `adapter-mock`, `adapter-python`, `adapter-javascript`, `adapter-rust`, `adapter-go`, `adapter-java`, `adapter-dotnet`, `mcp-debugger`) with their own `src/` trees.
 - `tests/` is grouped by scope: `core/`, `adapters/*/`, `e2e/`, plus shared utilities in `tests/test-utils/` and fixtures under `tests/fixtures/`.
 - `docs/` covers design notes; `examples/` hosts adapter recipes; `scripts/` stores CI helpers.
 - Build artifacts land in `dist/`; recorded assets and Docker helpers live in `assets/` and `docker/`.

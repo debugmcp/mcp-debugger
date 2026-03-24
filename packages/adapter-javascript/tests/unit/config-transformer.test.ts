@@ -41,11 +41,11 @@ class MockFileSystem implements FileSystem {
 describe('utils/config-transformer: determineOutFiles', () => {
   it('returns user-provided outFiles when given', () => {
     const custom = ['dist/**/*.js', '!**/node_modules/**'];
-    expect(determineOutFiles('/proj/app.ts', custom)).toEqual(custom);
+    expect(determineOutFiles(custom)).toEqual(custom);
   });
 
   it('returns default outFiles when not provided', () => {
-    expect(determineOutFiles('/proj/app.ts')).toEqual(['**/*.js', '!**/node_modules/**']);
+    expect(determineOutFiles()).toEqual(['**/*.js', '!**/node_modules/**']);
   });
 });
 

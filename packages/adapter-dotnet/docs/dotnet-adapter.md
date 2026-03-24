@@ -30,7 +30,7 @@ MCP Client → MCP Server → SessionManager → ProxyManager → ProxyWorker
 
 ### Why a TCP-to-stdio Bridge?
 
-netcoredbg supports DAP over TCP via `--server=PORT --interpreter=vscode`, but has a connection bug on Windows where the TCP connection drops after the DAP initialize sequence. The bridge spawns netcoredbg in stdio mode (which works reliably) and exposes a TCP socket for the proxy to connect to. This is a pure byte-level forwarder with no DAP parsing.
+netcoredbg supports DAP over TCP via `--server=PORT --interpreter=vscode`, but has a connection bug where the TCP connection drops after the DAP initialize sequence. This bug was originally discovered on Windows but affects all platforms. The bridge spawns netcoredbg in stdio mode (which works reliably on all platforms) and exposes a TCP socket for the proxy to connect to. This is a pure byte-level forwarder with no DAP parsing.
 
 ## Supported Runtimes
 
@@ -67,6 +67,8 @@ The utility function `findNetcoredbgExecutable` in `dotnet-utils.ts` uses a more
 3. Caller-provided preferred path
 4. `which netcoredbg` (searches PATH) — only when no target architecture is requested
 5. Hardcoded platform-specific candidate paths (architecture-aware)
+6. Common installation directories (e.g., `/usr/local/netcoredbg`, `C:\netcoredbg`)
+7. Samsung GitHub release download locations
 
 ## DAP Protocol Details
 
@@ -86,6 +88,8 @@ The utility function `findNetcoredbgExecutable` in `dotnet-utils.ts` uses a more
 - Exception info
 - Loaded sources
 - Module loading
+- Terminate request (graceful shutdown of debuggee)
+- Exception options configuration (`EXCEPTION_OPTIONS`)
 
 ### Filtered Variables
 

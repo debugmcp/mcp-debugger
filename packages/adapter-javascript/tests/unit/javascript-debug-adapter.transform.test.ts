@@ -96,7 +96,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
 
   it('JS with sourceMaps true applies default outFiles when not provided', async () => {
     const program = path.resolve('/proj/app.js');
-    (determineOutFiles as any).mockImplementation((_p: string, user?: string[]) => {
+    (determineOutFiles as any).mockImplementation((user?: string[]) => {
       if (user && user.length > 0) return user;
       return ['**/*.js', '!**/node_modules/**'];
     });

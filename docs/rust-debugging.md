@@ -261,12 +261,8 @@ When debugging async Rust code with tokio:
 #[tokio::main]
 async fn main() {
     // Set breakpoint here to debug async initialization
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    
-    runtime.block_on(async {
-        // Your async code here
-        my_async_function().await;
-    });
+    // Your async code here
+    my_async_function().await;
 }
 ```
 
@@ -330,8 +326,9 @@ If CodeLLDB is not found:
 cd packages/adapter-rust
 npm run build:adapter
 
-# Check if it was downloaded (fixed layout under vendor/codelldb/)
+# Check if it was downloaded (fixed layout under vendor/codelldb/ with per-platform subdirectories)
 ls vendor/codelldb/
+# e.g., vendor/codelldb/win32-x64/, vendor/codelldb/linux-x64/, vendor/codelldb/darwin-arm64/
 ```
 
 ### Async Code Debugging Issues

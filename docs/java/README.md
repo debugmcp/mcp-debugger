@@ -70,9 +70,11 @@ use_mcp_tool(
 
 Key launch arguments:
 - `mainClass` (required): Fully qualified class name with `main()` method
-- `classpath`: Directory or classpath containing compiled `.class` files (typically needed; not enforced at the adapter layer but the JVM will not find your classes without it)
+- `classpath`: Directory or classpath containing compiled `.class` files (default: `'.'`; typically needed — the JVM will not find your classes without it)
 - `cwd`: Working directory for the launched JVM
-- `stopOnEntry`: Whether to pause at the first line of `main()`
+- `stopOnEntry`: Whether to pause at the first line of `main()` (default: `true`)
+- `javaPath`: Path to the `java` executable (overrides auto-detection)
+- `vmArgs`: Additional JVM arguments (e.g., `-Xmx512m`)
 
 ### Attach Mode
 
@@ -120,7 +122,7 @@ use_mcp_tool(
 
 ### 2. Set Breakpoints
 
-Set breakpoints before starting/attaching. Breakpoints must be on executable lines (assignments, method calls, conditionals) — not on blank lines, comments, or declarations.
+Set breakpoints before starting/attaching. Breakpoints must be on executable lines (assignments, method calls, conditionals) — not on blank lines, comments, or declarations. Conditional breakpoints (with a `condition` expression) and exception breakpoints are also supported by the JDI bridge.
 
 ```
 use_mcp_tool(
@@ -165,6 +167,7 @@ use_mcp_tool(tool_name="get_local_variables", arguments={"sessionId": "..."})
 use_mcp_tool(tool_name="get_stack_trace", arguments={"sessionId": "..."})
 
 # Evaluate an expression (frameId is optional; defaults to top frame)
+# The evaluator supports field access, method calls, arithmetic, and string concatenation
 use_mcp_tool(
   tool_name="evaluate_expression",
   arguments={"sessionId": "...", "expression": "x + y", "frameId": 0}

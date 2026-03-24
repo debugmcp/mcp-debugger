@@ -256,7 +256,7 @@ const handleStopped = (threadId: number | undefined, reason: string) => {
 };
 ```
 
-Note: `SessionManagerCore` defines the auto-continue design intent for entry stops, but the concrete `SessionManager` facade currently overrides `handleAutoContinue()` with a throwing placeholder (`throw new Error('handleAutoContinue not yet implemented')`), so auto-continue on entry is not functional in the public class at this time.
+Note: `SessionManagerCore` defines the auto-continue design intent for entry stops, but the concrete `SessionManager` facade currently overrides `handleAutoContinue()` with a warning-logging stub (it does not throw -- it logs a warning and leaves the session paused), so auto-continue on entry is not functional in the public class at this time.
 
 ### Event-Based Lifecycle Management
 

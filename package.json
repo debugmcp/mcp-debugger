@@ -167,7 +167,6 @@
     "@vitest/coverage-istanbul": "^4.1.0",
     "@vitest/coverage-v8": "^4.1.0",
     "@vscode/debugadapter-testsupport": "^1.68.0",
-    "baseline-browser-mapping": "^2.10.8",
     "c8": "^11.0.0",
     "cross-env": "^10.1.0",
     "esbuild": "^0.27.4",
