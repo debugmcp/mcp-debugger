@@ -32,7 +32,6 @@ import { DotnetDebugAdapter } from '../../src/DotnetDebugAdapter.js';
 
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {} as unknown,
-  processLauncher: {} as unknown,
   environment: {
     get: () => undefined,
     getAll: () => ({}),

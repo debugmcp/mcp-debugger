@@ -27,7 +27,7 @@ High-level modules depend on abstractions, not concrete implementations.
 
 **Location**: `src/session/session-manager-core.ts`
 
-> **Note**: `SessionManager` (in `session-manager.ts`) extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`. While `SessionManager` is mostly a facade, it currently overrides `handleAutoContinue()` with a stub that logs a warning and leaves the session paused (it does not throw).
+> **Note**: `SessionManager` (in `session-manager.ts`) extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`. `SessionManager` implements `handleAutoContinue(sessionId)` which calls `this.continue(sessionId)` to auto-continue past entry breakpoints.
 
 ```typescript
 // Define dependencies interface
@@ -291,7 +291,7 @@ export function createMockFileSystem(): IFileSystem {
 
 ### Example: Testing SessionManager
 
-**Location**: `tests/unit/session/session-manager.test.ts`
+**Location**: `tests/core/unit/session/session-manager-*.test.ts`
 
 ```typescript
 describe('SessionManager', () => {

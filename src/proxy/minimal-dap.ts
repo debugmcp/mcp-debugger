@@ -721,10 +721,10 @@ export class MinimalDapClient extends EventEmitter {
     if (immediate) {
       this.removeAllListeners();
     } else {
-      // Use setImmediate to allow any pending emit operations to complete
-      setImmediate(() => {
+      // Use setTimeout(0) to allow any pending emit operations to complete
+      this.timers.setTimeout(() => {
         this.removeAllListeners();
-      });
+      }, 0);
     }
   }
 }

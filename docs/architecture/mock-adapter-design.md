@@ -59,7 +59,7 @@ stateDiagram-v2
 Breakpoint management happens inside the mock adapter process (`MockDebugAdapterProcess`). It stores breakpoints per-file via `setBreakpoints` requests and tracks a `currentLine` counter:
 
 - On **launch**: If `stopOnEntry` is true, emits `stopped(entry)` after 100ms. Otherwise, sorts all breakpoints by line, jumps to the first one and emits `stopped(breakpoint)` after 200ms. If no breakpoints are set, emits `terminated` + `exited`.
-- On **continue**: Finds the next breakpoint after `currentLine`, jumps to it and emits `stopped(breakpoint)`. If no breakpoint remains, emits `terminated` + `exited`.
+- On **continue**: Finds the next breakpoint after `currentLine`, jumps to it and emits `stopped(breakpoint)` after a 200ms delay. If no breakpoint remains, emits `terminated` + `exited` after a 200ms delay.
 
 All breakpoints are returned as `verified: true` with a random numeric ID. The `MockDebugAdapter` class (used by the adapter registry) handles DAP events via `handleDapEvent()`, updating `currentThreadId` on `stopped` events and transitioning to the `DEBUGGING` state.
 
@@ -105,7 +105,7 @@ enum MockErrorScenario {
 
 Error scenarios are controlled at runtime via `setErrorScenario()` on the `MockDebugAdapter` instance (which accepts a single `MockErrorScenario` value). `MockAdapterConfig` does not have an `errorScenarios` field; error scenarios are set exclusively via the runtime method:
 
-- **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code, which triggers an `AdapterError` with `ENVIRONMENT_INVALID` during `initialize()`.
+- **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code. The `initialize()` method checks this result and throws an `AdapterError` with `EXECUTABLE_NOT_FOUND` (not `ENVIRONMENT_INVALID`), transitioning the adapter to the `ERROR` state.
 - **CONNECTION_TIMEOUT**: Causes `connect()` to throw an `AdapterError` with `CONNECTION_TIMEOUT` (recoverable).
 
 ```typescript

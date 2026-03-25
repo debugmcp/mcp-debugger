@@ -7,11 +7,11 @@
 | Full language support | ✅ | ❌ |
 | DAP protocol handling | ✅ | ❌ |
 | Process management | ✅ | ❌ |
-| Session-specific behaviors | ❌ | ✅ |
+| Session-specific behaviors | ✅ (connect/disconnect, state machine) | ✅ (state hooks, filtering) |
 | Stack filtering | ❌ | ✅ |
 | Variable extraction | ❌ | ✅ |
-| Simple validation | ❌ | ✅ |
-| Handshake procedures | ❌ | ✅ |
+| Simple validation | ✅ (validateEnvironment) | ✅ (validateExecutable) |
+| Handshake procedures | ✅ (createLaunchBarrier) | ✅ (performHandshake) |
 
 ## When to Use IDebugAdapter
 
@@ -116,7 +116,7 @@ export const ComplexLanguagePolicy: AdapterPolicy = {
 
 **Solution**: Implement in IDebugAdapter
 
-> **Note:** In practice, `sendDapRequest` in existing adapters is a stub that throws -- DAP request forwarding is handled by the DAP client in the proxy layer, not by the adapter. This example shows a hypothetical pattern if adapter-level request interception were needed.
+> **Note:** In practice, `sendDapRequest` in most existing adapters returns `{} as T` (a no-op stub) -- DAP request forwarding is handled by the DAP client in the proxy layer, not by the adapter. The Go and Java adapters throw instead. This example shows a hypothetical pattern if adapter-level request interception were needed.
 
 ```typescript
 class CustomAdapter implements IDebugAdapter {
@@ -236,7 +236,11 @@ export const NewLanguagePolicy: AdapterPolicy = {
 };
 ```
 
-### Step 3: Add to selectPolicy()
+### Step 3: Add to selectPolicy() and update DebugLanguage enum
+Add your language to the `DebugLanguage` enum in `@debugmcp/shared`, then add your policy to **both** `selectPolicy()` locations:
+- `src/session/session-manager-data.ts` (session-level data operations)
+- `src/proxy/dap-proxy-worker.ts` (proxy-level adapter behavior via `selectAdapterPolicy()`)
+
 ```typescript
 case DebugLanguage.NEWLANG:
   return NewLanguagePolicy;

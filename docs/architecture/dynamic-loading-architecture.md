@@ -1,6 +1,6 @@
 # Dynamic Loading Architecture
 
-Status: v0.18.0
+Status: v0.19.0
 Scope: Adapter discovery, lazy loading, caching, error handling, and container considerations
 
 ## Overview
@@ -34,8 +34,8 @@ flowchart LR
 - Discovers adapter packages by convention: `@debugmcp/adapter-<language>`
 - Primary load path: dynamic `import(packageName)`
 - Fallback load paths (URLs relative to bundle):
-  - `../node_modules/@debugmcp/adapter-<language>/dist/index.js`
-  - `../packages/adapter-<language>/dist/index.js` (monorepo/dev)
+  - `../../node_modules/@debugmcp/adapter-<language>/dist/index.js`
+  - `../../packages/adapter-<language>/dist/index.js` (monorepo/dev)
 - Also tries `createRequire` for CJS/bundled contexts when direct import fails
 - Expects a named factory class to exist in the module:
   - Class name pattern: `<CapitalizedLanguage>AdapterFactory`

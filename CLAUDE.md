@@ -181,7 +181,7 @@ The codebase follows a **layered architecture with dependency injection** and **
      - `SessionManagerCore` (`session-manager-core.ts`): Lifecycle, state management, event handling, dependency wiring
      - `SessionManagerData` (`session-manager-data.ts`): Data retrieval (variables, stack traces, scopes) and adapter policy selection via `selectPolicy()`
      - `SessionManagerOperations` (`session-manager-operations.ts`): Debug operations (start, step, continue, breakpoints, attach/detach)
-     - `SessionManager` (`session-manager.ts`): Final composition class that extends SessionManagerOperations. Note: `handleAutoContinue()` currently throws — auto-continue is not yet implemented
+     - `SessionManager` (`session-manager.ts`): Final composition class that extends SessionManagerOperations. Implements `handleAutoContinue(sessionId)` which auto-continues past entry breakpoints when `stopOnEntry=false`
    - Coordinates ProxyManager instances (one per session)
    - Handles breakpoint management and queuing
 

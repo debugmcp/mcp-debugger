@@ -1,226 +1,200 @@
-# Testing Guide for Debug MCP Server
+# Testing Guide
 
-This guide provides information about how to run tests and how to structure new tests for the Debug MCP Server.
+The project uses [Vitest](https://vitest.dev/) with tests organized into unit, integration, and E2E levels, plus stress tests, manual scripts, and validation helpers.
 
-## Running Tests Locally with Act
+## Running Tests
 
-For running GitHub Actions workflows locally (especially container tests), we use [Act](https://github.com/nektos/act).
-
-### Prerequisites for Container Tests
-
-1. **Docker**: Ensure Docker is installed and running
-2. **Act**: Install Act following the [official instructions](https://github.com/nektos/act#installation)
-3. **Docker Image**: Build the MCP debugger Docker image:
-   ```bash
-   docker build -t mcp-debugger:local .
-   ```
-
-### Platform-Specific Requirements
-
-#### Windows Requirements
-- **CRITICAL**: Run Act inside WSL2 (required for Docker operations)
-- Ensure Docker Desktop WSL2 integration is enabled
-- Open WSL2 terminal and run Act from there
-- Do NOT run Act from Windows CMD/PowerShell
-
-#### Apple Silicon (M1/M2) Requirements
-- The `.actrc` file already includes `--container-architecture linux/amd64`
-- Alternatively, build multi-arch images for `mcp-debugger:local`
-
-### Running Tests with Act
-
-With the updated `.actrc` configuration, Act will:
-- Use your local `catthehacker/ubuntu:act-latest` image
-- Default to the CI workflow (to avoid running both workflows)
-- Not pull images from the registry
+### Core
 
 ```bash
-# Simple commands (using helper scripts):
-./scripts/act-test.sh ci      # Linux/macOS
-scripts\act-test.cmd ci        # Windows
-
-# Run CI workflow tests (default)
-act -j build-and-test --matrix os:ubuntu-latest
-
-# Run only E2E tests
-./scripts/act-test.sh e2e
-
-# Run Release workflow tests
-act -W .github/workflows/release.yml -j build-and-test
+npm test                  # Build + run all tests
+npm run test:unit         # Unit tests only
+npm run test:integration  # Integration tests only
+npm run test:e2e          # E2E tests (builds Docker image first)
+npm run test:core         # Core system tests (tests/core/)
+npm run test:watch        # Watch mode
+npx vitest run path/to/file.test.ts  # Single file
 ```
 
-**Note**: The CI workflow runs on every push/PR, while the Release workflow only runs when you create version tags (e.g., `v1.0.0`).
-
-### Act Configuration
-
-The project includes an `.actrc` file with optimized settings:
-- Uses Docker-enabled runner images (`catthehacker/ubuntu:act-latest`)
-- Enables `--bind` for proper volume mounting
-- Enables `--privileged` for Docker daemon access
-- Sets container architecture for cross-platform compatibility
-
-## Running Tests Directly
-
-The project uses Vitest as the testing framework. There are several scripts available to run tests:
-
-### Run All Tests
+### Language-Specific
 
 ```bash
-npm test
+npm run test:python       # Python adapter tests only
+npm run test:no-python    # All tests except Python
 ```
 
-### Run Unit Tests Only
+### Distribution Channels
 
 ```bash
-tests/runners/run-tests.cmd unit
+npm run test:e2e:smoke      # Language smoke tests (mcp-server-smoke-*.test.ts)
+npm run test:e2e:container  # Docker container E2E (rebuilds image)
+npm run test:e2e:npx        # NPX distribution E2E
+npm run test:all-channels   # All three above in sequence
 ```
 
-### Run Integration Tests Only
+### CI
 
 ```bash
-tests/runners/run-tests.cmd integration
+npm run test:ci             # All tests minus Docker
+npm run test:ci-no-python   # No E2E, no Python
+npm run test:ci-coverage    # Coverage without E2E
+npm run test:no-docker      # Skip Docker tests
 ```
 
-### Run E2E Tests Only
+### Coverage
 
 ```bash
-tests/runners/run-tests.cmd e2e
+npm run test:coverage          # Full coverage (HTML report)
+npm run test:coverage:summary  # Coverage summary table
+npm run test:coverage:analyze  # Detailed analysis
+npm run test:coverage:json     # JSON report
+npm run test:coverage:quiet    # Minimal output
 ```
 
-### Development Testing
+### Stress
 
 ```bash
-tests/runners/dev-test.cmd
+npm run test:stress    # Stress and load tests (requires RUN_STRESS_TESTS=true)
 ```
 
-This interactive script:
-- Builds the project
-- Restarts the MCP server with debug logging
-- Provides options to run unit, integration, E2E, or all tests
-- Allows keeping the server running for development
-
-### Run Specific Test File
+### Output Formats
 
 ```bash
-tests/runners/run-tests.cmd unit path/to/test/file.test.ts
+npm run test:verbose   # Detailed reporter
+npm run test:quiet     # Minimal (dot + silent)
+npm run test:dot       # Dot reporter
+npm run test:json      # JSON results to test-results.json
 ```
 
-## Testing Structure
+### GitHub Actions Locally (Act)
 
-The tests are organized into three main categories:
+```bash
+npm run act:test       # Run CI test job via Act
+npm run act:full       # Full CI workflow via Act
+```
 
-1. **Unit Tests**: Tests individual components in isolation by mocking their dependencies
-2. **Integration Tests**: Tests interactions between multiple components
-3. **E2E Tests**: Tests the entire application flow
-
-### Test Directory Structure
+## Directory Structure
 
 ```
 tests/
-├── e2e/                 # End-to-end tests
-├── fixtures/            # Test data and fixtures
-│   └── python/          # Python scripts for testing
-├── integration/         # Integration tests
-├── mocks/               # Mock implementations for testing
-├── runners/             # Test runner scripts
-├── test-utils/          # Test utility functions and helpers
-│   ├── helpers/         # Helper scripts (port-manager, test-setup, etc.)
-│   ├── mocks/           # Mock implementations (dap-client, logger, etc.)
-│   └── fixtures/        # Test fixtures (python scripts, etc.)
-├── unit/                # Unit tests
-│   ├── debugger/        # Tests for debugger components
-│   ├── session/         # Tests for session management
-│   └── utils/           # Tests for utility functions
-└── vitest.setup.ts      # Vitest setup configuration
+├── adapters/                  # Per-language adapter tests
+│   ├── go/unit/               # Go adapter unit tests
+│   ├── go/integration/        # Go session smoke test
+│   ├── java/unit/             # Java adapter, factory, utils, policy tests
+│   ├── javascript/integration/# JavaScript session smoke test
+│   ├── python/unit/           # Python utils tests
+│   ├── python/integration/    # Python discovery and workflow tests
+│   └── rust/integration/      # Rust session smoke test
+│
+├── core/unit/                 # Core system unit tests
+│   ├── adapters/              # Debug adapter interface tests
+│   ├── factories/             # ProxyManager and SessionStore factory tests
+│   ├── server/                # MCP server tests (init, lifecycle, tools, language discovery)
+│   ├── session/               # SessionManager tests (state, DAP, paths, edge cases, etc.)
+│   └── utils/                 # Type guards, session migration
+│
+├── e2e/                       # End-to-end tests
+│   ├── mcp-server-smoke-*.ts  # Per-language smoke tests (python, javascript, rust, go, java, dotnet)
+│   ├── docker/                # Docker container tests (python, javascript, rust, entrypoint)
+│   └── npx/                   # NPX distribution tests (python, javascript)
+│
+├── exploratory/               # Exploratory test result snapshots (JSON)
+├── fixtures/                  # Test data
+│   ├── debug-scripts/         # Simple mock scripts
+│   └── javascript-e2e/        # JS/TS fixtures for E2E tests
+│
+├── implementations/test/      # Fake implementations (e.g., fake-process-launcher.ts)
+├── integration/rust/          # Rust cross-component integration tests
+├── manual/                    # Manual/interactive test scripts (SSE, debugpy, js-debug)
+│
+├── proxy/                     # DAP proxy tests (worker, child sessions, client behavior)
+├── stress/                    # Stress tests (SSE stress, cross-transport parity)
+│
+├── test-utils/                # Shared test utilities
+│   ├── fixtures/              # Script fixtures (python-scripts.ts)
+│   ├── helpers/               # Port manager, test dependencies, coverage tools
+│   └── mocks/                 # Mock DAP client, logger, processes, adapters, etc.
+│
+├── unit/                      # Main unit test directory
+│   ├── adapter-python/        # Python debug adapter tests
+│   ├── adapters/              # Adapter loader, registry, JS/mock adapter tests
+│   ├── cli/                   # CLI command tests (stdio, sse, setup, version)
+│   ├── container/             # Dependency injection tests
+│   ├── dap-core/              # DAP handlers and state tests
+│   ├── implementations/       # Process launcher, process manager, env, filesystem, network
+│   ├── proxy/                 # Proxy manager, DAP proxy core, message parser, minimal-dap
+│   ├── shared/                # Adapter policy tests (default, python, js, go, dotnet, mock)
+│   ├── test-utils/            # Mock validation, test proxy manager
+│   └── utils/                 # Error messages, logger, file checker, language config
+│
+├── validation/                # Validation scripts (e.g., debugpy breakpoint messages)
+└── vitest.setup.ts            # Global Vitest setup
 ```
+
+### Package Co-located Tests
+
+Each adapter package also has tests alongside its source:
+
+```
+packages/
+├── adapter-dotnet/tests/unit/     # .NET adapter, factory, utils, bridge tests
+├── adapter-javascript/tests/unit/ # JS adapter, factory, config, resolver, vendor tests
+├── adapter-mock/tests/unit/       # Mock adapter and factory tests
+├── adapter-python/tests/unit/     # Python adapter, factory, utils tests
+├── adapter-rust/tests/            # Rust adapter, binary detector, cargo utils tests
+└── shared/tests/unit/             # Shared adapter policy tests
+```
+
+## Test Categories
+
+**Unit tests** (`tests/unit/`, `tests/core/unit/`, `packages/*/tests/unit/`) test components in isolation with mocked dependencies. This is the largest category, covering adapters, CLI, DI container, DAP core, proxy, session manager, and utilities.
+
+**Integration tests** (`tests/integration/`, `tests/adapters/*/integration/`) test interactions between components — e.g., a full debug session lifecycle through the adapter layer for a specific language.
+
+**E2E tests** (`tests/e2e/`) run complete debugging workflows against real debug runtimes. Includes per-language smoke tests, Docker container tests, NPX distribution tests, and SSE transport tests.
+
+**Proxy tests** (`tests/proxy/`) test the DAP proxy worker, child session manager, and DAP client behavior.
+
+**Stress tests** (`tests/stress/`) test SSE connection handling under load and cross-transport parity. Gated behind `RUN_STRESS_TESTS=true`.
+
+**Manual tests** (`tests/manual/`) are interactive scripts for ad-hoc debugging of SSE connections, debugpy, and js-debug transport.
+
+**Validation tests** (`tests/validation/`) verify protocol-level correctness (e.g., debugpy breakpoint message formats).
+
+## Shared Test Utilities
+
+`tests/test-utils/` provides reusable infrastructure:
+
+- **`helpers/port-manager.ts`** — allocates unique ports to avoid conflicts between parallel tests
+- **`helpers/test-dependencies.ts`** — creates dependency injection containers pre-wired for testing
+- **`mocks/dap-client.ts`** — mock DAP client for simulating debugger communication
+- **`mocks/mock-logger.ts`** — captures log output for assertion
+- **`mocks/mock-proxy-manager.ts`** — mock proxy manager with controllable behavior
+- **`mocks/child-process.ts`**, **`mocks/net.ts`** — mock Node.js built-ins
+- **`fixtures/python-scripts.ts`** — Python script content for test fixtures
 
 ## Writing Tests
 
-When writing tests, follow these guidelines:
+**File naming**: Use `*.test.ts` or `*.spec.ts`. Both are picked up by Vitest.
 
-### Unit Tests
+**Where to add tests**:
+- Adapter-specific unit tests → `packages/adapter-{lang}/tests/unit/` or `tests/adapters/{lang}/unit/`
+- Core system tests → `tests/core/unit/{area}/`
+- General unit tests → `tests/unit/{area}/`
+- Integration tests → `tests/adapters/{lang}/integration/` or `tests/integration/`
+- E2E tests → `tests/e2e/`
 
-- Mock all external dependencies
-- Test a single responsibility
-- Use descriptive test names
-- Structure tests with arrange-act-assert pattern
-- For tests involving the DAP protocol, use the mock DAP client
+**Mock patterns**: Import from `tests/test-utils/mocks/` for standard mocks. Use `tests/unit/test-utils/auto-mock.ts` for auto-mock helpers.
 
-### Integration Tests
+**Test structure**: Use `describe`/`it` blocks. Arrange-act-assert pattern. Always `await` async operations.
 
-- Mock external services (like debugpy server)
-- Test interactions between components
-- Focus on component boundaries
+## Configuration
 
-### E2E Tests
+Test configuration lives in `vitest.config.ts`:
 
-- Minimize mocking
-- Test complete workflows from user perspective
-
-## Common Testing Issues
-
-### Port Conflicts
-
-When running tests that involve network connections, port conflicts can occur. To avoid this:
-
-- Use random port numbers for tests
-- Ensure ports are released after each test
-- Use the global `testPortManager` to manage port allocation
-
-### Python Environment
-
-Tests requiring Python need the Python interpreter to be available. Ensure your system has Python installed and available in the PATH.
-
-### Asynchronous Testing
-
-Many operations in the Debug MCP Server are asynchronous. When testing:
-
-- Always await async functions
-- Use Vitest's async test support (async/await in test functions)
-- Be careful with timeouts
-
-## Test Coverage
-
-The project aims for high test coverage. Run the coverage report with:
-
-```bash
-npm run test:coverage
-```
-
-Focus on improving coverage in critical areas like:
-- Debug protocol implementation
-- Session management
-- Error handling
-
-## Debugging Tests
-
-For debugging failing tests:
-- Use the `--debug` flag with Vitest
-- Add console logs in tests (they will appear in test output)
-- Examine the log files in the `logs/` directory
-
-### Debugging Container Tests
-
-When container tests fail:
-1. Check if the Docker image exists: `docker images | grep mcp-debugger`
-2. Verify Act environment: `echo $ACT` (should be "true" when running in Act)
-3. Check Docker daemon access: `docker ps`
-4. Review container logs in test output
-
-### Common Container Test Issues
-
-1. **"Script path not found" errors**: Usually indicates volume mount issues
-   - Ensure `.actrc` includes `--bind` flag
-   - Check that paths are relative, not absolute
-
-2. **"spawn node ENOENT" errors**: Node.js not found in PATH
-   - The Python discovery test now handles Act environment automatically
-   - For other tests, ensure proper PATH configuration
-
-3. **Docker command failures**: Docker not available in Act container
-   - Ensure using `catthehacker/ubuntu:act-latest` images (as configured in `.actrc`)
-   - Verify `--privileged` flag is set
-
-## Alternative: Testcontainers
-
-If Act proves problematic for your environment, consider using the [Testcontainers](https://testcontainers.com/) library as an alternative approach for container-based testing.
+- **Setup file**: `tests/vitest.setup.ts`
+- **Test timeout**: 30 seconds
+- **Max workers**: 1 (process-spawning tests require serial execution)
+- **File parallelism**: Disabled
+- **Coverage**: Istanbul provider
+- **Include patterns**: `tests/**/*.{test,spec}.ts`, `packages/**/tests/**/*.{test,spec}.ts`

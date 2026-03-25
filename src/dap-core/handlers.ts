@@ -245,7 +245,8 @@ function handleDapResponse(
     };
   }
 
-  // Remove pending request and return updated state (no additional side-effects)
+  // Remove pending request from state tracking. Response resolution (resolve/reject
+  // of the caller's Promise) is handled imperatively by ProxyManager.handleDapResponse.
   return {
     commands: [],
     newState: removePendingRequest(state, message.requestId)

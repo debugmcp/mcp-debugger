@@ -138,9 +138,7 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
       throw new Error("MCP Client not initialized. Cannot run test.");
     }
 
-    // Helper to parse ServerResult
     // 1. List Sessions (simpler first call)
-    // Do not type listRawResult as ServerResult if its type is problematic
     const listRawResult = await client.callTool({ name: 'list_debug_sessions', arguments: {} });
     const listResult = parseToolResult(listRawResult);
     expect(listResult.success).toBe(true);

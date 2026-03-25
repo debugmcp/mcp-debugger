@@ -113,8 +113,7 @@ export async function main(): Promise<void> {
 }
 
 // Only execute if this is the main module
-// Check if the script is being run directly (not imported)
-// Handle both ESM (import.meta.url) and CJS (__filename) contexts
+// Handle both ESM (import.meta.url) and CJS (require.main) contexts
 const isMainModule = (() => {
   // In CJS context (bundled), use require.main check
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {

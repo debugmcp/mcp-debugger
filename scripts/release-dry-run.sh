@@ -131,7 +131,7 @@ if command -v gh > /dev/null 2>&1; then
       # Report per-job results
       JOBS_JSON=$(gh run view "$RUN_ID" --json jobs --jq '.jobs[] | .name + "|" + .conclusion' 2>/dev/null)
       ALL_OK=true
-      while IFS='|' read -r job_name job_result; do
+      [[ -n "$JOBS_JSON" ]] && while IFS='|' read -r job_name job_result; do
         if [[ "$job_result" == "success" ]]; then
           pass "$job_name"
         elif [[ "$job_result" == "failure" ]]; then

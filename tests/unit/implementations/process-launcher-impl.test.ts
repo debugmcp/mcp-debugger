@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { ProcessLauncherImpl, ProxyProcessLauncherImpl } from '../../../src/implementations/process-launcher-impl.js';
+import { ProxyProcessLauncherImpl } from '../../../src/implementations/process-launcher-impl.js';
 import type { IChildProcess, IProcessManager } from '@debugmcp/shared';
 
 class FakeChildProcess extends EventEmitter implements IChildProcess {
@@ -20,84 +20,6 @@ class FakeChildProcess extends EventEmitter implements IChildProcess {
   kill = vi.fn().mockReturnValue(true);
   send = vi.fn().mockReturnValue(true);
 }
-
-describe('ProcessLauncherImpl', () => {
-  let processManager: IProcessManager;
-  let child: FakeChildProcess;
-
-  beforeEach(() => {
-    delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
-    child = new FakeChildProcess(1234);
-    processManager = {
-      spawn: vi.fn().mockReturnValue(child),
-      exec: vi.fn()
-    } as unknown as IProcessManager;
-  });
-
-  it('wraps child process events and updates exit state', () => {
-    const launcher = new ProcessLauncherImpl(processManager);
-    const adapterProcess = launcher.launch('node', ['app.js']);
-
-    const exitHandler = vi.fn();
-    adapterProcess.on('exit', exitHandler);
-
-    child.emit('exit', 0, null);
-
-    expect(exitHandler).toHaveBeenCalledWith(0, null);
-    expect(adapterProcess.exitCode).toBe(0);
-  });
-
-  it('falls back to killing the child when group kill fails', () => {
-    const launcher = new ProcessLauncherImpl(processManager);
-    const adapterProcess = launcher.launch('node', ['script.js']);
-
-    const platformSpy = vi.spyOn(global.process, 'platform', 'get').mockReturnValue('linux');
-    const killSpy = vi.spyOn(global.process, 'kill').mockImplementation(() => {
-      throw new Error('group kill not supported');
-    });
-
-    const result = adapterProcess.kill('SIGTERM');
-
-    expect(killSpy).toHaveBeenCalledWith(-child.pid!, 'SIGTERM');
-    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(result).toBe(true);
-
-    platformSpy.mockRestore();
-    killSpy.mockRestore();
-  });
-
-  it('kills child directly when running inside a container', () => {
-    const originalContainer = process.env.MCP_CONTAINER;
-    process.env.MCP_CONTAINER = 'true';
-
-    const launcher = new ProcessLauncherImpl(processManager);
-    const adapterProcess = launcher.launch('node', ['script.js']);
-
-    const processKillSpy = vi.spyOn(global.process, 'kill');
-    adapterProcess.kill('SIGTERM');
-
-    expect(processKillSpy).not.toHaveBeenCalled();
-    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
-
-    if (originalContainer === undefined) {
-      delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
-    } else {
-      process.env.MCP_CONTAINER = originalContainer;
-    }
-  });
-
-  it('returns false when child kill throws', () => {
-    const launcher = new ProcessLauncherImpl(processManager);
-    const adapterProcess = launcher.launch('node', ['script.js']);
-
-    child.kill = vi.fn(() => {
-      throw new Error('kill failed');
-    });
-
-    const result = adapterProcess.kill('SIGTERM');
-    expect(result).toBe(false);
-  });
-});
 
 describe('ProxyProcessLauncherImpl', () => {
   let processManager: IProcessManager;

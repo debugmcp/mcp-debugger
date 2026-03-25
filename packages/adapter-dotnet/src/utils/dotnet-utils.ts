@@ -188,8 +188,7 @@ function getNetcoredbgSearchPaths(targetArch?: 'x86' | 'x64'): string[] {
 }
 
 /**
- * Auto-detect the best available .NET debug backend.
- * Prefers netcoredbg (supports both .NET Core and .NET Framework with our fork).
+ * Find the netcoredbg debug backend executable. Returns the backend type and resolved path.
  *
  * @param logger Optional logger
  * @returns Backend type and path

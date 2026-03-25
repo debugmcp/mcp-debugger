@@ -19,7 +19,6 @@ import {
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
-import { IDebugTargetLauncher } from '@debugmcp/shared';
 import { IAdapterRegistry } from '@debugmcp/shared';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -49,7 +48,6 @@ export interface SessionManagerDependencies {
   logger: ILogger;
   proxyManagerFactory: IProxyManagerFactory;
   sessionStoreFactory: ISessionStoreFactory;
-  debugTargetLauncher: IDebugTargetLauncher;
   environment: IEnvironment;
   adapterRegistry: IAdapterRegistry;
 }
@@ -75,7 +73,6 @@ export abstract class SessionManagerCore {
   protected environment: IEnvironment;
   protected proxyManagerFactory: IProxyManagerFactory;
   protected sessionStoreFactory: ISessionStoreFactory;
-  protected debugTargetLauncher: IDebugTargetLauncher;
   public adapterRegistry: IAdapterRegistry;
 
   protected defaultDapLaunchArgs: Partial<CustomLaunchRequestArguments>;
@@ -97,7 +94,6 @@ export abstract class SessionManagerCore {
     this.environment = dependencies.environment;
     this.proxyManagerFactory = dependencies.proxyManagerFactory;
     this.sessionStoreFactory = dependencies.sessionStoreFactory;
-    this.debugTargetLauncher = dependencies.debugTargetLauncher;
     this.adapterRegistry = dependencies.adapterRegistry;
     
     this.sessionStore = this.sessionStoreFactory.create();
@@ -239,8 +235,10 @@ export abstract class SessionManagerCore {
       // Handle auto-continue for stopOnEntry=false
       if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
         this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false)`);
-        // Delegate to subclass handleAutoContinue() implementation
-        this.handleAutoContinue().catch(err => {
+        // Must set PAUSED synchronously before handleAutoContinue, because
+        // continue() requires session.state === SessionState.PAUSED.
+        this._updateSessionState(session, SessionState.PAUSED);
+        this.handleAutoContinue(sessionId).catch(err => {
           this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
         });
       } else {
@@ -421,5 +419,5 @@ export abstract class SessionManagerCore {
    * Handle auto-continue when stopOnEntry is false.
    * Must be overridden in subclasses that have access to the continue method.
    */
-  protected abstract handleAutoContinue(): Promise<void>;
+  protected abstract handleAutoContinue(sessionId: string): Promise<void>;
 }

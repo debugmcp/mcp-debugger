@@ -110,7 +110,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
       return process.env.CARGO_PATH;
     }
 
-    // Defer to adapter for auto-detection (cargo / rustc)
+    // Defer to adapter for CodeLLDB path resolution
     return undefined;
   },
   

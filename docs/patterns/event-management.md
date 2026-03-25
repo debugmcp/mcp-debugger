@@ -61,7 +61,7 @@ This pattern provides:
 
 **Location**: `src/session/session-manager-core.ts`
 
-> **Note**: `SessionManager` is now a thin facade. Core logic including event handler setup lives in `SessionManagerCore` (in `session-manager-core.ts`).
+> **Note**: `SessionManager` is a thin facade atop a 4-class inheritance hierarchy: `SessionManagerCore` → `SessionManagerData` → `SessionManagerOperations` → `SessionManager`. Core logic including event handler setup lives in `SessionManagerCore` (in `session-manager-core.ts`).
 
 ```typescript
 // WeakMap to store event handlers for cleanup
@@ -75,14 +75,15 @@ private setupProxyEventHandlers(
   const sessionId = session.id;
   const handlers = new Map<string, (...args: any[]) => void>();
 
-  // Named function for stopped event
-  const handleStopped = (threadId: number | undefined, reason: string) => {
+  // Named function for stopped event (third parameter is the full stoppedBody from DAP)
+  const handleStopped = (threadId: number | undefined, reason: string, stoppedBody?: unknown) => {
     this.logger.debug(`[SessionManager] 'stopped' event handler called for session ${sessionId}`);
     this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
 
     // Handle auto-continue for stopOnEntry=false
     if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-      this.handleAutoContinue().catch(err => { /* log error */ });
+      this._updateSessionState(session, SessionState.PAUSED);
+      this.handleAutoContinue(sessionId).catch(err => { /* log error */ });
     } else {
       this._updateSessionState(session, SessionState.PAUSED);
     }
@@ -195,6 +196,13 @@ private setupEventHandlers(): void {
     this.cleanup();
   });
 }
+
+// Note: ProxyManager also tracks IPC lifecycle events internally:
+// - 'ipc-send-start': Emitted when an IPC message begins sending
+// - 'ipc-send-complete': Emitted when IPC send succeeds
+// - 'ipc-send-failed': Emitted when IPC send fails
+// - 'ipc-send-error': Emitted on IPC send error
+// These are used for internal diagnostics and request correlation.
 ```
 
 ### Message-Based Event Forwarding
@@ -249,14 +257,15 @@ const handleStopped = (threadId: number | undefined, reason: string) => {
 
   // Auto-continue on entry stops when stopOnEntry=false
   if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-    this.handleAutoContinue().catch(err => { /* log error */ });
+    this._updateSessionState(session, SessionState.PAUSED);
+    this.handleAutoContinue(sessionId).catch(err => { /* log error */ });
   } else {
     this._updateSessionState(session, SessionState.PAUSED);
   }
 };
 ```
 
-Note: `SessionManagerCore` defines the auto-continue design intent for entry stops, but the concrete `SessionManager` facade currently overrides `handleAutoContinue()` with a warning-logging stub (it does not throw -- it logs a warning and leaves the session paused), so auto-continue on entry is not functional in the public class at this time.
+When a 'stopped' event fires with `reason='entry'` and `stopOnEntry=false`, the session transitions synchronously to PAUSED and then `handleAutoContinue(sessionId)` calls `this.continue(sessionId)` to resume execution. The synchronous PAUSED transition is required because `continue()` guards on `session.state === SessionState.PAUSED`.
 
 ### Event-Based Lifecycle Management
 

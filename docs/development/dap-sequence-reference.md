@@ -70,6 +70,8 @@ A dual-state overlay is derived from `SessionState` via `mapLegacyState()` in `_
 * **SessionLifecycleState**: `CREATED` → `ACTIVE` → `TERMINATED` (coarse lifecycle)
 * **ExecutionState**: `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `ERROR` (fine-grained execution)
 
+Note: `SessionState.READY` maps identically to `INITIALIZING` in the dual-state model (both `SessionLifecycleState.ACTIVE` and `ExecutionState.INITIALIZING`).
+
 These derived `sessionLifecycle` and `executionState` fields are kept in sync as a secondary representation, but `SessionState` is the actively used model.
 
 **All debuggers distinguish**:

@@ -50,11 +50,7 @@ export const MockAdapterPolicy: AdapterPolicy = {
     
     // Find the first scope (mock adapter has simple scopes)
     const localScope = frameScopes[0];
-    
-    if (!localScope) {
-      return [];
-    }
-    
+
     // Return all variables for mock adapter
     return variables[localScope.variablesReference] || [];
   },

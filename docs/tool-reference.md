@@ -34,7 +34,7 @@ This document provides a complete reference for all tools available in mcp-debug
 Creates a new debugging session.
 
 **Parameters:**
-- `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. Defaults include: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are available.
+- `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. The default fallback languages (when dynamic discovery is unavailable) are `"python"` and `"mock"`. When all adapters are available, the full list is: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are discoverable at runtime.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"session-<8 chars>"` (e.g., `"session-a4d1acc8"`).
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 
@@ -58,6 +58,7 @@ Creates a new debugging session.
 **Notes:**
 - Session IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - Sessions start in `"created"` state
+- When a `port` parameter is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching to a running process on that port)
 
 ---
 
@@ -85,12 +86,13 @@ Lists all active debugging sessions.
 }
 ```
 
-**Session States:**
+**Session States** (from `SessionState` enum):
 - `"created"`: Session created but not started
 - `"initializing"`: Debug session starting up
-- `"running"`: Actively debugging
+- `"ready"`: Session initialized and ready to start debugging
+- `"running"`: Actively debugging (program executing)
 - `"paused"`: Paused at breakpoint or step
-- `"terminated"`: Session has ended
+- `"stopped"`: Session stopped (program terminated)
 - `"error"`: Session encountered an error
 
 ---
@@ -747,4 +749,4 @@ Tools can return errors in two formats:
 
 ---
 
-*Last updated: 2026-03-18 based on source code review of mcp-debugger v0.18.1*
+*Last updated: 2026-03-18 based on source code review of mcp-debugger v0.19.0*

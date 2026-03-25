@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { JavascriptAdapterFactory } from '../../src/index.js';
 import { AdapterState } from '@debugmcp/shared';
-import type { AdapterDependencies, IFileSystem, ILogger, IEnvironment, IProcessLauncher } from '@debugmcp/shared';
+import type { AdapterDependencies, IFileSystem, ILogger, IEnvironment } from '@debugmcp/shared';
 
 describe('@debugmcp/adapter-javascript package', () => {
   test('exports JavascriptAdapterFactory', () => {
@@ -15,8 +15,7 @@ describe('@debugmcp/adapter-javascript package', () => {
     const deps: AdapterDependencies = {
       fileSystem: {} as unknown as IFileSystem,
       logger: { debug() {}, info() {}, warn() {}, error() {} } as unknown as ILogger,
-      environment: {} as unknown as IEnvironment,
-      processLauncher: {} as unknown as IProcessLauncher
+      environment: {} as unknown as IEnvironment
     };
 
     const adapter = factory.createAdapter(deps);
@@ -31,8 +30,7 @@ describe('@debugmcp/adapter-javascript package', () => {
     const deps: AdapterDependencies = {
       fileSystem: {} as unknown as IFileSystem,
       logger: { debug() {}, info() {}, warn() {}, error() {} } as unknown as ILogger,
-      environment: {} as unknown as IEnvironment,
-      processLauncher: {} as unknown as IProcessLauncher
+      environment: {} as unknown as IEnvironment
     };
 
     const adapter = factory.createAdapter(deps);

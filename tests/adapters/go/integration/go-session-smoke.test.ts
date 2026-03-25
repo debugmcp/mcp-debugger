@@ -34,11 +34,6 @@ const createDependencies = (): AdapterDependencies => ({
     getAll: () => ({ ...process.env }),
     getCurrentWorkingDirectory: () => process.cwd()
   },
-  processLauncher: {
-    launch: () => {
-      throw new Error('processLauncher.launch should not be used in go smoke test');
-    }
-  } as AdapterDependencies['processLauncher']
 });
 
 describe('Go adapter - session smoke (integration)', () => {

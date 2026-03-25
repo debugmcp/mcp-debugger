@@ -1246,7 +1246,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * @param sessionId - The session ID
    * @param expression - The expression to evaluate
    * @param frameId - Optional stack frame ID for context (defaults to current frame)
-   * @param context - The context in which to evaluate ('variables' is default for maximum flexibility)
    * @returns Evaluation result with value, type, and optional variable reference
    */
   async evaluateExpression(

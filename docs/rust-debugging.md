@@ -40,7 +40,7 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 
 ### Useful environment flags
 
-- `CODELLDB_VERSION`: override the release tag (the runtime resolver defaults to `1.11.0` when reading vendored version metadata fails)
+- `CODELLDB_VERSION`: override the release tag (the runtime resolver defaults to `1.11.8` when reading vendored version metadata fails)
 - `CODELLDB_FORCE_REBUILD=true`: ignore cached binaries and re-download
 - `CODELLDB_PLATFORMS=win32-x64,linux-x64,linux-arm64,darwin-x64,darwin-arm64`: vendor specific platforms (comma-separated)
 - `CODELLDB_VENDOR_ALL=false`: opt out of the "vendor every platform" default and fall back to host-only downloads

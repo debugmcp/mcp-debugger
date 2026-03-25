@@ -175,7 +175,6 @@ class WhichCommandFinder implements CommandFinder {
         // Test if we can spawn the command directly without 'which'
         if (process.platform === 'win32') {
           console.error(`[Python Discovery] Testing direct spawn of ${cmd}...`);
-          const { spawn } = await import('child_process');
           const testResult = await new Promise<string>((resolve) => {
             const child = spawn(cmd, ['--version'], {
               stdio: 'pipe',

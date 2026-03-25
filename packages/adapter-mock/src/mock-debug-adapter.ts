@@ -247,8 +247,7 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Adapter Configuration =====
   
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
-    // Get the directory of this module
-    // When compiled, this will be in dist/adapters/mock/
+    // When compiled, this will be in packages/adapter-mock/dist/
     let mockAdapterPath: string;
 
     try {

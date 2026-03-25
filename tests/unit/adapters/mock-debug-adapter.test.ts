@@ -11,7 +11,6 @@ const createDependencies = (): AdapterDependencies => ({
   },
   environment: {},
   fileSystem: {} as unknown as AdapterDependencies['fileSystem'],
-  processLauncher: {} as unknown as AdapterDependencies['processLauncher'],
   networkManager: {} as unknown as AdapterDependencies['networkManager']
 });
 

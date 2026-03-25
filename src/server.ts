@@ -217,7 +217,7 @@ export class DebugMcpServer {
   private async getLanguageMetadata(): Promise<LanguageMetadata[]> {
     const languages = await this.getSupportedLanguagesAsync();
 
-    // Map to metadata - in future, this info can come directly from adapter registry
+    // Hardcoded metadata fallback; adapters could provide this via registry in the future
     return languages.map((lang: string) => {
       switch (lang) {
         case DebugLanguage.PYTHON:

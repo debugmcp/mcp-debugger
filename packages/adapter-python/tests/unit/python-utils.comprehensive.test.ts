@@ -879,7 +879,6 @@ describe('Additional edge cases', () => {
     delete process.env.pythonLocation;
     delete process.env.PYTHON_PATH;
 
-    let callCount = 0;
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {
         if (cmd === 'python3') return '/usr/bin/python3';

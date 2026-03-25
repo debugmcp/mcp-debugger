@@ -26,7 +26,7 @@ const metadata: AdapterMetadata = {
   description: 'Debug JavaScript and TypeScript applications using Node.js',
   minimumDebuggerVersion: '2.0.0',
   fileExtensions: ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts'],
-  // Placeholder icon (base64-encoded SVG). To be replaced in a later task if needed.
+  // Placeholder icon (base64-encoded empty SVG)
   icon: 'data:image/svg+xml;base64,PHN2Zy8+'
 };
 

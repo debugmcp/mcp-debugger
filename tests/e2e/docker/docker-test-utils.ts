@@ -125,7 +125,7 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
 
   // Only add --user flag for local Unix development (not Windows, not CI)
   // This prevents root-owned files locally but avoids permission issues in CI
-  if (process.platform !== 'win32' && process.env.CI !== 'true' && typeof process.getuid === 'function') {
+  if (process.platform !== 'win32' && process.env.CI !== 'true' && typeof process.getuid === 'function' && typeof process.getgid === 'function') {
     dockerArgs.push('--user', `${process.getuid()}:${process.getgid()}`);
   }
 

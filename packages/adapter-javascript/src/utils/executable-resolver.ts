@@ -77,7 +77,7 @@ export async function findNode(
 ): Promise<string> {
   const toAbs = (p: string) => path.resolve(p);
 
-  // 1) Preferred path override (bypasses/overwrites adapter cache)
+  // 1) Preferred path override
   if (preferredPath) {
     try {
       if (fileSystem.existsSync(preferredPath)) {

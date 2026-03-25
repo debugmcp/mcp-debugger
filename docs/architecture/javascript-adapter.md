@@ -64,7 +64,7 @@ Unit tests were updated to reflect the addition:
 
 1) Build the adapter and vendor `js-debug`:
 - `pnpm -w -F @debugmcp/adapter-javascript build`
-- `pnpm -w -F @debugmcp/adapter-javascript run build:adapter`
+- (The `postbuild` hook automatically runs vendoring via `build-js-debug.js` -- no separate `build:adapter` step is needed after `build`)
 
 2) Build all adapters (optional):
 - `pnpm -w run build:adapters:all`
@@ -83,7 +83,7 @@ js-debug requires a short handoff period before clients can issue requests such 
 
 - The adapter implements `createLaunchBarrier(command, args?)`, returning a `JsDebugLaunchBarrier` when the command is `'launch'` (`packages/adapter-javascript/src/utils/js-debug-launch-barrier.ts`).
 - `ProxyManager` delegates coordination to the barrier. It forwards proxy status updates, DAP events, and exit notifications without embedding language-specific branches.
-- The barrier resolves once js-debug emits a `stopped` event or the transport connection is confirmed (`adapter_connected` after a short delay); it rejects if the proxy exits prematurely.
+- The barrier resolves once js-debug emits a `stopped` event or the transport connection is confirmed (`adapter_connected` after a short delay); it rejects if the proxy exits prematurely. If neither condition is met within the timeout period, the barrier auto-resolves with a warning log to avoid hanging indefinitely.
 - Tests cover both sides: the adapter suite asserts the barrier’s behavior, and `tests/unit/proxy/proxy-manager-message-handling.test.ts` verifies both barrier modes — fire-and-forget (barrier returned with `awaitResponse: false`, launch proceeds without awaiting DAP response) AND await-response (barrier returned with `awaitResponse: true`, launch waits for DAP response and then disposes the barrier).
 
 This approach keeps the core proxy orchestration language-agnostic while allowing adapters to implement bespoke synchronization when necessary.

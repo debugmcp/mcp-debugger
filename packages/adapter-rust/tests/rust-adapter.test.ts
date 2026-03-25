@@ -43,9 +43,6 @@ const mockDependencies: AdapterDependencies = {
     get: vi.fn((key: string) => process.env[key]),
     getAll: vi.fn(() => process.env),
     getCurrentWorkingDirectory: vi.fn(() => process.cwd())
-  },
-  processLauncher: {
-    launch: vi.fn()
   }
 };
 

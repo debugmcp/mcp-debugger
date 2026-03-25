@@ -10,7 +10,7 @@ import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
 
 /** Concrete subclass for testing the abstract SessionManagerOperations */
 class TestableSessionManagerOperations extends SessionManagerOperations {
-  protected async handleAutoContinue(): Promise<void> {
+  protected async handleAutoContinue(_sessionId: string): Promise<void> {
     // no-op for tests
   }
 }
@@ -98,9 +98,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       },
       proxyManagerFactory: {
         create: vi.fn().mockReturnValue(mockProxyManager)
-      },
-      processLauncher: {
-        launch: vi.fn()
       },
       fileSystem: {
         readFile: vi.fn(),

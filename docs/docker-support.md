@@ -24,8 +24,8 @@ npm run docker-build
 
 The Debug MCP Server resolves paths through centralized container path utilities (`src/utils/container-path-utils.ts`). When running in a container (`MCP_CONTAINER=true`), the server performs centralized container path rewriting: `resolvePathForRuntime()` rewrites paths to be under the workspace root (`MCP_WORKSPACE_ROOT`, default `/workspace/`). Non-workspace absolute paths (e.g., `/home/user/test.py`) are rewritten to fall under the workspace root rather than being rejected. `SimpleFileChecker` then validates existence and returns the resolved `effectivePath`, which the server passes downstream to the debug adapter. This means:
 - Your project files must be mounted at `/workspace`
-- The LLM can provide any path format (relative, absolute, Windows, Linux)
-- The server rewrites paths to the container workspace root, not cross-platform conversion
+- The LLM should provide paths relative to the project root or as Linux-style absolute paths under `/workspace`
+- The server rewrites paths to the container workspace root; it does not perform Windows-to-Linux path conversion (e.g., `C:\Users\...` paths will not be correctly translated inside the container)
 - Debug adapter handles its own path resolution natively after receiving the rewritten path
 
 ## Running the Server with Docker

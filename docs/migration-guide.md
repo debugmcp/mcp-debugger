@@ -16,7 +16,7 @@ This release introduces dynamic discovery and loading of language adapters at ru
   - `@debugmcp/adapter-java`
   - `@debugmcp/adapter-dotnet`
   - `@debugmcp/adapter-mock`
-- Adapters are treated as optional dependencies in consumers
+- Adapters are bundled at build time into the `@debugmcp/mcp-debugger` CLI package (not optional npm dependencies that consumers install separately)
 - The core discovers and loads adapters on demand:
   - Package naming: `@debugmcp/adapter-<language>`
   - Factory class export: `<CapitalizedLanguage>AdapterFactory` (named export; the loader looks up this class name via convention)
@@ -156,7 +156,7 @@ enum DebugLanguage {
 No changes to environment variables. The following still work:
 - `DEBUG_MCP_LOG_LEVEL` - Logging level (default: `info`)
 - `MCP_CONTAINER` - Set to `true` in container mode (forces log path to `/app/logs/`)
-- `MCP_WORKSPACE_ROOT` - Workspace root path used for container-mode path resolution (default: `/workspace/`); set this when mounting your project at a non-default path
+- `MCP_WORKSPACE_ROOT` - Workspace root path used for container-mode path resolution (default: `/workspace`); set this when mounting your project at a non-default path
 - `CONSOLE_OUTPUT_SILENCED` - Set to `1` to suppress console output (auto-set in stdio mode)
 
 #### Launch Configuration
@@ -444,11 +444,12 @@ To ensure smooth upgrades to v1.0.0:
 
 ### Adding New Languages
 
-The new architecture makes it easy to add language support:
+The new architecture uses dynamic adapter loading:
 
-1. Implement `IDebugAdapter` interface
-2. Register with `AdapterRegistry`
-3. No core changes needed!
+1. Implement `IDebugAdapter` interface in a package named `@debugmcp/adapter-<language>`
+2. Export a factory class named `<CapitalizedLanguage>AdapterFactory`
+3. The `AdapterLoader` discovers and imports the package at runtime via convention -- no manual registration in core code is needed
+4. Add the language to the `DebugLanguage` enum in `@debugmcp/shared`
 
 See the [Adapter Development Guide](./architecture/adapter-development-guide.md) for details.
 

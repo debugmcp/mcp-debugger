@@ -8,9 +8,7 @@ const createLoggerMock = vi.fn(() => ({
 const fileSystemInstance = { tag: 'fs' };
 const processManagerInstance = { tag: 'pm' };
 const networkManagerInstance = { tag: 'net' };
-const processLauncherInstance = { tag: 'pl' };
 const proxyProcessLauncherInstance = { tag: 'proxy-pl' };
-const debugTargetLauncherInstance = { tag: 'debug-pl' };
 const proxyManagerFactoryInstance = { tag: 'proxy-factory' };
 const sessionStoreFactoryInstance = { tag: 'session-factory' };
 
@@ -25,9 +23,7 @@ vi.mock('../../../src/implementations/index.js', () => ({
   FileSystemImpl: vi.fn(function() { return fileSystemInstance; }),
   ProcessManagerImpl: vi.fn(function() { return processManagerInstance; }),
   NetworkManagerImpl: vi.fn(function() { return networkManagerInstance; }),
-  ProcessLauncherImpl: vi.fn(function() { return processLauncherInstance; }),
-  ProxyProcessLauncherImpl: vi.fn(function() { return proxyProcessLauncherInstance; }),
-  DebugTargetLauncherImpl: vi.fn(function() { return debugTargetLauncherInstance; })
+  ProxyProcessLauncherImpl: vi.fn(function() { return proxyProcessLauncherInstance; })
 }));
 
 const environmentInstance = { tag: 'env' };
@@ -105,9 +101,7 @@ describe('createProductionDependencies', () => {
       networkManager: networkManagerInstance,
       logger: createLoggerMock.mock.results[0]?.value,
       environment: environmentInstance,
-      processLauncher: processLauncherInstance,
       proxyProcessLauncher: proxyProcessLauncherInstance,
-      debugTargetLauncher: debugTargetLauncherInstance,
       proxyManagerFactory: proxyManagerFactoryInstance,
       sessionStoreFactory: sessionStoreFactoryInstance,
       adapterRegistry: expect.any(AdapterRegistryMock)

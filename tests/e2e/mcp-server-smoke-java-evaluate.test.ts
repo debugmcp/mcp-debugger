@@ -85,7 +85,7 @@ describe('MCP Server Java Expression Evaluation Smoke Test @requires-java', () =
       execSync('java -version', { stdio: 'ignore' });
       execSync('javac -version', { stdio: 'ignore' });
     } catch {
-      console.log('[Java Eval Test] Skipping — JDK not installed');
+      console.log('[Java Eval Test] JDK not installed — beforeAll setup skipped (tests will check for client)');
       return;
     }
 

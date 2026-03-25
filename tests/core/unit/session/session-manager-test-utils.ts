@@ -12,7 +12,6 @@ import {
   IProxyManagerFactory,
   IEnvironment
 } from '../../../../src/interfaces/external-dependencies.js';
-import { IDebugTargetLauncher } from '../../../../src/interfaces/process-interfaces.js';
 import { createMockFileSystem, createMockLogger } from '../../../test-utils/helpers/test-utils.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 import { createMockAdapterRegistry as createCentralizedMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
@@ -22,9 +21,7 @@ vi.mock('./dist/implementations/index.js', () => ({
   FileSystemImpl: vi.fn(),
   ProcessManagerImpl: vi.fn(),
   NetworkManagerImpl: vi.fn(),
-  ProcessLauncherImpl: vi.fn(),
   ProxyProcessLauncherImpl: vi.fn(),
-  DebugTargetLauncherImpl: vi.fn(),
 })); 
 
 vi.mock('./dist/proxy/proxy-manager.js', () => ({
@@ -83,14 +80,6 @@ export function createMockDependencies(): SessionManagerDependencies & {
   
   const mockSessionStoreFactory = new SessionStoreFactory();
   
-  const mockDebugTargetLauncher: IDebugTargetLauncher = {
-    launchPythonDebugTarget: vi.fn().mockResolvedValue({ 
-      process: { pid: 1234 } as unknown as any, 
-      debugPort: 5678,
-      terminate: vi.fn().mockResolvedValue(undefined)
-    })
-  };
-  
   const mockPathUtils = {
     isAbsolute: vi.fn((p: string) => p.startsWith('/') || /^[A-Za-z]:/.test(p)),
     resolve: vi.fn((...args: string[]) => args.join('/')),
@@ -114,7 +103,6 @@ export function createMockDependencies(): SessionManagerDependencies & {
     environment: mockEnvironment,
     proxyManagerFactory: mockProxyManagerFactory,
     sessionStoreFactory: mockSessionStoreFactory,
-    debugTargetLauncher: mockDebugTargetLauncher,
     pathUtils: mockPathUtils,
     adapterRegistry: mockAdapterRegistry
   };

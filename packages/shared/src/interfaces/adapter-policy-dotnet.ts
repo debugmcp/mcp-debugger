@@ -7,8 +7,8 @@
  *
  * ## netcoredbg communication
  *
- * netcoredbg supports DAP over TCP natively via `--server=PORT --interpreter=vscode`.
- * On all platforms, a TCP-to-stdio bridge is used due to a netcoredbg server mode bug.
+ * A TCP-to-stdio bridge is used by default for netcoredbg communication.
+ * Falls back to direct stdio if the bridge adapter command is unavailable.
  *
  * ## DAP sequence
  *

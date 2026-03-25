@@ -6,16 +6,13 @@
 import { EventEmitter } from 'events';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { 
-  IProcess, 
-  IProcessLauncher, 
+import {
+  IProcess,
   IProcessOptions,
-  IDebugTargetLauncher,
-  IDebugTarget,
   IProxyProcessLauncher,
   IProxyProcess
 } from '@debugmcp/shared';
-import { IProcessManager, IChildProcess, INetworkManager } from '@debugmcp/shared';
+import { IProcessManager, IChildProcess } from '@debugmcp/shared';
 
 /**
  * Adapter to wrap IChildProcess as IProcess
@@ -129,78 +126,6 @@ class ProcessAdapter extends EventEmitter implements IProcess {
       return false;
     }
   }
-}
-
-/**
- * Production implementation of IProcessLauncher
- */
-export class ProcessLauncherImpl implements IProcessLauncher {
-  constructor(private processManager: IProcessManager) {}
-  
-  launch(command: string, args: string[], options?: IProcessOptions): IProcess {
-    const childProcess = this.processManager.spawn(command, args, options);
-    return new ProcessAdapter(childProcess);
-  }
-}
-
-/**
- * Production implementation of IDebugTargetLauncher
- */
-export class DebugTargetLauncherImpl implements IDebugTargetLauncher {
-  constructor(
-    private processLauncher: IProcessLauncher,
-    private networkManager: INetworkManager
-  ) {}
-  
-  async launchPythonDebugTarget(
-    scriptPath: string,
-    args: string[],
-    pythonPath: string = 'python',
-    debugPort?: number
-  ): Promise<IDebugTarget> {
-    // Find a free port if not specified
-    const port = debugPort || await this.networkManager.findFreePort();
-
-    // Launch Python with debugpy
-    const debugArgs = [
-      '-m', 'debugpy',
-      '--listen', `127.0.0.1:${port}`,
-      '--wait-for-client',
-      scriptPath,
-      ...args
-    ];
-
-    // No cwd manipulation - let the process inherit the current working directory
-    const debugProcess = this.processLauncher.launch(
-      pythonPath,
-      debugArgs
-    );
-
-    return {
-      process: debugProcess,
-      debugPort: port,
-      terminate: async () => {
-        return new Promise((resolve) => {
-          if (debugProcess.killed) {
-            resolve();
-            return;
-          }
-
-          debugProcess.once('exit', () => resolve());
-          debugProcess.kill('SIGTERM');
-
-          // Force kill after timeout
-          setTimeout(() => {
-            if (!debugProcess.killed) {
-              debugProcess.kill('SIGKILL');
-            }
-            resolve();
-          }, 5000);
-        });
-      }
-    };
-  }
-
 }
 
 /**
@@ -600,8 +525,7 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     const diagnosticFlags = ['--trace-uncaught', '--trace-exit'];
     const args = [...diagnosticFlags, proxyScriptPath];
 
-    // Convert process.env to ensure all values are strings
-    // Filter out test-related environment variables to ensure proxy runs normally
+    // Build environment for proxy process. When no custom env is provided, filter test-related variables from process.env.
     const processEnv: Record<string, string> = {};
     if (env) {
       Object.assign(processEnv, env);

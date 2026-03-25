@@ -25,7 +25,6 @@ const createDependencies = () => ({
     debug: vi.fn()
   },
   environment: {} as unknown,
-  processLauncher: {} as unknown,
   networkManager: undefined
 });
 

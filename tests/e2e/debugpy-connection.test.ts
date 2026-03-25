@@ -396,14 +396,7 @@ print(f"Fibonacci(5) = {result}")
       
     } finally {
       if (tempScriptPath) {
-        try {
-          await stat(tempScriptPath); 
-          await rm(tempScriptPath); 
-        } catch (e) { 
-          console.error('Error during stat/rm cleanup:', e);
-          // Re-throw to expose cleanup issues
-          throw e;
-        }
+        try { await rm(tempScriptPath, { force: true }); } catch { /* ignore cleanup errors */ }
       }
       if (debugSessionId) {
         await mcpSdkClient.callTool({ name: 'close_debug_session', arguments: { sessionId: debugSessionId } });

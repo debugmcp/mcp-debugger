@@ -54,6 +54,12 @@ Launch coordination (optional)
   - When present, `ProxyManager` forwards proxy status messages, DAP events, and exit notifications to the barrier instead of hard-coding language logic.
   - Typical use: js-debug’s launch flow resolves when a `stopped` event or `adapter_connected` status arrives; the adapter signals readiness via the barrier without forcing `ProxyManager` to know about JavaScript specifics.
 
+Attach support (optional)
+- `supportsAttach?(): boolean` — Whether the adapter supports attaching to running processes
+- `supportsDetach?(): boolean` — Whether the adapter supports detaching without terminating the debuggee
+- `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig` — Transforms generic attach config to language-specific format
+- `getDefaultAttachConfig?(): Partial<GenericAttachConfig>` — Gets default attach configuration for this language
+
 Debug configuration
 - `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch)
 - `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
@@ -63,7 +69,7 @@ Debug configuration
 File: `packages/shared/src/interfaces/adapter-launch-barrier.ts`
 
 Adapters that implement `createLaunchBarrier` should return an object with the following responsibilities:
-- `awaitResponse: boolean` — If `false`, `ProxyManager` resolves the request once `waitUntilReady()` completes (useful for fire-and-forget launches).
+- `awaitResponse: boolean` — If `false`, `ProxyManager` does NOT await the DAP response; the request resolves once `waitUntilReady()` completes (fire-and-forget launches). If `true`, `ProxyManager` awaits both the DAP response AND `waitUntilReady()`, then disposes the barrier.
 - `onRequestSent(requestId)` — Observe when the request leaves `ProxyManager`.
 - `onProxyStatus(status, message)` / `onDapEvent(event, body)` — Receive raw proxy messages to determine readiness.
 - `onProxyExit(code, signal)` — Fail fast if the proxy exits unexpectedly.
@@ -152,11 +158,11 @@ export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
 }
 ```
 
-## AdapterFactory (Base)
+## AdapterFactory (IAdapterFactory Interface)
 
-File: `packages/shared/src/factories/adapter-factory.ts`
+File: `packages/shared/src/factories/adapter-factory.ts` (base class), `packages/shared/src/interfaces/adapter-registry.ts` (interface)
 
-Factories create adapter instances and expose metadata. They should extend `AdapterFactory` and implement `createAdapter`.
+Factories create adapter instances and expose metadata. The core contract is the `IAdapterFactory` interface. Most adapters implement this interface by extending the `AdapterFactory` base class, but extending it is not strictly required -- implementing `IAdapterFactory` directly is also valid.
 
 Key API
 - `constructor(metadata: AdapterMetadata)` — Provide name, description, version constraints, etc.

@@ -58,7 +58,7 @@ describe('MCP Server Java Inner Class Breakpoint Smoke Test @requires-java', () 
       execSync('java -version', { stdio: 'ignore' });
       execSync('javac -version', { stdio: 'ignore' });
     } catch {
-      console.log('[Java Inner Class Test] Skipping — JDK not installed');
+      console.log('[Java Inner Class Test] JDK not installed — beforeAll setup skipped (tests will check for client)');
       return;
     }
 

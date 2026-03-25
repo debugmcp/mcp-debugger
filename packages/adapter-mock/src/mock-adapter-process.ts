@@ -638,6 +638,7 @@ class MockDebugAdapterProcess {
   }
   
   private handleStepIn(request: DebugProtocol.StepInRequest): void {
+    this.currentLine++;
     this.sendResponse({
       seq: 0,
       type: 'response',
@@ -661,6 +662,7 @@ class MockDebugAdapterProcess {
   }
   
   private handleStepOut(request: DebugProtocol.StepOutRequest): void {
+    this.currentLine++;
     this.sendResponse({
       seq: 0,
       type: 'response',

@@ -65,7 +65,7 @@ Based on comprehensive testing with real-world Rust examples:
 
 ## Status: WIP
 
-The Rust adapter is functional and performant for production use with the GNU toolchain. MSVC toolchain support remains limited due to upstream CodeLLDB constraints. Planned work includes improving Windows-specific behaviors and path handling. Note: the `handleAutoContinue()` hook for auto-continuing through system breakpoints is currently a placeholder and will throw if invoked.
+The Rust adapter is functional and performant for production use with the GNU toolchain. MSVC toolchain support remains limited due to upstream CodeLLDB constraints. Planned work includes improving Windows-specific behaviors and path handling.
 
 ---
 *Performance metrics based on testing with Windows 11, Rust 1.91.1, and CodeLLDB 1.11.8*

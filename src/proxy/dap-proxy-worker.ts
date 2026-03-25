@@ -105,7 +105,7 @@ export class DapProxyWorker {
    */
   private selectAdapterPolicy(adapterCommand?: { command: string; args: string[] }): AdapterPolicy {
     if (!adapterCommand) {
-      // Legacy Python mode
+      // Fallback: default to Python adapter policy when no adapter command specified
       return PythonAdapterPolicy;
     }
     
@@ -847,30 +847,26 @@ export class DapProxyWorker {
     if (!this.dapClient) return;
     const start = Date.now();
 
-    try {
-      while (Date.now() - start < timeoutMs) {
-        try {
-          const threadsResp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
-          const first = threadsResp?.body?.threads?.[0]?.id;
-          if (typeof first === 'number' && first > 0) {
-            const pauseTid = first;
-            this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
-            try {
-              await this.dapClient.sendRequest('pause', { threadId: pauseTid });
-            } catch {
-              // ignore pause errors
-            }
-            return;
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const threadsResp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
+        const first = threadsResp?.body?.threads?.[0]?.id;
+        if (typeof first === 'number' && first > 0) {
+          const pauseTid = first;
+          this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
+          try {
+            await this.dapClient.sendRequest('pause', { threadId: pauseTid });
+          } catch {
+            // ignore pause errors
           }
-        } catch {
-          // ignore threads errors
+          return;
         }
-        await new Promise((r) => setTimeout(r, 100));
+      } catch {
+        // ignore threads errors
       }
-      this.logger?.warn('[Worker] ensureInitialStop: no threads discovered within timeout');
-    } finally {
-      // nothing to unsubscribe
+      await new Promise((r) => setTimeout(r, 100));
     }
+    this.logger?.warn('[Worker] ensureInitialStop: no threads discovered within timeout');
   }
 
   /**

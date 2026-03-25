@@ -39,8 +39,9 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   private readonly activeAdapters: ActiveAdapterMap = new Map();
   private readonly config: Required<AdapterRegistryConfig>;
   private readonly disposeTimers = new Map<IDebugAdapter, NodeJS.Timeout>();
+  private readonly registrationTimestamps = new Map<string, Date>();
   private readonly loader = new AdapterLoader();
-  // Dynamic loading is opt-in via constructor config to preserve backward compatibility in unit tests
+  // Dynamic loading is opt-in via constructor config or MCP_CONTAINER=true env var
   private readonly dynamicEnabled: boolean;
 
   constructor(config: AdapterRegistryConfig = {}) {
@@ -76,6 +77,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
 
     // Register the factory
     this.factories.set(language, factory);
+    this.registrationTimestamps.set(language, new Date());
     this.emit('factoryRegistered', language, factory.getMetadata());
   }
 
@@ -205,7 +207,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       language,
       available: true,
       activeInstances: activeSet?.size || 0,
-      registeredAt: new Date(),
+      registeredAt: this.registrationTimestamps.get(language) || new Date(),
     };
   }
 
@@ -357,7 +359,6 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       fileSystem: deps.fileSystem,
       logger: deps.logger,
       environment: deps.environment,
-      processLauncher: deps.processLauncher,
       networkManager: deps.networkManager,
     };
   }
@@ -408,6 +409,8 @@ let registryInstance: AdapterRegistry | null = null;
 export function getAdapterRegistry(config?: AdapterRegistryConfig): AdapterRegistry {
   if (!registryInstance) {
     registryInstance = new AdapterRegistry(config);
+  } else if (config) {
+    console.warn('[AdapterRegistry] getAdapterRegistry called with config but singleton already exists; config ignored');
   }
   return registryInstance;
 }

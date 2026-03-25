@@ -26,17 +26,11 @@ export { SessionManagerOperations } from './session-manager-operations.js';
  * Main SessionManager class that composes all functionality
  */
 export class SessionManager extends SessionManagerOperations {
-  /**
-   * Override handleAutoContinue to call the continue method.
-   * TODO: Implement with proper session context - this method is called from
-   * setupProxyEventHandlers where sessionId is available via closure, but this
-   * override does not currently have access to it. Needs refactoring to accept
-   * sessionId as a parameter or capture it from the event handler context.
-   */
-  protected async handleAutoContinue(): Promise<void> {
-    // Not yet implemented: requires session context refactoring.
-    // Log a warning instead of throwing, so the session stays paused
-    // rather than producing an unhandled error.
-    this.logger.warn('[SessionManager] handleAutoContinue called but not yet implemented — session will remain paused');
+  protected async handleAutoContinue(sessionId: string): Promise<void> {
+    this.logger.info(`[SessionManager] Auto-continuing session ${sessionId}`);
+    const result = await this.continue(sessionId);
+    if (!result.success) {
+      this.logger.warn(`[SessionManager] Auto-continue failed for session ${sessionId}: ${result.error}`);
+    }
   }
 }

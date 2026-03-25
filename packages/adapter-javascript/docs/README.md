@@ -17,6 +17,7 @@ Status and scope
 
 Build and test
 - Build: pnpm -w -F @debugmcp/adapter-javascript run build
+  (The `postbuild` hook automatically runs vendoring via `build-js-debug.js`)
 - Test:  pnpm -w -F @debugmcp/adapter-javascript run test
 
 Validation
@@ -82,9 +83,11 @@ Expected outputs
 - vendor/js-debug/vsDebugServer.cjs (CommonJS twin)
 - vendor/js-debug/bootloader.js (required sidecar)
 - vendor/js-debug/hash.js (required sidecar)
+- vendor/js-debug/watchdog.js (required sidecar)
 - vendor/js-debug/package.json (forces `type: 'commonjs'`)
 - vendor/js-debug/vsDebugServer.js.sha256
 - vendor/js-debug/manifest.json (metadata: source, repo, version, asset, sha256, fetchedAt)
+- vendor/ subdirectory (contains the js-debug vendored files)
 
 Determinism and safety
 - The script writes the artifact and checksum into vendor/js-debug/

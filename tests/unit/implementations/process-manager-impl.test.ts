@@ -1,8 +1,5 @@
 /**
- * Unit tests for ProcessManagerImpl
- * 
- * These tests cover various edge cases in how util.promisify might transform
- * the exec callback, which can vary across Node.js versions and implementations.
+ * Tests edge case handling for different return types from the promisified exec function.
  */
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
@@ -139,52 +136,31 @@ describe('ProcessManagerImpl', () => {
       });
     });
 
-    it('should handle promisify returning unexpected type with warning (lines 39-40)', async () => {
+    it('should throw on promisify returning unexpected type (number)', async () => {
       // Set promisify to return an unexpected type (number)
       (globalThis as any).__promisifyResult = 42;
 
-      const result = await processManager.exec('unexpected-command');
-      
-      // Should warn about unexpected type
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        '[ProcessManagerImpl] execAsync resolved to unexpected type:',
-        42
+      await expect(processManager.exec('unexpected-command')).rejects.toThrow(
+        '[ProcessManagerImpl] execAsync resolved to unexpected type: number'
       );
-      
-      // Should return the value cast to the expected type
-      expect(result).toBe(42);
     });
 
-    it('should handle promisify returning null (fallback case)', async () => {
+    it('should throw on promisify returning null', async () => {
       // Set promisify to return null
       (globalThis as any).__promisifyResult = null;
 
-      const result = await processManager.exec('null-command');
-      
-      // Should warn about unexpected type
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        '[ProcessManagerImpl] execAsync resolved to unexpected type:',
-        null
+      await expect(processManager.exec('null-command')).rejects.toThrow(
+        '[ProcessManagerImpl] execAsync resolved to unexpected type: object'
       );
-      
-      // Should return null cast to the expected type
-      expect(result).toBe(null);
     });
 
-    it('should handle promisify returning object without stdout/stderr (fallback case)', async () => {
+    it('should throw on promisify returning object without stdout/stderr', async () => {
       // Set promisify to return an object without stdout/stderr properties
       (globalThis as any).__promisifyResult = { foo: 'bar', baz: 123 };
 
-      const result = await processManager.exec('object-command');
-      
-      // Should warn about unexpected type
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        '[ProcessManagerImpl] execAsync resolved to unexpected type:',
-        { foo: 'bar', baz: 123 }
+      await expect(processManager.exec('object-command')).rejects.toThrow(
+        '[ProcessManagerImpl] execAsync resolved to unexpected type: object'
       );
-      
-      // Should return the object cast to the expected type
-      expect(result).toBe((globalThis as any).__promisifyResult);
     });
 
     it('should handle empty array from promisify', async () => {

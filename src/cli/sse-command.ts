@@ -202,7 +202,7 @@ export async function handleSSECommand(
   try {
     const app = createSSEApp(options, dependencies);
 
-    // Start the shared debug server (mirrors stdio-command.ts:57)
+    // Start the shared debug server (mirrors stdio-command.ts startup)
     const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer; // eslint-disable-line @typescript-eslint/no-explicit-any
     await sharedDebugServer.start();
 

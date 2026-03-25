@@ -7,7 +7,6 @@ const createDependencies = (): AdapterDependencies & {
   logger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 } => ({
   fileSystem: {} as any,
-  processLauncher: {} as any,
   networkManager: undefined,
   environment: {
     get: () => undefined,

@@ -8,7 +8,6 @@ const createDependencies = (): AdapterDependencies & {
   logger: { info: () => void; debug: () => void; error: () => void };
 } => ({
   fileSystem: {} as unknown,
-  processLauncher: {} as unknown,
   environment: {
     get: () => undefined,
     getAll: () => ({}),

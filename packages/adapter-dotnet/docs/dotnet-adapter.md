@@ -68,7 +68,6 @@ The utility function `findNetcoredbgExecutable` in `dotnet-utils.ts` uses a more
 4. `which netcoredbg` (searches PATH) — only when no target architecture is requested
 5. Hardcoded platform-specific candidate paths (architecture-aware)
 6. Common installation directories (e.g., `/usr/local/netcoredbg`, `C:\netcoredbg`)
-7. Samsung GitHub release download locations
 
 ## DAP Protocol Details
 

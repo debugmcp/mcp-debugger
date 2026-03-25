@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test file to explore debugpy's breakpoint validation messages"""
+"""Target script for debugpy breakpoint validation testing (used as a debuggee, not as a test runner)"""
 
 # Line 4: Comment line - test what message debugpy provides
 x = 10  # Line 5: Valid executable line

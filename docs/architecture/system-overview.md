@@ -176,7 +176,7 @@ sequenceDiagram
     DA-->>PW: initialized event
     PW-->>PM: adapter-configured
     PM-->>SM: adapter-configured event
-    Note over SM: Transition to RUNNING via adapter-configured handler (when stopOnEntry=false),<br/>or via auto-continue from entry stop
+    Note over SM: Transition to RUNNING via adapter-configured handler (when stopOnEntry=false).<br/>Auto-continue resumes execution past entry breakpoints when stopOnEntry=false
     SM-->>C: Debug started
     
     Note over DA,TGT: Script execution begins
@@ -209,7 +209,7 @@ sequenceDiagram
 ### Key Dependencies
 - `@modelcontextprotocol/sdk` - MCP server implementation
 - `@vscode/debugprotocol` - DAP type definitions
-- `debug-adapter-client` - DAP client for adapter communication
+- `MinimalDapClient (src/proxy/minimal-dap.ts)` - DAP client for adapter communication
 - `winston` - Structured logging
 - `fs-extra` - Enhanced file system operations
 
@@ -229,7 +229,7 @@ npx @debugmcp/mcp-debugger sse -p 3001  # SSE mode
 ```
 - Self-contained bundles with all dependencies
 - No installation required
-- CLI bundle (~3MB) includes all workspace packages
+- CLI bundle includes all workspace packages
 - Proxy bundle includes all proxy dependencies
 
 ### 2. Local Node.js

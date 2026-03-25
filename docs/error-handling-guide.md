@@ -30,9 +30,10 @@ export class SessionNotFoundError extends McpError {
 |------------|----------|------------|
 | `SessionNotFoundError` | Session doesn't exist | `InvalidParams` |
 | `SessionTerminatedError` | Operation on terminated session | `InvalidRequest` |
-| `ProxyNotRunningError` | Debug proxy not active | `InvalidRequest` | Note: `operation` is included in the MCP error payload (`data: { sessionId, operation }`) but is not stored as a class property (`this.operation` does not exist) |
+| `ProxyNotRunningError` | Debug proxy not active | `InvalidRequest` | Has `sessionId` and `operation` as class properties (both stored via `this.sessionId` and `this.operation`) and also included in the MCP error payload `data` |
 | `LanguageRuntimeNotFoundError` | Language runtime missing | `InvalidParams` |
 | `PythonNotFoundError` | Python specifically not found | `InvalidParams` |
+| `LanguageRuntimeNotFoundError` | Language runtime not found (generic) | `InvalidParams` |
 | `DebugSessionCreationError` | Failed to create session | `InternalError` |
 | `UnsupportedLanguageError` | Language not supported or adapter not found | `InvalidParams` |
 
@@ -188,8 +189,8 @@ Some operations return empty data instead of throwing errors for better UX:
 // - Valid session but not paused, no active proxy, or DAP request fails → returns []
 
 async getVariables(sessionId: string, ref: number): Promise<Variable[]> {
-  const session = this.getSession(sessionId);
-  
+  const session = this._getSessionById(sessionId); // throws SessionNotFoundError if not found
+
   // Return empty array for non-critical failures
   if (!session.proxyManager?.isRunning()) {
     this.logger.warn('No active proxy');

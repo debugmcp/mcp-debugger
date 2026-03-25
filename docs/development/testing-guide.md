@@ -273,7 +273,7 @@ describe('Session Manager Workflow', () => {
     const deps = createMockDependencies();
 
     sessionManager = new SessionManager(
-      { logDirBase: '/tmp/test-logs' },
+      { logDirBase: '/tmp/test-sessions' },
       deps
     );
   });
@@ -281,7 +281,7 @@ describe('Session Manager Workflow', () => {
   it('should debug Python script end-to-end', async () => {
     // Create session
     const session = await sessionManager.createSession({
-      language: DebugLanguage.PYTHON,
+      language: DebugLanguage.MOCK,
       name: 'Integration Test'
     });
 
@@ -293,10 +293,10 @@ describe('Session Manager Workflow', () => {
     );
 
     // Start debugging
-    const result = await sessionManager.startDebugging(
-      session.id,
-      'test-script.py'
-    );
+    const result = await sessionManager.startDebugging({
+      sessionId: session.id,
+      script: 'test-script.mock'
+    });
 
     expect(result.success).toBe(true);
     

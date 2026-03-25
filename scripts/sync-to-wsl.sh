@@ -3,7 +3,7 @@
 # Sync MCP Debugger project from Windows to WSL2
 # This script should be run from within WSL2
 #
-# Usage: ./scripts/sync-to-wsl.sh [/path/to/project] [--no-install] [--no-build] [--clean]
+# Usage: ./scripts/sync-to-wsl.sh [--no-install] [--no-build] [--clean]
 #
 
 set -e  # Exit on error
@@ -111,7 +111,6 @@ cd "$WSL_PROJECT_PATH"
 
 # 7. Fix permissions (rsync doesn't preserve Windows permissions correctly)
 echo -e "${GREEN}Fixing file permissions...${NC}"
-# Only fix permissions if needed (much faster than fixing everything)
 # Make shell scripts executable
 chmod +x scripts/*.sh 2>/dev/null || true
 

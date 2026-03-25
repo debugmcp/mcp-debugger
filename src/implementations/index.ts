@@ -7,7 +7,5 @@ export { NetworkManagerImpl } from './network-manager-impl.js';
 
 // Export process launcher implementations
 export {
-  ProcessLauncherImpl,
-  DebugTargetLauncherImpl,
   ProxyProcessLauncherImpl
 } from './process-launcher-impl.js';

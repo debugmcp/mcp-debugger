@@ -576,7 +576,7 @@ async function main() {
   await fsp.copyFile(found.abs, VENDOR_FILE);
   // Also emit a .cjs copy to force CommonJS execution regardless of parent package type
   try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch {}
-  // Copy known sidecar assets required by js-debug runtime (e.g., wasm, maps, json, native)
+  // Copy known sidecar assets required by js-debug runtime (wasm, maps, json, native, and JS sidecars)
   try {
     const serverDir = path.dirname(found.abs);
     const baseName = path.basename(found.abs);

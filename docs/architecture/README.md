@@ -15,7 +15,7 @@ The core components handle session management, process lifecycle, and DAP commun
 
 - **[SessionManager](../../src/session/session-manager.ts)** - Thin public facade over the session manager hierarchy (`session-manager-core.ts` → `session-manager-data.ts` → `session-manager-operations.ts` → `session-manager.ts`)
 - **[ProxyManager](../../src/proxy/proxy-manager.ts)** - Manages DAP proxy processes
-- **[SessionStore](../../src/session/session-store.ts)** - Persistent session storage
+- **[SessionStore](../../src/session/session-store.ts)** - In-memory session storage
 
 ### 2. Debug Adapter Interface
 

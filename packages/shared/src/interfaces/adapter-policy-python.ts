@@ -110,7 +110,6 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     }
 
     // Platform-specific default: 'python' on Windows, 'python3' on Unix-like systems
-    // Note: The actual resolution will be done by the adapter's resolveExecutablePath method
     return process.platform === 'win32' ? 'python' : 'python3';
   },
   
@@ -228,10 +227,9 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     const commandStr = adapterCommand.command.toLowerCase();
     const argsStr = adapterCommand.args.join(' ').toLowerCase();
     
-    return commandStr.includes('debugpy') || 
+    return commandStr.includes('debugpy') ||
            commandStr.includes('python') ||
-           argsStr.includes('debugpy') || 
-           argsStr.includes('-m debugpy');
+           argsStr.includes('debugpy');
   },
 
   /**

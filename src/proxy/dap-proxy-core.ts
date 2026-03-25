@@ -104,9 +104,7 @@ export class ProxyRunner {
         }, 5000);
       }
 
-      // Set up initialization timeout - exit if no init command received
-      // This prevents orphaned processes from consuming resources
-      // Use much shorter timeout to prevent resource consumption
+      // Exit if no initialization command received within timeout (prevents orphaned processes)
       const timeoutDuration = 10000; // 10 seconds - should be enough for normal initialization
       const initTimeout = setTimeout(() => {
         this.logger.warn(`[ProxyRunner] No initialization received within ${timeoutDuration / 1000} seconds, exiting...`);

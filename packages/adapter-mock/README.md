@@ -27,10 +27,12 @@ npm run build -w @debugmcp/adapter-mock
 
 ## Exports
 
-import { MockAdapterFactory, MockDebugAdapter, MockErrorScenario } from '@debugmcp/adapter-mock';
+import { MockAdapterFactory, MockDebugAdapter, MockErrorScenario, createMockAdapterFactory } from '@debugmcp/adapter-mock';
 import type { MockAdapterConfig } from '@debugmcp/adapter-mock';
 
 ## Notes
 
 - Primary path resolution for the mock-adapter-process uses import.meta.url when running from the compiled package.
 - A fallback path is provided for monorepo-root execution: packages/adapter-mock/dist/mock-adapter-process.js
+- A third fallback is available for CJS bundle execution (resolving from the bundle's directory)
+- The mock-adapter-process supports a `--host` flag to specify the listening address (e.g., `--host=127.0.0.1`; defaults to `127.0.0.1`)

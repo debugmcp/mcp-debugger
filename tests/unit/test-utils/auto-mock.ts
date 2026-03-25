@@ -78,6 +78,7 @@ export function createMockFromInterface<T extends object>(
 
     // Check if excluded
     if (excludeMethods instanceof RegExp) {
+      excludeMethods.lastIndex = 0;
       if (excludeMethods.test(propName)) return;
     } else if (excludeMethods.includes(propName as keyof T)) {
       return;

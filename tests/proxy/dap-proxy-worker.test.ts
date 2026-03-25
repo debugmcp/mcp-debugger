@@ -1022,29 +1022,8 @@ describe('DapProxyWorker', () => {
 
   describe('JavaScript Adapter Command Queueing', () => {
     it('should queue commands for JavaScript adapter', async () => {
-      // Create a new worker for JS testing
-      let jsWorker = new DapProxyWorker(dependencies);
-      
-      const initPayload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/script.js',
-        adapterHost: 'localhost',
-        adapterPort: 9229,
-        logDir: '/logs',
-        executablePath: 'node',
-        adapterCommand: {
-          command: 'node',
-          args: ['vendor/js-debug/vsDebugServer.js']
-        },
-        dryRunSpawn: true  // Use dry run to avoid actual connection
-      };
-
-      // Initialize with JS adapter
-      await jsWorker.handleCommand(initPayload);
-      
       // Create a fresh worker in initialized state but not connected
-      jsWorker = new DapProxyWorker(dependencies);
+      let jsWorker = new DapProxyWorker(dependencies);
       // Set up JavaScript policy detection
       const jsInitPayload: ProxyInitPayload = {
         cmd: 'init',

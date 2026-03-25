@@ -165,7 +165,7 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
       }
       const goVersion = await this.checkGoVersion(goPath);
       if (goVersion) {
-        const [major, minor] = goVersion.split('.').map(Number);
+        const [major, minor] = goVersion.split('.').map(s => parseInt(s, 10));
         // Delve requires Go 1.18+ for full compatibility
         if (major < 1 || (major === 1 && minor < 18)) {
           errors.push({

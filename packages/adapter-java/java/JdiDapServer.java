@@ -356,10 +356,8 @@ public class JdiDapServer {
         startEventLoop();
         registerPendingBreakpoints();
 
-        if (stopOnEntry) {
-            // VM is already suspended from suspend=y
-            // We'll send stopped event after configurationDone
-        }
+        // If stopOnEntry: VM is already suspended from suspend=y
+        // We'll send stopped event after configurationDone
 
         sendResponse(reqSeq, "launch", true, new HashMap<>());
     }
@@ -2549,6 +2547,7 @@ public class JdiDapServer {
                         case 'b': sb.append('\b'); break;
                         case 'f': sb.append('\f'); break;
                         case 'u':
+                            if (pos + 5 > input.length()) throw new RuntimeException("Unterminated \\u escape in JSON string");
                             String hex = input.substring(pos + 1, pos + 5);
                             sb.append((char) Integer.parseInt(hex, 16));
                             pos += 4;

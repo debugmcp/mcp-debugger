@@ -209,10 +209,8 @@ export const GoAdapterPolicy: AdapterPolicy = {
     const commandStr = adapterCommand.command.toLowerCase();
     const argsStr = adapterCommand.args.join(' ').toLowerCase();
     
-    return commandStr.includes('dlv') || 
-           commandStr.endsWith('/dlv') ||
-           commandStr === 'dlv' ||
-           argsStr.includes('dlv dap') || 
+    return commandStr.includes('dlv') ||
+           argsStr.includes('dlv dap') ||
            argsStr.includes('delve');
   },
 

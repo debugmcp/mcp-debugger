@@ -376,7 +376,7 @@ describe('MCP Server E2E JavaScript SSE Test', () => {
       console.log('[JS SSE Test] Waiting before requesting additional debug data...');
       await new Promise(resolve => setTimeout(resolve, 10000));
 
-      // 6. Retrieve local variables (may trigger stack trace internally)
+      // 5. Retrieve local variables (may trigger stack trace internally)
       const varsResult = await client.callTool({
         name: 'get_local_variables',
         arguments: {

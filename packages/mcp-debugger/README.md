@@ -40,14 +40,15 @@ All language adapters are bundled into the CLI package. No separate installation
 - **.NET** (`@debugmcp/adapter-dotnet`) - .NET debugging via netcoredbg
 - **Mock** (`@debugmcp/adapter-mock`) - Mock adapter for testing
 
-You still need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Go + Delve, JDK 11+, netcoredbg with a compatible .NET runtime).
+**System Requirements:** Node.js 18+ is required to run mcp-debugger. You also need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Go + Delve, JDK 21+, netcoredbg with a compatible .NET runtime).
 
 ### Check Rust binary compatibility
 ```bash
 mcp-debugger check-rust-binary <path-to-binary>
+mcp-debugger check-rust-binary --json <path-to-binary>
 ```
 
-Analyzes a Rust executable to determine whether it was built with the GNU or MSVC toolchain and reports CodeLLDB debugging compatibility.
+Analyzes a Rust executable to determine whether it was built with the GNU or MSVC toolchain and reports CodeLLDB debugging compatibility. Use `--json` for machine-readable output.
 
 ## Options
 

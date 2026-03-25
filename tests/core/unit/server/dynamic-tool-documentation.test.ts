@@ -18,9 +18,6 @@ vi.mock('../../../../src/container/dependencies.js', () => ({
       get: vi.fn(),
       getCurrentWorkingDirectory: vi.fn()
     },
-    processLauncher: {
-      spawn: vi.fn()
-    },
     networkManager: {
       findAvailablePort: vi.fn()
     },

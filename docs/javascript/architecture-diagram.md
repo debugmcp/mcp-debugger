@@ -114,8 +114,11 @@ Located in `src/proxy/child-session-manager.ts` (proxy layer, not JavaScript ada
 
 ### Setting a Breakpoint
 ```
-Client → SessionManager → ProxyManager → Parent → Child → Node.js
+Client → SessionManager → ProxyManager → Parent (breakpoints set on parent session)
+                                              ↓
+                                    mirrorBreakpointsToChild → Child
 ```
+Note: Breakpoints are NOT child-routed. They are set on the parent session and then mirrored to the child session via `mirrorBreakpointsToChild`.
 
 ### Getting Variables
 ```

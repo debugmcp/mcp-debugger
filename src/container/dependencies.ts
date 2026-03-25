@@ -13,17 +13,13 @@ import {
   IAdapterFactory
 } from '@debugmcp/shared';
 import {
-  IProcessLauncher,
-  IDebugTargetLauncher,
   IProxyProcessLauncher
 } from '@debugmcp/shared';
-import { 
-  FileSystemImpl, 
-  ProcessManagerImpl, 
+import {
+  FileSystemImpl,
+  ProcessManagerImpl,
   NetworkManagerImpl,
-  ProcessLauncherImpl,
-  ProxyProcessLauncherImpl,
-  DebugTargetLauncherImpl 
+  ProxyProcessLauncherImpl
 } from '../implementations/index.js';
 import { ProcessEnvironment } from '../implementations/environment-impl.js';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
@@ -51,9 +47,7 @@ export interface Dependencies {
   environment: IEnvironment;
   
   // Process launchers
-  processLauncher: IProcessLauncher;
   proxyProcessLauncher: IProxyProcessLauncher;
-  debugTargetLauncher: IDebugTargetLauncher;
   
   // Factories
   proxyManagerFactory: IProxyManagerFactory;
@@ -83,9 +77,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   const networkManager = new NetworkManagerImpl();
   
   // Create process launchers
-  const processLauncher = new ProcessLauncherImpl(processManager);
   const proxyProcessLauncher = new ProxyProcessLauncherImpl(processManager);
-  const debugTargetLauncher = new DebugTargetLauncherImpl(processLauncher, networkManager);
   
   // Create factories
   const proxyManagerFactory = new ProxyManagerFactory(
@@ -161,9 +153,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
     networkManager,
     logger,
     environment,
-    processLauncher,
     proxyProcessLauncher,
-    debugTargetLauncher,
     proxyManagerFactory,
     sessionStoreFactory,
     adapterRegistry

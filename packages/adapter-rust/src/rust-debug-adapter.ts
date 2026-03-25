@@ -652,7 +652,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Adapter Configuration =====
   
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
-    // Resolve CodeLLDB executable synchronously (already validated in initialize)
+    // Resolve CodeLLDB executable synchronously
     const resolvedPath = this.resolveCodeLLDBExecutableSync();
     
     if (!resolvedPath) {
@@ -903,7 +903,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     
     // Handle preLaunchTask for building
     if (rustConfig.preLaunchTask === 'cargo build' || rustConfig.cargo?.build) {
-      // TODO: implement actual cargo build trigger for preLaunchTask
+      // Note: preLaunchTask (cargo build) is not yet implemented. Users should build manually before debugging.
       this.dependencies.logger?.info('[RustDebugAdapter] Cargo build requested before debugging');
     }
 
@@ -929,8 +929,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     command: string, 
     args?: unknown
   ): Promise<T> {
-    // Note: This is a no-op stub; actual DAP forwarding is done by ProxyManager.
-    // Adapter just needs to validate the request is appropriate for Rust/LLDB
+    // Stub: actual DAP forwarding done by ProxyManager. Only validates setExceptionBreakpoints filters.
     
     this.dependencies.logger?.debug(`[RustDebugAdapter] DAP request: ${command}`);
     

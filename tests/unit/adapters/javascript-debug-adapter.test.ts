@@ -11,7 +11,6 @@ const createDependencies = () => ({
   },
   fileSystem: {},
   environment: {},
-  processLauncher: {} as unknown,
   networkManager: {} as unknown
 });
 

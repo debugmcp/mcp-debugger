@@ -72,7 +72,7 @@ describe('Server Lifecycle Tests', () => {
       try {
         await debugServer.stop();
       } catch (error) {
-        // Expected - closeAllSessions rejection propagates from stop()
+        // closeAllSessions rejection may propagate from stop() -- we only verify it was called
       }
       
       expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();

@@ -30,9 +30,7 @@ export function createMockDependencies() {
     },
     processManager: vi.fn(),
     networkManager: vi.fn(),
-    processLauncher: vi.fn(),
     proxyProcessLauncher: vi.fn(),
-    debugTargetLauncher: vi.fn(),
     proxyManagerFactory: vi.fn(),
     sessionStoreFactory: vi.fn(),
     environment: {

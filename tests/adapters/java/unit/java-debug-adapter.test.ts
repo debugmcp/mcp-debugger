@@ -44,10 +44,7 @@ const createMockDependencies = (): AdapterDependencies => ({
     get: (key: string) => process.env[key],
     getAll: () => ({ ...process.env }),
     getCurrentWorkingDirectory: () => process.cwd()
-  },
-  processLauncher: {
-    launch: vi.fn()
-  } as AdapterDependencies['processLauncher']
+  }
 });
 
 describe('JavaDebugAdapter', () => {

@@ -75,7 +75,7 @@ class SessionManager {
 }
 ```
 
-**Note:** `handleAutoContinue()` is an abstract method in `SessionManagerCore`. The concrete `SessionManager` class overrides it but currently logs a warning and leaves the session paused rather than implementing auto-continue.
+`handleAutoContinue(sessionId)` is an abstract method in `SessionManagerCore`. The concrete `SessionManager` class implements it by calling `this.continue(sessionId)` to auto-continue past entry breakpoints when `stopOnEntry=false`.
 
 ### Event Handler Pattern
 
@@ -91,12 +91,12 @@ protected setupProxyEventHandlers(
 
   // Named functions for each event
   const handleStopped = (threadId: number | undefined, reason: string) => {
-    // Design intent: auto-continue for stopOnEntry=false on 'entry' stops.
-    // Note: The concrete SessionManager.handleAutoContinue() currently logs a warning
-    // and does not actually continue (session stays paused). Non-entry stops
-    // transition to PAUSED.
+    // Auto-continue for stopOnEntry=false on 'entry' stops.
+    // Must set PAUSED synchronously before handleAutoContinue, because
+    // continue() requires session.state === SessionState.PAUSED.
     if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-      this.handleAutoContinue().catch(err => { /* log error */ });
+      this._updateSessionState(session, SessionState.PAUSED);
+      this.handleAutoContinue(sessionId).catch(err => { /* log error */ });
     } else {
       this._updateSessionState(session, SessionState.PAUSED);
     }

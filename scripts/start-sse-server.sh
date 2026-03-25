@@ -45,4 +45,5 @@ echo "========================================"
 echo
 
 # Start the server
+mkdir -p logs 2>/dev/null
 node dist/index.js sse --port 3001 --log-level debug --log-file logs/debug-mcp-server.log

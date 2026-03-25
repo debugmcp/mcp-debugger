@@ -246,7 +246,8 @@ import fs from 'fs';
 function takeHeapSnapshot(label: string) {
   const fileName = `heap-${label}-${Date.now()}.heapsnapshot`;
   const writtenPath = v8.writeHeapSnapshot(fileName);
-  console.log(`[DEBUG] Heap snapshot written to ${writtenPath}`);
+  // Note: console.log is silenced at startup — use fs.appendFileSync or the Winston logger instead
+  fs.appendFileSync('/tmp/heap-debug.log', `[DEBUG] Heap snapshot written to ${writtenPath}\n`);
 }
 
 // Usage
@@ -261,14 +262,16 @@ takeHeapSnapshot('after-session-create');
 
 ```typescript
 // Trace all events
+// Note: console.log is silenced in stdio/IPC mode. Use fs.appendFileSync to a debug file,
+// or use the SSE transport where console is not silenced.
 const originalEmit = EventEmitter.prototype.emit;
 EventEmitter.prototype.emit = function(event: string, ...args: any[]) {
-  console.log('[EVENT]', {
+  fs.appendFileSync('/tmp/event-trace.log', JSON.stringify({
     emitter: this.constructor.name,
     event,
     args: args.length,
     stack: new Error().stack?.split('\n')[2]
-  });
+  }) + '\n');
   return originalEmit.apply(this, [event, ...args]);
 };
 ```

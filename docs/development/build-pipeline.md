@@ -17,7 +17,7 @@ The `dist/` directory contains the compiled TypeScript output and is the source 
 
 ### Package Build Commands
 - **`pnpm --filter @debugmcp/mcp-debugger build`**: Builds the MCP debugger package
-  - Uses **tsup** (replacing esbuild) with `noExternal: [/./]` to bundle all dependencies
+  - Uses **tsup** (for the distribution package) with `noExternal: [/./]` to bundle all dependencies
   - Creates `packages/mcp-debugger/dist/cli.mjs` - self-contained CLI bundle (~3MB)
   - Creates `packages/mcp-debugger/dist/proxy/proxy-bundle.cjs` - self-contained proxy bundle
   - Copies compiled proxy, errors, adapters, session, and utils directories from root dist

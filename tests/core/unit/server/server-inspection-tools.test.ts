@@ -99,7 +99,7 @@ describe('Server Inspection Tools Tests', () => {
     });
 
     it('should validate required scope parameter', async () => {
-      // Test for proper MCP parameter validation (improved from previous runtime error behavior)
+      // Test for proper MCP parameter validation
       // The server now validates parameters upfront and returns clear MCP errors
       await expect(callToolHandler({
         method: 'tools/call',

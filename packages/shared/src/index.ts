@@ -115,13 +115,8 @@ export type {
 export type {
   // Core process interfaces
   IProcess,
-  IProcessLauncher,
   IProcessOptions,
-  
-  // Debug target interfaces
-  IDebugTargetLauncher,
-  IDebugTarget,
-  
+
   // Proxy process interfaces
   IProxyProcessLauncher,
   IProxyProcess

@@ -223,11 +223,11 @@ sequenceDiagram
     SM->>PM: proxyManagerFactory.create(adapter)
     SM->>PM: start(config)
 
-    Note over PM,A: start() calls validateEnvironment() internally
-    PM->>A: validateEnvironment()
-    A-->>PM: {valid: true}
-    PM->>A: buildAdapterCommand(config)
-    A-->>PM: {command, args, env}
+    Note over SM,A: SessionManagerOperations calls adapter methods before starting proxy
+    SM->>A: validateEnvironment()
+    A-->>SM: {valid: true}
+    SM->>A: buildAdapterCommand(config)
+    A-->>SM: {command, args, env}
     
     PM->>AP: spawn(command, args)
     AP-->>PM: process started
@@ -343,13 +343,8 @@ sequenceDiagram
    const adapter = await registry.create(language, config);
    ```
 
-2. **Adapter Pooling**
-   ```typescript
-   // Reuse adapters for same language
-   class AdapterPool {
-     private adapters = new Map<string, IDebugAdapter>();
-   }
-   ```
+2. **Per-Session Adapters with Auto-Dispose**
+   Adapters are created per session and automatically disposed when the session ends or the adapter enters a disconnected/error state. The `AdapterRegistry` subscribes to adapter `stateChanged` events and starts a dispose timer when the adapter becomes disconnected or errored.
 
 3. **Parallel Initialization**
    ```typescript

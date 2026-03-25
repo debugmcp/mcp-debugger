@@ -1,5 +1,7 @@
 #!/bin/sh
 # Docker entrypoint for mcp-debugger
+# Ensure log directory exists
+mkdir -p /app/logs 2>/dev/null || true
 # Log early startup context
 {
   echo "==== entry.sh ===="

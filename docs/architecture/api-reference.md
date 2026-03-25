@@ -279,7 +279,7 @@ Full DAP capabilities declaration.
 
 Manages debug sessions and coordinates adapters with ProxyManager.
 
-**Source**: [src/session/session-manager.ts](../../src/session/session-manager.ts) (thin facade); actual implementations are in `src/session/session-manager-operations.ts`, `src/session/session-manager-data.ts`, and `src/session/session-manager-core.ts`.
+**Source**: [src/session/session-manager.ts](../../src/session/session-manager.ts) (thin facade); actual implementations are in `src/session/session-manager-operations.ts`, `src/session/session-manager-data.ts`, and `src/session/session-manager-core.ts`. Session persistence is in `src/session/session-store.ts`.
 
 ### Core Methods
 
@@ -338,8 +338,8 @@ Pauses execution.
 #### `terminate(sessionId: string): Promise<void>`
 Terminates the debug session.
 
-#### `getStackTrace(sessionId: string, threadId: number): Promise<StackFrame[]>`
-Gets the current call stack.
+#### `getStackTrace(sessionId: string, threadId?: number, includeInternals?: boolean): Promise<StackFrame[]>`
+Gets the current call stack. If `threadId` is omitted, the session's current thread ID is used. If `includeInternals` is false (default), language-specific internal frames are filtered out via the adapter policy.
 
 #### `getScopes(sessionId: string, frameId: number): Promise<Scope[]>`
 Gets variable scopes for a stack frame.
@@ -351,6 +351,18 @@ Gets variables in a scope.
 Evaluates an expression in the current context. Returns a structured `EvaluateResult` with `result`, `type`, `variablesReference`, and optional error text.
 
 **Note**: The `context` parameter is accepted by the API but the DAP `evaluate` request is always sent with `context: 'variables'` internally, regardless of the value passed.
+
+#### `attachToProcess(sessionId: string, attachConfig: AttachConfig): Promise<DebugResult>`
+Attaches the debugger to a running process.
+
+#### `detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>`
+Detaches the debugger from an attached process.
+
+#### `listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>`
+Lists all threads in the debug session.
+
+#### `getLocalVariables(sessionId: string, includeSpecial?: boolean): Promise<LocalVariablesResult>`
+Gets local variables by traversing all stack frames and their scopes, using the language adapter's policy to extract relevant locals. If `includeSpecial` is false (default), internal/special variables are filtered out.
 
 ### Session Management
 
@@ -371,8 +383,8 @@ Manages debug adapter process lifecycle and DAP communication.
 
 ### Key Methods
 
-#### `constructor(adapter, launcher, fileSystem, logger, runtimeEnv?)`
-Creates a new ProxyManager with an adapter and injected dependencies (process launcher, filesystem, logger, optional runtime environment).
+#### `constructor(adapter: IDebugAdapter | null, launcher, fileSystem, logger, runtimeEnv?)`
+Creates a new ProxyManager with an adapter (or `null` for language-agnostic support) and injected dependencies (process launcher, filesystem, logger, optional runtime environment).
 
 #### `start(config: ProxyConfig): Promise<void>`
 Starts the debug adapter process and establishes connection.
@@ -404,12 +416,12 @@ Manages available debug adapters.
 
 ### Methods
 
-#### `register(language: string, factory: IAdapterFactory): void`
+#### `async register(language: string, factory: IAdapterFactory): Promise<void>`
 Registers a new adapter factory.
 
 **Example**:
 ```typescript
-registry.register('python', new PythonAdapterFactory());
+await registry.register('python', new PythonAdapterFactory());
 ```
 
 #### `create(language: string, config: AdapterConfig): Promise<IDebugAdapter>`
@@ -577,7 +589,7 @@ class MyAdapter extends EventEmitter implements IDebugAdapter {
 
 // Register it
 const registry = new AdapterRegistry({ enableDynamicLoading: false });
-registry.register('mylang', new MyAdapterFactory());
+await registry.register('mylang', new MyAdapterFactory());
 
 // Use it
 const adapter = await registry.create('mylang', config);

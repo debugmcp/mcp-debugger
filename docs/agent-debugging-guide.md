@@ -13,7 +13,7 @@ This guide explains how to correctly use the MCP Debugger tools when testing deb
 **How it works:**
 - The multi-session architecture properly routes evaluate commands to the active debugging context
 - You can immediately evaluate expressions when stopped at breakpoints
-- Note: auto-continue on entry is not implemented (`handleAutoContinue()` logs a warning and returns without continuing). If the debugger stops at an internal location on entry, you must use `continue_execution` manually to advance to user code
+- When `stopOnEntry` is false (the default), the debugger auto-continues past entry breakpoints so execution advances to user code automatically
 
 ### Python Variable Inspection
 
@@ -186,7 +186,7 @@ if "variablesReference" in vars:
 
 ## Rust Debugging
 
-**Prerequisites**: Rust toolchain (rustc, cargo) installed. CodeLLDB debug adapter is vendored automatically during `pnpm install`.
+**Prerequisites**: Rust toolchain (rustc, cargo) installed. CodeLLDB debug adapter is vendored via the `build:adapter` script (run `pnpm -w -F @debugmcp/adapter-rust run build:adapter`), not during `pnpm install`.
 
 **Testing sequence:**
 ```python
@@ -287,9 +287,9 @@ get_local_variables(sessionId=session_id)
 The MCP Debugger is fully functional for Python, JavaScript, Rust, Go, Java, and .NET/C#. The key insights are:
 - **JavaScript**: Stack trace filtering hides internal frames; may need `continue_execution` if initially stopped at internals
 - **Python**: Use variablesReference to expand variable containers
-- **Rust**: CodeLLDB adapter is vendored; supports both MSVC and GNU toolchains
+- **Rust**: CodeLLDB adapter is vendored; the GNU toolchain is required for reliable debugging -- MSVC-built binaries may produce errors with CodeLLDB. Set `RUST_MSVC_BEHAVIOR` env var to control MSVC handling
 - **Go**: Uses Delve's native DAP support
-- **Java**: Use FQCN for breakpoints, pass `mainClass`/`classpath` via `adapterLaunchConfig`
+- **Java**: Use FQCN for breakpoints, pass `mainClass`/`classpath` via `dapLaunchArgs`
 - **.NET**: Requires netcoredbg; uses TCP-to-stdio bridge
 - **All languages**: Use actual frame IDs from `get_stack_trace` (not hardcoded 0), and ensure proper state and context for operations
 

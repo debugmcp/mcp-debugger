@@ -25,14 +25,6 @@ export interface IProcess extends EventEmitter {
 }
 
 /**
- * General purpose process launcher
- * Provides a higher-level API than raw spawn/exec
- */
-export interface IProcessLauncher {
-  launch(command: string, args: string[], options?: IProcessOptions): IProcess;
-}
-
-/**
  * Options for launching processes
  * Simplified from Node.js SpawnOptions to focus on what we need
  */
@@ -42,29 +34,6 @@ export interface IProcessOptions {
   shell?: boolean;
   stdio?: any; // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions compatibility
   detached?: boolean;
-}
-
-/**
- * Specialized launcher for Python debug targets
- * Encapsulates the complexity of launching debugpy-enabled Python processes
- */
-export interface IDebugTargetLauncher {
-  launchPythonDebugTarget(
-    scriptPath: string,
-    args: string[],
-    pythonPath?: string,
-    debugPort?: number
-  ): Promise<IDebugTarget>;
-}
-
-/**
- * Represents a launched debug target
- * Encapsulates the process and debug connection details
- */
-export interface IDebugTarget {
-  process: IProcess;
-  debugPort: number;
-  terminate(): Promise<void>;
 }
 
 /**

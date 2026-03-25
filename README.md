@@ -16,7 +16,7 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.18.1: Java debugging via JDI bridge with launch and attach modes! Plus Go debugging with Delve.
+> 🆕 Version 0.19.0: Java debugging via JDI bridge with launch and attach modes! Plus Go debugging with Delve.
 
 > 🆕 Version 0.17.0: Rust debugging support! Debug Rust programs with CodeLLDB on Linux/macOS, including Cargo projects, async code, and full variable inspection—plus step commands now return the active source context so agents keep their place automatically.
 
@@ -43,6 +43,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that provides debugging to
 - 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Linux/macOS/Windows with GNU toolchain)
 - 🐹 **Go debugging via Delve** – Full DAP support for Go programs
 - ☕ **Java debugging via JDI bridge** – Launch and attach modes with JDK 21+
+- 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
 > WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
 > NOTE: The published npm bundle ships the Linux x64 CodeLLDB runtime to stay under registry size limits. On macOS or Windows, point the `CODELLDB_PATH` environment variable at an existing CodeLLDB installation (for example from the VSCode extension) or clone the repo and run `pnpm --filter @debugmcp/adapter-rust run build:adapter` to vendor your platform binaries locally.
 
@@ -59,7 +60,7 @@ The script installs the `stable-gnu` toolchain (via rustup), sets up `dlltool.ex
 The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (via winget + pacman) so `cargo +stable-gnu` has a fully functional `dlltool/ld/as` stack. If MSYS2 is already installed, it simply reuses it; otherwise it guides you through installing it (or warns so you can install manually).
 - 🧪 **Mock adapter for testing** – Test without external dependencies
 - 🔌 **STDIO and SSE transport modes** – Works with any MCP client
-- 📦 **Zero-runtime dependencies** – Self-contained bundles via tsup (~3 MB)
+- 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
 - 📊 **1266+ tests passing** – battle-tested end-to-end
 - 🐳 **Docker and npm packages** – Deploy anywhere
@@ -376,7 +377,6 @@ Then get the local variables:
 - 🐹 [Go Debugging Guide](./docs/go/README.md) – Go debugging with Delve
 - ☕ [Java Debugging Guide](./docs/java/README.md) – Java debugging with JDI bridge
 - [Rust Debugging on Windows](docs/rust-debugging-windows.md) - Toolchain requirements and troubleshooting
-- 🤖 [AI Integration Guide](./docs/ai-integration.md) – Leverage AI-friendly features
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
 ## 🤝 Contributing
@@ -443,16 +443,13 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.18.1 with six language adapters and polished multi-language distribution
+- ✅ **Production Ready**: v0.19.0 with six language adapters and polished multi-language distribution
 - ✅ **Clean architecture** with adapter pattern
 - ✅ **JavaScript/Node.js**: Full debugging loop via js-debug
 - ✅ **Go**: Full debugging support via Delve DAP
 - ✅ **Java**: Launch and attach modes via JDI bridge
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires GNU toolchain; MSVC is not supported by CodeLLDB)
-- 🚧 **Coming Soon**: Ruby, C/C++, and more language adapters
 - 📈 **Active Development**: Regular updates and improvements
-
-See [Roadmap.md](./Roadmap.md) for planned features.
 
 ## 📄 License
 

@@ -496,7 +496,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // Append any user-provided args last and normalize/dedupe
     let finalArgs = this.normalizeAndDedupeArgs([...computedArgs, ...userRuntimeArgs]);
 
-    // Normalize Node inspector flags: add --inspect-brk only when stopOnEntry is true
+    // Normalize Node inspector flags: ensure explicit port form, and add --inspect-brk when stopOnEntry is true
 
     result.runtimeExecutable = runtimeExecutableSync;
     if (finalArgs.length > 0) {

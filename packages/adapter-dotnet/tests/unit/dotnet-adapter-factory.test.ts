@@ -15,7 +15,6 @@ const findNetcoredbgExecutableMock = vi.mocked(findNetcoredbgExecutable);
 
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {} as unknown,
-  processLauncher: {} as unknown,
   environment: {
     get: () => undefined,
     getAll: () => ({}),

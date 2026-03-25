@@ -90,7 +90,7 @@ These issues stem from LLDB's partial support for Microsoft's PDB format. There 
 ## Frequently Asked Questions
 
 ### Can I debug MSVC builds anyway?
-Yes, but expect limited inspection. Setting `RUST_MSVC_BEHAVIOR=continue` makes the adapter warn and proceed with the MSVC binary despite limited variable support.
+Yes, but expect limited inspection. Setting `RUST_MSVC_BEHAVIOR=continue` makes the adapter silently proceed (no warning logged) with the MSVC binary despite limited variable support.
 
 ### What about Visual Studio Code?
 VS Code's C++ extension ships Microsoft's `cppvsdbg` adapter, which understands PDB files. If you must stay on MSVC, debug within VS Code instead of MCP.

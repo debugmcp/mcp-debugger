@@ -7,10 +7,6 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import {
   IProcess,
-  IProcessLauncher,
-  IProcessOptions,
-  IDebugTargetLauncher,
-  IDebugTarget,
   IProxyProcessLauncher,
   IProxyProcess
 } from '../../../src/interfaces/process-interfaces.js';
@@ -86,110 +82,6 @@ export class FakeProcess extends EventEmitter implements IProcess {
   
   simulateMessage(message: any): void {
     this.emit('message', message);
-  }
-}
-
-/**
- * Fake implementation of IProcessLauncher for testing
- */
-export class FakeProcessLauncher implements IProcessLauncher {
-  public launchedProcesses: Array<{
-    command: string;
-    args: string[];
-    options?: IProcessOptions;
-    process: FakeProcess;
-  }> = [];
-  
-  private nextProcess: FakeProcess | undefined;
-  
-  launch(command: string, args: string[], options?: IProcessOptions): IProcess {
-    const process = this.nextProcess || new FakeProcess();
-    this.nextProcess = undefined;
-    
-    this.launchedProcesses.push({ command, args, options, process });
-    
-    // Simulate spawn event
-    process.simulateSpawn();
-    
-    return process;
-  }
-  
-  // Test helper: prepare a specific process for the next launch
-  prepareProcess(setup: (process: FakeProcess) => void): void {
-    const process = new FakeProcess();
-    setup(process);
-    this.nextProcess = process;
-  }
-  
-  // Test helper: get the last launched process
-  getLastLaunchedProcess(): FakeProcess | undefined {
-    const last = this.launchedProcesses[this.launchedProcesses.length - 1];
-    return last?.process;
-  }
-  
-  // Test helper: reset state
-  reset(): void {
-    this.launchedProcesses = [];
-    this.nextProcess = undefined;
-  }
-}
-
-/**
- * Fake implementation of IDebugTargetLauncher for testing
- */
-export class FakeDebugTargetLauncher implements IDebugTargetLauncher {
-  public launchedTargets: Array<{
-    scriptPath: string;
-    args: string[];
-    pythonPath?: string;
-    debugPort: number;
-    target: IDebugTarget;
-  }> = [];
-  
-  private nextDebugPort = 5678;
-  private nextTarget: IDebugTarget | undefined;
-  
-  async launchPythonDebugTarget(
-    scriptPath: string,
-    args: string[],
-    pythonPath = 'python',
-    debugPort?: number
-  ): Promise<IDebugTarget> {
-    const port = debugPort || this.nextDebugPort++;
-    
-    if (this.nextTarget) {
-      const target = this.nextTarget;
-      this.nextTarget = undefined;
-      this.launchedTargets.push({ scriptPath, args, pythonPath, debugPort: port, target });
-      return target;
-    }
-    
-    const process = new FakeProcess();
-    const target: IDebugTarget = {
-      process,
-      debugPort: port,
-      terminate: async () => {
-        await new Promise<void>(resolve => {
-          process.once('exit', () => resolve());
-          process.kill('SIGTERM');
-        });
-      }
-    };
-    
-    this.launchedTargets.push({ scriptPath, args, pythonPath, debugPort: port, target });
-    return target;
-  }
-  
-  // Test helper: prepare a specific target for the next launch
-  prepareTarget(target: IDebugTarget): void {
-    this.nextTarget = target;
-  }
-  
-  // Test helper: reset state
-  reset(): void {
-    this.launchedTargets = [];
-    this.nextTarget = undefined;
-    this.nextDebugPort = 5678;
   }
 }
 

@@ -11,10 +11,8 @@ import {
   IProxyManagerFactory,
   IEnvironment
 } from '../../../src/interfaces/external-dependencies.js';
-import { 
-  IProcessLauncher, 
-  IDebugTargetLauncher, 
-  IProxyProcessLauncher 
+import {
+  IProxyProcessLauncher
 } from '../../../src/interfaces/process-interfaces.js';
 import { ISessionStoreFactory } from '../../../src/factories/session-store-factory.js';
 import { MockSessionStoreFactory } from '../../../src/factories/session-store-factory.js';
@@ -32,9 +30,7 @@ export interface Dependencies {
   logger: ILogger;
   
   // Process launchers
-  processLauncher: IProcessLauncher;
   proxyProcessLauncher: IProxyProcessLauncher;
-  debugTargetLauncher: IDebugTargetLauncher;
   
   // Factories
   proxyManagerFactory: IProxyManagerFactory;
@@ -52,9 +48,7 @@ export function createMockDependencies(): Dependencies {
   const networkManager = createMockNetworkManager();
   const logger = createMockLogger();
   
-  const processLauncher = createMockProcessLauncher();
   const proxyProcessLauncher = createMockProxyProcessLauncher();
-  const debugTargetLauncher = createMockDebugTargetLauncher();
   
   const proxyManagerFactory = new MockProxyManagerFactory();
   proxyManagerFactory.createFn = () => new MockProxyManager();
@@ -65,9 +59,7 @@ export function createMockDependencies(): Dependencies {
     processManager,
     networkManager,
     logger,
-    processLauncher,
     proxyProcessLauncher,
-    debugTargetLauncher,
     proxyManagerFactory,
     sessionStoreFactory
   };
@@ -118,21 +110,9 @@ export function createMockNetworkManager(): INetworkManager {
   };
 }
 
-export function createMockProcessLauncher(): IProcessLauncher {
-  return {
-    launch: vi.fn()
-  };
-}
-
 export function createMockProxyProcessLauncher(): IProxyProcessLauncher {
   return {
     launchProxy: vi.fn()
-  };
-}
-
-export function createMockDebugTargetLauncher(): IDebugTargetLauncher {
-  return {
-    launchPythonDebugTarget: vi.fn()
   };
 }
 

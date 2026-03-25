@@ -107,6 +107,14 @@ export function validateProxyInitPayload(payload: unknown): ProxyInitPayload {
       throw new Error(`Invalid ProxyInitPayload: missing required field '${field}'`);
     }
   }
+
+  // Validate critical field types
+  if (typeof p.sessionId !== 'string') {
+    throw new Error(`Invalid ProxyInitPayload: 'sessionId' must be a string, got ${typeof p.sessionId}`);
+  }
+  if (typeof p.adapterPort !== 'number') {
+    throw new Error(`Invalid ProxyInitPayload: 'adapterPort' must be a number, got ${typeof p.adapterPort}`);
+  }
   
   // Validate adapterCommand if present
   if (p.adapterCommand && !isValidAdapterCommand(p.adapterCommand)) {

@@ -378,7 +378,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         command
       });
 
-      // Mirror into functional core for observability (ProxyManager remains authoritative)
+      // Mirror into functional core for observability (seq is placeholder; ProxyManager remains authoritative)
       if (this.dapState) {
         this.dapState = addPendingRequest(this.dapState, {
           requestId,
@@ -805,7 +805,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         }
       }
       
-      // Handle pending DAP responses (still done imperatively for now)
+      // Resolve/reject pending DAP request Promises. The functional core above only
+      // tracks state; response resolution remains imperative because it involves
+      // Promise callbacks that cannot be expressed as pure commands.
       if (message.type === 'dapResponse') {
         this.handleDapResponse(message as ProxyDapResponseMessage);
       }

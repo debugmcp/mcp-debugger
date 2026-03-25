@@ -56,13 +56,8 @@ export class MockAdapterFactory implements IAdapterFactory {
     const errors: string[] = [];
     const warnings: string[] = [];
     
-    // Mock adapter has no real requirements, but we can simulate some checks
-    try {
-      // No real requirements for mock adapter
-    } catch (error) {
-      errors.push(`Validation error: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    
+    // Mock adapter has no real requirements
+
     return {
       valid: errors.length === 0,
       errors,

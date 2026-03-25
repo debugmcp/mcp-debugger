@@ -4,9 +4,9 @@
 The MCP Debugger Server now supports language-specific stack trace filtering to improve debugging UX by hiding internal/framework frames by default.
 
 ## Features
-- **JavaScript/Node.js**: Filters out `<node_internals>` frames by default
-- **Go**: Filters out `/runtime/` and `/testing/` frames by default
-- **Java**: Filters out JDK internal frames by default
+- **JavaScript/Node.js**: Filters out `<node_internals>` frames by default (implements `filterStackFrames`)
+- **Go**: Filters out `/runtime/` and `/testing/` frames by default (implements `filterStackFrames`)
+- **Java**: Filters out JDK internal frames by default (implements `filterStackFrames`)
 - **.NET/C#**: Filters out `System.*` and `Microsoft.*` runtime frames and sourceless frames by default
 - **Python**: No filtering applied (shows all frames)
 - **Configurable**: Use `includeInternals: true` to see all frames
@@ -67,7 +67,7 @@ The filtering is implemented using the existing `AdapterPolicy` system:
    - Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied (including JavaScript, Go, .NET, and any other adapter policies that define this method)
 
 ### Edge Cases Handled
-- **All frames internal**: At least the first frame is retained
+- **All frames internal**: At least the first frame is retained (this safety behavior applies to the JS and Go adapter policies)
 - **No frames**: Returns empty array as before
 - **Python**: No filtering applied (Python's AdapterPolicy does not implement `filterStackFrames`)
 - **Other languages**: .NET and Java DO implement filtering via their AdapterPolicy. Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied

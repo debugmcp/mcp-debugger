@@ -33,12 +33,7 @@ const createDependencies = (): AdapterDependencies => ({
     get: (key: string) => process.env[key],
     getAll: () => ({ ...process.env }),
     getCurrentWorkingDirectory: () => process.cwd()
-  },
-  processLauncher: {
-    launch: () => {
-      throw new Error('processLauncher.launch should not be used in rust smoke test');
-    }
-  } as AdapterDependencies['processLauncher']
+  }
 });
 
 describe('Rust adapter - session smoke (integration)', () => {

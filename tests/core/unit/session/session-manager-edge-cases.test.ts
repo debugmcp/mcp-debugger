@@ -81,7 +81,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Configure mock to fail on continue request
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockRejectedValue(new Error('DAP request failed'));
       
-      // Should throw the error (line 595)
+      // Should throw the error
       await expect(sessionManager.continue(session.id)).rejects.toThrow('DAP request failed');
     });
   });
@@ -102,7 +102,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Configure mock to throw error
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockRejectedValue(new Error('Network error'));
       
-      // Should return empty array and log error (lines 653-655)
+      // Should return empty array and log error
       const variables = await sessionManager.getVariables(session.id, 100);
       expect(variables).toEqual([]);
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
@@ -126,7 +126,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Configure mock to return response without body
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({});
       
-      // Should return empty array and warn (lines 650-651)
+      // Should return empty array and warn
       const variables = await sessionManager.getVariables(session.id, 100);
       expect(variables).toEqual([]);
       expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
@@ -150,7 +150,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Configure mock to throw error
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockRejectedValue(new Error('Timeout'));
       
-      // Should return empty array and log error (lines 690, 692)
+      // Should return empty array and log error
       const stackFrames = await sessionManager.getStackTrace(session.id);
       expect(stackFrames).toEqual([]);
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
@@ -174,7 +174,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Configure mock to return null body
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({ body: null });
       
-      // Should return empty array and warn (lines 687-688)
+      // Should return empty array and warn
       const stackFrames = await sessionManager.getStackTrace(session.id);
       expect(stackFrames).toEqual([]);
       expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
@@ -193,7 +193,6 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       await vi.runAllTimersAsync();
       
       // Ensure session is paused but mock returns no thread ID
-      dependencies.mockProxyManager.getCurrentThreadId = vi.fn().mockReturnValue(null);
       dependencies.mockProxyManager.simulateEvent('stopped', 1, 'entry');
       // Override getCurrentThreadId to return null after the stopped event
       dependencies.mockProxyManager.getCurrentThreadId = vi.fn().mockReturnValue(null);
@@ -221,7 +220,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // Configure mock to throw error
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockRejectedValue(new Error('Invalid frame'));
       
-      // Should return empty array and log error (lines 728-730)
+      // Should return empty array and log error
       const scopes = await sessionManager.getScopes(session.id, 1);
       expect(scopes).toEqual([]);
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
@@ -247,7 +246,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
         body: { scopes: null } 
       });
       
-      // Should return empty array and warn (lines 725-726)
+      // Should return empty array and warn
       const scopes = await sessionManager.getScopes(session.id, 1);
       expect(scopes).toEqual([]);
       expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
@@ -281,7 +280,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
     });
 
     it('should return false when closing non-existent session', async () => {
-      // Try to close session that doesn't exist (lines 751-754)
+      // Try to close session that doesn't exist
       const result = await sessionManager.closeSession('non-existent-id');
       expect(result).toBe(false);
       expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
