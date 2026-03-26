@@ -100,6 +100,9 @@ interface ToolArguments {
   terminateProcess?: boolean;
   suspendPolicy?: 'all' | 'thread';
   threadId?: number;
+  // redefine_classes parameters
+  classesDir?: string;
+  sinceTimestamp?: number;
 }
 
 /**
@@ -607,6 +610,7 @@ export class DebugMcpServer {
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
           { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically' } }, required: ['sessionId', 'expression'] } },
           { name: 'get_source_context', description: 'Get source context around a specific line in a file', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number to get context for' }, linesContext: { type: 'number', description: 'Number of lines before and after to include (default: 5)' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'redefine_classes', description: 'Hot-swap changed Java classes into a running JVM. Scans a classes directory for .class files modified after sinceTimestamp, matches them against loaded classes in the target JVM, and redefines them using JDI. Returns which classes were redefined and the newest file timestamp (pass as sinceTimestamp on next call for incremental updates). Only works with Java debug sessions.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, classesDir: { type: 'string', description: 'Absolute path to compiled classes directory (e.g. build/classes/java/main/)' }, sinceTimestamp: { type: 'number', description: 'Unix timestamp (ms). Only redefine .class files modified after this time. 0 or omitted = all files.' } }, required: ['sessionId', 'classesDir'] } },
         ],
       };
     });
@@ -1165,6 +1169,17 @@ export class DebugMcpServer {
             }
             case 'list_supported_languages': {
               result = await this.handleListSupportedLanguages();
+              break;
+            }
+            case 'redefine_classes': {
+              const redefineResult = await this.sessionManager.redefineClasses(
+                args.sessionId as string,
+                args.classesDir as string,
+                (args.sinceTimestamp as number) || 0
+              );
+              result = {
+                content: [{ type: 'text' as const, text: JSON.stringify(redefineResult, null, 2) }],
+              };
               break;
             }
             default:
