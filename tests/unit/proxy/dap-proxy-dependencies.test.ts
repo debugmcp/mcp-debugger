@@ -147,4 +147,137 @@ describe('setupGlobalErrorHandlers', () => {
 
     spy.mockRestore();
   });
+
+  it('uncaughtException handler sends error and calls shutdown', async () => {
+    const capturedHandlers: Record<string, Function> = {};
+    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    const logger = createConsoleLogger();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const messageSender = { send: vi.fn() };
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+    const getSessionId = vi.fn().mockReturnValue('session-1');
+
+    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
+
+    const handler = capturedHandlers['uncaughtException'];
+    expect(handler).toBeDefined();
+
+    await handler(new Error('test crash'), 'uncaughtException');
+    // Allow .finally() microtask to run
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(messageSender.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', sessionId: 'session-1' })
+    );
+    expect(shutdownFn).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    spy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('unhandledRejection handler sends error message', () => {
+    const capturedHandlers: Record<string, Function> = {};
+    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    const logger = createConsoleLogger();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const messageSender = { send: vi.fn() };
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+    const getSessionId = vi.fn().mockReturnValue(null);
+
+    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
+
+    const handler = capturedHandlers['unhandledRejection'];
+    handler('some reason', Promise.resolve());
+
+    expect(messageSender.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', sessionId: 'unknown' })
+    );
+
+    spy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('SIGTERM handler calls shutdown and exits with 0', async () => {
+    const capturedHandlers: Record<string, Function> = {};
+    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    const logger = createConsoleLogger();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const messageSender = { send: vi.fn() };
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+    const getSessionId = vi.fn().mockReturnValue(null);
+
+    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
+
+    await capturedHandlers['SIGTERM']();
+    expect(shutdownFn).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    spy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('SIGINT handler calls shutdown and exits with 0', async () => {
+    const capturedHandlers: Record<string, Function> = {};
+    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    const logger = createConsoleLogger();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const messageSender = { send: vi.fn() };
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+    const getSessionId = vi.fn().mockReturnValue(null);
+
+    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
+
+    await capturedHandlers['SIGINT']();
+    expect(shutdownFn).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    spy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  messageSender.send with process.send available                     */
+/* ------------------------------------------------------------------ */
+
+describe('messageSender with process.send', () => {
+  it('uses process.send when available', () => {
+    const originalSend = process.send;
+    const fakeSend = vi.fn();
+    (process as any).send = fakeSend;
+
+    const deps = createProductionDependencies();
+    deps.messageSender.send({ type: 'test' });
+
+    expect(fakeSend).toHaveBeenCalledWith({ type: 'test' });
+
+    if (originalSend) {
+      process.send = originalSend;
+    } else {
+      delete (process as any).send;
+    }
+  });
 });

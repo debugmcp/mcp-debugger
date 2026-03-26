@@ -67,6 +67,7 @@ bundled-adapters/
 
 # Osoji (code cleanup tool)
 .osoji/
+.osoji.local.toml
 .osojiignore
 
 # MCP server configuration (contains local paths)
@@ -200,6 +201,7 @@ undefined/
 examples/go/**/*.exe
 examples/go/**/hello_world
 examples/go/**/hello_world_bin
+examples/go/**/pause_test_bin
 __debug_bin*
 
 # E2E test result artifacts

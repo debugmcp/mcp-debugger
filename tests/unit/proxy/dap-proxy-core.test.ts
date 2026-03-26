@@ -208,3 +208,413 @@ describe('shouldAutoExecute', () => {
     expect(shouldAutoExecute({ isDirectRun: false, hasIPC: false, isWorkerEnv: false })).toBe(false);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  ProxyRunner - IPC communication                                    */
+/* ------------------------------------------------------------------ */
+
+describe('ProxyRunner IPC communication', () => {
+  let deps: DapProxyDependencies;
+  let logger: ILogger;
+  let runner: ProxyRunner;
+  const originalSend = process.send;
+  const originalConnected = Object.getOwnPropertyDescriptor(process, 'connected');
+
+  beforeEach(() => {
+    deps = createMockDependencies();
+    logger = createMockLogger();
+  });
+
+  afterEach(async () => {
+    if (runner) {
+      await runner.stop();
+    }
+    if (originalSend) {
+      process.send = originalSend;
+    } else {
+      delete (process as any).send;
+    }
+    if (originalConnected) {
+      Object.defineProperty(process, 'connected', originalConnected);
+    }
+  });
+
+  it('sets up IPC when process.send is available', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    const processOnSpy = vi.spyOn(process, 'on');
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true });
+    await runner.start();
+
+    const registeredEvents = processOnSpy.mock.calls.map(([event]) => event);
+    expect(registeredEvents).toContain('message');
+    expect(registeredEvents).toContain('disconnect');
+    expect(registeredEvents).toContain('error');
+
+    processOnSpy.mockRestore();
+  });
+
+  it('IPC message handler processes string messages', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    const onMessage = vi.fn().mockResolvedValue(undefined);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage });
+    await runner.start();
+
+    // Extract the message handler registered on process.on('message')
+    const processOnSpy = vi.spyOn(process, 'on');
+    // The handler is already registered. Find it by getting all 'message' listeners.
+    const messageListeners = process.listeners('message');
+    const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
+    expect(ipcHandler).toBeDefined();
+
+    await ipcHandler('{"cmd":"init","sessionId":"test-1"}');
+    expect(onMessage).toHaveBeenCalledWith('{"cmd":"init","sessionId":"test-1"}');
+
+    processOnSpy.mockRestore();
+  });
+
+  it('IPC message handler stringifies object messages', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    const onMessage = vi.fn().mockResolvedValue(undefined);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage });
+    await runner.start();
+
+    const messageListeners = process.listeners('message');
+    const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
+
+    await ipcHandler({ cmd: 'init', sessionId: 'test-2' });
+    expect(onMessage).toHaveBeenCalledWith(JSON.stringify({ cmd: 'init', sessionId: 'test-2' }));
+  });
+
+  it('IPC message handler warns on unexpected message type', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage: vi.fn() });
+    await runner.start();
+
+    const messageListeners = process.listeners('message');
+    const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
+
+    await ipcHandler(12345);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('unexpected type'),
+      'number',
+      12345
+    );
+  });
+
+  it('IPC message handler sends heartbeat acknowledgement', async () => {
+    const fakeSend = vi.fn();
+    (process as any).send = fakeSend;
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage: vi.fn().mockResolvedValue(undefined) });
+    await runner.start();
+
+    // Reset send to count only message-triggered heartbeats
+    fakeSend.mockClear();
+
+    const messageListeners = process.listeners('message');
+    const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
+
+    await ipcHandler('{"cmd":"ping"}');
+    // process.send should have been called with a heartbeat
+    expect(fakeSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'ipc-heartbeat' })
+    );
+  });
+
+  it('disconnect handler triggers worker shutdown and process exit', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage: vi.fn() });
+    await runner.start();
+
+    const disconnectListeners = process.listeners('disconnect');
+    const disconnectHandler = disconnectListeners[disconnectListeners.length - 1] as Function;
+    expect(disconnectHandler).toBeDefined();
+
+    disconnectHandler();
+    // Allow .finally() microtask to run
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    exitSpy.mockRestore();
+  });
+
+  it('error handler logs IPC channel error', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage: vi.fn() });
+    await runner.start();
+
+    const errorListeners = process.listeners('error');
+    const errorHandler = errorListeners[errorListeners.length - 1] as Function;
+
+    errorHandler(new Error('IPC broken'));
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('IPC channel error'),
+      expect.any(Error)
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  ProxyRunner - Stdin communication                                  */
+/* ------------------------------------------------------------------ */
+
+describe('ProxyRunner stdin communication', () => {
+  let deps: DapProxyDependencies;
+  let logger: ILogger;
+  let runner: ProxyRunner;
+  const originalSend = process.send;
+
+  beforeEach(() => {
+    deps = createMockDependencies();
+    logger = createMockLogger();
+    delete (process as any).send;
+  });
+
+  afterEach(async () => {
+    if (runner) {
+      await runner.stop();
+    }
+    if (originalSend) {
+      process.send = originalSend;
+    } else {
+      delete (process as any).send;
+    }
+  });
+
+  it('sets up stdin/readline when IPC is not available', async () => {
+    runner = new ProxyRunner(deps, logger, { useStdin: true });
+    await runner.start();
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('stdin/readline')
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  ProxyRunner - Heartbeat and init timeout                           */
+/* ------------------------------------------------------------------ */
+
+describe('ProxyRunner heartbeat and init timeout', () => {
+  let deps: DapProxyDependencies;
+  let logger: ILogger;
+  let runner: ProxyRunner;
+  const originalSend = process.send;
+  const originalConnected = Object.getOwnPropertyDescriptor(process, 'connected');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    deps = createMockDependencies();
+    logger = createMockLogger();
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    if (runner) {
+      await runner.stop();
+    }
+    if (originalSend) {
+      process.send = originalSend;
+    } else {
+      delete (process as any).send;
+    }
+    if (originalConnected) {
+      Object.defineProperty(process, 'connected', originalConnected);
+    }
+  });
+
+  it('sends heartbeat tick every 5 seconds when IPC is available', async () => {
+    const fakeSend = vi.fn();
+    (process as any).send = fakeSend;
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    // Mock process.exit to prevent init timeout from killing the process
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage: vi.fn() });
+    await runner.start();
+    fakeSend.mockClear();
+
+    vi.advanceTimersByTime(5000);
+    expect(fakeSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'ipc-heartbeat-tick', counter: 1 })
+    );
+
+    fakeSend.mockClear();
+    vi.advanceTimersByTime(5000);
+    expect(fakeSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'ipc-heartbeat-tick', counter: 2 })
+    );
+
+    exitSpy.mockRestore();
+  });
+
+  it('init timeout fires after 10 seconds', async () => {
+    delete (process as any).send;
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: false, useStdin: false });
+    await runner.start();
+
+    vi.advanceTimersByTime(10000);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('No initialization received')
+    );
+
+    exitSpy.mockRestore();
+  });
+
+  it('init timeout does not fire before 10 seconds', async () => {
+    delete (process as any).send;
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: false, useStdin: false });
+    await runner.start();
+
+    vi.advanceTimersByTime(9999);
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    exitSpy.mockRestore();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  ProxyRunner - Global error handlers                                */
+/* ------------------------------------------------------------------ */
+
+describe('ProxyRunner.setupGlobalErrorHandlers', () => {
+  let deps: DapProxyDependencies;
+  let logger: ILogger;
+  let runner: ProxyRunner;
+  const originalSend = process.send;
+  let processOnSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    deps = createMockDependencies();
+    logger = createMockLogger();
+    delete (process as any).send;
+    processOnSpy = vi.spyOn(process, 'on');
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+  });
+
+  afterEach(async () => {
+    processOnSpy.mockRestore();
+    exitSpy.mockRestore();
+    if (originalSend) {
+      process.send = originalSend;
+    } else {
+      delete (process as any).send;
+    }
+  });
+
+  it('registers handlers for uncaughtException, unhandledRejection, SIGTERM, SIGINT', () => {
+    runner = new ProxyRunner(deps, logger);
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+    const getSessionId = vi.fn().mockReturnValue(null);
+
+    runner.setupGlobalErrorHandlers(shutdownFn, getSessionId);
+
+    const events = processOnSpy.mock.calls.map(([event]) => event);
+    expect(events).toContain('uncaughtException');
+    expect(events).toContain('unhandledRejection');
+    expect(events).toContain('SIGTERM');
+    expect(events).toContain('SIGINT');
+  });
+
+  it('uncaughtException handler sends error and calls shutdown', async () => {
+    const capturedHandlers: Record<string, Function> = {};
+    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+
+    runner = new ProxyRunner(deps, logger);
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+    const getSessionId = vi.fn().mockReturnValue('sess-1');
+
+    runner.setupGlobalErrorHandlers(shutdownFn, getSessionId);
+
+    capturedHandlers['uncaughtException'](new Error('crash'));
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(deps.messageSender.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', sessionId: 'sess-1' })
+    );
+    expect(shutdownFn).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('unhandledRejection handler sends error but does not exit', () => {
+    const capturedHandlers: Record<string, Function> = {};
+    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+
+    runner = new ProxyRunner(deps, logger);
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+    const getSessionId = vi.fn().mockReturnValue(null);
+
+    runner.setupGlobalErrorHandlers(shutdownFn, getSessionId);
+
+    capturedHandlers['unhandledRejection']('reason', Promise.resolve());
+
+    expect(deps.messageSender.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', sessionId: 'unknown' })
+    );
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('SIGTERM handler shuts down and exits with 0', async () => {
+    const capturedHandlers: Record<string, Function> = {};
+    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+
+    runner = new ProxyRunner(deps, logger);
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+
+    runner.setupGlobalErrorHandlers(shutdownFn, vi.fn());
+
+    capturedHandlers['SIGTERM']();
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(shutdownFn).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('SIGINT handler shuts down and exits with 0', async () => {
+    const capturedHandlers: Record<string, Function> = {};
+    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
+
+    runner = new ProxyRunner(deps, logger);
+    const shutdownFn = vi.fn().mockResolvedValue(undefined);
+
+    runner.setupGlobalErrorHandlers(shutdownFn, vi.fn());
+
+    capturedHandlers['SIGINT']();
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(shutdownFn).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+});

@@ -316,6 +316,136 @@ describe('GoDebugAdapter', () => {
     });
   });
 
+  describe('handleDapEvent', () => {
+    it('should handle stopped event and track threadId', () => {
+      const stoppedSpy = vi.fn();
+      adapter.on('stopped', stoppedSpy);
+
+      adapter.handleDapEvent({
+        event: 'stopped',
+        seq: 1,
+        type: 'event',
+        body: { reason: 'breakpoint', threadId: 7 }
+      } as any);
+
+      expect(stoppedSpy).toHaveBeenCalled();
+      expect(adapter.getState()).toBe(AdapterState.DEBUGGING);
+    });
+
+    it('should handle continued event', () => {
+      const continuedSpy = vi.fn();
+      adapter.on('continued', continuedSpy);
+
+      adapter.handleDapEvent({
+        event: 'continued',
+        seq: 2,
+        type: 'event',
+        body: { threadId: 1 }
+      } as any);
+
+      expect(continuedSpy).toHaveBeenCalled();
+      expect(adapter.getState()).toBe(AdapterState.DEBUGGING);
+    });
+
+    it('should handle terminated event', () => {
+      const terminatedSpy = vi.fn();
+      adapter.on('terminated', terminatedSpy);
+
+      adapter.handleDapEvent({
+        event: 'terminated',
+        seq: 3,
+        type: 'event'
+      } as any);
+
+      expect(terminatedSpy).toHaveBeenCalled();
+      expect(adapter.getState()).toBe(AdapterState.DISCONNECTED);
+    });
+
+    it('should handle exited event', () => {
+      const exitedSpy = vi.fn();
+      adapter.on('exited', exitedSpy);
+
+      adapter.handleDapEvent({
+        event: 'exited',
+        seq: 4,
+        type: 'event',
+        body: { exitCode: 0 }
+      } as any);
+
+      expect(exitedSpy).toHaveBeenCalled();
+    });
+
+    it('should handle thread event', () => {
+      const threadSpy = vi.fn();
+      adapter.on('thread', threadSpy);
+
+      adapter.handleDapEvent({
+        event: 'thread',
+        seq: 5,
+        type: 'event',
+        body: { reason: 'started', threadId: 1 }
+      } as any);
+
+      expect(threadSpy).toHaveBeenCalled();
+    });
+
+    it('should handle output event', () => {
+      const outputSpy = vi.fn();
+      adapter.on('output', outputSpy);
+
+      adapter.handleDapEvent({
+        event: 'output',
+        seq: 6,
+        type: 'event',
+        body: { category: 'stdout', output: 'hello\n' }
+      } as any);
+
+      expect(outputSpy).toHaveBeenCalled();
+    });
+
+    it('should handle breakpoint event', () => {
+      const breakpointSpy = vi.fn();
+      adapter.on('breakpoint', breakpointSpy);
+
+      adapter.handleDapEvent({
+        event: 'breakpoint',
+        seq: 7,
+        type: 'event',
+        body: { reason: 'changed', breakpoint: { id: 1, verified: true } }
+      } as any);
+
+      expect(breakpointSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('getFeatureRequirements', () => {
+    it('returns Delve 1.6+ requirement for conditional breakpoints', () => {
+      const reqs = adapter.getFeatureRequirements(DebugFeature.CONDITIONAL_BREAKPOINTS);
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0].type).toBe('dependency');
+      expect(reqs[0].description).toContain('Delve 1.6');
+    });
+
+    it('returns Delve 1.7+ requirement for log points', () => {
+      const reqs = adapter.getFeatureRequirements(DebugFeature.LOG_POINTS);
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0].type).toBe('version');
+      expect(reqs[0].description).toContain('Delve 1.7');
+    });
+
+    it('returns rr requirement for step back', () => {
+      const reqs = adapter.getFeatureRequirements(DebugFeature.STEP_BACK);
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0].type).toBe('configuration');
+      expect(reqs[0].required).toBe(false);
+    });
+
+    it('returns empty array for features without special requirements', () => {
+      const reqs = adapter.getFeatureRequirements(DebugFeature.FUNCTION_BREAKPOINTS);
+      expect(reqs).toEqual([]);
+    });
+  });
+
   describe('buildAdapterCommand', () => {
     it('should build correct dlv dap command', async () => {
       vi.spyOn(fs.promises, 'access').mockResolvedValue(undefined);

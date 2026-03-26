@@ -536,7 +536,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             }
           };
 
-          /* istanbul ignore next -- event handler: covered by E2E tests */
           const handleConfigured = () => {
             const readyOnRunning = policy.isSessionReady
               ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
@@ -551,7 +550,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             }
           };
 
-          /* istanbul ignore next -- edge case: covered by E2E tests */
           const handleTerminated = () => {
             if (!resolved) {
               resolved = true;
@@ -561,7 +559,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             }
           };
 
-          /* istanbul ignore next -- edge case: covered by E2E tests */
           const handleExited = () => {
             if (!resolved) {
               resolved = true;
@@ -571,7 +568,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             }
           };
 
-          /* istanbul ignore next -- edge case: covered by E2E tests */
           const handleExit = () => {
             if (!resolved) {
               resolved = true;

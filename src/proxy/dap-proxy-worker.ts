@@ -115,19 +115,14 @@ export class DapProxyWorker {
     } else if (PythonAdapterPolicy.matchesAdapter(adapterCommand)) {
       return PythonAdapterPolicy;
     } else if (RustAdapterPolicy.matchesAdapter(adapterCommand)) {
-      /* istanbul ignore next -- adapter-specific: requires Rust adapter */
       return RustAdapterPolicy;
     } else if (GoAdapterPolicy.matchesAdapter(adapterCommand)) {
-      /* istanbul ignore next -- adapter-specific: requires Go adapter */
       return GoAdapterPolicy;
     } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
-      /* istanbul ignore next -- adapter-specific: requires Java adapter */
       return JavaAdapterPolicy;
     } else if (DotnetAdapterPolicy.matchesAdapter(adapterCommand)) {
-      /* istanbul ignore next -- adapter-specific: requires .NET adapter */
       return DotnetAdapterPolicy;
     } else if (MockAdapterPolicy.matchesAdapter(adapterCommand)) {
-      /* istanbul ignore next -- adapter-specific: requires Mock adapter */
       return MockAdapterPolicy;
     }
 
@@ -165,7 +160,6 @@ export class DapProxyWorker {
         case 'dap':
           await this.handleDapCommand(command);
           break;
-        /* istanbul ignore next -- terminate: covered by E2E tests */
         case 'terminate':
           await this.handleTerminate();
           break;

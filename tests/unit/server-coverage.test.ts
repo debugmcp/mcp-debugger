@@ -1128,4 +1128,303 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(payload.available[0].installed).toBe(true);
     });
   });
+
+  describe('handleGetSourceContext', () => {
+    it('returns binary/inaccessible message when lineReader returns null', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({
+          exists: true,
+          effectivePath: '/path/to/binary.bin'
+        })
+      };
+
+      (server as any).lineReader = {
+        getLineContext: vi.fn().mockResolvedValue(null)
+      };
+
+      const result = await (server as any).handleGetSourceContext({
+        sessionId: 'test-session',
+        file: '/path/to/binary.bin',
+        line: 1
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('binary or inaccessible');
+    });
+
+    it('returns source context when lineReader returns content', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        name: 'my-session'
+      });
+
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({
+          exists: true,
+          effectivePath: '/path/to/script.py'
+        })
+      };
+
+      (server as any).lineReader = {
+        getLineContext: vi.fn().mockResolvedValue({
+          lineContent: 'x = 42',
+          surrounding: ['', 'x = 42', '']
+        })
+      };
+
+      const result = await (server as any).handleGetSourceContext({
+        sessionId: 'test-session',
+        file: '/path/to/script.py',
+        line: 5,
+        linesContext: 3
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.lineContent).toBe('x = 42');
+      expect(payload.contextLines).toBe(3);
+    });
+
+    it('throws when file does not exist', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+
+      (server as any).fileChecker = {
+        checkExists: vi.fn().mockResolvedValue({
+          exists: false,
+          effectivePath: '/nope.py',
+          errorMessage: 'not found'
+        })
+      };
+
+      await expect((server as any).handleGetSourceContext({
+        sessionId: 'test-session',
+        file: '/nope.py',
+        line: 1
+      })).rejects.toThrow();
+    });
+  });
+
+  describe('handleGetLocalVariables', () => {
+    it('returns "no stack frames" message when frame is null', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        name: 'my-session'
+      });
+
+      mockSessionManager.getLocalVariables = vi.fn().mockResolvedValue({
+        variables: [],
+        frame: null,
+        scopeName: null
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.variables).toEqual([]);
+      expect(payload.message).toContain('No stack frames available');
+    });
+
+    it('returns "no local scope" message when scopeName is null', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        name: 'my-session'
+      });
+
+      mockSessionManager.getLocalVariables = vi.fn().mockResolvedValue({
+        variables: [],
+        frame: { name: 'main', file: 'test.py', line: 1 },
+        scopeName: null
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.message).toContain('No local scope found');
+    });
+
+    it('returns "scope is empty" message when scope exists but has no variables', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        name: 'my-session'
+      });
+
+      mockSessionManager.getLocalVariables = vi.fn().mockResolvedValue({
+        variables: [],
+        frame: { name: 'main', file: 'test.py', line: 1 },
+        scopeName: 'Locals'
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.message).toContain('Locals scope is empty');
+    });
+
+    it('returns variables with frame and scope info', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        name: 'my-session'
+      });
+
+      mockSessionManager.getLocalVariables = vi.fn().mockResolvedValue({
+        variables: [{ name: 'x', value: '42', type: 'int' }],
+        frame: { name: 'main', file: 'test.py', line: 10 },
+        scopeName: 'Locals'
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.variables).toHaveLength(1);
+      expect(payload.frame.name).toBe('main');
+      expect(payload.scopeName).toBe('Locals');
+      expect(payload.message).toBeUndefined();
+    });
+
+    it('returns graceful error for terminated session', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        name: 'my-session'
+      });
+
+      const { McpError: RealMcpError, ErrorCode } = await import('@modelcontextprotocol/sdk/types.js');
+      mockSessionManager.getLocalVariables = vi.fn().mockRejectedValue(
+        new RealMcpError(ErrorCode.InvalidRequest, 'Session is terminated: test-session')
+      );
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('terminated');
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  coerceToolArguments (exported pure function)                        */
+/* ------------------------------------------------------------------ */
+
+describe('coerceToolArguments', () => {
+  let coerceToolArguments: (args: Record<string, unknown>) => Record<string, unknown>;
+
+  beforeEach(async () => {
+    const mod = await import('../../src/server.js');
+    coerceToolArguments = mod.coerceToolArguments;
+  });
+
+  it('converts "null" string to undefined', () => {
+    const args = { line: 'null' };
+    coerceToolArguments(args);
+    expect(args.line).toBeUndefined();
+  });
+
+  it('converts numeric string to number', () => {
+    const args = { line: '42', linesContext: '5' };
+    coerceToolArguments(args);
+    expect(args.line).toBe(42);
+    expect(args.linesContext).toBe(5);
+  });
+
+  it('leaves empty string as-is for number fields', () => {
+    const args = { line: '' };
+    coerceToolArguments(args);
+    expect(args.line).toBe('');
+  });
+
+  it('leaves non-numeric string as-is for number fields', () => {
+    const args = { line: 'abc' };
+    coerceToolArguments(args);
+    expect(args.line).toBe('abc');
+  });
+
+  it('converts "true"/"false" to booleans', () => {
+    const args = { stopOnEntry: 'true', justMyCode: 'false' };
+    coerceToolArguments(args);
+    expect(args.stopOnEntry).toBe(true);
+    expect(args.justMyCode).toBe(false);
+  });
+
+  it('leaves non-boolean strings as-is', () => {
+    const args = { stopOnEntry: 'yes' };
+    coerceToolArguments(args);
+    expect(args.stopOnEntry).toBe('yes');
+  });
+
+  it('parses JSON object string for object fields', () => {
+    const args = { dapLaunchArgs: '{"key": "value"}' };
+    coerceToolArguments(args);
+    expect(args.dapLaunchArgs).toEqual({ key: 'value' });
+  });
+
+  it('leaves non-object JSON for object fields', () => {
+    const args = { dapLaunchArgs: '"just a string"' };
+    coerceToolArguments(args);
+    expect(args.dapLaunchArgs).toBe('"just a string"');
+  });
+
+  it('parses JSON array string for array fields', () => {
+    const args = { args: '["a", "b"]' };
+    coerceToolArguments(args);
+    expect(args.args).toEqual(['a', 'b']);
+  });
+
+  it('leaves non-array JSON for array fields', () => {
+    const args = { args: '{"not": "array"}' };
+    coerceToolArguments(args);
+    expect(args.args).toBe('{"not": "array"}');
+  });
+
+  it('leaves invalid JSON as-is', () => {
+    const args = { dapLaunchArgs: '{broken json' };
+    coerceToolArguments(args);
+    expect(args.dapLaunchArgs).toBe('{broken json');
+  });
+
+  it('skips undefined values', () => {
+    const args = { line: undefined, port: '8080' };
+    coerceToolArguments(args);
+    expect(args.line).toBeUndefined();
+    expect(args.port).toBe(8080);
+  });
+
+  it('skips already-correct types', () => {
+    const args = { line: 42, stopOnEntry: true };
+    coerceToolArguments(args);
+    expect(args.line).toBe(42);
+    expect(args.stopOnEntry).toBe(true);
+  });
+
+  it('ignores unknown keys', () => {
+    const args = { unknownField: 'hello' };
+    coerceToolArguments(args);
+    expect(args.unknownField).toBe('hello');
+  });
 });

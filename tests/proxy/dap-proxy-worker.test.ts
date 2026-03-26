@@ -1693,4 +1693,22 @@ describe('DapProxyWorker', () => {
       );
     });
   });
+
+  describe('handleCommand terminate', () => {
+    it('should route terminate command to handleTerminate', async () => {
+      (worker as any).dapClient = mockDapClient;
+      const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+      const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).state = ProxyState.CONNECTED;
+
+      await worker.handleCommand({
+        cmd: 'terminate',
+        sessionId: 'test-session'
+      });
+
+      expect(worker.getState()).toBe(ProxyState.TERMINATED);
+    });
+  });
 });

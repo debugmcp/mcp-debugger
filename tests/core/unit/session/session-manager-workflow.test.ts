@@ -145,5 +145,94 @@ describe('SessionManager - Debug Session Workflow', () => {
       // Verify stopOnEntry was passed correctly
       expect(dependencies.mockProxyManager.startCalls[0].stopOnEntry).toBe(false);
     });
+
+    it('should handle terminated event during startup', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        pythonPath: 'python'
+      });
+
+      // Override mock to emit 'terminated' instead of normal flow
+      const origStart = dependencies.mockProxyManager.start.bind(dependencies.mockProxyManager);
+      dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (config) => {
+        dependencies.mockProxyManager._isRunning = true;
+        dependencies.mockProxyManager.startCalls.push(config);
+        process.nextTick(() => {
+          dependencies.mockProxyManager.emit('terminated');
+        });
+      }) as any;
+
+      const startPromise = sessionManager.startDebugging(
+        session.id,
+        'test.py',
+        [],
+        { stopOnEntry: true }
+      );
+
+      await vi.runAllTimersAsync();
+      const result = await startPromise;
+      expect(result.success).toBe(true);
+      expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('terminated during startup')
+      );
+    });
+
+    it('should handle exited event during startup', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        pythonPath: 'python'
+      });
+
+      dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (config) => {
+        dependencies.mockProxyManager._isRunning = true;
+        dependencies.mockProxyManager.startCalls.push(config);
+        process.nextTick(() => {
+          dependencies.mockProxyManager.emit('exited', 0);
+        });
+      }) as any;
+
+      const startPromise = sessionManager.startDebugging(
+        session.id,
+        'test.py',
+        [],
+        { stopOnEntry: true }
+      );
+
+      await vi.runAllTimersAsync();
+      const result = await startPromise;
+      expect(result.success).toBe(true);
+      expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('exited during startup')
+      );
+    });
+
+    it('should handle exit event during startup', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        pythonPath: 'python'
+      });
+
+      dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (config) => {
+        dependencies.mockProxyManager._isRunning = true;
+        dependencies.mockProxyManager.startCalls.push(config);
+        process.nextTick(() => {
+          dependencies.mockProxyManager.emit('exit', 1, 'SIGKILL');
+        });
+      }) as any;
+
+      const startPromise = sessionManager.startDebugging(
+        session.id,
+        'test.py',
+        [],
+        { stopOnEntry: true }
+      );
+
+      await vi.runAllTimersAsync();
+      const result = await startPromise;
+      expect(result.success).toBe(true);
+      expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('proxy exited during startup')
+      );
+    });
   });
 });

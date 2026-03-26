@@ -124,7 +124,7 @@ const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 
   args: 'array', sourcePaths: 'array',
 };
 
-function coerceToolArguments(args: Record<string, unknown>): Record<string, unknown> {
+export function coerceToolArguments(args: Record<string, unknown>): Record<string, unknown> {
   for (const [key, expectedType] of Object.entries(TOOL_ARG_EXPECTED_TYPES)) {
     const val = args[key];
     if (val === undefined) continue;
