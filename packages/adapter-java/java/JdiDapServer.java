@@ -253,6 +253,12 @@ public class JdiDapServer {
         vm = connector.attach(connArgs);
         log("Attached to VM: " + vm.description());
 
+        boolean suspend = boolVal(args, "stopOnEntry", false);
+        if (suspend) {
+            vm.suspend();
+            log("VM suspended (stopOnEntry=true)");
+        }
+
         startEventLoop();
         registerPendingBreakpoints();
         sendResponse(reqSeq, "attach", true, new HashMap<>());
