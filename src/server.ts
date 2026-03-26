@@ -676,7 +676,8 @@ export class DebugMcpServer {
                   const attachResult = await this.sessionManager.attachToProcess(sessionInfo.id, {
                     port: args.port as number,
                     host: (args.host as string) || 'localhost',
-                    timeout: (args.timeout as number) || 30000
+                    timeout: (args.timeout as number) || 30000,
+                    stopOnEntry: args.stopOnEntry ?? false,
                   });
 
                   result = { content: [{ type: 'text', text: JSON.stringify({
@@ -865,7 +866,7 @@ export class DebugMcpServer {
                   processId: args.processId,
                   timeout: args.timeout,
                   sourcePaths: args.sourcePaths,
-                  stopOnEntry: args.stopOnEntry,
+                  stopOnEntry: args.stopOnEntry ?? false,
                   justMyCode: args.justMyCode
                 });
 
