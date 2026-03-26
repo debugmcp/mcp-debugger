@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import fs from 'fs';
+import fs, { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -47,11 +47,18 @@ const PYTHON_SCRIPT = path.resolve(ROOT, 'examples', 'python', 'simple_test.py')
 const JS_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'simple_test.js');
 const RUST_SCRIPT = path.resolve(ROOT, 'examples', 'rust', 'hello_world', 'src', 'main.rs');
 const GO_SCRIPT = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
-// Breakpoint lines (executable lines in each script)
-const PYTHON_BP_LINE = 8;   // a = 1
+const DOTNET_SCRIPT = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');
+const JAVA_SCRIPT = path.resolve(ROOT, 'examples', 'java', 'HelloWorld.java');
+const JAVA_CLASS_DIR = path.resolve(ROOT, 'examples', 'java');
+
+// Breakpoint lines (executable lines in each script — must be AFTER variable assignments
+// so that get_variables returns populated locals)
+const PYTHON_BP_LINE = 10;  // print(f"Before swap: a={a}, b={b}")  — a=1, b=2 in scope
 const JS_BP_LINE = 9;       // let a = 1;
 const RUST_BP_LINE = 13;    // let name = "Rust";
-const GO_BP_LINE = 12;      // message := greet("World")
+const GO_BP_LINE = 13;      // fmt.Println(message)  — message in scope
+const DOTNET_BP_LINE = 15;  // int y = 20;  — x=10 in scope
+const JAVA_BP_LINE = 24;    // int sum = add(x, y);  — x=10, y=20 in scope
 
 /* ---------- toolchain detection ---------- */
 
@@ -65,15 +72,62 @@ function hasCommand(cmd: string): boolean {
 }
 
 const hasRust = hasCommand('rustc --version');
-const hasGo = hasCommand('go version');
+const hasGo = hasCommand('go version') && hasCommand('dlv version');
+const hasDotnet = (() => {
+  if (!hasCommand('dotnet --version')) return false;
+  if (process.env.NETCOREDBG_PATH && existsSync(process.env.NETCOREDBG_PATH)) return true;
+  return hasCommand('netcoredbg --version');
+})();
+const hasJava = hasCommand('java -version') && hasCommand('javac -version');
+
+/* ---------- pre-compilation helpers ---------- */
+
+function ensureGoBuild(): string {
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const binary = path.resolve(ROOT, 'examples', 'go', `hello_world_test${ext}`);
+  execSync(`go build -gcflags="all=-N -l" -o "${binary}" "${GO_SCRIPT}"`, {
+    cwd: path.dirname(GO_SCRIPT),
+    stdio: 'pipe',
+  });
+  return binary;
+}
+
+function ensureDotnetBuild(): string {
+  const projectDir = path.resolve(ROOT, 'examples', 'dotnet');
+  const possibleTfms = ['net10.0', 'net9.0', 'net8.0', 'net7.0', 'net6.0'];
+  for (const tfm of possibleTfms) {
+    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'dotnet.dll');
+    if (existsSync(dllPath)) return dllPath;
+  }
+  execSync('dotnet build -c Debug', { cwd: projectDir, stdio: 'pipe', timeout: 60000 });
+  for (const tfm of possibleTfms) {
+    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'dotnet.dll');
+    if (existsSync(dllPath)) return dllPath;
+  }
+  throw new Error('Failed to find built dotnet.dll');
+}
+
+function ensureJavaBuild(): void {
+  execSync(`javac -g -d "${JAVA_CLASS_DIR}" "${JAVA_SCRIPT}"`, {
+    cwd: JAVA_CLASS_DIR,
+    stdio: 'pipe',
+  });
+}
+
+// Module-level variables set by beforeAll build steps
+let goBinary: string | undefined;
+let dotnetDll: string | undefined;
+
 /* ---------- language definitions ---------- */
 
 interface LangDef {
   language: string;
-  script: string;
+  script: string;          // source file (for breakpoints and get_source_context)
+  launchScript?: string;   // path passed to start_debugging (defaults to script)
   bpLine: number;
   available: boolean;
   skipReason?: string;
+  dapLaunchArgs?: Record<string, unknown>;  // language-specific DAP launch args
 }
 
 const LANGUAGES: LangDef[] = [
@@ -81,7 +135,12 @@ const LANGUAGES: LangDef[] = [
   { language: 'javascript', script: JS_SCRIPT, bpLine: JS_BP_LINE, available: true },
   { language: 'mock', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: true },
   { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed' },
-  { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go toolchain not installed' },
+  { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go/Delve not installed',
+    dapLaunchArgs: { mode: 'exec' } },  // launchScript set in beforeAll after build
+  { language: 'dotnet', script: DOTNET_SCRIPT, bpLine: DOTNET_BP_LINE, available: hasDotnet, skipReason: hasDotnet ? undefined : '.NET/netcoredbg not installed',
+    dapLaunchArgs: { justMyCode: true } },  // launchScript set in beforeAll after build
+  { language: 'java', script: JAVA_SCRIPT, bpLine: JAVA_BP_LINE, available: hasJava, skipReason: hasJava ? undefined : 'JDK not installed',
+    dapLaunchArgs: { mainClass: 'HelloWorld', classpath: JAVA_CLASS_DIR, cwd: JAVA_CLASS_DIR } },
 ];
 
 /* ---------- all 20 tools ---------- */
@@ -111,7 +170,7 @@ const ALL_TOOLS = [
 
 /* ---------- test suite ---------- */
 
-describe('Comprehensive MCP Debugger Test — 20 Tools × 5 Languages', () => {
+describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} Languages`, () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
 
@@ -137,8 +196,49 @@ describe('Comprehensive MCP Debugger Test — 20 Tools × 5 Languages', () => {
     );
 
     await mcpClient.connect(transport);
-    console.log('[Setup] MCP client connected to server\n');
-  }, 30_000);
+    console.log('[Setup] MCP client connected to server');
+
+    // Pre-compile languages that need it
+    const goLang = LANGUAGES.find(l => l.language === 'go');
+    if (goLang?.available) {
+      try {
+        goBinary = ensureGoBuild();
+        goLang.launchScript = goBinary;
+        console.log(`[Setup] Go binary compiled: ${goBinary}`);
+      } catch (err) {
+        console.log(`[Setup] Go build failed: ${err}`);
+        goLang.available = false;
+        goLang.skipReason = 'Go build failed';
+      }
+    }
+
+    const dotnetLang = LANGUAGES.find(l => l.language === 'dotnet');
+    if (dotnetLang?.available) {
+      try {
+        dotnetDll = ensureDotnetBuild();
+        dotnetLang.launchScript = dotnetDll;
+        console.log(`[Setup] .NET DLL built: ${dotnetDll}`);
+      } catch (err) {
+        console.log(`[Setup] .NET build failed: ${err}`);
+        dotnetLang.available = false;
+        dotnetLang.skipReason = '.NET build failed';
+      }
+    }
+
+    const javaLang = LANGUAGES.find(l => l.language === 'java');
+    if (javaLang?.available) {
+      try {
+        ensureJavaBuild();
+        console.log(`[Setup] Java compiled: ${JAVA_CLASS_DIR}`);
+      } catch (err) {
+        console.log(`[Setup] Java build failed: ${err}`);
+        javaLang.available = false;
+        javaLang.skipReason = 'Java build failed';
+      }
+    }
+
+    console.log('');
+  }, 60_000);
 
   afterAll(async () => {
     // Print final summary
@@ -333,9 +433,9 @@ describe('Comprehensive MCP Debugger Test — 20 Tools × 5 Languages', () => {
               name: 'start_debugging',
               arguments: {
                 sessionId: currentSessionId,
-                scriptPath: lang.script,
+                scriptPath: lang.launchScript ?? lang.script,
                 args: [],
-                dapLaunchArgs: { stopOnEntry: false, justMyCode: true },
+                dapLaunchArgs: { stopOnEntry: false, ...lang.dapLaunchArgs },
               },
             });
             const startParsed = parseSdkToolResult(startRes);
