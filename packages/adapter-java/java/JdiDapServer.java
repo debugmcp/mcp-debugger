@@ -204,6 +204,7 @@ public class JdiDapServer {
                 case "evaluate": handleEvaluate(reqSeq, args); break;
                 case "setExceptionBreakpoints": handleSetExceptionBreakpoints(reqSeq, args); break;
                 case "source": sendResponse(reqSeq, command, true, mapOf("content", "")); break;
+                case "redefineClasses": handleRedefineClasses(reqSeq, args); break;
                 default:
                     log("Unhandled command: " + command);
                     sendErrorResponse(reqSeq, command, "Unsupported command: " + command);
@@ -251,6 +252,12 @@ public class JdiDapServer {
 
         vm = connector.attach(connArgs);
         log("Attached to VM: " + vm.description());
+
+        boolean suspend = boolVal(args, "stopOnEntry", false);
+        if (suspend) {
+            vm.suspend();
+            log("VM suspended (stopOnEntry=true)");
+        }
 
         startEventLoop();
         registerPendingBreakpoints();
@@ -1096,6 +1103,102 @@ public class JdiDapServer {
         sendResponse(reqSeq, "setExceptionBreakpoints", true, new HashMap<>());
     }
 
+    // ========== Hot Reload (redefineClasses) ==========
+
+    private void handleRedefineClasses(int reqSeq, Map<String, Object> args) {
+        String classesDir = str(args, "classesDir");
+        long since = longVal(args, "sinceTimestamp");
+
+        if (vm == null) {
+            sendErrorResponse(reqSeq, "redefineClasses", "No VM attached");
+            return;
+        }
+        if (classesDir == null || classesDir.isEmpty()) {
+            sendErrorResponse(reqSeq, "redefineClasses", "classesDir is required");
+            return;
+        }
+
+        java.nio.file.Path dir = java.nio.file.Paths.get(classesDir);
+        if (!java.nio.file.Files.isDirectory(dir)) {
+            sendErrorResponse(reqSeq, "redefineClasses", "Not a directory: " + classesDir);
+            return;
+        }
+
+        try {
+            // 1. Scan for .class files, filter by mtime
+            List<java.nio.file.Path> classFiles = new ArrayList<>();
+            long newestTimestamp = 0;
+            java.util.Deque<java.nio.file.Path> stack = new ArrayDeque<>();
+            stack.push(dir);
+            while (!stack.isEmpty()) {
+                java.nio.file.Path current = stack.pop();
+                try (java.nio.file.DirectoryStream<java.nio.file.Path> stream =
+                        java.nio.file.Files.newDirectoryStream(current)) {
+                    for (java.nio.file.Path entry : stream) {
+                        if (java.nio.file.Files.isDirectory(entry)) {
+                            stack.push(entry);
+                        } else if (entry.toString().endsWith(".class")) {
+                            long mtime = java.nio.file.Files.getLastModifiedTime(entry).toMillis();
+                            if (mtime > newestTimestamp) newestTimestamp = mtime;
+                            if (since <= 0 || mtime > since) {
+                                classFiles.add(entry);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Match against loaded classes and redefine
+            List<String> redefined = new ArrayList<>();
+            List<Map<String, Object>> failed = new ArrayList<>();
+            int skippedNotLoaded = 0;
+
+            for (java.nio.file.Path classFile : classFiles) {
+                // Convert path to FQCN: com/example/Foo$Bar.class -> com.example.Foo$Bar
+                String relative = dir.relativize(classFile).toString();
+                String fqcn = relative.replace(java.io.File.separatorChar, '.')
+                        .replace('/', '.');
+                if (fqcn.endsWith(".class")) {
+                    fqcn = fqcn.substring(0, fqcn.length() - 6);
+                }
+
+                List<ReferenceType> types = vm.classesByName(fqcn);
+                if (types.isEmpty()) {
+                    skippedNotLoaded++;
+                    continue;
+                }
+
+                try {
+                    byte[] bytes = java.nio.file.Files.readAllBytes(classFile);
+                    Map<ReferenceType, byte[]> redefMap = new HashMap<>();
+                    redefMap.put(types.get(0), bytes);
+                    vm.redefineClasses(redefMap);
+                    redefined.add(fqcn);
+                } catch (Exception e) {
+                    Map<String, Object> entry = new HashMap<>();
+                    entry.put("fqcn", fqcn);
+                    entry.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+                    failed.add(entry);
+                }
+            }
+
+            // 3. Build response
+            Map<String, Object> body = new HashMap<>();
+            body.put("redefined", redefined);
+            body.put("redefinedCount", redefined.size());
+            body.put("skippedNotLoaded", skippedNotLoaded);
+            body.put("failedCount", failed.size());
+            if (!failed.isEmpty()) body.put("failed", failed);
+            body.put("scannedFiles", classFiles.size());
+            body.put("newestTimestamp", newestTimestamp);
+            sendResponse(reqSeq, "redefineClasses", true, body);
+
+        } catch (Exception e) {
+            sendErrorResponse(reqSeq, "redefineClasses",
+                    "Scan/redefine error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
     // ========== JDI Event Loop ==========
 
     private void startEventLoop() {
@@ -1105,6 +1208,8 @@ public class JdiDapServer {
                 while (running && vm != null) {
                     EventSet eventSet = queue.remove(); // blocks
                     boolean resume = true;
+
+                    boolean stopped = false; // true once a stopping event (breakpoint/step/exception) is seen
 
                     for (Event event : eventSet) {
                         if (event instanceof BreakpointEvent) {
@@ -1126,6 +1231,7 @@ public class JdiDapServer {
                             boolean allStopped = bpr == null || bpr.suspendPolicy() == EventRequest.SUSPEND_ALL;
                             sendStoppedEvent("breakpoint", bpe.thread().uniqueID(), allStopped);
                             resume = false;
+                            stopped = true;
 
                         } else if (event instanceof StepEvent) {
                             StepEvent se = (StepEvent) event;
@@ -1134,14 +1240,17 @@ public class JdiDapServer {
                             log("Step completed: " + se.location());
                             sendStoppedEvent("step", se.thread().uniqueID());
                             resume = false;
+                            stopped = true;
 
                         } else if (event instanceof ClassPrepareEvent) {
                             ClassPrepareEvent cpe = (ClassPrepareEvent) event;
                             ReferenceType refType = cpe.referenceType();
                             log("Class prepared: " + refType.name());
                             handleClassPrepared(refType);
-                            // Resume after setting breakpoints
-                            resume = true;
+                            // Only resume if no stopping event was seen in this EventSet
+                            if (!stopped) {
+                                resume = true;
+                            }
 
                         } else if (event instanceof VMStartEvent) {
                             // VMStartEvent represents the initial VM suspension (suspend=y).
@@ -1179,6 +1288,7 @@ public class JdiDapServer {
                             body.put("allThreadsStopped", true);
                             sendEvent("stopped", body);
                             resume = false;
+                            stopped = true;
                         }
                     }
 

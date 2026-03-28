@@ -43,6 +43,18 @@ export interface EvaluateResult {
   error?: string;
 }
 
+export interface RedefineClassesResult {
+  success: boolean;
+  redefined?: string[];
+  redefinedCount?: number;
+  skippedNotLoaded?: number;
+  failedCount?: number;
+  failed?: Array<{ fqcn: string; error: string }>;
+  scannedFiles?: number;
+  newestTimestamp?: number;
+  error?: string;
+}
+
 /**
  * Debug operations functionality for session management
  */
@@ -1603,4 +1615,88 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
+  /**
+   * Wait for a session to emit a stopped event after launch to honour the first breakpoint.
+   */
+  private async waitForInitialBreakpointPause(sessionId: string, timeoutMs: number): Promise<boolean> {
+    const session = this._getSessionById(sessionId);
+    const proxyManager = session.proxyManager;
+
+    if (!proxyManager) {
+      return false;
+    }
+
+    if (session.state === SessionState.PAUSED) {
+      return true;
+    }
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+
+      const cleanup = () => {
+        proxyManager.removeListener('stopped', onStopped);
+        clearTimeout(timer);
+      };
+
+      const onStopped = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(true);
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(false);
+      }, timeoutMs);
+
+      proxyManager.once('stopped', onStopped);
+    });
+  }
+
+  async redefineClasses(
+    sessionId: string,
+    classesDir: string,
+    sinceTimestamp: number = 0
+  ): Promise<RedefineClassesResult> {
+    const session = this._getSessionById(sessionId);
+    this.logger.info(
+      `[SM redefineClasses ${sessionId}] classesDir: "${classesDir}", since: ${sinceTimestamp}`
+    );
+
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      return { success: false, error: 'No active debug session' };
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await session.proxyManager.sendDapRequest<any>(
+        'redefineClasses', { classesDir, sinceTimestamp }
+      );
+
+      const body = response?.body;
+      if (!body) {
+        return { success: false, error: 'No response body from redefineClasses' };
+      }
+
+      return {
+        success: true,
+        redefined: body.redefined,
+        redefinedCount: body.redefinedCount,
+        skippedNotLoaded: body.skippedNotLoaded,
+        failedCount: body.failedCount,
+        failed: body.failed,
+        scannedFiles: body.scannedFiles,
+        newestTimestamp: body.newestTimestamp,
+      };
+    } catch (error) {
+      this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
 }
