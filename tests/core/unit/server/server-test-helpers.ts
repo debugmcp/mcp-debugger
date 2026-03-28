@@ -101,6 +101,7 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     listThreads: vi.fn(),
     detachFromProcess: vi.fn(),
     attachToProcess: vi.fn(),
+    redefineClasses: vi.fn(),
     getAdapterRegistry: vi.fn().mockReturnValue(mockAdapterRegistry),
     adapterRegistry: mockAdapterRegistry
   };
