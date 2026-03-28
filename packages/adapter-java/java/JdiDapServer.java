@@ -1106,6 +1106,8 @@ public class JdiDapServer {
                     EventSet eventSet = queue.remove(); // blocks
                     boolean resume = true;
 
+                    boolean stopped = false; // true once a stopping event (breakpoint/step/exception) is seen
+
                     for (Event event : eventSet) {
                         if (event instanceof BreakpointEvent) {
                             BreakpointEvent bpe = (BreakpointEvent) event;
@@ -1126,6 +1128,7 @@ public class JdiDapServer {
                             boolean allStopped = bpr == null || bpr.suspendPolicy() == EventRequest.SUSPEND_ALL;
                             sendStoppedEvent("breakpoint", bpe.thread().uniqueID(), allStopped);
                             resume = false;
+                            stopped = true;
 
                         } else if (event instanceof StepEvent) {
                             StepEvent se = (StepEvent) event;
@@ -1134,14 +1137,17 @@ public class JdiDapServer {
                             log("Step completed: " + se.location());
                             sendStoppedEvent("step", se.thread().uniqueID());
                             resume = false;
+                            stopped = true;
 
                         } else if (event instanceof ClassPrepareEvent) {
                             ClassPrepareEvent cpe = (ClassPrepareEvent) event;
                             ReferenceType refType = cpe.referenceType();
                             log("Class prepared: " + refType.name());
                             handleClassPrepared(refType);
-                            // Resume after setting breakpoints
-                            resume = true;
+                            // Only resume if no stopping event was seen in this EventSet
+                            if (!stopped) {
+                                resume = true;
+                            }
 
                         } else if (event instanceof VMStartEvent) {
                             // VMStartEvent represents the initial VM suspension (suspend=y).
@@ -1179,6 +1185,7 @@ public class JdiDapServer {
                             body.put("allThreadsStopped", true);
                             sendEvent("stopped", body);
                             resume = false;
+                            stopped = true;
                         }
                     }
 
