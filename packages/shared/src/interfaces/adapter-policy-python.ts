@@ -85,10 +85,10 @@ export const PythonAdapterPolicy: AdapterPolicy = {
   },
   
   /**
-   * Python uses "Locals" for local variables scope
+   * Python uses "Locals" for local variables scope, with 'Local' as fallback
    */
   getLocalScopeName: (): string[] => {
-    return ['Locals'];
+    return ['Locals', 'Local'];
   },
   
   getDapAdapterConfiguration: () => {

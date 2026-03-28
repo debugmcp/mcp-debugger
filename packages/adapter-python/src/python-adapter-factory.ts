@@ -83,7 +83,7 @@ export class PythonAdapterFactory implements IAdapterFactory {
       details: {
         pythonPath,
         pythonVersion,
-        pythonDetectionMethod: process.platform === 'win32' ? 'py launcher' : 'python3',
+        pythonDetectionMethod: 'multi-strategy',
         platform: process.platform,
         timestamp: new Date().toISOString()
       }

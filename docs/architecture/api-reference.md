@@ -320,7 +320,7 @@ Sets a breakpoint in a file. Internally sends a DAP `setBreakpoints` request for
 
 **Returns**: Breakpoint information
 
-#### `continue(sessionId: string, threadId?: number): Promise<void>`
+#### `continue(sessionId: string, threadId?: number): Promise<DebugResult>`
 Resumes execution from a breakpoint.
 
 #### `stepOver(sessionId: string, threadId?: number): Promise<void>`

@@ -105,7 +105,8 @@ export class DapProxyWorker {
    */
   private selectAdapterPolicy(adapterCommand?: { command: string; args: string[] }): AdapterPolicy {
     if (!adapterCommand) {
-      // Fallback: default to Python adapter policy when no adapter command specified
+      // Legacy fallback: when no adapter command is specified (pre-monorepo sessions),
+      // default to Python adapter policy
       return PythonAdapterPolicy;
     }
     

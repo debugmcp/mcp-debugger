@@ -46,6 +46,7 @@ export async function handleStdioCommand(
     logger.info('[MCP] Server connected to stdio transport successfully');
 
     // Ensure deterministic shutdown on transport close
+    // NOTE: `onclose` relies on an undocumented MCP SDK property
     const transportWithClose = transport as unknown as { onclose?: () => void };
     transportWithClose.onclose = () => {
       logger.warn('[MCP] Transport closed; exiting.');
@@ -65,10 +66,6 @@ export async function handleStdioCommand(
     // Keep the process alive
     process.stdin.resume();
 
-    // Exit policy for stdin end:
-    // - If server hasn't started yet, do not exit immediately (wait to see if transport connects).
-    // - If transport isn't connected, exit (no client will connect).
-    // - If transport is connected, keep running (client controls lifecycle).
     // In containerized stdio mode, stdin may close unexpectedly.
     // Do not exit on stdin end; rely on transport close or signals for shutdown.
     process.stdin.on('end', () => {

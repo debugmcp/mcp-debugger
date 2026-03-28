@@ -9,7 +9,6 @@ import { SpawnOptions } from 'child_process';
 import { Stats } from 'fs';
 import type { IDebugAdapter } from './debug-adapter.js';
 
-// Note: IProxyManager is not part of shared package - it remains in core
 export interface IProxyManager {
   // Minimal interface definition for type compatibility
   dispose(): Promise<void>;

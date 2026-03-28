@@ -594,7 +594,7 @@ You can also specify the Go path explicitly in your debug configuration.`;
    */
   private async checkGoVersion(goPath: string): Promise<string | null> {
     const cached = this.goPathCache.get(goPath);
-    if (cached?.version) {
+    if (cached?.version && (Date.now() - (cached.timestamp || 0) < this.cacheTimeout)) {
       return cached.version;
     }
 
@@ -612,7 +612,7 @@ You can also specify the Go path explicitly in your debug configuration.`;
    */
   async checkDelveVersion(dlvPath: string): Promise<string | null> {
     const cached = this.delvePathCache.get(dlvPath);
-    if (cached?.version) {
+    if (cached?.version && (Date.now() - (cached.timestamp || 0) < this.cacheTimeout)) {
       return cached.version;
     }
 

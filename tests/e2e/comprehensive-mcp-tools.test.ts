@@ -588,7 +588,7 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
             record('continue_execution', lang.language, 'FAIL', err.message, Date.now() - t0);
           }
 
-          /* ---- Tool 19: close_debug_session ---- */
+          /* ---- Tool 20: close_debug_session ---- */
           t0 = Date.now();
           try {
             const closeRes = await callToolSafely(mcpClient!, 'close_debug_session', { sessionId: currentSessionId });
@@ -699,9 +699,9 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
         }
       }, 30_000);
 
-      /* ---- Tool 17: attach_to_process ---- */
+      /* ---- Tool 18: attach_to_process ---- */
 
-      it(`Tool 17: attach_to_process (${lang.language})`, async () => {
+      it(`Tool 18: attach_to_process (${lang.language})`, async () => {
         // Create a session in attach mode
         const t0 = Date.now();
         try {
@@ -736,9 +736,9 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
         }
       }, 45_000);
 
-      /* ---- Tool 18: detach_from_process ---- */
+      /* ---- Tool 19: detach_from_process ---- */
 
-      it(`Tool 18: detach_from_process (${lang.language})`, async () => {
+      it(`Tool 19: detach_from_process (${lang.language})`, async () => {
         if (!currentSessionId) {
           const createRes = await mcpClient!.callTool({
             name: 'create_debug_session',

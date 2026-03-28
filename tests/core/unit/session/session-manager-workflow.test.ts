@@ -153,7 +153,6 @@ describe('SessionManager - Debug Session Workflow', () => {
       });
 
       // Override mock to emit 'terminated' instead of normal flow
-      const origStart = dependencies.mockProxyManager.start.bind(dependencies.mockProxyManager);
       dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (config) => {
         dependencies.mockProxyManager._isRunning = true;
         dependencies.mockProxyManager.startCalls.push(config);

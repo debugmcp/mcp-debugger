@@ -48,7 +48,7 @@ describe('AdapterRegistry', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    process.env.MCP_CONTAINER = undefined;
+    delete process.env.MCP_CONTAINER;
   });
 
   afterEach(() => {
@@ -253,7 +253,7 @@ describe('AdapterRegistry', () => {
       expect(languages).toEqual(['mock']);
     });
 
-    it('merges registered and dynamically discovered languages', async () => {
+    it('merges registered and dynamically discovered installed languages', async () => {
       const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
       const factory = createFactory();
       await registry.register('mock', factory as any);
@@ -268,7 +268,8 @@ describe('AdapterRegistry', () => {
       const languages = await registry.listLanguages();
       expect(languages).toContain('mock');
       expect(languages).toContain('python');
-      expect(languages).toContain('go');
+      // go is not installed, so it should not be listed
+      expect(languages).not.toContain('go');
     });
 
     it('falls back to registered languages when loader throws', async () => {

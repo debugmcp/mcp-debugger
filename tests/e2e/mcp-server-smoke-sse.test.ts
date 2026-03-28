@@ -1,6 +1,3 @@
-/**
- * @jest-environment node
- */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'path';
 import * as os from 'os';

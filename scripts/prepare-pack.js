@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Prepare package for packing by resolving workspace:* dependencies
+ * Prepare package for packing by resolving workspace: protocol dependencies
  * This mimics what pnpm publish does automatically
  */
 
@@ -42,7 +42,7 @@ function getWorkspaceVersions() {
   return versions;
 }
 
-// Resolve workspace:* dependencies to concrete versions
+// Resolve workspace: protocol dependencies to concrete versions
 function resolveWorkspaceDeps(pkg, versions) {
   const resolved = { ...pkg };
   

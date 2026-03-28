@@ -331,7 +331,6 @@ export class ChildSessionManager extends EventEmitter {
         logger.info(`[child:${pendingId}] ${attachArgs.command} attempt ${i + 1}`);
         await child.sendRequest(attachArgs.command, attachArgs.args, 20000);
         adopted = true;
-        break;
       } catch (e) {
         lastError = e;
         await this.sleep(200);
@@ -379,7 +378,7 @@ export class ChildSessionManager extends EventEmitter {
       // Try to pause the first thread
       try {
         const threadsResp = await child.sendRequest<DebugProtocol.ThreadsResponse>('threads', {}, 5000);
-        const threads = (threadsResp as DebugProtocol.ThreadsResponse)?.body?.threads;
+        const threads = threadsResp?.body?.threads;
         
         if (Array.isArray(threads) && threads.length > 0) {
           const threadId = threads[0].id;

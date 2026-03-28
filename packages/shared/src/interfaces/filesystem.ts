@@ -32,7 +32,7 @@ export interface FileSystem {
    * Synchronously read a file as text
    * @param path The path to read
    * @param encoding The encoding to use (typically 'utf8')
-   * @returns The file contents as a string, or empty string on error
+   * @returns The file contents as a string
    */
   readFileSync(path: string, encoding: string): string;
 }

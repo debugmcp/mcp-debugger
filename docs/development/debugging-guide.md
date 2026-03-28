@@ -258,12 +258,11 @@ takeHeapSnapshot('after-session-create');
 
 ### 5. Event Tracing
 
-> **Note:** In stdio/IPC transport mode, `console.log` is silenced at startup to protect the JSON-RPC protocol. Event tracing output will not appear unless you use the SSE transport or redirect logging to a file.
+> **Note:** `console.log` is silenced at startup in all transport modes (stdio, SSE, etc.) to protect the JSON-RPC protocol. Event tracing output will not appear unless you redirect logging to a file.
 
 ```typescript
 // Trace all events
-// Note: console.log is silenced in stdio/IPC mode. Use fs.appendFileSync to a debug file,
-// or use the SSE transport where console is not silenced.
+// Note: console.log is silenced in all transport modes. Use fs.appendFileSync to a debug file.
 const originalEmit = EventEmitter.prototype.emit;
 EventEmitter.prototype.emit = function(event: string, ...args: any[]) {
   fs.appendFileSync('/tmp/event-trace.log', JSON.stringify({

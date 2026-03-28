@@ -170,17 +170,17 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
       ensureSuccess(startResponse, 'start_debugging');
       expect(startResponse.state).toContain('paused');
 
-      const pauseResult = await mcpClient!.callTool({
+      const continueResult0 = await mcpClient!.callTool({
         name: 'continue_execution',
         arguments: { sessionId }
       });
-      ensureSuccess(parseSdkToolResult(pauseResult), 'continue_execution (to breakpoint)');
+      ensureSuccess(parseSdkToolResult(continueResult0), 'continue_execution (to breakpoint)');
 
-      const continueResult = await mcpClient!.callTool({
+      const continueResult1 = await mcpClient!.callTool({
         name: 'continue_execution',
         arguments: { sessionId }
       });
-      ensureSuccess(parseSdkToolResult(continueResult), 'continue_execution');
+      ensureSuccess(parseSdkToolResult(continueResult1), 'continue_execution');
 
       const closeResult = await mcpClient!.callTool({
         name: 'close_debug_session',
@@ -235,11 +235,11 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
       const startResponse = parseSdkToolResult(startResult);
       ensureSuccess(startResponse, 'start_debugging');
 
-      const pauseResult = await mcpClient!.callTool({
+      const continueResult = await mcpClient!.callTool({
         name: 'continue_execution',
         arguments: { sessionId }
       });
-      ensureSuccess(parseSdkToolResult(pauseResult), 'continue_execution (async breakpoint)');
+      ensureSuccess(parseSdkToolResult(continueResult), 'continue_execution (async breakpoint)');
 
       await waitForStackFrame(
         sessionId,
@@ -260,11 +260,11 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
       );
       expect(localsByName.get('id')).toBeDefined();
 
-      const continueResult = await mcpClient!.callTool({
+      const continueResult2 = await mcpClient!.callTool({
         name: 'continue_execution',
         arguments: { sessionId }
       });
-      ensureSuccess(parseSdkToolResult(continueResult), 'continue_execution');
+      ensureSuccess(parseSdkToolResult(continueResult2), 'continue_execution');
 
       const closeResult = await mcpClient!.callTool({
         name: 'close_debug_session',

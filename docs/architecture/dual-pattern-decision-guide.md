@@ -237,9 +237,10 @@ export const NewLanguagePolicy: AdapterPolicy = {
 ```
 
 ### Step 3: Add to selectPolicy() and update DebugLanguage enum
-Add your language to the `DebugLanguage` enum in `@debugmcp/shared`, then add your policy to **both** `selectPolicy()` locations:
+Add your language to the `DebugLanguage` enum in `@debugmcp/shared`, then add your policy to **all three** `selectPolicy()` locations:
 - `src/session/session-manager-data.ts` (session-level data operations)
 - `src/proxy/dap-proxy-worker.ts` (proxy-level adapter behavior via `selectAdapterPolicy()`)
+- `src/session/session-store.ts` (session persistence policy selection)
 
 ```typescript
 case DebugLanguage.NEWLANG:

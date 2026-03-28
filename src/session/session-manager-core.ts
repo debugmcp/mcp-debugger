@@ -27,7 +27,6 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
   justMyCode?: boolean;
 }
 
-// Define DebugResult interface (previously imported from provider.js)
 export interface DebugResult {
   success: boolean;
   state: SessionState;
@@ -218,7 +217,6 @@ export abstract class SessionManagerCore {
     // Named function for stopped event
     const handleStopped = (threadId: number | undefined, reason: string) => {
       this.logger.debug(`[SessionManager] handleStopped: session=${sessionId} currentState=${session.state} reason=${reason} threadId=${threadId}`);
-      this.logger.debug(`[SessionManager] 'stopped' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
       
       // Log debug state change with structured logging
@@ -278,7 +276,6 @@ export abstract class SessionManagerCore {
     // Named function for terminated event
     const handleTerminated = () => {
       this.logger.debug(`[SessionManager] handleTerminated: session=${sessionId} currentState=${session.state}`);
-      this.logger.debug(`[SessionManager] 'terminated' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Terminated event`);
       
       // Log debug state change with structured logging
@@ -301,7 +298,6 @@ export abstract class SessionManagerCore {
     // Named function for exited event
     const handleExited = () => {
       this.logger.debug(`[SessionManager] handleExited: session=${sessionId} currentState=${session.state}`);
-      this.logger.debug(`[SessionManager] 'exited' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exited event`);
       this._updateSessionState(session, SessionState.STOPPED);
 
@@ -353,7 +349,6 @@ export abstract class SessionManagerCore {
     // Named function for exit event
     const handleExit = (code: number | null, signal?: string) => {
       this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal}`);
-      this.logger.debug(`[SessionManager] 'exit' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}`);
       if (session.state !== SessionState.STOPPED && session.state !== SessionState.ERROR) {
         // Clean exit (code 0 or null with no signal) is normal termination, not an error

@@ -16,23 +16,12 @@ export class ProcessManagerImpl implements IProcessManager {
   async exec(command: string): Promise<{ stdout: string; stderr: string }> {
     const promisifiedResult = await execAsync(command);
 
-    // Case 1: Original child_process.exec with promisify.custom
-    // It resolves to an object { stdout: string, stderr: string }
+    // promisify(exec) resolves to { stdout: string, stderr: string }
     if (typeof promisifiedResult === 'object' && promisifiedResult !== null && 'stdout' in promisifiedResult && 'stderr' in promisifiedResult) {
       return promisifiedResult as { stdout: string; stderr: string };
     }
 
-    // Case 2: promisify returned an array [stdout, stderr]
-    if (Array.isArray(promisifiedResult)) {
-      return { stdout: promisifiedResult[0] as string, stderr: promisifiedResult[1] as string };
-    }
-
-    // Case 3: promisify returned only stdout as a string
-    if (typeof promisifiedResult === 'string') {
-      return { stdout: promisifiedResult, stderr: '' }; // Default stderr if only stdout is provided
-    }
-    
-    // Fallback - this shouldn't be reached if the above cover known scenarios
+    // Fallback - this shouldn't be reached with Node.js promisify(exec)
     throw new Error(`[ProcessManagerImpl] execAsync resolved to unexpected type: ${typeof promisifiedResult}`);
   }
 }

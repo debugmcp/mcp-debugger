@@ -357,10 +357,10 @@ class MockDebugAdapterProcess {
       // Simulate running to first breakpoint
       setTimeout(() => {
         const allBreakpoints = Array.from(this.breakpoints.entries())
-          .flatMap(([path, bps]) => bps.map(bp => ({ path, ...bp })))
+          .flatMap(([filePath, bps]) => bps.map(bp => ({ filePath, ...bp })))
           .filter(bp => bp.line !== undefined)
           .sort((a, b) => (a.line || 0) - (b.line || 0));
-        
+
         if (allBreakpoints.length > 0) {
           const firstBreakpoint = allBreakpoints[0];
           this.currentLine = firstBreakpoint.line || 1;
@@ -493,7 +493,7 @@ class MockDebugAdapterProcess {
         variablesReference: this.getOrCreateVariableReference({
           variables: [
             { name: '__name__', value: '"__main__"', type: 'str' },
-            { name: '__file__', value: '"simple-mock.js"', type: 'str' }
+            { name: '__file__', value: '"mock-adapter-process.ts"', type: 'str' }
           ]
         }),
         expensive: false
@@ -566,12 +566,12 @@ class MockDebugAdapterProcess {
     // Simulate hitting a breakpoint or terminating
     setTimeout(() => {
       const allBreakpoints = Array.from(this.breakpoints.entries())
-        .flatMap(([path, bps]) => bps.map(bp => ({ path, ...bp })))
+        .flatMap(([filePath, bps]) => bps.map(bp => ({ filePath, ...bp })))
         .filter(bp => bp.line !== undefined)
         .sort((a, b) => (a.line || 0) - (b.line || 0));
-      
+
       this.log(`Continue from line ${this.currentLine}. All breakpoints: ${allBreakpoints.map(bp => bp.line).join(', ')}`);
-      
+
       // Find next breakpoint after current line
       const nextBreakpoint = allBreakpoints.find(bp => (bp.line || 0) > this.currentLine);
       
@@ -731,13 +731,16 @@ class MockDebugAdapterProcess {
       command: request.command,
       success: true
     });
-    
+
     this.sendEvent({
       seq: 0,
       type: 'event',
       event: 'terminated'
     } as DebugProtocol.TerminatedEvent);
-    
+
+    // In TCP server mode, don't exit the process on terminate
+    if (this.server) return;
+
     setTimeout(() => {
       process.exit(0);
     }, 100);

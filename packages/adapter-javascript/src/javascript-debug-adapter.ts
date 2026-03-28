@@ -338,8 +338,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
     // Base fields and defaults - paths already resolved by server
-    const user = (config || {}) as Record<string, unknown>;
-    const u = user as Record<string, unknown>;
+    const u = (config || {}) as Record<string, unknown>;
     const program = typeof u.program === 'string' ? u.program : '';
     
     // Use cwd as provided (already resolved by server) or derive from program
@@ -515,12 +514,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         );
       const idx = findInspectIndex();
       if (idx !== -1) {
-        let port = 9229;
+        const port = 9229;
         const arg = finalArgs[idx];
         const m = arg.match(/^--inspect(?:-brk)?=(\d+)$/);
         if (m) {
-          const p = Number(m[1]);
-          if (!Number.isNaN(p) && p > 0) port = p;
+          // Port is already explicit in the flag; no rewrite needed
         } else {
           // Promote to explicit port for consistency and reliable auto-attach
           finalArgs[idx] = `--inspect-brk=${port}`;

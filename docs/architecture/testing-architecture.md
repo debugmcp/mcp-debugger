@@ -165,7 +165,7 @@ Two SSE test files test the SSE HTTP transport: Python over SSE (`mcp-server-smo
 
 **File:** `tests/e2e/comprehensive-mcp-tools.test.ts`
 
-Tests all 20 MCP tools across 5 languages (Python, JavaScript, Mock, Rust, Go) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
+Tests all 20 MCP tools across 7 languages (Python, JavaScript, Mock, Rust, Go, Java, Dotnet) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
 
 ### Docker E2E
 

@@ -26,8 +26,7 @@
   // 1. Explicit stdio argument
   // 2. Explicit sse argument (JS debugging)
   // 3. Environment variable set
-  // 4. No transport argument specified (default is STDIO)
-  // 5. stdin is a pipe (typical for MCP STDIO mode)
+  // 4. No transport argument specified AND stdin is a pipe (typical for MCP STDIO mode)
   const hasTransportArg = process.argv.some(arg =>
     arg === '--transport' || arg.includes('transport')
   );

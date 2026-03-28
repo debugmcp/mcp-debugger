@@ -264,7 +264,6 @@ describe('ProxyRunner IPC communication', () => {
     await runner.start();
 
     // Extract the message handler registered on process.on('message')
-    const processOnSpy = vi.spyOn(process, 'on');
     // The handler is already registered. Find it by getting all 'message' listeners.
     const messageListeners = process.listeners('message');
     const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
@@ -272,8 +271,6 @@ describe('ProxyRunner IPC communication', () => {
 
     await ipcHandler('{"cmd":"init","sessionId":"test-1"}');
     expect(onMessage).toHaveBeenCalledWith('{"cmd":"init","sessionId":"test-1"}');
-
-    processOnSpy.mockRestore();
   });
 
   it('IPC message handler stringifies object messages', async () => {

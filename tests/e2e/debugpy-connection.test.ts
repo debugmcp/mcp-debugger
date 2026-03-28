@@ -1,7 +1,4 @@
 /**
- * @jest-environment node
- */
-/**
  * E2E test for the MCP server connecting to debugpy
  *
  * This test verifies that the MCP server can correctly:
@@ -13,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import * as net from 'net';
 import * as path from 'path';
-import { writeFile, rm, stat } from 'node:fs/promises'; // Native promise-based fs
+import { writeFile, rm } from 'node:fs/promises'; // Native promise-based fs
 import { existsSync as nativeNodeExistsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';

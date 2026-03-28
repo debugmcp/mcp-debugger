@@ -112,28 +112,22 @@ describe('ProcessManagerImpl', () => {
       });
     });
 
-    it('should handle promisify returning array [stdout, stderr] (line 27)', async () => {
-      // Set promisify to return an array
+    it('should throw on promisify returning array (dead branch removed)', async () => {
+      // Array return is not a real promisify(exec) shape — falls through to error
       (globalThis as any).__promisifyResult = ['array stdout', 'array stderr'];
 
-      const result = await processManager.exec('array-command');
-      
-      expect(result).toEqual({ 
-        stdout: 'array stdout',
-        stderr: 'array stderr'
-      });
+      await expect(processManager.exec('array-command')).rejects.toThrow(
+        '[ProcessManagerImpl] execAsync resolved to unexpected type: object'
+      );
     });
 
-    it('should handle promisify returning string (line 32)', async () => {
-      // Set promisify to return just a string
+    it('should throw on promisify returning string (dead branch removed)', async () => {
+      // String return is not a real promisify(exec) shape — falls through to error
       (globalThis as any).__promisifyResult = 'string output';
 
-      const result = await processManager.exec('string-command');
-      
-      expect(result).toEqual({ 
-        stdout: 'string output',
-        stderr: ''
-      });
+      await expect(processManager.exec('string-command')).rejects.toThrow(
+        '[ProcessManagerImpl] execAsync resolved to unexpected type: string'
+      );
     });
 
     it('should throw on promisify returning unexpected type (number)', async () => {
@@ -163,16 +157,13 @@ describe('ProcessManagerImpl', () => {
       );
     });
 
-    it('should handle empty array from promisify', async () => {
-      // Set promisify to return an empty array
+    it('should throw on empty array from promisify (dead branch removed)', async () => {
+      // Empty array is not a real promisify(exec) shape — falls through to error
       (globalThis as any).__promisifyResult = [];
 
-      const result = await processManager.exec('empty-array-command');
-      
-      expect(result).toEqual({ 
-        stdout: undefined,
-        stderr: undefined
-      });
+      await expect(processManager.exec('empty-array-command')).rejects.toThrow(
+        '[ProcessManagerImpl] execAsync resolved to unexpected type: object'
+      );
     });
 
     it('should handle exec errors', async () => {

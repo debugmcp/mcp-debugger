@@ -32,7 +32,7 @@ The mcp-debugger architecture uses both patterns in complementary roles:
 - **Scope**: Language-specific behaviors for session management
 - **Lifecycle**: Static/singleton pattern
 - **Responsibility**: Validation, filtering, extraction policies
-- **Location**: Policy implementations are in `packages/shared/src/interfaces/adapter-policy-*.ts`. Policy selection logic lives in two places: `session-manager-data.ts` (via `selectPolicy()`) for session-level data operations, and `dap-proxy-worker.ts` (via `selectAdapterPolicy()`) for proxy-level adapter behavior.
+- **Location**: Policy implementations are in `packages/shared/src/interfaces/adapter-policy-*.ts`. Policy selection logic lives in three places: `session-manager-data.ts` (via `selectPolicy()`) for session-level data operations, `dap-proxy-worker.ts` (via `selectAdapterPolicy()`) for proxy-level adapter behavior, and `session-store.ts` for session persistence policy selection.
 - **State**: Stateless policy object
 
 ### Pattern Interaction

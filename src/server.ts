@@ -113,7 +113,7 @@ interface ToolArguments {
 const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 'array'> = {
   // numbers
   line: 'number', linesContext: 'number', scope: 'number',
-  frameId: 'number', port: 'number', timeout: 'number',
+  frameId: 'number', port: 'number', timeout: 'number', threadId: 'number',
   // booleans
   includeInternals: 'boolean', includeSpecial: 'boolean',
   stopOnEntry: 'boolean', justMyCode: 'boolean',

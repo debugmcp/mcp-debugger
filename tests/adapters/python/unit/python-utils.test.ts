@@ -25,12 +25,16 @@ describe('python-utils', () => {
   let mockCommandFinder: MockCommandFinder;
   let savedPythonLocation: string | undefined;
   let savedPythonLocationCap: string | undefined;
+  let savedPythonPath: string | undefined;
+  let savedPythonExecutable: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     // Save original values before deleting
     savedPythonLocation = process.env.pythonLocation;
     savedPythonLocationCap = process.env.PythonLocation;
+    savedPythonPath = process.env.PYTHON_PATH;
+    savedPythonExecutable = process.env.PYTHON_EXECUTABLE;
     // Reset environment variables
     delete process.env.PYTHON_PATH;
     delete process.env.PYTHON_EXECUTABLE;
@@ -66,6 +70,16 @@ describe('python-utils', () => {
       process.env.PythonLocation = savedPythonLocationCap;
     } else {
       delete process.env.PythonLocation;
+    }
+    if (savedPythonPath !== undefined) {
+      process.env.PYTHON_PATH = savedPythonPath;
+    } else {
+      delete process.env.PYTHON_PATH;
+    }
+    if (savedPythonExecutable !== undefined) {
+      process.env.PYTHON_EXECUTABLE = savedPythonExecutable;
+    } else {
+      delete process.env.PYTHON_EXECUTABLE;
     }
   });
 

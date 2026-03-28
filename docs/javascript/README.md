@@ -235,6 +235,6 @@ The JavaScript adapter uses:
 - **Vendor artifacts**: `vsDebugServer.js` is the canonical vendored artifact produced by the build script. `vsDebugServer.cjs` is a CommonJS compatibility duplicate created alongside it. The factory's validation checks for `.js` (the canonical path), while runtime command construction prefers `.cjs` for CommonJS child-process compatibility
 - **Protocol**: Debug Adapter Protocol (DAP)
 - **Transport**: TCP for DAP communication between the proxy and the js-debug adapter process
-- **Version**: The factory enforces Node.js 14+ as a minimum requirement; Node.js 18+ is recommended for best compatibility
+- **Version**: The package requires Node.js 18+ (per the engines field); the factory checks >= 14 as a lower-bound runtime guard
 
 For adapter development details, see the [Adapter Development Guide](../architecture/adapter-development-guide.md).

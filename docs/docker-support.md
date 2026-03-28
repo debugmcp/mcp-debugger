@@ -75,7 +75,8 @@ Here's the recommended configuration for your MCP settings file:
         "get_stack_trace",
         "get_scopes",
         "evaluate_expression",
-        "get_source_context"
+        "get_source_context",
+        "list_threads"
       ],
       "disabled": false,
       "timeout": 60

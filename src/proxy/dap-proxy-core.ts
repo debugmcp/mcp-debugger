@@ -185,7 +185,7 @@ export class ProxyRunner {
    */
   private createMessageProcessor(): (messageStr: string) => Promise<void> {
     return async (messageStr: string) => {
-      this.logger.info(`[ProxyRunner] Received message (first 200 chars): ${messageStr.substring(0, 200)}...`);
+      this.logger.info(`[ProxyRunner] Received message (first 200 chars): ${messageStr.substring(0, 200)}${messageStr.length > 200 ? '...' : ''}`);
 
       let command: ParentCommand | null = null;
       try {
@@ -287,9 +287,9 @@ export class ProxyRunner {
 
     this.disconnectHandler = () => {
       this.logger.warn('[ProxyRunner] IPC channel disconnected — parent process died');
-      // Trigger worker shutdown so attach-mode auto-detach runs before exit.
+      // Trigger full stop so attach-mode auto-detach and cleanup run before exit.
       // Use the same pattern as SIGTERM in setupGlobalErrorHandlers().
-      this.worker.shutdown().finally(() => {
+      this.stop().finally(() => {
         process.exit(0);
       });
     };

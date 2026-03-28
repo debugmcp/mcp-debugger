@@ -67,7 +67,7 @@ export default defineConfig({
         '[SM _updateSessionState',
         'stdout |',
         'stderr |',
-        '2025-', // Date timestamps
+        '20', // Date timestamps (matches 2025-, 2026-, etc.)
         '[info]',
         '[debug]',
         '[warn]'

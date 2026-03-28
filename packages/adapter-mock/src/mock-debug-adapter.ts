@@ -348,6 +348,8 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
       this.currentThreadId = null;
       if (this.connected) {
         this.transitionTo(AdapterState.CONNECTED);
+      } else {
+        this.transitionTo(AdapterState.DISCONNECTED);
       }
     }
     

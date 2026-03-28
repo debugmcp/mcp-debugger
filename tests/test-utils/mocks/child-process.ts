@@ -18,7 +18,7 @@ export class MockChildProcess extends EventEmitter {
   public stderr: NodeJS.ReadableStream | null = new EventEmitter() as any;
   
   // Process methods
-  public kill = vi.fn().mockImplementation(() => true);
+  public kill = vi.fn();
   public send = vi.fn().mockImplementation((message: any) => {
     // By default, send returns true to indicate success
     return true;

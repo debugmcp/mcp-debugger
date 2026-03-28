@@ -60,7 +60,7 @@ export const GoAdapterPolicy: AdapterPolicy = {
       localVars = localVars.filter(v => {
         const name = v.name;
         
-        // Skip Go internal variables (those starting with underscore typically)
+        // Skip Go internal variables (those starting with underscore, except bare `_`)
         // Delve shows these explicitly when needed
         if (name.startsWith('_') && name !== '_') {
           return false;

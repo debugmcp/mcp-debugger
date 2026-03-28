@@ -156,6 +156,10 @@ export function mapLegacyState(legacyState: SessionState): { lifecycle: SessionL
       return { lifecycle: SessionLifecycleState.TERMINATED };
     case SessionState.ERROR:
       return { lifecycle: SessionLifecycleState.ACTIVE, execution: ExecutionState.ERROR };
+    default: {
+      const _exhaustive: never = legacyState;
+      throw new Error(`Unknown session state: ${_exhaustive}`);
+    }
   }
 }
 

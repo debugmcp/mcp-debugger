@@ -201,11 +201,11 @@ describe.sequential('NPX: JavaScript Debugging Smoke Tests', () => {
     const variables = varsBefore.variables as any[];
     const varA = variables.find(v => v.name === 'a');
     const varB = variables.find(v => v.name === 'b');
-    
+
     expect(varA).toBeDefined();
     expect(varB).toBeDefined();
-    expect(varA.value).toBe('1');
-    expect(varB.value).toBe('2');
+    expect(varA?.value).toBe('1');
+    expect(varB?.value).toBe('2');
     
     console.log('[NPX JavaScript] ✓ Variables before swap: a=1, b=2');
 
@@ -236,9 +236,11 @@ describe.sequential('NPX: JavaScript Debugging Smoke Tests', () => {
     const variablesAfter = varsAfter.variables as any[];
     const varAAfter = variablesAfter.find(v => v.name === 'a');
     const varBAfter = variablesAfter.find(v => v.name === 'b');
-    
-    expect(varAAfter.value).toBe('2');
-    expect(varBAfter.value).toBe('1');
+
+    expect(varAAfter).toBeDefined();
+    expect(varBAfter).toBeDefined();
+    expect(varAAfter?.value).toBe('2');
+    expect(varBAfter?.value).toBe('1');
     
     console.log('[NPX JavaScript] ✓ Variables after swap: a=2, b=1');
 

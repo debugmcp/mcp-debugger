@@ -6,6 +6,8 @@
  *  - findNode(preferredPath?, fileSystem?): Promise<string>
  *  - whichInPath(names, fileSystem?): string | undefined
  *  - isWindows(): boolean
+ *  - setDefaultFileSystem(fileSystem): void
+ *  - resolveNodeExecutable(preferredPath?): Promise<string>
  *
  * Behavior:
  *  - Precedence: preferredPath (if exists) -> process.execPath (if exists) -> PATH search -> fallback to process.execPath.

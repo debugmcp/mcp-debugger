@@ -638,7 +638,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         } requestId=${requestId ?? 'n/a'})`,
         error
       );
-      this.logger.error(`[ProxyManager] Failed to send command:`, error);
       throw error;
     }
   }
@@ -773,6 +772,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
             
           case 'emitEvent':
             {
+              // Skip emitEvent commands for DAP events — they are already handled
+              // by the fast-path handleDapEvent() call above to avoid double emission.
+              if (message.type === 'dapEvent') break;
               const args = (command.args as unknown[]) ?? [];
               this.emit(command.event as keyof ProxyManagerEvents, ...(args as never[]));
             }

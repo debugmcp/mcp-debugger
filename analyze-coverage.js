@@ -52,7 +52,7 @@ try {
   
   // Print compact analysis
   console.log('\n' + '═'.repeat(70));
-  console.log(' COVERAGE ANALYSIS - Files to focus on (sorted by impact):');
+  console.log(' COVERAGE ANALYSIS - Files to focus on (sorted by uncovered line count):');
   console.log('═'.repeat(70));
   console.log(`Overall: ${overall.toFixed(1)}% | Focus on files with most uncovered lines`);
   console.log('─'.repeat(70));

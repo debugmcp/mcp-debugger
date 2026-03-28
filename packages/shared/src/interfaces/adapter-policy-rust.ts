@@ -10,17 +10,6 @@ import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
-export interface RustAdapterPolicyInterface {
-  requiresCompilation: true;
-  supportsCargo: true;
-  defaultBuildCommand: 'cargo build';
-  supportedExtensions: ['.rs'];
-  supportsDebugging: true;
-  defaultDebugTarget: 'debug';
-  releaseBuildCommand: 'cargo build --release';
-  testCommand: 'cargo test';
-}
-
 export const RustAdapterPolicy: AdapterPolicy = {
   name: 'rust',
   supportsReverseStartDebugging: false,
@@ -106,11 +95,8 @@ export const RustAdapterPolicy: AdapterPolicy = {
       return providedPath;
     }
 
-    if (process.env.CARGO_PATH) {
-      return process.env.CARGO_PATH;
-    }
-
     // Defer to adapter for CodeLLDB path resolution
+    // (CODELLDB_PATH env var is checked in codelldb-resolver.ts)
     return undefined;
   },
   

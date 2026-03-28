@@ -11,8 +11,10 @@ export { GoDebugAdapter } from './go-debug-adapter.js';
 export { GoAdapterFactory } from './go-adapter-factory.js';
 export * from './utils/go-utils.js';
 
+import { GoAdapterFactory as _GoAdapterFactory } from './go-adapter-factory.js';
+
 // Default export required by mcp-debugger dynamic loader
-export default { 
-  name: 'go', 
-  factory: (await import('./go-adapter-factory.js')).GoAdapterFactory 
+export default {
+  name: 'go',
+  factory: _GoAdapterFactory
 };

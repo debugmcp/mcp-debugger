@@ -82,10 +82,8 @@ describe('RustAdapterPolicy', () => {
   it('resolves executable path using inputs and env', () => {
     expect(RustAdapterPolicy.resolveExecutablePath!('/custom/bin')).toBe('/custom/bin');
 
-    process.env.CARGO_PATH = '/env/cargo';
-    expect(RustAdapterPolicy.resolveExecutablePath!()).toBe('/env/cargo');
-
-    delete process.env.CARGO_PATH;
+    // Without a provided path, defers to adapter (returns undefined)
+    // CODELLDB_PATH env var is handled in codelldb-resolver.ts, not here
     expect(RustAdapterPolicy.resolveExecutablePath!()).toBeUndefined();
   });
 

@@ -5,12 +5,8 @@ import { fileURLToPath } from 'url';
 const FALLBACK_VERSION = '0.0.0';
 
 function getModuleDirectory(): string {
-  try {
-    if (typeof __dirname === 'string') {
-      return __dirname;
-    }
-  } catch {
-    // __dirname is not defined in ESM – fall through to import.meta
+  if (typeof __dirname === 'string') {
+    return __dirname;
   }
 
   if (typeof import.meta !== 'undefined' && import.meta.url) {

@@ -360,7 +360,7 @@ The policy implements the `AdapterPolicy` interface (from `adapter-policy.ts`). 
 
 See `packages/shared/src/interfaces/adapter-policy-go.ts` for a minimal, clean policy example.
 
-### Wiring the policy (2 locations)
+### Wiring the policy (3 locations)
 
 1. **DAP proxy** — `src/proxy/dap-proxy-worker.ts` → `selectAdapterPolicy()` method: add a new `else if` branch matching your adapter command.
 

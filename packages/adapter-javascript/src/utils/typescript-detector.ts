@@ -73,10 +73,10 @@ export function detectBinary(
  * Detects tsx and ts-node runners with process-level caching.
  * No throw; returns undefineds when not found.
  */
-export async function detectTsRunners(
+export function detectTsRunners(
   cwd: string = process.cwd(),
   fileSystem: FileSystem = defaultFileSystem
-): Promise<TsRunnerDetection> {
+): TsRunnerDetection {
   const hit = cachedByCwd.get(cwd);
   if (hit) {
     return hit;

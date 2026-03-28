@@ -101,11 +101,6 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
           return false;
         }
 
-        // Filter out async state machine fields
-        if (name.startsWith('<>t__') || name.startsWith('<>s__')) {
-          return false;
-        }
-
         return true;
       });
     }
@@ -114,7 +109,8 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   },
 
   /**
-   * netcoredbg uses "Locals" for local variables scope
+   * netcoredbg uses "Locals" for local variables scope.
+   * extractLocalVariables also checks for 'Local' as a fallback.
    */
   getLocalScopeName: (): string[] => {
     return ['Locals'];

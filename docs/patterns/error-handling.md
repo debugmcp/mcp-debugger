@@ -239,7 +239,7 @@ return {
 **Location**: `src/session/session-manager-core.ts`
 
 ```typescript
-private cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
+protected cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
   const handlers = this.sessionEventHandlers.get(session);
   if (!handlers) {
     this.logger.debug(`[SessionManager] No handlers found for session ${session.id}`);

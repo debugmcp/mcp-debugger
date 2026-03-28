@@ -6,7 +6,7 @@ import { INetworkManager, IServer } from '@debugmcp/shared';
 
 export class NetworkManagerImpl implements INetworkManager {
   createServer(): IServer {
-    // Directly return the Node.js Server as it implements our IServer interface
+    // Return the Node.js Server (cast to IServer via unknown)
     return net.createServer() as unknown as IServer;
   }
 

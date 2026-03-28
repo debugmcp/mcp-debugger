@@ -68,7 +68,7 @@ There isn’t an official enforced naming convention for these states in all deb
 
 A dual-state overlay is derived from `SessionState` via `mapLegacyState()` in `_updateSessionState()`:
 * **SessionLifecycleState**: `CREATED` → `ACTIVE` → `TERMINATED` (coarse lifecycle)
-* **ExecutionState**: `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `ERROR` (fine-grained execution)
+* **ExecutionState**: `INITIALIZING` → `RUNNING` ⇄ `PAUSED` → `TERMINATED` | `ERROR` (fine-grained execution)
 
 Note: `SessionState.READY` maps identically to `INITIALIZING` in the dual-state model (both `SessionLifecycleState.ACTIVE` and `ExecutionState.INITIALIZING`).
 

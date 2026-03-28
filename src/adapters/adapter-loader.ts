@@ -91,7 +91,7 @@ export class AdapterLoader {
         throw new Error(`Failed to resolve adapter module for '${language}'`);
       }
       const moduleRef = loadedModule as Record<string, unknown>;
-      const FactoryClass = moduleRef[factoryClassName] as unknown;
+      const FactoryClass = moduleRef[factoryClassName];
       if (!FactoryClass) {
         throw new Error(`Factory class ${factoryClassName} not found in ${packageName}`);
       }

@@ -53,9 +53,6 @@ export function createSSEApp(
   // SSE endpoint - for server-to-client messages
   app.get('/sse', async (req, res) => {
     try {
-      // Create SSE transport with the response object
-      const transport = new SSEServerTransport('/sse', res as ServerResponse);
-
       // Block EventSource phantom reconnection: eventsource@4.0.0 auto-reconnects
       // ~3s after initial connection when the SSE stream reader returns done.
       // This creates a 2nd session that overwrites Protocol._transport, so responses
@@ -66,6 +63,9 @@ export function createSSEApp(
         res.status(204).end();
         return;
       }
+
+      // Create SSE transport with the response object
+      const transport = new SSEServerTransport('/sse', res as ServerResponse);
 
       // Connect the shared server to the transport (this automatically calls start())
       await sharedDebugServer.server.connect(transport);

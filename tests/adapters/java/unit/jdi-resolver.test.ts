@@ -142,7 +142,7 @@ describe('jdi-resolver', () => {
 
       mockExecFileSync.mockReturnValue(Buffer.from(''));
 
-      const result = ensureJdiBridgeCompiled();
+      ensureJdiBridgeCompiled();
 
       // Should have called javac
       expect(mockMkdirSync).toHaveBeenCalled();
@@ -164,7 +164,7 @@ describe('jdi-resolver', () => {
       mockExecSync.mockReturnValue('/usr/bin/javac\n');
       mockExecFileSync.mockReturnValue(Buffer.from(''));
 
-      const result = ensureJdiBridgeCompiled();
+      ensureJdiBridgeCompiled();
 
       expect(mockExecSync).toHaveBeenCalled();
       expect(mockExecFileSync).toHaveBeenCalled();

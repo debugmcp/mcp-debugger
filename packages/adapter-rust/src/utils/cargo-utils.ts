@@ -28,6 +28,8 @@ export async function resolveCargoProject(projectPath: string): Promise<{
     const cargoTomlContent = await fs.readFile(cargoTomlPath, 'utf-8');
     
     // Parse basic info from Cargo.toml (simplified parsing)
+    // Note: This regex matches the first name/version in the file, not necessarily
+    // within [package]. This is a known limitation for multi-table TOML files.
     const nameMatch = cargoTomlContent.match(/name\s*=\s*"([^"]+)"/);
     const versionMatch = cargoTomlContent.match(/version\s*=\s*"([^"]+)"/);
     

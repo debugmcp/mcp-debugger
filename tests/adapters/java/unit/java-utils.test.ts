@@ -91,13 +91,11 @@ describe('java-utils', () => {
       const originalJavaHome = process.env.JAVA_HOME;
       delete process.env.JAVA_HOME;
 
-      let callCount = 0;
       mockSpawn.mockImplementation((cmd) => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
-          callCount++;
           if (cmd === 'java') {
             proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
             proc.emit('exit', 0);

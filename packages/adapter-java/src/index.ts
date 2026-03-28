@@ -13,8 +13,10 @@ export { JavaAdapterFactory } from './java-adapter-factory.js';
 export { findJavaExecutable, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
 export { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled } from './utils/jdi-resolver.js';
 
+import { JavaAdapterFactory as _JavaAdapterFactory } from './java-adapter-factory.js';
+
 // Default export required by mcp-debugger dynamic loader
 export default {
   name: 'java',
-  factory: (await import('./java-adapter-factory.js')).JavaAdapterFactory
+  factory: _JavaAdapterFactory
 };

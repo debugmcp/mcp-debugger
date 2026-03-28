@@ -76,9 +76,6 @@ logBootstrapActivity(`Bootstrap script started. CWD: ${process.cwd()}`);
     // Verify the chosen file exists
     if (!fs.existsSync(proxyPath)) {
       logBootstrapActivity(`ERROR: Proxy file not found at ${proxyPath}`);
-      if (useBundle) {
-        logBootstrapActivity('Bundle was expected but not found. Build may have failed.');
-      }
       process.exit(1);
     }
     

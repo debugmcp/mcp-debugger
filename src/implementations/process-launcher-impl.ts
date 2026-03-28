@@ -95,16 +95,12 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
   }
   
   private setupErrorHandling(): void {
-    // Override error handling to support DAP spec
+    // Set up error handling to support DAP spec
     // Note: We must handle errors to prevent Node.js from throwing unhandled errors
     this.on('error', () => {
-      if (this.initializationState === 'waiting') {
-        // Both reject promise AND emit event (DAP spec requirement)
-        // The failInitialization will reject the promise, but the error event
-        // will still be emitted for other listeners
-        // Don't pass the error directly - this will be handled by exit event
-      }
-      // Error is handled - prevent default throw behavior
+      // Error is handled - prevent default throw behavior.
+      // If we're waiting for initialization, the exit event handler will
+      // call failInitialization to reject the promise.
     });
   }
   

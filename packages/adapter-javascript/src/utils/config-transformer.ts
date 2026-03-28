@@ -142,11 +142,3 @@ export function hasTsConfigPaths(
   return false;
 }
 
-/**
- * Identity transform for launch configuration.
- * Specific transformation logic is handled by individual helper functions
- * (determineOutFiles, isESMProject, hasTsConfigPaths) rather than this catch-all.
- */
-export function transformConfig(config: Record<string, unknown>): Record<string, unknown> {
-  return { ...config };
-}

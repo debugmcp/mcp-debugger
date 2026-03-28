@@ -3,6 +3,7 @@
  */
 
 import * as fs from 'fs/promises';
+import { constants as fsConstants } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -42,7 +43,7 @@ export async function resolveCodeLLDBExecutable(): Promise<string | null> {
   
   for (const candidate of candidatePaths) {
     try {
-      await fs.access(candidate, fs.constants.F_OK);
+      await fs.access(candidate, fsConstants.F_OK);
       return candidate;
     } catch {
       // Try next candidate
@@ -52,7 +53,7 @@ export async function resolveCodeLLDBExecutable(): Promise<string | null> {
   // Check environment variable as fallback
   if (process.env.CODELLDB_PATH) {
     try {
-      await fs.access(process.env.CODELLDB_PATH, fs.constants.F_OK);
+      await fs.access(process.env.CODELLDB_PATH, fsConstants.F_OK);
       return process.env.CODELLDB_PATH;
     } catch {
       // Fall through

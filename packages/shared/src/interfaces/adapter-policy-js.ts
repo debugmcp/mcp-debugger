@@ -153,7 +153,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    * JavaScript uses various local scope names
    */
   getLocalScopeName: (): string[] => {
-    return ['Local', 'Local:', 'Block:', 'Script', 'Global'];
+    return ['Local', 'Locals', 'Local:', 'Block:', 'Script', 'Module', 'module', 'Global'];
   },
   
   getDapAdapterConfiguration: () => {
@@ -542,9 +542,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   updateStateOnCommand: (command: string, _args: unknown, state: AdapterSpecificState): void => {
     const jsState = state as JsAdapterState;
     
-    if (command === 'initialize') {
-      // Will mark initializeResponded when we get the response
-    } else if (command === 'configurationDone') {
+    if (command === 'configurationDone') {
       jsState.configurationDone = true;
     } else if (command === 'launch' || command === 'attach') {
       jsState.startSent = true;

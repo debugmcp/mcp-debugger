@@ -1,6 +1,6 @@
 ﻿/**
- * Simplified MinimalDapClient using proper buffer management
- * Extracts just the message parsing logic from vscode's implementation
+ * MinimalDapClient - Lightweight DAP client for communicating with debug adapters
+ * over TCP sockets using the Debug Adapter Protocol wire format.
  */
 
 import net, { Socket } from 'net';

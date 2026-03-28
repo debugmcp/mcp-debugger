@@ -142,7 +142,7 @@ async function bundleCLI() {
       filter: (src) => {
         const stat = fs.statSync(src);
         if (stat.isDirectory()) return true;
-        return src.endsWith('.js') && !src.endsWith('.d.ts');
+        return src.endsWith('.js');
       }
     });
     console.log(`Copied ${dir}/ from repo dist.`);

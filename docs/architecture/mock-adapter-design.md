@@ -85,8 +85,8 @@ All variables have `variablesReference: 0` (not expandable). Variable references
 Step operations are handled by the mock adapter process with minimal simulation:
 
 - **next** (step over): Increments `currentLine` by 1, sends success response, then emits `stopped(step)` after 50ms.
-- **stepIn**: Sends success response, then emits `stopped(step)` after 50ms. Does not modify `currentLine` or simulate entering a function.
-- **stepOut**: Sends success response, then emits `stopped(step)` after 50ms. Does not modify the call stack.
+- **stepIn**: Increments `currentLine` by 1, sends success response, then emits `stopped(step)` after 50ms.
+- **stepOut**: Increments `currentLine` by 1, sends success response, then emits `stopped(step)` after 50ms.
 - **pause**: Immediately sends `stopped(pause)` with no delay.
 
 All step events use `threadId: 1` and `allThreadsStopped: true`.
@@ -228,7 +228,7 @@ The process implements a `DAPConnection` class that handles Content-Length frame
 **Simulated behavior**:
 - **Breakpoints**: Tracked per-file. On `launch`, if `stopOnEntry` is true, sends a `stopped(entry)` event. Otherwise runs to the first breakpoint (sorted by line) or terminates if none are set.
 - **Continue**: Finds the next breakpoint after the current line and stops there, or sends `terminated` + `exited` if no more breakpoints remain.
-- **Step operations**: `next` increments `currentLine` by one; `stepIn` and `stepOut` send `stopped(step)` events after a 50ms delay.
+- **Step operations**: `next`, `stepIn`, and `stepOut` all increment `currentLine` by one and send `stopped(step)` events after a 50ms delay.
 - **Variables**: Returns hardcoded scopes (Locals with `x=10, y=20, result=30`; Globals with `__name__, __file__`).
 - **Evaluate**: Always returns `'mock_value'` of type `string`.
 - **Stack trace**: Returns two frames: `main` (at current line) and `mockFunction` (at line 42).

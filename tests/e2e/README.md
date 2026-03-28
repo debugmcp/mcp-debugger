@@ -27,7 +27,7 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
   - Stack trace retrieval uses `includeInternals: false` to filter out Node internal frames
   - Variable references change after steps (refresh pattern required)
 - Tests core functionality: breakpoints, stepping, variables, expressions
-- Multiple test scenarios including multiple breakpoints and step-into
+- Multiple test scenarios including multiple breakpoints
 
 ### 4. `mcp-server-smoke-python.test.ts`
 - Tests Python adapter through MCP interface
@@ -80,7 +80,7 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 ### 15. `smoke-test-utils.ts`
 - Shared utilities for all smoke tests
 - Common debug sequence execution
-- Docker and SSE helper functions
+- SSE helper functions
 - Cross-platform compatibility utilities
 
 ### 16. `rust-example-utils.ts`

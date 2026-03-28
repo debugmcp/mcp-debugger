@@ -1,6 +1,5 @@
 /**
  * Message parsing and validation utilities for DAP Proxy
- * Pure functions with no side effects for easy testing
  */
 
 import {
