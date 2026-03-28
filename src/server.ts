@@ -677,7 +677,7 @@ export class DebugMcpServer {
                     port: args.port as number,
                     host: (args.host as string) || 'localhost',
                     timeout: (args.timeout as number) || 30000,
-                    stopOnEntry: args.stopOnEntry ?? false,
+                    stopOnEntry: args.stopOnEntry,
                   });
 
                   result = { content: [{ type: 'text', text: JSON.stringify({
@@ -866,7 +866,7 @@ export class DebugMcpServer {
                   processId: args.processId,
                   timeout: args.timeout,
                   sourcePaths: args.sourcePaths,
-                  stopOnEntry: args.stopOnEntry ?? false,
+                  stopOnEntry: args.stopOnEntry,
                   justMyCode: args.justMyCode
                 });
 

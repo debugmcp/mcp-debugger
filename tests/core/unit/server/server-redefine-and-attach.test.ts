@@ -166,10 +166,10 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       mockSessionManager.createSession.mockResolvedValue(mockSessionInfo);
     });
 
-    it('should default stopOnEntry to false for attach mode', async () => {
+    it('should default stopOnEntry to undefined for attach mode (session manager decides)', async () => {
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: true,
-        state: 'running',
+        state: 'paused',
       });
 
       await callToolHandler({
@@ -186,7 +186,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith(
         'attach-session-1',
         expect.objectContaining({
-          stopOnEntry: false,
+          stopOnEntry: undefined,
         })
       );
     });
@@ -219,10 +219,10 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
   });
 
   describe('attach_to_process stopOnEntry', () => {
-    it('should default stopOnEntry to false', async () => {
+    it('should default stopOnEntry to undefined (session manager decides)', async () => {
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: true,
-        state: 'running',
+        state: 'paused',
       });
 
       await callToolHandler({
@@ -239,7 +239,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith(
         'test-session',
         expect.objectContaining({
-          stopOnEntry: false,
+          stopOnEntry: undefined,
         })
       );
     });
