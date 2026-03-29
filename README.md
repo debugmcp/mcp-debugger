@@ -190,6 +190,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `evaluate_expression` | Evaluate expressions in debug context | ✅ Implemented |
 | `get_source_context` | Get source code context | ✅ Implemented |
 | `close_debug_session` | Close a session | ✅ Implemented |
+| `redefine_classes` | Hot-swap changed Java classes into a running JVM (Java only) | ✅ Implemented |
 
 > 📸 **Screenshot**: *Multi-Session Debugging*
 > 

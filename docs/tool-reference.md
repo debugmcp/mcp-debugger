@@ -701,6 +701,61 @@ The following tools are also available but are not fully documented with example
 - **detach_from_process**: Detaches the debugger from an attached process. Parameters include `sessionId` and optional `terminateProcess` flag.
 - **list_threads**: Lists all threads in the debug session. Parameters include `sessionId`.
 
+---
+
+## Language-Specific Tools
+
+### redefine_classes
+
+Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redefineClasses()`. **Java only.**
+
+**Parameters:**
+- `sessionId` (string, required): The debug session ID (must be an active Java session)
+- `classesDir` (string, required): Absolute path to compiled classes directory (e.g., `build/classes/java/main/`)
+- `sinceTimestamp` (number, optional): Unix timestamp in milliseconds. Only redefine `.class` files modified after this time. `0` or omitted = scan all files.
+
+**Response:**
+```json
+{
+  "success": true,
+  "redefined": ["com.example.Foo", "com.example.Bar"],
+  "redefinedCount": 2,
+  "skippedNotLoaded": 3,
+  "failedCount": 1,
+  "failed": [
+    { "fqcn": "com.example.Baz", "error": "UnsupportedOperationException: class redefinition failed: attempted to add a method" }
+  ],
+  "scannedFiles": 6,
+  "newestTimestamp": 1711500000000
+}
+```
+
+**Example — full scan:**
+```json
+{
+  "sessionId": "abc-123",
+  "classesDir": "/project/build/classes/java/main"
+}
+```
+
+**Example — incremental scan (pass `newestTimestamp` from previous call):**
+```json
+{
+  "sessionId": "abc-123",
+  "classesDir": "/project/build/classes/java/main",
+  "sinceTimestamp": 1711500000000
+}
+```
+
+**Notes:**
+- Only works with Java debug sessions (requires JDI support)
+- Classes must already be loaded in the target JVM — unloaded classes are skipped (`skippedNotLoaded`)
+- Schema changes (adding/removing methods or fields) will fail for individual classes without blocking others
+- The `newestTimestamp` in the response enables incremental workflows: recompile, then pass it as `sinceTimestamp` on the next call to only redefine newly modified files
+- The session can be paused or running when calling this tool
+
+---
+
 ## Error Handling
 
 Tools can return errors in two formats:

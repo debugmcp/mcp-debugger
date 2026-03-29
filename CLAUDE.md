@@ -438,7 +438,7 @@ After adding the MCP server:
 - **Status Check**: After restart, type `/mcp` in Claude Code to see connected servers
 
 ### Available Tools After Integration
-Once connected, the following 20 MCP tools become available:
+Once connected, the following 21 MCP tools become available:
 - `create_debug_session` - Start a new debug session
 - `list_debug_sessions` - List active debug sessions
 - `list_supported_languages` - Show available language adapters
@@ -457,6 +457,7 @@ Once connected, the following 20 MCP tools become available:
 - `get_scopes` - Get variable scopes for a stack frame
 - `evaluate_expression` - Evaluate expressions in debug context
 - `get_source_context` - Get source code around current position
+- `redefine_classes` - Hot-swap changed Java classes into a running JVM (Java only)
 
 **Dev proxy only** (these 3 tools are injected by the dev proxy process itself, not by the main mcp-debugger server):
 - `dev_restart_debugger` - Restart the backend (pass `rebuild: true` to build first)

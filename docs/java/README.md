@@ -255,6 +255,47 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 - Check for firewall rules blocking the port
 - Ensure `server=y` is set in the JDWP agent string
 
+## Hot Reload (redefine_classes)
+
+The `redefine_classes` MCP tool hot-swaps changed Java classes into a running JVM using JDI's `VirtualMachine.redefineClasses()`. This enables edit-compile-reload workflows without restarting the debug session.
+
+### Workflow
+
+1. **Attach** to a running JVM (or launch a debug session)
+2. **Edit** your Java source files
+3. **Recompile** with `javac -g` to produce updated `.class` files
+4. **Call `redefine_classes`** with the classes directory:
+   ```json
+   {
+     "sessionId": "your-session-id",
+     "classesDir": "/project/build/classes/java/main",
+     "sinceTimestamp": 0
+   }
+   ```
+5. The tool scans for `.class` files, matches them against loaded classes, and redefines them
+6. Use the returned `newestTimestamp` as `sinceTimestamp` on subsequent calls for incremental updates
+
+### Limitations
+
+- **No schema changes**: Adding or removing methods, fields, or interfaces will fail for the affected class (reported in the `failed` array). Other classes in the same call are still redefined successfully.
+- **Class must be loaded**: Only classes already loaded by the JVM can be redefined. Unloaded classes are silently skipped (reported in `skippedNotLoaded`).
+- **JVM support**: Requires a JVM that supports class redefinition (HotSpot does; some minimal JVMs may not).
+- **Java only**: This tool is specific to Java debug sessions — it relies on JDI, which is a JVM-specific API.
+
+### Example Output
+
+```json
+{
+  "redefined": ["com.example.Foo", "com.example.Bar"],
+  "redefinedCount": 2,
+  "skippedNotLoaded": 5,
+  "failedCount": 1,
+  "failed": [{"fqcn": "com.example.Baz", "error": "UnsupportedOperationException: schema change"}],
+  "scannedFiles": 8,
+  "newestTimestamp": 1711500000000
+}
+```
+
 ## Additional Resources
 
 - [Java Debug Interface (JDI)](https://docs.oracle.com/en/java/javase/17/docs/api/jdk.jdi/module-summary.html) — JVM debugging API
