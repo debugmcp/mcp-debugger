@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-go",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Go debugging adapter for mcp-debugger using Delve",
   "type": "module",
   "main": "./dist/index.js",

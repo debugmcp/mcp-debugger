@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-03-29
+
+### Added
+- **`redefine_classes` MCP tool** — hot-swap changed Java classes into a running JVM without restarting the debug session (21 MCP tools total) (PR #26, contributed by [@Finomosec](https://github.com/Finomosec))
+- E2E tests for `redefine_classes` and Java ClassPrepareEvent/BreakpointEvent race condition
+- `redefine_classes` documentation in `docs/java/README.md`
+
+### Fixed
+- **Attach-mode stopOnEntry** — restore default to preserve paused state; pass `stopOnEntry` through to attach and default to `false` in `create_debug_session`
+- **Java event loop race** — prevent `ClassPrepareEvent` from resuming stopped threads (PR #27, contributed by [@Finomosec](https://github.com/Finomosec))
+- **Java attach suspend** — suspend VM on attach when `stopOnEntry` is true
+- Remove dead `ProcessAdapter` class and unrecognized `--no-wait` arg from debugpy E2E test
+
+### Changed
+- Comprehensive osoji sweeps — dead code removal, stale docs rewrite, test robustness improvements
+- Replace istanbul ignore comments with real unit tests
+- Fix comprehensive test matrix failures; add dotnet/java language coverage
+
 ## [0.19.0] - 2026-03-22
 
 ### Added
