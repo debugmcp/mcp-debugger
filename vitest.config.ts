@@ -124,7 +124,10 @@ export default defineConfig({
         'packages/shared/src/index.ts',
         'packages/shared/src/models/index.ts'
       ],
-      include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}']
+      include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}'],
+      thresholds: {
+        statements: 80
+      }
     },
     testTimeout: 30000,
     maxWorkers: 1, // Required for process spawning tests
