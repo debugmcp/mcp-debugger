@@ -88,7 +88,7 @@ jobs:
     
     - name: Upload Windows test diagnostics
       if: failure() && matrix.os == 'windows-latest'
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
       with:
         name: windows-test-diagnostics
         path: |
@@ -99,7 +99,7 @@ jobs:
         if-no-files-found: warn
     
     - name: Upload coverage reports
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
       if: matrix.os == 'ubuntu-latest'
       with:
         name: coverage-report
@@ -164,7 +164,7 @@ jobs:
 
     - name: Upload targeted test diagnostics
       if: failure()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
       with:
         name: windows-python-integration-logs
         path: |
