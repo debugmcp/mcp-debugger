@@ -16,7 +16,7 @@ Thank you for your interest in contributing to mcp-debugger! We welcome contribu
 
 ## 📜 Code of Conduct
 
-This project adheres to a Code of Conduct that all contributors are expected to follow. Please be respectful and professional in all interactions.
+This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). All contributors are expected to follow it. Please be respectful and professional in all interactions.
 
 ## 🚀 Getting Started
 
