@@ -28,7 +28,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import tar from 'tar';
+import { extract as tarExtract } from 'tar';
 import extractZip from 'extract-zip';
 import { ensureDir, copy as fsxCopy } from 'fs-extra';
 import { selectBestAsset, normalizePath } from './lib/js-debug-helpers.js';
@@ -219,7 +219,7 @@ async function downloadWithRetries(url, destFile) {
 async function extractArchive(archiveFile, type, outDir) {
   await ensureDir(outDir);
   if (type === 'tgz') {
-    await tar.x({
+    await tarExtract({
       file: archiveFile,
       cwd: outDir,
       // Keep structure; do not strip
