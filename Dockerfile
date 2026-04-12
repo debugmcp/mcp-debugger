@@ -1,12 +1,12 @@
 # Stage 1: Build and bundle the TypeScript application
 ARG DISABLE_LANGUAGES=rust
 
-FROM node:20-slim AS builder
+FROM node:20-slim@sha256:f93745c153377ee2fbbdd6e24efcd03cd2e86d6ab1d8aa9916a3790c40313a55 AS builder
 ARG DISABLE_LANGUAGES
 ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
 # Install pnpm (using version 10 to match local development)
-RUN npm install -g pnpm@10
+RUN npm install -g pnpm@10.33.0
 
 # Set application directory
 WORKDIR /app
@@ -90,7 +90,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/
 
 # Stage 2: Create runtime image with full LLDB dependencies
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:84e77dee7d1bc93fb029a45e3c6cb9d8aa4831ccfcc7103d36e876938d28895b
 # Disable Go at runtime too — Delve isn't installed in the container
 ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet
 
@@ -120,7 +120,7 @@ RUN apt-get update && \
       openjdk-21-jdk-headless && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    pip3 install --break-system-packages --no-cache-dir "debugpy>=1.8.14"
+    pip3 install --break-system-packages --no-cache-dir "debugpy==1.8.14"
 
 # Copy Node runtime from builder to avoid installing system-wide Node.js
 COPY --from=builder /usr/local/bin/node /usr/local/bin/node
