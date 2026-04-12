@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  vite: 7.3.2
+  path-to-regexp: '>=8.4.0'
+  brace-expansion: '>=5.0.5'
+
 importers:
 
   .:
@@ -65,10 +70,10 @@ importers:
         version: 25.5.0
       '@vitest/coverage-istanbul':
         specifier: ^4.1.0
-        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0)))
+        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0)))
       '@vitest/coverage-v8':
         specifier: ^4.1.0
-        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0)))
+        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0)))
       c8:
         specifier: ^11.0.0
         version: 11.0.0
@@ -107,7 +112,7 @@ importers:
         version: 8.57.1(eslint@10.0.3)(typescript@5.9.3)
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
     optionalDependencies:
       '@debugmcp/adapter-dotnet':
         specifier: workspace:*
@@ -154,7 +159,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   packages/adapter-go:
     dependencies:
@@ -176,7 +181,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   packages/adapter-java:
     dependencies:
@@ -198,7 +203,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   packages/adapter-javascript:
     dependencies:
@@ -214,7 +219,7 @@ importers:
         version: 25.5.0
       '@vitest/coverage-v8':
         specifier: ^4.1.0
-        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0)))
+        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0)))
       eslint:
         specifier: ^10.0.3
         version: 10.0.3
@@ -232,7 +237,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   packages/adapter-mock:
     dependencies:
@@ -251,7 +256,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   packages/adapter-python:
     dependencies:
@@ -276,7 +281,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   packages/adapter-rust:
     dependencies:
@@ -304,7 +309,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   packages/mcp-debugger:
     devDependencies:
@@ -344,7 +349,7 @@ importers:
         version: 25.5.0
       '@vitest/coverage-istanbul':
         specifier: ^4.1.0
-        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0)))
+        version: 4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0)))
       rimraf:
         specifier: ^6.1.3
         version: 6.1.3
@@ -353,7 +358,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.0
-        version: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+        version: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
 packages:
 
@@ -997,7 +1002,7 @@ packages:
     resolution: {integrity: sha512-evxREh+Hork43+Y4IOhTo+h5lGmVRyjqI739Rz4RlUPqwrkFFDF6EMvOOYjTx4E8Tl6gyCLRL8Mu7Ry12a13Tw==}
     peerDependencies:
       msw: ^2.4.9
-      vite: ^6.0.0 || ^7.0.0 || ^8.0.0-0
+      vite: 7.3.2
     peerDependenciesMeta:
       msw:
         optional: true
@@ -1091,8 +1096,8 @@ packages:
     resolution: {integrity: sha512-oP5VkATKlNwcgvxi0vM0p/D3n2C3EReYVX+DNYs5TjZFn/oQt2j+4sVJtSMr18pdRr8wjTcBl6LoV+FUwzPmNA==}
     engines: {node: '>=18'}
 
-  brace-expansion@5.0.4:
-    resolution: {integrity: sha512-h+DEnpVvxmfVefa4jFbCf5HdH5YMDXRsmKflpf1pILZWRFlTbJpxeU55nJl4Smt5HQaGzg1o6RHFPJaOqnmBDg==}
+  brace-expansion@5.0.5:
+    resolution: {integrity: sha512-VZznLgtwhn+Mact9tfiwx64fA9erHH/MCXEUfB/0bX/6Fz6ny5EGTXYltMocqg4xFAQZtnO3DHWWXi8RiuN7cQ==}
     engines: {node: 18 || 20 || >=22}
 
   browserslist@4.28.1:
@@ -1804,8 +1809,8 @@ packages:
     resolution: {integrity: sha512-3O/iVVsJAPsOnpwWIeD+d6z/7PmqApyQePUtCndjatj/9I5LylHvt5qluFaBT3I5h3r1ejfR056c+FCv+NnNXg==}
     engines: {node: 18 || 20 || >=22}
 
-  path-to-regexp@8.3.0:
-    resolution: {integrity: sha512-7jdwVIRtsP8MYpdXSwOS0YdD0Du+qOoF/AEPIt88PcCFrZCzx41oxku1jD88hZBwbNUIEfpqvuhjFaMAqMTWnA==}
+  path-to-regexp@8.4.2:
+    resolution: {integrity: sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA==}
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
@@ -2172,8 +2177,8 @@ packages:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
 
-  vite@7.3.1:
-    resolution: {integrity: sha512-w+N7Hifpc3gRjZ63vYBXA56dvvRlNWRczTdmCBBa+CotUzAPf5b7YMdMR/8CQoeYE5LX3W4wj6RYTgonm1b9DA==}
+  vite@7.3.2:
+    resolution: {integrity: sha512-Bby3NOsna2jsjfLVOHKes8sGwgl4TT0E6vvpYgnAYDIF/tie7MRaFthmKuHx1NSXjiTueXH3do80FMQgvEktRg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -2226,7 +2231,7 @@ packages:
       '@vitest/ui': 4.1.0
       happy-dom: '*'
       jsdom: '*'
-      vite: ^6.0.0 || ^7.0.0 || ^8.0.0-0
+      vite: 7.3.2
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
@@ -2872,7 +2877,7 @@ snapshots:
       '@typescript-eslint/types': 8.57.1
       eslint-visitor-keys: 5.0.1
 
-  '@vitest/coverage-istanbul@4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0)))':
+  '@vitest/coverage-istanbul@4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0)))':
     dependencies:
       '@babel/core': 7.29.0
       '@istanbuljs/schema': 0.1.3
@@ -2884,11 +2889,11 @@ snapshots:
       magicast: 0.5.2
       obug: 2.1.1
       tinyrainbow: 3.1.0
-      vitest: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+      vitest: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
     transitivePeerDependencies:
       - supports-color
 
-  '@vitest/coverage-v8@4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0)))':
+  '@vitest/coverage-v8@4.1.0(vitest@4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0)))':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
       '@vitest/utils': 4.1.0
@@ -2900,7 +2905,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.0.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0))
+      vitest: 4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0))
 
   '@vitest/expect@4.1.0':
     dependencies:
@@ -2911,13 +2916,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.0(vite@7.3.1(@types/node@25.5.0))':
+  '@vitest/mocker@4.1.0(vite@7.3.2(@types/node@25.5.0))':
     dependencies:
       '@vitest/spy': 4.1.0
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.1(@types/node@25.5.0)
+      vite: 7.3.2(@types/node@25.5.0)
 
   '@vitest/pretty-format@4.1.0':
     dependencies:
@@ -3016,7 +3021,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  brace-expansion@5.0.4:
+  brace-expansion@5.0.5:
     dependencies:
       balanced-match: 4.0.4
 
@@ -3621,7 +3626,7 @@ snapshots:
 
   minimatch@10.2.4:
     dependencies:
-      brace-expansion: 5.0.4
+      brace-expansion: 5.0.5
 
   minipass@3.3.6:
     dependencies:
@@ -3709,7 +3714,7 @@ snapshots:
       lru-cache: 11.2.7
       minipass: 7.1.3
 
-  path-to-regexp@8.3.0: {}
+  path-to-regexp@8.4.2: {}
 
   pathe@2.0.3: {}
 
@@ -3826,7 +3831,7 @@ snapshots:
       depd: 2.0.0
       is-promise: 4.0.0
       parseurl: 1.3.3
-      path-to-regexp: 8.3.0
+      path-to-regexp: 8.4.2
     transitivePeerDependencies:
       - supports-color
 
@@ -4096,7 +4101,7 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vite@7.3.1(@types/node@25.5.0):
+  vite@7.3.2(@types/node@25.5.0):
     dependencies:
       esbuild: 0.27.4
       fdir: 6.5.0(picomatch@4.0.3)
@@ -4108,10 +4113,10 @@ snapshots:
       '@types/node': 25.5.0
       fsevents: 2.3.3
 
-  vitest@4.1.0(@types/node@25.5.0)(vite@7.3.1(@types/node@25.5.0)):
+  vitest@4.1.0(@types/node@25.5.0)(vite@7.3.2(@types/node@25.5.0)):
     dependencies:
       '@vitest/expect': 4.1.0
-      '@vitest/mocker': 4.1.0(vite@7.3.1(@types/node@25.5.0))
+      '@vitest/mocker': 4.1.0(vite@7.3.2(@types/node@25.5.0))
       '@vitest/pretty-format': 4.1.0
       '@vitest/runner': 4.1.0
       '@vitest/snapshot': 4.1.0
@@ -4128,7 +4133,7 @@ snapshots:
       tinyexec: 1.0.4
       tinyglobby: 0.2.15
       tinyrainbow: 3.1.0
-      vite: 7.3.1(@types/node@25.5.0)
+      vite: 7.3.2(@types/node@25.5.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.5.0
