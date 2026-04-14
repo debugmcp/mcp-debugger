@@ -15,11 +15,7 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "composite": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"],
-      "*": ["node_modules/*"]
-    }
+    "types": ["node"]
   },
   "ts-node": {
     "esm": true,
