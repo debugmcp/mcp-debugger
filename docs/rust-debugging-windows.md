@@ -73,6 +73,34 @@ The resulting binaries (in `target/x86_64-pc-windows-gnu/debug`) contain DWARF d
 
 > **Tip:** For scripts or CI, set `RUSTFLAGS="-C debuginfo=2"` to ensure full debug symbols even if profiles are customised.
 
+### Full MinGW Binutils Required for Crates That Import From Windows DLLs
+
+`rustup toolchain install stable-gnu` ships a *self-contained* GNU toolchain under `%USERPROFILE%\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained\`. That directory contains `dlltool.exe`, `ld.exe`, and a linker-only `x86_64-w64-mingw32-gcc.exe`, but **no GNU assembler (`as.exe`)**.
+
+For a bare binary (no dependencies) that is enough — `rust-lld` handles linking and `dlltool` is never invoked. But as soon as any transitive dependency needs to import symbols from a Windows system DLL (e.g. `windows-sys`, `parking_lot_core`, anything that brings in `tokio`), `rustc` calls `dlltool.exe` to synthesise import libraries for `kernel32.dll` / `ntdll.dll`, and `dlltool` in turn spawns `as.exe`. Without it you get:
+
+```
+error: dlltool could not create import library with ... dlltool.exe ...:
+    dlltool.exe: CreateProcess
+error: could not compile `parking_lot_core` (lib) due to 1 previous error
+```
+
+Install the full MinGW-w64 binutils (and gcc, if any dependency's `build.rs` compiles C) via MSYS2:
+
+```powershell
+winget install --id=MSYS2.MSYS2 -e
+C:\msys64\usr\bin\bash.exe -lc "pacman -Sy --noconfirm && pacman -S --needed --noconfirm mingw-w64-x86_64-binutils mingw-w64-x86_64-gcc"
+```
+
+Then prepend `C:\msys64\mingw64\bin` to your user `PATH` so `as.exe`, `ld.exe`, `dlltool.exe`, and `gcc.exe` resolve there:
+
+```powershell
+$current = [Environment]::GetEnvironmentVariable('Path','User')
+[Environment]::SetEnvironmentVariable('Path', "C:\msys64\mingw64\bin;$current", 'User')
+```
+
+Open a new shell (or VS Code window) so the change is picked up, then rerun `cargo +stable-gnu build --target x86_64-pc-windows-gnu`.
+
 ---
 
 ## What Happens With MSVC Builds?

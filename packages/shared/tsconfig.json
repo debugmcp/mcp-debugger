@@ -17,10 +17,7 @@
     "resolveJsonModule": true,
     "composite": true,
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
-    "baseUrl": ".",
-    "paths": {
-      "*": ["node_modules/*"]
-    }
+    "types": ["node"]
   },
   "ts-node": {
     "esm": true,
