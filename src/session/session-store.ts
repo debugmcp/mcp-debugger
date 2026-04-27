@@ -57,6 +57,11 @@ export interface ManagedSession extends DebugSessionInfo {
   executionState?: ExecutionState;
   logDir?: string;
   toolchainValidation?: ToolchainValidationState;
+  // True once the first 'stopped' event after launch has been observed.
+  // Used by the auto-continue trigger to identify the initial entry stop
+  // even when the adapter reports a non-'entry' reason (e.g., js-debug
+  // emits 'pause' from its post-attach forced pause).
+  firstStopHandled?: boolean;
 }
 
 /**

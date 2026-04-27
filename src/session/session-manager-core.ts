@@ -207,18 +207,37 @@ export abstract class SessionManagerCore {
   }
 
   protected setupProxyEventHandlers(
-    session: ManagedSession, 
+    session: ManagedSession,
     proxyManager: IProxyManager,
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void {
     const sessionId = session.id;
     const handlers = new Map<string, (...args: any[]) => void>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- Event handlers require flexible argument signatures to support various event types
 
+    // Reset first-stop tracking for this launch — a session may be re-launched.
+    session.firstStopHandled = false;
+
+    // Adapters whose first stopped event after launch may not carry
+    // reason='entry' (e.g., js-debug emits 'pause'/'breakpoint' from
+    // pauseForSourceMap or post-attach forced pauses) opt into a relaxed
+    // first-stop auto-continue rule. Identified by the policy flag
+    // `pauseAfterChildAttach`, which today is true only for js-debug.
+    // Other adapters keep the strict reason==='entry' check so a real
+    // user-initiated pause_execution lands paused, not auto-continued.
+    let firstStopMayBeNonEntry = false;
+    try {
+      const policy = this.sessionStore.selectPolicy(session.language);
+      firstStopMayBeNonEntry =
+        policy.getDapClientBehavior?.().pauseAfterChildAttach === true;
+    } catch (err) {
+      this.logger.debug(`[SessionManager ${sessionId}] Could not determine adapter policy for first-stop heuristic: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Named function for stopped event
     const handleStopped = (threadId: number | undefined, reason: string) => {
       this.logger.debug(`[SessionManager] handleStopped: session=${sessionId} currentState=${session.state} reason=${reason} threadId=${threadId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
-      
+
       // Log debug state change with structured logging
       // Note: We don't have location info at this point, but that could be added later if needed
       this.logger.info('debug:state', {
@@ -229,10 +248,26 @@ export abstract class SessionManagerCore {
         threadId: threadId,
         timestamp: Date.now()
       });
-      
+
+      // Reasons that always reflect explicit user-visible debug events.
+      // Even on the very first stop, these must NOT be auto-continued —
+      // the user set the breakpoint or hit the exception deliberately.
+      const userBreakReasons = new Set([
+        'breakpoint',
+        'function breakpoint',
+        'data breakpoint',
+        'instruction breakpoint',
+        'exception'
+      ]);
+      const isFirstStop = !session.firstStopHandled;
+      const shouldAutoContinue =
+        !effectiveLaunchArgs.stopOnEntry &&
+        (reason === 'entry' ||
+          (firstStopMayBeNonEntry && isFirstStop && !userBreakReasons.has(reason)));
+
       // Handle auto-continue for stopOnEntry=false
-      if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-        this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false)`);
+      if (shouldAutoContinue) {
+        this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false) [reason=${reason}, firstStop=${isFirstStop}]`);
         // Must set PAUSED synchronously before handleAutoContinue, because
         // continue() requires session.state === SessionState.PAUSED.
         this._updateSessionState(session, SessionState.PAUSED);
@@ -242,6 +277,8 @@ export abstract class SessionManagerCore {
       } else {
         this._updateSessionState(session, SessionState.PAUSED);
       }
+
+      session.firstStopHandled = true;
     };
     proxyManager.on('stopped', handleStopped);
     handlers.set('stopped', handleStopped);

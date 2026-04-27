@@ -231,8 +231,12 @@ export class ChildSessionManager extends EventEmitter {
       // Handle post-attach initialization if needed
       await this.handlePostAttachInit(child);
       
-      // Ensure initial stop if policy requires it
-      if (this.dapBehavior.pauseAfterChildAttach) {
+      // Ensure initial stop if policy requires it.
+      // Skip when the user explicitly requested stopOnEntry=false: forcing a
+      // pause contradicts intent and the resulting 'pause'-reason stopped
+      // event would not be recognized by the auto-continue trigger.
+      const wantsEntryStop = parentConfig?.stopOnEntry !== false;
+      if (this.dapBehavior.pauseAfterChildAttach && wantsEntryStop) {
         await this.ensureChildStopped(child);
       }
       
