@@ -1,0 +1,33 @@
+# Cross-platform line endings.
+# Default: auto-detect text, store and check out as LF on every platform.
+# This overrides per-user core.autocrlf settings so the working tree matches
+# what's stored in git, regardless of OS — eliminates phantom "modified"
+# diffs on Windows when build tooling (e.g. scripts/prepare-pack.js) writes
+# package.json with LF.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF or cmd.exe / PowerShell may misbehave.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary assets — don't try to convert.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.svg  binary
+*.tgz  binary
+*.zip  binary
+*.gz   binary
+*.exe  binary
+*.dll  binary
+*.so   binary
+*.dylib binary
+*.class binary
+*.jar  binary
+*.wasm binary
+*.node binary
+*.pdf  binary
