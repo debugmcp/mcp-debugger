@@ -55,20 +55,21 @@ The following components are in scope for security reports:
 
 ## Trust Model
 
-mcp-debugger is a debugger, not a sandbox. It is intended to be run locally under a specific OS user, driven by an MCP client (such as an AI agent) that the operator has chosen to trust at that user's privilege level. **The trust boundary is the deployment, not the tool.**
+mcp-debugger is a debugger, not a sandbox. It runs as a process trusted at the level of its invoking OS user, driven by an MCP client (such as an AI agent) that the operator has chosen to trust at that same level. **The trust boundary is the deployment, not the tool.** This holds whether the MCP client is on the same machine over stdio or remote over SSE, and whether the debuggee is local or attached over DAP.
 
-This means:
+There are really two privilege scopes the MCP client inherits:
 
-- The MCP client can read any file the mcp-debugger process can read (`get_source_context`, DAP source requests).
-- The MCP client can spawn arbitrary processes (`create_debug_session` + `start_debugging`, `attach_to_process`).
-- The MCP client can execute arbitrary code inside a debuggee (`evaluate_expression`, `redefine_classes`).
+- On the **mcp-debugger host**, the MCP client can read any file the mcp-debugger process can read (`get_source_context`, DAP source requests) and spawn arbitrary processes (`create_debug_session` + `start_debugging`, `attach_to_process`).
+- On the **debuggee host** (which may be a remote machine reached via `attach_to_process`), the MCP client can execute arbitrary code inside the debuggee (`evaluate_expression`, `redefine_classes`).
 
 These capabilities are intrinsic to being a debugger and cannot be removed without defeating the tool's purpose. In particular, `evaluate_expression` forwards a caller-supplied expression to the debug adapter, which evaluates it in the debuggee's runtime; deciding whether such an expression is "safe" is undecidable in general and not a property mcp-debugger attempts to enforce.
 
-If you want to constrain what the MCP client can reach, constrain the mcp-debugger process:
+If you want to constrain what the MCP client can reach, constrain the mcp-debugger process — and any host running a debuggee it can attach to:
 
 - **Containers.** Run the published `debugmcp/mcp-debugger` image with the workspace mounted at `/workspace`. The container boundary is the filesystem boundary.
 - **OS permissions.** Run mcp-debugger as a user with read access only to the source you want it to debug, and no access to secrets, SSH keys, credentials, etc. The kernel enforces the limits.
+- **Network exposure.** If running in SSE mode, treat the SSE port as a remote shell endpoint — anyone who can reach it inherits the mcp-debugger process's privileges. Bind to loopback or put it behind authenticated network access.
+- **Remote debuggees.** When using `attach_to_process` to debug a process on another host, the MCP client inherits that debuggee's privileges too. Apply the same containment reasoning there.
 - **MCP client trust.** Do not expose mcp-debugger to an MCP client that you trust less than the OS user mcp-debugger runs under.
 
 ## Security Design
