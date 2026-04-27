@@ -30,6 +30,7 @@ packages/*/tests/**/*.js.map
 *.tgz
 packages/**/*.tgz
 *.vsix
+dist-tarball/
 
 # Turbo cache (not using Turborepo)
 .turbo/
