@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Command } from 'commander';
-import { createCLI, setupStdioCommand, setupSSECommand } from '../../../src/cli/setup.js';
+import { createCLI, setupStdioCommand, setupSSECommand, setupHttpCommand } from '../../../src/cli/setup.js';
 
 describe('CLI Setup', () => {
   describe('createCLI', () => {
@@ -92,7 +92,7 @@ describe('CLI Setup', () => {
       const sseCommand = program.commands.find(cmd => cmd.name() === 'sse');
       
       expect(sseCommand).toBeDefined();
-      expect(sseCommand?.description()).toBe('Start the server using SSE (Server-Sent Events) transport');
+      expect(sseCommand?.description()).toBe('Start the server using SSE (DEPRECATED: use "http" subcommand instead)');
       expect(sseCommand?.options).toHaveLength(3);
       
       // Check options
@@ -152,12 +152,53 @@ describe('CLI Setup', () => {
     });
   });
 
+  describe('setupHttpCommand', () => {
+    it('should configure http command with correct options', () => {
+      const program = new Command();
+      const mockHandler = vi.fn();
+
+      setupHttpCommand(program, mockHandler);
+
+      const httpCommand = program.commands.find(cmd => cmd.name() === 'http');
+
+      expect(httpCommand).toBeDefined();
+      expect(httpCommand?.description()).toBe(
+        'Start the server using Streamable HTTP transport (recommended)'
+      );
+      expect(httpCommand?.options).toHaveLength(3);
+
+      const options = httpCommand?.options || [];
+      const portOption = options.find(opt => opt.long === '--port');
+      const logLevelOption = options.find(opt => opt.long === '--log-level');
+      const logFileOption = options.find(opt => opt.long === '--log-file');
+
+      expect(portOption?.short).toBe('-p');
+      expect(portOption?.defaultValue).toBe('3001');
+      expect(logLevelOption?.defaultValue).toBe('info');
+      expect(logFileOption).toBeDefined();
+    });
+
+    it('should call handler when http command is executed', async () => {
+      const program = new Command();
+      const mockHandler = vi.fn().mockResolvedValue(undefined);
+
+      setupHttpCommand(program, mockHandler);
+
+      await program.parseAsync(['node', 'test', 'http', '--port', '4000', '--log-level', 'debug']);
+
+      expect(mockHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ port: '4000', logLevel: 'debug' }),
+        expect.anything()
+      );
+    });
+  });
+
   describe('Integration', () => {
     it('should set stdio as default command', async () => {
       const program = new Command();
       const stdioHandler = vi.fn().mockResolvedValue(undefined);
       const sseHandler = vi.fn().mockResolvedValue(undefined);
-      
+
       setupStdioCommand(program, stdioHandler);
       setupSSECommand(program, sseHandler);
 
