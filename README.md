@@ -60,7 +60,7 @@ The script installs the `stable-gnu` toolchain (via rustup), sets up `dlltool.ex
 
 The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (via winget + pacman) so `cargo +stable-gnu` has a fully functional `dlltool/ld/as` stack. If MSYS2 is already installed, it simply reuses it; otherwise it guides you through installing it (or warns so you can install manually).
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- 🔌 **STDIO and SSE transport modes** – Works with any MCP client
+- 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client (legacy SSE transport is deprecated)
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
 - 📊 **1266+ tests passing** – battle-tested end-to-end

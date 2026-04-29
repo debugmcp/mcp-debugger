@@ -11,12 +11,15 @@ export interface SSEOptions {
   logFile?: string;
 }
 
+export type HttpOptions = SSEOptions;
+
 export interface CheckRustBinaryOptions {
   json?: boolean;
 }
 
 export type StdioHandler = (options: StdioOptions, command?: Command) => Promise<void>;
 export type SSEHandler = (options: SSEOptions, command?: Command) => Promise<void>;
+export type HttpHandler = (options: HttpOptions, command?: Command) => Promise<void>;
 export type CheckRustBinaryHandler = (
   binaryPath: string,
   options: CheckRustBinaryOptions,
@@ -50,12 +53,26 @@ export function setupStdioCommand(program: Command, handler: StdioHandler): void
 export function setupSSECommand(program: Command, handler: SSEHandler): void {
   program
     .command('sse')
-    .description('Start the server using SSE (Server-Sent Events) transport')
+    .description('Start the server using SSE (DEPRECATED: use "http" subcommand instead)')
     .option('-p, --port <number>', 'Port to listen on', '3001')
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
     .action(async (options: SSEOptions, command: Command) => {
       // Silencing also applies to SSE to protect transports used for JS debugging
+      process.env.CONSOLE_OUTPUT_SILENCED = '1';
+      await handler(options, command);
+    });
+}
+
+export function setupHttpCommand(program: Command, handler: HttpHandler): void {
+  program
+    .command('http')
+    .description('Start the server using Streamable HTTP transport (recommended)')
+    .option('-p, --port <number>', 'Port to listen on', '3001')
+    .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
+    .option('--log-file <path>', 'Log to file instead of console')
+    .action(async (options: HttpOptions, command: Command) => {
+      // Silence console output to protect any spawned proxy IPC channels
       process.env.CONSOLE_OUTPUT_SILENCED = '1';
       await handler(options, command);
     });

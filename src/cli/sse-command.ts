@@ -197,6 +197,10 @@ export async function handleSSECommand(
   }
   
   const port = parseInt(options.port, 10);
+  logger.warn(
+    `SSE transport is deprecated and will be removed in a future release. ` +
+      `Switch to: mcp-debugger http -p ${port}`
+  );
   logger.info(`Starting Debug MCP Server in SSE mode on port ${port}`);
 
   try {
