@@ -28,10 +28,10 @@ import path from 'path';
 import net from 'net';
 import { fileURLToPath } from 'url';
 import { execSync, spawn, ChildProcess } from 'child_process';
-import fs from 'fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { prepareJavaExample } from './java-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -158,12 +158,8 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       return;
     }
 
-    const testJavaFile = path.resolve(ROOT, 'examples', 'java', 'InfiniteWait.java');
-    const testClassDir = path.resolve(ROOT, 'examples', 'java');
-
-    // Compile with full debug info (-g) so JDI can access local variables
-    execSync(`javac -g "${testJavaFile}"`, { cwd: testClassDir, stdio: 'pipe' });
-    console.log('[Java Attach Test] Compiled InfiniteWait.java');
+    const { sourcePath: testJavaFile, classDir: testClassDir, mainClass } = prepareJavaExample('InfiniteWait');
+    console.log('[Java Attach Test] InfiniteWait.class ready in', testClassDir);
 
     try {
       // Pick a free port
@@ -174,7 +170,7 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       jvmProcess = spawn('java', [
         `-agentlib:jdwp=transport=dt_socket,server=y,address=${jdwpPort},suspend=y`,
         '-cp', testClassDir,
-        'InfiniteWait'
+        mainClass
       ], {
         cwd: testClassDir,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -332,16 +328,6 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       expect(finalContinue.success).toBe(true);
 
     } finally {
-      // Clean up compiled class files
-      try {
-        const classFile = path.resolve(testClassDir, 'InfiniteWait.class');
-        if (fs.existsSync(classFile)) {
-          fs.unlinkSync(classFile);
-        }
-      } catch {
-        // Ignore cleanup errors
-      }
-
       // Kill JVM if still running
       if (jvmProcess && !jvmProcess.killed) {
         jvmProcess.kill('SIGKILL');
@@ -360,11 +346,7 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       return;
     }
 
-    const testJavaFile = path.resolve(ROOT, 'examples', 'java', 'InfiniteWait.java');
-    const testClassDir = path.resolve(ROOT, 'examples', 'java');
-
-    // Compile with full debug info
-    execSync(`javac -g "${testJavaFile}"`, { cwd: testClassDir, stdio: 'pipe' });
+    const { sourcePath: testJavaFile, classDir: testClassDir, mainClass } = prepareJavaExample('InfiniteWait');
 
     try {
       // Pick a free port and spawn JVM with JDWP (suspend=y)
@@ -374,7 +356,7 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       jvmProcess = spawn('java', [
         `-agentlib:jdwp=transport=dt_socket,server=y,address=${jdwpPort},suspend=y`,
         '-cp', testClassDir,
-        'InfiniteWait'
+        mainClass
       ], {
         cwd: testClassDir,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -504,10 +486,6 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       console.log('[Attach BP-While-Paused] TEST PASSED — breakpoint added while paused was hit');
 
     } finally {
-      try {
-        const classFile = path.resolve(testClassDir, 'InfiniteWait.class');
-        if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
-      } catch { /* ignore */ }
       if (jvmProcess && !jvmProcess.killed) {
         jvmProcess.kill('SIGKILL');
         jvmProcess = null;

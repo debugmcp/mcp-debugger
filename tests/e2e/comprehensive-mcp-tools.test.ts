@@ -16,6 +16,7 @@ import { execSync } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { prepareJavaExample } from './java-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,10 +109,7 @@ function ensureDotnetBuild(): string {
 }
 
 function ensureJavaBuild(): void {
-  execSync(`javac -g -d "${JAVA_CLASS_DIR}" "${JAVA_SCRIPT}"`, {
-    cwd: JAVA_CLASS_DIR,
-    stdio: 'pipe',
-  });
+  prepareJavaExample('HelloWorld');
 }
 
 // Module-level variables set by beforeAll build steps
