@@ -19,10 +19,10 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
-import fs from 'fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { prepareJavaExample } from './java-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -124,111 +124,91 @@ describe('MCP Server Java Inner Class Breakpoint Smoke Test @requires-java', () 
       return;
     }
 
-    const testJavaFile = path.resolve(ROOT, 'examples', 'java', 'InnerClassTest.java');
-    const testClassDir = path.resolve(ROOT, 'examples', 'java');
+    const { sourcePath: testJavaFile, classDir: testClassDir, mainClass } = prepareJavaExample('InnerClassTest');
+    console.log('[Java Inner Class Test] InnerClassTest.class ready in', testClassDir);
 
-    // Compile with full debug info
-    execSync(`javac -g -d "${testClassDir}" "${testJavaFile}"`, {
-      cwd: testClassDir,
-      stdio: 'pipe'
+    // 1. Create session
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'java', name: 'java-inner-class-test' }
     });
-    console.log('[Java Inner Class Test] Compiled InnerClassTest.java');
+    const createResponse = parseSdkToolResult(createResult);
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+    console.log(`[Java Inner Class Test] Session created: ${sessionId}`);
 
-    try {
-      // 1. Create session
-      const createResult = await mcpClient!.callTool({
-        name: 'create_debug_session',
-        arguments: { language: 'java', name: 'java-inner-class-test' }
-      });
-      const createResponse = parseSdkToolResult(createResult);
-      expect(createResponse.sessionId).toBeDefined();
-      sessionId = createResponse.sessionId as string;
-      console.log(`[Java Inner Class Test] Session created: ${sessionId}`);
+    // 2. Set breakpoint on line 15 (int result = a + b; inside Inner.compute())
+    const bpResult = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: testJavaFile, line: 15 }
+    }));
+    expect(bpResult.success).toBe(true);
+    console.log('[Java Inner Class Test] Breakpoint set on line 15 (Inner.compute)');
 
-      // 2. Set breakpoint on line 15 (int result = a + b; inside Inner.compute())
-      const bpResult = parseSdkToolResult(await mcpClient!.callTool({
-        name: 'set_breakpoint',
-        arguments: { sessionId, file: testJavaFile, line: 15 }
-      }));
-      expect(bpResult.success).toBe(true);
-      console.log('[Java Inner Class Test] Breakpoint set on line 15 (Inner.compute)');
-
-      // 3. Start debugging
-      const startResult = parseSdkToolResult(await mcpClient!.callTool({
-        name: 'start_debugging',
-        arguments: {
-          sessionId,
-          scriptPath: testJavaFile,
-          args: [],
-          dapLaunchArgs: {
-            mainClass: 'InnerClassTest',
-            classpath: testClassDir,
-            cwd: testClassDir,
-            stopOnEntry: false
-          }
+    // 3. Start debugging
+    const startResult = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: testJavaFile,
+        args: [],
+        dapLaunchArgs: {
+          mainClass,
+          classpath: testClassDir,
+          cwd: testClassDir,
+          stopOnEntry: false
         }
-      }));
-      expect(startResult.success).toBe(true);
-      console.log('[Java Inner Class Test] Debugging started');
-
-      // 4. Wait for breakpoint hit
-      console.log('[Java Inner Class Test] Waiting for breakpoint hit...');
-      const stackResponse = await waitForPausedState(mcpClient!, sessionId, 30, 500);
-
-      // HARD ASSERTION: Breakpoint in inner class must fire
-      expect(stackResponse).not.toBeNull();
-      const frames = stackResponse!.stackFrames!;
-      expect(frames.length).toBeGreaterThan(0);
-
-      const topFrame = frames[0];
-      console.log(`[Java Inner Class Test] Hit breakpoint at ${topFrame.name}:${topFrame.line}`);
-
-      // Top frame should be in compute() method
-      expect(topFrame.name?.toLowerCase()).toContain('compute');
-      if (typeof topFrame.line === 'number' && topFrame.line > 0) {
-        expect(topFrame.line).toBe(15);
       }
+    }));
+    expect(startResult.success).toBe(true);
+    console.log('[Java Inner Class Test] Debugging started');
 
-      // 5. Get local variables and verify a=7, b=8
-      console.log('[Java Inner Class Test] Getting local variables...');
-      const localsRaw = await mcpClient!.callTool({
-        name: 'get_local_variables',
-        arguments: { sessionId }
-      });
-      const localsResponse = parseSdkToolResult(localsRaw) as {
-        success?: boolean;
-        variables?: Array<{ name: string; value: string }>;
-      };
+    // 4. Wait for breakpoint hit
+    console.log('[Java Inner Class Test] Waiting for breakpoint hit...');
+    const stackResponse = await waitForPausedState(mcpClient!, sessionId, 30, 500);
 
-      expect(localsResponse.success).toBe(true);
-      expect(Array.isArray(localsResponse.variables)).toBe(true);
+    // HARD ASSERTION: Breakpoint in inner class must fire
+    expect(stackResponse).not.toBeNull();
+    const frames = stackResponse!.stackFrames!;
+    expect(frames.length).toBeGreaterThan(0);
 
-      const localsByName = new Map(
-        (localsResponse.variables ?? []).map(v => [v.name, v.value])
-      );
-      console.log('[Java Inner Class Test] Variables:', Object.fromEntries(localsByName));
+    const topFrame = frames[0];
+    console.log(`[Java Inner Class Test] Hit breakpoint at ${topFrame.name}:${topFrame.line}`);
 
-      // HARD ASSERTION: a=7, b=8 in compute()
-      expect(localsByName.get('a')).toBe('7');
-      expect(localsByName.get('b')).toBe('8');
-
-      // 6. Continue execution to let program finish
-      console.log('[Java Inner Class Test] Continuing execution...');
-      const contResult = await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-      expect(contResult.success).toBe(true);
-
-      console.log('[Java Inner Class Test] TEST PASSED — inner class breakpoint worked');
-
-    } finally {
-      // Clean up compiled class files (InnerClassTest.class and InnerClassTest$Inner.class)
-      try {
-        const classFile = path.resolve(testClassDir, 'InnerClassTest.class');
-        if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
-      } catch { /* ignore */ }
-      try {
-        const innerClassFile = path.resolve(testClassDir, 'InnerClassTest$Inner.class');
-        if (fs.existsSync(innerClassFile)) fs.unlinkSync(innerClassFile);
-      } catch { /* ignore */ }
+    // Top frame should be in compute() method
+    expect(topFrame.name?.toLowerCase()).toContain('compute');
+    if (typeof topFrame.line === 'number' && topFrame.line > 0) {
+      expect(topFrame.line).toBe(15);
     }
+
+    // 5. Get local variables and verify a=7, b=8
+    console.log('[Java Inner Class Test] Getting local variables...');
+    const localsRaw = await mcpClient!.callTool({
+      name: 'get_local_variables',
+      arguments: { sessionId }
+    });
+    const localsResponse = parseSdkToolResult(localsRaw) as {
+      success?: boolean;
+      variables?: Array<{ name: string; value: string }>;
+    };
+
+    expect(localsResponse.success).toBe(true);
+    expect(Array.isArray(localsResponse.variables)).toBe(true);
+
+    const localsByName = new Map(
+      (localsResponse.variables ?? []).map(v => [v.name, v.value])
+    );
+    console.log('[Java Inner Class Test] Variables:', Object.fromEntries(localsByName));
+
+    // HARD ASSERTION: a=7, b=8 in compute()
+    expect(localsByName.get('a')).toBe('7');
+    expect(localsByName.get('b')).toBe('8');
+
+    // 6. Continue execution to let program finish
+    console.log('[Java Inner Class Test] Continuing execution...');
+    const contResult = await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+    expect(contResult.success).toBe(true);
+
+    console.log('[Java Inner Class Test] TEST PASSED — inner class breakpoint worked');
   }, 60000);
 });
