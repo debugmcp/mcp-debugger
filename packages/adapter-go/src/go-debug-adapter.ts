@@ -304,12 +304,25 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Debug Configuration =====
   
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<GoLaunchConfig> {
+    // Inference rule: a .go source file means dlv should compile-and-run
+    // (mode 'debug'); anything else (a pre-built binary) means dlv should
+    // run it directly (mode 'exec'). dlv exits with no useful error when
+    // given a binary in 'debug' mode, so this auto-detection is required
+    // for usable UX. An explicit user-supplied mode always wins (e.g.
+    // 'test', 'replay', 'core').
+    const rawConfig = config as Record<string, unknown>;
+    const userMode = rawConfig.mode as GoLaunchConfig['mode'] | undefined;
+    const program = rawConfig.program;
+    const isGoSource = typeof program === 'string'
+      && program.toLowerCase().endsWith('.go');
+    const inferredMode: GoLaunchConfig['mode'] = isGoSource ? 'debug' : 'exec';
+    const mode = userMode ?? inferredMode;
+
     const goConfig: GoLaunchConfig = {
       ...config,
       type: 'go',
       request: 'launch',
-      // Preserve mode if specified (e.g., 'test'), otherwise default to 'debug'
-      mode: (config as Record<string, unknown>).mode as GoLaunchConfig['mode'] || 'debug',
+      mode,
       // Default stopOnEntry to false: Delve returns "unknown goroutine" when
       // stack traces are requested immediately after stopping on entry.
       stopOnEntry: config.stopOnEntry ?? false,
