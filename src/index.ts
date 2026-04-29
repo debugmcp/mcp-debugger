@@ -45,10 +45,12 @@ import {
   createCLI,
   setupStdioCommand,
   setupSSECommand,
+  setupHttpCommand,
   setupCheckRustBinaryCommand,
 } from './cli/setup.js';
 import { handleStdioCommand } from './cli/stdio-command.js';
 import { handleSSECommand } from './cli/sse-command.js';
+import { handleHttpCommand } from './cli/http-command.js';
 import { handleCheckRustBinaryCommand } from './cli/commands/check-rust-binary.js';
 import { getVersion } from './cli/version.js';
 import fs from 'fs';
@@ -104,6 +106,10 @@ export async function main(): Promise<void> {
     handleSSECommand(options, { logger, serverFactory: createDebugMcpServer })
   );
 
+  setupHttpCommand(program, (options) =>
+    handleHttpCommand(options, { logger, serverFactory: createDebugMcpServer })
+  );
+
   setupCheckRustBinaryCommand(program, (binaryPath, options) =>
     handleCheckRustBinaryCommand(binaryPath, options)
   );
@@ -145,13 +151,15 @@ if (isMainModule) {
 }
 
 // Export for testing
-export { 
-  setupErrorHandlers, 
-  createCLI, 
-  setupStdioCommand, 
+export {
+  setupErrorHandlers,
+  createCLI,
+  setupStdioCommand,
   setupSSECommand,
+  setupHttpCommand,
   setupCheckRustBinaryCommand,
   handleStdioCommand,
   handleSSECommand,
+  handleHttpCommand,
   handleCheckRustBinaryCommand
 };

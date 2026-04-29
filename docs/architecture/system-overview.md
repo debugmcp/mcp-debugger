@@ -55,7 +55,7 @@ graph TB
 - **Purpose**: Entry point for MCP protocol communication
 - **Key Files**: 
   - `src/server.ts` - Main server implementation
-  - `src/index.ts` - CLI entry point with subcommands (stdio, sse, check-rust-binary)
+  - `src/index.ts` - CLI entry point with subcommands (stdio, http, sse [deprecated], check-rust-binary)
 - **Responsibilities**:
   - Handle MCP tool registration and routing
   - Manage server lifecycle and transport modes
@@ -201,7 +201,7 @@ sequenceDiagram
 ### Core Technologies
 - **Runtime**: Node.js 18+ with ES modules
 - **Language**: TypeScript 5.x with strict mode
-- **Protocol**: Model Context Protocol (MCP) over stdio/SSE
+- **Protocol**: Model Context Protocol (MCP) over stdio or Streamable HTTP (legacy SSE deprecated)
 - **Debugging**: Debug Adapter Protocol (DAP) 1.51.0
 - **Testing**: Vitest with 90%+ coverage
 - **Bundling**: tsup with `noExternal` for self-contained distributions
@@ -224,8 +224,9 @@ sequenceDiagram
 
 ### 1. NPX Distribution (Recommended)
 ```bash
-npx @debugmcp/mcp-debugger stdio  # stdio mode
-npx @debugmcp/mcp-debugger sse -p 3001  # SSE mode
+npx @debugmcp/mcp-debugger stdio        # stdio mode
+npx @debugmcp/mcp-debugger http -p 3001 # Streamable HTTP mode (recommended for remote)
+npx @debugmcp/mcp-debugger sse -p 3001  # SSE mode (deprecated)
 ```
 - Self-contained bundles with all dependencies
 - No installation required
@@ -235,12 +236,13 @@ npx @debugmcp/mcp-debugger sse -p 3001  # SSE mode
 ### 2. Local Node.js
 ```bash
 pnpm install && npm run build
-node dist/index.js stdio              # stdio mode
-node dist/index.js sse -p 3001       # SSE mode
+node dist/index.js stdio                # stdio mode
+node dist/index.js http -p 3001         # Streamable HTTP mode (recommended)
+node dist/index.js sse -p 3001          # SSE mode (deprecated)
 ```
 
 ### 3. Docker Container
-- Dockerfile configured for both stdio and SSE modes
+- Dockerfile configured for stdio and HTTP modes
 - Python and debugpy pre-installed in image
 - Volume mounting for workspace access
 - Uses bundled versions for minimal image size
@@ -283,7 +285,7 @@ This architecture enables:
 - **Startup Time**: ~1-2s for session initialization
 - **Command Latency**: <100ms for most DAP commands
 - **Memory Usage**: ~50MB base + ~20MB per active session
-- **Concurrent Sessions**: Limited by system resources. In SSE mode, the MCP SDK uses a single transport connection, so concurrent tool calls from a single client are serialized. Multiple independent clients can connect in SSE mode for true concurrency. STDIO mode supports a single client connection.
+- **Concurrent Sessions**: Limited by system resources. In Streamable HTTP mode, each MCP session gets an isolated `DebugMcpServer` instance routed by `Mcp-Session-Id`, so multiple clients run independently without serialization. In legacy SSE mode, all connections share a single `DebugMcpServer` and tool calls from a single client are serialized. STDIO mode supports a single client connection.
 
 ## Error Handling Strategy
 

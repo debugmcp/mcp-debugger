@@ -207,7 +207,10 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       const bpResponse = parseSdkToolResult(bpResult);
       console.log('[Go Smoke Test] Breakpoint response:', bpResponse);
 
-      // 3. Start debugging (exec mode for pre-compiled binary)
+      // 3. Start debugging — scriptPath is a pre-compiled binary, and the
+      // adapter must auto-infer mode 'exec' from the absence of a .go
+      // extension. Do NOT pass an explicit mode here; that's the property
+      // under test.
       console.log('[Go Smoke Test] Starting debugging...');
       const startResult = await mcpClient!.callTool({
         name: 'start_debugging',
@@ -216,7 +219,6 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
           scriptPath: testBinary, // Pre-compiled binary
           args: [],
           dapLaunchArgs: {
-            mode: 'exec',
             stopOnEntry: false
           }
         }

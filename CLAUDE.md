@@ -74,7 +74,8 @@ node dist/index.js
 
 # Run with specific transport modes
 node dist/index.js                          # STDIO mode (default)
-node dist/index.js sse -p 3001             # SSE mode (HTTP/Server-Sent Events)
+node dist/index.js http -p 3001             # Streamable HTTP mode (recommended for remote)
+node dist/index.js sse -p 3001              # SSE mode (DEPRECATED — use http instead)
 ```
 
 ### Testing
@@ -167,7 +168,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 1. **MCP Server Layer** (`src/server.ts`, `src/index.ts`)
    - Entry point for MCP protocol communication
    - Handles tool registration and routing
-   - Supports STDIO and SSE transport modes
+   - Supports STDIO and Streamable HTTP transport modes (legacy SSE deprecated)
    - Dynamically discovers available language adapters
 
 2. **Adapter System** (NEW)
@@ -408,16 +409,17 @@ claude mcp add-json mcp-debugger \
   '{"type":"stdio","command":"node","args":["tools/dev-proxy/dev-proxy.mjs"]}'
 ```
 
-The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that sits between Claude Code and mcp-debugger. It maintains a stable stdio connection to Claude Code while managing the backend as a restartable SSE child process. This means you can rebuild and restart mcp-debugger **without restarting Claude Code** (which would lose conversation context).
+The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that sits between Claude Code and mcp-debugger. It maintains a stable stdio connection to Claude Code while managing the backend as a restartable Streamable HTTP child process (default; legacy SSE and stdio modes are also supported via `DEV_PROXY_BACKEND_TRANSPORT`). This means you can rebuild and restart mcp-debugger **without restarting Claude Code** (which would lose conversation context).
 
 **When to use**: Whenever you are actively developing mcp-debugger — making code changes, adding adapters, or installing new toolchains (Go, etc.) that need to be picked up by the running server.
 
 **How it works**: After code changes, call the `dev_rebuild_and_restart` tool. The proxy kills the backend, runs `npm run build`, spawns a fresh process, and reconnects — all transparently. If the backend crashes, dev tools remain available to bring it back.
 
 **Configuration** (env vars, all optional):
-- `DEV_PROXY_PORT` — Backend SSE port (default: 3001)
+- `DEV_PROXY_PORT` — Backend HTTP port (default: 3001; used by `http` and `sse` modes)
 - `DEV_PROXY_BUILD_CMD` — Build command (default: `npm run build`)
 - `DEV_PROXY_ROOT` — Project root (default: auto-detected)
+- `DEV_PROXY_BACKEND_TRANSPORT` — `http` (default), `sse` (legacy/deprecated), or `stdio`
 
 #### Verify Installation
 
