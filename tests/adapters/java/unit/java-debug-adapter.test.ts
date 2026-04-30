@@ -383,6 +383,56 @@ describe('JavaDebugAdapter', () => {
         launchConfig: {}
       })).toThrow(/JDI bridge not compiled|Valid TCP port/);
     });
+
+    it('passes --owner-pid from MCP_DEBUGGER_MAIN_PID when set', () => {
+      const prev = process.env.MCP_DEBUGGER_MAIN_PID;
+      process.env.MCP_DEBUGGER_MAIN_PID = '424242';
+      try {
+        const result = adapter.buildAdapterCommand({
+          sessionId: 'test-session',
+          executablePath: 'java',
+          adapterHost: '127.0.0.1',
+          adapterPort: 38000,
+          logDir: '/tmp/logs',
+          scriptPath: '/app/Main.java',
+          scriptArgs: [],
+          launchConfig: {}
+        });
+        const idx = result.args.indexOf('--owner-pid');
+        expect(idx).toBeGreaterThanOrEqual(0);
+        expect(result.args[idx + 1]).toBe('424242');
+      } catch (error) {
+        // JDI bridge not compiled in this environment — covered by other tests
+        expect((error as Error).message).toMatch(/JDI bridge not compiled/);
+      } finally {
+        if (prev === undefined) delete process.env.MCP_DEBUGGER_MAIN_PID;
+        else process.env.MCP_DEBUGGER_MAIN_PID = prev;
+      }
+    });
+
+    it('falls back to process.ppid when MCP_DEBUGGER_MAIN_PID is unset', () => {
+      const prev = process.env.MCP_DEBUGGER_MAIN_PID;
+      delete process.env.MCP_DEBUGGER_MAIN_PID;
+      try {
+        const result = adapter.buildAdapterCommand({
+          sessionId: 'test-session',
+          executablePath: 'java',
+          adapterHost: '127.0.0.1',
+          adapterPort: 38000,
+          logDir: '/tmp/logs',
+          scriptPath: '/app/Main.java',
+          scriptArgs: [],
+          launchConfig: {}
+        });
+        const idx = result.args.indexOf('--owner-pid');
+        expect(idx).toBeGreaterThanOrEqual(0);
+        expect(result.args[idx + 1]).toBe(String(process.ppid));
+      } catch (error) {
+        expect((error as Error).message).toMatch(/JDI bridge not compiled/);
+      } finally {
+        if (prev !== undefined) process.env.MCP_DEBUGGER_MAIN_PID = prev;
+      }
+    });
   });
 
   describe('transformLaunchConfig', () => {

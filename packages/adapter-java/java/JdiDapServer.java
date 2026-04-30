@@ -63,6 +63,14 @@ public class JdiDapServer {
     // --- Logging ---
     private static boolean debug = false;
 
+    // --- Orphan-reap markers (stamped onto launched JVM command lines) ---
+    // ownerPid identifies the mcp-debugger main process so a future startup can
+    // detect a leaked JVM (owner dead) and reap it. sessionTag is informational —
+    // a UUID for log correlation. Both are emitted as -D system properties on
+    // the spawned JVM, visible to /proc, ps, and Win32_Process.
+    private static long ownerPid = -1;
+    private static String sessionTag = "";
+
     public static void main(String[] args) throws Exception {
         int port = 0;
         for (int i = 0; i < args.length; i++) {
@@ -71,14 +79,39 @@ public class JdiDapServer {
                 i++;
             } else if ("--debug".equals(args[i])) {
                 debug = true;
+            } else if ("--owner-pid".equals(args[i]) && i + 1 < args.length) {
+                try {
+                    ownerPid = Long.parseLong(args[i + 1]);
+                } catch (NumberFormatException e) { /* ignore malformed pid */ }
+                i++;
+            } else if ("--session-tag".equals(args[i]) && i + 1 < args.length) {
+                sessionTag = args[i + 1];
+                i++;
             }
         }
         if (port == 0) {
-            System.err.println("Usage: java JdiDapServer --port <port>");
+            System.err.println("Usage: java JdiDapServer --port <port> [--owner-pid <pid>] [--session-tag <tag>]");
             System.exit(1);
         }
+        if (sessionTag.isEmpty()) {
+            sessionTag = java.util.UUID.randomUUID().toString();
+        }
 
-        new JdiDapServer().run(port);
+        final JdiDapServer server = new JdiDapServer();
+
+        // SIGTERM / Process.destroy / console-close path: the launched debuggee
+        // JVM must still be killed even if we don't process the DAP disconnect.
+        // (SIGKILL / Process.destroyForcibly skips this hook — that's what the
+        // Node-side orphan reaper covers on next startup.)
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                server.cleanup();
+            } catch (Throwable t) {
+                // Shutdown hooks must not throw.
+            }
+        }, "mcp-debugger-jdi-cleanup"));
+
+        server.run(port);
     }
 
     private void run(int port) throws Exception {
@@ -306,8 +339,21 @@ public class JdiDapServer {
             }
         }
 
-        log("Launching: " + String.join(" ", cmdList));
-        ProcessBuilder pb = new ProcessBuilder(cmdList);
+        // Stamp the spawned JVM with -D markers so a future mcp-debugger startup
+        // can identify orphans from this run (owner_pid dead) and reap them.
+        // Inserted immediately after the java executable so they're picked up
+        // by the JVM as system properties (and visible in cmdline scans).
+        List<String> taggedCmd = new ArrayList<>(cmdList.size() + 3);
+        taggedCmd.add(cmdList.get(0));
+        taggedCmd.add("-Dmcp.debugger.jvm=true");
+        if (ownerPid > 0) {
+            taggedCmd.add("-Dmcp.debugger.owner_pid=" + ownerPid);
+        }
+        taggedCmd.add("-Dmcp.debugger.session_tag=" + sessionTag);
+        taggedCmd.addAll(cmdList.subList(1, cmdList.size()));
+
+        log("Launching: " + String.join(" ", taggedCmd));
+        ProcessBuilder pb = new ProcessBuilder(taggedCmd);
         pb.redirectErrorStream(false);
         launchedProcess = pb.start();
 
@@ -1459,7 +1505,9 @@ public class JdiDapServer {
         }
     }
 
-    private void cleanup() {
+    // synchronized so the shutdown-hook thread and the disconnect/terminate
+    // handlers can't race when the proxy is shutting down rapidly.
+    private synchronized void cleanup() {
         if (vm != null) {
             try {
                 vm.dispose();

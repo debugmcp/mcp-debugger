@@ -947,10 +947,15 @@ export class DapProxyWorker {
     }
     this.dapClient = null;
 
-    // In attach mode, give the adapter time to complete detach cleanup
-    // after receiving the DAP disconnect before we kill the adapter process.
+    // Give the adapter time to complete its post-disconnect cleanup before we
+    // kill the adapter process. Attach mode: completes detach without
+    // terminating the debuggee. Launch mode: gives e.g. JdiDapServer time to
+    // destroyForcibly the launched debuggee JVM (otherwise it's orphaned).
     if (this.isAttachMode && this.processManager && this.adapterProcess) {
       this.logger?.info('[Worker] Attach mode: waiting 500ms for adapter to complete detach...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } else if (!this.isAttachMode && this.processManager && this.adapterProcess) {
+      this.logger?.info('[Worker] Launch mode: waiting 500ms for adapter to terminate debuggee...');
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 

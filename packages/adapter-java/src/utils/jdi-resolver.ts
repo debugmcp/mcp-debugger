@@ -4,7 +4,7 @@
  * JdiDapServer.java compiles to java/out/JdiDapServer.class.
  * This module resolves that output directory for use by the adapter.
  */
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync, execSync } from 'child_process';
@@ -74,20 +74,26 @@ function resolveJdiBridgeSourceDir(): string | null {
 }
 
 /**
- * Ensure the JDI bridge is compiled. Compiles on-demand if needed.
+ * Ensure the JDI bridge is compiled. Compiles on-demand if needed, and also
+ * recompiles when the .java source is newer than the cached .class — this
+ * prevents stale bridge classes from silently dropping CLI args added in
+ * newer versions (e.g. --owner-pid for the orphan-reap markers).
  *
  * @returns Path to the output directory, or null if compilation fails
  */
 export function ensureJdiBridgeCompiled(): string | null {
-  // Already compiled?
-  const existing = resolveJdiBridgeClassDir();
-  if (existing) return existing;
-
-  // Find source
+  // Find source first so we can compare against any cached .class
   const sourceDir = resolveJdiBridgeSourceDir();
-  if (!sourceDir) return null;
+  const sourceFile = sourceDir ? path.join(sourceDir, 'JdiDapServer.java') : null;
 
-  const sourceFile = path.join(sourceDir, 'JdiDapServer.java');
+  // Already compiled and not stale?
+  const existing = resolveJdiBridgeClassDir();
+  if (existing && (!sourceFile || !isClassStale(sourceFile, existing))) {
+    return existing;
+  }
+
+  if (!sourceDir || !sourceFile) return null;
+
   const outDir = path.join(sourceDir, 'out');
 
   // Find javac
@@ -120,5 +126,21 @@ export function ensureJdiBridgeCompiled(): string | null {
     return outDir;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Returns true when the .java source has a newer mtime than the cached
+ * .class. Stat failures are treated as "not stale" — a missing source
+ * shouldn't trigger a rebuild attempt against a known-good cached class.
+ */
+function isClassStale(sourceFile: string, classDir: string): boolean {
+  const classFile = path.join(classDir, 'JdiDapServer.class');
+  try {
+    const sourceMtime = statSync(sourceFile).mtimeMs;
+    const classMtime = statSync(classFile).mtimeMs;
+    return sourceMtime > classMtime;
+  } catch {
+    return false;
   }
 }
