@@ -62,18 +62,11 @@
       fs.mkdirSync(logsDir, { recursive: true });
     } catch (_) {}
 
-    // Mirror stdin raw for diagnostics (what the server receives)
-    try {
-      const stdinLogPath = path.join(logsDir, 'stdin-raw.log');
-      const stdinLogStream = fs.createWriteStream(stdinLogPath, { flags: 'a' });
-      if (process.stdin && typeof process.stdin.on === 'function') {
-        process.stdin.on('data', (chunk) => {
-          try {
-            stdinLogStream.write(chunk);
-          } catch (_) {}
-        });
-      }
-    } catch (_) {}
+    // No stdin mirror: attaching a 'data' listener here puts stdin into
+    // flowing mode at preload time. Any bytes the client wrote before the
+    // MCP SDK's StdioServerTransport attaches its own listener inside
+    // server.connect() are read out by this listener and lost to the SDK,
+    // which manifests as a hung MCP `initialize` and a 60 s client timeout.
 
     // Mirror stdout to a file for diagnostics (non-invasive: do not modify content or gating)
     try {
