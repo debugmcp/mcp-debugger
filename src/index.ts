@@ -39,6 +39,7 @@ process.argv = process.argv.map(arg =>
 );
 
 import { createLogger } from './utils/logger.js';
+import { reapOrphanJvms } from './utils/jvm-orphan-reaper.js';
 import { DebugMcpServer } from './server.js';
 import { setupErrorHandlers } from './cli/error-handlers.js';
 import {
@@ -90,7 +91,24 @@ try {
 // Main execution function
 export async function main(): Promise<void> {
   const logger = createLogger('debug-mcp:cli');
-  
+
+  // Stamp our PID so the Java adapter (and other future child-spawning
+  // adapters) can mark debuggee processes with our identity. The reaper
+  // below uses this to decide which orphans from prior runs are ours to kill.
+  process.env.MCP_DEBUGGER_MAIN_PID = String(process.pid);
+
+  // Best-effort cleanup of debuggee JVMs leaked by prior crashed runs. Awaited
+  // synchronously so a fresh server starts in a known-clean state. Failures
+  // here must never block startup — wrapped in try/catch.
+  try {
+    const result = await reapOrphanJvms({ selfPid: process.pid, logger });
+    if (result.killed.length > 0) {
+      logger.info(`[startup] Reaped ${result.killed.length} orphan JVM(s) from prior runs`);
+    }
+  } catch (e) {
+    logger.warn(`[startup] Orphan JVM reaper failed: ${(e as Error).message}`);
+  }
+
   // Setup error handlers
   setupErrorHandlers({ logger });
   
