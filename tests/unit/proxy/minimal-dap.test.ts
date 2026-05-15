@@ -1378,4 +1378,362 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  // Helper: a socket that auto-responds with a success response for every
+  // outgoing request, so `sendRequest` resolves without needing the test to
+  // synthesize responses by hand.
+  const echoSocket = (capturedRequests?: DebugProtocol.Request[]) => {
+    const sock = {
+      destroyed: false,
+      end: vi.fn(),
+      destroy: vi.fn(),
+      write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+        cb?.(null);
+        const [, body] = raw.split('\r\n\r\n');
+        const request = JSON.parse(body) as DebugProtocol.Request;
+        capturedRequests?.push(request);
+        setImmediate(() => {
+          void (client as any).handleProtocolMessage({
+            seq: request.seq,
+            type: 'response',
+            request_seq: request.seq,
+            command: request.command,
+            success: true
+          } satisfies DebugProtocol.Response);
+        });
+        return true;
+      })
+    } as unknown as net.Socket;
+    return sock;
+  };
+
+  describe('Adapter ID normalization on initialize', () => {
+    it('mutates adapterID when policy provides a normalizer that changes it', async () => {
+      const captured: DebugProtocol.Request[] = [];
+      (client as any).socket = echoSocket(captured);
+      (client as any).dapBehavior = {
+        normalizeAdapterId: vi.fn((id: string) => `${id}-normalized`)
+      };
+
+      await client.sendRequest('initialize', { adapterID: 'python' });
+
+      expect((client as any).dapBehavior.normalizeAdapterId).toHaveBeenCalledWith('python');
+      expect(captured).toHaveLength(1);
+      expect((captured[0].arguments as { adapterID: string }).adapterID).toBe('python-normalized');
+    });
+
+    it('passes original args through when normalizer throws', async () => {
+      const captured: DebugProtocol.Request[] = [];
+      (client as any).socket = echoSocket(captured);
+      (client as any).dapBehavior = {
+        normalizeAdapterId: vi.fn(() => {
+          throw new Error('boom');
+        })
+      };
+
+      await expect(
+        client.sendRequest('initialize', { adapterID: 'python' })
+      ).resolves.toBeDefined();
+
+      expect(captured).toHaveLength(1);
+      expect((captured[0].arguments as { adapterID: string }).adapterID).toBe('python');
+    });
+
+    it('does not invoke normalizer when adapterID is missing from args', async () => {
+      const captured: DebugProtocol.Request[] = [];
+      (client as any).socket = echoSocket(captured);
+      const normalizer = vi.fn((id: string) => id);
+      (client as any).dapBehavior = { normalizeAdapterId: normalizer };
+
+      await client.sendRequest('initialize', { clientID: 'test' });
+
+      expect(normalizer).not.toHaveBeenCalled();
+      expect(captured).toHaveLength(1);
+    });
+
+    it('leaves args untouched when normalizer returns the same value', async () => {
+      const captured: DebugProtocol.Request[] = [];
+      (client as any).socket = echoSocket(captured);
+      const normalizer = vi.fn((id: string) => id);
+      (client as any).dapBehavior = { normalizeAdapterId: normalizer };
+
+      await client.sendRequest('initialize', { adapterID: 'python' });
+
+      expect(normalizer).toHaveBeenCalledWith('python');
+      expect((captured[0].arguments as { adapterID: string }).adapterID).toBe('python');
+    });
+  });
+
+  describe('Non-stackTrace child wait loop', () => {
+    it('polls for an active child before dispatching a child-scoped non-stackTrace command', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      stubManager.hasActiveChildren.mockReturnValue(true);
+
+      const childResponse: DebugProtocol.Response = {
+        seq: 99,
+        type: 'response',
+        request_seq: 1,
+        command: 'next',
+        success: true
+      };
+      const childClient = {
+        sendRequest: vi.fn().mockResolvedValue(childResponse)
+      } as unknown as MinimalDapClient;
+
+      let polls = 0;
+      stubManager.getActiveChild.mockImplementation(() => {
+        polls += 1;
+        return polls >= 4 ? childClient : null;
+      });
+
+      const routedClient = new MinimalDapClient(
+        'localhost',
+        5678,
+        JsDebugAdapterPolicy,
+        {
+          childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+        }
+      );
+      (routedClient as any).socket = {
+        destroyed: false,
+        end: vi.fn(),
+        destroy: vi.fn(),
+        write: vi.fn()
+      } as unknown as net.Socket;
+      (routedClient as any).sleep = vi.fn().mockResolvedValue(undefined);
+
+      const result = await routedClient.sendRequest<DebugProtocol.Response>('next', { threadId: 1 });
+
+      expect((routedClient as any).sleep).toHaveBeenCalled();
+      expect(childClient.sendRequest).toHaveBeenCalledWith('next', { threadId: 1 }, 30000);
+      expect(result).toEqual(childResponse);
+      // Parent socket must not have been written to: the routed call took over.
+      expect((routedClient as any).socket.write).not.toHaveBeenCalled();
+
+      routedClient.shutdown();
+    });
+  });
+
+  describe('Child fallback behavior', () => {
+    it('returns a synthetic success response when child disconnects during a graceful-completion command', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+
+      const childClient = {
+        sendRequest: vi.fn().mockRejectedValue(new Error('DAP client disconnected'))
+      } as unknown as MinimalDapClient;
+
+      const routedClient = new MinimalDapClient(
+        'localhost',
+        5678,
+        JsDebugAdapterPolicy,
+        {
+          childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+        }
+      );
+      (routedClient as any).socket = {
+        destroyed: false,
+        end: vi.fn(),
+        destroy: vi.fn(),
+        write: vi.fn()
+      } as unknown as net.Socket;
+      (routedClient as any).activeChild = childClient;
+
+      const result = await routedClient.sendRequest<DebugProtocol.Response>('continue', { threadId: 1 });
+
+      expect(result.success).toBe(true);
+      expect(result.command).toBe('continue');
+      // The synthetic response must not have round-tripped through the parent socket.
+      expect((routedClient as any).socket.write).not.toHaveBeenCalled();
+
+      routedClient.shutdown();
+    });
+
+    it('falls through to parent socket when child disconnects on a non-graceful command', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+
+      const childClient = {
+        sendRequest: vi.fn().mockRejectedValue(new Error('Socket not connected'))
+      } as unknown as MinimalDapClient;
+
+      const captured: DebugProtocol.Request[] = [];
+      const routedClient = new MinimalDapClient(
+        'localhost',
+        5678,
+        JsDebugAdapterPolicy,
+        {
+          childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+        }
+      );
+      (routedClient as any).socket = {
+        destroyed: false,
+        end: vi.fn(),
+        destroy: vi.fn(),
+        write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+          cb?.(null);
+          const [, body] = raw.split('\r\n\r\n');
+          const request = JSON.parse(body) as DebugProtocol.Request;
+          captured.push(request);
+          setImmediate(() => {
+            void (routedClient as any).handleProtocolMessage({
+              seq: request.seq,
+              type: 'response',
+              request_seq: request.seq,
+              command: request.command,
+              success: true
+            } satisfies DebugProtocol.Response);
+          });
+          return true;
+        })
+      } as unknown as net.Socket;
+      (routedClient as any).activeChild = childClient;
+
+      const result = await routedClient.sendRequest<DebugProtocol.Response>('next', { threadId: 1 });
+
+      expect(childClient.sendRequest).toHaveBeenCalled();
+      // After child fallback, the request fell through to the parent socket.
+      expect(captured).toHaveLength(1);
+      expect(captured[0].command).toBe('next');
+      expect(result.success).toBe(true);
+
+      routedClient.shutdown();
+    });
+
+    it('rethrows when the child rejects with an unrelated error', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+
+      const childClient = {
+        sendRequest: vi.fn().mockRejectedValue(new Error('adapter blew up'))
+      } as unknown as MinimalDapClient;
+
+      const routedClient = new MinimalDapClient(
+        'localhost',
+        5678,
+        JsDebugAdapterPolicy,
+        {
+          childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+        }
+      );
+      (routedClient as any).socket = {
+        destroyed: false,
+        end: vi.fn(),
+        destroy: vi.fn(),
+        write: vi.fn()
+      } as unknown as net.Socket;
+      (routedClient as any).activeChild = childClient;
+
+      await expect(
+        routedClient.sendRequest('next', { threadId: 1 })
+      ).rejects.toThrow('adapter blew up');
+
+      routedClient.shutdown();
+    });
+  });
+
+  describe('Configuration deferral edge cases', () => {
+    it('replaces an in-flight deferred configurationDone with a fresh deferral', () => {
+      client.shutdown();
+
+      let timerCounter = 0;
+      const setTimeoutSpy = vi.fn(
+        () => ({ id: ++timerCounter }) as unknown as NodeJS.Timeout
+      );
+      const clearTimeoutSpy = vi.fn();
+
+      client = new MinimalDapClient('localhost', 5678, undefined, {
+        timers: {
+          setTimeout: setTimeoutSpy as unknown as typeof setTimeout,
+          clearTimeout: clearTimeoutSpy as unknown as typeof clearTimeout
+        }
+      });
+      (client as any).socket = {
+        destroyed: false,
+        end: vi.fn(),
+        destroy: vi.fn(),
+        write: vi.fn()
+      } as unknown as net.Socket;
+      (client as any).deferParentConfigDoneActive = true;
+
+      const promise1 = client.sendRequest('configurationDone', { first: true });
+      promise1.catch(() => undefined);
+      const firstDeferred = (client as any).parentConfigDoneDeferred;
+      expect(firstDeferred).not.toBeNull();
+      expect(firstDeferred.timer).toEqual({ id: 1 });
+
+      const promise2 = client.sendRequest('configurationDone', { second: true });
+      promise2.catch(() => undefined);
+
+      expect(clearTimeoutSpy).toHaveBeenCalledWith({ id: 1 });
+      expect((client as any).parentConfigDoneDeferred).not.toBe(firstDeferred);
+      expect((client as any).parentConfigDoneDeferred.timer).toEqual({ id: 2 });
+
+      // Clean up dangling deferred to avoid lingering state.
+      (client as any).parentConfigDoneDeferred?.reject(new Error('test cleanup'));
+    });
+
+    it('passes configurationDone through immediately when suppressNextConfigDoneDeferral is set', async () => {
+      const captured: DebugProtocol.Request[] = [];
+      (client as any).socket = echoSocket(captured);
+      (client as any).deferParentConfigDoneActive = true;
+      (client as any).suppressNextConfigDoneDeferral = true;
+
+      await client.sendRequest('configurationDone', { go: true });
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].command).toBe('configurationDone');
+      expect((client as any).suppressNextConfigDoneDeferral).toBe(false);
+      expect((client as any).parentConfigDoneDeferred).toBeNull();
+    });
+  });
+
+  describe('Trace file error handling', () => {
+    it('swallows fs.appendFileSync errors so requests still complete', async () => {
+      const originalTrace = process.env.DAP_TRACE_FILE;
+      process.env.DAP_TRACE_FILE = 'trace.ndjson';
+      const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation(() => {
+        throw new Error('disk full');
+      });
+
+      const traceClient = new MinimalDapClient('localhost', 5678);
+      const captured: DebugProtocol.Request[] = [];
+      const sock = {
+        destroyed: false,
+        end: vi.fn(),
+        destroy: vi.fn(),
+        write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+          cb?.(null);
+          const [, body] = raw.split('\r\n\r\n');
+          const request = JSON.parse(body) as DebugProtocol.Request;
+          captured.push(request);
+          setImmediate(() => {
+            void (traceClient as any).handleProtocolMessage({
+              seq: request.seq,
+              type: 'response',
+              request_seq: request.seq,
+              command: request.command,
+              success: true
+            } satisfies DebugProtocol.Response);
+          });
+          return true;
+        })
+      } as unknown as net.Socket;
+      (traceClient as any).socket = sock;
+
+      await expect(traceClient.sendRequest('threads')).resolves.toBeDefined();
+
+      expect(appendSpy).toHaveBeenCalled();
+      expect(captured).toHaveLength(1);
+
+      appendSpy.mockRestore();
+      traceClient.shutdown();
+      if (originalTrace === undefined) {
+        delete process.env.DAP_TRACE_FILE;
+      } else {
+        process.env.DAP_TRACE_FILE = originalTrace;
+      }
+    });
+  });
+
 });
