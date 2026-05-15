@@ -118,7 +118,8 @@ export async function listTaggedJvms(): Promise<TaggedJvm[]> {
   }
 }
 
-async function listLinux(): Promise<TaggedJvm[]> {
+/** @internal Exposed for unit tests; not part of the public module API. */
+export async function listLinux(): Promise<TaggedJvm[]> {
   let entries: string[];
   try {
     entries = await fs.readdir('/proc');
@@ -144,7 +145,8 @@ async function listLinux(): Promise<TaggedJvm[]> {
   return result;
 }
 
-async function listDarwin(): Promise<TaggedJvm[]> {
+/** @internal Exposed for unit tests; not part of the public module API. */
+export async function listDarwin(): Promise<TaggedJvm[]> {
   // -ww disables column truncation; otherwise long java cmdlines lose the
   // -D markers we depend on. -A lists all users' processes (we filter by
   // owner_pid liveness anyway).
@@ -166,7 +168,8 @@ async function listDarwin(): Promise<TaggedJvm[]> {
   return result;
 }
 
-async function listWindows(): Promise<TaggedJvm[]> {
+/** @internal Exposed for unit tests; not part of the public module API. */
+export async function listWindows(): Promise<TaggedJvm[]> {
   // Get-CimInstance is the modern path; wmic is deprecated and missing on
   // fresh Windows 11 installs. ConvertTo-Json -Compress keeps stdout small.
   // -NoProfile skips loading user profile scripts (faster, more deterministic).
@@ -206,7 +209,8 @@ async function listWindows(): Promise<TaggedJvm[]> {
   return result;
 }
 
-function parseArgs(pid: number, args: string[]): TaggedJvm | null {
+/** @internal Exposed for unit tests; not part of the public module API. */
+export function parseArgs(pid: number, args: string[]): TaggedJvm | null {
   let hasMarker = false;
   let ownerPid = -1;
   let sessionTag = '';
@@ -238,7 +242,8 @@ export function isPidAlive(pid: number): boolean {
   }
 }
 
-function defaultKill(pid: number): boolean {
+/** @internal Exposed for unit tests; not part of the public module API. */
+export function defaultKill(pid: number): boolean {
   try {
     process.kill(pid, 'SIGKILL');
     return true;
