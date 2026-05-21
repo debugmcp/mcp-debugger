@@ -296,8 +296,8 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
     const possiblePaths = [
       // Development: running from compiled adapter package dist/
       path.resolve(__dirname, 'utils', 'netcoredbg-bridge.js'),
-      // Bundled NPX distribution (cli.mjs is in dist/, bridge copied alongside)
-      path.resolve(__dirname, '..', 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
+      // Bundled NPX distribution (cli.mjs is in dist/, bridge copied at dist/packages/adapter-dotnet/dist/utils/)
+      path.resolve(__dirname, 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
       // Monorepo source tree fallback
       path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
       // CWD-relative fallback

@@ -211,15 +211,24 @@ async function bundleCLI() {
     console.warn('Run: pnpm -w -F @debugmcp/adapter-rust run build:adapter');
   }
 
-  // Copy netcoredbg bridge script for .NET adapter
-  const bridgeSrc = path.join(repoRoot, 'packages/adapter-dotnet/dist/utils/netcoredbg-bridge.js');
-  if (fs.existsSync(bridgeSrc)) {
-    const bridgeDestDir = path.join(distDir, 'packages', 'adapter-dotnet', 'dist', 'utils');
-    fs.mkdirSync(bridgeDestDir, { recursive: true });
-    fs.cpSync(bridgeSrc, path.join(bridgeDestDir, 'netcoredbg-bridge.js'));
-    console.log('Copied netcoredbg bridge script.');
+  // Copy .NET adapter runtime utils. The bridge entry imports ./netcoredbg-bridge-core.js
+  // at runtime in the spawned child Node process, so the core file must be present on
+  // disk next to the entry — tsup only inlines into cli.mjs, not the spawned worker.
+  const dotnetUtilsSrc = path.join(repoRoot, 'packages/adapter-dotnet/dist/utils');
+  if (fs.existsSync(dotnetUtilsSrc)) {
+    const dotnetUtilsDest = path.join(distDir, 'packages', 'adapter-dotnet', 'dist', 'utils');
+    fs.mkdirSync(dotnetUtilsDest, { recursive: true });
+    fs.cpSync(dotnetUtilsSrc, dotnetUtilsDest, {
+      recursive: true,
+      filter: (src) => {
+        const stat = fs.statSync(src);
+        if (stat.isDirectory()) return true;
+        return src.endsWith('.js');
+      }
+    });
+    console.log('Copied .NET adapter runtime utils (netcoredbg bridge + core).');
   } else {
-    console.warn('Warning: netcoredbg-bridge.js not found; .NET debugging may fail in NPX distribution.');
+    console.warn('Warning: packages/adapter-dotnet/dist/utils/ not found; .NET debugging will fail in NPX distribution.');
   }
 
   // Mirror dist into the package/ directory used by npm pack artifacts.

@@ -40,8 +40,12 @@ console.log('Bundle path:', bundlePath);
     console.log('\nChecking for required runtime assets:');
     const requiredAssets = [
       {
-        name: 'netcoredbg bridge (.NET)',
+        name: 'netcoredbg bridge entry (.NET)',
         path: 'packages/adapter-dotnet/dist/utils/netcoredbg-bridge.js'
+      },
+      {
+        name: 'netcoredbg bridge core (.NET)',
+        path: 'packages/adapter-dotnet/dist/utils/netcoredbg-bridge-core.js'
       },
       {
         name: 'proxy bundle',
