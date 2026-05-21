@@ -252,18 +252,24 @@ async function bundleCLI() {
     });
     console.log('npm pack artifact refreshed in packages/mcp-debugger/package/.');
 
-    // Copy tarball to stable name for local npx testing
-    const tgzFiles = fs.readdirSync(path.join(packageRoot, 'package'))
-      .filter(f => f.endsWith('.tgz'));
-    if (tgzFiles.length > 0) {
-      // Note: lexicographic sort may misorder semver (e.g., 0.9.0 > 0.10.0).
-      // For robustness, derive from package.json version if precise ordering matters.
-      const latestTgz = tgzFiles.sort().pop();
+    // Copy tarball to stable alias for local npx testing. Derive the exact
+    // filename from package.json — avoids two hazards in readdir-based discovery:
+    // the alias itself can win the lexicographic sort over the real tarball
+    // ('m' > 'd'), and version-named files can sort out of order (0.9.0 > 0.10.0).
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')
+    );
+    const tarballName = `${pkg.name.replace('@', '').replace('/', '-')}-${pkg.version}.tgz`;
+    const tarballPath = path.join(packageRoot, 'package', tarballName);
+
+    if (fs.existsSync(tarballPath)) {
       fs.copyFileSync(
-        path.join(packageRoot, 'package', latestTgz),
+        tarballPath,
         path.join(packageRoot, 'package', 'mcp-debugger-latest.tgz')
       );
-      console.log(`Copied ${latestTgz} → mcp-debugger-latest.tgz`);
+      console.log(`Copied ${tarballName} → mcp-debugger-latest.tgz`);
+    } else {
+      console.warn(`Warning: expected tarball ${tarballName} not found; mcp-debugger-latest.tgz not refreshed.`);
     }
   } finally {
     execSync(`node "${preparePackScript}" restore`, {
