@@ -40,7 +40,7 @@ All language adapters are bundled into the CLI package. No separate installation
 - **.NET** (`@debugmcp/adapter-dotnet`) - .NET debugging via netcoredbg
 - **Mock** (`@debugmcp/adapter-mock`) - Mock adapter for testing
 
-**System Requirements:** Node.js 18+ is required to run mcp-debugger. You also need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Go + Delve, JDK 21+, netcoredbg with a compatible .NET runtime).
+**System Requirements:** Node.js 22+ is required to run mcp-debugger. You also need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Go + Delve, JDK 21+, netcoredbg with a compatible .NET runtime).
 
 ### Check Rust binary compatibility
 ```bash

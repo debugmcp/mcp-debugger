@@ -21,7 +21,7 @@ Build and test
 - Test:  pnpm -w -F @debugmcp/adapter-javascript run test
 
 Validation
-- Node.js 18+ required
+- Node.js 22+ required
 - Requires bundled js-debug vendor file at vendor/js-debug/vsDebugServer.js
 - Optional TypeScript runners: tsx or ts-node recommended; absence only results in a warning
 - The factory-level validation does not spawn processes or touch the network, but it does perform filesystem checks (e.g., `fs.existsSync` for the vendored adapter and TypeScript runner detection)
@@ -44,7 +44,7 @@ Notes
 Populate the Microsoft js-debug adapter into this package so that validation passes and later tasks can spawn it via TCP (positional port argument).
 
 Prereqs
-- Node 18+ for the vendoring script (uses global `fetch` and AbortController)
+- Node 22+ for the vendoring script (uses global `fetch` and AbortController)
 - Optional: `GH_TOKEN` environment variable to avoid GitHub API rate limits (recommended behind corporate proxies)
 
 Commands
@@ -97,7 +97,7 @@ Determinism and safety
 Validation
 - After vendoring, `JavascriptAdapterFactory.validate()` should pass the vendor check locally. It looks for:
   - vendor/js-debug/vsDebugServer.js (relative to the package source/dist layout)
-- Runtime Node requirement: the package declares `engines.node >= 18` in package.json (the factory-level validation currently checks for 14+ as a lower bound, but Node 18+ is required in practice)
+- Runtime Node requirement: the package declares `engines.node >= 22` in package.json (the factory-level validation currently checks for 14+ as a lower bound, but Node 22+ is required in practice)
 - Runtime command construction: `JavascriptDebugAdapter.buildAdapterCommand` prefers `vsDebugServer.cjs` for CommonJS compatibility, falling back to `vsDebugServer.js` if the `.cjs` variant is not found
 
 Troubleshooting

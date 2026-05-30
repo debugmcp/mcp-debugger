@@ -24,6 +24,9 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.7"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "peerDependencies": {
     "@debugmcp/shared": "0.20.0"
   },

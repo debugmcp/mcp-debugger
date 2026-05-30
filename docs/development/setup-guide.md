@@ -6,7 +6,7 @@ This guide will help you set up your development environment for working on the 
 
 ### Required Software
 
-1. **Node.js** (v18.0.0 or higher, 20.x recommended)
+1. **Node.js** (v22.0.0 or higher)
    - Download from [nodejs.org](https://nodejs.org/)
    - Verify installation: `node --version`
 
@@ -326,9 +326,9 @@ npm install -g npm@latest
 # Install nvm
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
 
-# Install and use Node 18
-nvm install 18
-nvm use 18
+# Install and use Node 22
+nvm install 22
+nvm use 22
 ```
 
 ### Python Issues

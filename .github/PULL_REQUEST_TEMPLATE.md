@@ -38,7 +38,7 @@ npm test
 
 **Test Configuration**:
 - OS: [e.g., Ubuntu 22.04]
-- Node version: [e.g., 20.11.0]
+- Node version: [e.g., 22.x]
 - Python version: [e.g., 3.11.5]
 
 ## 📸 Screenshots (if applicable)

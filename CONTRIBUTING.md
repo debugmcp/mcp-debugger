@@ -22,7 +22,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ### Prerequisites
 
-- Node.js 18+ (20.x recommended)
+- Node.js 22+
 - pnpm (required — `workspace:*` protocol needs pnpm, not npm)
 - Python 3.7+ (for debugging Python code)
 - Go 1.18+ and Delve (for debugging Go code, optional)

@@ -199,7 +199,7 @@ sequenceDiagram
 ## Technology Stack
 
 ### Core Technologies
-- **Runtime**: Node.js 18+ with ES modules
+- **Runtime**: Node.js 22+ with ES modules
 - **Language**: TypeScript 5.x with strict mode
 - **Protocol**: Model Context Protocol (MCP) over stdio or Streamable HTTP (legacy SSE deprecated)
 - **Debugging**: Debug Adapter Protocol (DAP) 1.51.0

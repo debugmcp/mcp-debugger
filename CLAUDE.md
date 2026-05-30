@@ -327,7 +327,7 @@ packages/adapter-{language}/
 - The system will auto-detect Python path or use `PYTHON_PATH` env var
 
 ### JavaScript/Node.js
-- Node.js 18+ must be installed
+- Node.js 22+ must be installed
 - Uses bundled js-debug adapter (VSCode's debugger)
 - Supports JavaScript and TypeScript debugging
 - Auto-detects TypeScript configuration
