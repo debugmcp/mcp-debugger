@@ -41,7 +41,7 @@ Both servers can be configured in the same MCP settings file. The configuration 
 ## Prerequisites
 
 1. **For Debug MCP Server**:
-   - Node.js 18.0.0 or higher
+   - Node.js 22.0.0 or higher
    - Python 3.7 or higher (for Python debugging)
 
 2. **For GitHub MCP Server**:

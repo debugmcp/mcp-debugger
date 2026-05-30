@@ -16,7 +16,7 @@ Benefits:
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - pnpm (not npm) — the monorepo uses `workspace:*` protocol
 - TypeScript 5.9+
 - Familiarity with the [Debug Adapter Protocol (DAP)](https://microsoft.github.io/debug-adapter-protocol/)

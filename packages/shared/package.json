@@ -48,7 +48,7 @@
     "url": "https://github.com/debugmcp/mcp-debugger/issues"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@vscode/debugprotocol": "^1.68.0"

@@ -226,7 +226,7 @@ act -j build-and-test
 
 4. **Use smaller images** for simple jobs:
    ```bash
-   act -j lint -P ubuntu-latest=node:20
+   act -j lint -P ubuntu-latest=node:22
    ```
 
 ## Project-Specific Notes

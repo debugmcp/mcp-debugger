@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Minimum Node.js raised to 22.** All packages now declare `engines.node >=22.0.0`, and the Docker image builds on `node:22-slim`. Node 18 and 20 are no longer supported (Node 20 reached end-of-life April 2026).
+
+### Dependencies
+- Bumped `which` 6 → 7 (requires Node 22+). The API is unchanged, and `which` is bundled into the `@debugmcp/mcp-debugger` npx CLI, so end-user installs are unaffected. (supersedes #76)
+
 ## [0.20.0] - 2026-03-29
 
 ### Added

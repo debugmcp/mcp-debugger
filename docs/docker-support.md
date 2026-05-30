@@ -191,7 +191,7 @@ In the MCP settings:
 
 The Dockerfile for the Debug MCP Server:
 
-1. Uses Node.js 20-slim for building
+1. Uses Node.js 22-slim for building
 2. Creates a bundled application in `/app`
 3. Uses Ubuntu 24.04 for runtime
 4. Installs Python 3 and debugpy
