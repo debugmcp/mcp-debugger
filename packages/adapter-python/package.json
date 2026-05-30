@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-python",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "Python debug adapter for MCP debugger using debugpy",
   "type": "module",
   "main": "dist/index.js",
@@ -30,7 +30,7 @@
     "node": ">=22.0.0"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.20.0"
+    "@debugmcp/shared": "0.21.0"
   },
   "repository": {
     "type": "git",
