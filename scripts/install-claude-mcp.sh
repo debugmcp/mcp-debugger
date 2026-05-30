@@ -41,7 +41,7 @@ if $CLAUDE_CLI mcp list | grep -q "mcp-debugger.*✓ Connected"; then
     echo ""
     echo "Available debugging languages:"
     echo "  - Python (requires: pip install debugpy)"
-    echo "  - JavaScript/TypeScript (requires: Node.js 18+)"
+    echo "  - JavaScript/TypeScript (requires: Node.js 22+)"
     echo "  - Rust (requires: Rust toolchain)"
     echo "  - Go (requires: Go 1.18+ and Delve)"
     echo "  - Java (requires: JDK 11+)"
