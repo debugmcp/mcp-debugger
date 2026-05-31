@@ -4,7 +4,7 @@
   <img src="assets/logo.png" alt="MCP Debugger Logo - A stylized circuit board with debug breakpoints" width="400" height="400">
 </div>
 
-**MCP server for multi-language debugging – give your AI agents debugging superpowers** 🚀
+**A headless, agentic debugger over MCP — let your AI agents debug running programs in six languages.**
 
 [![CI](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/debugmcp/mcp-debugger/branch/main/graph/badge.svg)](https://codecov.io/gh/debugmcp/mcp-debugger)
@@ -15,61 +15,33 @@
 
 ## 🎯 Overview
 
-mcp-debugger is a Model Context Protocol (MCP) server that provides debugging tools as structured API calls. It enables AI agents to perform step-through debugging of multiple programming languages using the Debug Adapter Protocol (DAP).
+mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across six languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
 
-> 🆕 Version 0.19.0: Java debugging via JDI bridge with launch and attach modes! Plus Go debugging with Delve.
-
-> 🆕 Version 0.17.0: Rust debugging support! Debug Rust programs with CodeLLDB on Linux/macOS, including Cargo projects, async code, and full variable inspection—plus step commands now return the active source context so agents keep their place automatically.
-
-> 🔥 Version 0.16.0: JavaScript/Node.js debugging support! Full debugging capabilities with bundled js-debug, TypeScript support, and zero-runtime dependencies via improved npx distribution.
-
-> 🎬 **Demo Video**: See the debugger in action!
-> 
-> *Recording in progress - This will show an AI agent discovering and fixing the variable swap bug in real-time*
-> 
-> <!-- To capture this demo, see examples/visualizer/demo_script.md -->
-> <!-- Uncomment when demo.gif is available:
-> <div align="center">
->   <img src="assets/demo.gif" alt="MCP Debugger Demo - AI agent debugging Python code">
->   <br>
->   <em>AI agent discovering and fixing a variable swap bug in real-time</em>
-> </div>
-> -->
+> 🆕 **v0.21.0** — the minimum runtime is now **Node.js 22+** (Node 20 reached end-of-life). See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
 ## ✨ Key Features
 
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
 - 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger
-- 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Linux/macOS/Windows with GNU toolchain)
+- 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Linux/macOS; Windows needs the GNU toolchain — see [Rust on Windows](docs/rust-debugging-windows.md))
 - 🐹 **Go debugging via Delve** – Full DAP support for Go programs
 - ☕ **Java debugging via JDI bridge** – Launch and attach modes with JDK 21+
 - 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
-> WARNING: On Windows, use the GNU toolchain for full variable inspection. Run `mcp-debugger check-rust-binary <path-to-exe>` to verify your build and see [Rust Debugging on Windows](docs/rust-debugging-windows.md) for detailed guidance.
-> NOTE: The published npm bundle ships the Linux x64 CodeLLDB runtime to stay under registry size limits. On macOS or Windows, point the `CODELLDB_PATH` environment variable at an existing CodeLLDB installation (for example from the VSCode extension) or clone the repo and run `pnpm --filter @debugmcp/adapter-rust run build:adapter` to vendor your platform binaries locally.
-
-### Windows Rust Setup Script
-
-If you're on Windows and want the quickest path to a working GNU toolchain + dlltool configuration, run:
-
-```powershell
-pwsh scripts/setup/windows-rust-debug.ps1
-```
-
-The script installs the `stable-gnu` toolchain (via rustup), sets up `dlltool.exe` (preferring MSYS2/MinGW when available, falling back to rustup's self-contained copy), builds the bundled Rust examples, and runs the Rust smoke tests by default. Add `-SkipTests` to opt out of running tests. Add `-UpdateUserPath` if you want the dlltool path persisted to your user PATH/DLLTOOL variables.
-
-The script will also attempt to provision an MSYS2-based MinGW-w64 toolchain (via winget + pacman) so `cargo +stable-gnu` has a fully functional `dlltool/ld/as` stack. If MSYS2 is already installed, it simply reuses it; otherwise it guides you through installing it (or warns so you can install manually).
 - 🧪 **Mock adapter for testing** – Test without external dependencies
+- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Java via JDWP), with source-path mapping
 - 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client (legacy SSE transport is deprecated)
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
-- 📊 **1266+ tests passing** – battle-tested end-to-end
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
 - 🛡️ **Path validation** – Prevents crashes from non-existent files
 - 📝 **AI-aware line context** – Intelligent breakpoint placement with code context
+- ✅ **Comprehensive test suite** – unit, integration, and end-to-end coverage across every adapter ([CI status](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml))
 
 ## 🚀 Quick Start
+
+> **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Node.js, Go + Delve, JDK 21+, .NET SDK, or the Rust toolchain).
 
 ### For MCP Clients (Claude Desktop, etc.)
 
@@ -128,16 +100,6 @@ Or use without installation via npx:
 npx @debugmcp/mcp-debugger --help
 ```
 
-> 📸 **Screenshot**: *MCP Integration in Action*
-> 
-> This screenshot will show real-time MCP protocol communication with tool calls and JSON responses flowing between the AI agent and debugger.
-> 
-> <!-- To capture this screenshot, see examples/visualizer/capture_guide.md -->
-> <!-- Uncomment when mcp-integration.png is available:
-> ![MCP Integration](assets/screenshots/mcp-integration.png)
-> *Real-time MCP protocol communication showing tool calls and responses*
-> -->
-
 ## 📚 How It Works
 
 mcp-debugger exposes debugging operations as MCP tools that can be called with structured JSON parameters:
@@ -156,16 +118,6 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
   "message": "Created python debug session: My Debug Session"
 }
 ```
-
-> 📸 **Screenshot**: *Active Debugging Session*
-> 
-> This screenshot will show the debugger paused at a breakpoint with the stack trace visible in the left panel, local variables in the right panel, and source code with line highlighting in the center.
-> 
-> <!-- To capture this screenshot, see examples/visualizer/capture_guide.md -->
-> <!-- Uncomment when debugging-session.png is available:
-> ![Debugging Session](assets/screenshots/debugging-session.png)
-> *Active debugging session paused at a breakpoint with stack trace visible*
-> -->
 
 ## 🛠️ Available Tools
 
@@ -192,16 +144,6 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `get_source_context` | Get source code context | ✅ Implemented |
 | `close_debug_session` | Close a session | ✅ Implemented |
 | `redefine_classes` | Hot-swap changed Java classes into a running JVM (Java only) | ✅ Implemented |
-
-> 📸 **Screenshot**: *Multi-Session Debugging*
-> 
-> This screenshot will show the debugger managing multiple concurrent debug sessions, demonstrating how AI agents can debug different scripts simultaneously with isolated session management.
-> 
-> <!-- To capture this screenshot, see examples/visualizer/capture_guide.md -->
-> <!-- Uncomment when multi-session.png is available:
-> ![Multi-session Debugging](assets/screenshots/multi-session.png)
-> *Managing multiple debug sessions simultaneously*
-> -->
 
 ## 🏗️ Architecture: Dynamic Adapter Loading
 
@@ -355,16 +297,6 @@ Then get the local variables:
 }
 ```
 
-> 📸 **Screenshot**: *Variable Inspection Reveals the Bug*
-> 
-> This screenshot will show the TUI visualizer after stepping over line 4, where both variables incorrectly show value 20, clearly demonstrating the variable swap bug. The left panel shows the execution state, the center shows the highlighted code, and the right panel displays the incorrect variable values.
-> 
-> <!-- To capture this screenshot, see examples/visualizer/capture_guide.md -->
-> <!-- Uncomment when variable-inspection.png is available:
-> ![Variable Inspection](assets/screenshots/variable-inspection.png)
-> *After stepping over line 4, both variables incorrectly show value 20*
-> -->
-
 ## 📖 Documentation
 
 - 📘 [Tool Reference](./docs/tool-reference.md) – Complete API documentation
@@ -445,12 +377,11 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.19.0 with six language adapters and polished multi-language distribution
-- ✅ **Clean architecture** with adapter pattern
-- ✅ **JavaScript/Node.js**: Full debugging loop via js-debug
-- ✅ **Go**: Full debugging support via Delve DAP
-- ✅ **Java**: Launch and attach modes via JDI bridge
-- 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires GNU toolchain; MSVC is not supported by CodeLLDB)
+- ✅ **Production Ready**: v0.21.0 with six language adapters and polished multi-language distribution
+- ✅ **Clean architecture** with a dynamic adapter pattern
+- ✅ **Python · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
+- 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)
+- 🟢 **Runtime**: Node.js 22+
 - 📈 **Active Development**: Regular updates and improvements
 
 ## 📄 License
@@ -471,4 +402,4 @@ Built with:
 
 ---
 
-**Give your AI the power to debug like a developer – in any language!** 🎯
+**Give your AI agents a real debugger — in any language.**
