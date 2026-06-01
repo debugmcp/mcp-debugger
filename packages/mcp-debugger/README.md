@@ -1,6 +1,6 @@
 # @debugmcp/mcp-debugger
 
-Step-through debugging MCP server for LLMs
+Step-through debugging MCP server for LLMs across seven languages
 
 ## Installation
 
@@ -33,6 +33,7 @@ mcp-debugger sse --port 3001
 All language adapters are bundled into the CLI package. No separate installation is needed. The following adapters are included:
 
 - **Python** (`@debugmcp/adapter-python`) - Python debugging via debugpy
+- **Ruby** (`@debugmcp/adapter-ruby`) - Ruby debugging via rdbg
 - **JavaScript** (`@debugmcp/adapter-javascript`) - JavaScript/Node.js debugging via js-debug
 - **Rust** (`@debugmcp/adapter-rust`) - Rust debugging via CodeLLDB
 - **Go** (`@debugmcp/adapter-go`) - Go debugging via Delve
@@ -40,7 +41,7 @@ All language adapters are bundled into the CLI package. No separate installation
 - **.NET** (`@debugmcp/adapter-dotnet`) - .NET debugging via netcoredbg
 - **Mock** (`@debugmcp/adapter-mock`) - Mock adapter for testing
 
-**System Requirements:** Node.js 22+ is required to run mcp-debugger. You also need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Go + Delve, JDK 21+, netcoredbg with a compatible .NET runtime).
+**System Requirements:** Node.js 22+ is required to run mcp-debugger. You also need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Ruby + the `debug` gem / `rdbg`, Go + Delve, JDK 21+, netcoredbg with a compatible .NET runtime).
 
 ### Check Rust binary compatibility
 ```bash

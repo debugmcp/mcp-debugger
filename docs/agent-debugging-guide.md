@@ -1,6 +1,6 @@
 # MCP Debugger Usage Guide for AI Agents
 
-This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, JavaScript, Rust, Go, Java, .NET/C#).
+This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, Ruby, JavaScript, Rust, Go, Java, and .NET/C#).
 
 ## Key Concepts
 
@@ -208,6 +208,25 @@ frame_id = stack["stackFrames"][0]["id"]
 get_local_variables(sessionId=session_id)
 ```
 
+## Ruby Debugging
+
+**Prerequisites**: Ruby 2.7+ installed. `rdbg` must be available through the standard `debug` gem.
+
+**Testing sequence:**
+```python
+# 1. Create session
+session_id = create_debug_session(language="ruby")
+
+# 2. Set breakpoint
+set_breakpoint(sessionId=session_id, file="/path/to/app.rb", line=12)
+
+# 3. Start debugging
+start_debugging(sessionId=session_id, scriptPath="/path/to/app.rb")
+
+# 4. Inspect variables
+get_local_variables(sessionId=session_id)
+```
+
 ## Go Debugging
 
 **Prerequisites**: Go 1.18+ installed. Delve debugger must be installed: `go install github.com/go-delve/delve/cmd/dlv@latest`.
@@ -284,9 +303,10 @@ get_local_variables(sessionId=session_id)
 
 ## Summary
 
-The MCP Debugger is fully functional for Python, JavaScript, Rust, Go, Java, and .NET/C#. The key insights are:
+The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, and .NET/C#. The key insights are:
 - **JavaScript**: Stack trace filtering hides internal frames; may need `continue_execution` if initially stopped at internals
 - **Python**: Use variablesReference to expand variable containers
+- **Ruby**: Supports launch and attach flows through `rdbg`; use Bundler mode for Rails and RSpec-style entrypoints
 - **Rust**: CodeLLDB adapter is vendored; the GNU toolchain is required for reliable debugging -- MSVC-built binaries may produce errors with CodeLLDB. Set `RUST_MSVC_BEHAVIOR` env var to control MSVC handling
 - **Go**: Uses Delve's native DAP support
 - **Java**: Use FQCN for breakpoints, pass `mainClass`/`classpath` via `dapLaunchArgs`

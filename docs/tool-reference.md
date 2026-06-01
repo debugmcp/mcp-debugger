@@ -34,7 +34,7 @@ This document provides a complete reference for all tools available in mcp-debug
 Creates a new debugging session.
 
 **Parameters:**
-- `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. The default fallback languages (when dynamic discovery is unavailable) are `"python"` and `"mock"`. When all adapters are available, the full list is: `"python"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are discoverable at runtime.
+- `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. The default fallback languages (when dynamic discovery is unavailable) are `"python"` and `"mock"`. When all adapters are available, the full list is: `"python"`, `"ruby"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are discoverable at runtime.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"session-<8 chars>"` (e.g., `"session-a4d1acc8"`).
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 

@@ -49,6 +49,7 @@ Each supported language implements the IDebugAdapter interface:
 
 - **[MockDebugAdapter](../../packages/adapter-mock/)** - Reference implementation for testing
 - **[PythonDebugAdapter](../../packages/adapter-python/)** - Python/debugpy support
+- **[RubyDebugAdapter](../../packages/adapter-ruby/)** - Ruby/rdbg support
 - **[JavascriptDebugAdapter](../../packages/adapter-javascript/)** - JavaScript/Node.js support
 - **[RustDebugAdapter](../../packages/adapter-rust/)** - Rust/CodeLLDB support
 - **[GoDebugAdapter](../../packages/adapter-go/)** - Go/Delve support
@@ -261,6 +262,7 @@ async endSession(exitCode: number) {
 
 ## Version History
 
+- **v0.21.0** - Ruby adapter, 8 adapters total
 - **v0.19.0** - .NET/C# adapter, 7 language adapters total
 - **v0.18.0** - Go adapter, Java adapter
 - **v0.17.0** - Rust adapter

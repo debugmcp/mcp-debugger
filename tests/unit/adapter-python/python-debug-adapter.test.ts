@@ -276,6 +276,41 @@ describe('PythonDebugAdapter', () => {
     expect(config.justMyCode).toBe(false);
   });
 
+  it('transforms attach configuration for debugpy handoff', () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+    const config = adapter.transformAttachConfig({
+      request: 'attach',
+      host: '127.0.0.1',
+      port: 5678,
+      sourcePaths: ['/workspace/app'],
+      stopOnEntry: true,
+      justMyCode: false
+    });
+
+    expect(adapter.supportsAttach?.()).toBe(true);
+    expect(adapter.supportsDetach?.()).toBe(true);
+    expect(config).toEqual({
+      type: 'python',
+      request: 'attach',
+      name: 'Python: Attach',
+      connect: {
+        host: '127.0.0.1',
+        port: 5678
+      },
+      justMyCode: false,
+      subProcess: true,
+      pathMappings: [
+        {
+          localRoot: '/workspace/app',
+          remoteRoot: '/workspace/app'
+        }
+      ],
+      stopOnEntry: true,
+      cwd: undefined,
+      env: undefined
+    });
+  });
+
   it('disposes by clearing state and emitting event', async () => {
     const adapter = new PythonDebugAdapter(createDependencies());
     const disposed = vi.fn();
@@ -318,5 +353,17 @@ describe('PythonDebugAdapter', () => {
     expect(defaults.justMyCode).toBe(true);
     expect(defaults.env).toEqual({});
     expect(defaults.cwd).toBe(process.cwd());
+  });
+
+  it('returns default attach configuration snapshot', () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+    const defaults = adapter.getDefaultAttachConfig?.();
+
+    expect(defaults).toEqual({
+      request: 'attach',
+      host: '127.0.0.1',
+      stopOnEntry: true,
+      justMyCode: true
+    });
   });
 });

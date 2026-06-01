@@ -57,7 +57,7 @@ npm run build
 
 # Build specific packages
 npm run build:shared
-npm run build:adapters       # Build mock + python adapters
+npm run build:adapters       # Build mock + python + ruby adapters
 npm run build:adapters:all   # Build all adapters including JavaScript
 npm run build:packages       # Build all packages in correct order via build-packages.cjs
 

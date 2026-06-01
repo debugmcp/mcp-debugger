@@ -4,7 +4,7 @@
   <img src="assets/logo.png" alt="MCP Debugger Logo - A stylized circuit board with debug breakpoints" width="400" height="400">
 </div>
 
-**A headless, agentic debugger over MCP — let your AI agents debug running programs in six languages.**
+**A headless, agentic debugger over MCP — let your AI agents debug running programs in seven languages.**
 
 [![CI](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/debugmcp/mcp-debugger/branch/main/graph/badge.svg)](https://codecov.io/gh/debugmcp/mcp-debugger)
@@ -15,7 +15,7 @@
 
 ## 🎯 Overview
 
-mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across six languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
+mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across seven languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
 
 > 🆕 **v0.21.0** — the minimum runtime is now **Node.js 22+** (Node 20 reached end-of-life). See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
@@ -23,13 +23,14 @@ mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through 
 
 - 🌐 **Multi-language support** – Clean adapter pattern for any language
 - 🐍 **Python debugging via debugpy** – Full DAP protocol support
+- 💎 **Ruby debugging via rdbg** – Launch and attach workflows for Ruby and Rails projects
 - 🟨 **JavaScript (Node.js) debugging via js-debug** – VSCode's proven debugger
 - 🦀 **Rust debugging via CodeLLDB** – Debug Rust & Cargo projects (Linux/macOS; Windows needs the GNU toolchain — see [Rust on Windows](docs/rust-debugging-windows.md))
 - 🐹 **Go debugging via Delve** – Full DAP support for Go programs
 - ☕ **Java debugging via JDI bridge** – Launch and attach modes with JDK 21+
 - 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Java via JDWP), with source-path mapping
+- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, Java via JDWP), with source-path mapping
 - 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client (legacy SSE transport is deprecated)
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
@@ -41,7 +42,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through 
 
 ## 🚀 Quick Start
 
-> **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Node.js, Go + Delve, JDK 21+, .NET SDK, or the Rust toolchain).
+> **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Ruby + the `debug` gem / `rdbg`, Node.js, Go + Delve, JDK 21+, .NET SDK, or the Rust toolchain).
 
 ### For MCP Clients (Claude Desktop, etc.)
 
@@ -108,7 +109,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",  // or "javascript", "rust", "go", "java", "dotnet", or "mock" for testing
+  "language": "python",  // or "ruby", "javascript", "rust", "go", "java", "dotnet", or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -168,6 +169,8 @@ Version 0.10.0 introduces a clean adapter pattern that separates language-agnost
         │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
         └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────���───┘
 ```
+
+Current built-in language adapters are Python, Ruby, JavaScript, Rust, Go, Java, and .NET, plus a mock adapter for testing.
 
 ### Adding Language Support
 
@@ -307,9 +310,11 @@ Then get the local variables:
 - 🧩 [Adapter API Reference](./docs/architecture/adapter-api-reference.md) – Adapter, factory, loader, and registry contracts
 - 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading to v0.15.0 (dynamic loading)
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
+- 💎 [Ruby Debugging Guide](./docs/ruby/README.md) – Ruby debugging with `rdbg`
 - 🟨 [JavaScript Debugging Guide](./docs/javascript/README.md) – JavaScript/TypeScript features
 - 🐹 [Go Debugging Guide](./docs/go/README.md) – Go debugging with Delve
 - ☕ [Java Debugging Guide](./docs/java/README.md) – Java debugging with JDI bridge
+- 🧭 [Project Stewardship](./docs/project-stewardship.md) – Public ownership and maintainer signals
 - [Rust Debugging on Windows](docs/rust-debugging-windows.md) - Toolchain requirements and troubleshooting
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
@@ -377,9 +382,9 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.21.0 with six language adapters and polished multi-language distribution
+- ✅ **Production Ready**: v0.21.0 with seven language adapters and polished multi-language distribution
 - ✅ **Clean architecture** with a dynamic adapter pattern
-- ✅ **Python · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
+- ✅ **Python · Ruby · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)
 - 🟢 **Runtime**: Node.js 22+
 - 📈 **Active Development**: Regular updates and improvements
@@ -388,10 +393,14 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 MIT License - see [LICENSE](./LICENSE) for details.
 
+## 🧭 Project Stewardship
+
+Public ownership signals for this repository are documented in [Project Stewardship](./docs/project-stewardship.md), including the GitHub organization, CODEOWNERS coverage, maintainer contact, and the currently public human contributors called out in the repo.
+
 ## 👥 Contributors
 
-- [@swinyx](https://github.com/swinyx) — Go adapter (Delve)
-- [@roofpig95008](https://github.com/roofpig95008) — Java adapter (JDI bridge)
+- [@swinyx](https://github.com/swinyx) (Swinyx) — Go adapter (Delve)
+- [@roofpig95008](https://github.com/roofpig95008) (Richard Berlin) — Java adapter (JDI bridge)
 
 ## 🙏 Acknowledgments
 
@@ -399,6 +408,7 @@ Built with:
 - [Model Context Protocol](https://github.com/anthropics/model-context-protocol) by Anthropic
 - [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) by Microsoft
 - [debugpy](https://github.com/microsoft/debugpy) for Python debugging
+- [debug](https://github.com/ruby/debug) for Ruby debugging
 
 ---
 

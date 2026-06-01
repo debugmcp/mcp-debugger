@@ -94,4 +94,28 @@ describe('PythonDebugAdapter', () => {
     const message = adapter.translateErrorMessage(new Error('ENOENT: no such file'));
     expect(message).toContain('ENOENT');
   });
+
+  it('builds a debugpy attach configuration', () => {
+    const adapter = new PythonDebugAdapter(deps);
+    const config = adapter.transformAttachConfig({
+      request: 'attach',
+      host: '127.0.0.1',
+      port: 5678
+    });
+
+    expect(config).toEqual({
+      type: 'python',
+      request: 'attach',
+      name: 'Python: Attach',
+      connect: {
+        host: '127.0.0.1',
+        port: 5678
+      },
+      justMyCode: true,
+      subProcess: true,
+      stopOnEntry: undefined,
+      cwd: undefined,
+      env: undefined
+    });
+  });
 });

@@ -21,7 +21,9 @@ import {
   AdapterCommand,
   AdapterConfig,
   GenericLaunchConfig,
+  GenericAttachConfig,
   LanguageSpecificLaunchConfig,
+  LanguageSpecificAttachConfig,
   DebugFeature,
   FeatureRequirement,
   AdapterCapabilities,
@@ -57,6 +59,22 @@ interface PythonLaunchConfig extends LanguageSpecificLaunchConfig {
   showReturnValue?: boolean;    // Show function return values
   subProcess?: boolean;         // Debug child processes
   [key: string]: unknown;       // Required by LanguageSpecificLaunchConfig
+}
+
+interface PythonAttachConfig extends LanguageSpecificAttachConfig {
+  type: 'python';
+  request: 'attach';
+  name: string;
+  connect: {
+    host: string;
+    port: number;
+  };
+  justMyCode: boolean;
+  subProcess: boolean;
+  pathMappings?: Array<{ localRoot: string; remoteRoot: string }>;
+  stopOnEntry?: boolean;
+  cwd?: string;
+  env?: Record<string, string>;
 }
 
 /**
@@ -366,6 +384,56 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       justMyCode: true,
       env: {},
       cwd: process.cwd()
+    };
+  }
+
+  supportsAttach(): boolean {
+    return true;
+  }
+
+  supportsDetach(): boolean {
+    return true;
+  }
+
+  transformAttachConfig(config: GenericAttachConfig): PythonAttachConfig {
+    if (typeof config.port !== 'number') {
+      throw new AdapterError(
+        'Python attach requires a debugpy host and port',
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
+    }
+
+    const attachConfig: PythonAttachConfig = {
+      type: 'python',
+      request: 'attach',
+      name: 'Python: Attach',
+      connect: {
+        host: config.host || '127.0.0.1',
+        port: config.port
+      },
+      justMyCode: config.justMyCode ?? true,
+      subProcess: true,
+      stopOnEntry: config.stopOnEntry,
+      cwd: config.cwd,
+      env: config.env
+    };
+
+    if (Array.isArray(config.sourcePaths) && config.sourcePaths.length > 0) {
+      attachConfig.pathMappings = config.sourcePaths.map((sourcePath) => ({
+        localRoot: sourcePath,
+        remoteRoot: sourcePath
+      }));
+    }
+
+    return attachConfig;
+  }
+
+  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
+    return {
+      request: 'attach',
+      host: '127.0.0.1',
+      stopOnEntry: true,
+      justMyCode: true
     };
   }
   

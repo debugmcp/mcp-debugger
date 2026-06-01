@@ -1,24 +1,23 @@
-# Python Debugging with Debug MCP Server
+# Python Debugging with mcp-debugger
 
-The Debug MCP Server provides support for Python debugging through the [debugpy](https://github.com/microsoft/debugpy) library. This document explains how to use the Python debugging capabilities.
+mcp-debugger supports Python debugging through [debugpy](https://github.com/microsoft/debugpy). You can either launch Python directly from MCP or attach MCP to an already-running `debugpy` endpoint for a VS Code handoff.
 
 ## Prerequisites
 
-Before using the Python debugging features, ensure you have:
+Before using the Python adapter, ensure you have:
 
 1. Python 3.7 or higher installed
-2. The debugpy package installed:
-   ```bash
-   pip install debugpy
-   ```
+2. `debugpy` installed in the Python environment you want to debug
 
-## Debugging Workflow
-
-### 1. Create a Debug Session
-
-First, create a Python debug session:
-
+```bash
+pip install debugpy
 ```
+
+## Launch a Python program from MCP
+
+### 1. Create a session
+
+```text
 use_mcp_tool(
   tool_name="create_debug_session",
   arguments={
@@ -28,13 +27,9 @@ use_mcp_tool(
 )
 ```
 
-This returns a session ID that you'll use for all subsequent debugging commands.
+### 2. Set breakpoints
 
-### 2. Set Breakpoints
-
-Set breakpoints in your code before starting execution:
-
-```
+```text
 use_mcp_tool(
   tool_name="set_breakpoint",
   arguments={
@@ -47,7 +42,7 @@ use_mcp_tool(
 
 You can also set conditional breakpoints:
 
-```
+```text
 use_mcp_tool(
   tool_name="set_breakpoint",
   arguments={
@@ -59,11 +54,9 @@ use_mcp_tool(
 )
 ```
 
-### 3. Start Debugging
+### 3. Start debugging
 
-Start debugging your Python script:
-
-```
+```text
 use_mcp_tool(
   tool_name="start_debugging",
   arguments={
@@ -74,104 +67,27 @@ use_mcp_tool(
 )
 ```
 
-### 4. Control Execution
+### 4. Control execution
 
-When execution pauses at a breakpoint, you can:
-
-#### Step Over (execute current line and pause at next line)
-```
-use_mcp_tool(
-  tool_name="step_over",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+use_mcp_tool(tool_name="step_over", arguments={ "sessionId": "your-session-id" })
+use_mcp_tool(tool_name="step_into", arguments={ "sessionId": "your-session-id" })
+use_mcp_tool(tool_name="step_out", arguments={ "sessionId": "your-session-id" })
+use_mcp_tool(tool_name="continue_execution", arguments={ "sessionId": "your-session-id" })
+use_mcp_tool(tool_name="pause_execution", arguments={ "sessionId": "your-session-id" })
 ```
 
-#### Step Into (go into functions called on current line)
-```
-use_mcp_tool(
-  tool_name="step_into",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
-```
+### 5. Inspect state
 
-#### Step Out (run until exiting current function)
-```
-use_mcp_tool(
-  tool_name="step_out",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
-```
+When paused, the most direct inspection flow is:
 
-#### Continue (run until next breakpoint)
-```
-use_mcp_tool(
-  tool_name="continue_execution",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
-```
+1. `get_stack_trace`
+2. `get_scopes`
+3. `get_variables`
 
-#### Pause (pause a running program)
-```
-use_mcp_tool(
-  tool_name="pause_execution",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
-```
+For a shortcut, use `get_local_variables`:
 
-### 5. Examine Program State
-
-When paused, you can examine the program's state using the `get_stack_trace` -> `get_scopes` -> `get_variables` sequence. Each step returns numeric handles that feed into the next:
-
-#### Step 1: Get the Stack Trace
-```
-use_mcp_tool(
-  tool_name="get_stack_trace",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
-```
-This returns stack frames, each with a numeric `id` (the frame ID).
-
-#### Step 2: Get Scopes for a Frame
-Use the `id` from the top stack frame:
-```
-use_mcp_tool(
-  tool_name="get_scopes",
-  arguments={
-    "sessionId": "your-session-id",
-    "frameId": 3
-  }
-)
-```
-This returns scopes (e.g., "Locals", "Globals"), each with a numeric `variablesReference`.
-
-#### Step 3: Get Variables for a Scope
-Use the `variablesReference` from a scope (not the frame ID):
-```
-use_mcp_tool(
-  tool_name="get_variables",
-  arguments={
-    "sessionId": "your-session-id",
-    "scope": 5
-  }
-)
-```
-The `scope` parameter is the numeric `variablesReference` from `get_scopes`.
-
-#### Shortcut: Get Local Variables
-For convenience, `get_local_variables` performs the full stack->scopes->variables traversal in a single call:
-```
+```text
 use_mcp_tool(
   tool_name="get_local_variables",
   arguments={
@@ -180,8 +96,9 @@ use_mcp_tool(
 )
 ```
 
-#### Evaluate Expressions
-```
+Evaluate expressions in the current frame:
+
+```text
 use_mcp_tool(
   tool_name="evaluate_expression",
   arguments={
@@ -191,18 +108,9 @@ use_mcp_tool(
 )
 ```
 
-#### View Stack Trace
-```
-use_mcp_tool(
-  tool_name="get_stack_trace",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
-```
+Get source context around the current line:
 
-#### Get Source Context
-```
+```text
 use_mcp_tool(
   tool_name="get_source_context",
   arguments={
@@ -214,11 +122,9 @@ use_mcp_tool(
 )
 ```
 
-### 6. Close the Session
+### 6. Close the session
 
-When finished debugging, close the session:
-
-```
+```text
 use_mcp_tool(
   tool_name="close_debug_session",
   arguments={
@@ -227,10 +133,88 @@ use_mcp_tool(
 )
 ```
 
-## Debugging Tips
+## VS Code handoff with `attach_to_process`
 
-1. Always check if breakpoints are verified (some lines cannot have breakpoints, like blank lines)
-2. If the debugger doesn't stop at a breakpoint, ensure the file path is correct and absolute
-3. Use source context to see code around your current position
-4. The stack trace shows the call hierarchy that led to the current position
-5. Expressions are evaluated against the current paused debug context (current frame when available), with the evaluation context defaulting to `'variables'`
+Issue #7 asked for a practical way to move from MCP-driven debugging into VS Code. The supported workflow is a handoff through a shared `debugpy` endpoint:
+
+1. Start the target under `debugpy`
+2. Attach `mcp-debugger` to that port
+3. Detach MCP when you are ready
+4. Attach VS Code to the same host and port
+
+### 1. Start the target with `debugpy`
+
+```bash
+python -m debugpy --listen 127.0.0.1:5678 --wait-for-client app.py
+```
+
+### 2. Attach MCP
+
+```text
+use_mcp_tool(
+  tool_name="create_debug_session",
+  arguments={
+    "language": "python",
+    "name": "Python Attach Session"
+  }
+)
+```
+
+```text
+use_mcp_tool(
+  tool_name="attach_to_process",
+  arguments={
+    "sessionId": "your-session-id",
+    "host": "127.0.0.1",
+    "port": 5678,
+    "sourcePaths": ["/path/to/your/workspace"]
+  }
+)
+```
+
+`sourcePaths` becomes `pathMappings` for the Python attach configuration, which keeps local source lookup aligned with the debug target.
+
+### 3. Detach MCP before opening VS Code
+
+Use `detach_from_process` when you want to hand control to VS Code:
+
+```text
+use_mcp_tool(
+  tool_name="detach_from_process",
+  arguments={
+    "sessionId": "your-session-id"
+  }
+)
+```
+
+Treat this as a handoff, not a simultaneous dual-client session.
+
+### 4. Attach VS Code to the same `debugpy` endpoint
+
+Add a `launch.json` entry like this:
+
+```json
+{
+  "name": "Python: Attach to debugpy",
+  "type": "python",
+  "request": "attach",
+  "connect": {
+    "host": "127.0.0.1",
+    "port": 5678
+  },
+  "justMyCode": true,
+  "pathMappings": [
+    {
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "${workspaceFolder}"
+    }
+  ]
+}
+```
+
+## Tips
+
+1. Breakpoints are only fully verified after the adapter finishes initialization.
+2. Prefer absolute file paths when debugging across shells, containers, or editors.
+3. If breakpoints do not bind, confirm the Python interpreter that launched `debugpy` matches the code you are editing.
+4. Use `get_local_variables` for fast MCP inspection and switch to the full stack/scopes flow only when you need more detail.

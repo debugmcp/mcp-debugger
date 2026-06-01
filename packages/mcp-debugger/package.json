@@ -37,6 +37,7 @@
     "@debugmcp/adapter-javascript": "workspace:*",
     "@debugmcp/adapter-python": "workspace:*",
     "@debugmcp/adapter-mock": "workspace:*",
+    "@debugmcp/adapter-ruby": "workspace:*",
     "@debugmcp/adapter-rust": "workspace:*",
     "@debugmcp/shared": "workspace:*"
   }
