@@ -399,6 +399,7 @@ Public ownership signals for this repository are documented in [Project Stewards
 
 ## 👥 Contributors
 
+- [@Poyraxx](https://github.com/Poyraxx) (Poyrax) — Ruby adapter (rdbg)
 - [@swinyx](https://github.com/swinyx) (Swinyx) — Go adapter (Delve)
 - [@roofpig95008](https://github.com/roofpig95008) (Richard Berlin) — Java adapter (JDI bridge)
 

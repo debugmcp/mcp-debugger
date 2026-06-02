@@ -15,6 +15,7 @@ This document summarizes the public ownership and maintainer signals for `debugm
 
 These are the human contributors currently named in the repository README:
 
+- [Poyrax](https://github.com/Poyraxx) — Ruby adapter (rdbg)
 - [Swinyx](https://github.com/swinyx) — Go adapter (Delve)
 - [Richard Berlin](https://github.com/roofpig95008) — Java adapter (JDI bridge)
 
