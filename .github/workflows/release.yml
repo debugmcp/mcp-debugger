@@ -62,14 +62,6 @@ jobs:
         distribution: 'temurin'
         java-version: '21'
 
-    - name: Setup Ruby 3.3
-      uses: ruby/setup-ruby@ec02537da5712d66d4d50a0f33b7eb52773b5ed1
-      with:
-        ruby-version: '3.3'
-
-    - name: Install Ruby debug gem
-      run: gem install debug --no-document
-
     - name: Sanity versions
       run: |
         node -v
@@ -257,14 +249,6 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '21'
-
-    - name: Setup Ruby 3.3
-      uses: ruby/setup-ruby@ec02537da5712d66d4d50a0f33b7eb52773b5ed1
-      with:
-        ruby-version: '3.3'
-
-    - name: Install Ruby debug gem
-      run: gem install debug --no-document
 
     - name: Install dependencies
       run: pnpm install --frozen-lockfile --ignore-scripts

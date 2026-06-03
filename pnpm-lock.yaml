@@ -132,6 +132,9 @@ importers:
       '@debugmcp/adapter-python':
         specifier: workspace:*
         version: link:packages/adapter-python
+      '@debugmcp/adapter-ruby':
+        specifier: workspace:*
+        version: link:packages/adapter-ruby
       '@debugmcp/adapter-rust':
         specifier: workspace:*
         version: link:packages/adapter-rust
@@ -283,6 +286,31 @@ importers:
         specifier: ^4.1.7
         version: 4.1.7(@types/node@25.9.1)(@vitest/coverage-istanbul@4.1.7)(@vitest/coverage-v8@4.1.7)(vite@7.3.2(@types/node@25.9.1))
 
+  packages/adapter-ruby:
+    dependencies:
+      '@debugmcp/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@vscode/debugprotocol':
+        specifier: ^1.68.0
+        version: 1.68.0
+      which:
+        specifier: ^7.0.0
+        version: 7.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.1
+        version: 25.9.1
+      '@types/which':
+        specifier: ^3.0.4
+        version: 3.0.4
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.7
+        version: 4.1.7(@types/node@25.9.1)(@vitest/coverage-istanbul@4.1.7)(@vitest/coverage-v8@4.1.7)(vite@7.3.2(@types/node@25.9.1))
+
   packages/adapter-rust:
     dependencies:
       '@debugmcp/shared':
@@ -337,6 +365,9 @@ importers:
       '@debugmcp/adapter-python':
         specifier: workspace:*
         version: link:../adapter-python
+      '@debugmcp/adapter-ruby':
+        specifier: workspace:*
+        version: link:../adapter-ruby
       '@debugmcp/adapter-rust':
         specifier: workspace:*
         version: link:../adapter-rust
