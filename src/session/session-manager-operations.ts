@@ -1474,6 +1474,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     this._updateSessionState(session, SessionState.INITIALIZING);
     this.sessionStore.update(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
+      attachMode: true,
     });
 
     try {

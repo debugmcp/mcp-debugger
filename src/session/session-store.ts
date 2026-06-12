@@ -55,6 +55,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // even when the adapter reports a non-'entry' reason (e.g., js-debug
   // emits 'pause' from its post-attach forced pause).
   firstStopHandled?: boolean;
+  // True for sessions established via attach_to_process. Attach targets may
+  // run on a remote filesystem (container, pod, other machine), so host-side
+  // file existence checks do not apply to their source paths.
+  attachMode?: boolean;
 }
 
 /**

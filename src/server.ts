@@ -358,6 +358,14 @@ export class DebugMcpServer {
       return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
     }
 
+    // Attach sessions may debug a target on a remote filesystem (container,
+    // pod, another machine); host-side existence checks don't apply. Pass the
+    // path through as-is — the debugger knows its own filesystem best.
+    if (this.sessionManager.getSession(sessionId)?.attachMode) {
+      this.logger.info(`[DebugMcpServer.setBreakpoint] Attach session: skipping host file check for ${file}`);
+      return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
+    }
+
     // Check file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(file);
     if (!fileCheck.exists) {
