@@ -1541,6 +1541,82 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('threads', {});
       expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
     });
+
+    it('should send a post-attach pause when the policy requests it (ruby)', async () => {
+      // Ruby's policy declares pauseAfterAttach: rdbg does not suspend a
+      // running target on attach, so the PAUSED state must be made real.
+      mockSession.language = 'ruby';
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 12345,
+        host: '127.0.0.1',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
+    });
+
+    it('should tolerate a rejected post-attach pause (target already stopped)', async () => {
+      mockSession.language = 'ruby';
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        if (command === 'pause') {
+          throw new Error('already stopped');
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 12345,
+        host: '127.0.0.1',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Post-attach pause not needed/accepted')
+      );
+    });
+
+    it('should not send a post-attach pause for policies without the behavior (java)', async () => {
+      mockSession.language = 'java';
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 2, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('pause', expect.anything());
+    });
   });
 
   describe('Attach Mode Handling', () => {

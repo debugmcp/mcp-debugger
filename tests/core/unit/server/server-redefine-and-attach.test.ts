@@ -51,6 +51,39 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     vi.clearAllMocks();
   });
 
+  describe('set_breakpoint on attach sessions', () => {
+    it('skips the host-side file existence check for attach-mode sessions', async () => {
+      // Attach targets may run on a remote filesystem (container/pod), so a
+      // breakpoint path like /app/app.rb must pass through unchecked.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'attach-session',
+        sessionLifecycle: 'active',
+        attachMode: true
+      });
+      mockSessionManager.getSessionPolicy.mockReturnValue({});
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        id: 'bp-1',
+        file: '/app/app.rb',
+        line: 18,
+        verified: true
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId: 'attach-session', file: '/app/app.rb', line: 18 }
+        }
+      });
+
+      const response = JSON.parse(result.content[0].text);
+      expect(response.success).toBe(true);
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+        'attach-session', '/app/app.rb', 18, undefined, undefined
+      );
+    });
+  });
+
   describe('redefine_classes tool registration', () => {
     it('should be listed in available tools', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
