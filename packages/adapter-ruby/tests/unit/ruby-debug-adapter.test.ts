@@ -2,13 +2,17 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { RubyDebugAdapter } from '../../src/ruby-debug-adapter.js';
 import { AdapterError, AdapterState, DebugFeature } from '@debugmcp/shared';
 
-vi.mock('../../src/utils/ruby-utils.js', () => ({
-  findRubyExecutable: vi.fn(),
-  getRubyVersion: vi.fn(),
-  findRdbgExecutable: vi.fn(),
-  getRdbgVersion: vi.fn(),
-  getRubySearchPaths: vi.fn().mockReturnValue(['/usr/bin'])
-}));
+vi.mock('../../src/utils/ruby-utils.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/utils/ruby-utils.js')>();
+  return {
+    ...actual,
+    findRubyExecutable: vi.fn(),
+    getRubyVersion: vi.fn(),
+    findRdbgExecutable: vi.fn(),
+    getRdbgVersion: vi.fn(),
+    getRubySearchPaths: vi.fn().mockReturnValue(['/usr/bin'])
+  };
+});
 
 const { findRubyExecutable, getRubyVersion, findRdbgExecutable, getRdbgVersion } = await import('../../src/utils/ruby-utils.js');
 
@@ -68,7 +72,8 @@ describe('RubyDebugAdapter', () => {
 
   it('builds an rdbg adapter command', () => {
     const adapter = new RubyDebugAdapter(createDependencies());
-    (adapter as unknown as { resolvedRdbgPath: string }).resolvedRdbgPath = '/usr/bin/rdbg';
+    (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
+      .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
 
     const command = adapter.buildAdapterCommand({
       sessionId: 'ruby-session',
@@ -83,7 +88,7 @@ describe('RubyDebugAdapter', () => {
 
     expect(command.command).toBe('/usr/bin/rdbg');
     expect(command.args).toEqual([
-      '--open=vscode',
+      '--open',
       '--host', '127.0.0.1',
       '--port', '8123',
       '--nonstop',

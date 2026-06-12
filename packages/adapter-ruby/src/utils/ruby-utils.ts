@@ -154,6 +154,37 @@ export async function findRdbgExecutable(
   return findExecutable(preferredPath, envRdbg, candidates, getRdbgSearchPaths(), 'rdbg', logger);
 }
 
+export interface RdbgInvocation {
+  command: string;
+  args: string[];
+}
+
+/**
+ * Build a spawnable rdbg invocation. On Windows, gem executables are .bat/.cmd
+ * shims, which Node's spawn() rejects without a shell (EINVAL since the
+ * CVE-2024-27980 hardening). Instead of spawning the shim, run the sibling
+ * extensionless Ruby script directly with the Ruby interpreter; if no sibling
+ * script exists, fall back to cmd.exe.
+ */
+export function buildRdbgInvocation(
+  rdbgPath: string,
+  args: string[],
+  rubyPath?: string
+): RdbgInvocation {
+  if (process.platform === 'win32' && /\.(bat|cmd)$/i.test(rdbgPath)) {
+    const scriptPath = rdbgPath.replace(/\.(bat|cmd)$/i, '');
+    if (path.isAbsolute(scriptPath) && fs.existsSync(scriptPath)) {
+      return { command: rubyPath || 'ruby', args: [scriptPath, ...args] };
+    }
+    return {
+      command: process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', rdbgPath, ...args]
+    };
+  }
+
+  return { command: rdbgPath, args };
+}
+
 export async function getRubyVersion(rubyPath: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(rubyPath, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -176,8 +207,9 @@ export async function getRubyVersion(rubyPath: string): Promise<string | null> {
 }
 
 export async function getRdbgVersion(rdbgPath: string): Promise<string | null> {
+  const invocation = buildRdbgInvocation(rdbgPath, ['--version']);
   return new Promise((resolve) => {
-    const child = spawn(rdbgPath, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(invocation.command, invocation.args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
 
     child.stdout?.on('data', (data) => { output += data.toString(); });

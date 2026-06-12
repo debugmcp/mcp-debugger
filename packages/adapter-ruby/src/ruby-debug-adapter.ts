@@ -27,7 +27,8 @@ import {
   findRdbgExecutable,
   getRubyVersion,
   getRdbgVersion,
-  getRubySearchPaths
+  getRubySearchPaths,
+  buildRdbgInvocation
 } from './utils/ruby-utils.js';
 
 interface RubyPathCacheEntry {
@@ -77,7 +78,6 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
   private readonly cacheTimeout = 60000;
   private currentThreadId: number | null = null;
   private connected = false;
-  private resolvedRdbgPath: string | null = null;
 
   constructor(dependencies: AdapterDependencies) {
     super();
@@ -110,8 +110,7 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     this.rdbgPathCache.clear();
     this.currentThreadId = null;
     this.connected = false;
-    this.resolvedRdbgPath = null;
-    this.state = AdapterState.UNINITIALIZED;
+    this.transitionTo(AdapterState.UNINITIALIZED);
     this.emit('disposed');
   }
 
@@ -234,22 +233,32 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
 
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     const launchConfig = config.launchConfig as RubyLaunchConfig;
-    const rdbgPath = this.resolvedRdbgPath || process.env.RDBG_PATH || (process.platform === 'win32' ? 'rdbg.bat' : 'rdbg');
+    const rdbgPath = this.getCachedRdbgPath()
+      || process.env.RDBG_PATH
+      || (process.platform === 'win32' ? 'rdbg.bat' : 'rdbg');
     const targetCommand = this.buildTargetCommand(config, launchConfig);
     const stopOnEntry = launchConfig.stopOnEntry ?? false;
-    const args = [
-      '--open=vscode',
+    // Plain --open serves DAP over the TCP socket (protocol is auto-detected
+    // on connect); --open=vscode would try to launch a local VS Code instead.
+    const rdbgArgs = [
+      '--open',
       '--host', config.adapterHost,
       '--port', config.adapterPort.toString(),
     ];
 
     if (!stopOnEntry) {
-      args.push('--nonstop');
+      rdbgArgs.push('--nonstop');
     }
 
+    const invocation = buildRdbgInvocation(
+      rdbgPath,
+      [...rdbgArgs, '-c', '--', ...targetCommand],
+      config.executablePath
+    );
+
     return {
-      command: rdbgPath,
-      args: [...args, '-c', '--', ...targetCommand],
+      command: invocation.command,
+      args: invocation.args,
       env: {
         ...process.env,
         RUBY_DEBUG_DAP_SHOW_PROTOCOL: process.env.DEBUG ? '1' : '0'
@@ -537,7 +546,6 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     const cached = this.rdbgPathCache.get(cacheKey);
 
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      this.resolvedRdbgPath = cached.path;
       return cached.path;
     }
 
@@ -546,8 +554,12 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       path: rdbgPath,
       timestamp: Date.now()
     });
-    this.resolvedRdbgPath = rdbgPath;
     return rdbgPath;
+  }
+
+  /** Synchronous view of the last resolved rdbg path (populated by initialize/validateEnvironment). */
+  private getCachedRdbgPath(): string | null {
+    return this.rdbgPathCache.get('default')?.path ?? null;
   }
 
   private async checkRubyVersion(rubyPath: string): Promise<string | null> {

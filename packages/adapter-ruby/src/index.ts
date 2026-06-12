@@ -6,5 +6,7 @@ export {
   findRdbgExecutable,
   getRdbgVersion,
   getRubySearchPaths,
-  getRdbgSearchPaths
+  getRdbgSearchPaths,
+  buildRdbgInvocation
 } from './utils/ruby-utils.js';
+export type { RdbgInvocation } from './utils/ruby-utils.js';
