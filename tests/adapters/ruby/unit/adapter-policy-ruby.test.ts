@@ -155,6 +155,94 @@ describe('RubyAdapterPolicy hooks', () => {
   });
 });
 
+describe('RubyAdapterPolicy behavior surface', () => {
+  it('exposes static debugger configuration', () => {
+    expect(RubyAdapterPolicy.getDapAdapterConfiguration?.()).toEqual({ type: 'rdbg' });
+    expect(RubyAdapterPolicy.getDebuggerConfiguration?.()).toMatchObject({
+      requiresStrictHandshake: false,
+      supportsVariableType: true
+    });
+    expect(RubyAdapterPolicy.getInitializationBehavior?.()).toEqual({ sendLaunchBeforeConfig: true });
+    expect(RubyAdapterPolicy.requiresCommandQueueing()).toBe(false);
+    expect(RubyAdapterPolicy.shouldQueueCommand('next', undefined, {} as never)).toMatchObject({
+      shouldQueue: false,
+      shouldDefer: false
+    });
+    expect(RubyAdapterPolicy.shouldDeferParentConfigDone()).toBe(false);
+    expect(RubyAdapterPolicy.isChildReadyEvent({ event: 'initialized' } as never)).toBe(true);
+    expect(RubyAdapterPolicy.isChildReadyEvent({ event: 'stopped' } as never)).toBe(false);
+    expect(() => RubyAdapterPolicy.buildChildStartArgs('x', {})).toThrow(/child sessions/);
+  });
+
+  it('resolves the ruby executable from explicit path or env', () => {
+    expect(RubyAdapterPolicy.resolveExecutablePath?.('/custom/ruby')).toBe('/custom/ruby');
+    const prev = process.env.RUBY_PATH;
+    process.env.RUBY_PATH = '/env/ruby';
+    try {
+      expect(RubyAdapterPolicy.resolveExecutablePath?.()).toBe('/env/ruby');
+    } finally {
+      if (prev === undefined) delete process.env.RUBY_PATH; else process.env.RUBY_PATH = prev;
+    }
+  });
+
+  it('tracks adapter-specific state through commands and events', () => {
+    const state = RubyAdapterPolicy.createInitialState();
+    expect(RubyAdapterPolicy.isInitialized(state)).toBe(false);
+    expect(RubyAdapterPolicy.isConnected(state)).toBe(false);
+
+    RubyAdapterPolicy.updateStateOnEvent('initialized', undefined, state);
+    expect(RubyAdapterPolicy.isInitialized(state)).toBe(true);
+    expect(RubyAdapterPolicy.isConnected(state)).toBe(true);
+
+    RubyAdapterPolicy.updateStateOnCommand('configurationDone', undefined, state);
+    expect(state.configurationDone).toBe(true);
+  });
+
+  it('considers the session ready only when paused', () => {
+    expect(RubyAdapterPolicy.isSessionReady?.('paused' as never)).toBe(true);
+    expect(RubyAdapterPolicy.isSessionReady?.('running' as never)).toBe(false);
+  });
+
+  it('answers runInTerminal reverse requests and ignores others', async () => {
+    const behavior = RubyAdapterPolicy.getDapClientBehavior();
+    const sendResponse = (await import('vitest')).vi.fn();
+    const handled = await behavior.handleReverseRequest!(
+      { command: 'runInTerminal', seq: 1, type: 'request' } as never,
+      { sendResponse } as never
+    );
+    expect(handled).toEqual({ handled: true });
+    expect(sendResponse).toHaveBeenCalled();
+
+    const unhandled = await behavior.handleReverseRequest!(
+      { command: 'startDebugging', seq: 2, type: 'request' } as never,
+      { sendResponse } as never
+    );
+    expect(unhandled).toEqual({ handled: false });
+  });
+
+  it('validates executables by spawning --version', async () => {
+    await expect(RubyAdapterPolicy.validateExecutable!(process.execPath)).resolves.toBe(true);
+    await expect(RubyAdapterPolicy.validateExecutable!('/definitely/not/ruby')).resolves.toBe(false);
+  });
+
+  it('classifies internal frames', () => {
+    expect(RubyAdapterPolicy.isInternalFrame!({ id: 1, name: 'x', file: '<internal:kernel>', line: 1 })).toBe(true);
+    expect(RubyAdapterPolicy.isInternalFrame!({ id: 2, name: 'y', file: '/gems/rack/server.rb'.replace('/gems/', '/gems/'), line: 1 })).toBe(true);
+    expect(RubyAdapterPolicy.isInternalFrame!({ id: 3, name: 'z', file: '/workspace/app.rb', line: 1 })).toBe(false);
+  });
+
+  it('returns empty locals when frames or scopes are missing', () => {
+    expect(RubyAdapterPolicy.extractLocalVariables!([], {}, {})).toEqual([]);
+    const frames = [{ id: 1, name: 'f', file: 'a.rb', line: 1 }];
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, { 1: [] }, {})).toEqual([]);
+    expect(RubyAdapterPolicy.extractLocalVariables!(
+      frames,
+      { 1: [{ name: 'Global variables', variablesReference: 9, expensive: false }] },
+      {}
+    )).toEqual([]);
+  });
+});
+
 describe('getPolicyForLanguage', () => {
   it('maps ruby to RubyAdapterPolicy', () => {
     expect(getPolicyForLanguage(DebugLanguage.RUBY)).toBe(RubyAdapterPolicy);
