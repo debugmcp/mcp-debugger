@@ -168,8 +168,9 @@ export interface RdbgInvocation {
  * Build a spawnable rdbg invocation. On Windows, gem executables are .bat/.cmd
  * shims, which Node's spawn() rejects without a shell (EINVAL since the
  * CVE-2024-27980 hardening). Instead of spawning the shim, run the sibling
- * extensionless Ruby script directly with the Ruby interpreter; if no sibling
- * script exists, fall back to cmd.exe.
+ * extensionless Ruby script directly with the Ruby interpreter — RubyInstaller
+ * and `gem install` both ship it next to the shim. No shell fallback: routing
+ * through cmd.exe would re-parse arguments and is never needed in practice.
  */
 export function buildRdbgInvocation(
   rdbgPath: string,
@@ -181,10 +182,11 @@ export function buildRdbgInvocation(
     if (path.isAbsolute(scriptPath) && fs.existsSync(scriptPath)) {
       return { command: rubyPath || 'ruby', args: [scriptPath, ...args] };
     }
-    return {
-      command: process.env.ComSpec || 'cmd.exe',
-      args: ['/d', '/s', '/c', rdbgPath, ...args]
-    };
+    throw new Error(
+      `Cannot run rdbg shim '${rdbgPath}' directly (Windows .bat/.cmd files cannot be spawned). ` +
+      `No sibling rdbg script found next to it. Set RDBG_PATH to the rdbg Ruby script ` +
+      `(the extensionless file the gem installs alongside the shim).`
+    );
   }
 
   return { command: rdbgPath, args };
@@ -212,7 +214,13 @@ export async function getRubyVersion(rubyPath: string): Promise<string | null> {
 }
 
 export async function getRdbgVersion(rdbgPath: string): Promise<string | null> {
-  const invocation = buildRdbgInvocation(rdbgPath, ['--version']);
+  let invocation: RdbgInvocation;
+  try {
+    invocation = buildRdbgInvocation(rdbgPath, ['--version']);
+  } catch {
+    // Unspawnable shim with no sibling script — version probe simply fails.
+    return null;
+  }
   return new Promise((resolve) => {
     const child = spawn(invocation.command, invocation.args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';

@@ -227,7 +227,7 @@ describe('RubyAdapterPolicy behavior surface', () => {
 
   it('classifies internal frames', () => {
     expect(RubyAdapterPolicy.isInternalFrame!({ id: 1, name: 'x', file: '<internal:kernel>', line: 1 })).toBe(true);
-    expect(RubyAdapterPolicy.isInternalFrame!({ id: 2, name: 'y', file: '/gems/rack/server.rb'.replace('/gems/', '/gems/'), line: 1 })).toBe(true);
+    expect(RubyAdapterPolicy.isInternalFrame!({ id: 2, name: 'y', file: '/usr/lib/gems/rack/server.rb', line: 1 })).toBe(true);
     expect(RubyAdapterPolicy.isInternalFrame!({ id: 3, name: 'z', file: '/workspace/app.rb', line: 1 })).toBe(false);
   });
 
@@ -292,10 +292,9 @@ describe('buildRdbgInvocation', () => {
     });
   });
 
-  it('falls back to cmd.exe when no sibling script exists', () => {
+  it('throws with RDBG_PATH guidance when no sibling script exists', () => {
     setPlatform('win32');
-    const invocation = buildRdbgInvocation('rdbg.bat', ['--open', '--port', '1']);
-    expect(invocation.command.toLowerCase()).toContain('cmd');
-    expect(invocation.args).toEqual(['/d', '/s', '/c', 'rdbg.bat', '--open', '--port', '1']);
+    expect(() => buildRdbgInvocation('rdbg.bat', ['--open', '--port', '1']))
+      .toThrow(/Set RDBG_PATH to the rdbg Ruby script/);
   });
 });
