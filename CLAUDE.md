@@ -15,6 +15,7 @@ mcp-debugger/
 ├── packages/
 │   ├── shared/             # Shared interfaces, types, and utilities
 │   ├── adapter-python/     # Python debug adapter using debugpy
+│   ├── adapter-ruby/       # Ruby debug adapter using rdbg (debug gem)
 │   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug
 │   ├── adapter-rust/       # Rust debug adapter using CodeLLDB
 │   ├── adapter-go/         # Go debug adapter using Delve
@@ -34,6 +35,7 @@ mcp-debugger/
 
 - **@debugmcp/shared**: Core interfaces and types used across all packages
 - **@debugmcp/adapter-python**: Python debugging support via debugpy
+- **@debugmcp/adapter-ruby**: Ruby debugging support via rdbg (debug gem)
 - **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug
 - **@debugmcp/adapter-rust**: Rust debugging support via CodeLLDB
 - **@debugmcp/adapter-go**: Go debugging support via Delve
@@ -57,7 +59,7 @@ npm run build
 
 # Build specific packages
 npm run build:shared
-npm run build:adapters       # Build mock + python adapters
+npm run build:adapters       # Build mock + python + ruby adapters
 npm run build:adapters:all   # Build all adapters including JavaScript
 npm run build:packages       # Build all packages in correct order via build-packages.cjs
 
@@ -246,9 +248,10 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 
 ### Adapter System
 - `src/adapters/adapter-registry.ts` - Adapter lifecycle management
-- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (7 known adapters)
+- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (8 known adapters)
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter (debugpy)
+- `packages/adapter-ruby/` - Ruby debug adapter (rdbg)
 - `packages/adapter-javascript/` - JavaScript/Node.js debug adapter (js-debug)
 - `packages/adapter-rust/` - Rust debug adapter (CodeLLDB)
 - `packages/adapter-go/` - Go debug adapter (Delve)
@@ -325,6 +328,13 @@ packages/adapter-{language}/
 - Python 3.7+ must be installed
 - debugpy must be installed: `pip install debugpy`
 - The system will auto-detect Python path or use `PYTHON_PATH` env var
+
+### Ruby
+- Ruby 2.7+ must be installed (3.1+ recommended — bundles the debug gem)
+- The `debug` gem (rdbg) must be available: `gem install debug`
+- Auto-detects ruby/rdbg from PATH and common install locations, or use `RUBY_PATH`/`RDBG_PATH` env vars
+- Launch always stops at load (the entry pause is auto-continued for `stopOnEntry=false`); attach connects directly to a running `rdbg --open` DAP socket without spawning an adapter process, including remote targets via port mapping/`kubectl port-forward` (see `docs/ruby/README.md`)
+- On Windows, rdbg's `.bat` shim is bypassed by running the sibling rdbg script via the Ruby interpreter (Node cannot spawn `.bat` without a shell)
 
 ### JavaScript/Node.js
 - Node.js 22+ must be installed

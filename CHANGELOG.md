@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Ruby debugging support** – launch and attach via `rdbg` (debug gem) DAP, including remote attach to containers and Kubernetes pods through port forwarding; conditional breakpoints, locals, repl-context expression evaluation, detach/re-attach (adapted from PR #88, contributed by [@Poyraxx](https://github.com/Poyraxx))
+- **Direct-connect attach** – adapter policies can now return a `connect`-mode spawn config to attach straight to an already-listening DAP server without spawning an adapter process; policy selection is driven by the session language via a single shared `getPolicyForLanguage()` mapping instead of adapter-command sniffing
+- **Ruby documentation** – `docs/ruby/README.md` user guide with verified launch/attach flows and Docker/Kubernetes remote-attach walkthroughs (`examples/ruby/remote-attach/`)
+
+### Fixed
+- Attach sessions no longer apply host-side file existence checks to breakpoint paths — attach targets may run on a remote filesystem (container, pod, other machine)
+- `test:unit` now actually runs the per-adapter unit suites on Windows (the `tests/adapters/*/unit` glob never expanded under cmd.exe)
+- CLI bundle prepare-pack workspace list updated for new adapter packages
+
 ## [0.21.0] - 2026-05-30
 
 ### Changed
