@@ -117,9 +117,7 @@ export const RubyAdapterPolicy: AdapterPolicy = {
     const commandStr = adapterCommand.command.toLowerCase();
     const argsStr = adapterCommand.args.join(' ').toLowerCase();
 
-    return commandStr.includes('rdbg') ||
-      argsStr.includes('rdbg') ||
-      argsStr.includes('--stop-at-load');
+    return commandStr.includes('rdbg') || argsStr.includes('rdbg');
   },
   getInitializationBehavior: () => {
     return {
@@ -160,65 +158,43 @@ export const RubyAdapterPolicy: AdapterPolicy = {
   },
   getAdapterSpawnConfig: (payload) => {
     const launchConfig = (payload.launchConfig ?? {}) as Record<string, unknown>;
-    if (launchConfig.request === 'attach') {
-      const debugPortValue = launchConfig.debugPort;
-      let host = '127.0.0.1';
-      let port: number | undefined;
 
-      if (typeof debugPortValue === 'number') {
-        port = debugPortValue;
-      } else if (typeof debugPortValue === 'string') {
-        const parts = debugPortValue.split(':');
-        if (parts.length === 1) {
-          const parsedPort = Number(parts[0]);
-          if (!Number.isNaN(parsedPort)) {
-            port = parsedPort;
-          }
-        } else {
-          const parsedPort = Number(parts[parts.length - 1]);
-          if (!Number.isNaN(parsedPort)) {
-            host = parts.slice(0, -1).join(':') || host;
-            port = parsedPort;
-          }
-        }
+    // Attach: rdbg is already listening as a DAP server (started with --open),
+    // so there is no adapter process to spawn — connect directly.
+    if (launchConfig.request === 'attach') {
+      const host = typeof launchConfig.host === 'string' && launchConfig.host.length > 0
+        ? launchConfig.host
+        : '127.0.0.1';
+      const port = launchConfig.port;
+
+      if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port > 65535) {
+        throw new Error(
+          `Ruby attach requires a valid TCP port for the listening rdbg server (got: ${String(port)}). ` +
+          `Start the target with: rdbg --open --port <port> <script.rb>`
+        );
       }
 
       return {
-        command: '',
-        args: [],
+        mode: 'connect',
         host,
-        port: port || payload.adapterPort,
-        logDir: payload.logDir,
-        connectOnly: true
+        port,
+        logDir: payload.logDir
       };
     }
 
-    if (payload.adapterCommand) {
-      return {
-        command: payload.adapterCommand.command,
-        args: payload.adapterCommand.args,
-        host: payload.adapterHost,
-        port: payload.adapterPort,
-        logDir: payload.logDir,
-        env: payload.adapterCommand.env
-      };
+    // Launch: the adapter always provides the rdbg command via buildAdapterCommand.
+    if (!payload.adapterCommand) {
+      throw new Error('RubyAdapterPolicy requires an adapter command for launch (none provided)');
     }
 
     return {
-      command: process.platform === 'win32' ? 'rdbg.bat' : 'rdbg',
-      args: [
-        '--command',
-        '--open',
-        '--host', payload.adapterHost,
-        '--port', String(payload.adapterPort),
-        '--stop-at-load',
-        '--',
-        payload.executablePath || 'ruby',
-        payload.scriptPath
-      ],
+      mode: 'spawn',
+      command: payload.adapterCommand.command,
+      args: payload.adapterCommand.args,
       host: payload.adapterHost,
       port: payload.adapterPort,
-      logDir: payload.logDir
+      logDir: payload.logDir,
+      env: payload.adapterCommand.env
     };
   }
 };

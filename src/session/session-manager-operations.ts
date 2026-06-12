@@ -222,8 +222,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // Update adapter config with resolved executable path
     adapterConfig.executablePath = resolvedExecutablePath;
 
-    // Build adapter command using the adapter
-    const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
+    // Build adapter command using the adapter. Direct-connect attach sessions
+    // (e.g. Ruby/rdbg) have no adapter process to spawn, so no command is built;
+    // the adapter policy connects straight to the attach host/port instead.
+    const adapterCommand =
+      isAttachMode && adapter.usesDirectConnectForAttach?.()
+        ? undefined
+        : adapter.buildAdapterCommand(adapterConfig);
 
     const launchConfigBase =
       transformedLaunchConfig ?? (genericLaunchConfig as LanguageSpecificLaunchConfig);

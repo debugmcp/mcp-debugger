@@ -81,6 +81,10 @@ export class MessageParser {
     }
 
     // Optional fields validation
+    if (obj.language !== undefined && typeof obj.language !== 'string') {
+      throw new Error(`Init payload 'language' must be a string if provided`);
+    }
+
     if (obj.scriptArgs !== undefined && !Array.isArray(obj.scriptArgs)) {
       throw new Error(`Init payload 'scriptArgs' must be an array if provided`);
     }

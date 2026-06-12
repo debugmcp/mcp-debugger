@@ -297,6 +297,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   getAdapterSpawnConfig: (payload) => {
     if (payload.adapterCommand) {
       return {
+        mode: 'spawn',
         command: payload.adapterCommand.command,
         args: payload.adapterCommand.args,
         host: payload.adapterHost,
@@ -310,6 +311,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
     const netcoredbgPath = payload.executablePath || 'netcoredbg';
 
     return {
+      mode: 'spawn',
       command: netcoredbgPath,
       args: [
         '--interpreter=vscode',

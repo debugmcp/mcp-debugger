@@ -278,6 +278,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     // If a custom adapter command was provided, use it directly
     if (payload.adapterCommand) {
       return {
+        mode: 'spawn',
         command: payload.adapterCommand.command,
         args: payload.adapterCommand.args,
         host: payload.adapterHost,
@@ -291,6 +292,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     const pythonPath = payload.executablePath || (process.platform === 'win32' ? 'python' : 'python3');
     
     return {
+      mode: 'spawn',
       command: pythonPath,
       args: [
         '-m', 'debugpy.adapter',

@@ -56,7 +56,8 @@ interface RubyAttachConfig extends LanguageSpecificAttachConfig {
   type: 'rdbg';
   request: 'attach';
   name: string;
-  debugPort: string;
+  host: string;
+  port: number;
   localfs: boolean;
   localfsMap?: string;
   stopOnEntry?: boolean;
@@ -341,6 +342,10 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     return true;
   }
 
+  usesDirectConnectForAttach(): boolean {
+    return true;
+  }
+
   transformAttachConfig(config: GenericAttachConfig): RubyAttachConfig {
     const rawConfig = config as Record<string, unknown>;
     const host = config.host || '127.0.0.1';
@@ -357,7 +362,8 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       type: 'rdbg',
       request: 'attach',
       name: 'Ruby: Attach',
-      debugPort: this.buildDebugPort(host, port),
+      host,
+      port,
       localfs: this.isLocalHost(host),
       stopOnEntry: config.stopOnEntry,
       justMyCode: config.justMyCode ?? true
@@ -580,14 +586,6 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
 
     return version;
-  }
-
-  private buildDebugPort(host: string, port: number): string {
-    if (host === '127.0.0.1' || host === 'localhost') {
-      return String(port);
-    }
-
-    return `${host}:${port}`;
   }
 
   private isLocalHost(host: string): boolean {

@@ -312,30 +312,52 @@ export interface AdapterPolicy {
   getDapClientBehavior(): DapClientBehavior;
 
   /**
-   * Get the configuration for spawning the debug adapter process.
-   * This allows each policy to define how to spawn its adapter.
+   * Get the configuration for starting the debug adapter connection.
+   * Policies return either a 'spawn' config (start an adapter process, then
+   * connect to it) or a 'connect' config (an external DAP server is already
+   * listening — e.g. attach to a remote rdbg — so connect directly without
+   * spawning anything).
    * @param payload The initialization payload containing ports, paths, etc.
-   * @returns Configuration for spawning the adapter, or undefined if not applicable
+   * @returns Spawn or connect configuration, or undefined if not applicable
    */
-  getAdapterSpawnConfig?(payload: {
-    executablePath: string;
-    adapterHost: string;
-    adapterPort: number;
-    logDir: string;
-    scriptPath: string;
-    launchConfig?: LanguageSpecificLaunchConfig;
-    adapterCommand?: { command: string; args: string[]; env?: Record<string, string> };
-  }): {
-    command: string;
-    args: string[];
-    host: string;
-    port: number;
-    logDir: string;
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-    connectOnly?: boolean;
-  } | undefined;
+  getAdapterSpawnConfig?(payload: AdapterSpawnPayload): AdapterSpawnConfig | undefined;
 }
+
+/**
+ * Input payload for AdapterPolicy.getAdapterSpawnConfig.
+ */
+export interface AdapterSpawnPayload {
+  executablePath: string;
+  adapterHost: string;
+  adapterPort: number;
+  logDir: string;
+  scriptPath: string;
+  launchConfig?: LanguageSpecificLaunchConfig;
+  adapterCommand?: { command: string; args: string[]; env?: Record<string, string> };
+}
+
+/**
+ * Result of AdapterPolicy.getAdapterSpawnConfig — a discriminated union:
+ * - mode 'spawn': the worker spawns the adapter process, then connects to host:port
+ * - mode 'connect': a DAP server is already listening; connect directly to host:port
+ */
+export type AdapterSpawnConfig =
+  | {
+      mode: 'spawn';
+      command: string;
+      args: string[];
+      host: string;
+      port: number;
+      logDir: string;
+      cwd?: string;
+      env?: NodeJS.ProcessEnv;
+    }
+  | {
+      mode: 'connect';
+      host: string;
+      port: number;
+      logDir: string;
+    };
 
 /**
  * DefaultAdapterPolicy is a lightweight placeholder used while the worker is

@@ -197,6 +197,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     const initCommand = {
       cmd: 'init',
       sessionId: config.sessionId,
+      language: config.language,
       executablePath: executablePath,  // Using resolved executable path
       adapterHost: config.adapterHost,
       adapterPort: config.adapterPort,

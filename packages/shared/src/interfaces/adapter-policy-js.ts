@@ -710,6 +710,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     // since js-debug/pwa-node isn't a simple executable
     if (payload.adapterCommand) {
       return {
+        mode: 'spawn',
         command: payload.adapterCommand.command,
         args: payload.adapterCommand.args,
         host: payload.adapterHost,

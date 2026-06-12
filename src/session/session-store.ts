@@ -14,15 +14,7 @@ import {
   DebugSessionInfo,
   Breakpoint,
   AdapterPolicy,
-  DefaultAdapterPolicy,
-  PythonAdapterPolicy,
-  RubyAdapterPolicy,
-  JsDebugAdapterPolicy,
-  RustAdapterPolicy,
-  GoAdapterPolicy,
-  JavaAdapterPolicy,
-  DotnetAdapterPolicy,
-  MockAdapterPolicy
+  getPolicyForLanguage
 } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
 
@@ -76,26 +68,7 @@ export class SessionStore {
    * Selects the appropriate adapter policy based on language
    */
   public selectPolicy(language: DebugLanguage): AdapterPolicy {
-    switch (language) {
-      case DebugLanguage.PYTHON:
-        return PythonAdapterPolicy;
-      case DebugLanguage.RUBY:
-        return RubyAdapterPolicy;
-      case DebugLanguage.JAVASCRIPT:
-        return JsDebugAdapterPolicy;
-      case DebugLanguage.RUST:
-        return RustAdapterPolicy;
-      case DebugLanguage.GO:
-        return GoAdapterPolicy;
-      case DebugLanguage.JAVA:
-        return JavaAdapterPolicy;
-      case DebugLanguage.DOTNET:
-        return DotnetAdapterPolicy;
-      case DebugLanguage.MOCK:
-        return MockAdapterPolicy;
-      default:
-        return DefaultAdapterPolicy;
-    }
+    return getPolicyForLanguage(language);
   }
 
   /**

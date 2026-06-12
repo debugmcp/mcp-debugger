@@ -12,6 +12,10 @@ import type { AdapterPolicy, LanguageSpecificLaunchConfig } from '@debugmcp/shar
 export interface ProxyInitPayload {
   cmd: 'init';
   sessionId: string;
+  /** Debug language for this session; selects the adapter policy directly.
+   *  Optional for backward compatibility — absent on legacy payloads, where
+   *  the policy is inferred from adapterCommand instead. */
+  language?: string;
   executablePath: string;
   adapterHost: string;
   adapterPort: number;

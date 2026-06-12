@@ -222,6 +222,7 @@ export const JavaAdapterPolicy: AdapterPolicy = {
   getAdapterSpawnConfig: (payload) => {
     if (payload.adapterCommand) {
       return {
+        mode: 'spawn',
         command: payload.adapterCommand.command,
         args: payload.adapterCommand.args,
         host: payload.adapterHost,
@@ -233,6 +234,7 @@ export const JavaAdapterPolicy: AdapterPolicy = {
 
     // Default: launch JdiDapServer directly
     return {
+      mode: 'spawn',
       command: 'java',
       args: [
         '-cp', 'java/out',

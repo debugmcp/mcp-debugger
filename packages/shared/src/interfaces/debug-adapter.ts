@@ -138,6 +138,15 @@ export interface IDebugAdapter extends EventEmitter {
   supportsDetach?(): boolean;
 
   /**
+   * Whether attach connects directly to an already-listening DAP server
+   * (e.g. rdbg started with --open) instead of spawning an adapter process.
+   * When true, no adapter command is built for attach sessions; the adapter
+   * policy returns a 'connect' spawn config from the attach host/port.
+   * @returns true if attach uses direct connection, false otherwise
+   */
+  usesDirectConnectForAttach?(): boolean;
+
+  /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
    * @param config Generic attach configuration

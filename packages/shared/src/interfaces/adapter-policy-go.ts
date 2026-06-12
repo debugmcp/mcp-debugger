@@ -308,6 +308,7 @@ export const GoAdapterPolicy: AdapterPolicy = {
     // If a custom adapter command was provided, use it directly
     if (payload.adapterCommand) {
       return {
+        mode: 'spawn',
         command: payload.adapterCommand.command,
         args: payload.adapterCommand.args,
         host: payload.adapterHost,
@@ -321,6 +322,7 @@ export const GoAdapterPolicy: AdapterPolicy = {
     const dlvPath = payload.executablePath || 'dlv';
     
     return {
+      mode: 'spawn',
       command: dlvPath,
       args: [
         'dap',

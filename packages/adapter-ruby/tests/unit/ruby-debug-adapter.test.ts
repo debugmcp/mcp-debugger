@@ -122,11 +122,13 @@ describe('RubyDebugAdapter', () => {
 
     expect(adapter.supportsAttach?.()).toBe(true);
     expect(adapter.supportsDetach?.()).toBe(true);
+    expect(adapter.usesDirectConnectForAttach?.()).toBe(true);
     expect(config).toEqual(
       expect.objectContaining({
         type: 'rdbg',
         request: 'attach',
-        debugPort: '12345',
+        host: '127.0.0.1',
+        port: 12345,
         localfs: true,
         stopOnEntry: true
       })
