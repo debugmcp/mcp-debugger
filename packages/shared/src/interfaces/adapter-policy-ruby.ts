@@ -30,8 +30,10 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       return [];
     }
 
+    // rdbg reports the scope as "Local variables"; prefer the DAP
+    // presentationHint so a future rename doesn't break us.
     const localScope = frameScopes.find((scope) =>
-      scope.name === 'Locals' || scope.name === 'Local'
+      scope.presentationHint === 'locals' || scope.name === 'Local variables'
     );
 
     if (!localScope) {
@@ -41,7 +43,7 @@ export const RubyAdapterPolicy: AdapterPolicy = {
     return variables[localScope.variablesReference] || [];
   },
   getLocalScopeName: (): string[] => {
-    return ['Locals', 'Local'];
+    return ['Local variables'];
   },
   getDapAdapterConfiguration: () => {
     return {
@@ -124,6 +126,15 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       sendLaunchBeforeConfig: true
     };
   },
+  // rdbg rejects the DAP-default 'variables' evaluate context
+  // ("unknown context: variables"); it accepts 'repl' and 'watch'.
+  // 'repl' also permits state-modifying expressions, which is the
+  // documented behavior of the evaluate_expression tool.
+  getEvaluateContext: (): string => 'repl',
+  // rdbg only suspends on attach when the target was started suspended
+  // (stop-at-load). Re-attaching to a running target leaves it running, so
+  // an explicit pause is required for stopOnEntry to hold.
+  getAttachBehavior: () => ({ pauseAfterAttach: true }),
   getDapClientBehavior: (): DapClientBehavior => {
     return {
       handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {

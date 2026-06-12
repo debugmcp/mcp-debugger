@@ -237,18 +237,18 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       || process.env.RDBG_PATH
       || (process.platform === 'win32' ? 'rdbg.bat' : 'rdbg');
     const targetCommand = this.buildTargetCommand(config, launchConfig);
-    const stopOnEntry = launchConfig.stopOnEntry ?? false;
     // Plain --open serves DAP over the TCP socket (protocol is auto-detected
     // on connect); --open=vscode would try to launch a local VS Code instead.
+    //
+    // No --nonstop: rdbg must suspend at load and wait for the client, or a
+    // short script finishes before the proxy can connect. The stop-at-entry
+    // pause is released by SessionManager.handleAutoContinue when
+    // stopOnEntry=false, matching how other adapters handle entry stops.
     const rdbgArgs = [
       '--open',
       '--host', config.adapterHost,
       '--port', config.adapterPort.toString(),
     ];
-
-    if (!stopOnEntry) {
-      rdbgArgs.push('--nonstop');
-    }
 
     const invocation = buildRdbgInvocation(
       rdbgPath,

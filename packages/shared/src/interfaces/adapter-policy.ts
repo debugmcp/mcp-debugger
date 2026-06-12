@@ -312,6 +312,22 @@ export interface AdapterPolicy {
   getDapClientBehavior(): DapClientBehavior;
 
   /**
+   * DAP evaluate context to use for evaluate_expression.
+   * Most adapters accept 'variables'; some (rdbg) only accept contexts like
+   * 'repl'/'watch'. Defaults to 'variables' when not implemented.
+   */
+  getEvaluateContext?(): string;
+
+  /**
+   * Attach-mode behavior tweaks.
+   * pauseAfterAttach: send an explicit DAP 'pause' after attaching when
+   * stopOnEntry is requested. Needed for debuggers (rdbg) that do NOT
+   * suspend the target on attach when it is already running — without it the
+   * session would report PAUSED while the target keeps executing.
+   */
+  getAttachBehavior?(): { pauseAfterAttach?: boolean };
+
+  /**
    * Get the configuration for starting the debug adapter connection.
    * Policies return either a 'spawn' config (start an adapter process, then
    * connect to it) or a 'connect' config (an external DAP server is already

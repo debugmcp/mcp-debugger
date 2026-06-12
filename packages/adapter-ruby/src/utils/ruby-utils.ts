@@ -117,6 +117,11 @@ export function getRdbgSearchPaths(): string[] {
 
   if (process.platform === 'win32') {
     paths.push(
+      // RubyInstaller ships rdbg (bundled debug gem) alongside ruby.exe
+      'C:\\Ruby31-x64\\bin',
+      'C:\\Ruby32-x64\\bin',
+      'C:\\Ruby33-x64\\bin',
+      'C:\\Ruby34-x64\\bin',
       path.join(home, 'scoop', 'apps', 'ruby', 'current', 'bin'),
       path.join(home, '.local', 'share', 'gem', 'ruby', 'bin')
     );
