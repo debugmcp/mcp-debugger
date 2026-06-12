@@ -323,6 +323,7 @@ export interface AdapterPolicy {
     adapterPort: number;
     logDir: string;
     scriptPath: string;
+    launchConfig?: LanguageSpecificLaunchConfig;
     adapterCommand?: { command: string; args: string[]; env?: Record<string, string> };
   }): {
     command: string;
@@ -332,6 +333,7 @@ export interface AdapterPolicy {
     logDir: string;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    connectOnly?: boolean;
   } | undefined;
 }
 

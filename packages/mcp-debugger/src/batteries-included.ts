@@ -10,6 +10,7 @@
 import { JavascriptAdapterFactory } from '@debugmcp/adapter-javascript';
 import { PythonAdapterFactory } from '@debugmcp/adapter-python';
 import { MockAdapterFactory } from '@debugmcp/adapter-mock';
+import { RubyAdapterFactory } from '@debugmcp/adapter-ruby';
 import { GoAdapterFactory } from '@debugmcp/adapter-go';
 import { RustAdapterFactory } from '@debugmcp/adapter-rust';
 import { JavaAdapterFactory } from '@debugmcp/adapter-java';
@@ -17,7 +18,7 @@ import { DotnetAdapterFactory } from '@debugmcp/adapter-dotnet';
 import type { IAdapterFactory } from '@debugmcp/shared';
 
 interface BundledAdapterEntry {
-  language: 'javascript' | 'python' | 'mock' | 'go' | 'rust' | 'java' | 'dotnet';
+  language: 'javascript' | 'python' | 'mock' | 'ruby' | 'go' | 'rust' | 'java' | 'dotnet';
   factoryCtor: new () => IAdapterFactory;
 }
 
@@ -27,6 +28,7 @@ const adapters: BundledAdapterEntry[] = [
   { language: 'javascript', factoryCtor: JavascriptAdapterFactory },
   { language: 'python', factoryCtor: PythonAdapterFactory },
   { language: 'mock', factoryCtor: MockAdapterFactory },
+  { language: 'ruby', factoryCtor: RubyAdapterFactory },
   { language: 'go', factoryCtor: GoAdapterFactory },
   { language: 'rust', factoryCtor: RustAdapterFactory },
   { language: 'java', factoryCtor: JavaAdapterFactory },

@@ -231,6 +231,14 @@ export class DebugMcpServer {
             requiresExecutable: true,
             defaultExecutable: 'python'
           };
+        case DebugLanguage.RUBY:
+          return {
+            id: DebugLanguage.RUBY,
+            displayName: 'Ruby',
+            version: '1.0.0',
+            requiresExecutable: true,
+            defaultExecutable: 'ruby'
+          };
         case DebugLanguage.MOCK:
           return {
             id: DebugLanguage.MOCK,

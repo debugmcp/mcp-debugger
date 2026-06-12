@@ -146,6 +146,7 @@ export default defineConfig({
       { find: '@debugmcp/shared', replacement: path.resolve(__dirname, './packages/shared/src/index.ts') },
       { find: '@debugmcp/adapter-mock', replacement: path.resolve(__dirname, './packages/adapter-mock/src/index.ts') },
       { find: '@debugmcp/adapter-python', replacement: path.resolve(__dirname, './packages/adapter-python/src/index.ts') },
+      { find: '@debugmcp/adapter-ruby', replacement: path.resolve(__dirname, './packages/adapter-ruby/src/index.ts') },
       { find: '@debugmcp/adapter-javascript', replacement: path.resolve(__dirname, './packages/adapter-javascript/src/index.ts') },
       { find: '@debugmcp/adapter-go', replacement: path.resolve(__dirname, './packages/adapter-go/src/index.ts') },
       { find: '@debugmcp/adapter-rust', replacement: path.resolve(__dirname, './packages/adapter-rust/src/index.ts') },

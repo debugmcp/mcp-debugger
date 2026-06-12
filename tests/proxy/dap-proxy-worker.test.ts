@@ -26,7 +26,8 @@ import {
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,
   GoAdapterPolicy,
-  JavaAdapterPolicy
+  JavaAdapterPolicy,
+  RubyAdapterPolicy
 } from '@debugmcp/shared';
 
 // Mock implementations
@@ -258,6 +259,14 @@ describe('DapProxyWorker', () => {
         args: ['dap', '--listen=:9876']
       });
       expect(policy.name).toBe('go');
+    });
+
+    it('should select Ruby policy for rdbg adapter', () => {
+      const policy = (worker as any).selectAdapterPolicy({
+        command: 'rdbg',
+        args: ['--open=vscode', '--port', '12345']
+      });
+      expect(policy.name).toBe('ruby');
     });
 
     it('should select Java policy for JdiDapServer adapter', () => {
@@ -596,6 +605,64 @@ describe('DapProxyWorker', () => {
       );
       expect(statusCall).toBeDefined();
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it('startAdapterAndConnect should connect directly for Ruby attach sessions', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'ruby-attach-session',
+        executablePath: 'ruby',
+        adapterHost: '127.0.0.1',
+        adapterPort: 8123,
+        logDir: '/logs',
+        scriptPath: 'attach://remote',
+        launchConfig: {
+          request: 'attach',
+          type: 'rdbg',
+          debugPort: '127.0.0.1:12345'
+        },
+        adapterCommand: {
+          command: 'rdbg',
+          args: ['--open=vscode', '--port', '8123', '-c', '--', 'ruby', 'app.rb']
+        }
+      };
+
+      const processStub = {
+        spawn: vi.fn(),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
+        sendAttachRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = RubyAdapterPolicy;
+      (worker as any).adapterState = RubyAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      expect(processStub.spawn).not.toHaveBeenCalled();
+      expect(connectionStub.connectWithRetry).toHaveBeenCalledWith('127.0.0.1', 12345);
+      expect(connectionStub.sendAttachRequest).toHaveBeenCalledWith(
+        mockDapClient,
+        payload.launchConfig
+      );
     });
 
     it('startAdapterAndConnect should defer initialized and send launch before configurationDone when sendLaunchBeforeConfig is true', async () => {

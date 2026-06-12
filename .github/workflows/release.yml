@@ -276,6 +276,7 @@ jobs:
         node -e 'console.log("SHARED_VERSION="+require("./packages/shared/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("ADAPTER_MOCK_VERSION="+require("./packages/adapter-mock/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("ADAPTER_PYTHON_VERSION="+require("./packages/adapter-python/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("ADAPTER_RUBY_VERSION="+require("./packages/adapter-ruby/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("CLI_VERSION="+require("./packages/mcp-debugger/package.json").version)' >> $GITHUB_ENV
     - name: Set npm dist-tag
       run: |
@@ -295,6 +296,7 @@ jobs:
         npm pack --dry-run -w @debugmcp/shared
         npm pack --dry-run -w @debugmcp/adapter-mock
         npm pack --dry-run -w @debugmcp/adapter-python
+        npm pack --dry-run -w @debugmcp/adapter-ruby
         npm pack --dry-run -w @debugmcp/mcp-debugger
     
     - name: Publish to npm (workspaces)
@@ -320,6 +322,12 @@ jobs:
           echo "@debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} already exists, skipping"
         else
           npm publish -w @debugmcp/adapter-python --access public --provenance
+        fi
+
+        if npm view @debugmcp/adapter-ruby@${ADAPTER_RUBY_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/adapter-ruby@${ADAPTER_RUBY_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/adapter-ruby --access public --provenance
         fi
 
         if npm view @debugmcp/mcp-debugger@${CLI_VERSION} version >/dev/null 2>&1; then
@@ -399,6 +407,7 @@ jobs:
         **Optional adapters:**
         ```bash
         npm install -g @debugmcp/adapter-python
+        npm install -g @debugmcp/adapter-ruby
         npm install -g @debugmcp/adapter-mock
         ```
         

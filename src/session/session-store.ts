@@ -16,6 +16,7 @@ import {
   AdapterPolicy,
   DefaultAdapterPolicy,
   PythonAdapterPolicy,
+  RubyAdapterPolicy,
   JsDebugAdapterPolicy,
   RustAdapterPolicy,
   GoAdapterPolicy,
@@ -78,6 +79,8 @@ export class SessionStore {
     switch (language) {
       case DebugLanguage.PYTHON:
         return PythonAdapterPolicy;
+      case DebugLanguage.RUBY:
+        return RubyAdapterPolicy;
       case DebugLanguage.JAVASCRIPT:
         return JsDebugAdapterPolicy;
       case DebugLanguage.RUST:

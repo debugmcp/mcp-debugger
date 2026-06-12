@@ -35,6 +35,7 @@ import {
   RustAdapterPolicy,
   GoAdapterPolicy,
   JavaAdapterPolicy,
+  RubyAdapterPolicy,
   DotnetAdapterPolicy,
   MockAdapterPolicy
 } from '@debugmcp/shared';
@@ -119,6 +120,8 @@ export class DapProxyWorker {
       return RustAdapterPolicy;
     } else if (GoAdapterPolicy.matchesAdapter(adapterCommand)) {
       return GoAdapterPolicy;
+    } else if (RubyAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return RubyAdapterPolicy;
     } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
       return JavaAdapterPolicy;
     } else if (DotnetAdapterPolicy.matchesAdapter(adapterCommand)) {
@@ -290,6 +293,7 @@ export class DapProxyWorker {
       adapterPort: payload.adapterPort,
       logDir: payload.logDir,
       scriptPath: payload.scriptPath,
+      launchConfig: payload.launchConfig,
       adapterCommand: payload.adapterCommand
     });
     
@@ -297,7 +301,9 @@ export class DapProxyWorker {
       throw new Error(`Cannot determine adapter command for dry run (policy: ${this.adapterPolicy.name})`);
     }
     
-    const fullCommand = `${spawnConfig.command} ${spawnConfig.args.join(' ')}`;
+    const fullCommand = spawnConfig.connectOnly
+      ? `[direct-connect] ${spawnConfig.host}:${spawnConfig.port}`
+      : `${spawnConfig.command} ${spawnConfig.args.join(' ')}`;
     
     this.logger!.warn(`[Worker DRY_RUN] Would execute: ${fullCommand}`);
     this.logger!.warn(`[Worker DRY_RUN] Script to debug: ${payload.scriptPath}`);
@@ -334,6 +340,7 @@ export class DapProxyWorker {
       adapterPort: payload.adapterPort,
       logDir: payload.logDir,
       scriptPath: payload.scriptPath,
+      launchConfig: payload.launchConfig,
       adapterCommand: payload.adapterCommand
     });
     
@@ -344,32 +351,35 @@ export class DapProxyWorker {
     // In container mode, default adapter cwd to workspace root so that
     // relative paths in DAP launch args (classpath, cwd, etc.) resolve
     // against the mounted project directory rather than /app.
-    if (process.env.MCP_WORKSPACE_ROOT && !spawnConfig.cwd) {
+    if (process.env.MCP_WORKSPACE_ROOT && !spawnConfig.cwd && !spawnConfig.connectOnly) {
       spawnConfig.cwd = process.env.MCP_WORKSPACE_ROOT;
     }
 
-    // Spawn adapter process using the config from the policy
-    const spawnResult = await this.processManager!.spawn(spawnConfig);
+    if (!spawnConfig.connectOnly) {
+      const spawnResult = await this.processManager!.spawn(spawnConfig);
 
-    this.adapterProcess = spawnResult.process;
-    this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
+      this.adapterProcess = spawnResult.process;
+      this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
 
-    // Monitor adapter process
-    this.adapterProcess.on('error', (err) => {
-      this.logger!.error('[Worker] Adapter process error:', err);
-      this.sendError(`Adapter process error: ${err.message}`);
-    });
+      this.adapterProcess.on('error', (err) => {
+        this.logger!.error('[Worker] Adapter process error:', err);
+        this.sendError(`Adapter process error: ${err.message}`);
+      });
 
-    this.adapterProcess.on('exit', (code, signal) => {
-      this.logger!.info(`[Worker] Adapter process exited. Code: ${code}, Signal: ${signal}`);
-      this.sendStatus('adapter_exited', { code, signal });
-    });
+      this.adapterProcess.on('exit', (code, signal) => {
+        this.logger!.info(`[Worker] Adapter process exited. Code: ${code}, Signal: ${signal}`);
+        this.sendStatus('adapter_exited', { code, signal });
+      });
+    } else {
+      this.adapterProcess = null;
+      this.logger!.info(`[Worker] Connecting directly to adapter at ${spawnConfig.host}:${spawnConfig.port}`);
+    }
 
     // Connect to adapter
     try {
       this.dapClient = await this.connectionManager!.connectWithRetry(
-        payload.adapterHost,
-        payload.adapterPort
+        spawnConfig.host,
+        spawnConfig.port
       );
 
       // Set up event handlers

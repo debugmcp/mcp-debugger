@@ -9,6 +9,7 @@ import {
   AdapterPolicy,
   DefaultAdapterPolicy,
   PythonAdapterPolicy,
+  RubyAdapterPolicy,
   JsDebugAdapterPolicy,
   RustAdapterPolicy,
   GoAdapterPolicy,
@@ -33,6 +34,8 @@ export abstract class SessionManagerData extends SessionManagerCore {
         return PythonAdapterPolicy;
       case DebugLanguage.JAVASCRIPT:
         return JsDebugAdapterPolicy;
+      case DebugLanguage.RUBY:
+        return RubyAdapterPolicy;
       case DebugLanguage.RUST:
         return RustAdapterPolicy;
       case DebugLanguage.GO:

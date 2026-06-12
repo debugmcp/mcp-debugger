@@ -17,6 +17,7 @@ const packages = [
   '@debugmcp/shared',
   '@debugmcp/adapter-mock',
   '@debugmcp/adapter-python',
+  '@debugmcp/adapter-ruby',
   '@debugmcp/adapter-javascript',
   ...(!disabledLanguages.has('rust') ? ['@debugmcp/adapter-rust'] : []),
   ...(!disabledLanguages.has('go') ? ['@debugmcp/adapter-go'] : []),
