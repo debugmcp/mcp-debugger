@@ -229,6 +229,33 @@ describe('MessageParser', () => {
       });
     });
 
+    describe('language field', () => {
+      const basePayload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        executablePath: '/usr/bin/ruby',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/home/user/script.rb'
+      };
+
+      it('accepts an optional language string', () => {
+        const result = MessageParser.validateInitPayload({ ...basePayload, language: 'ruby' });
+        expect((result as any).language).toBe('ruby');
+      });
+
+      it('accepts payloads without a language (legacy)', () => {
+        const result = MessageParser.validateInitPayload(basePayload);
+        expect((result as any).language).toBeUndefined();
+      });
+
+      it('rejects a non-string language', () => {
+        expect(() => MessageParser.validateInitPayload({ ...basePayload, language: 42 }))
+          .toThrow(/'language' must be a string/);
+      });
+    });
+
     describe('string-to-type coercion (Claude Code SSE bug workaround)', () => {
       const basePayload = {
         cmd: 'init',
