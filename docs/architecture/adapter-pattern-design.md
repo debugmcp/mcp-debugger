@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 7 languages (Python, JavaScript, Rust, Go, Java, .NET/C#, and Mock). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
+The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 7 programming languages plus a mock adapter (Python, Ruby, JavaScript, Rust, Go, Java, and .NET/C#). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
 
 1. **IDebugAdapter Interface**: Complete adapter implementations for full language support
 2. **AdapterPolicy Interface**: Lightweight policies for language-specific session management behaviors
@@ -87,6 +87,7 @@ graph TD
     
     subgraph "Language Adapters"
         PA[PythonAdapter]
+        RBA[RubyAdapter]
         NA[JavascriptAdapter]
         RA[RustAdapter]
         GA[GoAdapter]
@@ -96,6 +97,7 @@ graph TD
     end
 
     AR --> PA
+    AR --> RBA
     AR --> NA
     AR --> RA
     AR --> GA

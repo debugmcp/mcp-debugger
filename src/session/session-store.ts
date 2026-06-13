@@ -14,14 +14,7 @@ import {
   DebugSessionInfo,
   Breakpoint,
   AdapterPolicy,
-  DefaultAdapterPolicy,
-  PythonAdapterPolicy,
-  JsDebugAdapterPolicy,
-  RustAdapterPolicy,
-  GoAdapterPolicy,
-  JavaAdapterPolicy,
-  DotnetAdapterPolicy,
-  MockAdapterPolicy
+  getPolicyForLanguage
 } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
 
@@ -62,6 +55,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // even when the adapter reports a non-'entry' reason (e.g., js-debug
   // emits 'pause' from its post-attach forced pause).
   firstStopHandled?: boolean;
+  // True for sessions established via attach_to_process. Attach targets may
+  // run on a remote filesystem (container, pod, other machine), so host-side
+  // file existence checks do not apply to their source paths.
+  attachMode?: boolean;
 }
 
 /**
@@ -75,24 +72,7 @@ export class SessionStore {
    * Selects the appropriate adapter policy based on language
    */
   public selectPolicy(language: DebugLanguage): AdapterPolicy {
-    switch (language) {
-      case DebugLanguage.PYTHON:
-        return PythonAdapterPolicy;
-      case DebugLanguage.JAVASCRIPT:
-        return JsDebugAdapterPolicy;
-      case DebugLanguage.RUST:
-        return RustAdapterPolicy;
-      case DebugLanguage.GO:
-        return GoAdapterPolicy;
-      case DebugLanguage.JAVA:
-        return JavaAdapterPolicy;
-      case DebugLanguage.DOTNET:
-        return DotnetAdapterPolicy;
-      case DebugLanguage.MOCK:
-        return MockAdapterPolicy;
-      default:
-        return DefaultAdapterPolicy;
-    }
+    return getPolicyForLanguage(language);
   }
 
   /**

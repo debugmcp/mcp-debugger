@@ -1,0 +1,20 @@
+# Kubernetes demo pod for remote Ruby debugging.
+# Build the image into your cluster's runtime first, e.g. with Docker Desktop:
+#   docker build -t ruby-remote-attach:demo examples/ruby/remote-attach
+# Then:
+#   kubectl apply -f examples/ruby/remote-attach/pod.yaml
+#   kubectl port-forward pod/ruby-remote-attach 12345:12345
+# and attach mcp-debugger to 127.0.0.1:12345.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ruby-remote-attach
+  labels:
+    app: ruby-remote-attach
+spec:
+  containers:
+    - name: app
+      image: ruby-remote-attach:demo
+      imagePullPolicy: Never # use the locally built image
+      ports:
+        - containerPort: 12345

@@ -7,14 +7,7 @@ import {
   StackFrame,
   SessionState,
   AdapterPolicy,
-  DefaultAdapterPolicy,
-  PythonAdapterPolicy,
-  JsDebugAdapterPolicy,
-  RustAdapterPolicy,
-  GoAdapterPolicy,
-  DotnetAdapterPolicy,
-  JavaAdapterPolicy,
-  MockAdapterPolicy,
+  getPolicyForLanguage,
   DebugLanguage
 } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
@@ -28,24 +21,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * Selects the appropriate adapter policy based on language
    */
   protected selectPolicy(language: string | DebugLanguage): AdapterPolicy {
-    switch (language) {
-      case DebugLanguage.PYTHON:
-        return PythonAdapterPolicy;
-      case DebugLanguage.JAVASCRIPT:
-        return JsDebugAdapterPolicy;
-      case DebugLanguage.RUST:
-        return RustAdapterPolicy;
-      case DebugLanguage.GO:
-        return GoAdapterPolicy;
-      case DebugLanguage.DOTNET:
-        return DotnetAdapterPolicy;
-      case DebugLanguage.JAVA:
-        return JavaAdapterPolicy;
-      case DebugLanguage.MOCK:
-        return MockAdapterPolicy;
-      default:
-        return DefaultAdapterPolicy;
-    }
+    return getPolicyForLanguage(language);
   }
 
   async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {

@@ -80,6 +80,7 @@ export type LanguageSpecificAttachConfig = Record<string, unknown>;
  */
 export enum DebugLanguage {
   PYTHON = 'python',
+  RUBY = 'ruby',
   JAVASCRIPT = 'javascript',
   RUST = 'rust',
   GO = 'go',

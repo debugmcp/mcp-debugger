@@ -267,6 +267,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
     // If a custom adapter command was provided, use it directly
     if (payload.adapterCommand) {
       return {
+        mode: 'spawn',
         command: payload.adapterCommand.command,
         args: payload.adapterCommand.args,
         host: payload.adapterHost,
@@ -305,6 +306,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
     
     // CodeLLDB is spawned with TCP port for DAP communication
     return {
+      mode: 'spawn',
       command: codelldbPath,
       args: [
         '--port', String(payload.adapterPort)

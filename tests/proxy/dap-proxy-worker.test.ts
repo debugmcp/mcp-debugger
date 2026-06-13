@@ -26,7 +26,8 @@ import {
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,
   GoAdapterPolicy,
-  JavaAdapterPolicy
+  JavaAdapterPolicy,
+  RubyAdapterPolicy
 } from '@debugmcp/shared';
 
 // Mock implementations
@@ -253,15 +254,23 @@ describe('DapProxyWorker', () => {
 
     it('should select Go policy for dlv adapter', () => {
       // Test policy selection directly without triggering full validation
-      const policy = (worker as any).selectAdapterPolicy({
+      const policy = (worker as any).selectAdapterPolicy(undefined, {
         command: 'dlv',
         args: ['dap', '--listen=:9876']
       });
       expect(policy.name).toBe('go');
     });
 
+    it('should select Ruby policy for rdbg adapter', () => {
+      const policy = (worker as any).selectAdapterPolicy(undefined, {
+        command: 'rdbg',
+        args: ['--open=vscode', '--port', '12345']
+      });
+      expect(policy.name).toBe('ruby');
+    });
+
     it('should select Java policy for JdiDapServer adapter', () => {
-      const policy = (worker as any).selectAdapterPolicy({
+      const policy = (worker as any).selectAdapterPolicy(undefined, {
         command: 'java',
         args: ['-cp', '/path/to/jdi', 'JdiDapServer', '5005']
       });
@@ -269,7 +278,7 @@ describe('DapProxyWorker', () => {
     });
 
     it('should select Rust policy for codelldb adapter', () => {
-      const policy = (worker as any).selectAdapterPolicy({
+      const policy = (worker as any).selectAdapterPolicy(undefined, {
         command: '/path/to/codelldb',
         args: ['--port', '12345']
       });
@@ -277,7 +286,7 @@ describe('DapProxyWorker', () => {
     });
 
     it('should select Dotnet policy for netcoredbg adapter', () => {
-      const policy = (worker as any).selectAdapterPolicy({
+      const policy = (worker as any).selectAdapterPolicy(undefined, {
         command: 'node',
         args: ['netcoredbg-bridge.js', '/path/to/netcoredbg']
       });
@@ -285,7 +294,7 @@ describe('DapProxyWorker', () => {
     });
 
     it('should select Dotnet policy for dotnet adapter command', () => {
-      const policy = (worker as any).selectAdapterPolicy({
+      const policy = (worker as any).selectAdapterPolicy(undefined, {
         command: '/path/to/netcoredbg',
         args: ['--interpreter=vscode']
       });
@@ -293,11 +302,33 @@ describe('DapProxyWorker', () => {
     });
 
     it('should select Mock policy for mock-adapter', () => {
-      const policy = (worker as any).selectAdapterPolicy({
+      const policy = (worker as any).selectAdapterPolicy(undefined, {
         command: 'node',
         args: ['mock-adapter-process.js']
       });
       expect(policy.name).toBe('mock');
+    });
+
+    it('should select policy by language when provided, ignoring adapter command shape', () => {
+      const policy = (worker as any).selectAdapterPolicy('ruby', {
+        command: '/opt/python-toolchain/bin/rdbg',
+        args: ['--open', '--port', '12345']
+      });
+      expect(policy.name).toBe('ruby');
+    });
+
+    it('should select policy by language without any adapter command', () => {
+      expect((worker as any).selectAdapterPolicy('go').name).toBe('go');
+      expect((worker as any).selectAdapterPolicy('python').name).toBe('python');
+      expect((worker as any).selectAdapterPolicy('ruby').name).toBe('ruby');
+    });
+
+    it('should fall back to command sniffing for unknown languages', () => {
+      const policy = (worker as any).selectAdapterPolicy('fortran', {
+        command: 'dlv',
+        args: ['dap', '--listen=:9876']
+      });
+      expect(policy.name).toBe('go');
     });
   });
 
@@ -596,6 +627,63 @@ describe('DapProxyWorker', () => {
       );
       expect(statusCall).toBeDefined();
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it('startAdapterAndConnect should connect directly for Ruby attach sessions', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'ruby-attach-session',
+        language: 'ruby',
+        executablePath: 'ruby',
+        adapterHost: '127.0.0.1',
+        adapterPort: 8123,
+        logDir: '/logs',
+        scriptPath: 'attach://remote',
+        launchConfig: {
+          request: 'attach',
+          type: 'rdbg',
+          host: '127.0.0.1',
+          port: 12345
+        }
+        // No adapterCommand: direct-connect attach has no adapter process to spawn
+      };
+
+      const processStub = {
+        spawn: vi.fn(),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
+        sendAttachRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = RubyAdapterPolicy;
+      (worker as any).adapterState = RubyAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      expect(processStub.spawn).not.toHaveBeenCalled();
+      expect(connectionStub.connectWithRetry).toHaveBeenCalledWith('127.0.0.1', 12345);
+      expect(connectionStub.sendAttachRequest).toHaveBeenCalledWith(
+        mockDapClient,
+        payload.launchConfig
+      );
     });
 
     it('startAdapterAndConnect should defer initialized and send launch before configurationDone when sendLaunchBeforeConfig is true', async () => {

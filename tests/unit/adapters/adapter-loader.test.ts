@@ -292,7 +292,7 @@ describe('AdapterLoader', () => {
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
-      expect(adapters).toHaveLength(7);
+      expect(adapters).toHaveLength(8);
 
       const pythonAdapter = adapters.find(a => a.name === 'python');
       expect(pythonAdapter).toEqual({
@@ -315,6 +315,14 @@ describe('AdapterLoader', () => {
         name: 'javascript',
         packageName: '@debugmcp/adapter-javascript',
         description: 'JavaScript/TypeScript debugger using js-debug',
+        installed: false
+      });
+
+      const rubyAdapter = adapters.find(a => a.name === 'ruby');
+      expect(rubyAdapter).toEqual({
+        name: 'ruby',
+        packageName: '@debugmcp/adapter-ruby',
+        description: 'Ruby debugger using rdbg',
         installed: false
       });
 

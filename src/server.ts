@@ -231,6 +231,14 @@ export class DebugMcpServer {
             requiresExecutable: true,
             defaultExecutable: 'python'
           };
+        case DebugLanguage.RUBY:
+          return {
+            id: DebugLanguage.RUBY,
+            displayName: 'Ruby',
+            version: '1.0.0',
+            requiresExecutable: true,
+            defaultExecutable: 'ruby'
+          };
         case DebugLanguage.MOCK:
           return {
             id: DebugLanguage.MOCK,
@@ -347,6 +355,14 @@ export class DebugMcpServer {
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     if (policy.isNonFileSourceIdentifier?.(file)) {
       this.logger.info(`[DebugMcpServer.setBreakpoint] Non-file source identifier detected: ${file}`);
+      return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
+    }
+
+    // Attach sessions may debug a target on a remote filesystem (container,
+    // pod, another machine); host-side existence checks don't apply. Pass the
+    // path through as-is — the debugger knows its own filesystem best.
+    if (this.sessionManager.getSession(sessionId)?.attachMode) {
+      this.logger.info(`[DebugMcpServer.setBreakpoint] Attach session: skipping host file check for ${file}`);
       return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
     }
 

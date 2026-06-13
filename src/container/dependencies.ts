@@ -117,7 +117,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   // Adapters are loaded dynamically on-demand by the AdapterRegistry via AdapterLoader.
   // In container runtime, pre-register known adapters using dynamic import (fire-and-forget)
   if (process.env.MCP_CONTAINER === 'true') {
-    const tryRegister = (lang: 'mock' | 'python' | 'javascript' | 'rust' | 'go' | 'java', factoryName: string) => {
+    const tryRegister = (lang: 'mock' | 'python' | 'javascript' | 'ruby' | 'rust' | 'go' | 'java', factoryName: string) => {
       if (isLanguageDisabled(lang)) {
         logger.info?.(`[AdapterRegistry] Skipping bundled adapter '${lang}' (disabled via env).`);
         return;
@@ -142,6 +142,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
     tryRegister('mock', 'MockAdapterFactory');
     tryRegister('python', 'PythonAdapterFactory');
     tryRegister('javascript', 'JavascriptAdapterFactory');
+    tryRegister('ruby', 'RubyAdapterFactory');
     tryRegister('rust', 'RustAdapterFactory');
     tryRegister('go', 'GoAdapterFactory');
     tryRegister('java', 'JavaAdapterFactory');

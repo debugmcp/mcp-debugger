@@ -35,8 +35,10 @@ import {
   RustAdapterPolicy,
   GoAdapterPolicy,
   JavaAdapterPolicy,
+  RubyAdapterPolicy,
   DotnetAdapterPolicy,
-  MockAdapterPolicy
+  MockAdapterPolicy,
+  getPolicyForLanguage
 } from '@debugmcp/shared';
 
 export type DapProxyWorkerHooks = {
@@ -103,14 +105,25 @@ export class DapProxyWorker {
   /**
    * Select the appropriate adapter policy based on the adapter command
    */
-  private selectAdapterPolicy(adapterCommand?: { command: string; args: string[] }): AdapterPolicy {
+  private selectAdapterPolicy(
+    language?: string,
+    adapterCommand?: { command: string; args: string[] }
+  ): AdapterPolicy {
+    // Preferred path: the session's language identifies the policy directly.
+    if (language) {
+      const policy = getPolicyForLanguage(language);
+      if (policy !== DefaultAdapterPolicy) {
+        return policy;
+      }
+    }
+
     if (!adapterCommand) {
       // Legacy fallback: when no adapter command is specified (pre-monorepo sessions),
       // default to Python adapter policy
       return PythonAdapterPolicy;
     }
-    
-    // Check each policy's matcher
+
+    // Legacy fallback: infer the policy from the adapter command shape
     if (JsDebugAdapterPolicy.matchesAdapter(adapterCommand)) {
       return JsDebugAdapterPolicy;
     } else if (PythonAdapterPolicy.matchesAdapter(adapterCommand)) {
@@ -119,6 +132,8 @@ export class DapProxyWorker {
       return RustAdapterPolicy;
     } else if (GoAdapterPolicy.matchesAdapter(adapterCommand)) {
       return GoAdapterPolicy;
+    } else if (RubyAdapterPolicy.matchesAdapter(adapterCommand)) {
+      return RubyAdapterPolicy;
     } else if (JavaAdapterPolicy.matchesAdapter(adapterCommand)) {
       return JavaAdapterPolicy;
     } else if (DotnetAdapterPolicy.matchesAdapter(adapterCommand)) {
@@ -202,7 +217,7 @@ export class DapProxyWorker {
     const validatedPayload = validateProxyInitPayload(payload);
     
     // Select adapter policy
-    this.adapterPolicy = this.selectAdapterPolicy(validatedPayload.adapterCommand);
+    this.adapterPolicy = this.selectAdapterPolicy(validatedPayload.language, validatedPayload.adapterCommand);
     this.adapterState = this.adapterPolicy.createInitialState();
     this.logger?.info(`[Worker] Selected adapter policy: ${this.adapterPolicy.name}`);
     
@@ -290,6 +305,7 @@ export class DapProxyWorker {
       adapterPort: payload.adapterPort,
       logDir: payload.logDir,
       scriptPath: payload.scriptPath,
+      launchConfig: payload.launchConfig,
       adapterCommand: payload.adapterCommand
     });
     
@@ -297,7 +313,9 @@ export class DapProxyWorker {
       throw new Error(`Cannot determine adapter command for dry run (policy: ${this.adapterPolicy.name})`);
     }
     
-    const fullCommand = `${spawnConfig.command} ${spawnConfig.args.join(' ')}`;
+    const fullCommand = spawnConfig.mode === 'connect'
+      ? `[connect] ${spawnConfig.host}:${spawnConfig.port}`
+      : `${spawnConfig.command} ${spawnConfig.args.join(' ')}`;
     
     this.logger!.warn(`[Worker DRY_RUN] Would execute: ${fullCommand}`);
     this.logger!.warn(`[Worker DRY_RUN] Script to debug: ${payload.scriptPath}`);
@@ -334,6 +352,7 @@ export class DapProxyWorker {
       adapterPort: payload.adapterPort,
       logDir: payload.logDir,
       scriptPath: payload.scriptPath,
+      launchConfig: payload.launchConfig,
       adapterCommand: payload.adapterCommand
     });
     
@@ -341,35 +360,43 @@ export class DapProxyWorker {
       throw new Error(`Adapter policy ${this.adapterPolicy.name} does not provide spawn configuration`);
     }
 
-    // In container mode, default adapter cwd to workspace root so that
-    // relative paths in DAP launch args (classpath, cwd, etc.) resolve
-    // against the mounted project directory rather than /app.
-    if (process.env.MCP_WORKSPACE_ROOT && !spawnConfig.cwd) {
-      spawnConfig.cwd = process.env.MCP_WORKSPACE_ROOT;
+    if (spawnConfig.mode === 'spawn') {
+      // In container mode, default adapter cwd to workspace root so that
+      // relative paths in DAP launch args (classpath, cwd, etc.) resolve
+      // against the mounted project directory rather than /app.
+      if (process.env.MCP_WORKSPACE_ROOT && !spawnConfig.cwd) {
+        spawnConfig.cwd = process.env.MCP_WORKSPACE_ROOT;
+      }
+
+      const spawnResult = await this.processManager!.spawn(spawnConfig);
+
+      this.adapterProcess = spawnResult.process;
+      this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
+
+      this.adapterProcess.on('error', (err) => {
+        this.logger!.error('[Worker] Adapter process error:', err);
+        this.sendError(`Adapter process error: ${err.message}`);
+      });
+
+      this.adapterProcess.on('exit', (code, signal) => {
+        this.logger!.info(`[Worker] Adapter process exited. Code: ${code}, Signal: ${signal}`);
+        this.sendStatus('adapter_exited', { code, signal });
+      });
+    } else {
+      // connect mode: an external DAP server is already listening (e.g. remote
+      // rdbg attach). There is no adapter process to monitor — termination is
+      // detected via socket close (dap_connection_closed), not process exit.
+      this.adapterProcess = null;
+      this.logger!.info(
+        `[Worker] Connecting directly to DAP server at ${spawnConfig.host}:${spawnConfig.port} (no adapter process to monitor)`
+      );
     }
-
-    // Spawn adapter process using the config from the policy
-    const spawnResult = await this.processManager!.spawn(spawnConfig);
-
-    this.adapterProcess = spawnResult.process;
-    this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
-
-    // Monitor adapter process
-    this.adapterProcess.on('error', (err) => {
-      this.logger!.error('[Worker] Adapter process error:', err);
-      this.sendError(`Adapter process error: ${err.message}`);
-    });
-
-    this.adapterProcess.on('exit', (code, signal) => {
-      this.logger!.info(`[Worker] Adapter process exited. Code: ${code}, Signal: ${signal}`);
-      this.sendStatus('adapter_exited', { code, signal });
-    });
 
     // Connect to adapter
     try {
       this.dapClient = await this.connectionManager!.connectWithRetry(
-        payload.adapterHost,
-        payload.adapterPort
+        spawnConfig.host,
+        spawnConfig.port
       );
 
       // Set up event handlers

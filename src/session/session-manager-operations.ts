@@ -222,8 +222,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // Update adapter config with resolved executable path
     adapterConfig.executablePath = resolvedExecutablePath;
 
-    // Build adapter command using the adapter
-    const adapterCommand = adapter.buildAdapterCommand(adapterConfig);
+    // Build adapter command using the adapter. Direct-connect attach sessions
+    // (e.g. Ruby/rdbg) have no adapter process to spawn, so no command is built;
+    // the adapter policy connects straight to the attach host/port instead.
+    const adapterCommand =
+      isAttachMode && adapter.usesDirectConnectForAttach?.()
+        ? undefined
+        : adapter.buildAdapterCommand(adapterConfig);
 
     const launchConfigBase =
       transformedLaunchConfig ?? (genericLaunchConfig as LanguageSpecificLaunchConfig);
@@ -1261,8 +1266,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     expression: string,
     frameId?: number
   ): Promise<EvaluateResult> {
-    const context = 'variables';
     const session = this._getSessionById(sessionId);
+    // Some debuggers (rdbg) reject the default 'variables' context; let the
+    // adapter policy pick the context its debugger understands.
+    const context = this.selectPolicy(session.language).getEvaluateContext?.() ?? 'variables';
     this.logger.info(
       `[SM evaluateExpression ${sessionId}] Entered. Expression: "${this.truncateForLog(
         expression,
@@ -1467,6 +1474,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     this._updateSessionState(session, SessionState.INITIALIZING);
     this.sessionStore.update(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
+      attachMode: true,
     });
 
     try {
@@ -1515,6 +1523,21 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           }
           session.proxyManager.setCurrentThreadId(discoveredThreadId);
           this.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
+
+          // Some debuggers (rdbg) do not suspend a running target on attach;
+          // issue an explicit pause so the PAUSED state we report is real.
+          const attachBehavior = this.selectPolicy(session.language).getAttachBehavior?.();
+          if (attachBehavior?.pauseAfterAttach) {
+            try {
+              await session.proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
+              this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
+            } catch (err) {
+              // Already stopped (e.g. target was started suspended) — fine.
+              this.logger.info(
+                `[SessionManager] Post-attach pause not needed/accepted: ${err instanceof Error ? err.message : String(err)}`
+              );
+            }
+          }
         }
 
         this.logger.info(`[SessionManager] Set session ${sessionId} to PAUSED after attach (stopOnEntry=${attachConfig.stopOnEntry})`);

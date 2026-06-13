@@ -164,20 +164,24 @@ export {
 export { AdapterFactory } from './factories/adapter-factory.js';
 
 // Adapter Policy interfaces and implementations
-export type { 
-  AdapterPolicy, 
+export type {
+  AdapterPolicy,
   ChildSessionStrategy,
   AdapterSpecificState,
-  CommandHandling 
+  CommandHandling,
+  AdapterSpawnPayload,
+  AdapterSpawnConfig
 } from './interfaces/adapter-policy.js';
 export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
+export { RubyAdapterPolicy } from './interfaces/adapter-policy-ruby.js';
 export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
 export { GoAdapterPolicy } from './interfaces/adapter-policy-go.js';
 export { JavaAdapterPolicy } from './interfaces/adapter-policy-java.js';
 export { DotnetAdapterPolicy } from './interfaces/adapter-policy-dotnet.js';
 export { MockAdapterPolicy } from './interfaces/adapter-policy-mock.js';
+export { getPolicyForLanguage } from './interfaces/adapter-policy-map.js';
 
 // DAP Client Behavior interfaces for adapter policies
 export type {

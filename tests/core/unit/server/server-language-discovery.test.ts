@@ -97,6 +97,46 @@ describe('Server Language Discovery Tests', () => {
     });
   });
 
+  describe('Ruby availability and metadata', () => {
+    it('should report ruby metadata when dynamically discovered', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'ruby']);
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python debugger using debugpy' },
+        { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, description: 'Mock adapter for testing' },
+        { name: 'ruby', packageName: '@debugmcp/adapter-ruby', installed: true, description: 'Ruby debugger using rdbg' }
+      ]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_supported_languages',
+          arguments: {}
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const rubyAvail = content.available.find((adapter: any) => adapter.language === 'ruby');
+      const rubyMeta = content.languages.find((meta: any) => meta.id === 'ruby');
+
+      expect(rubyAvail).toEqual({
+        language: 'ruby',
+        package: '@debugmcp/adapter-ruby',
+        installed: true,
+        description: 'Ruby debugger using rdbg'
+      });
+      expect(rubyMeta).toEqual({
+        id: 'ruby',
+        displayName: 'Ruby',
+        version: '1.0.0',
+        requiresExecutable: true,
+        defaultExecutable: 'ruby'
+      });
+    });
+  });
+
   describe('getSupportedLanguagesAsync', () => {
     it('should return languages from dynamic discovery when available', async () => {
       debugServer = new DebugMcpServer();
