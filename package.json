@@ -138,7 +138,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/which": "^3.0.4",
     "@vscode/debugprotocol": "^1.68.0",
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "debug": "^4.4.3",
     "eventsource": "^4.1.0",
     "express": "^5.2.1",
