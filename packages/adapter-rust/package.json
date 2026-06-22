@@ -30,7 +30,7 @@
     "which": "^7.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "@types/which": "^3.0.4",
     "extract-zip": "^2.0.1",
     "progress": "^2.0.3",

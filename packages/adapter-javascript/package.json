@@ -37,7 +37,7 @@
     "@debugmcp/shared": "0.21.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "@vitest/coverage-v8": "^4.1.8",
     "eslint": "^10.5.0",
     "extract-zip": "^2.0.1",

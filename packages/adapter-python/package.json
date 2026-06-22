@@ -21,7 +21,7 @@
     "which": "^7.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "@types/which": "^3.0.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
