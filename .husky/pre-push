@@ -74,13 +74,17 @@ fi
 echo "✅ Build successful!"
 echo ""
 
-# Run tests (reduced suite for tag-only pushes to match release CI)
-echo "🧪 Running tests (this may take a few minutes)..."
+# Run tests. The full e2e suite (smoke/docker/npx) runs in CI; the pre-push gate
+# runs the fast parallel `unit` project plus the integration set — "as much as
+# fits" without the heavy/flaky e2e tests. The clean build above already produced
+# dist, and these scripts don't rebuild, so there's no redundant second build.
+# Tag-only pushes keep the reduced release-CI suite.
+echo "🧪 Running pre-push tests (unit + integration; full e2e runs in CI)..."
 if [ "$TAGS_ONLY" = true ]; then
     echo "🔖 Tag-only push detected. Running reduced CI tests..."
     npm run test:ci-no-python > "$PRE_PUSH_LOG" 2>&1
 else
-    npm test > "$PRE_PUSH_LOG" 2>&1
+    (npm run test:unit && npm run test:integration) > "$PRE_PUSH_LOG" 2>&1
 fi
 
 TEST_EXIT=$?
