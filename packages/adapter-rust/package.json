@@ -36,7 +36,7 @@
     "progress": "^2.0.3",
     "rimraf": "^6.1.3",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "engines": {
     "node": ">=22.0.0"
