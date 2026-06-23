@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { AdapterState, AdapterErrorCode } from '@debugmcp/shared';
+import { AdapterState } from '@debugmcp/shared';
 import { PythonDebugAdapter } from '../../src/python-debug-adapter.js';
 import type { AdapterDependencies } from '@debugmcp/shared';
 
@@ -47,20 +47,21 @@ describe('PythonDebugAdapter', () => {
     expect(events).toContain('initialized');
   });
 
-  it('fails initialize when debugpy is missing', async () => {
+  it('initialize succeeds with a warning when debugpy is missing from the auto-detected interpreter', async () => {
+    // Registration/init runs without a configured interpreter, so a missing debugpy must NOT block:
+    // it is re-checked at launch against the user's real executablePath. Regression guard for #106/#16.
     const adapter = new PythonDebugAdapter(deps);
     (adapter as any).resolveExecutablePath = vi.fn().mockResolvedValue('/usr/bin/python3');
     (adapter as any).checkPythonVersion = vi.fn().mockResolvedValue('3.10.1');
     (adapter as any).checkDebugpyInstalled = vi.fn().mockResolvedValue(false);
     (adapter as any).detectVirtualEnv = vi.fn().mockResolvedValue(false);
 
-    await expect(adapter.initialize()).rejects.toMatchObject({
-      code: AdapterErrorCode.ENVIRONMENT_INVALID,
-    });
-    expect(adapter.getState()).toBe(AdapterState.ERROR);
+    await adapter.initialize();
+    expect(adapter.getState()).toBe(AdapterState.READY);
+    expect(adapter.isReady()).toBe(true);
   });
 
-  it('validateEnvironment reports version and debugpy issues', async () => {
+  it('validateEnvironment reports version as error and missing debugpy as a warning when auto-detected', async () => {
     const adapter = new PythonDebugAdapter(deps);
     (adapter as any).resolveExecutablePath = vi.fn().mockResolvedValue('/usr/bin/python');
     (adapter as any).checkPythonVersion = vi.fn().mockResolvedValue('3.6.9');
@@ -70,12 +71,60 @@ describe('PythonDebugAdapter', () => {
     const result = await adapter.validateEnvironment();
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'PYTHON_VERSION_TOO_OLD' }),
-        expect.objectContaining({ code: 'DEBUGPY_NOT_INSTALLED' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ code: 'PYTHON_VERSION_TOO_OLD' })]),
+    );
+    // No explicit interpreter was provided, so a missing debugpy is a warning, not an error.
+    expect(result.errors.some((e) => e.code === 'DEBUGPY_NOT_INSTALLED')).toBe(false);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'DEBUGPY_NOT_INSTALLED' })]),
     );
     expect(deps.logger.info).toHaveBeenCalledWith('[PythonDebugAdapter] Virtual environment detected');
+  });
+
+  describe('configured-interpreter validation (issue #106)', () => {
+    it('forwards the configured executablePath to resolveExecutablePath', async () => {
+      // Root-cause guard: validateEnvironment must check the interpreter the user configured,
+      // not an auto-detected one. Pre-fix this was called with undefined.
+      const adapter = new PythonDebugAdapter(deps);
+      const resolveSpy = vi.fn().mockResolvedValue('/project/.venv/bin/python');
+      (adapter as any).resolveExecutablePath = resolveSpy;
+      (adapter as any).checkPythonVersion = vi.fn().mockResolvedValue('3.12.0');
+      (adapter as any).checkDebugpyInstalled = vi.fn().mockResolvedValue(true);
+      (adapter as any).detectVirtualEnv = vi.fn().mockResolvedValue(true);
+
+      await adapter.validateEnvironment('/project/.venv/bin/python');
+
+      expect(resolveSpy).toHaveBeenCalledWith('/project/.venv/bin/python');
+    });
+
+    it('passes when the configured venv python has debugpy even if the global one does not', async () => {
+      const adapter = new PythonDebugAdapter(deps);
+      // resolveExecutablePath echoes an explicit preferred path, as findPythonExecutable does.
+      (adapter as any).resolveExecutablePath = vi.fn(async (p?: string) => p ?? '/usr/bin/python3');
+      (adapter as any).checkPythonVersion = vi.fn().mockResolvedValue('3.12.0');
+      (adapter as any).checkDebugpyInstalled = vi.fn(async (p: string) => p === '/project/.venv/bin/python');
+      (adapter as any).detectVirtualEnv = vi.fn().mockResolvedValue(true);
+
+      const result = await adapter.validateEnvironment('/project/.venv/bin/python');
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('reports missing debugpy as an error when an explicit interpreter was provided', async () => {
+      const adapter = new PythonDebugAdapter(deps);
+      (adapter as any).resolveExecutablePath = vi.fn(async (p?: string) => p ?? '/usr/bin/python3');
+      (adapter as any).checkPythonVersion = vi.fn().mockResolvedValue('3.12.0');
+      (adapter as any).checkDebugpyInstalled = vi.fn().mockResolvedValue(false);
+      (adapter as any).detectVirtualEnv = vi.fn().mockResolvedValue(false);
+
+      const result = await adapter.validateEnvironment('/project/.venv/bin/python');
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'DEBUGPY_NOT_INSTALLED' })]),
+      );
+    });
   });
 
   it('dispose resets state to UNINITIALIZED', async () => {

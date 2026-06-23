@@ -58,7 +58,9 @@ describe('PythonDebugAdapter', () => {
     expect(result.errors[0]?.code).toBe('PYTHON_VERSION_TOO_OLD');
   });
 
-  it('reports debugpy missing even when Python version passes checks', async () => {
+  it('reports missing debugpy as a warning when no interpreter was configured (issue #106)', async () => {
+    // With no explicit executablePath, debugpy may still be in the user's virtualenv, so a missing
+    // system debugpy is a warning (re-checked at launch), not a blocking error.
     const deps = createDependencies();
     const adapter = new PythonDebugAdapter(deps);
     (adapter as any).resolveExecutablePath = vi.fn().mockResolvedValue('/usr/bin/python');
@@ -68,8 +70,9 @@ describe('PythonDebugAdapter', () => {
 
     const result = await adapter.validateEnvironment();
 
-    expect(result.valid).toBe(false);
-    expect(result.errors.map((entry: { code: string }) => entry.code)).toContain('DEBUGPY_NOT_INSTALLED');
+    expect(result.valid).toBe(true);
+    expect(result.errors.map((entry: { code: string }) => entry.code)).not.toContain('DEBUGPY_NOT_INSTALLED');
+    expect(result.warnings.map((entry: { code: string }) => entry.code)).toContain('DEBUGPY_NOT_INSTALLED');
     expect(deps.logger.info).toHaveBeenCalledWith('[PythonDebugAdapter] Virtual environment detected');
   });
 
