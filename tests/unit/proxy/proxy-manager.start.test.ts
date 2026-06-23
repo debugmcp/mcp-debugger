@@ -286,6 +286,36 @@ describe('ProxyManager.start', () => {
     expect(launchProxySpy).not.toHaveBeenCalled();
   });
 
+  it('validates the user-configured interpreter, not an auto-detected one (issue #106)', async () => {
+    const validateEnvironment = vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] });
+    const resolveExecutablePath = vi.fn();
+    const adapter = {
+      language: DebugLanguage.PYTHON,
+      validateEnvironment,
+      resolveExecutablePath
+    } as unknown as IDebugAdapter;
+
+    proxyManager = new ProxyManager(
+      adapter,
+      proxyProcessLauncher,
+      fileSystem,
+      logger
+    );
+
+    const config: ProxyConfig = {
+      ...baseConfig,
+      language: DebugLanguage.PYTHON,
+      executablePath: '/project/.venv/bin/python'
+    };
+
+    await proxyManager.start(config);
+
+    // The configured venv interpreter must be the one validated for debugpy.
+    expect(validateEnvironment).toHaveBeenCalledWith('/project/.venv/bin/python');
+    // A provided path is used directly — no auto-detection fallback.
+    expect(resolveExecutablePath).not.toHaveBeenCalled();
+  });
+
   describe('init retry handling', () => {
     beforeEach(() => {
       vi.useFakeTimers();

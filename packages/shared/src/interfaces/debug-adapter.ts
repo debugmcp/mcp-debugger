@@ -58,8 +58,10 @@ export interface IDebugAdapter extends EventEmitter {
   
   /**
    * Validate that the environment is properly configured for debugging
+   * @param executablePath Optional user-configured interpreter to validate. When provided,
+   *   validation should check this exact interpreter rather than an auto-detected one.
    */
-  validateEnvironment(): Promise<ValidationResult>;
+  validateEnvironment(executablePath?: string): Promise<ValidationResult>;
   
   /**
    * Get list of required dependencies for this adapter
