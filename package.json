@@ -144,7 +144,7 @@
     "express": "^5.2.1",
     "fs-extra": "^11.3.5",
     "lru-cache": "^11.5.1",
-    "uuid": "^14.0.0",
+    "uuid": "^14.0.1",
     "which": "^7.0.0",
     "winston": "^3.19.0"
   },
@@ -164,8 +164,8 @@
     "@types/express": "^5.0.6",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^25.9.3",
-    "@vitest/coverage-istanbul": "^4.1.8",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-istanbul": "^4.1.9",
+    "@vitest/coverage-v8": "^4.1.9",
     "c8": "^11.0.0",
     "cross-env": "^10.1.0",
     "esbuild": "^0.28.1",
@@ -177,8 +177,8 @@
     "ts-node": "^10.9.2",
     "tsup": "^8.5.1",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.61.0",
-    "vitest": "^4.1.8"
+    "typescript-eslint": "^8.61.1",
+    "vitest": "^4.1.9"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
