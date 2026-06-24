@@ -231,9 +231,14 @@ export default defineConfig({
           name: 'unit',
           include: UNIT_INCLUDE,
           exclude: UNIT_EXCLUDE,
-          // Parallel: separate worker processes (forks), one file at a time per
-          // worker. forks (not threads) keeps process.env / module-global
-          // mutation from bleeding across concurrently-running files.
+          // Parallel pool. Kept on `forks` for full per-file process isolation
+          // (robust against any future non-hermetic test). The Tier 2 vi.stubEnv
+          // migration DID make `threads` safe — it was verified green across 10
+          // seeded-shuffle runs — but measured wall-clock was identical to forks
+          // (~111s either way), because a few proxy-manager.start retry tests use
+          // real-time backoff (~16s each) and dominate the run, not pool startup.
+          // Flip to 'threads' once Tier 3 converts those to fake timers and the
+          // startup-overhead difference can actually show.
           pool: 'forks',
           fileParallelism: true,
           isolate: true,
