@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import path from 'path';
 
 import { JavascriptDebugAdapter } from '../../src/index.js';
@@ -36,18 +36,7 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
     launchConfig: {}
   } as unknown as import('@debugmcp/shared').AdapterConfig;
 
-  let originalNodeOptions: string | undefined;
-
-  beforeEach(() => {
-    originalNodeOptions = process.env.NODE_OPTIONS;
-  });
-
   afterEach(() => {
-    if (typeof originalNodeOptions === 'string') {
-      process.env.NODE_OPTIONS = originalNodeOptions;
-    } else {
-      delete (process.env as Record<string, string | undefined>).NODE_OPTIONS;
-    }
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -100,7 +89,7 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
   it('preserves and appends existing NODE_OPTIONS when memory flag missing (single space separation)', () => {
     const adapter = new JavascriptDebugAdapter(deps);
 
-    process.env.NODE_OPTIONS = '--experimental-repl-await';
+    vi.stubEnv('NODE_OPTIONS', '--experimental-repl-await');
     const cmd = adapter.buildAdapterCommand(defaultConfig);
 
     // Should contain both flags, with a single space separation and trimmed
@@ -114,7 +103,7 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
     const adapter = new JavascriptDebugAdapter(deps);
 
     // Start with no NODE_OPTIONS
-    delete (process.env as Record<string, string | undefined>).NODE_OPTIONS;
+    vi.stubEnv('NODE_OPTIONS', undefined);
 
     const first = adapter.buildAdapterCommand(defaultConfig);
     const second = adapter.buildAdapterCommand(defaultConfig);
@@ -129,7 +118,7 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
   it('does not override when NODE_OPTIONS already includes a max-old-space-size (any value, case-insensitive)', () => {
     const adapter = new JavascriptDebugAdapter(deps);
 
-    process.env.NODE_OPTIONS = '--MAX-OLD-SPACE-SIZE=2048   --trace-warnings';
+    vi.stubEnv('NODE_OPTIONS', '--MAX-OLD-SPACE-SIZE=2048   --trace-warnings');
     const cmd = adapter.buildAdapterCommand(defaultConfig);
 
     // Should not append another max-old-space-size; should normalize spaces

@@ -73,7 +73,7 @@ describe('Version Utility', () => {
   });
 
   it('suppresses error logging when console output is silenced', () => {
-    process.env.CONSOLE_OUTPUT_SILENCED = '1';
+    vi.stubEnv('CONSOLE_OUTPUT_SILENCED', '1');
     vi.mocked(fs.readFileSync).mockImplementation(() => {
       throw new Error('boom');
     });
@@ -81,6 +81,5 @@ describe('Version Utility', () => {
     getVersion();
 
     expect(consoleErrorSpy).not.toHaveBeenCalled();
-    delete process.env.CONSOLE_OUTPUT_SILENCED;
   });
 });

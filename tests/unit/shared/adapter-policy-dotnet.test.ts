@@ -1,22 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { DotnetAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-dotnet.js';
 import { SessionState } from '@debugmcp/shared';
 
 describe('DotnetAdapterPolicy', () => {
-  let originalNetcoredbgPath: string | undefined;
-
-  beforeEach(() => {
-    originalNetcoredbgPath = process.env.NETCOREDBG_PATH;
-  });
-
-  afterEach(() => {
-    if (originalNetcoredbgPath === undefined) {
-      delete process.env.NETCOREDBG_PATH;
-    } else {
-      process.env.NETCOREDBG_PATH = originalNetcoredbgPath;
-    }
-  });
-
   // ===== Identity =====
 
   it('has name "dotnet"', () => {
@@ -182,12 +168,12 @@ describe('DotnetAdapterPolicy', () => {
   });
 
   it('resolves executable from NETCOREDBG_PATH env var', () => {
-    process.env.NETCOREDBG_PATH = '/env/netcoredbg';
+    vi.stubEnv('NETCOREDBG_PATH', '/env/netcoredbg');
     expect(DotnetAdapterPolicy.resolveExecutablePath()).toBe('/env/netcoredbg');
   });
 
   it('defaults to "netcoredbg" when no path or env var', () => {
-    delete process.env.NETCOREDBG_PATH;
+    vi.stubEnv('NETCOREDBG_PATH', undefined);
     expect(DotnetAdapterPolicy.resolveExecutablePath()).toBe('netcoredbg');
   });
 

@@ -44,15 +44,9 @@ const createFactory = (overrides: Partial<ReturnType<typeof createFactory>> = {}
 };
 
 describe('AdapterRegistry', () => {
-  const originalEnv = process.env.MCP_CONTAINER;
-
   beforeEach(() => {
     vi.restoreAllMocks();
-    delete process.env.MCP_CONTAINER;
-  });
-
-  afterEach(() => {
-    process.env.MCP_CONTAINER = originalEnv;
+    vi.stubEnv('MCP_CONTAINER', undefined);
   });
 
   it('registers and unregisters factories (with validation)', async () => {

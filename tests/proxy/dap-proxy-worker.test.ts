@@ -415,12 +415,11 @@ describe('DapProxyWorker', () => {
 
     it('uses custom trace file factory during initialization', async () => {
       vi.useFakeTimers();
-      
-      const previousTrace = process.env.DAP_TRACE_FILE;
+
       const exitSpy = vi.fn();
       const traceSpy = vi.fn().mockImplementation((_sessionId: string, logDir: string) => {
         const tracePath = path.join(logDir, 'custom-trace.ndjson');
-        process.env.DAP_TRACE_FILE = tracePath;
+        vi.stubEnv('DAP_TRACE_FILE', tracePath);
         return tracePath;
       });
       worker = new DapProxyWorker(dependencies, {
@@ -436,12 +435,6 @@ describe('DapProxyWorker', () => {
       expect(traceSpy).toHaveBeenCalledWith(basePayload.sessionId, basePayload.logDir);
       expect(process.env.DAP_TRACE_FILE).toBe(path.join(basePayload.logDir, 'custom-trace.ndjson'));
 
-      if (previousTrace === undefined) {
-        delete process.env.DAP_TRACE_FILE;
-      } else {
-        process.env.DAP_TRACE_FILE = previousTrace;
-      }
-      
       vi.useRealTimers();
     });
 

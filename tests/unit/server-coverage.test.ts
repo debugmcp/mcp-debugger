@@ -221,22 +221,18 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     });
 
     it('should handle unsupported language in non-container mode', async () => {
-      const originalEnv = process.env.MCP_CONTAINER;
-      delete process.env.MCP_CONTAINER;
-      
+      vi.stubEnv('MCP_CONTAINER', undefined);
+
       mockSessionManager.adapterRegistry.listLanguages.mockResolvedValue(['python']);
 
       await expect(server.createDebugSession({
         language: 'javascript' as any
       })).rejects.toThrow("Language 'javascript' is not supported");
-
-      process.env.MCP_CONTAINER = originalEnv;
     });
 
     it('should allow python in container mode even if not in list', async () => {
-      const originalEnv = process.env.MCP_CONTAINER;
-      process.env.MCP_CONTAINER = 'true';
-      
+      vi.stubEnv('MCP_CONTAINER', 'true');
+
       mockSessionManager.adapterRegistry.listLanguages.mockResolvedValue(['mock']);
       mockSessionManager.createSession.mockResolvedValue({
         id: 'session-1',
@@ -252,8 +248,6 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       expect(result).toBeDefined();
       expect(result.id).toBe('session-1');
-
-      process.env.MCP_CONTAINER = originalEnv;
     });
   });
 
@@ -558,17 +552,14 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     });
 
     it('should add python in container mode if missing', async () => {
-      const originalEnv = process.env.MCP_CONTAINER;
-      process.env.MCP_CONTAINER = 'true';
-      
+      vi.stubEnv('MCP_CONTAINER', 'true');
+
       mockSessionManager.adapterRegistry.getSupportedLanguages.mockReturnValue(['mock']);
       mockSessionManager.adapterRegistry.listLanguages = undefined;
 
       const result = await (server as any).getSupportedLanguagesAsync();
       expect(result).toContain('python');
       expect(result).toContain('mock');
-
-      process.env.MCP_CONTAINER = originalEnv;
     });
   });
 

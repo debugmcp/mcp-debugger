@@ -8,7 +8,7 @@
  * plus the Ruby-specific policy hooks (evaluate context, post-attach pause,
  * local scope extraction) and Windows .bat invocation handling.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -176,13 +176,8 @@ describe('RubyAdapterPolicy behavior surface', () => {
 
   it('resolves the ruby executable from explicit path or env', () => {
     expect(RubyAdapterPolicy.resolveExecutablePath?.('/custom/ruby')).toBe('/custom/ruby');
-    const prev = process.env.RUBY_PATH;
-    process.env.RUBY_PATH = '/env/ruby';
-    try {
-      expect(RubyAdapterPolicy.resolveExecutablePath?.()).toBe('/env/ruby');
-    } finally {
-      if (prev === undefined) delete process.env.RUBY_PATH; else process.env.RUBY_PATH = prev;
-    }
+    vi.stubEnv('RUBY_PATH', '/env/ruby');
+    expect(RubyAdapterPolicy.resolveExecutablePath?.()).toBe('/env/ruby');
   });
 
   it('tracks adapter-specific state through commands and events', () => {

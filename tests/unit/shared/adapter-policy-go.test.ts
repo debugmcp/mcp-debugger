@@ -1,22 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { GoAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-go.js';
 import { SessionState } from '@debugmcp/shared';
 
 describe('GoAdapterPolicy', () => {
-  let originalDlvPath: string | undefined;
-
-  beforeEach(() => {
-    originalDlvPath = process.env.DLV_PATH;
-  });
-
-  afterEach(() => {
-    if (originalDlvPath === undefined) {
-      delete process.env.DLV_PATH;
-    } else {
-      process.env.DLV_PATH = originalDlvPath;
-    }
-  });
-
   // ===== Identity =====
 
   it('has name "go"', () => {
@@ -195,12 +181,12 @@ describe('GoAdapterPolicy', () => {
   });
 
   it('resolves executable from DLV_PATH env var', () => {
-    process.env.DLV_PATH = '/env/dlv';
+    vi.stubEnv('DLV_PATH', '/env/dlv');
     expect(GoAdapterPolicy.resolveExecutablePath()).toBe('/env/dlv');
   });
 
   it('defaults to "dlv" when no path or env var', () => {
-    delete process.env.DLV_PATH;
+    vi.stubEnv('DLV_PATH', undefined);
     expect(GoAdapterPolicy.resolveExecutablePath()).toBe('dlv');
   });
 

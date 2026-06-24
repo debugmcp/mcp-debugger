@@ -62,28 +62,18 @@ describe('go-utils', () => {
         });
 
         const pathEnv = platform === 'win32' ? 'C:\\Go\\bin' : '/usr/local/go/bin';
-        const originalPath = process.env.PATH;
-        process.env.PATH = pathEnv;
+        vi.stubEnv('PATH', pathEnv);
 
-        try {
-          const result = await findGoExecutable(undefined, mockLogger);
-          expect(result).toBe(expectedPath);
-        } finally {
-          process.env.PATH = originalPath;
-        }
+        const result = await findGoExecutable(undefined, mockLogger);
+        expect(result).toBe(expectedPath);
       });
 
       it('should throw error if go not found', async () => {
         vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
-        const originalPath = process.env.PATH;
-        process.env.PATH = '';
+        vi.stubEnv('PATH', '');
 
-        try {
-          await expect(findGoExecutable(undefined, mockLogger))
-            .rejects.toThrow('Go executable not found');
-        } finally {
-          process.env.PATH = originalPath;
-        }
+        await expect(findGoExecutable(undefined, mockLogger))
+          .rejects.toThrow('Go executable not found');
       });
     });
   });
@@ -116,51 +106,24 @@ describe('go-utils', () => {
           throw new Error('Not found');
         });
 
-        const originalHome = process.env.HOME;
-        const originalUserProfile = process.env.USERPROFILE;
-        const originalGoPath = process.env.GOPATH;
-        const originalGoBin = process.env.GOBIN;
-        const originalPath = process.env.PATH;
-        
-        process.env.HOME = home;
-        process.env.USERPROFILE = home;
-        process.env.PATH = '';
-        delete process.env.GOPATH;
-        delete process.env.GOBIN;
+        vi.stubEnv('HOME', home);
+        vi.stubEnv('USERPROFILE', home);
+        vi.stubEnv('PATH', '');
+        vi.stubEnv('GOPATH', undefined);
+        vi.stubEnv('GOBIN', undefined);
 
-        try {
-          const result = await findDelveExecutable(undefined, mockLogger);
-          expect(result).toBe(expectedPath);
-        } finally {
-          process.env.HOME = originalHome;
-          process.env.USERPROFILE = originalUserProfile;
-          process.env.PATH = originalPath;
-          if (originalGoPath !== undefined) {
-            process.env.GOPATH = originalGoPath;
-          }
-          if (originalGoBin !== undefined) {
-            process.env.GOBIN = originalGoBin;
-          }
-        }
+        const result = await findDelveExecutable(undefined, mockLogger);
+        expect(result).toBe(expectedPath);
       });
 
       it('should throw error if dlv not found', async () => {
         vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
-        const originalPath = process.env.PATH;
-        const originalGoPath = process.env.GOPATH;
-        const originalGoBin = process.env.GOBIN;
-        process.env.PATH = '';
-        delete process.env.GOPATH;
-        delete process.env.GOBIN;
+        vi.stubEnv('PATH', '');
+        vi.stubEnv('GOPATH', undefined);
+        vi.stubEnv('GOBIN', undefined);
 
-        try {
-          await expect(findDelveExecutable(undefined, mockLogger))
-            .rejects.toThrow('Delve (dlv) not found');
-        } finally {
-          process.env.PATH = originalPath;
-          if (originalGoPath !== undefined) process.env.GOPATH = originalGoPath;
-          if (originalGoBin !== undefined) process.env.GOBIN = originalGoBin;
-        }
+        await expect(findDelveExecutable(undefined, mockLogger))
+          .rejects.toThrow('Delve (dlv) not found');
       });
     });
   });
@@ -342,19 +305,10 @@ describe('go-utils', () => {
       });
 
       it('should include GOBIN if set', () => {
-        const originalGobin = process.env.GOBIN;
-        process.env.GOBIN = '/custom/gobin';
+        vi.stubEnv('GOBIN', '/custom/gobin');
 
-        try {
-          const paths = getGoSearchPaths();
-          expect(paths[0]).toBe('/custom/gobin');
-        } finally {
-          if (originalGobin) {
-            process.env.GOBIN = originalGobin;
-          } else {
-            delete process.env.GOBIN;
-          }
-        }
+        const paths = getGoSearchPaths();
+        expect(paths[0]).toBe('/custom/gobin');
       });
     });
   });

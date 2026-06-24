@@ -59,9 +59,8 @@ describe('java-utils', () => {
     });
 
     it('should use JAVA_HOME when set', async () => {
-      const originalJavaHome = process.env.JAVA_HOME;
       const testJdkPath = path.join(path.sep, 'test', 'jdk');
-      process.env.JAVA_HOME = testJdkPath;
+      vi.stubEnv('JAVA_HOME', testJdkPath);
 
       mockSpawn.mockImplementation((_cmd) => {
         const proc = new EventEmitter() as any;
@@ -74,22 +73,13 @@ describe('java-utils', () => {
         return proc;
       });
 
-      try {
-        const result = await findJavaExecutable();
-        // Normalize both paths for comparison (handles / vs \ on different platforms)
-        expect(result.split(path.sep).join('/')).toContain('test/jdk');
-      } finally {
-        if (originalJavaHome) {
-          process.env.JAVA_HOME = originalJavaHome;
-        } else {
-          delete process.env.JAVA_HOME;
-        }
-      }
+      const result = await findJavaExecutable();
+      // Normalize both paths for comparison (handles / vs \ on different platforms)
+      expect(result.split(path.sep).join('/')).toContain('test/jdk');
     });
 
     it('should fall back to PATH java', async () => {
-      const originalJavaHome = process.env.JAVA_HOME;
-      delete process.env.JAVA_HOME;
+      vi.stubEnv('JAVA_HOME', undefined);
 
       mockSpawn.mockImplementation((cmd) => {
         const proc = new EventEmitter() as any;
@@ -106,17 +96,12 @@ describe('java-utils', () => {
         return proc;
       });
 
-      try {
-        const result = await findJavaExecutable();
-        expect(result).toBe('java');
-      } finally {
-        if (originalJavaHome) process.env.JAVA_HOME = originalJavaHome;
-      }
+      const result = await findJavaExecutable();
+      expect(result).toBe('java');
     });
 
     it('should throw when java not found anywhere', async () => {
-      const originalJavaHome = process.env.JAVA_HOME;
-      delete process.env.JAVA_HOME;
+      vi.stubEnv('JAVA_HOME', undefined);
 
       mockSpawn.mockImplementation(() => {
         const proc = new EventEmitter() as any;
@@ -126,11 +111,7 @@ describe('java-utils', () => {
         return proc;
       });
 
-      try {
-        await expect(findJavaExecutable()).rejects.toThrow('Java not found');
-      } finally {
-        if (originalJavaHome) process.env.JAVA_HOME = originalJavaHome;
-      }
+      await expect(findJavaExecutable()).rejects.toThrow('Java not found');
     });
   });
 
@@ -202,21 +183,12 @@ describe('java-utils', () => {
     });
 
     it('should include JAVA_HOME/bin when set', () => {
-      const originalJavaHome = process.env.JAVA_HOME;
       const customJdkPath = path.join(path.sep, 'custom', 'jdk');
-      process.env.JAVA_HOME = customJdkPath;
+      vi.stubEnv('JAVA_HOME', customJdkPath);
 
-      try {
-        const paths = getJavaSearchPaths();
-        // Normalize path for comparison (handles / vs \ on different platforms)
-        expect(paths[0].split(path.sep).join('/')).toContain('custom/jdk/bin');
-      } finally {
-        if (originalJavaHome) {
-          process.env.JAVA_HOME = originalJavaHome;
-        } else {
-          delete process.env.JAVA_HOME;
-        }
-      }
+      const paths = getJavaSearchPaths();
+      // Normalize path for comparison (handles / vs \ on different platforms)
+      expect(paths[0].split(path.sep).join('/')).toContain('custom/jdk/bin');
     });
 
     it('should include PATH entries', () => {

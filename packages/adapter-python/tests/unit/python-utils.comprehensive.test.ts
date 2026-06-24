@@ -58,8 +58,6 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
   return proc;
 };
 
-const originalEnv = process.env;
-
 // `defaultCommandFinder` is a module-global. Several tests below swap in a custom
 // or deliberately-throwing finder, and the real WhichCommandFinder also carries an
 // internal resolution CACHE. Either leaking the finder or leaving cached lookups
@@ -107,24 +105,25 @@ describe('setDefaultCommandFinder', () => {
 
 describe('WhichCommandFinder integration', () => {
   beforeEach(() => {
-    process.env = { ...originalEnv };
     spawnMock.mockReset();
     whichMock.mockReset();
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     vi.restoreAllMocks();
   });
 
   describe('Windows platform behavior', () => {
     it('handles Path to PATH conversion on Windows', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-      process.env.Path = 'C:\\Windows\\System32;C:\\Python311';
-      delete process.env.PATH;
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.pythonLocation;
-      delete process.env.PythonLocation;
+      // NOTE: process.env is case-insensitive on Windows, so PATH and Path alias the
+      // same key. Stub PATH (undefined) FIRST, then Path, so the Path value survives on
+      // Windows; on case-sensitive platforms PATH stays unset and the code copies Path→PATH.
+      vi.stubEnv('PATH', undefined);
+      vi.stubEnv('Path', 'C:\\Windows\\System32;C:\\Python311');
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('pythonLocation', undefined);
+      vi.stubEnv('PythonLocation', undefined);
 
       whichMock.mockResolvedValue(['C:\\Python311\\python.exe']);
       spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: '1.8.0' }));
@@ -141,9 +140,9 @@ describe('WhichCommandFinder integration', () => {
 
     it('filters Windows Store aliases', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.pythonLocation;
-      delete process.env.PythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('pythonLocation', undefined);
+      vi.stubEnv('PythonLocation', undefined);
 
       // Mock which to return Windows Store alias first, then real Python
       whichMock.mockResolvedValueOnce([
@@ -165,8 +164,8 @@ describe('WhichCommandFinder integration', () => {
 
     it('handles .exe extension on Windows', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.pythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('pythonLocation', undefined);
 
       const finder: CommandFinder = {
         find: vi.fn(async (cmd) => {
@@ -194,9 +193,9 @@ describe('WhichCommandFinder integration', () => {
 
     it('logs verbose discovery information when DEBUG_PYTHON_DISCOVERY=true', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'true';
-      process.env.PATH = 'C:\\Python311;C:\\Windows';
-      delete process.env.pythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
+      vi.stubEnv('PATH', 'C:\\Python311;C:\\Windows');
+      vi.stubEnv('pythonLocation', undefined);
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -226,8 +225,8 @@ describe('WhichCommandFinder integration', () => {
 
     it('detects Windows Store alias by stderr content', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.pythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('pythonLocation', undefined);
 
       const finder: CommandFinder = {
         find: vi.fn(async (cmd) => {
@@ -260,9 +259,9 @@ describe('WhichCommandFinder integration', () => {
   describe('Environment variable handling', () => {
     it('uses PYTHON_EXECUTABLE environment variable', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.PYTHON_EXECUTABLE = '/opt/python/bin/python3';
-      delete process.env.PYTHON_PATH;
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      vi.stubEnv('PYTHON_EXECUTABLE', '/opt/python/bin/python3');
+      vi.stubEnv('PYTHON_PATH', undefined);
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
       whichMock.mockResolvedValue([process.env.PYTHON_EXECUTABLE]);
       spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: '1.8.0' }));
@@ -280,10 +279,14 @@ describe('WhichCommandFinder integration', () => {
     it('uses PythonLocation (uppercase) environment variable on Windows', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       const pythonRoot = 'C:\\PythonLocation\\3.11.9';
-      process.env.PythonLocation = pythonRoot;
-      delete process.env.pythonLocation;
-      delete process.env.PYTHON_PATH;
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      // NOTE: process.env is case-insensitive on Windows, so pythonLocation and
+      // PythonLocation alias the same key. Stub the lowercase variant (undefined) FIRST,
+      // then the uppercase value, so PythonLocation survives on Windows; on case-sensitive
+      // platforms the lowercase stays unset and the code falls through to PythonLocation.
+      vi.stubEnv('pythonLocation', undefined);
+      vi.stubEnv('PythonLocation', pythonRoot);
+      vi.stubEnv('PYTHON_PATH', undefined);
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
       const fsExists = vi
         .spyOn(fs, 'existsSync')
@@ -308,9 +311,9 @@ describe('WhichCommandFinder integration', () => {
     it('uses pythonLocation on non-Windows with bin subdirectory', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       const pythonRoot = '/opt/python/3.11.9';
-      process.env.pythonLocation = pythonRoot;
-      delete process.env.PYTHON_PATH;
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      vi.stubEnv('pythonLocation', pythonRoot);
+      vi.stubEnv('PYTHON_PATH', undefined);
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
       const fsExists = vi
         .spyOn(fs, 'existsSync')
@@ -337,7 +340,7 @@ describe('WhichCommandFinder integration', () => {
   describe('preferredPath parameter', () => {
     it('returns preferredPath immediately when valid on non-Windows', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
       const finder: CommandFinder = {
         find: vi.fn(async (cmd) => `/custom/path/${cmd}`)
@@ -360,9 +363,9 @@ describe('WhichCommandFinder integration', () => {
 
     it('skips invalid preferredPath and continues discovery', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.pythonLocation;
-      delete process.env.PythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('pythonLocation', undefined);
+      vi.stubEnv('PythonLocation', undefined);
 
       const finder: CommandFinder = {
         find: vi.fn(async (cmd) => {
@@ -389,7 +392,7 @@ describe('WhichCommandFinder integration', () => {
 
     it('throws error when preferredPath finder throws non-CommandNotFoundError', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
       const customError = new Error('Permission denied');
       const finder: CommandFinder = {
@@ -411,8 +414,8 @@ describe('WhichCommandFinder integration', () => {
   describe('Multiple Python installations with debugpy preference', () => {
     it('prefers Python with debugpy installed', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.pythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('pythonLocation', undefined);
 
       let callCount = 0;
       const finder: CommandFinder = {
@@ -450,8 +453,8 @@ describe('WhichCommandFinder integration', () => {
 
     it('returns first valid Python when none have debugpy', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.pythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('pythonLocation', undefined);
 
       const finder: CommandFinder = {
         find: vi.fn(async (cmd) => {
@@ -481,9 +484,9 @@ describe('WhichCommandFinder integration', () => {
   describe('Error scenarios', () => {
     it('throws error with tried paths when no Python found', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      delete process.env.PYTHON_PATH;
-      delete process.env.pythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('PYTHON_PATH', undefined);
+      vi.stubEnv('pythonLocation', undefined);
 
       whichMock.mockRejectedValue(new Error('not found'));
 
@@ -498,9 +501,9 @@ describe('WhichCommandFinder integration', () => {
 
     it('logs detailed failure info in CI environment', async () => {
       const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-      process.env.CI = 'true';
-      delete process.env.pythonLocation;
+      vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('pythonLocation', undefined);
 
       whichMock.mockRejectedValue(new Error('not found'));
 
@@ -584,20 +587,18 @@ describe('getPythonVersion', () => {
 
 describe('WhichCommandFinder class behavior', () => {
   beforeEach(() => {
-    process.env = { ...originalEnv };
     spawnMock.mockReset();
     whichMock.mockReset();
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     vi.restoreAllMocks();
   });
 
   it('handles spawn error when checking debugpy', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+    vi.stubEnv('pythonLocation', undefined);
 
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {
@@ -624,8 +625,8 @@ describe('WhichCommandFinder class behavior', () => {
 
   it('logs debug messages during Python discovery', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+    vi.stubEnv('pythonLocation', undefined);
 
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {
@@ -650,8 +651,8 @@ describe('WhichCommandFinder class behavior', () => {
 
   it('handles Windows Store alias detected by AppData path in stderr', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+    vi.stubEnv('pythonLocation', undefined);
 
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {
@@ -681,8 +682,8 @@ describe('WhichCommandFinder class behavior', () => {
 
   it('handles errors other than CommandNotFoundError in environment variable lookup', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.PYTHON_EXECUTABLE = '/invalid/python';
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+    vi.stubEnv('PYTHON_EXECUTABLE', '/invalid/python');
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
     const customError = new TypeError('Invalid path');
     const finder: CommandFinder = {
@@ -703,9 +704,9 @@ describe('WhichCommandFinder class behavior', () => {
   it('checks all pythonLocation candidates on non-Windows', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     const pythonRoot = '/opt/python/3.11.9';
-    process.env.pythonLocation = pythonRoot;
-    delete process.env.PYTHON_PATH;
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+    vi.stubEnv('pythonLocation', pythonRoot);
+    vi.stubEnv('PYTHON_PATH', undefined);
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
     // Only the last candidate exists
     const fsExists = vi
@@ -732,9 +733,9 @@ describe('WhichCommandFinder class behavior', () => {
   it('continues to next pythonLocation candidate when validation fails', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const pythonRoot = 'C:\\Python311';
-    process.env.pythonLocation = pythonRoot;
-    delete process.env.PYTHON_PATH;
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+    vi.stubEnv('pythonLocation', pythonRoot);
+    vi.stubEnv('PYTHON_PATH', undefined);
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
     let callCount = 0;
     const fsExists = vi
@@ -767,20 +768,18 @@ describe('WhichCommandFinder class behavior', () => {
 
 describe('Additional edge cases', () => {
   beforeEach(() => {
-    process.env = { ...originalEnv };
     spawnMock.mockReset();
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     vi.restoreAllMocks();
   });
 
   it('handles errors during auto-detect loop', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-    delete process.env.pythonLocation;
-    delete process.env.PYTHON_PATH;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+    vi.stubEnv('pythonLocation', undefined);
+    vi.stubEnv('PYTHON_PATH', undefined);
 
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {
@@ -803,8 +802,8 @@ describe('Additional edge cases', () => {
 
   it('handles Windows Store alias detected by "Windows Store" in stderr', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+    vi.stubEnv('pythonLocation', undefined);
 
     const finder: CommandFinder = {
       find: vi.fn(async () => 'C:\\fake\\python.exe')
@@ -829,8 +828,8 @@ describe('Additional edge cases', () => {
 
   it('validates Python executable on Windows before returning', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-    process.env.PYTHON_PATH = 'C:\\Python\\python.exe';
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+    vi.stubEnv('PYTHON_PATH', 'C:\\Python\\python.exe');
 
     const finder: CommandFinder = {
       find: vi.fn(async () => 'C:\\Python\\python.exe')
@@ -855,9 +854,9 @@ describe('Additional edge cases', () => {
   it('checks multiple pythonLocation candidates when first does not exist', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const pythonRoot = 'C:\\Python311';
-    process.env.pythonLocation = pythonRoot;
-    delete process.env.PYTHON_PATH;
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+    vi.stubEnv('pythonLocation', pythonRoot);
+    vi.stubEnv('PYTHON_PATH', undefined);
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
     // Only the second candidate exists
     let checkCount = 0;
@@ -886,9 +885,9 @@ describe('Additional edge cases', () => {
 
   it('returns first valid Python when collecting multiple candidates', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
-    delete process.env.pythonLocation;
-    delete process.env.PYTHON_PATH;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
+    vi.stubEnv('pythonLocation', undefined);
+    vi.stubEnv('PYTHON_PATH', undefined);
 
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {
@@ -917,23 +916,21 @@ describe('Additional edge cases', () => {
 
 describe('Verbose discovery logging', () => {
   beforeEach(() => {
-    process.env = { ...originalEnv };
     spawnMock.mockReset();
     whichMock.mockReset();
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     vi.restoreAllMocks();
   });
 
   it('logs verbose discovery info when DEBUG_PYTHON_DISCOVERY=true on Windows', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'true';
-    process.env.CI = 'true';
-    process.env.GITHUB_ACTIONS = 'true';
-    process.env.PATH = 'C:\\Python311;C:\\Windows\\System32';
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
+    vi.stubEnv('CI', 'true');
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('PATH', 'C:\\Python311;C:\\Windows\\System32');
+    vi.stubEnv('pythonLocation', undefined);
 
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -972,9 +969,9 @@ describe('Verbose discovery logging', () => {
 
   it('logs PATH issues when detected', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'true';
-    process.env.PATH = 'C:\\Path1;;C:\\Path2';  // Empty entry
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
+    vi.stubEnv('PATH', 'C:\\Path1;;C:\\Path2');  // Empty entry
+    vi.stubEnv('pythonLocation', undefined);
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -1005,9 +1002,9 @@ describe('Verbose discovery logging', () => {
 
   it('logs Python PATH entries when found', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'true';
-    process.env.PATH = 'C:\\Python311;C\\Windows;C:\\Python39';
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
+    vi.stubEnv('PATH', 'C:\\Python311;C\\Windows;C:\\Python39');
+    vi.stubEnv('pythonLocation', undefined);
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -1039,10 +1036,10 @@ describe('Verbose discovery logging', () => {
 
   it('logs verbose failure info when discovery fails in CI with DEBUG enabled', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'true';
-    process.env.CI = 'true';
-    process.env.PATH = '/usr/bin';
-    delete process.env.pythonLocation;
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
+    vi.stubEnv('CI', 'true');
+    vi.stubEnv('PATH', '/usr/bin');
+    vi.stubEnv('pythonLocation', undefined);
 
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

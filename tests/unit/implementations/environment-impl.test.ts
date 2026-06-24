@@ -3,22 +3,22 @@ import { ProcessEnvironment } from '../../../src/implementations/environment-imp
 
 describe('ProcessEnvironment', () => {
   afterEach(() => {
-    delete process.env.TEST_ENV_SNAPSHOT;
+    vi.stubEnv('TEST_ENV_SNAPSHOT', undefined);
     vi.restoreAllMocks();
   });
 
   it('captures a snapshot of environment variables at construction', () => {
-    process.env.TEST_ENV_SNAPSHOT = 'initial';
+    vi.stubEnv('TEST_ENV_SNAPSHOT', 'initial');
     const env = new ProcessEnvironment();
 
     expect(env.get('TEST_ENV_SNAPSHOT')).toBe('initial');
 
-    process.env.TEST_ENV_SNAPSHOT = 'mutated';
+    vi.stubEnv('TEST_ENV_SNAPSHOT', 'mutated');
     expect(env.get('TEST_ENV_SNAPSHOT')).toBe('initial');
   });
 
   it('returns a defensive copy from getAll', () => {
-    process.env.TEST_ENV_SNAPSHOT = 'value';
+    vi.stubEnv('TEST_ENV_SNAPSHOT', 'value');
     const env = new ProcessEnvironment();
 
     const snapshot = env.getAll();

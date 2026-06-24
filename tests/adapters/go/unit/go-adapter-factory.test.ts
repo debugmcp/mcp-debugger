@@ -131,18 +131,13 @@ describe('GoAdapterFactory', () => {
 
     it('should return invalid when Go is not found', async () => {
       vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
-      const originalPath = process.env.PATH;
-      process.env.PATH = '';
+      vi.stubEnv('PATH', '');
 
-      try {
-        const result = await factory.validate();
+      const result = await factory.validate();
 
-        expect(result.valid).toBe(false);
-        expect(result.errors.length).toBeGreaterThan(0);
-        expect(result.errors[0]).toContain('not found');
-      } finally {
-        process.env.PATH = originalPath;
-      }
+      expect(result.valid).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toContain('not found');
     });
 
     it('should return error when Go version is too old', async () => {

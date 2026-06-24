@@ -35,12 +35,10 @@ vi.mock('winston', () => ({
 
 const { createLogger, getLogger } = await import('../../../src/utils/logger.js');
 
-const originalEnv = { ...process.env };
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
 describe('logger utility', () => {
   beforeEach(() => {
-    process.env = { ...originalEnv };
     consoleTransportSpy.mockClear();
     fileTransportSpy.mockClear();
     createLoggerSpy.mockClear().mockReturnValue({ on: vi.fn(), warn: vi.fn() });
@@ -48,7 +46,6 @@ describe('logger utility', () => {
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     vi.restoreAllMocks();
   });
 
@@ -71,7 +68,7 @@ describe('logger utility', () => {
   });
 
   it('logs into container path when running in MCP container', () => {
-    process.env.MCP_CONTAINER = 'true';
+    vi.stubEnv('MCP_CONTAINER', 'true');
     const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(true);
     vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {});
 
@@ -98,7 +95,7 @@ describe('logger utility', () => {
   });
 
   it('suppresses console errors when console output is silenced', () => {
-    process.env.CONSOLE_OUTPUT_SILENCED = '1';
+    vi.stubEnv('CONSOLE_OUTPUT_SILENCED', '1');
     const existsSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
     vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {
       throw new Error('permission denied');
@@ -147,7 +144,7 @@ describe('logger utility', () => {
   });
 
   it('suppresses transport error logging when console output is silenced', () => {
-    process.env.CONSOLE_OUTPUT_SILENCED = '1';
+    vi.stubEnv('CONSOLE_OUTPUT_SILENCED', '1');
 
     createLogger('debug-mcp:test');
 
@@ -160,6 +157,5 @@ describe('logger utility', () => {
     errorHandler?.(new Error('transport failed'));
 
     expect(consoleErrorSpy).not.toHaveBeenCalled();
-    delete process.env.CONSOLE_OUTPUT_SILENCED;
   });
 });

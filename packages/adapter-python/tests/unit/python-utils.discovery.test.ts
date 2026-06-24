@@ -44,24 +44,20 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
   return proc;
 };
 
-const originalEnv = process.env;
-
 describe('python-utils discovery behaviour', () => {
   beforeEach(() => {
-    process.env = { ...originalEnv };
     spawnMock.mockReset();
-    delete process.env.pythonLocation;
-    delete process.env.PythonLocation;
+    vi.stubEnv('pythonLocation', undefined);
+    vi.stubEnv('PythonLocation', undefined);
   });
 
   afterEach(() => {
-    process.env = originalEnv;
     vi.restoreAllMocks();
   });
 
   it('auto-detects python from PATH on non-Windows when debugpy present', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {
@@ -90,8 +86,8 @@ describe('python-utils discovery behaviour', () => {
   it('prefers pythonLocation when available on Windows', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const pythonRoot = 'C:\\HostedPython\\3.11.9\\x64';
-    process.env.pythonLocation = pythonRoot;
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+    vi.stubEnv('pythonLocation', pythonRoot);
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
     const fsExists = vi
       .spyOn(fs, 'existsSync')
@@ -131,8 +127,8 @@ describe('python-utils discovery behaviour', () => {
 
   it('uses PYTHON_PATH environment variable when provided', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    process.env.PYTHON_PATH = 'C:\\CustomPython\\python.exe';
-    delete process.env.pythonLocation;
+    vi.stubEnv('PYTHON_PATH', 'C:\\CustomPython\\python.exe');
+    vi.stubEnv('pythonLocation', undefined);
 
     const fsExists = vi
       .spyOn(fs, 'existsSync')
@@ -171,12 +167,12 @@ describe('python-utils discovery behaviour', () => {
 
   it('reports discovery failure details through logger', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    delete process.env.pythonLocation;
-    delete process.env.PYTHON_PATH;
-    process.env.PATH = '';
+    vi.stubEnv('pythonLocation', undefined);
+    vi.stubEnv('PYTHON_PATH', undefined);
+    vi.stubEnv('PATH', '');
 
     const fsExists = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-    process.env.CI = 'true';
+    vi.stubEnv('CI', 'true');
     spawnMock.mockImplementation(() => createSpawn({ exitCode: 1, stderr: 'missing python' }));
 
     const finder: CommandFinder = {
@@ -201,7 +197,7 @@ describe('python-utils discovery behaviour', () => {
 
   it('falls back to first valid python when debugpy is missing', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    process.env.DEBUG_PYTHON_DISCOVERY = 'false';
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
     const finder: CommandFinder = {
       find: vi.fn(async (cmd) => {

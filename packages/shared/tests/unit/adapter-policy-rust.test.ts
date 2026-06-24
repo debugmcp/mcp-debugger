@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { EventEmitter } from 'events';
 import { RustAdapterPolicy } from '../../src/interfaces/adapter-policy-rust.js';
@@ -35,10 +35,6 @@ describe('RustAdapterPolicy', () => {
   beforeEach(() => {
     accessMock.mockReset();
     spawnMock.mockReset();
-  });
-
-  afterEach(() => {
-    delete process.env.CARGO_PATH;
   });
 
   describe('extractLocalVariables', () => {

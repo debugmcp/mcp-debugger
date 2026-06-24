@@ -1,22 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PythonAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-python.js';
 
 describe('PythonAdapterPolicy', () => {
-  let originalPythonPath: string | undefined;
   let originalPlatform: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    originalPythonPath = process.env.PYTHON_PATH;
     originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   });
 
   afterEach(() => {
-    if (originalPythonPath === undefined) {
-      delete process.env.PYTHON_PATH;
-    } else {
-      process.env.PYTHON_PATH = originalPythonPath;
-    }
-
     if (originalPlatform) {
       Object.defineProperty(process, 'platform', originalPlatform);
     }
@@ -55,11 +47,11 @@ describe('PythonAdapterPolicy', () => {
   });
 
   it('resolves executable path using precedence rules', () => {
-    process.env.PYTHON_PATH = '/custom/python';
+    vi.stubEnv('PYTHON_PATH', '/custom/python');
     expect(PythonAdapterPolicy.resolveExecutablePath()).toBe('/custom/python');
     expect(PythonAdapterPolicy.resolveExecutablePath('/explicit/python')).toBe('/explicit/python');
 
-    delete process.env.PYTHON_PATH;
+    vi.stubEnv('PYTHON_PATH', undefined);
     Object.defineProperty(process, 'platform', {
       value: 'win32'
     });

@@ -147,18 +147,12 @@ describe('ProxyRunner', () => {
 
 describe('detectExecutionMode', () => {
   const originalSend = process.send;
-  const originalEnv = process.env.DAP_PROXY_WORKER;
 
   afterEach(() => {
     if (originalSend) {
       process.send = originalSend;
     } else {
       delete (process as any).send;
-    }
-    if (originalEnv !== undefined) {
-      process.env.DAP_PROXY_WORKER = originalEnv;
-    } else {
-      delete process.env.DAP_PROXY_WORKER;
     }
   });
 
@@ -175,13 +169,13 @@ describe('detectExecutionMode', () => {
   });
 
   it('detects worker env when DAP_PROXY_WORKER=true', () => {
-    process.env.DAP_PROXY_WORKER = 'true';
+    vi.stubEnv('DAP_PROXY_WORKER', 'true');
     const mode = detectExecutionMode();
     expect(mode.isWorkerEnv).toBe(true);
   });
 
   it('detects non-worker env when DAP_PROXY_WORKER is unset', () => {
-    delete process.env.DAP_PROXY_WORKER;
+    vi.stubEnv('DAP_PROXY_WORKER', undefined);
     const mode = detectExecutionMode();
     expect(mode.isWorkerEnv).toBe(false);
   });

@@ -75,33 +75,19 @@ describe('JavaAdapterPolicy', () => {
     });
 
     it('should use JAVA_HOME when set', () => {
-      const originalJavaHome = process.env.JAVA_HOME;
-      process.env.JAVA_HOME = '/test/jdk';
+      vi.stubEnv('JAVA_HOME', '/test/jdk');
 
-      try {
-        const result = JavaAdapterPolicy.resolveExecutablePath();
-        expect(result).toContain('/test/jdk');
-        expect(result).toContain('bin');
-        expect(result).toContain('java');
-      } finally {
-        if (originalJavaHome) {
-          process.env.JAVA_HOME = originalJavaHome;
-        } else {
-          delete process.env.JAVA_HOME;
-        }
-      }
+      const result = JavaAdapterPolicy.resolveExecutablePath();
+      expect(result).toContain('/test/jdk');
+      expect(result).toContain('bin');
+      expect(result).toContain('java');
     });
 
     it('should default to "java" when nothing else is set', () => {
-      const originalJavaHome = process.env.JAVA_HOME;
-      delete process.env.JAVA_HOME;
+      vi.stubEnv('JAVA_HOME', undefined);
 
-      try {
-        const result = JavaAdapterPolicy.resolveExecutablePath();
-        expect(result).toBe('java');
-      } finally {
-        if (originalJavaHome) process.env.JAVA_HOME = originalJavaHome;
-      }
+      const result = JavaAdapterPolicy.resolveExecutablePath();
+      expect(result).toBe('java');
     });
   });
 

@@ -1,7 +1,7 @@
 /**
  * Unit tests verifying sessions use executablePath (not legacy pythonPath)
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SessionStore, CreateSessionParams } from '../../../../src/session/session-store.js';
 import { DebugLanguage } from '@debugmcp/shared';
 
@@ -49,23 +49,15 @@ describe('Session Migration Verification', () => {
     const store = new SessionStore();
     
     // Clear environment variable to test defaults
-    const originalPythonPath = process.env.PYTHON_PATH;
-    delete process.env.PYTHON_PATH;
-    
-    try {
-      const pythonSession = store.createSession({
-        language: DebugLanguage.PYTHON
-      });
-      
-      const managedSession = store.get(pythonSession.id);
-      const expectedDefault = process.platform === 'win32' ? 'python' : 'python3';
-      expect(managedSession?.executablePath).toBe(expectedDefault);
-    } finally {
-      // Restore environment
-      if (originalPythonPath) {
-        process.env.PYTHON_PATH = originalPythonPath;
-      }
-    }
+    vi.stubEnv('PYTHON_PATH', undefined);
+
+    const pythonSession = store.createSession({
+      language: DebugLanguage.PYTHON
+    });
+
+    const managedSession = store.get(pythonSession.id);
+    const expectedDefault = process.platform === 'win32' ? 'python' : 'python3';
+    expect(managedSession?.executablePath).toBe(expectedDefault);
   });
   
   it('should verify API interfaces use executablePath', () => {

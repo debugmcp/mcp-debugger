@@ -100,8 +100,6 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
   return proc;
 };
 
-const savedEnv = { ...process.env };
-
 describe('CommandNotFoundError', () => {
   it('creates error with command property', () => {
     const error = new CommandNotFoundError('netcoredbg');
@@ -119,16 +117,11 @@ describe('CommandNotFoundError', () => {
 describe('findNetcoredbgExecutable', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...savedEnv };
-    delete process.env.NETCOREDBG_PATH;
-  });
-
-  afterEach(() => {
-    process.env = savedEnv;
+    vi.stubEnv('NETCOREDBG_PATH', undefined);
   });
 
   it('uses NETCOREDBG_PATH environment variable when set and file exists', async () => {
-    process.env.NETCOREDBG_PATH = '/custom/netcoredbg';
+    vi.stubEnv('NETCOREDBG_PATH', '/custom/netcoredbg');
     existsSyncMock.mockImplementation((p: string) => p === '/custom/netcoredbg');
 
     const result = await findNetcoredbgExecutable();
@@ -161,16 +154,11 @@ describe('findNetcoredbgExecutable', () => {
 describe('findDotnetBackend', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...savedEnv };
-    delete process.env.NETCOREDBG_PATH;
-  });
-
-  afterEach(() => {
-    process.env = savedEnv;
+    vi.stubEnv('NETCOREDBG_PATH', undefined);
   });
 
   it('returns netcoredbg when available', async () => {
-    process.env.NETCOREDBG_PATH = '/path/netcoredbg';
+    vi.stubEnv('NETCOREDBG_PATH', '/path/netcoredbg');
     existsSyncMock.mockImplementation((p: string) => p === '/path/netcoredbg');
 
     const result = await findDotnetBackend();
@@ -293,16 +281,11 @@ describe('isPortablePdb', () => {
 describe('findPdb2PdbExecutable', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...savedEnv };
-    delete process.env.PDB2PDB_PATH;
-  });
-
-  afterEach(() => {
-    process.env = savedEnv;
+    vi.stubEnv('PDB2PDB_PATH', undefined);
   });
 
   it('uses PDB2PDB_PATH environment variable when set and file exists', () => {
-    process.env.PDB2PDB_PATH = '/custom/Pdb2Pdb.exe';
+    vi.stubEnv('PDB2PDB_PATH', '/custom/Pdb2Pdb.exe');
     existsSyncMock.mockImplementation((p: string) => p === '/custom/Pdb2Pdb.exe');
 
     const result = findPdb2PdbExecutable();
@@ -310,7 +293,7 @@ describe('findPdb2PdbExecutable', () => {
   });
 
   it('falls through when PDB2PDB_PATH is set but file does not exist', () => {
-    process.env.PDB2PDB_PATH = '/nonexistent/Pdb2Pdb.exe';
+    vi.stubEnv('PDB2PDB_PATH', '/nonexistent/Pdb2Pdb.exe');
     existsSyncMock.mockReturnValue(false);
 
     const result = findPdb2PdbExecutable();
@@ -335,16 +318,11 @@ describe('findPdb2PdbExecutable', () => {
 describe('findNetcoredbgExecutable (additional coverage)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...savedEnv };
-    delete process.env.NETCOREDBG_PATH;
-  });
-
-  afterEach(() => {
-    process.env = savedEnv;
+    vi.stubEnv('NETCOREDBG_PATH', undefined);
   });
 
   it('falls through when NETCOREDBG_PATH is set but file does not exist', async () => {
-    process.env.NETCOREDBG_PATH = '/nonexistent/netcoredbg';
+    vi.stubEnv('NETCOREDBG_PATH', '/nonexistent/netcoredbg');
     existsSyncMock.mockReturnValue(false);
     whichMock.mockRejectedValue(new Error('not found'));
 
@@ -379,7 +357,7 @@ describe('findNetcoredbgExecutable (additional coverage)', () => {
 
   it('calls logger.debug when available', async () => {
     const logger = { error: vi.fn(), debug: vi.fn() };
-    process.env.NETCOREDBG_PATH = '/found/netcoredbg';
+    vi.stubEnv('NETCOREDBG_PATH', '/found/netcoredbg');
     existsSyncMock.mockImplementation((p: string) => p === '/found/netcoredbg');
 
     await findNetcoredbgExecutable(undefined, logger);
@@ -900,17 +878,12 @@ describe('getProcessArchitecture', () => {
 describe('findNetcoredbgExecutable (architecture-aware)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...savedEnv };
-    delete process.env.NETCOREDBG_PATH;
-    delete process.env.NETCOREDBG_X86_PATH;
-  });
-
-  afterEach(() => {
-    process.env = savedEnv;
+    vi.stubEnv('NETCOREDBG_PATH', undefined);
+    vi.stubEnv('NETCOREDBG_X86_PATH', undefined);
   });
 
   it('uses NETCOREDBG_X86_PATH when targeting x86', async () => {
-    process.env.NETCOREDBG_X86_PATH = '/x86/netcoredbg';
+    vi.stubEnv('NETCOREDBG_X86_PATH', '/x86/netcoredbg');
     existsSyncMock.mockImplementation((p: string) => p === '/x86/netcoredbg');
 
     const result = await findNetcoredbgExecutable(undefined, undefined, 'x86');
@@ -918,7 +891,7 @@ describe('findNetcoredbgExecutable (architecture-aware)', () => {
   });
 
   it('skips NETCOREDBG_PATH when it has wrong architecture for x86 target', async () => {
-    process.env.NETCOREDBG_PATH = '/x64/netcoredbg';
+    vi.stubEnv('NETCOREDBG_PATH', '/x64/netcoredbg');
     existsSyncMock.mockImplementation((p: string) => p === '/x64/netcoredbg');
 
     // PE check returns x64 for the env path
@@ -943,7 +916,7 @@ describe('findNetcoredbgExecutable (architecture-aware)', () => {
   });
 
   it('falls back to any architecture when no matching x86 binary found', async () => {
-    process.env.NETCOREDBG_PATH = '/path/netcoredbg';
+    vi.stubEnv('NETCOREDBG_PATH', '/path/netcoredbg');
     existsSyncMock.mockImplementation((p: string) => p === '/path/netcoredbg');
 
     // PE check returns x64

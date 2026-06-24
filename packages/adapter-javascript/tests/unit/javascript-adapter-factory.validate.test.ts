@@ -12,7 +12,6 @@ function isVendorPath(p: unknown): boolean {
 }
 
 describe('JavascriptAdapterFactory.validate', () => {
-  const originalPath = process.env.PATH;
   let versionDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
@@ -21,8 +20,6 @@ describe('JavascriptAdapterFactory.validate', () => {
   });
 
   afterEach(() => {
-    // Restore PATH
-    process.env.PATH = originalPath;
     // Restore process.version
     if (versionDescriptor) {
       Object.defineProperty(process, 'version', versionDescriptor);
@@ -37,7 +34,7 @@ describe('JavascriptAdapterFactory.validate', () => {
       return isVendorPath(p);
     });
     // Keep PATH controlled (no runners => may warn)
-    process.env.PATH = '';
+    vi.stubEnv('PATH', '');
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();
@@ -59,7 +56,7 @@ describe('JavascriptAdapterFactory.validate', () => {
     vi.spyOn(fs, 'existsSync').mockImplementation((p: unknown) => {
       return isVendorPath(p);
     });
-    process.env.PATH = '';
+    vi.stubEnv('PATH', '');
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();
@@ -71,7 +68,7 @@ describe('JavascriptAdapterFactory.validate', () => {
   it('flags error when js-debug vendor is missing', async () => {
     // Vendor missing
     vi.spyOn(fs, 'existsSync').mockImplementation(() => false);
-    process.env.PATH = '';
+    vi.stubEnv('PATH', '');
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();
@@ -85,7 +82,7 @@ describe('JavascriptAdapterFactory.validate', () => {
     vi.spyOn(fs, 'existsSync').mockImplementation((p: unknown) => {
       return isVendorPath(p);
     });
-    process.env.PATH = '';
+    vi.stubEnv('PATH', '');
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();
@@ -116,7 +113,7 @@ describe('JavascriptAdapterFactory.validate', () => {
 
     // Set PATH to include our fake bin
     const delim = path.delimiter;
-    process.env.PATH = [fakeBin].join(delim);
+    vi.stubEnv('PATH', [fakeBin].join(delim));
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();

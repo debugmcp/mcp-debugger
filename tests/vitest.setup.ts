@@ -51,6 +51,12 @@ beforeAll(() => {
 afterEach(() => {
   vi.resetAllMocks();
   vi.restoreAllMocks();
+  // Auto-restore any env vars set via vi.stubEnv(), so tests that adopt stubEnv
+  // are cleaned up centrally and can't leak process.env across tests/files. This
+  // is the prerequisite for migrating ad-hoc `process.env.X = …` save/restore to
+  // vi.stubEnv (and, ultimately, for running the unit pool on threads). No-op for
+  // tests that still mutate process.env directly.
+  vi.unstubAllEnvs();
 });
 
 // Clean up after all tests

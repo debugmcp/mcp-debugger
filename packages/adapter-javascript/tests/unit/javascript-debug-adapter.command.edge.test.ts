@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { JavascriptDebugAdapter } from '../../src/index.js';
 
 // Minimal AdapterDependencies stub
@@ -29,25 +29,14 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (edge/env stability)', () =
     launchConfig: {}
   } as unknown as import('@debugmcp/shared').AdapterConfig;
 
-  let originalNodeOptions: string | undefined;
-
-  beforeEach(() => {
-    originalNodeOptions = process.env.NODE_OPTIONS;
-  });
-
   afterEach(() => {
-    if (typeof originalNodeOptions === 'string') {
-      process.env.NODE_OPTIONS = originalNodeOptions;
-    } else {
-      delete (process.env as Record<string, string | undefined>).NODE_OPTIONS;
-    }
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
   it('repeated calls are stable when NODE_OPTIONS already includes max-old-space-size (normalize whitespace once, no duplication)', () => {
     const adapter = new JavascriptDebugAdapter(deps);
-    process.env.NODE_OPTIONS = '   --MAX-OLD-SPACE-SIZE=2048    --trace-warnings   ';
+    vi.stubEnv('NODE_OPTIONS', '   --MAX-OLD-SPACE-SIZE=2048    --trace-warnings   ');
 
     const first = adapter.buildAdapterCommand(baseConfig);
     const second = adapter.buildAdapterCommand(baseConfig);
@@ -67,7 +56,7 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (edge/env stability)', () =
 
   it('repeated calls are stable when NODE_OPTIONS missing memory flag (append once, normalize whitespace)', () => {
     const adapter = new JavascriptDebugAdapter(deps);
-    process.env.NODE_OPTIONS = '    --experimental-repl-await    --trace-warnings   ';
+    vi.stubEnv('NODE_OPTIONS', '    --experimental-repl-await    --trace-warnings   ');
 
     const first = adapter.buildAdapterCommand(baseConfig);
     const second = adapter.buildAdapterCommand(baseConfig);
@@ -83,7 +72,7 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (edge/env stability)', () =
 
   it('empty NODE_OPTIONS stays stable across repeated calls (single memory flag only)', () => {
     const adapter = new JavascriptDebugAdapter(deps);
-    delete (process.env as Record<string, string | undefined>).NODE_OPTIONS;
+    vi.stubEnv('NODE_OPTIONS', undefined);
 
     const first = adapter.buildAdapterCommand(baseConfig);
     const second = adapter.buildAdapterCommand(baseConfig);

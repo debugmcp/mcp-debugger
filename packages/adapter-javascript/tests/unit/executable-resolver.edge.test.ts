@@ -24,35 +24,25 @@ class MockFileSystem implements FileSystem {
 const WIN = isWindows();
 
 function withPath(paths: string[]) {
-  const prev = process.env.PATH;
-  process.env.PATH = paths.join(path.delimiter);
-  return () => {
-    process.env.PATH = prev;
-  };
+  vi.stubEnv('PATH', paths.join(path.delimiter));
 }
 
 describe('utils/executable-resolver.edge', () => {
-  let restoreEnv: (() => void) | null = null;
   let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    restoreEnv = null;
     mockFileSystem = new MockFileSystem();
     setDefaultFileSystem(mockFileSystem);
   });
 
   afterEach(() => {
-    if (restoreEnv) {
-      restoreEnv();
-      restoreEnv = null;
-    }
     vi.restoreAllMocks();
     setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('Windows: whichInPath prefers node.exe over node when both present in same dir (name order), POSIX: prefers node', () => {
     const dir = path.resolve(process.cwd(), '.bin-pref');
-    restoreEnv = withPath([dir]);
+    withPath([dir]);
 
     const nodeExe = path.join(dir, 'node.exe');
     const nodeBare = path.join(dir, 'node');
@@ -75,7 +65,7 @@ describe('utils/executable-resolver.edge', () => {
     // PATH = A;B with names ['node.exe','node']
     const dirA = path.resolve(process.cwd(), 'A');
     const dirB = path.resolve(process.cwd(), 'B');
-    restoreEnv = withPath([dirA, dirB]);
+    withPath([dirA, dirB]);
 
     const names = ['node.exe', 'node'];
 
@@ -103,7 +93,7 @@ describe('utils/executable-resolver.edge', () => {
 
   it('execPath non-existent but PATH candidate present -> returns PATH candidate; if none, deterministic fallback to process.execPath', async () => {
     const dir = path.resolve(process.cwd(), '.bin-path-candidate');
-    restoreEnv = withPath([dir]);
+    withPath([dir]);
 
     const candidate = WIN ? path.join(dir, 'node.exe') : path.join(dir, 'node');
 
