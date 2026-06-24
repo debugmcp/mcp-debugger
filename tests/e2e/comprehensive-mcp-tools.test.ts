@@ -51,15 +51,17 @@ const GO_SCRIPT = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
 const DOTNET_SCRIPT = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');
 const JAVA_SCRIPT = path.resolve(ROOT, 'examples', 'java', 'HelloWorld.java');
 const JAVA_CLASS_DIR = path.resolve(ROOT, 'examples', 'java');
+const RUBY_SCRIPT = path.resolve(ROOT, 'examples', 'ruby', 'fizzbuzz.rb');
 
 // Breakpoint lines (executable lines in each script — must be AFTER variable assignments
 // so that get_variables returns populated locals)
 const PYTHON_BP_LINE = 10;  // print(f"Before swap: a={a}, b={b}")  — a=1, b=2 in scope
 const JS_BP_LINE = 9;       // let a = 1;
-const RUST_BP_LINE = 13;    // let name = "Rust";
+const RUST_BP_LINE = 19;    // println!("Sum of 5 and 10 is: {}", result)  — name, version, is_awesome, result in scope
 const GO_BP_LINE = 13;      // fmt.Println(message)  — message in scope
 const DOTNET_BP_LINE = 15;  // int y = 20;  — x=10 in scope
 const JAVA_BP_LINE = 24;    // int sum = add(x, y);  — x=10, y=20 in scope
+const RUBY_BP_LINE = 15;    // value = fizzbuzz_for(i)  — i, results in scope (first loop iteration)
 
 /* ---------- toolchain detection ---------- */
 
@@ -74,6 +76,7 @@ function hasCommand(cmd: string): boolean {
 
 const hasRust = hasCommand('rustc --version');
 const hasGo = hasCommand('go version') && hasCommand('dlv version');
+const hasRuby = hasCommand('ruby --version') && hasCommand('rdbg --version');
 const hasDotnet = (() => {
   if (!hasCommand('dotnet --version')) return false;
   if (process.env.NETCOREDBG_PATH && existsSync(process.env.NETCOREDBG_PATH)) return true;
@@ -133,6 +136,7 @@ const LANGUAGES: LangDef[] = [
   { language: 'javascript', script: JS_SCRIPT, bpLine: JS_BP_LINE, available: true },
   { language: 'mock', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: true },
   { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed' },
+  { language: 'ruby', script: RUBY_SCRIPT, bpLine: RUBY_BP_LINE, available: hasRuby, skipReason: hasRuby ? undefined : 'Ruby/rdbg not installed' },
   { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go/Delve not installed',
     dapLaunchArgs: { mode: 'exec' } },  // launchScript set in beforeAll after build
   { language: 'dotnet', script: DOTNET_SCRIPT, bpLine: DOTNET_BP_LINE, available: hasDotnet, skipReason: hasDotnet ? undefined : '.NET/netcoredbg not installed',

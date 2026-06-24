@@ -147,16 +147,17 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   // ===== Environment Validation =====
   
-  async validateEnvironment(): Promise<ValidationResult> {
+  async validateEnvironment(executablePath?: string): Promise<ValidationResult> {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
 
     try {
-      // Check Python executable
+      // Check Python executable. Validate the interpreter the user actually configured
+      // (e.g. a virtualenv python) rather than an auto-detected system one — see issue #106.
       if (process.env.CI === 'true') {
         console.error('[PythonDebugAdapter] Resolving Python executable path...');
       }
-      const pythonPath = await this.resolveExecutablePath();
+      const pythonPath = await this.resolveExecutablePath(executablePath);
       if (process.env.CI === 'true') {
         console.error('[PythonDebugAdapter] Resolved Python path:', pythonPath);
       }
@@ -179,14 +180,26 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
         });
       }
       
-      // Check debugpy installation
+      // Check debugpy installation. When the user configured an explicit interpreter we fail
+      // fast with a clear, correct error for that interpreter. When the interpreter was merely
+      // auto-detected (no executablePath given), debugpy may still live in the user's virtualenv,
+      // so we downgrade to a warning and re-check at launch time — consistent with the factory's
+      // #16 fix and avoids blocking virtualenv users (issue #106).
       const hasDebugpy = await this.checkDebugpyInstalled(pythonPath);
       if (!hasDebugpy) {
-        errors.push({
-          code: 'DEBUGPY_NOT_INSTALLED',
-          message: 'debugpy not installed. Run: pip install debugpy',
-          recoverable: true
-        });
+        if (executablePath) {
+          errors.push({
+            code: 'DEBUGPY_NOT_INSTALLED',
+            message: `debugpy not installed for ${pythonPath}. Run: ${pythonPath} -m pip install debugpy`,
+            recoverable: true
+          });
+        } else {
+          warnings.push({
+            code: 'DEBUGPY_NOT_INSTALLED',
+            message: 'debugpy not found in the auto-detected Python. If using a virtualenv, ' +
+              'pass its interpreter as executablePath; otherwise run: pip install debugpy'
+          });
+        }
       }
       
       // Check if in virtual environment

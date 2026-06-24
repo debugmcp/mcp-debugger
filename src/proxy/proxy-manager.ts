@@ -435,7 +435,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     let executablePath = config.executablePath;
 
     if (this.adapter) {
-      const validation = await this.adapter.validateEnvironment();
+      // Validate the interpreter the user configured (if any) rather than an auto-detected one,
+      // so a venv that has debugpy is not rejected because the system Python lacks it (issue #106).
+      const validation = await this.adapter.validateEnvironment(executablePath);
       if (!validation.valid) {
         throw new Error(
           `Invalid environment for ${this.adapter.language}: ${validation.errors[0].message}`
