@@ -47,6 +47,8 @@
     "posttest:watch": "node scripts/cleanup-test-processes.js",
     "test:unit": "vitest run --project unit",
     "posttest:unit": "node scripts/cleanup-test-processes.js",
+    "test:flake": "node scripts/flake-hunt.mjs",
+    "posttest:flake": "node scripts/cleanup-test-processes.js",
     "test:integration": "vitest run --project integration",
     "posttest:integration": "node scripts/cleanup-test-processes.js",
     "test:e2e": "pnpm run pretest:docker && vitest run --project e2e",

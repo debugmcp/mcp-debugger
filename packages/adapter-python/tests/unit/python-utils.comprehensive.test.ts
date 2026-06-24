@@ -21,6 +21,7 @@ import {
   findPythonExecutable,
   getPythonVersion,
   setDefaultCommandFinder,
+  resetDefaultCommandFinder,
   CommandNotFoundError,
   type CommandFinder,
 } from '../../src/utils/python-utils.js';
@@ -58,6 +59,16 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
 };
 
 const originalEnv = process.env;
+
+// `defaultCommandFinder` is a module-global. Several tests below swap in a custom
+// or deliberately-throwing finder, and the real WhichCommandFinder also carries an
+// internal resolution CACHE. Either leaking the finder or leaving cached lookups
+// breaks sibling tests that rely on the default finder — invisible in source order,
+// but exposed once `sequence.shuffle` randomizes test order. Reset to a fresh
+// production finder (empty cache) after EVERY test so no state crosses boundaries.
+afterEach(() => {
+  resetDefaultCommandFinder();
+});
 
 describe('CommandNotFoundError', () => {
   it('creates error with command property', () => {

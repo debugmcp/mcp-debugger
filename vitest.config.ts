@@ -163,6 +163,15 @@ export default defineConfig({
   optimizeDeps: sharedOptimizeDeps,
   test: {
     // --- Root-level only (read by the top-level runner, not per project) ---
+    // Tier 2: seeded random test ordering, to surface order-dependent tests.
+    // MUST live here at the root — a per-project `sequence` is silently ignored
+    // under `projects` (Vitest 4.1.8); the root value propagates to all projects.
+    // `tests: true` shuffles tests WITHIN a file (catches a test relying on a
+    // sibling's leftover mock/env state); `files: true` shuffles file order
+    // (meaningful for the serial integration/e2e projects that share a process).
+    // Seed is unpinned (defaults to Date.now()) so every run varies; reproduce a
+    // failure with `vitest run --project <name> --sequence.seed=<n>`.
+    sequence: { shuffle: { files: true, tests: true } },
     // Reporter configuration
     reporters: process.env.CI ? ['dot'] : ['default'],
     outputFile: {
