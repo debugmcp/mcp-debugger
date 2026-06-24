@@ -15,6 +15,7 @@ import { existsSync as nativeNodeExistsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { waitUntil, delay } from '../test-utils/helpers/test-utils.js';
 // No mocking of python-utils - E2E tests should use real Python discovery
 const TEST_TIMEOUT = 60000;
 
@@ -187,7 +188,7 @@ async function startMcpServer(port: number): Promise<ChildProcess> {
   const serverProcess = spawn(process.execPath, ['dist/index.js', 'sse', '-p', port.toString(), '--log-level', 'debug'], { stdio: 'pipe' });
   serverProcess.stdout?.on('data', (data) => console.log(`[MCP Server] ${data.toString().trim()}`));
   serverProcess.stderr?.on('data', (data) => console.error(`[MCP Server Error] ${data.toString().trim()}`));
-  await new Promise(resolve => setTimeout(resolve, 3000)); 
+  // Readiness is gated by the caller polling /health (see beforeAll), so no fixed sleep here.
   return serverProcess;
 }
 
@@ -204,30 +205,19 @@ describe('MCP Server connecting to debugpy', () => {
       serverPort = await findAvailablePort();
       mcpProcess = await startMcpServer(serverPort); 
 
-      let mcpServerReady = false;
       const healthUrl = `http://localhost:${serverPort}/health`;
-      const pollTimeout = Date.now() + 10000; 
       console.log(`[E2E Test] Polling MCP server health at ${healthUrl}...`);
-      while (Date.now() < pollTimeout) {
+      await waitUntil(async () => {
         try {
           const response = await globalThis.fetch(healthUrl);
-          if (response.ok) {
-            const healthStatus = await response.json();
-            if (healthStatus.status === 'ok') {
-              mcpServerReady = true;
-              console.log('[E2E Test] MCP server /health reported OK.');
-              break;
-            }
-          }
+          if (!response.ok) return false;
+          const healthStatus = await response.json();
+          return healthStatus.status === 'ok';
         } catch {
-          // Connection error - retry until timeout
+          return false; // Connection error - retry until timeout
         }
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      if (!mcpServerReady) {
-        throw new Error('Timeout waiting for MCP server /health endpoint to be ready.');
-      }
+      }, { timeout: 10000, interval: 500, message: 'MCP server /health endpoint to be ready' });
+      console.log('[E2E Test] MCP server /health reported OK.');
       
       mcpSdkClient = new Client({ name: "e2e-sdk-test-client", version: "0.1.0" });
       const transport = new SSEClientTransport(new URL(`http://localhost:${serverPort}/sse`));
@@ -322,9 +312,10 @@ print(f"Fibonacci(5) = {result}")
       }
       expect(debugResponse.success).toBe(true);
       
-      // Wait a bit for the debugger to be ready
+      // Wait a bit for the debugger to be ready. There is no cheap readiness
+      // signal to poll before the breakpoint is set, so this stays a fixed wait.
       console.log('[E2E] Waiting for debugger to be ready...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await delay(2000);
       
       // Now set the breakpoint
       console.log('[E2E] Setting breakpoint...');
@@ -354,10 +345,17 @@ print(f"Fibonacci(5) = {result}")
         throw error;
       }
       
-      // Wait for the script to hit the breakpoint
+      // Wait for the script to run and hit the breakpoint at line 4 by polling
+      // the stack trace, instead of a fixed sleep.
       console.log('[E2E] Waiting for breakpoint to be hit...');
-      await new Promise(resolve => setTimeout(resolve, 3000)); 
-      
+      await waitUntil(async () => {
+        const st = parseSdkToolResult(await mcpSdkClient!.callTool({
+          name: 'get_stack_trace',
+          arguments: { sessionId: debugSessionId }
+        })) as { success?: boolean; stackFrames?: Array<{ line?: number }> };
+        return st.success === true && st.stackFrames?.[0]?.line === 4;
+      }, { timeout: 10000, interval: 200, message: 'Python breakpoint at line 4 to be hit' });
+
       // Get the stack trace
       console.log('[E2E] Getting stack trace...');
       try {
