@@ -68,24 +68,35 @@ describe('ChildSessionManager', () => {
     });
     
     it('should create child session with JavaScript policy', async () => {
-      const childCreatedSpy = vi.fn();
-      manager.on('childCreated', childCreatedSpy);
-      
-      const config = {
-        pendingId: 'test-pending-1',
-        host: 'localhost',
-        port: 9229,
-        parentConfig: {
-          type: 'pwa-node',
-          request: 'launch'
-        }
-      };
-      
-      await manager.createChildSession(config);
-      
-      expect(childCreatedSpy).toHaveBeenCalledWith('test-pending-1', expect.any(Object));
-      expect(manager.getActiveChild()).toBeDefined();
-      expect(manager.hasActiveChildren()).toBe(true);
+      // createChildSession internally waits for a 'stopped' event (15s) and a
+      // post-attach 'initialized' event (3s) that the mock never emits, so it
+      // burns ~18s of REAL time. Drive those timeouts with fake timers instead:
+      // start it, advance fake time past the waits, then await the result.
+      vi.useFakeTimers();
+      try {
+        const childCreatedSpy = vi.fn();
+        manager.on('childCreated', childCreatedSpy);
+
+        const config = {
+          pendingId: 'test-pending-1',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {
+            type: 'pwa-node',
+            request: 'launch'
+          }
+        };
+
+        const createPromise = manager.createChildSession(config);
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        expect(childCreatedSpy).toHaveBeenCalledWith('test-pending-1', expect.any(Object));
+        expect(manager.getActiveChild()).toBeDefined();
+        expect(manager.hasActiveChildren()).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
     
     it('should route commands to child when policy specifies', () => {
@@ -116,19 +127,26 @@ describe('ChildSessionManager', () => {
     });
 
     it('mirrors stored breakpoints to the active child session', async () => {
-      await manager.createChildSession({
-        pendingId: 'child-breakpoints',
-        host: 'localhost',
-        port: 9229,
-        parentConfig: {}
-      });
+      vi.useFakeTimers();
+      try {
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-breakpoints',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
 
-      const child = manager.getActiveChild() as unknown as MockMinimalDapClient;
-      child.requests = [];
+        const child = manager.getActiveChild() as unknown as MockMinimalDapClient;
+        child.requests = [];
 
-      manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 42 }]);
+        manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 42 }]);
 
-      expect(child.requests.some(req => req.command === 'setBreakpoints')).toBe(true);
+        expect(child.requests.some(req => req.command === 'setBreakpoints')).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     
@@ -147,58 +165,80 @@ describe('ChildSessionManager', () => {
         parentConfig: {}
       };
       
-      // Start first adoption
-      const promise1 = manager.createChildSession(config1);
-      
-      // Try to start second while first is in progress
-      const promise2 = manager.createChildSession(config2);
-      
-      await Promise.all([promise1, promise2]);
-      
-      // Only one should succeed
-      expect(manager.getActiveChild()).toBeDefined();
-      expect(manager.hasActiveChildren()).toBe(true);
+      vi.useFakeTimers();
+      try {
+        // Start first adoption
+        const promise1 = manager.createChildSession(config1);
+
+        // Try to start second while first is in progress
+        const promise2 = manager.createChildSession(config2);
+
+        await vi.advanceTimersByTimeAsync(20000);
+        await Promise.all([promise1, promise2]);
+
+        // Only one should succeed
+        expect(manager.getActiveChild()).toBeDefined();
+        expect(manager.hasActiveChildren()).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('ignores duplicate adoption requests for the same pending target', async () => {
-      await manager.createChildSession({
-        pendingId: 'dup-target',
-        host: 'localhost',
-        port: 9229,
-        parentConfig: {}
-      });
+      vi.useFakeTimers();
+      try {
+        const first = manager.createChildSession({
+          pendingId: 'dup-target',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await first;
 
-      expect(manager.isAdopted('dup-target')).toBe(true);
+        expect(manager.isAdopted('dup-target')).toBe(true);
 
-      await manager.createChildSession({
-        pendingId: 'dup-target',
-        host: 'localhost',
-        port: 9229,
-        parentConfig: {}
-      });
+        const second = manager.createChildSession({
+          pendingId: 'dup-target',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await second;
 
-      expect(manager.isAdopted('dup-target')).toBe(true);
-      expect((manager as any).childSessions.size).toBe(1);
+        expect(manager.isAdopted('dup-target')).toBe(true);
+        expect((manager as any).childSessions.size).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     
     it('should forward child events to parent', async () => {
-      const childEventSpy = vi.fn();
-      manager.on('childEvent', childEventSpy);
-      
-      await manager.createChildSession({
-        pendingId: 'test-1',
-        host: 'localhost',
-        port: 9229,
-        parentConfig: {}
-      });
-      
-      const child = manager.getActiveChild();
-      if (child) {
-        // Simulate child emitting an event
-        (child as any).emit('event', { event: 'stopped', body: {} });
-        
-        expect(childEventSpy).toHaveBeenCalledWith({ event: 'stopped', body: {} });
+      vi.useFakeTimers();
+      try {
+        const childEventSpy = vi.fn();
+        manager.on('childEvent', childEventSpy);
+
+        const createPromise = manager.createChildSession({
+          pendingId: 'test-1',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const child = manager.getActiveChild();
+        if (child) {
+          // Simulate child emitting an event
+          (child as any).emit('event', { event: 'stopped', body: {} });
+
+          expect(childEventSpy).toHaveBeenCalledWith({ event: 'stopped', body: {} });
+        }
+      } finally {
+        vi.useRealTimers();
       }
     });
     
@@ -249,26 +289,33 @@ describe('ChildSessionManager', () => {
   
   describe('Shutdown', () => {
     it('should shutdown all child sessions', async () => {
-      manager = new ChildSessionManager({
-        policy: JsDebugAdapterPolicy,
-        host: 'localhost',
-        port: 9229
-      });
-      
-      // Create multiple child sessions
-      await manager.createChildSession({
-        pendingId: 'child-1',
-        host: 'localhost',
-        port: 9229,
-        parentConfig: {}
-      });
-      
-      expect(manager.hasActiveChildren()).toBe(true);
-      
-      await manager.shutdown();
-      
-      expect(manager.hasActiveChildren()).toBe(false);
-      expect(manager.getActiveChild()).toBeNull();
+      vi.useFakeTimers();
+      try {
+        manager = new ChildSessionManager({
+          policy: JsDebugAdapterPolicy,
+          host: 'localhost',
+          port: 9229
+        });
+
+        // Create multiple child sessions
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-1',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        expect(manager.hasActiveChildren()).toBe(true);
+
+        await manager.shutdown();
+
+        expect(manager.hasActiveChildren()).toBe(false);
+        expect(manager.getActiveChild()).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
