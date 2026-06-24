@@ -243,20 +243,25 @@ export default defineConfig({
           include: UNIT_INCLUDE,
           exclude: UNIT_EXCLUDE,
           // Parallel pool. Kept on `forks` for full per-file process isolation
-          // (robust against any future non-hermetic test). The Tier 2 vi.stubEnv
-          // migration DID make `threads` safe — it was verified green across 10
-          // seeded-shuffle runs — but measured wall-clock was identical to forks
-          // (~111s either way), because a few proxy-manager.start retry tests use
-          // real-time backoff (~16s each) and dominate the run, not pool startup.
-          // Flip to 'threads' once Tier 3 converts those to fake timers and the
-          // startup-overhead difference can actually show.
+          // (robust against any future non-hermetic test). `threads` is also
+          // green (the Tier 2 vi.stubEnv migration made it safe), but a Tier 3
+          // re-measure found forks vs threads within noise (~110s vs ~109s; 147
+          // files / 2283 tests). Pool choice can't matter yet: the wall-clock is
+          // dominated by ~10 tests that drive the proxy init RETRY path in REAL
+          // time (~15.5s of [500,1000,2000,4000,8000] backoff each), run serially
+          // within their file (see the testTimeout note). Until those use fake
+          // timers, stay on forks for the stronger isolation at equal cost.
           pool: 'forks',
           fileParallelism: true,
           isolate: true,
-          // Kept at 30s (same as before) because a few unit tests exercise the
-          // proxy start RETRY path, whose backoff runs in real time (~16s each).
-          // Tightening this — and making those tests use fake timers so they
-          // stop burning real wall-clock — is deferred to the Tier 3 cleanup.
+          // 30s ceiling — required by ~10 tests that exercise the proxy init
+          // retry/backoff in REAL time (~15.5s each): child-session-manager.test.ts
+          // (6 JS multi-session tests) and proxy-manager.start.test.ts (the
+          // "proxy exits before readiness" / "stop while start pending" / stderr
+          // cases). NB: the two proxy-manager.start retry tests named in earlier
+          // notes ARE already fake-timed — these other ones are not. Converting
+          // them to fake timers is the real Tier 3 "Step B": it would cut unit
+          // wall-clock substantially AND let this ceiling drop to ~15s.
           testTimeout: 30000
         }
       },
