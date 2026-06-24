@@ -2,17 +2,23 @@
  * Flake hunter — repeatedly runs the `unit` project under fresh random shuffle
  * seeds to surface order-dependent tests.
  *
- * Seeded shuffle is enabled in vitest.config.ts (`sequence.shuffle`), so each
- * run reorders tests within every file. This script pins an EXPLICIT random seed
- * per run and prints it, so any failure reproduces exactly with:
+ * vitest.config.ts shuffles FILE order only (`sequence.shuffle.files`); aggressive
+ * WITHIN-file shuffle is intentionally NOT in the committed config because the
+ * serial integration/e2e suites share a live debug session across `it` blocks and
+ * would break if reordered. This hunt is unit-only, so it forces within-file
+ * shuffle by adding `--sequence.shuffle.tests` on the CLI — that is what catches a
+ * unit test relying on a sibling's leftover mock/env state. It pins an EXPLICIT
+ * random seed per run and prints it, so any failure reproduces exactly with:
  *
- *     vitest run --project unit --sequence.seed=<seed>
+ *     vitest run --project unit --sequence.seed=<seed> --sequence.shuffle.tests
  *
  * Usage:
  *     node scripts/flake-hunt.mjs [runs]        # default 10
  *   env:
  *     FLAKE_RUNS=<n>        number of runs (CLI arg wins if given)
- *     FLAKE_PROJECT=<name>  vitest project to loop (default: unit)
+ *     FLAKE_PROJECT=<name>  vitest project to loop (default: unit). NOTE: leave as
+ *                           'unit' — forcing within-file shuffle on integration/e2e
+ *                           breaks their intentionally-sequential session tests.
  *
  * Exits non-zero (and lists the failing seeds) if any run fails.
  */
@@ -35,9 +41,9 @@ const failures = [];
 
 for (let i = 1; i <= RUNS; i++) {
   const seed = randomSeed();
-  const args = ['vitest', 'run', '--project', PROJECT, `--sequence.seed=${seed}`, '--retry=0', '--reporter=dot'];
+  const args = ['vitest', 'run', '--project', PROJECT, `--sequence.seed=${seed}`, '--sequence.shuffle.tests', '--retry=0', '--reporter=dot'];
   const banner = `[flake-hunt] run ${i}/${RUNS}  seed=${seed}`;
-  console.log(`\n${'='.repeat(70)}\n${banner}\n  reproduce: vitest run --project ${PROJECT} --sequence.seed=${seed}\n${'='.repeat(70)}`);
+  console.log(`\n${'='.repeat(70)}\n${banner}\n  reproduce: vitest run --project ${PROJECT} --sequence.seed=${seed} --sequence.shuffle.tests\n${'='.repeat(70)}`);
 
   const started = Date.now();
   // `npx` resolves the local vitest binary cross-platform (Windows + CI).

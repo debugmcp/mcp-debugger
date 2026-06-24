@@ -163,15 +163,26 @@ export default defineConfig({
   optimizeDeps: sharedOptimizeDeps,
   test: {
     // --- Root-level only (read by the top-level runner, not per project) ---
-    // Tier 2: seeded random test ordering, to surface order-dependent tests.
-    // MUST live here at the root — a per-project `sequence` is silently ignored
-    // under `projects` (Vitest 4.1.8); the root value propagates to all projects.
-    // `tests: true` shuffles tests WITHIN a file (catches a test relying on a
-    // sibling's leftover mock/env state); `files: true` shuffles file order
-    // (meaningful for the serial integration/e2e projects that share a process).
-    // Seed is unpinned (defaults to Date.now()) so every run varies; reproduce a
-    // failure with `vitest run --project <name> --sequence.seed=<n>`.
-    sequence: { shuffle: { files: true, tests: true } },
+    // Tier 2: seeded random ordering to surface order-dependent tests. This MUST
+    // live at the root — a per-project `sequence` is silently ignored under
+    // `projects` (Vitest 4.1.8); the root value propagates to ALL projects, and
+    // there is no per-project override. So it has to be safe for every project,
+    // including the combined `--project unit --project integration` CI run.
+    //
+    // Therefore: FILES-ONLY here. `files: true` shuffles file order (catches
+    // cross-file deps in the serial integration/e2e projects, harmless for the
+    // isolated unit pool). `tests: false` because the integration/e2e suites
+    // legitimately share a live debug session across `it` blocks (create→…→close)
+    // and would break if tests were reordered within a file.
+    //
+    // Aggressive WITHIN-file shuffle (`tests: true`) — which is what catches a
+    // unit test relying on a sibling's leftover mock/env state — is applied to the
+    // unit project ALONE by the flake hunt (scripts/flake-hunt.mjs passes
+    // `--sequence.shuffle.tests`), run via `pnpm run test:flake` and nightly CI.
+    //
+    // Seed is unpinned (defaults to Date.now()); reproduce a failure with
+    // `vitest run --project <name> --sequence.seed=<n> [--sequence.shuffle.tests]`.
+    sequence: { shuffle: { files: true, tests: false } },
     // Reporter configuration
     reporters: process.env.CI ? ['dot'] : ['default'],
     outputFile: {
