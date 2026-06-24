@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -137,7 +138,7 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
     }
   });
 
-  it('should complete Go debugging flow with compiled binary', async () => {
+  it('should complete Go debugging flow with compiled binary', async (ctx) => {
     // Skip if Go/Delve not available
     const { execSync } = await import('child_process');
     let goAvailable = false;
@@ -225,6 +226,10 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       });
       
       const startResponse = parseSdkToolResult(startResult);
+      if (!startResponse.success) {
+        // Skip (don't hard-fail) if the Delve binary couldn't be spawned.
+        skipIfSpawnBlocked(ctx, startResponse, 'Go');
+      }
       expect(startResponse.state).toBeDefined();
       console.log('[Go Smoke Test] Debug started, state:', startResponse.state);
 
