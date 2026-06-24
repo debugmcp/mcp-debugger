@@ -3,8 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
 import { existsSync } from 'fs';
-import { spawn, ChildProcess, exec as execCallback } from 'child_process';
-import { promisify } from 'util';
+import { spawn, ChildProcess } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
@@ -12,7 +11,6 @@ import {
   waitForHealthEndpoint
 } from './smoke-test-utils.js';
 
-const execAsync = promisify(execCallback);
 const TEST_TIMEOUT = 30000; // 30 seconds for all operations
 
 let mcpSdkClient: Client | null = null;
@@ -82,19 +80,17 @@ describe('MCP Server E2E SSE Smoke Test', () => {
     serverPort = null;
   });
 
-  async function ensureDistBuild(): Promise<void> {
+  // Fail fast if the project hasn't been built. Building is the job of the
+  // `pretest:e2e:smoke` npm hook (build once), not of each test.
+  function ensureDistBuild(): void {
     if (distReady) {
       return;
     }
 
     const distEntry = path.join(projectRoot, 'dist', 'index.js');
-    if (existsSync(distEntry)) {
-      distReady = true;
-      return;
+    if (!existsSync(distEntry)) {
+      throw new Error('dist/index.js not found. Run "npm run build" first or use "npm run test:e2e:smoke".');
     }
-
-    console.log('[SSE Smoke Test] dist build missing; running "pnpm build" before launching SSE server...');
-    await execAsync('pnpm build', { cwd: projectRoot });
     distReady = true;
   }
 
@@ -145,7 +141,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
    */
   async function startSSEServer(options: { cwd?: string, env?: NodeJS.ProcessEnv } = {}, maxRetries: number = 3): Promise<number> {
     let lastError: Error | null = null;
-    await ensureDistBuild();
+    ensureDistBuild();
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
