@@ -23,6 +23,7 @@ import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,7 +155,7 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
     console.log('[.NET Smoke Test] dotnet language is available');
   });
 
-  it('should complete .NET debugging flow', async () => {
+  it('should complete .NET debugging flow', async (ctx) => {
     const dllPath = ensureDotnetBuild();
     const sourceFile = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');
 
@@ -204,6 +205,10 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
     });
 
     const startResponse = parseSdkToolResult(startResult);
+    if (!startResponse.success) {
+      // Skip (don't hard-fail) if netcoredbg couldn't be spawned.
+      skipIfSpawnBlocked(ctx, startResponse, '.NET');
+    }
     expect(startResponse.state).toBeDefined();
     console.log('[.NET Smoke Test] Debug started, state:', startResponse.state);
 

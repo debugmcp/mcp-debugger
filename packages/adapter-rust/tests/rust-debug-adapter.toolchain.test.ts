@@ -99,10 +99,10 @@ describe('RustDebugAdapter toolchain logic', () => {
     vi.mocked(checkRustInstallation).mockReset();
     vi.mocked(getRustHostTriple).mockReset();
     vi.mocked(findDlltoolExecutable).mockReset();
-    delete process.env.MCP_RUST_ALLOW_PREBUILT;
-    delete process.env.MCP_RUST_EXECUTABLE_PLACEHOLDER;
-    delete process.env.RUST_MSVC_BEHAVIOR;
-    delete process.env.RUST_AUTO_SUGGEST_GNU;
+    vi.stubEnv('MCP_RUST_ALLOW_PREBUILT', undefined);
+    vi.stubEnv('MCP_RUST_EXECUTABLE_PLACEHOLDER', undefined);
+    vi.stubEnv('RUST_MSVC_BEHAVIOR', undefined);
+    vi.stubEnv('RUST_AUTO_SUGGEST_GNU', undefined);
     dependencies = createDependencies();
     adapter = new RustDebugAdapter(dependencies);
   });
@@ -140,8 +140,8 @@ describe('RustDebugAdapter toolchain logic', () => {
     });
 
     it('uses relaxed toolchain placeholder when allowed', async () => {
-      process.env.MCP_RUST_ALLOW_PREBUILT = 'true';
-      process.env.MCP_RUST_EXECUTABLE_PLACEHOLDER = 'custom-rust-binary';
+      vi.stubEnv('MCP_RUST_ALLOW_PREBUILT', 'true');
+      vi.stubEnv('MCP_RUST_EXECUTABLE_PLACEHOLDER', 'custom-rust-binary');
       checkCargoInstallation.mockResolvedValueOnce(false);
       checkRustInstallation.mockResolvedValueOnce(false);
       const dependencies = createDependencies();
@@ -189,10 +189,8 @@ describe('RustDebugAdapter toolchain logic', () => {
   describe('buildAdapterCommand environment wiring', () => {
     it('injects dlltool path into environment when available on Windows', () => {
       const restorePlatform = setPlatform('win32');
-      const originalPath = process.env.PATH;
-      const originalDlltool = process.env.DLLTOOL;
-      process.env.PATH = '/usr/bin';
-      delete process.env.DLLTOOL;
+      vi.stubEnv('PATH', '/usr/bin');
+      vi.stubEnv('DLLTOOL', undefined);
 
       const adapterWithMethod = adapter as unknown as {
         resolveCodeLLDBExecutableSync: () => string | null;
@@ -220,16 +218,6 @@ describe('RustDebugAdapter toolchain logic', () => {
         expect(command.args).toEqual(['--port', '4000']);
       } finally {
         resolveSpy.mockRestore();
-        if (originalDlltool === undefined) {
-          delete process.env.DLLTOOL;
-        } else {
-          process.env.DLLTOOL = originalDlltool;
-        }
-        if (originalPath === undefined) {
-          delete process.env.PATH;
-        } else {
-          process.env.PATH = originalPath;
-        }
         restorePlatform();
       }
     });
@@ -336,7 +324,7 @@ describe('RustDebugAdapter toolchain logic', () => {
     });
 
     it('honors MSVC behavior "error" during launch transformation', async () => {
-      process.env.RUST_MSVC_BEHAVIOR = 'error';
+      vi.stubEnv('RUST_MSVC_BEHAVIOR', 'error');
       adapter = new RustDebugAdapter(createDependencies());
       detectBinaryFormat.mockResolvedValue({
         format: 'msvc',
@@ -434,10 +422,8 @@ describe('RustDebugAdapter toolchain logic', () => {
 
     it('derives executable search paths per platform', () => {
       const restoreLinux = setPlatform('linux');
-      const originalHome = process.env.HOME;
-      const originalPath = process.env.PATH;
-      process.env.HOME = '/tmp/tester';
-      process.env.PATH = '/usr/bin:/usr/local/bin';
+      vi.stubEnv('HOME', '/tmp/tester');
+      vi.stubEnv('PATH', '/usr/bin:/usr/local/bin');
       const searchPaths = adapter
         .getExecutableSearchPaths()
         .map((entry) => entry.replace(/\\/g, '/'));
@@ -449,23 +435,15 @@ describe('RustDebugAdapter toolchain logic', () => {
       );
       expect(searchPaths.some((entry) => entry.includes('/usr/bin'))).toBe(true);
       expect(searchPaths.some((entry) => entry.includes('/usr/local/bin'))).toBe(true);
-      process.env.HOME = originalHome;
-      process.env.PATH = originalPath;
       restoreLinux();
 
       const restoreWindows = setPlatform('win32');
-      const originalRustup = process.env.RUSTUP_HOME;
-      const originalCargo = process.env.CARGO_HOME;
-      const originalHomeWin = process.env.HOME;
-      process.env.HOME = 'C:\\Users\\tester';
-      process.env.RUSTUP_HOME = 'C:\\Rustup';
-      process.env.CARGO_HOME = 'C:\\Cargo';
+      vi.stubEnv('HOME', 'C:\\Users\\tester');
+      vi.stubEnv('RUSTUP_HOME', 'C:\\Rustup');
+      vi.stubEnv('CARGO_HOME', 'C:\\Cargo');
       const windowsPaths = adapter.getExecutableSearchPaths();
       expect(windowsPaths.some((entry) => entry.includes('Cargo'))).toBe(true);
       expect(windowsPaths.some((entry) => entry.includes('Program Files'))).toBe(true);
-      process.env.HOME = originalHomeWin;
-      process.env.RUSTUP_HOME = originalRustup;
-      process.env.CARGO_HOME = originalCargo;
       restoreWindows();
     });
 

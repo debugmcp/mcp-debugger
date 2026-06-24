@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
 import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
 import { detectBinary, setDefaultFileSystem } from '../../src/utils/typescript-detector.js';
@@ -37,19 +37,13 @@ class MockFileSystem implements FileSystem {
 const WIN = isWindows();
 
 function withPath(paths: string[]) {
-  const prev = process.env.PATH;
-  process.env.PATH = paths.join(path.delimiter);
-  return () => {
-    process.env.PATH = prev;
-  };
+  vi.stubEnv('PATH', paths.join(path.delimiter));
 }
 
 describe('utils/typescript-detector.edge: detectBinary ordering and PATH precedence', () => {
-  let restoreEnv: (() => void) | null = null;
   let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    restoreEnv = null;
     mockFileSystem = new MockFileSystem();
     setDefaultFileSystem(mockFileSystem);
     // Default: no files exist
@@ -58,10 +52,6 @@ describe('utils/typescript-detector.edge: detectBinary ordering and PATH precede
   });
 
   afterEach(() => {
-    if (restoreEnv) {
-      restoreEnv();
-      restoreEnv = null;
-    }
     // Restore the default filesystem
     setDefaultFileSystem(new NodeFileSystem());
   });
@@ -99,7 +89,7 @@ describe('utils/typescript-detector.edge: detectBinary ordering and PATH precede
   it('PATH precedence is dir-first across PATH entries, not name-first', () => {
     const A = path.resolve(process.cwd(), 'A');
     const B = path.resolve(process.cwd(), 'B');
-    restoreEnv = withPath([A, B]);
+    withPath([A, B]);
 
     // For ts-node: In dir A we have bare; in dir B we have .cmd (Windows) or bare (POSIX).
     const aBare = path.join(A, 'ts-node');
@@ -118,7 +108,7 @@ describe('utils/typescript-detector.edge: detectBinary ordering and PATH precede
 
   it('Windows PATH single dir with both .cmd and .exe prefers .cmd within same dir; POSIX prefers bare', () => {
     const D = path.resolve(process.cwd(), 'D');
-    restoreEnv = withPath([D]);
+    withPath([D]);
 
     const cmd = path.join(D, 'tsx.cmd');
     const exe = path.join(D, 'tsx.exe');

@@ -902,8 +902,7 @@ describe('MinimalDapClient', () => {
     });
 
     it('appends trace output when DAP_TRACE_FILE is set', async () => {
-      const originalTrace = process.env.DAP_TRACE_FILE;
-      process.env.DAP_TRACE_FILE = 'trace.ndjson';
+      vi.stubEnv('DAP_TRACE_FILE', 'trace.ndjson');
       const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation(() => undefined);
 
       const client = new MinimalDapClient('localhost', 5678);
@@ -936,11 +935,6 @@ describe('MinimalDapClient', () => {
 
       appendSpy.mockRestore();
       client.shutdown();
-      if (originalTrace === undefined) {
-        delete process.env.DAP_TRACE_FILE;
-      } else {
-        process.env.DAP_TRACE_FILE = originalTrace;
-      }
     });
 
     it('should delegate startDebugging adoption to ChildSessionManager when policy requests it', async () => {
@@ -1690,8 +1684,7 @@ describe('MinimalDapClient', () => {
 
   describe('Trace file error handling', () => {
     it('swallows fs.appendFileSync errors so requests still complete', async () => {
-      const originalTrace = process.env.DAP_TRACE_FILE;
-      process.env.DAP_TRACE_FILE = 'trace.ndjson';
+      vi.stubEnv('DAP_TRACE_FILE', 'trace.ndjson');
       const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation(() => {
         throw new Error('disk full');
       });
@@ -1728,11 +1721,6 @@ describe('MinimalDapClient', () => {
 
       appendSpy.mockRestore();
       traceClient.shutdown();
-      if (originalTrace === undefined) {
-        delete process.env.DAP_TRACE_FILE;
-      } else {
-        process.env.DAP_TRACE_FILE = originalTrace;
-      }
     });
   });
 

@@ -31,20 +31,14 @@ const WIN = isWindows();
 let callCount = 0;
 
 function withPath(paths: string[]) {
-  const orig = process.env.PATH;
-  process.env.PATH = paths.join(path.delimiter);
-  return () => {
-    process.env.PATH = orig;
-  };
+  vi.stubEnv('PATH', paths.join(path.delimiter));
 }
 
 describe('utils/typescript-detector: detectTsRunners', () => {
-  let restoreEnv: (() => void) | null = null;
   let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
     clearCache();
-    restoreEnv = null;
     callCount = 0;
     mockFileSystem = new MockFileSystem();
     setDefaultFileSystem(mockFileSystem);
@@ -57,15 +51,11 @@ describe('utils/typescript-detector: detectTsRunners', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     clearCache();
-    if (restoreEnv) {
-      restoreEnv();
-      restoreEnv = null;
-    }
     setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('returns undefineds when no runners found (no local bins, empty PATH)', async () => {
-    restoreEnv = withPath([]); // empty PATH
+    withPath([]); // empty PATH
     mockFileSystem.setExistsMock(() => {
       callCount++;
       return false;
@@ -84,7 +74,7 @@ describe('utils/typescript-detector: detectTsRunners', () => {
     const localTsx = WIN ? path.join(localDir, 'tsx.cmd') : path.join(localDir, 'tsx');
 
     // PATH irrelevant here
-    restoreEnv = withPath([]);
+    withPath([]);
 
     mockFileSystem.setExistsMock((p: string) => {
       callCount++;
@@ -103,7 +93,7 @@ describe('utils/typescript-detector: detectTsRunners', () => {
     const pathCandidate = WIN ? path.join(binDir, 'ts-node.cmd') : path.join(binDir, 'ts-node');
 
     // PATH includes binDir
-    restoreEnv = withPath([binDir]);
+    withPath([binDir]);
 
     // Local checks should be false; PATH candidate true
     mockFileSystem.setExistsMock((p: string) => {
@@ -122,7 +112,7 @@ describe('utils/typescript-detector: detectTsRunners', () => {
   it('caches results across calls until clearCache is invoked', async () => {
     const cwd = path.resolve(process.cwd(), 'proj-cache');
 
-    restoreEnv = withPath([]); // empty PATH
+    withPath([]); // empty PATH
 
     mockFileSystem.setExistsMock(() => {
       callCount++;

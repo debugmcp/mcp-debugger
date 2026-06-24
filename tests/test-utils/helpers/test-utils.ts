@@ -53,6 +53,40 @@ export function createMockFileSystem(): IFileSystem {
 }
 
 /**
+ * Poll a condition until it becomes truthy or a timeout elapses.
+ *
+ * Use this instead of a fixed `delay()`/`setTimeout` sleep that merely guesses
+ * how long some asynchronous state takes to settle: `waitUntil` returns as soon
+ * as `condition` holds (so the common case is faster) and fails fast with a
+ * clear message if it never does (so a regression surfaces as a useful error
+ * rather than a flaky downstream assertion).
+ *
+ * @param condition - Sync or async predicate; polling stops when it returns truthy.
+ * @param options.timeout - Max time to wait in ms (default 5000).
+ * @param options.interval - Gap between polls in ms (default 50).
+ * @param options.message - Short description of what is awaited, used in the timeout error.
+ * @returns Promise that resolves once the condition holds; rejects on timeout.
+ */
+export async function waitUntil(
+  condition: () => boolean | Promise<boolean>,
+  options: { timeout?: number; interval?: number; message?: string } = {}
+): Promise<void> {
+  const { timeout = 5000, interval = 50, message = 'condition' } = options;
+  const start = Date.now();
+
+  // Check immediately first, then poll until satisfied or timed out.
+  for (;;) {
+    if (await condition()) {
+      return;
+    }
+    if (Date.now() - start >= timeout) {
+      throw new Error(`Timeout after ${timeout}ms waiting for ${message}`);
+    }
+    await delay(interval);
+  }
+}
+
+/**
  * Wait for an event to be emitted
  *
  * @param emitter - Event emitter to listen on

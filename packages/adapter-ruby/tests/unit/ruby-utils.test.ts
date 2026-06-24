@@ -61,8 +61,6 @@ describe('findRubyExecutable / findRdbgExecutable', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    delete process.env.RUBY_PATH;
-    delete process.env.RDBG_PATH;
   });
 
   it('prefers the explicitly provided path when resolvable via which', async () => {
@@ -81,7 +79,7 @@ describe('findRubyExecutable / findRdbgExecutable', () => {
     whichMock.mockRejectedValue(new Error('not found'));
     const rdbgFile = path.join(tmpDir, 'rdbg');
     fs.writeFileSync(rdbgFile, '', { mode: 0o755 });
-    process.env.RDBG_PATH = rdbgFile;
+    vi.stubEnv('RDBG_PATH', rdbgFile);
     await expect(findRdbgExecutable()).resolves.toBe(rdbgFile);
   });
 

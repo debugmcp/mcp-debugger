@@ -12,15 +12,12 @@ function isVendorPath(p: unknown): boolean {
 }
 
 describe('JavascriptAdapterFactory.validate (edge branches)', () => {
-  const originalPath = process.env.PATH;
-
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
   afterEach(() => {
-    process.env.PATH = originalPath;
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -34,7 +31,7 @@ describe('JavascriptAdapterFactory.validate (edge branches)', () => {
       }
       return false;
     });
-    process.env.PATH = '';
+    vi.stubEnv('PATH', '');
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();
@@ -67,7 +64,7 @@ describe('JavascriptAdapterFactory.validate (edge branches)', () => {
 
     const A = path.resolve(process.cwd(), 'A');
     const B = path.resolve(process.cwd(), 'B');
-    process.env.PATH = [A, B].join(path.delimiter);
+    vi.stubEnv('PATH', [A, B].join(path.delimiter));
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();
@@ -95,7 +92,7 @@ describe('JavascriptAdapterFactory.validate (edge branches)', () => {
 
     const A = path.resolve(process.cwd(), 'throw-this');
     const B = path.resolve(process.cwd(), 'other');
-    process.env.PATH = [A, B].join(path.delimiter);
+    vi.stubEnv('PATH', [A, B].join(path.delimiter));
 
     const factory = new JavascriptAdapterFactory();
     const res = await factory.validate();

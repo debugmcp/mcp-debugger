@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
 import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
 import { detectBinary, setDefaultFileSystem } from '../../src/utils/typescript-detector.js';
@@ -37,19 +37,13 @@ class MockFileSystem implements FileSystem {
 const WIN = isWindows();
 
 function withPath(paths: string[]) {
-  const prev = process.env.PATH;
-  process.env.PATH = paths.join(path.delimiter);
-  return () => {
-    process.env.PATH = prev;
-  };
+  vi.stubEnv('PATH', paths.join(path.delimiter));
 }
 
 describe('utils/typescript-detector: throw/edge coverage', () => {
-  let restoreEnv: (() => void) | null = null;
   let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    restoreEnv = null;
     mockFileSystem = new MockFileSystem();
     setDefaultFileSystem(mockFileSystem);
     // Default: no files exist
@@ -58,10 +52,6 @@ describe('utils/typescript-detector: throw/edge coverage', () => {
   });
 
   afterEach(() => {
-    if (restoreEnv) {
-      restoreEnv();
-      restoreEnv = null;
-    }
     // Restore the default filesystem
     setDefaultFileSystem(new NodeFileSystem());
   });
@@ -75,7 +65,7 @@ describe('utils/typescript-detector: throw/edge coverage', () => {
     const localBare = path.join(binDir, 'tsx');
 
     const A = path.resolve(process.cwd(), 'A');
-    restoreEnv = withPath([A]);
+    withPath([A]);
 
     const pathCmd = path.join(A, 'tsx.cmd');
     const pathBare = path.join(A, 'tsx');
@@ -103,7 +93,7 @@ describe('utils/typescript-detector: throw/edge coverage', () => {
 
   it('no PATH and local throws for all candidates -> returns undefined', () => {
     const cwd = path.resolve(process.cwd(), 'proj-throw2');
-    restoreEnv = withPath([]);
+    withPath([]);
 
     mockFileSystem.setExistsMock(() => {
       throw new Error('fs error');

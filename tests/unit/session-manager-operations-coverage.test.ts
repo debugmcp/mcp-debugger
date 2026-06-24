@@ -176,10 +176,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('starts proxy manager with resolved configuration', async () => {
-      const originalCI = process.env.CI;
-      const originalGitHub = process.env.GITHUB_ACTIONS;
-      process.env.CI = 'true';
-      delete process.env.GITHUB_ACTIONS;
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyInstance: any = {
         ...mockProxyManager,
@@ -205,26 +203,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         verified: false
       });
 
-      try {
-        await (operations as any).startProxyManager(
-          mockSession,
-          'script.py',
-          scriptArgs,
-          dapArgs,
-          false
-        );
-      } finally {
-        if (originalCI === undefined) {
-          delete process.env.CI;
-        } else {
-          process.env.CI = originalCI;
-        }
-        if (originalGitHub === undefined) {
-          delete process.env.GITHUB_ACTIONS;
-        } else {
-          process.env.GITHUB_ACTIONS = originalGitHub;
-        }
-      }
+      await (operations as any).startProxyManager(
+        mockSession,
+        'script.py',
+        scriptArgs,
+        dapArgs,
+        false
+      );
 
       expect(mockDependencies.fileSystem.ensureDir).toHaveBeenCalled();
       expect(mockDependencies.networkManager.findFreePort).toHaveBeenCalled();
@@ -741,10 +726,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Start Debugging Error Scenarios', () => {
     it('should return timeout result when dry run never completes', async () => {
-      const originalCI = process.env.CI;
-      const originalGitHub = process.env.GITHUB_ACTIONS;
-      process.env.CI = 'true';
-      delete process.env.GITHUB_ACTIONS;
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const dryRunProxy = {
         ...mockProxyManager,
@@ -757,21 +740,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.spyOn(operations as any, 'startProxyManager').mockResolvedValue(undefined);
       vi.spyOn(operations as any, 'waitForDryRunCompletion').mockResolvedValue(false);
 
-      let result;
-      try {
-        result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
-      } finally {
-        if (originalCI === undefined) {
-          delete process.env.CI;
-        } else {
-          process.env.CI = originalCI;
-        }
-        if (originalGitHub === undefined) {
-          delete process.env.GITHUB_ACTIONS;
-        } else {
-          process.env.GITHUB_ACTIONS = originalGitHub;
-        }
-      }
+      const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
 
       expect((operations as any).startProxyManager).toHaveBeenCalledTimes(1);
       expect((operations as any).waitForDryRunCompletion).toHaveBeenCalledWith(
@@ -783,10 +752,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('returns success immediately when dry run already completed', async () => {
-      const originalCI = process.env.CI;
-      const originalGitHub = process.env.GITHUB_ACTIONS;
-      process.env.CI = 'true';
-      delete process.env.GITHUB_ACTIONS;
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const dryRunProxy = {
         ...mockProxyManager,
@@ -802,21 +769,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         mockSession.proxyManager = dryRunProxy as any;
       });
 
-      let result;
-      try {
-        result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
-      } finally {
-        if (originalCI === undefined) {
-          delete process.env.CI;
-        } else {
-          process.env.CI = originalCI;
-        }
-        if (originalGitHub === undefined) {
-          delete process.env.GITHUB_ACTIONS;
-        } else {
-          process.env.GITHUB_ACTIONS = originalGitHub;
-        }
-      }
+      const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
 
       expect(result!.success).toBe(true);
       expect(result!.state).toBe(SessionState.STOPPED);
@@ -826,59 +779,27 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should handle startDebugging with proxy creation failure', async () => {
-      const originalCI = process.env.CI;
-      const originalGitHub = process.env.GITHUB_ACTIONS;
-      process.env.CI = 'true';
-      delete process.env.GITHUB_ACTIONS;
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       mockDependencies.proxyManagerFactory.create.mockImplementation(() => {
         throw new Error('Port allocation failed');
       });
 
-      let result;
-      try {
-        result = await operations.startDebugging('test-session', 'test.py');
-      } finally {
-        if (originalCI === undefined) {
-          delete process.env.CI;
-        } else {
-          process.env.CI = originalCI;
-        }
-        if (originalGitHub === undefined) {
-          delete process.env.GITHUB_ACTIONS;
-        } else {
-          process.env.GITHUB_ACTIONS = originalGitHub;
-        }
-      }
-      
+      const result = await operations.startDebugging('test-session', 'test.py');
+
       expect(result!.success).toBe(false);
       expect(result!.error).toContain('Port allocation failed');
     });
 
     it('should handle startDebugging with launch failure', async () => {
-      const originalCI = process.env.CI;
-      const originalGitHub = process.env.GITHUB_ACTIONS;
-      process.env.CI = 'true';
-      delete process.env.GITHUB_ACTIONS;
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       mockProxyManager.start.mockRejectedValue(new Error('Failed to launch debuggee'));
 
-      let result;
-      try {
-        result = await operations.startDebugging('test-session', 'test.py');
-      } finally {
-        if (originalCI === undefined) {
-          delete process.env.CI;
-        } else {
-          process.env.CI = originalCI;
-        }
-        if (originalGitHub === undefined) {
-          delete process.env.GITHUB_ACTIONS;
-        } else {
-          process.env.GITHUB_ACTIONS = originalGitHub;
-        }
-      }
-      
+      const result = await operations.startDebugging('test-session', 'test.py');
+
       expect(result!.success).toBe(false);
       expect(result!.error).toContain('Failed to launch debuggee');
     });
@@ -947,10 +868,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Start Debugging Success Scenarios', () => {
     it('completes handshake and waits for stop event', async () => {
-      const originalCI = process.env.CI;
-      const originalGitHub = process.env.GITHUB_ACTIONS;
-      process.env.CI = 'true';
-      delete process.env.GITHUB_ACTIONS;
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyStub: any = {
         hasDryRunCompleted: vi.fn().mockReturnValue(false),
@@ -992,16 +911,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       } finally {
         startProxySpy.mockRestore();
         selectPolicySpy.mockRestore();
-        if (originalCI === undefined) {
-          delete process.env.CI;
-        } else {
-          process.env.CI = originalCI;
-        }
-        if (originalGitHub === undefined) {
-          delete process.env.GITHUB_ACTIONS;
-        } else {
-          process.env.GITHUB_ACTIONS = originalGitHub;
-        }
       }
 
       expect(policy.performHandshake).toHaveBeenCalledWith(
@@ -1014,10 +923,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('handles dry run completion after waiting', async () => {
-      const originalCI = process.env.CI;
-      const originalGitHub = process.env.GITHUB_ACTIONS;
-      process.env.CI = 'true';
-      delete process.env.GITHUB_ACTIONS;
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const dryRunProxy: any = {
         getDryRunSnapshot: vi.fn().mockReturnValue({ command: 'python -m debugpy', script: 'wait.py' }),
@@ -1036,16 +943,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         result = await operations.startDebugging('test-session', 'wait.py', undefined, undefined, true);
       } finally {
         startProxySpy.mockRestore();
-        if (originalCI === undefined) {
-          delete process.env.CI;
-        } else {
-          process.env.CI = originalCI;
-        }
-        if (originalGitHub === undefined) {
-          delete process.env.GITHUB_ACTIONS;
-        } else {
-          process.env.GITHUB_ACTIONS = originalGitHub;
-        }
       }
 
       expect(waitSpy).toHaveBeenCalled();

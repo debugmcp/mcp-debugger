@@ -24,19 +24,13 @@ class MockFileSystem implements FileSystem {
 }
 
 function withPath(paths: string[]) {
-  const orig = process.env.PATH;
-  process.env.PATH = paths.join(path.delimiter);
-  return () => {
-    process.env.PATH = orig;
-  };
+  vi.stubEnv('PATH', paths.join(path.delimiter));
 }
 
 describe('utils/executable-resolver: findNode and whichInPath', () => {
-  let restoreEnv: (() => void) | null = null;
   let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    restoreEnv = null;
     mockFileSystem = new MockFileSystem();
     // Set mock as default
     setDefaultFileSystem(mockFileSystem);
@@ -44,10 +38,6 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    if (restoreEnv) {
-      restoreEnv();
-      restoreEnv = null;
-    }
     // Reset to a new NodeFileSystem for other tests
     setDefaultFileSystem(new NodeFileSystem());
   });
@@ -72,7 +62,7 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
     const candidate = WIN ? path.join(binDir, 'node.exe') : path.join(binDir, 'node');
 
     // PATH includes binDir first
-    restoreEnv = withPath([binDir, path.resolve(process.cwd(), '.other_bin')]);
+    withPath([binDir, path.resolve(process.cwd(), '.other_bin')]);
 
     mockFileSystem.setExistsMock((p: string) => {
       if (p === process.execPath) {
@@ -88,7 +78,7 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
   it('whichInPath returns first existing match with dir-first precedence', () => {
     const dirA = path.resolve(process.cwd(), 'A');
     const dirB = path.resolve(process.cwd(), 'B');
-    restoreEnv = withPath([dirA, dirB]);
+    withPath([dirA, dirB]);
 
     const names = ['nodeA', 'nodeB']; // candidate order is preserved per dir
 
@@ -106,7 +96,7 @@ describe('utils/executable-resolver: findNode and whichInPath', () => {
   });
 
   it('negative: when execPath and PATH matches are "missing", findNode still returns process.execPath deterministically', async () => {
-    restoreEnv = withPath([]); // empty PATH
+    withPath([]); // empty PATH
     mockFileSystem.setExistsMock(() => false);
 
     const resolved = await findNode();

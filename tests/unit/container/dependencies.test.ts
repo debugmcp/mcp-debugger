@@ -61,11 +61,9 @@ vi.mock('../../../src/utils/language-config.js', () => ({
 
 const { createProductionDependencies } = await import('../../../src/container/dependencies.js');
 
-const originalEnv = { ...process.env };
 const BUNDLED_ADAPTERS_KEY = '__DEBUG_MCP_BUNDLED_ADAPTERS__';
 
 beforeEach(() => {
-  process.env = { ...originalEnv };
   createLoggerMock.mockClear().mockReturnValue({
     info: vi.fn(),
     warn: vi.fn()
@@ -77,7 +75,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env = originalEnv;
   delete (globalThis as Record<string, unknown>)[BUNDLED_ADAPTERS_KEY];
 });
 
@@ -159,7 +156,7 @@ describe('createProductionDependencies', () => {
   });
 
   it('skips container adapters when disabled via environment', () => {
-    process.env.MCP_CONTAINER = 'true';
+    vi.stubEnv('MCP_CONTAINER', 'true');
     isLanguageDisabledMock.mockReturnValue(true);
 
     const logger = {

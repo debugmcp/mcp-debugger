@@ -439,19 +439,27 @@ describe('ProxyManager.start', () => {
   });
 
   it('rejects when proxy exits during initialization with captured stderr', async () => {
-    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
-    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
-      if (cmd.cmd === 'init') {
-        setTimeout(() => {
-          stderrEmitter.emit('data', Buffer.from('boot failure'));
-          fakeProcess.emit('exit', 2, 'SIGTERM');
-        }, 0);
-      }
-    });
+    vi.useFakeTimers();
+    try {
+      const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+      fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+        if (cmd.cmd === 'init') {
+          setTimeout(() => {
+            stderrEmitter.emit('data', Buffer.from('boot failure'));
+            fakeProcess.emit('exit', 2, 'SIGTERM');
+          }, 0);
+        }
+      });
 
-    await expect(proxyManager.start({ ...baseConfig, dryRunSpawn: false })).rejects.toThrow(
-      /Proxy exit details -> code=2 signal=SIGTERM stderr:\nboot failure/
-    );
+      const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      await vi.advanceTimersByTimeAsync(35000);
+      await expect(startPromise).rejects.toThrow(
+        /Proxy exit details -> code=2 signal=SIGTERM stderr:\nboot failure/
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('fails to start when bootstrap worker script is missing', async () => {
@@ -1000,41 +1008,57 @@ describe('ProxyManager.start', () => {
   });
 
   it('rejects initialization when proxy exits with non-zero status before readiness', async () => {
-    const config: ProxyConfig = {
-      ...baseConfig,
-      dryRunSpawn: false
-    };
+    vi.useFakeTimers();
+    try {
+      const config: ProxyConfig = {
+        ...baseConfig,
+        dryRunSpawn: false
+      };
 
-    fakeProcess.sendCommand.mockImplementation(() => {
-      // Simulate proxy exit on first attempt
-      setImmediate(() => {
-        fakeProcess.emit('exit', 7, null);
+      fakeProcess.sendCommand.mockImplementation(() => {
+        // Simulate proxy exit on first attempt
+        setImmediate(() => {
+          fakeProcess.emit('exit', 7, null);
+        });
       });
-    });
 
-    const startPromise = proxyManager.start(config);
+      const startPromise = proxyManager.start(config);
 
-    // With retry logic, error message is different
-    await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
+      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      await vi.advanceTimersByTimeAsync(35000);
+
+      // With retry logic, error message is different
+      await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects initialization when proxy exits via signal before readiness', async () => {
-    const config: ProxyConfig = {
-      ...baseConfig,
-      dryRunSpawn: false
-    };
+    vi.useFakeTimers();
+    try {
+      const config: ProxyConfig = {
+        ...baseConfig,
+        dryRunSpawn: false
+      };
 
-    fakeProcess.sendCommand.mockImplementation(() => {
-      // Simulate proxy exit on first attempt
-      setImmediate(() => {
-        fakeProcess.emit('exit', null, 'SIGTERM');
+      fakeProcess.sendCommand.mockImplementation(() => {
+        // Simulate proxy exit on first attempt
+        setImmediate(() => {
+          fakeProcess.emit('exit', null, 'SIGTERM');
+        });
       });
-    });
 
-    const startPromise = proxyManager.start(config);
+      const startPromise = proxyManager.start(config);
 
-    // With retry logic, error message is different
-    await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
+      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      await vi.advanceTimersByTimeAsync(35000);
+
+      // With retry logic, error message is different
+      await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('allows multiple concurrent stop calls without errors', async () => {
@@ -1064,20 +1088,28 @@ describe('ProxyManager.start', () => {
   });
 
   it('handles stop invoked while start is still pending', async () => {
-    const config: ProxyConfig = {
-      ...baseConfig,
-      dryRunSpawn: false
-    };
+    vi.useFakeTimers();
+    try {
+      const config: ProxyConfig = {
+        ...baseConfig,
+        dryRunSpawn: false
+      };
 
-    const startPromise = proxyManager.start(config);
-    const stopPromise = proxyManager.stop();
+      const startPromise = proxyManager.start(config);
+      const stopPromise = proxyManager.stop();
 
-    setImmediate(() => {
-      fakeProcess.emit('exit', 0, null);
-    });
+      setImmediate(() => {
+        fakeProcess.emit('exit', 0, null);
+      });
 
-    await expect(stopPromise).resolves.toBeUndefined();
-    await expect(startPromise).rejects.toThrow(/Proxy/);
+      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      await vi.advanceTimersByTimeAsync(35000);
+
+      await expect(stopPromise).resolves.toBeUndefined();
+      await expect(startPromise).rejects.toThrow(/Proxy/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('resolves stop immediately if proxy already exited', async () => {

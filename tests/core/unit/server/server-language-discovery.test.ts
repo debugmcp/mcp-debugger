@@ -238,8 +238,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('ensures python is advertised when running inside a container', async () => {
-      const previous = process.env.MCP_CONTAINER;
-      process.env.MCP_CONTAINER = 'true';
+      vi.stubEnv('MCP_CONTAINER', 'true');
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['mock']);
       mockAdapterRegistry.getSupportedLanguages = vi.fn().mockReturnValue(['mock']);
@@ -260,12 +259,6 @@ describe('Server Language Discovery Tests', () => {
       const installed = content.installed;
       expect(installed).toContain('python');
       expect(installed).toContain('mock');
-
-      if (previous === undefined) {
-        delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
-      } else {
-        process.env.MCP_CONTAINER = previous;
-      }
     });
   });
 

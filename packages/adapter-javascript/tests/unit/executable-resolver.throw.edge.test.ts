@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
 import { FileSystem, NodeFileSystem } from '@debugmcp/shared';
 import { whichInPath, findNode, isWindows, setDefaultFileSystem } from '../../src/utils/executable-resolver.js';
@@ -36,35 +36,25 @@ class MockFileSystem implements FileSystem {
 const WIN = isWindows();
 
 function withPath(paths: string[]) {
-  const prev = process.env.PATH;
-  process.env.PATH = paths.join(path.delimiter);
-  return () => {
-    process.env.PATH = prev;
-  };
+  vi.stubEnv('PATH', paths.join(path.delimiter));
 }
 
 describe('utils/executable-resolver: throw/edge coverage', () => {
-  let restoreEnv: (() => void) | null = null;
   let mockFileSystem: MockFileSystem;
 
   beforeEach(() => {
-    restoreEnv = null;
     mockFileSystem = new MockFileSystem();
     // Set mock as default
     setDefaultFileSystem(mockFileSystem);
   });
 
   afterEach(() => {
-    if (restoreEnv) {
-      restoreEnv();
-      restoreEnv = null;
-    }
     // Reset to a new NodeFileSystem for other tests
     setDefaultFileSystem(new NodeFileSystem());
   });
 
   it('whichInPath: empty PATH returns undefined', () => {
-    restoreEnv = withPath([]);
+    withPath([]);
     const found = whichInPath(WIN ? ['node.exe', 'node'] : ['node'], mockFileSystem);
     expect(found).toBeUndefined();
   });
@@ -74,7 +64,7 @@ describe('utils/executable-resolver: throw/edge coverage', () => {
       // On POSIX, test with two different directories instead
       const dir1 = path.resolve(process.cwd(), '.bin-throw1');
       const dir2 = path.resolve(process.cwd(), '.bin-throw2');
-      restoreEnv = withPath([dir1, dir2]);
+      withPath([dir1, dir2]);
 
       const first = path.join(dir1, 'node');
       const second = path.join(dir2, 'node');
@@ -91,7 +81,7 @@ describe('utils/executable-resolver: throw/edge coverage', () => {
     } else {
       // On Windows, test with different extensions in same dir
       const dir = path.resolve(process.cwd(), '.bin-throw');
-      restoreEnv = withPath([dir]);
+      withPath([dir]);
 
       const first = path.join(dir, 'node.exe');
       const second = path.join(dir, 'node');
@@ -109,7 +99,7 @@ describe('utils/executable-resolver: throw/edge coverage', () => {
   });
 
   it('findNode: execPath check throws, PATH empty -> deterministic fallback to resolved process.execPath', async () => {
-    restoreEnv = withPath([]);
+    withPath([]);
     mockFileSystem.setExistsMock((p: string) => {
       if (p === process.execPath) {
         throw new Error('fs error'); // simulate permission or transient fs error
@@ -126,7 +116,7 @@ describe('utils/executable-resolver: throw/edge coverage', () => {
       // On POSIX, use two different directories
       const dir1 = path.resolve(process.cwd(), '.bin-throw-a');
       const dir2 = path.resolve(process.cwd(), '.bin-throw-b');
-      restoreEnv = withPath([dir1, dir2]);
+      withPath([dir1, dir2]);
 
       const cand1 = path.join(dir1, 'node');
       const cand2 = path.join(dir2, 'node');
@@ -143,7 +133,7 @@ describe('utils/executable-resolver: throw/edge coverage', () => {
     } else {
       // On Windows, use different extensions in same directory
       const dir = path.resolve(process.cwd(), '.bin-throw2');
-      restoreEnv = withPath([dir]);
+      withPath([dir]);
 
       const cand1 = path.join(dir, 'node.exe');
       const cand2 = path.join(dir, 'node');

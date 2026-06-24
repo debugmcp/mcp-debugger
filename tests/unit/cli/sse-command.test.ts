@@ -399,19 +399,27 @@ describe('SSE Command Handler', () => {
 
     it('should handle POST request with valid session ID', async () => {
       expect(postHandler).toBeDefined();
-      
-      // First establish a connection by adding to the sseTransports map
+
+      // Establish a connection by adding our OWN transport to the sseTransports map.
+      // `mockTransport` is only assigned as a side effect of constructing an
+      // SSEServerTransport (in the GET tests), so relying on it here makes this test
+      // depend on a sibling having run first — which breaks under sequence.shuffle.
+      // Build a self-contained transport instead (matches the error-path tests below).
       const sessionId = 'test-session-valid';
+      const validTransport = {
+        ...mockTransport,
+        handlePostMessage: vi.fn().mockResolvedValue(undefined)
+      };
       (app as any).sseTransports.set(sessionId, {
-        transport: mockTransport,
+        transport: validTransport,
         server: mockServer
       });
-      
+
       mockReq.query.sessionId = sessionId;
 
       await postHandler(mockReq, mockRes);
 
-      expect(mockTransport.handlePostMessage).toHaveBeenCalledWith(mockReq, mockRes);
+      expect(validTransport.handlePostMessage).toHaveBeenCalledWith(mockReq, mockRes);
       expect(mockLogger.warn).not.toHaveBeenCalled();
     });
 

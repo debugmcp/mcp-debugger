@@ -67,8 +67,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  delete process.env.DLLTOOL;
-  delete process.env.RUSTUP_HOME;
   for (const dir of tempDirs.splice(0)) {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -178,7 +176,7 @@ describe('findDlltoolExecutable', () => {
     const explicit = path.join(dir, 'dlltool.exe');
     await fs.writeFile(explicit, '');
 
-    process.env.DLLTOOL = explicit;
+    vi.stubEnv('DLLTOOL', explicit);
     await expect(rustUtils.findDlltoolExecutable()).resolves.toBe(explicit);
   });
 
@@ -190,7 +188,7 @@ describe('findDlltoolExecutable', () => {
   it('scans rustup toolchains on Windows platforms', async () => {
     const restorePlatform = overridePlatform('win32');
     const rustupHome = await createTempDir('rustup');
-    process.env.RUSTUP_HOME = rustupHome;
+    vi.stubEnv('RUSTUP_HOME', rustupHome);
 
     const toolchain = path.join(rustupHome, 'toolchains', 'stable-x86_64-pc-windows-gnu');
     const binDir = path.join(

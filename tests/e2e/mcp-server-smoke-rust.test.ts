@@ -8,6 +8,7 @@ import { existsSync } from 'fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 import { prepareRustExample } from './rust-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,7 +63,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
 
   it(
     'starts Rust debug session end-to-end without proxy exit',
-    async () => {
+    async (ctx) => {
       const { sourcePath: helloSourcePath, binaryPath: helloBinaryPath } =
         await prepareRustExample('hello_world');
       expect(existsSync(helloSourcePath)).toBe(true);
@@ -105,6 +106,10 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
       const startResponse = parseSdkToolResult(startResult);
       const message = String(startResponse.message ?? startResponse.error ?? '');
       if (!startResponse.success) {
+        // If the CodeLLDB binary couldn't be spawned (missing / not executable /
+        // blocked by Windows Smart App Control), skip with a clear reason rather
+        // than hard-fail with the opaque "spawn UNKNOWN".
+        skipIfSpawnBlocked(ctx, startResponse, 'Rust');
         throw new Error(`start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
       }
       expect(['paused', 'running']).toContain(startResponse.state);
@@ -192,7 +197,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
 
   it(
     'steps through async await and inspects locals',
-    async () => {
+    async (ctx) => {
       const { sourcePath: asyncSourcePath, binaryPath: asyncBinaryPath } =
         await prepareRustExample('async_example');
       expect(existsSync(asyncSourcePath)).toBe(true);
@@ -233,6 +238,10 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
         }
       });
       const startResponse = parseSdkToolResult(startResult);
+      if (!startResponse.success) {
+        // Same environmental skip as the first test (e.g. SAC-blocked CodeLLDB).
+        skipIfSpawnBlocked(ctx, startResponse, 'Rust');
+      }
       expect(startResponse.success).toBe(true);
 
       const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

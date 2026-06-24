@@ -23,23 +23,14 @@ const mockSpawn = vi.mocked(spawn);
 
 describe('python-utils', () => {
   let mockCommandFinder: MockCommandFinder;
-  let savedPythonLocation: string | undefined;
-  let savedPythonLocationCap: string | undefined;
-  let savedPythonPath: string | undefined;
-  let savedPythonExecutable: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Save original values before deleting
-    savedPythonLocation = process.env.pythonLocation;
-    savedPythonLocationCap = process.env.PythonLocation;
-    savedPythonPath = process.env.PYTHON_PATH;
-    savedPythonExecutable = process.env.PYTHON_EXECUTABLE;
     // Reset environment variables
-    delete process.env.PYTHON_PATH;
-    delete process.env.PYTHON_EXECUTABLE;
-    delete process.env.pythonLocation;
-    delete process.env.PythonLocation;
+    vi.stubEnv('PYTHON_PATH', undefined);
+    vi.stubEnv('PYTHON_EXECUTABLE', undefined);
+    vi.stubEnv('pythonLocation', undefined);
+    vi.stubEnv('PythonLocation', undefined);
 
     // Create a fresh mock command finder for each test
     mockCommandFinder = new MockCommandFinder();
@@ -60,27 +51,6 @@ describe('python-utils', () => {
   afterEach(() => {
     vi.clearAllMocks();
     mockCommandFinder.reset();
-    // Restore original values
-    if (savedPythonLocation !== undefined) {
-      process.env.pythonLocation = savedPythonLocation;
-    } else {
-      delete process.env.pythonLocation;
-    }
-    if (savedPythonLocationCap !== undefined) {
-      process.env.PythonLocation = savedPythonLocationCap;
-    } else {
-      delete process.env.PythonLocation;
-    }
-    if (savedPythonPath !== undefined) {
-      process.env.PYTHON_PATH = savedPythonPath;
-    } else {
-      delete process.env.PYTHON_PATH;
-    }
-    if (savedPythonExecutable !== undefined) {
-      process.env.PYTHON_EXECUTABLE = savedPythonExecutable;
-    } else {
-      delete process.env.PYTHON_EXECUTABLE;
-    }
   });
 
   describe('findPythonExecutable', () => {
@@ -103,7 +73,7 @@ describe('python-utils', () => {
       });
 
       it('should use PYTHON_PATH environment variable if set', async () => {
-        process.env.PYTHON_PATH = '/env/python';
+        vi.stubEnv('PYTHON_PATH', '/env/python');
         mockCommandFinder.setResponse('/env/python', '/env/python');
 
         const result = await findPythonExecutable(undefined, undefined, mockCommandFinder);
@@ -112,7 +82,7 @@ describe('python-utils', () => {
       });
 
       it('should use PYTHON_EXECUTABLE environment variable if PYTHON_PATH is not set', async () => {
-        process.env.PYTHON_EXECUTABLE = '/env/exec/python';
+        vi.stubEnv('PYTHON_EXECUTABLE', '/env/exec/python');
         mockCommandFinder.setResponse('/env/exec/python', '/env/exec/python');
 
         const result = await findPythonExecutable(undefined, undefined, mockCommandFinder);
@@ -123,7 +93,7 @@ describe('python-utils', () => {
       if (platform === 'win32') {
         it('should use pythonLocation path when available (GitHub Actions)', async () => {
           const pythonRoot = 'C:\\hostedtoolcache\\windows\\Python\\3.11.9\\x64';
-          process.env.pythonLocation = pythonRoot;
+          vi.stubEnv('pythonLocation', pythonRoot);
 
           const existsSpy = vi.spyOn(fs, 'existsSync').mockImplementation((candidate) => {
             return candidate === path.join(pythonRoot, 'python.exe');

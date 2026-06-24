@@ -96,6 +96,17 @@ describe('DapProxyWorker', () => {
   let mockDapClient: IDapClient;
   let mockMessageSender: ReturnType<typeof createMockMessageSender>;
 
+  // Guard: unit tests must NEVER call the real process.exit. The worker schedules
+  // its exit via setImmediate + setTimeout(100ms) (see handleInit's error path), so
+  // a worker built with the DEFAULT (real process.exit) hook can leak a pending
+  // timer that fires during a LATER test once `sequence.shuffle` randomizes order.
+  // Spying process.exit to a no-op for every test makes such a leak harmless; the
+  // two tests that assert on process.exit install their own spy on top. The global
+  // afterEach in tests/vitest.setup.ts (vi.restoreAllMocks) restores this each time.
+  beforeEach(() => {
+    vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+  });
+
   beforeEach(() => {
     mockLogger = createMockLogger();
     mockDapClient = createMockDapClient();
@@ -404,12 +415,11 @@ describe('DapProxyWorker', () => {
 
     it('uses custom trace file factory during initialization', async () => {
       vi.useFakeTimers();
-      
-      const previousTrace = process.env.DAP_TRACE_FILE;
+
       const exitSpy = vi.fn();
       const traceSpy = vi.fn().mockImplementation((_sessionId: string, logDir: string) => {
         const tracePath = path.join(logDir, 'custom-trace.ndjson');
-        process.env.DAP_TRACE_FILE = tracePath;
+        vi.stubEnv('DAP_TRACE_FILE', tracePath);
         return tracePath;
       });
       worker = new DapProxyWorker(dependencies, {
@@ -425,12 +435,6 @@ describe('DapProxyWorker', () => {
       expect(traceSpy).toHaveBeenCalledWith(basePayload.sessionId, basePayload.logDir);
       expect(process.env.DAP_TRACE_FILE).toBe(path.join(basePayload.logDir, 'custom-trace.ndjson'));
 
-      if (previousTrace === undefined) {
-        delete process.env.DAP_TRACE_FILE;
-      } else {
-        process.env.DAP_TRACE_FILE = previousTrace;
-      }
-      
       vi.useRealTimers();
     });
 

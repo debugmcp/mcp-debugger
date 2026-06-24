@@ -83,18 +83,20 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+// Fail fast if the workspace hasn't been built. Building is the job of the
+// `pretest:e2e:npx` npm hook (build once), not of each test.
 async function ensureWorkspaceBuilt(): Promise<void> {
   const needsRootBuild = !(await pathExists(ROOT_BUNDLE_ENTRY));
   const needsPackageBuild = !(await pathExists(PACKAGE_DIST_ENTRY));
 
-  if (needsRootBuild) {
-    console.log('[NPX Test] Root dist missing, running "pnpm build"...');
-    await execAsync('pnpm build', { cwd: ROOT });
-  }
-
-  if (needsPackageBuild) {
-    console.log('[NPX Test] mcp-debugger dist missing, rebuilding package...');
-    await execAsync('pnpm --filter @debugmcp/mcp-debugger build', { cwd: ROOT });
+  if (needsRootBuild || needsPackageBuild) {
+    const missing = [
+      needsRootBuild ? `root bundle (${ROOT_BUNDLE_ENTRY})` : null,
+      needsPackageBuild ? `mcp-debugger package dist (${PACKAGE_DIST_ENTRY})` : null
+    ].filter(Boolean).join(' and ');
+    throw new Error(
+      `Workspace build output missing: ${missing}. Run "npm run build" first or use "npm run test:e2e:npx".`
+    );
   }
 }
 

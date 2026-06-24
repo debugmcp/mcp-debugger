@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import path from 'path';
 
 // Mock fs module
@@ -31,31 +31,15 @@ const mockExecSync = vi.mocked(execSync);
 const mockExecFileSync = vi.mocked(execFileSync);
 
 describe('jdi-resolver', () => {
-  const originalJdiBridgeDir = process.env.JDI_BRIDGE_DIR;
-  const originalJavaHome = process.env.JAVA_HOME;
-
   beforeEach(() => {
     vi.clearAllMocks();
     // Default: nothing exists
     mockExistsSync.mockReturnValue(false);
   });
 
-  afterEach(() => {
-    if (originalJdiBridgeDir) {
-      process.env.JDI_BRIDGE_DIR = originalJdiBridgeDir;
-    } else {
-      delete process.env.JDI_BRIDGE_DIR;
-    }
-    if (originalJavaHome) {
-      process.env.JAVA_HOME = originalJavaHome;
-    } else {
-      delete process.env.JAVA_HOME;
-    }
-  });
-
   describe('resolveJdiBridgeClassDir', () => {
     it('should return JDI_BRIDGE_DIR when env var is set and class exists', () => {
-      process.env.JDI_BRIDGE_DIR = '/custom/jdi/bridge';
+      vi.stubEnv('JDI_BRIDGE_DIR', '/custom/jdi/bridge');
       mockExistsSync.mockImplementation((p: any) => {
         return p === path.join('/custom/jdi/bridge', 'JdiDapServer.class');
       });
@@ -65,7 +49,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should skip JDI_BRIDGE_DIR when class does not exist there', () => {
-      process.env.JDI_BRIDGE_DIR = '/invalid/path';
+      vi.stubEnv('JDI_BRIDGE_DIR', '/invalid/path');
       mockExistsSync.mockReturnValue(false);
 
       const result = resolveJdiBridgeClassDir();
@@ -73,7 +57,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should search candidate paths when env var not set', () => {
-      delete process.env.JDI_BRIDGE_DIR;
+      vi.stubEnv('JDI_BRIDGE_DIR', undefined);
 
       // Simulate class found in one of the candidate paths
       // Use path.join pattern to match platform-specific separators
@@ -89,7 +73,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should return null when class not found in any path', () => {
-      delete process.env.JDI_BRIDGE_DIR;
+      vi.stubEnv('JDI_BRIDGE_DIR', undefined);
       mockExistsSync.mockReturnValue(false);
 
       const result = resolveJdiBridgeClassDir();
@@ -97,7 +81,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should handle exceptions in existsSync gracefully', () => {
-      delete process.env.JDI_BRIDGE_DIR;
+      vi.stubEnv('JDI_BRIDGE_DIR', undefined);
       mockExistsSync.mockImplementation(() => {
         throw new Error('Permission denied');
       });
@@ -129,7 +113,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should find javac from JAVA_HOME', () => {
-      process.env.JAVA_HOME = '/usr/lib/jvm/java-21';
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
 
       // Class doesn't exist, but source does, and JAVA_HOME javac exists
       mockExistsSync.mockImplementation((p: any) => {
@@ -150,7 +134,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should find javac from PATH using which', () => {
-      delete process.env.JAVA_HOME;
+      vi.stubEnv('JAVA_HOME', undefined);
 
       // Class doesn't exist, source exists, JAVA_HOME javac doesn't exist
       mockExistsSync.mockImplementation((p: any) => {
@@ -171,7 +155,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should return null when javac not found', () => {
-      delete process.env.JAVA_HOME;
+      vi.stubEnv('JAVA_HOME', undefined);
 
       // Source exists but javac not found
       mockExistsSync.mockImplementation((p: any) => {
@@ -190,7 +174,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should return null when compilation fails', () => {
-      process.env.JAVA_HOME = '/usr/lib/jvm/java-21';
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
 
       mockExistsSync.mockImplementation((p: any) => {
         const pathStr = p.toString();
@@ -210,7 +194,7 @@ describe('jdi-resolver', () => {
     });
 
     it('should compile with correct arguments', () => {
-      process.env.JAVA_HOME = '/usr/lib/jvm/java-21';
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
 
       mockExistsSync.mockImplementation((p: any) => {
         const pathStr = p.toString();

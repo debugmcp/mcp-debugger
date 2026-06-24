@@ -65,13 +65,9 @@ describe('ProxyProcessLauncherImpl', () => {
   });
 
   it('scrubs testing environment variables before launching proxy', () => {
-    const originalNodeEnv = process.env.NODE_ENV;
-    const originalVitest = process.env.VITEST;
-    const originalJestWorker = process.env.JEST_WORKER_ID;
-
-    process.env.NODE_ENV = 'test';
-    process.env.VITEST = 'true';
-    process.env.JEST_WORKER_ID = '2';
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('VITEST', 'true');
+    vi.stubEnv('JEST_WORKER_ID', '2');
 
     const spawnSpy = vi.spyOn(processManager, 'spawn');
     const launcher = new ProxyProcessLauncherImpl(processManager);
@@ -81,27 +77,10 @@ describe('ProxyProcessLauncherImpl', () => {
     expect(options.env.NODE_ENV).toBeUndefined();
     expect(options.env.VITEST).toBeUndefined();
     expect(options.env.JEST_WORKER_ID).toBeUndefined();
-
-    if (originalNodeEnv === undefined) {
-      delete (process.env as Record<string, string | undefined>).NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
-    }
-    if (originalVitest === undefined) {
-      delete (process.env as Record<string, string | undefined>).VITEST;
-    } else {
-      process.env.VITEST = originalVitest;
-    }
-    if (originalJestWorker === undefined) {
-      delete (process.env as Record<string, string | undefined>).JEST_WORKER_ID;
-    } else {
-      process.env.JEST_WORKER_ID = originalJestWorker;
-    }
   });
 
   it('disables process detaching when running inside a container', () => {
-    const originalContainer = process.env.MCP_CONTAINER;
-    process.env.MCP_CONTAINER = 'true';
+    vi.stubEnv('MCP_CONTAINER', 'true');
 
     const spawnSpy = vi.spyOn(processManager, 'spawn');
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
@@ -113,11 +92,6 @@ describe('ProxyProcessLauncherImpl', () => {
     expect(options.detached).toBe(false);
 
     platformSpy.mockRestore();
-    if (originalContainer === undefined) {
-      delete (process.env as Record<string, string | undefined>).MCP_CONTAINER;
-    } else {
-      process.env.MCP_CONTAINER = originalContainer;
-    }
   });
 
   it('reuses initialization promise for concurrent callers', async () => {

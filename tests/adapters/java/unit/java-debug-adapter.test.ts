@@ -128,18 +128,11 @@ describe('JavaDebugAdapter', () => {
         return proc;
       });
 
-      const originalPath = process.env.PATH;
-      const originalJavaHome = process.env.JAVA_HOME;
-      process.env.PATH = '';
-      delete process.env.JAVA_HOME;
+      vi.stubEnv('PATH', '');
+      vi.stubEnv('JAVA_HOME', undefined);
 
-      try {
-        await expect(adapter.initialize()).rejects.toThrow();
-        expect(adapter.getState()).toBe(AdapterState.ERROR);
-      } finally {
-        process.env.PATH = originalPath;
-        if (originalJavaHome) process.env.JAVA_HOME = originalJavaHome;
-      }
+      await expect(adapter.initialize()).rejects.toThrow();
+      expect(adapter.getState()).toBe(AdapterState.ERROR);
     });
 
     it('should warn when Java version is old (< 11)', async () => {
@@ -385,8 +378,7 @@ describe('JavaDebugAdapter', () => {
     });
 
     it('passes --owner-pid from MCP_DEBUGGER_MAIN_PID when set', () => {
-      const prev = process.env.MCP_DEBUGGER_MAIN_PID;
-      process.env.MCP_DEBUGGER_MAIN_PID = '424242';
+      vi.stubEnv('MCP_DEBUGGER_MAIN_PID', '424242');
       try {
         const result = adapter.buildAdapterCommand({
           sessionId: 'test-session',
@@ -404,15 +396,11 @@ describe('JavaDebugAdapter', () => {
       } catch (error) {
         // JDI bridge not compiled in this environment — covered by other tests
         expect((error as Error).message).toMatch(/JDI bridge not compiled/);
-      } finally {
-        if (prev === undefined) delete process.env.MCP_DEBUGGER_MAIN_PID;
-        else process.env.MCP_DEBUGGER_MAIN_PID = prev;
       }
     });
 
     it('falls back to process.ppid when MCP_DEBUGGER_MAIN_PID is unset', () => {
-      const prev = process.env.MCP_DEBUGGER_MAIN_PID;
-      delete process.env.MCP_DEBUGGER_MAIN_PID;
+      vi.stubEnv('MCP_DEBUGGER_MAIN_PID', undefined);
       try {
         const result = adapter.buildAdapterCommand({
           sessionId: 'test-session',
@@ -429,8 +417,6 @@ describe('JavaDebugAdapter', () => {
         expect(result.args[idx + 1]).toBe(String(process.ppid));
       } catch (error) {
         expect((error as Error).message).toMatch(/JDI bridge not compiled/);
-      } finally {
-        if (prev !== undefined) process.env.MCP_DEBUGGER_MAIN_PID = prev;
       }
     });
   });
@@ -628,21 +614,12 @@ describe('JavaDebugAdapter', () => {
     });
 
     it('should include JAVA_HOME when set', () => {
-      const originalJavaHome = process.env.JAVA_HOME;
       const customJdkPath = path.join(path.sep, 'custom', 'jdk');
-      process.env.JAVA_HOME = customJdkPath;
+      vi.stubEnv('JAVA_HOME', customJdkPath);
 
-      try {
-        const paths = adapter.getExecutableSearchPaths();
-        // Normalize paths for comparison (handles / vs \ on different platforms)
-        expect(paths.some(p => p.split(path.sep).join('/').includes('custom/jdk'))).toBe(true);
-      } finally {
-        if (originalJavaHome) {
-          process.env.JAVA_HOME = originalJavaHome;
-        } else {
-          delete process.env.JAVA_HOME;
-        }
-      }
+      const paths = adapter.getExecutableSearchPaths();
+      // Normalize paths for comparison (handles / vs \ on different platforms)
+      expect(paths.some(p => p.split(path.sep).join('/').includes('custom/jdk'))).toBe(true);
     });
   });
 

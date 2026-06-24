@@ -1,19 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getDisabledLanguages, isLanguageDisabled } from '../../../src/utils/language-config.js';
 
-const originalEnv = { ...process.env };
-
 describe('language configuration helpers', () => {
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-  });
-
-  afterEach(() => {
-    process.env = { ...originalEnv };
-  });
-
   it('parses disabled languages from environment variable', () => {
-    process.env.DEBUG_MCP_DISABLE_LANGUAGES = 'python,  Rust , ,  mock';
+    vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'python,  Rust , ,  mock');
 
     const disabled = getDisabledLanguages();
 
@@ -21,12 +11,12 @@ describe('language configuration helpers', () => {
   });
 
   it('returns empty set when env variable missing', () => {
-    delete process.env.DEBUG_MCP_DISABLE_LANGUAGES;
+    vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', undefined);
     expect(getDisabledLanguages()).toEqual(new Set());
   });
 
   it('detects disabled language with case insensitivity', () => {
-    process.env.DEBUG_MCP_DISABLE_LANGUAGES = 'PYTHON,RUST';
+    vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'PYTHON,RUST');
 
     expect(isLanguageDisabled('python')).toBe(true);
     expect(isLanguageDisabled('Rust')).toBe(true);
@@ -34,7 +24,7 @@ describe('language configuration helpers', () => {
   });
 
   it('returns false for falsy language input', () => {
-    process.env.DEBUG_MCP_DISABLE_LANGUAGES = 'python';
+    vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'python');
     expect(isLanguageDisabled('')).toBe(false);
     expect(isLanguageDisabled(null as unknown as string)).toBe(false);
   });

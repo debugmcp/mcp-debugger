@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { shouldExitAsOrphan, shouldExitAsOrphanFromEnv } from '../../../src/proxy/utils/orphan-check.js';
 
 describe('orphan-check', () => {
@@ -27,17 +27,8 @@ describe('orphan-check', () => {
     });
 
     it('falls back to process.env when env argument omitted', () => {
-      const original = process.env.MCP_CONTAINER;
-      process.env.MCP_CONTAINER = 'true';
-      try {
-        expect(shouldExitAsOrphanFromEnv(1)).toBe(false);
-      } finally {
-        if (original === undefined) {
-          delete process.env.MCP_CONTAINER;
-        } else {
-          process.env.MCP_CONTAINER = original;
-        }
-      }
+      vi.stubEnv('MCP_CONTAINER', 'true');
+      expect(shouldExitAsOrphanFromEnv(1)).toBe(false);
     });
   });
 });

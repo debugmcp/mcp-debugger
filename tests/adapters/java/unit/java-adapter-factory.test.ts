@@ -120,20 +120,13 @@ describe('JavaAdapterFactory', () => {
         return proc;
       });
 
-      const originalPath = process.env.PATH;
-      const originalJavaHome = process.env.JAVA_HOME;
-      process.env.PATH = '';
-      delete process.env.JAVA_HOME;
+      vi.stubEnv('PATH', '');
+      vi.stubEnv('JAVA_HOME', undefined);
 
-      try {
-        const result = await factory.validate();
+      const result = await factory.validate();
 
-        expect(result.valid).toBe(false);
-        expect(result.errors.length).toBeGreaterThan(0);
-      } finally {
-        process.env.PATH = originalPath;
-        if (originalJavaHome) process.env.JAVA_HOME = originalJavaHome;
-      }
+      expect(result.valid).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
     });
 
     it('should warn when JDI bridge is not compiled', async () => {
