@@ -11,13 +11,18 @@ function isVendorPath(p: unknown): boolean {
   return norm(p).endsWith('/vendor/js-debug/vsDebugServer.cjs');
 }
 
-// Minimal AdapterDependencies stub (adapter does not use dependencies in buildAdapterCommand)
+// Minimal AdapterDependencies stub — fileSystem reports the vendored js-debug as
+// present so these tests stay hermetic (no dependency on a real vendor/ dir).
 const deps = {
   logger: {
     info: () => {},
     error: () => {},
     debug: () => {},
     warn: () => {}
+  },
+  fileSystem: {
+    existsSync: () => true,
+    pathExists: async () => true
   },
   // Cast to satisfy type system in tests
 } as unknown as import('@debugmcp/shared').AdapterDependencies;
