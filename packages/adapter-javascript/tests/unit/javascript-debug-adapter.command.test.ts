@@ -133,3 +133,41 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
     expect(process.env.NODE_OPTIONS).toBe('--MAX-OLD-SPACE-SIZE=2048   --trace-warnings');
   });
 });
+
+describe('JavascriptDebugAdapter with vendored js-debug absent', () => {
+  const missingDeps = {
+    logger: {
+      info: () => {},
+      error: () => {},
+      debug: () => {},
+      warn: () => {}
+    },
+    fileSystem: {
+      existsSync: () => false,
+      pathExists: async () => false
+    }
+  } as unknown as import('@debugmcp/shared').AdapterDependencies;
+
+  const config = {
+    sessionId: 'test-session',
+    executablePath: '/usr/bin/node',
+    adapterHost: '127.0.0.1',
+    adapterPort: 12345,
+    logDir: '/tmp/logs',
+    scriptPath: '/tmp/app.js',
+    launchConfig: {}
+  } as unknown as import('@debugmcp/shared').AdapterConfig;
+
+  it('buildAdapterCommand throws when the vendored js-debug cannot be found', () => {
+    const adapter = new JavascriptDebugAdapter(missingDeps);
+    expect(() => adapter.buildAdapterCommand(config)).toThrow(/js-debug vendor file not found/);
+  });
+
+  it('validateEnvironment reports JS_DEBUG_NOT_FOUND when the bundle is absent', async () => {
+    const adapter = new JavascriptDebugAdapter(missingDeps);
+    const result = await adapter.validateEnvironment();
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]?.code).toBe('JS_DEBUG_NOT_FOUND');
+  });
+});
