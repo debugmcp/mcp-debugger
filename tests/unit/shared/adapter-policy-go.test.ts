@@ -1,6 +1,23 @@
 import { describe, it, expect, vi } from 'vitest';
+import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
 import { GoAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-go.js';
 import { SessionState } from '@debugmcp/shared';
+
+// validateExecutable dynamically imports child_process — mock it so no real
+// process is ever spawned (hermetic; no dependency on installed tools or load).
+vi.mock('child_process', () => ({ spawn: vi.fn() }));
+
+/** Fake child whose stdout/exit/error behavior is scripted per test. */
+function mockSpawnChild(script: (child: EventEmitter & { stdout: EventEmitter }) => void): void {
+  vi.mocked(spawn).mockImplementationOnce(() => {
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter };
+    child.stdout = new EventEmitter();
+    // Emit after validateExecutable has attached its listeners
+    setImmediate(() => script(child));
+    return child as unknown as ReturnType<typeof spawn>;
+  });
+}
 
 describe('GoAdapterPolicy', () => {
   // ===== Identity =====
@@ -437,15 +454,39 @@ describe('GoAdapterPolicy', () => {
   // ===== validateExecutable =====
 
   describe('validateExecutable', () => {
-    it('resolves true for a command that exists and exits 0', async () => {
-      // validateExecutable runs `command version` — git supports `git version`
-      const result = await GoAdapterPolicy.validateExecutable!('git');
+    it('resolves true when the command produces output and exits 0', async () => {
+      mockSpawnChild((child) => {
+        child.stdout.emit('data', 'Delve Debugger Version: 1.0.0');
+        child.emit('exit', 0);
+      });
+      const result = await GoAdapterPolicy.validateExecutable!('dlv');
       expect(result).toBe(true);
-    }, 10000);
+      expect(spawn).toHaveBeenCalledWith('dlv', ['version'], expect.anything());
+    });
 
-    it('resolves false for a command that does not exist', async () => {
+    it('resolves false when the command does not exist (spawn error)', async () => {
+      mockSpawnChild((child) => {
+        child.emit('error', new Error('spawn ENOENT'));
+      });
       const result = await GoAdapterPolicy.validateExecutable!('nonexistent_command_that_does_not_exist_12345');
       expect(result).toBe(false);
-    }, 10000);
+    });
+
+    it('resolves false when the command exits non-zero', async () => {
+      mockSpawnChild((child) => {
+        child.stdout.emit('data', 'some error text');
+        child.emit('exit', 1);
+      });
+      const result = await GoAdapterPolicy.validateExecutable!('dlv');
+      expect(result).toBe(false);
+    });
+
+    it('resolves false when the command exits 0 without output', async () => {
+      mockSpawnChild((child) => {
+        child.emit('exit', 0);
+      });
+      const result = await GoAdapterPolicy.validateExecutable!('dlv');
+      expect(result).toBe(false);
+    });
   });
 });

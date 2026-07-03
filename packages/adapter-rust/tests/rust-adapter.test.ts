@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { RustDebugAdapter } from '../src/rust-debug-adapter.js';
 import { RustAdapterFactory } from '../src/rust-adapter-factory.js';
-import { 
+import {
   AdapterState,
   DebugLanguage,
   DebugFeature,
@@ -13,6 +13,21 @@ import {
   AdapterConfig
 } from '@debugmcp/shared';
 import * as path from 'path';
+
+// RustAdapterFactory.validate() probes the real environment (vendored CodeLLDB on
+// disk, `cargo`/`rustc` spawns). Mock those probes so this suite is hermetic and
+// deterministic — no toolchain requirements, no spawn stalls under load.
+vi.mock('../src/utils/codelldb-resolver.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  resolveCodeLLDBExecutable: vi.fn(async () => '/mock/vendor/codelldb'),
+  getCodeLLDBVersion: vi.fn(async () => '1.11.0')
+}));
+vi.mock('../src/utils/rust-utils.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  checkCargoInstallation: vi.fn(async () => true),
+  getCargoVersion: vi.fn(async () => 'cargo 1.99.0'),
+  getRustHostTriple: vi.fn(async () => 'x86_64-unknown-linux-gnu')
+}));
 
 // Mock dependencies
 const mockDependencies: AdapterDependencies = {
@@ -266,14 +281,32 @@ describe('RustAdapterFactory', () => {
   });
   
   it('should validate environment', async () => {
-    // This will check for CodeLLDB and Cargo installation
+    // CodeLLDB/cargo probes are mocked (see vi.mock at top) — assert deterministically
     const result = await factory.validate();
-    
-    // Result will vary based on actual environment
-    expect(result).toHaveProperty('valid');
-    expect(result).toHaveProperty('errors');
-    expect(result).toHaveProperty('warnings');
-    expect(result.details).toHaveProperty('platform');
-    expect(result.details).toHaveProperty('arch');
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.details).toMatchObject({
+      codelldbPath: '/mock/vendor/codelldb',
+      codelldbVersion: '1.11.0',
+      cargoVersion: 'cargo 1.99.0',
+      hostTriple: 'x86_64-unknown-linux-gnu',
+      platform: process.platform,
+      arch: process.arch
+    });
+  });
+
+  it('should report an error when CodeLLDB is missing and a warning when cargo is missing', async () => {
+    const { resolveCodeLLDBExecutable } = await import('../src/utils/codelldb-resolver.js');
+    const { checkCargoInstallation } = await import('../src/utils/rust-utils.js');
+    vi.mocked(resolveCodeLLDBExecutable).mockResolvedValueOnce(null);
+    vi.mocked(checkCargoInstallation).mockResolvedValueOnce(false);
+
+    const result = await factory.validate();
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('CodeLLDB not found'))).toBe(true);
+    expect(result.warnings.some(w => w.includes('Cargo not found'))).toBe(true);
   });
 });

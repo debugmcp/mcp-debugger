@@ -28,7 +28,8 @@ describe('@debugmcp/adapter-javascript package', () => {
   test('initialize transitions to READY and emits initialized', async () => {
     const factory = new JavascriptAdapterFactory();
     const deps: AdapterDependencies = {
-      fileSystem: {} as unknown as IFileSystem,
+      // Report the vendored js-debug as present so validateEnvironment passes hermetically
+      fileSystem: { pathExists: async () => true } as unknown as IFileSystem,
       logger: { debug() {}, info() {}, warn() {}, error() {} } as unknown as ILogger,
       environment: {} as unknown as IEnvironment
     };

@@ -1,13 +1,18 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { JavascriptDebugAdapter } from '../../src/index.js';
 
-// Minimal AdapterDependencies stub
+// Minimal AdapterDependencies stub — fileSystem reports the vendored js-debug as
+// present so these tests stay hermetic (no dependency on a real vendor/ dir).
 const deps = {
   logger: {
     info: () => {},
     error: () => {},
     debug: () => {},
     warn: () => {}
+  },
+  fileSystem: {
+    existsSync: () => true,
+    pathExists: async () => true
   }
 } as unknown as import('@debugmcp/shared').AdapterDependencies;
 
