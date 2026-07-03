@@ -27,7 +27,9 @@ const PACK_CACHE_DIR = path.join(PACKAGE_DIR, 'package-cache');
 const PACKAGE_JSON_PATH = path.join(PACKAGE_DIR, 'package.json');
 const PACKAGE_BACKUP_PATH = path.join(PACKAGE_DIR, 'package.json.backup');
 const ROOT_DIST_DIR = path.join(ROOT, 'dist');
-const ROOT_BUNDLE_ENTRY = path.join(ROOT_DIST_DIR, 'bundle.cjs');
+// dist/index.js is what `npm run build` (tsc) emits; dist/bundle.cjs exists
+// only inside the Docker image build and must not be required here.
+const ROOT_DIST_ENTRY = path.join(ROOT_DIST_DIR, 'index.js');
 const PACKAGE_DIST_ENTRY = path.join(PACKAGE_DIST_DIR, 'cli.mjs');
 
 async function acquirePackLock(): Promise<void> {
@@ -86,12 +88,12 @@ async function pathExists(filePath: string): Promise<boolean> {
 // Fail fast if the workspace hasn't been built. Building is the job of the
 // `pretest:e2e:npx` npm hook (build once), not of each test.
 async function ensureWorkspaceBuilt(): Promise<void> {
-  const needsRootBuild = !(await pathExists(ROOT_BUNDLE_ENTRY));
+  const needsRootBuild = !(await pathExists(ROOT_DIST_ENTRY));
   const needsPackageBuild = !(await pathExists(PACKAGE_DIST_ENTRY));
 
   if (needsRootBuild || needsPackageBuild) {
     const missing = [
-      needsRootBuild ? `root bundle (${ROOT_BUNDLE_ENTRY})` : null,
+      needsRootBuild ? `root dist (${ROOT_DIST_ENTRY})` : null,
       needsPackageBuild ? `mcp-debugger package dist (${PACKAGE_DIST_ENTRY})` : null
     ].filter(Boolean).join(' and ');
     throw new Error(

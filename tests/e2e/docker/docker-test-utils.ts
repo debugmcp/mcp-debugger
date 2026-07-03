@@ -49,6 +49,9 @@ export async function buildDockerImage(config: DockerTestConfig = {}): Promise<v
       try {
         await execAsync(`node "${scriptPath}"`, {
           cwd: ROOT,
+          // Full docker build output flows through here; the 1MB default
+          // maxBuffer would kill an otherwise-succeeding build.
+          maxBuffer: 64 * 1024 * 1024,
           env: {
             ...process.env,
             DOCKER_IMAGE_NAME: imageName
@@ -56,6 +59,15 @@ export async function buildDockerImage(config: DockerTestConfig = {}): Promise<v
         });
       } catch (error) {
         dockerBuildPromise = null;
+        // Surface the build output — exec errors otherwise show only
+        // "Command failed: node ..." with no hint of what broke.
+        const execError = error as Error & { stdout?: string; stderr?: string };
+        if (execError.stdout) {
+          console.error('[Docker Test] Build stdout:\n' + execError.stdout);
+        }
+        if (execError.stderr) {
+          console.error('[Docker Test] Build stderr:\n' + execError.stderr);
+        }
         throw error;
       }
     })();
@@ -66,7 +78,7 @@ export async function buildDockerImage(config: DockerTestConfig = {}): Promise<v
 
 async function runDockerBuild(imageName: string): Promise<void> {
   try {
-    const { stderr } = await execAsync(`docker build -t ${imageName} .`, { cwd: ROOT });
+    const { stderr } = await execAsync(`docker build -t ${imageName} .`, { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
     if (stderr && stderr.trim().length > 0) {
       console.warn('[Docker Test] Build warnings:', stderr);
     }
