@@ -5,7 +5,6 @@
  */
 import { EventEmitter } from 'events';
 import * as path from 'path';
-import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
@@ -161,12 +160,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       
       let found = false;
       for (const adapterPath of possiblePaths) {
-        try {
-          await fs.promises.access(adapterPath, fs.constants.R_OK);
+        if (await this.dependencies.fileSystem.pathExists(adapterPath)) {
           found = true;
           break;
-        } catch {
-          // Continue checking other paths
         }
       }
       
@@ -254,12 +250,12 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       '/app/node_modules/@debugmcp/adapter-javascript/vendor/js-debug/vsDebugServer.cjs'
     ];
     
-    const adapterPath = possiblePaths.find(p => fs.existsSync(p));
-    
+    const adapterPath = possiblePaths.find(p => this.dependencies.fileSystem.existsSync(p));
+
     if (!adapterPath) {
       this.dependencies.logger?.error?.(`[JavascriptDebugAdapter] js-debug vendor file not found. Searched paths:`);
       possiblePaths.forEach(p => {
-        this.dependencies.logger?.error?.(`  ${p}: ${fs.existsSync(p) ? 'EXISTS' : 'NOT FOUND'}`);
+        this.dependencies.logger?.error?.(`  ${p}: NOT FOUND`);
       });
       
       throw new AdapterError(
