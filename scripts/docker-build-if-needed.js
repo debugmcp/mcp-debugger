@@ -41,15 +41,22 @@ async function restorePackageManifestIfNeeded() {
   }
 }
 
+// Runtime and build artifacts that .dockerignore excludes from the image
+// (logs, dist, pack output, ...). Tests write logs under packages/ mid-run,
+// so counting these mtimes would mark a just-built image as stale and force
+// a needless (and destructive) rebuild between suites of the same run.
+const SKIPPED_DIRS = new Set(['node_modules', 'logs', 'dist', 'package-cache', 'package', 'sessions', 'coverage']);
+const SKIPPED_FILE_PATTERN = /\.(log|tsbuildinfo|tgz)$/;
+
 function getLatestModifiedTime(dir, newestTime = new Date(0)) {
   const entries = readdirSync(dir, { withFileTypes: true });
 
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
 
-    if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+    if (entry.isDirectory() && !entry.name.startsWith('.') && !SKIPPED_DIRS.has(entry.name)) {
       newestTime = getLatestModifiedTime(fullPath, newestTime);
-    } else if (entry.isFile()) {
+    } else if (entry.isFile() && !SKIPPED_FILE_PATTERN.test(entry.name)) {
       const stats = statSync(fullPath);
       if (stats.mtime > newestTime) {
         newestTime = stats.mtime;
@@ -90,12 +97,27 @@ async function main() {
   let imageBuildTime = null;
 
   try {
-    const output = execSync(`docker inspect ${IMAGE_NAME} --format="{{.Created}}"`, {
+    // Prefer LastTagTime over Created: with BuildKit layer caching, a rebuild
+    // that fully cache-hits produces an identical image whose Created is the
+    // ORIGINAL build time, so comparing against Created marks the image as
+    // outdated forever. LastTagTime advances on every successful build.
+    const output = execSync(`docker inspect ${IMAGE_NAME} --format="{{.Created}}|{{json .Metadata.LastTagTime}}"`, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'ignore']
     });
     imageExists = true;
-    imageBuildTime = new Date(output.trim());
+    const [created, lastTagJson] = output.trim().split('|');
+    let buildTime = new Date(created);
+    try {
+      const lastTag = new Date(JSON.parse(lastTagJson));
+      // Zero value ("0001-01-01...") means the tag time is unknown (e.g. pulled image)
+      if (!isNaN(lastTag) && lastTag.getFullYear() > 1971 && lastTag > buildTime) {
+        buildTime = lastTag;
+      }
+    } catch {
+      // Malformed/missing LastTagTime — fall back to Created
+    }
+    imageBuildTime = buildTime;
   } catch {
     imageExists = false;
   }
@@ -156,15 +178,9 @@ async function main() {
 
   if (needsBuild) {
     try {
-      if (imageExists) {
-        console.log(`[Docker Build] Removing old ${IMAGE_NAME} image...`);
-        try {
-          execSync(`docker rmi ${IMAGE_NAME}`, { stdio: 'inherit' });
-        } catch {
-          console.warn('[Docker Build] Warning: Could not remove old image');
-        }
-      }
-
+      // No pre-build `docker rmi`: a successful `docker build -t` retags
+      // atomically (the old image just goes dangling), and a failed rebuild
+      // must leave the previous working image in place for other suites.
       console.log(`[Docker Build] Building ${IMAGE_NAME}...`);
       const timestamp = Date.now();
       execSync(`docker build . -t ${IMAGE_NAME} --build-arg CACHEBUST=${timestamp}`, {
