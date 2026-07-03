@@ -20,6 +20,7 @@ const JAVA_DIR = resolve(__dirname, '..', 'java');
 const SOURCE_FILE = resolve(JAVA_DIR, 'JdiDapServer.java');
 const OUT_DIR = resolve(JAVA_DIR, 'out');
 const CLASS_FILE = resolve(OUT_DIR, 'JdiDapServer.class');
+const TARGET_RELEASE = 21;
 
 function findJavac() {
   // Check JAVA_HOME first
@@ -40,6 +41,20 @@ function findJavac() {
   return null;
 }
 
+function getJavacMajorVersion(javac) {
+  try {
+    // `javac -version` prints "javac <major>.<minor>.<patch>" on stdout (JDK 9+)
+    const output = execFileSync(javac, ['-version'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const match = /javac\s+(\d+)/.exec(output);
+    return match ? Number(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 function needsCompilation() {
   if (!existsSync(CLASS_FILE)) return true;
   if (!existsSync(SOURCE_FILE)) return false; // nothing to compile
@@ -52,6 +67,11 @@ function needsCompilation() {
 function main() {
   if (process.env.SKIP_JDI_COMPILE) {
     console.log('[compile-jdi-bridge] Skipping (SKIP_JDI_COMPILE set)');
+    return;
+  }
+
+  if ((process.env.SKIP_ADAPTER_VENDOR || '').trim().toLowerCase() === 'true') {
+    console.log('[compile-jdi-bridge] Skipping (SKIP_ADAPTER_VENDOR=true)');
     return;
   }
 
@@ -68,7 +88,15 @@ function main() {
   const javac = findJavac();
   if (!javac) {
     console.warn('[compile-jdi-bridge] javac not found. JDI bridge will not be available.');
-    console.warn('[compile-jdi-bridge] Install JDK 21+ and ensure javac is on PATH or set JAVA_HOME.');
+    console.warn(`[compile-jdi-bridge] Install JDK ${TARGET_RELEASE}+ and ensure javac is on PATH or set JAVA_HOME.`);
+    // Don't fail hard — adapter will report the error at runtime
+    return;
+  }
+
+  const javacVersion = getJavacMajorVersion(javac);
+  if (javacVersion !== null && javacVersion < TARGET_RELEASE) {
+    console.warn(`[compile-jdi-bridge] javac ${javacVersion} is too old (need ${TARGET_RELEASE}+). JDI bridge will not be available.`);
+    console.warn(`[compile-jdi-bridge] Install JDK ${TARGET_RELEASE}+ and ensure javac is on PATH or set JAVA_HOME.`);
     // Don't fail hard — adapter will report the error at runtime
     return;
   }
@@ -79,7 +107,7 @@ function main() {
   console.log(`[compile-jdi-bridge] Compiling JdiDapServer.java with ${javac}`);
   try {
     execFileSync(javac, [
-      '--release', '21',
+      '--release', String(TARGET_RELEASE),
       SOURCE_FILE,
       '-d', OUT_DIR
     ], {
