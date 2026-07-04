@@ -40,7 +40,20 @@ export const ErrorMessages = {
     `Step operation did not complete within ${timeout}s. ` +
     `The debug adapter may have crashed or the program may be stuck. ` +
     `Try restarting your debug session.`,
-  
+
+  /**
+   * Error message for pause operation timeouts
+   * Occurs when: A pause request doesn't receive a 'stopped' event within the timeout
+   * Used in: src/session/session-manager-operations.ts
+   * Default timeout: 5 seconds
+   * @param timeout - The timeout duration in seconds
+   */
+  pauseTimeout: (timeout: number) =>
+    `Pause request was accepted but no 'stopped' event arrived within ${timeout}s. ` +
+    `The program may not be pausable right now (e.g. blocked in native code). ` +
+    `Check the session state or try again.`,
+
+
   /**
    * Error message for adapter ready timeouts
    * Occurs when: Waiting for the debug adapter to be configured times out
