@@ -1192,40 +1192,129 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       return { success: false, error: `Cannot pause in state: ${session.state}`, state: session.state };
     }
 
-    try {
-      this.logger.debug(`[SessionManager] pauseExecution: sending DAP pause for session=${sessionId} currentState=${session.state}`);
-      // DAP pause request: threadId 0 should pause all threads per DAP spec,
-      // but some adapters (e.g. netcoredbg) reject threadId=0 with E_INVALIDARG.
-      // When no explicit threadId is provided, discover one via a threads request.
-      let effectiveThreadId = threadId ?? 0;
-      if (effectiveThreadId === 0) {
-        try {
-          const threadsResp = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
-          const threads = threadsResp?.body?.threads;
-          if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
-            effectiveThreadId = threads[0].id;
-            this.logger.info(`[SessionManager pause] Auto-discovered threadId=${effectiveThreadId} for pause`);
-          }
-        } catch {
-          // threads request failed — fall through with threadId=0
+    this.logger.debug(`[SessionManager] pauseExecution: sending DAP pause for session=${sessionId} currentState=${session.state}`);
+    // DAP pause request: threadId 0 should pause all threads per DAP spec,
+    // but some adapters (e.g. netcoredbg) reject threadId=0 with E_INVALIDARG.
+    // When no explicit threadId is provided, discover one via a threads request.
+    let effectiveThreadId = threadId ?? 0;
+    if (effectiveThreadId === 0) {
+      try {
+        const threadsResp = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+        const threads = threadsResp?.body?.threads;
+        if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
+          effectiveThreadId = threads[0].id;
+          this.logger.info(`[SessionManager pause] Auto-discovered threadId=${effectiveThreadId} for pause`);
         }
+      } catch {
+        // threads request failed — fall through with threadId=0
       }
-      await session.proxyManager.sendDapRequest('pause', { threadId: effectiveThreadId });
-
-      this.logger.info(
-        `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`
-      );
-
-      // The stopped event handler will set state to PAUSED and update threadId.
-      // Return success — the caller should poll or wait for state change.
-      return { success: true, state: session.state };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
-      );
-      throw error;
     }
+
+    const proxyManager = session.proxyManager;
+
+    // The pause response only acknowledges the request; the state transition
+    // to PAUSED happens when the asynchronous 'stopped' event is handled by
+    // the core handleStopped listener. Adapters differ on whether the event
+    // arrives before or after the response, so listen for it (registered
+    // BEFORE sending the request) and only settle once the stop is observed.
+    return new Promise<DebugResult>((resolve, reject) => {
+      let settled = false;
+      let stopEventSeen = false;
+
+      const cleanup = () => {
+        proxyManager.off('stopped', onStopped);
+        proxyManager.off('terminated', onEnded);
+        proxyManager.off('exited', onEnded);
+        proxyManager.off('exit', onEnded);
+        clearTimeout(timeout);
+      };
+
+      const settle = (result: DebugResult) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+
+      const onStopped = async () => {
+        stopEventSeen = true;
+        // Try to get current location from stack trace
+        let location: { file: string; line: number; column?: number } | undefined;
+        try {
+          // Wait a brief moment for state to settle after stopped event
+          await new Promise(resolve => setTimeout(resolve, 10));
+
+          const stackFrames = await this.getStackTrace(sessionId);
+          if (stackFrames && stackFrames.length > 0) {
+            const topFrame = stackFrames[0];
+            location = {
+              file: topFrame.file,
+              line: topFrame.line,
+              column: topFrame.column
+            };
+          }
+        } catch (error) {
+          this.logger.debug(`[SessionManager pause ${sessionId}] Could not capture location:`, error);
+        }
+        this.logger.info(
+          `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
+        );
+        const data: { message: string; location?: { file: string; line: number; column?: number } } = { message: 'Paused' };
+        if (location) {
+          data.location = location;
+        }
+        settle({ success: true, state: session.state, data });
+      };
+
+      const onEnded = () => settle({
+        success: true,
+        state: session.state,
+        data: { message: 'Session ended before pause took effect' }
+      });
+
+      const timeout = setTimeout(() => {
+        this.logger.warn(
+          `[SessionManager pause] Timeout waiting for stopped event in session ${sessionId}`
+        );
+        settle({
+          success: false,
+          error: ErrorMessages.pauseTimeout(5),
+          state: session.state,
+        });
+      }, 5000);
+
+      proxyManager.on('stopped', onStopped);
+      proxyManager.on('terminated', onEnded);
+      proxyManager.on('exited', onEnded);
+      proxyManager.on('exit', onEnded);
+
+      proxyManager
+        .sendDapRequest('pause', { threadId: effectiveThreadId })
+        .then(() => {
+          this.logger.info(
+            `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`
+          );
+          // Guard: if the stopped event fired before the listeners above were
+          // registered (e.g. during the threads-discovery await), the state is
+          // already PAUSED and no further event will arrive.
+          if (session.state === SessionState.PAUSED && !stopEventSeen) {
+            settle({ success: true, state: session.state, data: { message: 'Paused' } });
+          }
+        })
+        .catch((error: unknown) => {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
+          );
+          if (!settled) {
+            settled = true;
+            cleanup();
+            reject(error instanceof Error ? error : new Error(errorMessage));
+          }
+        });
+    });
   }
 
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>> {

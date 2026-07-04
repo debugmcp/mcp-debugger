@@ -2331,14 +2331,42 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
   });
 
   describe('pause with threadId', () => {
+    // pause() waits for the 'stopped' event before resolving, so these tests
+    // capture the registered handlers and emit 'stopped' the way the real
+    // ProxyManager would (after the core handleStopped listener has already
+    // flipped the session state to PAUSED).
+    let handlers: Record<string, Function[]>;
+
+    const emit = (event: string, ...args: unknown[]) => {
+      (handlers[event] ?? []).forEach(fn => fn(...args));
+    };
+
+    const emitStopped = () => {
+      mockSession.state = SessionState.PAUSED; // core handleStopped runs first
+      emit('stopped', 1, 'pause');
+    };
+
+    beforeEach(() => {
+      handlers = {};
+      mockProxyManager.on.mockImplementation((event: string, handler: Function) => {
+        (handlers[event] ??= []).push(handler);
+        return mockProxyManager;
+      });
+    });
+
     it('should pass specific threadId to DAP request', async () => {
       mockSession.state = SessionState.RUNNING;
       mockProxyManager.sendDapRequest.mockResolvedValue({});
 
-      const result = await operations.pause('test-session', 42);
+      const promise = operations.pause('test-session', 42);
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 42 });
+      });
+      emitStopped();
+      const result = await promise;
 
       expect(result.success).toBe(true);
-      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 42 });
+      expect(result.state).toBe(SessionState.PAUSED);
     });
 
     it('should auto-discover threadId when not provided', async () => {
@@ -2349,12 +2377,16 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         .mockResolvedValueOnce({ body: { threads: [{ id: 7, name: 'Main' }] } })
         .mockResolvedValueOnce({});
 
-      const result = await operations.pause('test-session');
+      const promise = operations.pause('test-session');
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 7 });
+      });
+      emitStopped();
+      const result = await promise;
 
       expect(result.success).toBe(true);
       // Should have called threads first, then pause with discovered threadId
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('threads', {});
-      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 7 });
     });
 
     it('should fall back to threadId=0 when threads request fails', async () => {
@@ -2364,10 +2396,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         .mockRejectedValueOnce(new Error('not connected'))
         .mockResolvedValueOnce({});
 
-      const result = await operations.pause('test-session');
+      const promise = operations.pause('test-session');
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 0 });
+      });
+      emitStopped();
+      const result = await promise;
 
       expect(result.success).toBe(true);
-      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 0 });
     });
 
     it('should fall back to threadId=0 when threads response has no threads', async () => {
@@ -2377,10 +2413,110 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         .mockResolvedValueOnce({ body: { threads: [] } })
         .mockResolvedValueOnce({});
 
+      const promise = operations.pause('test-session');
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 0 });
+      });
+      emitStopped();
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+    });
+
+    it('reports state PAUSED when stopped arrives after the pause response (the common adapter ordering)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const promise = operations.pause('test-session', 1);
+      // Let the pause response resolve first — state must still be RUNNING here
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
+      });
+      expect(mockSession.state).toBe(SessionState.RUNNING);
+      emitStopped();
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+    });
+
+    it('reports state PAUSED when stopped arrives before the pause response resolves (netcoredbg ordering)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      // Emit 'stopped' from inside the pause request, before its promise resolves
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'pause') {
+          emitStopped();
+        }
+        return Promise.resolve({});
+      });
+
+      const result = await operations.pause('test-session', 1);
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+    });
+
+    it('reports state PAUSED when the stop happened during thread discovery (no further event arrives)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      // The stop lands while awaiting the 'threads' request, before the
+      // stopped listeners are registered — the post-response guard covers it.
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        return Promise.resolve({});
+      });
+
       const result = await operations.pause('test-session');
 
       expect(result.success).toBe(true);
-      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 0 });
+      expect(result.state).toBe(SessionState.PAUSED);
+    });
+
+    it('returns a pause-timeout error when no stopped event arrives', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.RUNNING;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        const promise = operations.pause('test-session', 1);
+        await vi.advanceTimersByTimeAsync(5000);
+        const result = await promise;
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("no 'stopped' event");
+        expect(result.state).toBe(SessionState.RUNNING);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('resolves gracefully when the session terminates while waiting', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const promise = operations.pause('test-session', 1);
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
+      });
+      emit('terminated');
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(result.data?.message).toContain('Session ended');
+    });
+
+    it('rejects when the pause request itself fails', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'pause') {
+          return Promise.reject(new Error('pause not supported'));
+        }
+        return Promise.resolve({ body: { threads: [{ id: 1, name: 'Main' }] } });
+      });
+
+      await expect(operations.pause('test-session', 1)).rejects.toThrow('pause not supported');
     });
   });
 
