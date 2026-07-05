@@ -517,7 +517,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result).toEqual([]);
     });
 
-    it('should handle getStackTrace with malformed response', async () => {
+    it('should treat a malformed getStackTrace response as an error', async () => {
       mockSession.state = SessionState.PAUSED;
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
@@ -525,19 +525,18 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      const result = await operations.getStackTrace('test-session', 1);
-      
-      expect(result).toEqual([]);
+      // Malformed responses must not be flattened into an empty-but-successful
+      // stack trace (issue #124).
+      await expect(operations.getStackTrace('test-session', 1))
+        .rejects.toThrow('did not include stack frames');
     });
 
-    it('should handle getStackTrace network failure', async () => {
+    it('should propagate getStackTrace network failures', async () => {
       mockSession.state = SessionState.PAUSED;
       mockProxyManager.sendDapRequest.mockRejectedValue(new Error('Proxy disconnected'));
 
-      const result = await operations.getStackTrace('test-session', 1);
-      
-      // Returns empty array on error
-      expect(result).toEqual([]);
+      await expect(operations.getStackTrace('test-session', 1))
+        .rejects.toThrow('Proxy disconnected');
     });
   });
 
@@ -1305,6 +1304,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.language = 'java';
       mockSession.state = SessionState.CREATED;
       mockProxyManager.setCurrentThreadId = vi.fn();
+      // Shrink the attach verification window so failure-path tests stay fast.
+      (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 200;
+      (operations as unknown as { attachVerifyIntervalMs: number }).attachVerifyIntervalMs = 10;
     });
 
     it('should discover main thread when available', async () => {
@@ -1372,7 +1374,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(5); // first thread
     });
 
-    it('should fall back to threadId=1 when no threads returned', async () => {
+    it('should fail the attach when the debugger reports zero threads for the whole verification window', async () => {
+      // Previously this scenario silently fell back to threadId=1 and
+      // reported success + PAUSED — the exact lie described in issue #124.
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
           return { body: { threads: [] } };
@@ -1390,14 +1394,17 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         stopOnEntry: true
       });
 
-      expect(result.success).toBe(true);
-      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(1); // fallback
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('No threads returned by adapter')
-      );
+      expect(result.success).toBe(false);
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(result.error).toContain('no threads reported');
+      expect(result.error).toContain('zero threads');
+      expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
+      // The proxy must be torn down so the session is not left half-attached.
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+      expect(mockSession.proxyManager).toBeUndefined();
     });
 
-    it('should fall back to threadId=1 when threads request fails', async () => {
+    it('should fail the attach when the threads request keeps failing for the whole verification window', async () => {
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
           throw new Error('Connection refused');
@@ -1415,11 +1422,69 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         stopOnEntry: true
       });
 
+      expect(result.success).toBe(false);
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(result.error).toContain('no threads reported');
+      expect(result.error).toContain('Connection refused');
+      expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+    });
+
+    it('should fail the attach when the adapter answers threads with a DAP failure response', async () => {
+      // Shape produced by the js-debug proxy when the child session never
+      // materializes ("Child session not ready for '...' after waiting ...ms").
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { success: false, message: "Child session not ready for 'threads' after waiting 12000ms" };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(result.error).toContain('Child session not ready');
+      expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
+    });
+
+    it('should succeed when threads appear during the verification window', async () => {
+      // Emulates child-session adoption finishing after the attach handshake:
+      // the first polls see no threads, a later poll reports the real ones.
+      let threadCalls = 0;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          threadCalls++;
+          if (threadCalls < 3) {
+            return { body: { threads: [] } };
+          }
+          return { body: { threads: [{ id: 7, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
       expect(result.success).toBe(true);
-      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(1); // fallback
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to discover threads')
-      );
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(threadCalls).toBeGreaterThanOrEqual(3);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(7);
     });
 
     it('should skip thread discovery when stopOnEntry is false', async () => {

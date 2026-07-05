@@ -135,52 +135,92 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       );
     });
 
-    it('should handle errors in getStackTrace gracefully', async () => {
-      const session = await sessionManager.createSession({ 
+    it('should propagate errors from getStackTrace instead of returning an empty stack', async () => {
+      const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
         executablePath: 'python'
       });
-      
+
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
-      
+
       // Pause the session
       dependencies.mockProxyManager.simulateStopped(1, 'entry');
-      
+
       // Configure mock to throw error
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockRejectedValue(new Error('Timeout'));
-      
-      // Should return empty array and log error
-      const stackFrames = await sessionManager.getStackTrace(session.id);
-      expect(stackFrames).toEqual([]);
+
+      // A DAP failure must surface as an error, not an empty-but-successful
+      // stack trace (issue #124).
+      await expect(sessionManager.getStackTrace(session.id)).rejects.toThrow('Timeout');
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('Error getting stack trace'),
         expect.any(Error)
       );
     });
 
-    it('should handle missing response body in getStackTrace', async () => {
-      const session = await sessionManager.createSession({ 
+    it('should propagate a failed DAP stackTrace response instead of returning an empty stack', async () => {
+      const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
         executablePath: 'python'
       });
-      
+
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
-      
+
       // Pause the session
       dependencies.mockProxyManager.simulateStopped(1, 'entry');
-      
+
+      // Shape produced by the js-debug proxy when the child session never
+      // materializes (issue #124).
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({
+        success: false,
+        message: "Child session not ready for 'stackTrace' after waiting 12000ms"
+      });
+
+      await expect(sessionManager.getStackTrace(session.id)).rejects.toThrow('Child session not ready');
+    });
+
+    it('should treat a missing stackTrace response body as an error', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      // Pause the session
+      dependencies.mockProxyManager.simulateStopped(1, 'entry');
+
       // Configure mock to return null body
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({ body: null });
-      
-      // Should return empty array and warn
-      const stackFrames = await sessionManager.getStackTrace(session.id);
-      expect(stackFrames).toEqual([]);
+
+      await expect(sessionManager.getStackTrace(session.id)).rejects.toThrow('did not include stack frames');
       expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('No stackFrames in response body'),
         expect.any(Object)
       );
+    });
+
+    it('should propagate stack trace failures from getLocalVariables instead of returning empty variables', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      // Pause the session
+      dependencies.mockProxyManager.simulateStopped(1, 'entry');
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({
+        success: false,
+        message: "Child session not ready for 'stackTrace' after waiting 12000ms"
+      });
+
+      await expect(sessionManager.getLocalVariables(session.id)).rejects.toThrow('Child session not ready');
     });
 
     it('should handle no effective thread ID in getStackTrace', async () => {
