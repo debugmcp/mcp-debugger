@@ -1724,4 +1724,50 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  describe('Child config enrichment (attach intent threading, issue #124)', () => {
+    // js-debug's reverse startDebugging configuration only carries
+    // {type, name, __pendingTargetId}; enrichChildConfig threads the caller's
+    // attach intent (request, stopOnEntry) into the child's parentConfig.
+    const baseConfig = {
+      host: 'localhost',
+      port: 1234,
+      pendingId: 'p1',
+      parentConfig: { type: 'pwa-node', name: 'Remote Process [0]' }
+    };
+
+    it('returns the config unchanged when no start request was recorded', () => {
+      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
+      expect((c as any).enrichChildConfig(baseConfig)).toBe(baseConfig);
+      c.shutdown();
+    });
+
+    it('returns the config unchanged for launch-mode parents', () => {
+      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
+      (c as any).lastStartRequestArgs = { request: 'launch', stopOnEntry: false };
+      expect((c as any).enrichChildConfig(baseConfig)).toBe(baseConfig);
+      c.shutdown();
+    });
+
+    it('threads request and stopOnEntry into attach-mode child configs', () => {
+      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
+      (c as any).lastStartRequestArgs = { request: 'attach', stopOnEntry: false };
+      const enriched = (c as any).enrichChildConfig(baseConfig);
+      expect(enriched.parentConfig.request).toBe('attach');
+      expect(enriched.parentConfig.stopOnEntry).toBe(false);
+      expect(enriched.parentConfig.type).toBe('pwa-node');
+      // Original config must not be mutated
+      expect((baseConfig.parentConfig as Record<string, unknown>).request).toBeUndefined();
+      c.shutdown();
+    });
+
+    it('omits stopOnEntry when the attach request did not carry a boolean', () => {
+      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
+      (c as any).lastStartRequestArgs = { request: 'attach' };
+      const enriched = (c as any).enrichChildConfig(baseConfig);
+      expect(enriched.parentConfig.request).toBe('attach');
+      expect('stopOnEntry' in enriched.parentConfig).toBe(false);
+      c.shutdown();
+    });
+  });
+
 });

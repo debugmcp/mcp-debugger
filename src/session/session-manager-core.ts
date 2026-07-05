@@ -260,7 +260,17 @@ export abstract class SessionManagerCore {
         'exception'
       ]);
       const isFirstStop = !session.firstStopHandled;
+      // Attach sessions have no launch entry stop to skip: any stop observed
+      // after attach is either the deliberate post-attach pause issued by
+      // attachToProcess (pauseAfterAttach policies) or a real debug event.
+      // Auto-continuing those resumed the target right after we paused it
+      // (issue #124), so auto-continue is launch-only.
+      const launchArgsRecord = effectiveLaunchArgs as Record<string, unknown>;
+      const isAttachSession =
+        launchArgsRecord.request === 'attach' ||
+        launchArgsRecord.__attachMode === true;
       const shouldAutoContinue =
+        !isAttachSession &&
         !effectiveLaunchArgs.stopOnEntry &&
         (reason === 'entry' ||
           (firstStopMayBeNonEntry && isFirstStop && !userBreakReasons.has(reason)));

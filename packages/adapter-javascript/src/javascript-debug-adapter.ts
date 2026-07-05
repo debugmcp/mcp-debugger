@@ -19,6 +19,8 @@ import {
   type AdapterConfig,
   type GenericLaunchConfig,
   type LanguageSpecificLaunchConfig,
+  type GenericAttachConfig,
+  type LanguageSpecificAttachConfig,
   type FeatureRequirement,
   type AdapterCapabilities,
   type AdapterLaunchBarrier
@@ -554,6 +556,47 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       justMyCode: true,
       env: {},
       cwd: process.cwd()
+    };
+  }
+
+  // ===== Attach Support =====
+
+  supportsAttach(): boolean {
+    return true;
+  }
+
+  /**
+   * Build the js-debug (pwa-node) attach configuration. Unlike
+   * transformLaunchConfig — which always produces a launch request — this
+   * preserves the attach request/host/port so the proxy worker detects attach
+   * mode and JsDebugAdapterPolicy.performHandshake sends a real DAP 'attach'.
+   */
+  transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
+    const attachConfig: LanguageSpecificAttachConfig = {
+      type: 'pwa-node',
+      request: 'attach',
+      name: 'Attach to Node.js process',
+      host: config.host || '127.0.0.1',
+      port: config.port,
+    };
+
+    if (config.stopOnEntry !== undefined) {
+      attachConfig.stopOnEntry = config.stopOnEntry;
+    }
+    if (config.justMyCode !== undefined) {
+      attachConfig.justMyCode = config.justMyCode;
+    }
+    if (config.timeout !== undefined) {
+      attachConfig.timeout = config.timeout;
+    }
+
+    return attachConfig;
+  }
+
+  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
+    return {
+      request: 'attach',
+      host: '127.0.0.1',
     };
   }
 
