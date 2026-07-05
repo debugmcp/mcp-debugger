@@ -29,6 +29,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { installShutdownHandlers } from './shutdown.mjs';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -760,6 +761,14 @@ async function main() {
 
   log(`Proxy server connected to stdio (backend transport: ${BACKEND_TRANSPORT})`);
 
+  // Exit when the MCP client goes away — stdin EOF/close/error, protocol-level
+  // server close, or SIGINT/SIGTERM — stopping the backend child on the way out.
+  // Installed before backend.start() so a client that dies during a slow backend
+  // startup still triggers shutdown (backend.stop() handles the 'starting' state).
+  // Without this, on Windows both the proxy and its backend outlive a dead
+  // Claude Code forever (issue #122).
+  installShutdownHandlers({ stdin: process.stdin, backend, server, log });
+
   // Start the backend automatically
   try {
     await backend.start();
@@ -769,19 +778,6 @@ async function main() {
     log(`Initial backend start failed: ${err.message}`);
     log('Dev tools are still available — use dev_restart_debugger to retry');
   }
-
-  // Handle graceful shutdown
-  process.on('SIGINT', async () => {
-    log('SIGINT received, shutting down...');
-    await backend.stop();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', async () => {
-    log('SIGTERM received, shutting down...');
-    await backend.stop();
-    process.exit(0);
-  });
 }
 
 main().catch((err) => {
