@@ -83,7 +83,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
       this.logger.info(`[SM getStackTrace ${sessionId}] Sending DAP 'stackTrace' for threadId ${currentThreadForRequest}.`);
       const response = await session.proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', { threadId: currentThreadForRequest });
       this.logger.info(`[SM getStackTrace ${sessionId}] DAP 'stackTrace' response received. Body:`, response?.body);
-      
+
+      // A failed DAP response (e.g. "Child session not ready ...") must not
+      // be flattened into an empty-but-successful stack trace (issue #124):
+      // propagate the failure to the caller.
+      if (response?.success === false) {
+        throw new Error(response.message || `DAP 'stackTrace' request failed`);
+      }
+
       if (response && response.body && response.body.stackFrames) {
         let frames: StackFrame[] = response.body.stackFrames.map((sf: DebugProtocol.StackFrame) => ({ 
             id: sf.id, name: sf.name, 
@@ -103,10 +110,10 @@ export abstract class SessionManagerData extends SessionManagerCore {
         return frames;
       }
       this.logger.warn(`[SM getStackTrace ${sessionId}] No stackFrames in response body. Response:`, response);
-      return [];
+      throw new Error(`DAP 'stackTrace' response did not include stack frames`);
     } catch (error) {
       this.logger.error(`[SM getStackTrace ${sessionId}] Error getting stack trace:`, error);
-      return [];
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -236,8 +243,10 @@ export abstract class SessionManagerData extends SessionManagerCore {
       };
       
     } catch (error) {
+      // Do not flatten failures (e.g. a stack trace that could not be
+      // retrieved) into an empty-but-successful result (issue #124).
       this.logger.error(`[SM getLocalVariables ${sessionId}] Error getting local variables:`, error);
-      return { variables: [], frame: null, scopeName: null };
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 }

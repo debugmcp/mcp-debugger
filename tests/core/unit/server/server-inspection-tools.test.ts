@@ -278,23 +278,29 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.error).toContain('no active proxy for session test-session');
     });
 
-    it('should handle SessionManager errors', async () => {
+    it('should surface SessionManager errors as a truthful tool-level failure', async () => {
       const mockSession = {
         proxyManager: {
           getCurrentThreadId: vi.fn().mockReturnValue(1)
         }
       };
-      
+
       mockSessionManager.getSession.mockReturnValue(mockSession);
       mockSessionManager.getStackTrace.mockRejectedValue(new Error('Stack trace failed'));
-      
-      await expect(callToolHandler({
+
+      // DAP-level failures must produce success:false with the real error,
+      // never an empty-but-successful stack trace (issue #124).
+      const result = await callToolHandler({
         method: 'tools/call',
         params: {
           name: 'get_stack_trace',
           arguments: { sessionId: 'test-session' }
         }
-      })).rejects.toThrow(/Stack trace failed/);
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('Stack trace failed');
     });
   });
 
