@@ -186,6 +186,13 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     state === SessionState.PAUSED || (!options.stopOnEntry && state === SessionState.RUNNING),
 
   /**
+   * js-debug attaches with continueOnAttach, so a running target stays
+   * running; the SessionManager must issue an explicit pause for the PAUSED
+   * state it reports after attach to be real (issue #124).
+   */
+  getAttachBehavior: () => ({ pauseAfterAttach: true }),
+
+  /**
    * Perform JavaScript-specific handshake sequence for js-debug/pwa-node.
    * This includes the strict initialization sequence required by js-debug.
    */
@@ -325,18 +332,44 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       getPortValue(a.port);
 
     if (req === 'attach' && typeof attachPort === 'number' && attachPort > 0) {
-      // Explicit ATTACH flow (single parent session); avoid DI ambiguity
+      // Explicit ATTACH flow (single parent session); avoid DI ambiguity.
+      // Use the caller-provided host — previously hardcoded to 127.0.0.1,
+      // which broke attaching to anything but local loopback (issue #124).
+      const attachHost =
+        typeof baseRecord.host === 'string' && (baseRecord.host as string).length > 0
+          ? (baseRecord.host as string)
+          : typeof a.host === 'string' && (a.host as string).length > 0
+          ? (a.host as string)
+          : '127.0.0.1';
+      // NOTE: do not set attachSimplePort here. Combined with `port` it makes
+      // js-debug attach to the same inspector twice (simple-attach delegate +
+      // regular attach target); with continueOnAttach the two targets then
+      // fight over the process — every pause is immediately resumed by the
+      // other target and stackTrace fails with "Thread is not paused"
+      // (observed empirically while fixing issue #124).
+      const attachArgs: Record<string, unknown> = {
+        type,
+        request: 'attach',
+        address: attachHost,
+        port: attachPort,
+        continueOnAttach: true,
+        attachExistingChildren: true
+      };
+      // Carry the caller's stopOnEntry: js-debug itself ignores it, but
+      // MinimalDapClient records the attach args and threads the intent into
+      // child session creation (issue #124).
+      const stopOnEntryValue =
+        typeof baseRecord.stopOnEntry === 'boolean'
+          ? (baseRecord.stopOnEntry as boolean)
+          : typeof a.stopOnEntry === 'boolean'
+          ? (a.stopOnEntry as boolean)
+          : undefined;
+      if (typeof stopOnEntryValue === 'boolean') {
+        attachArgs.stopOnEntry = stopOnEntryValue;
+      }
       try {
-        console.info(`[JsDebugAdapterPolicy] [JS] Sending 'attach' to ${attachPort} (address=127.0.0.1)`);
-        await pm.sendDapRequest('attach', {
-          type,
-          request: 'attach',
-          address: '127.0.0.1',
-          port: attachPort,
-          continueOnAttach: true,
-          attachExistingChildren: true,
-          attachSimplePort: attachPort
-        });
+        console.info(`[JsDebugAdapterPolicy] [JS] Sending 'attach' to ${attachPort} (address=${attachHost})`);
+        await pm.sendDapRequest('attach', attachArgs);
       } catch (e) {
         console.warn(`[JsDebugAdapterPolicy] [JS] 'attach' failed: ${e instanceof Error ? e.message : String(e)}`);
       }

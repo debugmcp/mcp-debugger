@@ -9,7 +9,7 @@ const message = 'tick';
 
 function tick() {
   counter += 1;
-  if (counter % 50 === 0) {
+  if (counter % 10 === 0) {
     console.log(`${message} ${counter}`);
   }
 }

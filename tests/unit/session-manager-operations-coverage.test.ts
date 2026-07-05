@@ -1307,6 +1307,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // Shrink the attach verification window so failure-path tests stay fast.
       (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 200;
       (operations as unknown as { attachVerifyIntervalMs: number }).attachVerifyIntervalMs = 10;
+      (operations as unknown as { attachPauseStopTimeoutMs: number }).attachPauseStopTimeoutMs = 50;
     });
 
     it('should discover main thread when available', async () => {
@@ -1454,6 +1455,78 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.ERROR);
       expect(result.error).toContain('Child session not ready');
       expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
+    });
+
+    it('should invoke the adapter policy performHandshake for attach when the policy defines it', async () => {
+      // js-debug's DAP attach sequence is driven by performHandshake; before
+      // issue #124 attachToProcess never called it, so no attach request ever
+      // reached the adapter. Policies without performHandshake are no-ops.
+      const handshakeSpy = vi.fn().mockResolvedValue(undefined);
+      vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({
+        performHandshake: handshakeSpy,
+        getAttachBehavior: () => undefined
+      });
+
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return { request: 'attach', port: 5005 };
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(handshakeSpy).toHaveBeenCalledTimes(1);
+      expect(handshakeSpy.mock.calls[0][0]).toMatchObject({
+        sessionId: 'test-session',
+        scriptPath: 'attach://remote',
+        dapLaunchArgs: expect.objectContaining({
+          request: 'attach',
+          __attachMode: true,
+          port: 5005
+        }),
+        launchConfig: { request: 'attach', port: 5005 }
+      });
+    });
+
+    it('should tolerate a performHandshake failure and still verify the attach', async () => {
+      const handshakeSpy = vi.fn().mockRejectedValue(new Error('handshake exploded'));
+      vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({
+        performHandshake: handshakeSpy,
+        getAttachBehavior: () => undefined
+      });
+
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Language handshake for attach returned with warning/error')
+      );
     });
 
     it('should succeed when threads appear during the verification window', async () => {

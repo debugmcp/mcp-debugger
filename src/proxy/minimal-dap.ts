@@ -49,6 +49,11 @@ export class MinimalDapClient extends EventEmitter {
   private childSessions = new Map<string, MinimalDapClient>();
   private activeChild: MinimalDapClient | null = null;
 
+  // Arguments of the last 'launch'/'attach' request sent through this client.
+  // Used to thread the caller's intent (attach mode, stopOnEntry) into child
+  // session creation — the adapter does not echo these fields (issue #124).
+  private lastStartRequestArgs: Record<string, unknown> | null = null;
+
   // Adapter policy and DAP behavior configuration
   private policy: AdapterPolicy;
   private dapBehavior: DapClientBehavior;
@@ -260,7 +265,7 @@ export class MinimalDapClient extends EventEmitter {
             },
             createChildSession: async (config: ChildSessionConfig) => {
               if (this.childSessionManager) {
-                await this.childSessionManager.createChildSession(config);
+                await this.childSessionManager.createChildSession(this.enrichChildConfig(config));
                 // Update active child reference from manager
                 this.activeChild = this.childSessionManager.getActiveChild();
               }
@@ -277,7 +282,7 @@ export class MinimalDapClient extends EventEmitter {
               // Create child session through the manager
               logger.info(`[MinimalDapClient] Creating child session via ChildSessionManager`);
               try {
-                await this.childSessionManager.createChildSession(result.childConfig);
+                await this.childSessionManager.createChildSession(this.enrichChildConfig(result.childConfig));
                 
                 // Set up deferred config if needed
                 if (this.dapBehavior.deferParentConfigDone) {
@@ -388,6 +393,29 @@ export class MinimalDapClient extends EventEmitter {
     });
   }
 
+  /**
+   * Thread the caller's attach intent into a child session config. js-debug's
+   * reverse startDebugging configuration only carries
+   * {type, name, __pendingTargetId}: without this, ChildSessionManager cannot
+   * distinguish attach-mode children from launch-mode children, nor see
+   * whether the user asked for an entry stop (issue #124). Launch-mode
+   * configs are returned unchanged.
+   */
+  private enrichChildConfig(config: ChildSessionConfig): ChildSessionConfig {
+    const start = this.lastStartRequestArgs;
+    if (!start || start.request !== 'attach') {
+      return config;
+    }
+    const parentConfig: Record<string, unknown> = {
+      ...(config.parentConfig ?? {}),
+      request: 'attach'
+    };
+    if (typeof start.stopOnEntry === 'boolean') {
+      parentConfig.stopOnEntry = start.stopOnEntry;
+    }
+    return { ...config, parentConfig };
+  }
+
   public async sendRequest<T extends DebugProtocol.Response>(
     command: string,
     args?: unknown,
@@ -401,6 +429,16 @@ export class MinimalDapClient extends EventEmitter {
       throw new Error('Client is disconnecting or disconnected');
     }
 
+    // Remember the parent's start request so child session creation can see
+    // the caller's intent: js-debug's reverse startDebugging configuration
+    // only carries {type, name, __pendingTargetId} — request mode and
+    // stopOnEntry never round-trip through the adapter (issue #124).
+    if (command === 'attach' || command === 'launch') {
+      this.lastStartRequestArgs = {
+        ...((args as Record<string, unknown> | undefined) ?? {}),
+        request: command
+      };
+    }
 
     // Defer parent's configurationDone briefly to allow child session to configure,
     // avoiding immediate resume of the target before adoption completes.

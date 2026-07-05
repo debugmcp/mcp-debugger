@@ -69,6 +69,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected attachVerifyTimeoutMs = 5000;
   protected attachVerifyIntervalMs = 250;
 
+  /**
+   * How long to wait for the 'stopped' event after a post-attach pause
+   * (policies with getAttachBehavior().pauseAfterAttach) before reporting
+   * PAUSED anyway with a warning. Protected so tests can shrink the window.
+   */
+  protected attachPauseStopTimeoutMs = 5000;
+
   protected async startProxyManager(
     session: ManagedSession,
     scriptPath: string,
@@ -1593,13 +1600,40 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         __attachMode: true  // Internal flag to signal attach mode
       };
 
-      await this.startProxyManager(
+      const attachConfigData = await this.startProxyManager(
         session,
         placeholderPath,
         undefined,
         attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
         false
       );
+
+      // Perform language-specific handshake if required, mirroring
+      // startDebugging. For js-debug the whole DAP sequence — initialize,
+      // configurationDone and the DAP 'attach' request itself — is driven
+      // here because the proxy worker skips its built-in attach flow for
+      // command-queueing policies. Policies without performHandshake are
+      // untouched: their attach is performed by the proxy worker.
+      const policy = this.selectPolicy(session.language);
+      if (policy.performHandshake) {
+        try {
+          await policy.performHandshake({
+            proxyManager: session.proxyManager,
+            sessionId: session.id,
+            dapLaunchArgs: attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
+            scriptPath: placeholderPath,
+            scriptArgs: undefined,
+            breakpoints: session.breakpoints,
+            launchConfig: attachConfigData
+          });
+        } catch (handshakeErr) {
+          this.logger.warn(
+            `[SessionManager] Language handshake for attach returned with warning/error: ${
+              handshakeErr instanceof Error ? handshakeErr.message : String(handshakeErr)
+            }`
+          );
+        }
+      }
 
       // Set session state based on stopOnEntry
       let finalState = session.state;
@@ -1646,27 +1680,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           this.logger.warn(`[SessionManager] Initial thread discovery for attach failed: ${lastFailure}`);
         }
 
-        // Some debuggers (rdbg) do not suspend a running target on attach;
-        // issue an explicit pause so the PAUSED state we report is real.
-        // Sent after the first discovery attempt (preserving the previous
-        // ordering) and before any retries so the pause itself can surface
-        // the threads that verification is waiting for.
-        const attachBehavior = this.selectPolicy(session.language).getAttachBehavior?.();
-        if (attachBehavior?.pauseAfterAttach) {
-          const pauseThreadId = threads && threads.length > 0
-            ? (threads.find(t => t.name === 'main') ?? threads[0]).id
-            : 1;
-          try {
-            await proxyManager.sendDapRequest('pause', { threadId: pauseThreadId });
-            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${pauseThreadId})`);
-          } catch (err) {
-            // Already stopped (e.g. target was started suspended) — fine.
-            this.logger.info(
-              `[SessionManager] Post-attach pause not needed/accepted: ${err instanceof Error ? err.message : String(err)}`
-            );
-          }
-        }
-
         // Retry until the deadline if the debugger has not reported threads yet.
         while (!threads && Date.now() < deadline) {
           const sleepMs = Math.min(pollIntervalMs, Math.max(deadline - Date.now(), 1));
@@ -1707,6 +1720,56 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.logger.info(`[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${mainThread?.name || threads[0].name})`);
         proxyManager.setCurrentThreadId(discoveredThreadId);
         this.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
+
+        // Some debuggers (rdbg; js-debug attaches with continueOnAttach) do
+        // not suspend a running target on attach; issue an explicit pause so
+        // the PAUSED state we report is real, and wait for the stop to be
+        // observed before reporting it. Sent after thread verification so it
+        // reaches the debuggee-owning session (for js-debug the pause is
+        // routed to the child session, which exists once threads are
+        // reported). A rejected pause means the target is already stopped
+        // (e.g. started suspended) — fine, no stop event will follow.
+        const attachBehavior = this.selectPolicy(session.language).getAttachBehavior?.();
+        if (attachBehavior?.pauseAfterAttach) {
+          let stopSettled = false;
+          let stopTimer: ReturnType<typeof setTimeout> | undefined;
+          let onStopped: (() => void) | undefined;
+          const stoppedSeen = new Promise<boolean>((resolve) => {
+            onStopped = () => {
+              if (!stopSettled) {
+                stopSettled = true;
+                if (stopTimer) clearTimeout(stopTimer);
+                resolve(true);
+              }
+            };
+            stopTimer = setTimeout(() => {
+              if (!stopSettled) {
+                stopSettled = true;
+                resolve(false);
+              }
+            }, this.attachPauseStopTimeoutMs);
+            proxyManager.once('stopped', onStopped);
+          });
+          try {
+            await proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
+            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
+            const stopObserved = await stoppedSeen;
+            if (!stopObserved) {
+              this.logger.warn(
+                `[SessionManager] No 'stopped' event within ${this.attachPauseStopTimeoutMs}ms after post-attach pause; reported state may lag the engine`
+              );
+            }
+          } catch (err) {
+            // Already stopped (e.g. target was started suspended) — fine.
+            this.logger.info(
+              `[SessionManager] Post-attach pause not needed/accepted: ${err instanceof Error ? err.message : String(err)}`
+            );
+          } finally {
+            stopSettled = true;
+            if (stopTimer) clearTimeout(stopTimer);
+            if (onStopped) proxyManager.removeListener('stopped', onStopped);
+          }
+        }
 
         this._updateSessionState(session, SessionState.PAUSED);
         finalState = SessionState.PAUSED;

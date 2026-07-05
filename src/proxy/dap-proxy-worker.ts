@@ -402,17 +402,22 @@ export class DapProxyWorker {
       // Set up event handlers
       this.setupDapEventHandlers();
 
+      // Detect attach mode from launchConfig. Needed to determine the DAP
+      // sequence below AND the shutdown behavior (attach mode must detach
+      // with terminateDebuggee=false so the target survives) — including for
+      // command-queueing policies (js-debug), whose handshake is driven by
+      // the SessionManager rather than this worker.
+      const isAttachMode = payload.launchConfig?.request === 'attach' ||
+                           payload.launchConfig?.__attachMode === true;
+      this.isAttachMode = isAttachMode;
+
       // Check if adapter requires command queueing
       if (this.adapterPolicy.requiresCommandQueueing()) {
-        this.logger!.info(`[Worker] ${this.adapterPolicy.name} adapter detected; command queueing enabled`);
+        this.logger!.info(`[Worker] ${this.adapterPolicy.name} adapter detected; command queueing enabled (attachMode=${isAttachMode})`);
         this.state = ProxyState.CONNECTED;
         this.sendStatus('adapter_connected');
         await this.drainPreConnectQueue();
       } else {
-        // Detect attach mode from launchConfig - needed to determine DAP sequence
-        const isAttachMode = payload.launchConfig?.request === 'attach' ||
-                             payload.launchConfig?.__attachMode === true;
-        this.isAttachMode = isAttachMode;
         const initBehavior = this.adapterPolicy.getInitializationBehavior();
 
         // For adapters that send 'initialized' before launch/attach (Go/Delve, Java),
