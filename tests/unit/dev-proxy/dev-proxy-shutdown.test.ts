@@ -12,7 +12,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'events';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- plain-JS module without type declarations
-import { installShutdownHandlers } from '../../../tools/dev-proxy/shutdown.mjs';
+import { installShutdownHandlers, killChildGracefully } from '../../../tools/dev-proxy/shutdown.mjs';
 
 interface FakeProc extends EventEmitter {
   exit: ReturnType<typeof vi.fn>;
@@ -146,5 +146,125 @@ describe('dev-proxy installShutdownHandlers', () => {
     expect(proc.exit).toHaveBeenCalledTimes(1);
     expect(proc.exit).toHaveBeenCalledWith(0);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('test reason'));
+  });
+});
+
+/**
+ * killChildGracefully (issue #122, PR-3): the backend gets a graceful shutdown
+ * request first (stdin close on Windows — no SIGTERM there — or SIGTERM
+ * elsewhere) and is force-killed only if it does not exit within the grace
+ * period.
+ */
+interface FakeChild extends EventEmitter {
+  pid: number;
+  exitCode: number | null;
+  kill: ReturnType<typeof vi.fn>;
+  stdin: { destroyed: boolean; end: ReturnType<typeof vi.fn> } | null;
+}
+
+function makeFakeChild({ withStdin = true }: { withStdin?: boolean } = {}): FakeChild {
+  const child = new EventEmitter() as FakeChild;
+  child.pid = 4242;
+  child.exitCode = null;
+  child.kill = vi.fn();
+  child.stdin = withStdin ? { destroyed: false, end: vi.fn() } : null;
+  return child;
+}
+
+describe('dev-proxy killChildGracefully', () => {
+  it('resolves immediately for a missing or already-exited child', async () => {
+    await killChildGracefully(null);
+
+    const child = makeFakeChild();
+    child.exitCode = 0;
+    const forceKill = vi.fn();
+    await killChildGracefully(child, { platform: 'win32', forceKill });
+
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(child.stdin!.end).not.toHaveBeenCalled();
+  });
+
+  it('win32: closes the stdin pipe and resolves on prompt exit without force-killing', async () => {
+    const child = makeFakeChild();
+    const forceKill = vi.fn();
+    const promise = killChildGracefully(child, {
+      platform: 'win32',
+      forceKill,
+      killTimeoutMs: 1000,
+    });
+
+    expect(child.stdin!.end).toHaveBeenCalledTimes(1);
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    await promise;
+
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it('win32: force-kills when the child ignores the graceful request', async () => {
+    const child = makeFakeChild();
+    const forceKill = vi.fn(() => {
+      setTimeout(() => child.emit('exit', 1, null), 5);
+    });
+
+    await killChildGracefully(child, { platform: 'win32', forceKill, killTimeoutMs: 20 });
+
+    expect(child.stdin!.end).toHaveBeenCalledTimes(1);
+    expect(forceKill).toHaveBeenCalledWith(child.pid);
+  });
+
+  it('win32: force-kills immediately when no stdin pipe is available', async () => {
+    const child = makeFakeChild({ withStdin: false });
+    const forceKill = vi.fn(() => {
+      setTimeout(() => child.emit('exit', 1, null), 5);
+    });
+
+    await killChildGracefully(child, { platform: 'win32', forceKill, killTimeoutMs: 5000 });
+
+    expect(forceKill).toHaveBeenCalledWith(child.pid);
+  });
+
+  it('unix: sends SIGTERM first and resolves on exit without force-killing', async () => {
+    const child = makeFakeChild();
+    const forceKill = vi.fn();
+    const promise = killChildGracefully(child, {
+      platform: 'linux',
+      forceKill,
+      killTimeoutMs: 1000,
+    });
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(child.stdin!.end).not.toHaveBeenCalled();
+    child.emit('exit', 0, null);
+    await promise;
+
+    expect(forceKill).not.toHaveBeenCalled();
+  });
+
+  it('unix: escalates to force kill after the grace period', async () => {
+    const child = makeFakeChild();
+    const forceKill = vi.fn(() => {
+      setTimeout(() => child.emit('exit', null, 'SIGKILL'), 5);
+    });
+
+    await killChildGracefully(child, { platform: 'linux', forceKill, killTimeoutMs: 20 });
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(forceKill).toHaveBeenCalledWith(child.pid);
+  });
+
+  it('resolves via the bail timer when even force-kill surfaces no exit event', async () => {
+    const child = makeFakeChild();
+    const forceKill = vi.fn(); // does nothing — no 'exit' will ever fire
+
+    await killChildGracefully(child, {
+      platform: 'win32',
+      forceKill,
+      killTimeoutMs: 10,
+      bailMs: 20,
+    });
+
+    expect(forceKill).toHaveBeenCalledWith(child.pid);
   });
 });

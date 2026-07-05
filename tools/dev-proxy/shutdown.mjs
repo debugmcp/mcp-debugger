@@ -17,11 +17,19 @@
  * dev-proxy entry point (dev-proxy.mjs runs main() at module top level).
  */
 
+import { execFileSync } from 'child_process';
+
 /** Max time to wait for backend.stop() before exiting anyway. */
 export const STOP_TIMEOUT_MS = 8000;
 
 /** Hard-exit backstop in case the shutdown sequence itself stalls. */
 export const FORCE_EXIT_DELAY_MS = 10000;
+
+/** Max time to wait for a graceful backend exit before force-killing it. */
+export const KILL_GRACE_MS = 5000;
+
+/** After a force-kill, max time to wait for the 'exit' event before giving up. */
+export const FORCE_KILL_BAIL_MS = 2000;
 
 /**
  * Install handlers that shut the proxy down when the MCP client disconnects.
@@ -112,4 +120,101 @@ export function installShutdownHandlers({
   proc.on('SIGTERM', () => void shutdown('SIGTERM received'));
 
   return shutdown;
+}
+
+/**
+ * Kill a backend child gracefully, then by force.
+ *
+ * Graceful channel per platform:
+ * - win32: there is no SIGTERM equivalent for console processes, so the
+ *   backend is spawned with a stdin pipe and MCP_EXIT_ON_STDIN_CLOSE=1;
+ *   closing that pipe asks it to run its graceful shutdown
+ *   (closeAllSessions() etc., issue #122).
+ * - elsewhere: SIGTERM (the backend's gracefulShutdown is signal-wired).
+ *
+ * If the child has not exited within killTimeoutMs, it is force-killed
+ * (taskkill /F on Windows, SIGKILL elsewhere). Children that ignore the
+ * graceful request (e.g. a `docker run` CLI without -i) simply fall through
+ * to the force path.
+ *
+ * @param {import('child_process').ChildProcess | null} child
+ * @param {object} [opts]
+ * @param {(msg: string) => void} [opts.log]
+ * @param {number} [opts.killTimeoutMs]
+ * @param {number} [opts.bailMs] Post-force-kill wait before giving up.
+ * @param {NodeJS.Platform} [opts.platform] Injectable for tests.
+ * @param {(pid: number) => void} [opts.forceKill] Injectable for tests.
+ * @returns {Promise<void>} Resolves once the child exited (or force-kill was
+ *   attempted and no exit surfaced within bailMs).
+ */
+export function killChildGracefully(child, opts = {}) {
+  const {
+    log = () => {},
+    killTimeoutMs = KILL_GRACE_MS,
+    bailMs = FORCE_KILL_BAIL_MS,
+    platform = process.platform,
+    forceKill,
+  } = opts;
+
+  if (!child || child.exitCode !== null) {
+    return Promise.resolve();
+  }
+
+  const doForceKill =
+    forceKill ??
+    ((pid) => {
+      if (platform === 'win32') {
+        // execFileSync (no shell) — pid is numeric, but avoid shell interpolation on principle
+        execFileSync('taskkill', ['/pid', String(pid), '/F'], { stdio: 'ignore' });
+      } else {
+        child.kill('SIGKILL');
+      }
+    });
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let forceTimer;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(forceTimer);
+      resolve();
+    };
+    child.once('exit', finish);
+
+    const force = (why) => {
+      clearTimeout(forceTimer);
+      log(`Force-killing backend PID ${child.pid} (${why})`);
+      try {
+        doForceKill(child.pid);
+      } catch {
+        // Already dead
+      }
+      // If even the force-kill surfaces no 'exit' event, don't hang the caller
+      const bail = setTimeout(finish, bailMs);
+      bail.unref?.();
+    };
+
+    forceTimer = setTimeout(
+      () => force(`did not exit within ${killTimeoutMs}ms of graceful request`),
+      killTimeoutMs
+    );
+    forceTimer.unref?.();
+
+    // Graceful attempt first, so the backend can close its debug sessions
+    try {
+      if (platform === 'win32') {
+        if (child.stdin && !child.stdin.destroyed) {
+          child.stdin.end();
+        } else {
+          force('no stdin pipe available for graceful shutdown');
+        }
+      } else {
+        child.kill('SIGTERM');
+      }
+    } catch (err) {
+      force(`graceful request failed: ${err?.message ?? err}`);
+    }
+  });
 }

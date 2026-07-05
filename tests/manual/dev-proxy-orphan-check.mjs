@@ -1,19 +1,27 @@
 #!/usr/bin/env node
 /**
- * Manual verification for issue #122 (PR-1): dev-proxy must exit — and kill its
- * backend child — when its MCP client disappears (stdin EOF).
+ * Manual verification for issue #122: no tier of the dev-proxy process tree
+ * may outlive its parent.
  *
- * For each backend transport mode this script:
- *   1. Spawns tools/dev-proxy/dev-proxy.mjs with piped stdio (like Claude Code does)
- *   2. Waits for "Backend running (PID=...)" on the proxy's stderr
- *   3. Closes the proxy's stdin — simulating the MCP client dying
- *   4. Asserts the proxy exits (code 0) within PROXY_EXIT_BUDGET_MS
- *   5. Asserts the backend PID is gone within BACKEND_EXIT_BUDGET_MS
+ * Two scenarios per backend transport mode:
+ *
+ * Scenario "eof" (PR-1 — clean client disconnect):
+ *   1. Spawn tools/dev-proxy/dev-proxy.mjs with piped stdio (like Claude Code does)
+ *   2. Wait for "Backend running (PID=...)" on the proxy's stderr
+ *   3. Close the proxy's stdin — simulating the MCP client dying
+ *   4. Assert the proxy exits (code 0) within PROXY_EXIT_BUDGET_MS
+ *   5. Assert the backend PID is gone within BACKEND_EXIT_BUDGET_MS
+ *
+ * Scenario "kill" (PR-3 — supervisor hard-killed, orphan self-defense):
+ *   1-2. As above
+ *   3. SIGKILL the dev-proxy itself (TerminateProcess on Windows ≈ taskkill /F)
+ *   4. Assert the backend notices its dead parent (stdin pipe EOF) and
+ *      self-exits within BACKEND_EXIT_BUDGET_MS
  *
  * Usage (requires a built dist/ — run `npm run build` first):
- *   node tests/manual/dev-proxy-orphan-check.mjs           # both modes
- *   node tests/manual/dev-proxy-orphan-check.mjs http
- *   node tests/manual/dev-proxy-orphan-check.mjs stdio
+ *   node tests/manual/dev-proxy-orphan-check.mjs                    # all modes+scenarios
+ *   node tests/manual/dev-proxy-orphan-check.mjs http               # one mode, both scenarios
+ *   node tests/manual/dev-proxy-orphan-check.mjs stdio kill         # one mode, one scenario
  *
  * Uses port 3947 (not the default 3001) so a developer's real dev-proxy backend
  * is never touched — dev-proxy's _ensurePortFree() kills whatever node process
@@ -47,8 +55,8 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function runMode(mode) {
-  console.log(`\n=== Mode: ${mode} ===`);
+async function runScenario(mode, scenario) {
+  console.log(`\n=== Mode: ${mode}, scenario: ${scenario} ===`);
 
   const child = spawn(process.execPath, [DEV_PROXY], {
     cwd: ROOT,
@@ -71,6 +79,24 @@ async function runMode(mode) {
     child.on('exit', (code, signal) => resolve({ code, signal, at: Date.now() }));
   });
 
+  const fail = (msg, backendPid = null) => {
+    console.error(`FAIL(${mode}/${scenario}): ${msg}`);
+    console.error(`Proxy stderr:\n${stderrBuf}`);
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+    if (backendPid && pidAlive(backendPid)) {
+      try {
+        process.kill(backendPid);
+      } catch {
+        /* already gone */
+      }
+    }
+    return false;
+  };
+
   // 1. Wait for the backend to come up and capture its PID
   let backendPid = null;
   const startupDeadline = Date.now() + STARTUP_BUDGET_MS;
@@ -83,42 +109,38 @@ async function runMode(mode) {
     if (child.exitCode !== null) break;
     await sleep(POLL_INTERVAL_MS);
   }
-
   if (!backendPid) {
-    console.error(`FAIL(${mode}): backend never came up. Proxy stderr:\n${stderrBuf}`);
-    try {
-      child.kill();
-    } catch {
-      /* already gone */
-    }
-    return false;
+    return fail('backend never came up');
   }
   console.log(`Backend up (PID=${backendPid}); proxy PID=${child.pid}`);
 
-  // 2. Simulate the MCP client (Claude Code) dying: close the proxy's stdin
+  // 2. Trigger the scenario
   const t0 = Date.now();
-  child.stdin.end();
-
-  // 3. Proxy must exit within budget
-  const proxyResult = await Promise.race([
-    exitInfo,
-    sleep(PROXY_EXIT_BUDGET_MS).then(() => null),
-  ]);
-  if (!proxyResult) {
-    console.error(`FAIL(${mode}): proxy still alive ${PROXY_EXIT_BUDGET_MS}ms after stdin close`);
-    console.error(`Proxy stderr:\n${stderrBuf}`);
-    try {
-      child.kill();
-    } catch {
-      /* already gone */
-    }
-    if (pidAlive(backendPid)) process.kill(backendPid);
-    return false;
+  if (scenario === 'eof') {
+    child.stdin.end(); // MCP client disconnected cleanly
+  } else {
+    child.kill('SIGKILL'); // supervisor hard-killed (TerminateProcess on Windows)
   }
-  const proxyExitMs = proxyResult.at - t0;
-  console.log(
-    `Proxy exited in ${proxyExitMs}ms (code=${proxyResult.code}, signal=${proxyResult.signal})`
-  );
+
+  // 3. eof only: the proxy itself must exit promptly with code 0
+  if (scenario === 'eof') {
+    const proxyResult = await Promise.race([
+      exitInfo,
+      sleep(PROXY_EXIT_BUDGET_MS).then(() => null),
+    ]);
+    if (!proxyResult) {
+      return fail(`proxy still alive ${PROXY_EXIT_BUDGET_MS}ms after stdin close`, backendPid);
+    }
+    if (proxyResult.code !== 0) {
+      return fail(`proxy exit code was ${proxyResult.code}, expected 0`, backendPid);
+    }
+    console.log(
+      `Proxy exited in ${proxyResult.at - t0}ms (code=${proxyResult.code}, signal=${proxyResult.signal})`
+    );
+  } else {
+    await exitInfo; // killed — just wait for the OS to reap it
+    console.log('Proxy hard-killed');
+  }
 
   // 4. Backend must be gone within budget
   let backendExitMs = null;
@@ -132,28 +154,30 @@ async function runMode(mode) {
   }
   if (backendExitMs === null) {
     console.error(
-      `FAIL(${mode}): backend PID ${backendPid} still alive ${BACKEND_EXIT_BUDGET_MS}ms after stdin close`
+      `FAIL(${mode}/${scenario}): backend PID ${backendPid} still alive ${BACKEND_EXIT_BUDGET_MS}ms after trigger`
     );
-    process.kill(backendPid);
+    try {
+      process.kill(backendPid);
+    } catch {
+      /* already gone */
+    }
     return false;
   }
-  console.log(`Backend gone within ${backendExitMs}ms of stdin close`);
-
-  const codeOk = proxyResult.code === 0;
-  if (!codeOk) {
-    console.error(`FAIL(${mode}): proxy exit code was ${proxyResult.code}, expected 0`);
-    return false;
-  }
-
-  console.log(`PASS(${mode}): proxy exit ${proxyExitMs}ms, backend reaped ${backendExitMs}ms`);
+  console.log(`Backend gone within ${backendExitMs}ms of trigger`);
+  console.log(`PASS(${mode}/${scenario}): backend reaped in ${backendExitMs}ms`);
   return true;
 }
 
-const arg = process.argv[2];
-const modes = arg ? [arg] : ['http', 'stdio'];
+const modeArg = process.argv[2];
+const scenarioArg = process.argv[3];
+const modes = modeArg ? [modeArg] : ['http', 'stdio'];
+const scenarios = scenarioArg ? [scenarioArg] : ['eof', 'kill'];
+
 let allPassed = true;
 for (const mode of modes) {
-  if (!(await runMode(mode))) allPassed = false;
+  for (const scenario of scenarios) {
+    if (!(await runScenario(mode, scenario))) allPassed = false;
+  }
 }
 console.log(allPassed ? '\nALL PASSED' : '\nFAILURES — see above');
 process.exit(allPassed ? 0 : 1);
