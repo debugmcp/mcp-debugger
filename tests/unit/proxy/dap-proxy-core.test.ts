@@ -394,6 +394,46 @@ describe('ProxyRunner stdin communication', () => {
       expect.stringContaining('stdin/readline')
     );
   });
+
+  it('shuts down and exits when stdin closes while running', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    runner = new ProxyRunner(deps, logger, { useStdin: true, onMessage: vi.fn() });
+    await runner.start();
+    const shutdownSpy = vi.spyOn(runner.getWorker(), 'shutdown');
+
+    // Simulate parent death: stdin EOF closes the readline interface
+    const rl = (runner as unknown as { rl: { emit: (event: string) => void } }).rl;
+    rl.emit('close');
+    // Allow the async stop() chain and .finally() to run
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('stdin closed')
+    );
+    expect(shutdownSpy).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    exitSpy.mockRestore();
+  });
+
+  it('stop() closing the stdin interface does not exit the process', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    runner = new ProxyRunner(deps, logger, { useStdin: true, onMessage: vi.fn() });
+    await runner.start();
+    await runner.stop();
+
+    // Allow any readline 'close' handler triggered by stop() to run
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('stdin closed')
+    );
+
+    exitSpy.mockRestore();
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -449,6 +489,36 @@ describe('ProxyRunner heartbeat and init timeout', () => {
     expect(fakeSend).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'ipc-heartbeat-tick', counter: 2 })
     );
+
+    exitSpy.mockRestore();
+  });
+
+  it('shuts down and exits(1) when heartbeat tick send fails', async () => {
+    const fakeSend = vi.fn(() => {
+      throw new Error('ERR_IPC_CHANNEL_CLOSED: Channel closed');
+    });
+    (process as any).send = fakeSend;
+    Object.defineProperty(process, 'connected', { value: false, configurable: true });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage: vi.fn() });
+    await runner.start();
+    const shutdownSpy = vi.spyOn(runner.getWorker(), 'shutdown');
+
+    // First tick throws -> runner must warn, shut down, and exit(1)
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('parent unreachable'),
+      expect.any(Error)
+    );
+    expect(shutdownSpy).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    // stop() cleared the interval (and init timeout): no further exits
+    exitSpy.mockClear();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(exitSpy).not.toHaveBeenCalled();
 
     exitSpy.mockRestore();
   });

@@ -23,11 +23,12 @@ function logBootstrapActivity(message) {
 // Bootstrap handlers would race with worker shutdown and call process.exit()
 // before the async auto-detach could complete.
 
-// Set up heartbeat to detect orphaned state
-let lastHeartbeat = Date.now();
-const HEARTBEAT_TIMEOUT = 30000; // 30 seconds
-
- // Check if we're orphaned every 10 seconds
+// Check if we're orphaned every 10 seconds.
+// NOTE: The old one-sided `{type:'heartbeat'}` ping to the parent was removed
+// (issue #123): the parent rejected it as an invalid message and never replied,
+// so on idle sessions it only produced WARN log noise. Proxy liveness is proven
+// by the ProxyRunner's 5s ipc-heartbeat-tick, and a failing tick send triggers
+// self-shutdown there (see dap-proxy-core.ts).
 setInterval(() => {
   // Use container-safe orphan detection (ppid=1 ignored inside containers)
   // Send SIGTERM (not process.exit) so the worker's signal handler fires
@@ -35,25 +36,8 @@ setInterval(() => {
   if (shouldExitAsOrphanFromEnv(process.ppid, process.env)) {
     logBootstrapActivity('Process orphaned (ppid=1 outside container), sending SIGTERM...');
     process.kill(process.pid, 'SIGTERM');
-    return;
-  }
-
-  // Also check if we haven't received any IPC messages in a while
-  if (Date.now() - lastHeartbeat > HEARTBEAT_TIMEOUT && process.send) {
-    try {
-      // Try to ping parent
-      process.send({ type: 'heartbeat', pid: process.pid });
-    } catch {
-      logBootstrapActivity('Cannot communicate with parent, sending SIGTERM...');
-      process.kill(process.pid, 'SIGTERM');
-    }
   }
 }, 10000);
-
-// Update heartbeat on any message from parent
-process.on('message', () => {
-  lastHeartbeat = Date.now();
-});
 
 logBootstrapActivity(`Bootstrap script started. CWD: ${process.cwd()}`);
 
