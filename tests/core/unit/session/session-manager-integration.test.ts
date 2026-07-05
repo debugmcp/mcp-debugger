@@ -51,6 +51,8 @@ describe('SessionManager - Integration Tests', () => {
       
       dependencies.mockProxyManager.simulateEvent('terminated');
       expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);
+      // Natural termination must reap the proxy process (issue #122)
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
     });
 
     it('should handle auto-continue for stopOnEntry=false', async () => {

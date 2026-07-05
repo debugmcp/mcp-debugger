@@ -174,6 +174,8 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('terminated during startup')
       );
+      // Natural termination must reap the proxy process (issue #122)
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
     });
 
     it('should handle exited event during startup', async () => {
@@ -203,6 +205,8 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('exited during startup')
       );
+      // Natural termination must reap the proxy process (issue #122)
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
     });
 
     it('should handle exit event during startup', async () => {

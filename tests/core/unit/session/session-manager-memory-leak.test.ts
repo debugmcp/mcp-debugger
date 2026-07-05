@@ -174,10 +174,14 @@ describe('SessionManager - Memory Leak Prevention', () => {
         (sum, event) => sum + mockProxy.listenerCount(event as string), 0
       );
       expect(totalListeners).toBe(0);
-      
+
       // Session should be in STOPPED state
       const updatedSession = sessionManager.getSession(session.id);
       expect(updatedSession?.state).toBe(SessionState.STOPPED);
+
+      // The proxy process must be reaped, not just dereferenced — if the worker's
+      // self-exit stalls, stop() force-kills it after a timeout (issue #122)
+      expect(mockProxy.stopCalls).toBe(1);
     });
 
     it('should clean up listeners when proxy exits unexpectedly', async () => {
@@ -200,10 +204,14 @@ describe('SessionManager - Memory Leak Prevention', () => {
         (sum, event) => sum + mockProxy.listenerCount(event as string), 0
       );
       expect(totalListeners).toBe(0);
-      
+
       // Session should be in ERROR state
       const updatedSession = sessionManager.getSession(session.id);
       expect(updatedSession?.state).toBe(SessionState.ERROR);
+
+      // 'exit' means the proxy process is already gone — no stop() call expected
+      // (ProxyManager.handleProxyExit already ran its own cleanup)
+      expect(mockProxy.stopCalls).toBe(0);
     });
   });
 
