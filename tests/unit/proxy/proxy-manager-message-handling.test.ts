@@ -407,6 +407,107 @@ describe('ProxyManager Message Handling', () => {
     });
   });
 
+  describe('stop() drains in-flight DAP requests (issue #122 regression)', () => {
+    // Regression for the js-debug container e2e failure: on natural
+    // termination, the DAP 'terminated' event can arrive BEFORE the final
+    // continue/step response. SessionManagerCore.handleTerminated now calls
+    // stop(); without a drain, stop() would set isStopped (dropping the
+    // response already in the IPC pipe) and cancel the pending request,
+    // turning a successful continue into
+    // "Request cancelled during proxy shutdown: continue".
+    function makeStoppableProxyManager() {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const fakeProcess = new EventEmitter() as unknown as IProxyProcess & {
+        sendCommand: ReturnType<typeof vi.fn>;
+        send: ReturnType<typeof vi.fn>;
+        killed: boolean;
+        exitCode: number | null;
+        kill: ReturnType<typeof vi.fn>;
+      };
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      (fakeProcess as any).sendCommand = vi.fn();
+      (fakeProcess as any).killed = false;
+      (fakeProcess as any).exitCode = null;
+      (fakeProcess as any).kill = vi.fn();
+      // stop() sends { cmd: 'terminate' }; the worker then exits
+      (fakeProcess as any).send = vi.fn(() => {
+        setImmediate(() => (fakeProcess as unknown as EventEmitter).emit('exit', 0, null));
+        return true;
+      });
+
+      (proxyManager as any).proxyProcess = fakeProcess;
+      (proxyManager as any).isInitialized = true;
+      (proxyManager as any).sessionId = 'drain-session';
+      (proxyManager as any).dapState = createInitialState('drain-session');
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+
+      return { proxyManager, fakeProcess };
+    }
+
+    it("resolves an in-flight continue whose response races the 'terminated' event, and still stops", async () => {
+      const { proxyManager, fakeProcess } = makeStoppableProxyManager();
+
+      const continuePromise = proxyManager.sendDapRequest('continue', { threadId: 1 });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload = (fakeProcess as any).sendCommand.mock.calls[0][0];
+      expect(payload.dapCommand).toBe('continue');
+
+      // Natural termination: handleTerminated fires stop() while the continue
+      // response is still in the IPC pipe...
+      const stopPromise = proxyManager.stop();
+
+      // ...and the response arrives a tick later, inside the drain window.
+      setImmediate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (proxyManager as any).handleProxyMessage({
+          type: 'dapResponse',
+          sessionId: 'drain-session',
+          requestId: payload.requestId,
+          success: true,
+          response: {
+            type: 'response',
+            seq: 2,
+            request_seq: 1,
+            command: 'continue',
+            success: true
+          }
+        });
+      });
+
+      // The continue must resolve successfully, not reject with
+      // "Request cancelled during proxy shutdown"
+      const response = await continuePromise;
+      expect(response.success).toBe(true);
+
+      // And the proxy still gets reaped
+      await stopPromise;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((fakeProcess as any).send).toHaveBeenCalledWith(
+        expect.objectContaining({ cmd: 'terminate' })
+      );
+    });
+
+    it('still cancels requests that never settle, after the bounded drain', async () => {
+      const { proxyManager } = makeStoppableProxyManager();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).stopDrainTimeoutMs = 50; // keep the test fast
+
+      const hungPromise = proxyManager.sendDapRequest('continue', { threadId: 1 });
+      const stopPromise = proxyManager.stop();
+
+      await expect(hungPromise).rejects.toThrow(/cancelled during proxy shutdown/i);
+      await stopPromise;
+    });
+  });
+
   describe('DAP request handling edge cases', () => {
     it('should handle request when proxy is not running', async () => {
       // Stop the proxy first

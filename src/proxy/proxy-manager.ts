@@ -105,6 +105,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }>();
   private isInitialized = false;
   private isStopped = false;
+  /** Bounded wait for in-flight DAP requests to settle before stop() cancels them. */
+  private stopDrainTimeoutMs = 1000;
   private isDryRun = false;
   private dryRunCompleteReceived = false;
   private dryRunCommandSnapshot?: string;
@@ -286,12 +288,29 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.logger.info(`[ProxyManager] Stopping proxy for session ${this.sessionId}`);
 
+    // Give in-flight DAP requests a bounded window to settle before we stop
+    // processing messages and cancel them. On natural termination the DAP
+    // 'terminated' event often races ahead of the final continue/step
+    // response, which is typically already in the IPC pipe — cancelling
+    // immediately would turn a successful operation into an error
+    // (issue #122 follow-up; observed with js-debug in container e2e).
+    await this.drainPendingDapRequests(this.stopDrainTimeoutMs);
+
+    // The proxy may have exited — or a concurrent stop() may have completed —
+    // while we drained; cleanup() nulls proxyProcess, so re-check before
+    // touching the process handle.
+    const process = this.proxyProcess;
+    if (!process) {
+      this.isStopped = true;
+      this.cleanup();
+      return;
+    }
+
     // Mark as shutting down to stop processing new messages
     this.isStopped = true;
-    const process = this.proxyProcess;
     const sessionIdSnapshot = this.sessionId;
 
-    // Immediately cleanup to prevent "unknown request" warnings
+    // Cleanup (cancels whatever is still pending after the drain)
     this.cleanup();
 
     // Send terminate command if process is still running
@@ -324,6 +343,31 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         resolve();
       }
     });
+  }
+
+  /**
+   * Wait (bounded) for in-flight DAP requests to settle. While draining,
+   * isStopped is still false, so responses already in the IPC pipe are
+   * processed normally and resolve their pending promises — the common case
+   * completes within one poll interval. Requests still pending at the
+   * deadline are cancelled by the caller via cleanup().
+   */
+  private async drainPendingDapRequests(timeoutMs: number, pollIntervalMs = 20): Promise<void> {
+    if (this.pendingDapRequests.size === 0) {
+      return;
+    }
+    this.logger.debug(
+      `[ProxyManager] Draining ${this.pendingDapRequests.size} in-flight DAP request(s) before stop (max ${timeoutMs}ms)`
+    );
+    const deadline = Date.now() + timeoutMs;
+    while (this.pendingDapRequests.size > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    if (this.pendingDapRequests.size > 0) {
+      this.logger.warn(
+        `[ProxyManager] ${this.pendingDapRequests.size} DAP request(s) still pending after ${timeoutMs}ms drain; cancelling`
+      );
+    }
   }
 
   async sendDapRequest<T extends DebugProtocol.Response>(
