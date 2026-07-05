@@ -642,6 +642,52 @@ describe('SSE Command Handler', () => {
       expect(mockExitProcess).not.toHaveBeenCalled();
     });
 
+    it('shuts down gracefully when stdin ends and MCP_EXIT_ON_STDIN_CLOSE=1 (issue #122)', async () => {
+      vi.stubEnv('MCP_EXIT_ON_STDIN_CLOSE', '1');
+
+      const httpServer = {
+        close: vi.fn((cb?: Function) => cb && cb()),
+        on: vi.fn()
+      };
+      const mockListen = vi.fn((_port: number, callback: Function) => {
+        callback();
+        return httpServer;
+      });
+      vi.mocked(express).mockReturnValue({
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        listen: mockListen
+      } as any);
+      process.on = vi.fn() as any;
+
+      const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
+        resume: ReturnType<typeof vi.fn>;
+        emit: (event: string, ...args: unknown[]) => boolean;
+      };
+      (stdin as unknown as { resume: unknown }).resume = vi.fn();
+
+      await handleSSECommand({ port: '3001' }, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        exitProcess: mockExitProcess,
+        stdin
+      });
+
+      expect(stdin.resume).toHaveBeenCalled();
+      stdin.emit('end');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      // Graceful shutdown must stop the shared debug server before exiting.
+      // (`mockServer` is shadowed by the HTTP server mock in this describe, so
+      // fetch the DebugMcpServer instance from the factory's return value.)
+      const sharedDebugServer = mockServerFactory.mock.results[0].value;
+      expect(sharedDebugServer.stop).toHaveBeenCalled();
+      expect(httpServer.close).toHaveBeenCalled();
+
+      vi.unstubAllEnvs();
+    });
+
     it('should handle server start failure', async () => {
       const options = { port: '3001' };
       const error = new Error('Server start failed');
