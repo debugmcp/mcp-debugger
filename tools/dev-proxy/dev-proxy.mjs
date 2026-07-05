@@ -29,6 +29,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { installShutdownHandlers, killChildGracefully } from './shutdown.mjs';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -166,10 +167,13 @@ class BackendManager {
       // Kill any orphan process holding the port from a previous crash
       await this._ensurePortFree();
 
+      // stdin is a pipe + MCP_EXIT_ON_STDIN_CLOSE so the backend can detect
+      // our death (pipe closes) and we can ask it to shut down gracefully
+      // before force-killing (issue #122).
       this.child = spawn(command, args, {
         cwd: PROJECT_ROOT,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, MCP_EXIT_ON_STDIN_CLOSE: '1' },
       });
 
       this.child.stdout.on('data', logBackend);
@@ -435,46 +439,11 @@ class BackendManager {
       return;
     }
 
-    await new Promise((resolve) => {
-      const child = this.child;
-      if (!child || child.exitCode !== null) {
-        this.child = null;
-        resolve();
-        return;
-      }
-
-      const forceKillTimer = setTimeout(() => {
-        try {
-          if (process.platform === 'win32') {
-            // On Windows, use taskkill to force-terminate the process (no /T to avoid killing unrelated trees)
-            execSync(`taskkill /pid ${child.pid} /F`, { stdio: 'ignore' });
-          } else {
-            child.kill('SIGKILL');
-          }
-        } catch {
-          // Already dead
-        }
-      }, KILL_TIMEOUT_MS);
-
-      child.once('exit', () => {
-        clearTimeout(forceKillTimer);
-        this.child = null;
-        resolve();
-      });
-
-      // Graceful kill (on Windows, use /F immediately — WM_CLOSE is ignored by console Node processes)
-      try {
-        if (process.platform === 'win32') {
-          execSync(`taskkill /pid ${child.pid} /F`, { stdio: 'ignore' });
-        } else {
-          child.kill('SIGTERM');
-        }
-      } catch {
-        clearTimeout(forceKillTimer);
-        this.child = null;
-        resolve();
-      }
-    });
+    // Graceful first (stdin close on Windows, SIGTERM elsewhere) so the
+    // backend can run its gracefulShutdown/closeAllSessions; force-kill
+    // after KILL_TIMEOUT_MS (issue #122).
+    await killChildGracefully(this.child, { log, killTimeoutMs: KILL_TIMEOUT_MS });
+    this.child = null;
 
     // After killing the CLI process, also stop any Docker container on our port
     await this._killDockerContainer();
@@ -760,6 +729,14 @@ async function main() {
 
   log(`Proxy server connected to stdio (backend transport: ${BACKEND_TRANSPORT})`);
 
+  // Exit when the MCP client goes away — stdin EOF/close/error, protocol-level
+  // server close, or SIGINT/SIGTERM — stopping the backend child on the way out.
+  // Installed before backend.start() so a client that dies during a slow backend
+  // startup still triggers shutdown (backend.stop() handles the 'starting' state).
+  // Without this, on Windows both the proxy and its backend outlive a dead
+  // Claude Code forever (issue #122).
+  installShutdownHandlers({ stdin: process.stdin, backend, server, log });
+
   // Start the backend automatically
   try {
     await backend.start();
@@ -769,19 +746,6 @@ async function main() {
     log(`Initial backend start failed: ${err.message}`);
     log('Dev tools are still available — use dev_restart_debugger to retry');
   }
-
-  // Handle graceful shutdown
-  process.on('SIGINT', async () => {
-    log('SIGINT received, shutting down...');
-    await backend.stop();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', async () => {
-    log('SIGTERM received, shutting down...');
-    await backend.stop();
-    process.exit(0);
-  });
 }
 
 main().catch((err) => {

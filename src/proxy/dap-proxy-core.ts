@@ -99,7 +99,17 @@ export class ProxyRunner {
               counter: this.heartbeatTickCounter
             });
           } catch (tickError) {
-            this.logger.warn('[ProxyRunner] Failed to send heartbeat tick:', tickError);
+            // process.send throws only when the IPC channel is closed (the
+            // payload is static, so serialization cannot fail) — the parent is
+            // unreachable. Shut down instead of lingering. This replaces the
+            // self-SIGTERM the old proxy-bootstrap heartbeat performed (#123).
+            this.logger.warn(
+              '[ProxyRunner] Failed to send heartbeat tick — parent unreachable, shutting down:',
+              tickError
+            );
+            this.stop().finally(() => {
+              process.exit(1);
+            });
           }
         }, 5000);
       }
@@ -127,6 +137,11 @@ export class ProxyRunner {
     if (!this.isRunning) {
       return;
     }
+
+    // Mark as stopped immediately so channel-close handlers triggered by the
+    // teardown below (e.g. readline 'close' when we close the interface) do
+    // not treat it as a parent death and exit the process.
+    this.isRunning = false;
 
     this.logger.info('[ProxyRunner] Stopping proxy runner...');
 
@@ -162,7 +177,6 @@ export class ProxyRunner {
       this.rl.close();
     }
 
-    this.isRunning = false;
     this.logger.info('[ProxyRunner] Stopped');
   }
 
@@ -312,8 +326,22 @@ export class ProxyRunner {
       output: process.stdout,
       terminal: false
     });
-    
+
     this.rl.on('line', (line: string) => processMessage(line));
+
+    // stdin closing (EOF) means the parent is gone — mirror the IPC
+    // 'disconnect' handling so stdin-mode proxies do not linger as orphans.
+    // Guarded by isRunning: a normal stop() closes the interface after
+    // marking the runner stopped, which must not re-enter or exit.
+    this.rl.on('close', () => {
+      if (!this.isRunning) {
+        return;
+      }
+      this.logger.warn('[ProxyRunner] stdin closed — parent process gone, shutting down');
+      this.stop().finally(() => {
+        process.exit(0);
+      });
+    });
   }
 
   /**
