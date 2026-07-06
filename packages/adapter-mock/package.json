@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-mock",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "Mock debug adapter for testing MCP debugger",
   "type": "module",
   "main": "dist/index.js",
@@ -28,7 +28,7 @@
     "node": ">=22.0.0"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.21.0"
+    "@debugmcp/shared": "0.22.0"
   },
   "repository": {
     "type": "git",

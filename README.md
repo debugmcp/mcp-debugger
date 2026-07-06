@@ -17,7 +17,7 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across seven languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
 
-> 🆕 **v0.21.0** — the minimum runtime is now **Node.js 22+** (Node 20 reached end-of-life). See the [CHANGELOG](./CHANGELOG.md) for the full release history.
+> 🆕 **v0.22.0** — **Ruby debugging support** lands (launch + attach via `rdbg`, including remote attach to containers and Kubernetes pods), alongside JavaScript attach-mode fixes and session/proxy lifecycle hardening. See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
 ## ✨ Key Features
 
@@ -87,7 +87,7 @@ claude mcp list
 docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
-> ⚠️ The Docker image ships Python, JavaScript, Go, Java, and .NET adapters. Rust debugging requires the local, SSE, or packed deployments where the adapter runs next to your toolchain. Note: adapters are loaded dynamically at runtime — only those whose toolchain is installed and detected will be reported as available by `list_supported_languages`.
+> ⚠️ The Docker image bundles the toolchains for **Python, JavaScript, and Java** debugging (Rust, Go, and .NET are disabled inside the container image, and the image does not include a Ruby runtime). For those languages, run the server via npm/npx next to your local toolchain — or, for Ruby, use remote attach to a `rdbg --open` process inside the container (see the [Ruby guide](./docs/ruby/README.md)). Adapters load dynamically at runtime — `list_supported_languages` reports only those whose toolchain is detected.
 
 ### Using npm
 
@@ -159,15 +159,13 @@ Version 0.10.0 introduces a clean adapter pattern that separates language-agnost
                     ┌──────────────┐      ┌─────────────────┐
                     │ ProxyManager │◀─────│ Language Adapter│
                     └──────────────┘      └─────────────────┘
-                                                   │
-                          ┌──────────────┴──────────────────────────────────────────┐
-                          │                                                          │
-              ┌───────────┼───────────┬───────────┬───────────┬───────────┐          │
-              │           │           │           │           │           │          │
-        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
-        │Python    ││JavaScript││Rust      ││Go        ││Java      ││Dotnet    ││Mock      │
-        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
-        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────���───┘
+                                                  │
+              ┌───────────┬───────────┬───────────┼───────────┬───────────┬───────────┬───────────┐
+              │           │           │           │           │           │           │           │
+        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
+        │Python    ││Ruby      ││JavaScript││Rust      ││Go        ││Java      ││.NET      ││Mock      │
+        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
+        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
 ```
 
 ### Adding Language Support
@@ -312,6 +310,7 @@ Then get the local variables:
 - 🟨 [JavaScript Debugging Guide](./docs/javascript/README.md) – JavaScript/TypeScript features
 - 🐹 [Go Debugging Guide](./docs/go/README.md) – Go debugging with Delve
 - ☕ [Java Debugging Guide](./docs/java/README.md) – Java debugging with JDI bridge
+- 🔷 [.NET Debugging Guide](./docs/dotnet/README.md) – .NET/C# debugging with netcoredbg
 - [Rust Debugging on Windows](docs/rust-debugging-windows.md) - Toolchain requirements and troubleshooting
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
@@ -379,7 +378,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.21.0 with seven language adapters and polished multi-language distribution
+- ✅ **Production Ready**: v0.22.0 with seven language adapters and polished multi-language distribution
 - ✅ **Clean architecture** with a dynamic adapter pattern
 - ✅ **Python · Ruby · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)

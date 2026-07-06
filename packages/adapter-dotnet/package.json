@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-dotnet",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": ".NET/C# debug adapter for MCP debugger using netcoredbg",
   "type": "module",
   "main": "dist/index.js",
@@ -31,7 +31,7 @@
     "node": ">=22.0.0"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.21.0"
+    "@debugmcp/shared": "0.22.0"
   },
   "repository": {
     "type": "git",
