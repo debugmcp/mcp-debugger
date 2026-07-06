@@ -103,5 +103,7 @@ describe('SessionManager - State Machine Integrity', () => {
     // Should transition to ERROR state
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.ERROR);
     expect(sessionManager.getSession(session.id)?.proxyManager).toBeUndefined();
+    // A proxy in error state must be reaped, not just dereferenced (issue #122)
+    expect(dependencies.mockProxyManager.stopCalls).toBe(1);
   });
 });

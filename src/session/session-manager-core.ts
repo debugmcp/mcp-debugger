@@ -334,10 +334,21 @@ export abstract class SessionManagerCore {
       });
       
       this._updateSessionState(session, SessionState.STOPPED);
-      
+
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;
+
+      // Reap the proxy process instead of just dropping the reference. The
+      // worker normally self-exits after 'terminated', but if its shutdown
+      // stalls (e.g. a hung adapter process) nothing else reaps it — on
+      // Windows especially, orphans accumulate (issue #122). stop() is
+      // idempotent against an already-exiting worker and force-kills after 5s.
+      proxyManager.stop().catch((err) => {
+        this.logger.warn(
+          `[SessionManager] Error stopping proxy after 'terminated' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
     };
     proxyManager.on('terminated', handleTerminated);
     handlers.set('terminated', handleTerminated);
@@ -351,6 +362,13 @@ export abstract class SessionManagerCore {
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;
+
+      // Reap the proxy process (see handleTerminated for rationale, issue #122)
+      proxyManager.stop().catch((err) => {
+        this.logger.warn(
+          `[SessionManager] Error stopping proxy after 'exited' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
     };
     proxyManager.on('exited', handleExited);
     handlers.set('exited', handleExited);
@@ -389,6 +407,13 @@ export abstract class SessionManagerCore {
       // Clean up listeners since proxy is in error state
       this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;
+
+      // Reap the proxy process (see handleTerminated for rationale, issue #122)
+      proxyManager.stop().catch((err) => {
+        this.logger.warn(
+          `[SessionManager] Error stopping proxy after 'error' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
     };
     proxyManager.on('error', handleError);
     handlers.set('error', handleError);
