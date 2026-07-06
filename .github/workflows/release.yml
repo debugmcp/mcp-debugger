@@ -9,7 +9,7 @@ on:
       ref:
         description: 'Git ref (tag or branch) to release from'
         required: true
-        default: 'refs/tags/v0.21.0'
+        default: 'refs/tags/v0.22.0'
 
 permissions: {}
 
@@ -61,6 +61,14 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '21'
+
+    - name: Setup Ruby
+      uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74  # v1.314.0
+      with:
+        ruby-version: '3.3'
+
+    - name: Verify rdbg (bundled debug gem)
+      run: rdbg --version
 
     - name: Sanity versions
       run: |
@@ -249,6 +257,11 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '21'
+
+    - name: Setup Ruby
+      uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74  # v1.314.0
+      with:
+        ruby-version: '3.3'
 
     - name: Install dependencies
       run: pnpm install --frozen-lockfile --ignore-scripts

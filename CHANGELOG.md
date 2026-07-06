@@ -7,15 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-07-06
+
 ### Added
 - **Ruby debugging support** – launch and attach via `rdbg` (debug gem) DAP, including remote attach to containers and Kubernetes pods through port forwarding; conditional breakpoints, locals, repl-context expression evaluation, detach/re-attach (adapted from PR #88, contributed by [@Poyraxx](https://github.com/Poyraxx))
 - **Direct-connect attach** – adapter policies can now return a `connect`-mode spawn config to attach straight to an already-listening DAP server without spawning an adapter process; policy selection is driven by the session language via a single shared `getPolicyForLanguage()` mapping instead of adapter-command sniffing
 - **Ruby documentation** – `docs/ruby/README.md` user guide with verified launch/attach flows and Docker/Kubernetes remote-attach walkthroughs (`examples/ruby/remote-attach/`)
 
 ### Fixed
+- **JavaScript attach mode** – establish the js-debug child session when attaching, so breakpoints, stepping, and inspection work for attached Node.js processes (#131, fixes #124)
+- **Truthful attach failures** – `attach_to_process` now reports adapter/connection errors instead of returning an empty success (#129)
+- **`pause_execution` state** – reports the correct session state instead of a stale one (#119)
+- **Proxy lifecycle** – the per-session proxy process is stopped when a debuggee terminates naturally, eliminating leaked proxy processes (#127)
+- **Server orphan self-defense** – a stdin watchdog shuts the server down when its MCP client disappears, and backend shutdown is graceful across stdio/http/sse commands (#130)
+- **Proxy bootstrap heartbeat** – removed a one-sided heartbeat that could kill healthy proxies during slow startups (#126, fixes #123)
+- **Logging** – per-process log files prevent multi-process rotation races, and a rotation-failure latch stops runaway retry loops (#128, fixes #121)
+- **Python interpreter validation** – a configured `pythonPath` is validated for debugpy availability up front, with a clear error instead of a hang (#107, fixes #106)
+- **Java adapter vendoring** – honors `SKIP_ADAPTER_VENDOR` and skips gracefully on a `javac` older than JDK 21 (#116)
 - Attach sessions no longer apply host-side file existence checks to breakpoint paths — attach targets may run on a remote filesystem (container, pod, other machine)
 - `test:unit` now actually runs the per-adapter unit suites on Windows (the `tests/adapters/*/unit` glob never expanded under cmd.exe)
 - CLI bundle prepare-pack workspace list updated for new adapter packages
+
+### Changed
+- Test suite parallelized and hardened via Vitest projects — unit suite runtime dropped from ~12 minutes to ~10 seconds (#110)
+- README refreshed with current capabilities and language matrix (#87)
+
+### Dependencies
+- Bumped `commander` 14 → 15. The CLI surface is unchanged; `commander` is bundled into the published CLI, so end-user installs are unaffected. (#92)
 
 ## [0.21.0] - 2026-05-30
 

@@ -24,6 +24,7 @@ ROOT_VER=$(node -e "console.log(require('./package.json').version)")
 SHARED_VER=$(node -e "console.log(require('./packages/shared/package.json').version)")
 MOCK_VER=$(node -e "console.log(require('./packages/adapter-mock/package.json').version)")
 PYTHON_VER=$(node -e "console.log(require('./packages/adapter-python/package.json').version)")
+RUBY_VER=$(node -e "console.log(require('./packages/adapter-ruby/package.json').version)")
 GO_VER=$(node -e "console.log(require('./packages/adapter-go/package.json').version)")
 JAVA_VER=$(node -e "console.log(require('./packages/adapter-java/package.json').version)")
 JS_VER=$(node -e "console.log(require('./packages/adapter-javascript/package.json').version)")
@@ -35,6 +36,7 @@ echo "  Root:               $ROOT_VER"
 echo "  shared:             $SHARED_VER"
 echo "  adapter-mock:       $MOCK_VER"
 echo "  adapter-python:     $PYTHON_VER"
+echo "  adapter-ruby:       $RUBY_VER"
 echo "  adapter-go:         $GO_VER"
 echo "  adapter-java:       $JAVA_VER"
 echo "  adapter-javascript: $JS_VER"
@@ -42,7 +44,7 @@ echo "  adapter-rust:       $RUST_VER"
 echo "  adapter-dotnet:     $DOTNET_VER"
 echo "  mcp-debugger:       $CLI_VER"
 
-if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$GO_VER" && "$ROOT_VER" == "$JAVA_VER" && "$ROOT_VER" == "$JS_VER" && "$ROOT_VER" == "$RUST_VER" && "$ROOT_VER" == "$DOTNET_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
+if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$RUBY_VER" && "$ROOT_VER" == "$GO_VER" && "$ROOT_VER" == "$JAVA_VER" && "$ROOT_VER" == "$JS_VER" && "$ROOT_VER" == "$RUST_VER" && "$ROOT_VER" == "$DOTNET_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
   pass "All package versions match ($ROOT_VER)"
 else
   fail "Package versions are inconsistent"
@@ -84,7 +86,7 @@ fi
 # --- 5. npm pack dry-run and provenance readiness ---
 echo ""
 echo "── npm pack dry-run ──"
-PUBLISHED_PKGS=("shared" "adapter-mock" "adapter-python" "mcp-debugger")
+PUBLISHED_PKGS=("shared" "adapter-mock" "adapter-python" "adapter-ruby" "mcp-debugger")
 for pkg_dir in "${PUBLISHED_PKGS[@]}"; do
   pkg_name=$(node -e "console.log(require('./packages/$pkg_dir/package.json').name)")
   if npm pack --dry-run -w "$pkg_name" > /dev/null 2>&1; then
@@ -156,7 +158,7 @@ else
 fi
 
 # Check if packages already exist at this version (would be skipped during publish)
-for pkg in @debugmcp/shared @debugmcp/adapter-mock @debugmcp/adapter-python @debugmcp/mcp-debugger; do
+for pkg in @debugmcp/shared @debugmcp/adapter-mock @debugmcp/adapter-python @debugmcp/adapter-ruby @debugmcp/mcp-debugger; do
   if npm view "${pkg}@${ROOT_VER}" version > /dev/null 2>&1; then
     warn "${pkg}@${ROOT_VER} already published — will be skipped"
   fi
