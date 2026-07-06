@@ -6,6 +6,7 @@ import type { Logger as WinstonLoggerType } from 'winston';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { SafeFileTransport } from './safe-file-transport.js';
 
 /**
  * Logger configuration options.
@@ -18,6 +19,95 @@ export interface LoggerOptions {
 }
 
 let defaultLogger: WinstonLoggerType | null = null;
+
+/**
+ * Default log files are per-process (issue #121): multiple server processes
+ * sharing one rotating winston file is unsupported by winston and busy-spins
+ * forever on Windows, where renaming a file another process holds open fails.
+ * Container mode keeps the fixed `/app/logs/debug-mcp-server.log` name — a
+ * container runs a single server process and log-collection tooling depends
+ * on that exact path.
+ */
+const DEFAULT_LOG_BASENAME = `debug-mcp-server-${process.pid}.log`;
+
+/** Matches per-pid default log files (including their rotated `<name>N.log` siblings). */
+const PID_LOG_PATTERN = /^debug-mcp-server-(\d+)\.log$/;
+
+/** Delete leftover per-pid logs from dead processes after this long. */
+const STALE_LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * One shared File transport per resolved log path. Several loggers are created
+ * per process (CLI, DI container, module-level fallbacks); without sharing,
+ * each would hold its own file handle and its own rotation byte-counter on the
+ * same file — the cap is then never enforced correctly, and on Windows the
+ * extra open handles make rotation renames fail (issue #121).
+ * Note: winston supports attaching one transport to many loggers; per-logger
+ * levels still filter before the transport. Nothing in src/ calls
+ * logger.close(), which would close the shared transport for all loggers.
+ */
+const fileTransportCache = new Map<string, winston.transport>();
+
+let staleLogCleanupDone = false;
+
+/**
+ * Best-effort check whether a pid belongs to a live process.
+ * EPERM means "alive but not ours" — treat as alive.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Delete per-pid default log files left behind by dead processes.
+ *
+ * Guard rails:
+ * - Only files matching the per-pid naming pattern are considered; the legacy
+ *   fixed `debug-mcp-server.log` and `proxy-<sessionId>.log` files are never touched.
+ * - Files belonging to this process or any live pid are skipped, even when
+ *   old: an idle-but-alive server can have a stale mtime, and on POSIX
+ *   unlinking its open file would silently discard all future writes.
+ * - Everything is best-effort; failures are ignored.
+ */
+export function cleanupStaleLogFiles(
+  logDir: string,
+  opts: { maxAgeMs?: number; now?: number } = {}
+): void {
+  const maxAgeMs = opts.maxAgeMs ?? STALE_LOG_MAX_AGE_MS;
+  const now = opts.now ?? Date.now();
+
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(logDir);
+  } catch {
+    return;
+  }
+
+  for (const name of entries) {
+    const match = PID_LOG_PATTERN.exec(name);
+    if (!match) {
+      continue;
+    }
+    const pid = Number(match[1]);
+    if (pid === process.pid || isProcessAlive(pid)) {
+      continue;
+    }
+    const fullPath = path.join(logDir, name);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (now - stat.mtimeMs >= maxAgeMs) {
+        fs.unlinkSync(fullPath);
+      }
+    } catch {
+      // Best-effort cleanup; never let it interfere with logger creation.
+    }
+  }
+}
 
 /**
  * Create a winston logger with the given namespace.
@@ -58,20 +148,22 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     if (import.meta.url) {
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = path.dirname(__filename);
-      projectRootDefaultLogPath = path.resolve(__dirname, '../../logs/debug-mcp-server.log');
+      projectRootDefaultLogPath = path.resolve(__dirname, '../../logs', DEFAULT_LOG_BASENAME);
     } else {
       // Fallback for test environments
-      projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs/debug-mcp-server.log');
+      projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs', DEFAULT_LOG_BASENAME);
     }
   } catch {
     // Fallback if import.meta.url fails
-    projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs/debug-mcp-server.log');
+    projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs', DEFAULT_LOG_BASENAME);
   }
-  
-  // In container runtime, centralize logs under /app/logs for easier collection
+
+  // In container runtime, centralize logs under /app/logs for easier collection.
+  // Single process per container, so the fixed (non-pid) name is safe there.
   if (process.env.MCP_CONTAINER === 'true') {
     projectRootDefaultLogPath = '/app/logs/debug-mcp-server.log';
   }
+  const usingDefaultHostPath = !options.file && process.env.MCP_CONTAINER !== 'true';
   const logFilePath = options.file || projectRootDefaultLogPath;
 
   try {
@@ -86,9 +178,16 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     }
   }
 
+  if (usingDefaultHostPath && !staleLogCleanupDone) {
+    staleLogCleanupDone = true;
+    cleanupStaleLogFiles(path.dirname(logFilePath));
+  }
+
   try {
-    transports.push(
-      new winston.transports.File({
+    const cacheKey = path.resolve(logFilePath);
+    let fileTransport = fileTransportCache.get(cacheKey);
+    if (!fileTransport) {
+      fileTransport = new SafeFileTransport({
         filename: logFilePath,
         maxsize: 50 * 1024 * 1024,  // 50 MB per file
         maxFiles: 3,                 // Keep 3 rotated files (150 MB max)
@@ -97,8 +196,10 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
           winston.format.timestamp(),
           winston.format.json()
         )
-      })
-    );
+      });
+      fileTransportCache.set(cacheKey, fileTransport);
+    }
+    transports.push(fileTransport);
   } catch (fileTransportError) {
     // When console output is silenced we must not write to console as it corrupts transports
     if (!isConsoleSilenced) {

@@ -59,6 +59,23 @@ export interface RedefineClassesResult {
  * Debug operations functionality for session management
  */
 export abstract class SessionManagerOperations extends SessionManagerData {
+  /**
+   * Attach verification window: after an attach handshake completes, DAP
+   * 'threads' is polled until the debugger reports at least one thread.
+   * If the window elapses without any threads, the attach is reported as a
+   * failure instead of a false "paused" success (issue #124).
+   * Protected so tests can shrink the window.
+   */
+  protected attachVerifyTimeoutMs = 5000;
+  protected attachVerifyIntervalMs = 250;
+
+  /**
+   * How long to wait for the 'stopped' event after a post-attach pause
+   * (policies with getAttachBehavior().pauseAfterAttach) before reporting
+   * PAUSED anyway with a warning. Protected so tests can shrink the window.
+   */
+  protected attachPauseStopTimeoutMs = 5000;
+
   protected async startProxyManager(
     session: ManagedSession,
     scriptPath: string,
@@ -1329,6 +1346,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
 
     const response = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+    // A failed DAP response must not be flattened into an empty-but-successful
+    // thread list (issue #124): propagate the failure to the caller.
+    if (response?.success === false) {
+      throw new Error(response.message || `DAP 'threads' request failed`);
+    }
     return (response?.body?.threads ?? []).map(t => ({ id: t.id, name: t.name }));
   }
 
@@ -1578,7 +1600,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         __attachMode: true  // Internal flag to signal attach mode
       };
 
-      await this.startProxyManager(
+      const attachConfigData = await this.startProxyManager(
         session,
         placeholderPath,
         undefined,
@@ -1586,49 +1608,171 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         false
       );
 
+      // Perform language-specific handshake if required, mirroring
+      // startDebugging. For js-debug the whole DAP sequence — initialize,
+      // configurationDone and the DAP 'attach' request itself — is driven
+      // here because the proxy worker skips its built-in attach flow for
+      // command-queueing policies. Policies without performHandshake are
+      // untouched: their attach is performed by the proxy worker.
+      const policy = this.selectPolicy(session.language);
+      if (policy.performHandshake) {
+        try {
+          await policy.performHandshake({
+            proxyManager: session.proxyManager,
+            sessionId: session.id,
+            dapLaunchArgs: attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
+            scriptPath: placeholderPath,
+            scriptArgs: undefined,
+            breakpoints: session.breakpoints,
+            launchConfig: attachConfigData
+          });
+        } catch (handshakeErr) {
+          this.logger.warn(
+            `[SessionManager] Language handshake for attach returned with warning/error: ${
+              handshakeErr instanceof Error ? handshakeErr.message : String(handshakeErr)
+            }`
+          );
+        }
+      }
+
       // Set session state based on stopOnEntry
       let finalState = session.state;
 
       if (attachConfig.stopOnEntry !== false) {
-        this._updateSessionState(session, SessionState.PAUSED);
-        finalState = SessionState.PAUSED;
+        // Verify the attach actually produced a debuggable target before
+        // reporting PAUSED: poll DAP 'threads' until the debugger reports at
+        // least one thread. A debugger that cannot enumerate any threads after
+        // attach is not usable — reporting success would be a lie (issue #124:
+        // JS attach reported success + "paused" while the js-debug child
+        // session never connected to the target).
+        if (!session.proxyManager) {
+          throw new Error('Proxy manager is not available after attach initialization');
+        }
+        const proxyManager = session.proxyManager;
 
-        if (session.proxyManager) {
-          // Discover the actual main thread via DAP threads request instead of hardcoding threadId=1
-          let discoveredThreadId = 1;
-          try {
-            const threadsResponse = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
-            const threads = threadsResponse?.body?.threads;
-            if (threads && threads.length > 0) {
-              // Prefer a thread named "main" (common in JVM debugging)
-              const mainThread = threads.find(t => t.name === 'main');
-              discoveredThreadId = mainThread ? mainThread.id : threads[0].id;
-              this.logger.info(`[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${mainThread?.name || threads[0].name})`);
-            } else {
-              this.logger.warn(`[SessionManager] No threads returned by adapter, falling back to threadId=1`);
-            }
-          } catch (err) {
-            this.logger.warn(`[SessionManager] Failed to discover threads for attach mode, falling back to threadId=1: ${err instanceof Error ? err.message : String(err)}`);
+        const verifyTimeoutMs = this.attachVerifyTimeoutMs;
+        const pollIntervalMs = this.attachVerifyIntervalMs;
+        const deadline = Date.now() + verifyTimeoutMs;
+
+        let threads: DebugProtocol.Thread[] | undefined;
+        let lastFailure = 'no threads response received';
+
+        const requestThreads = async (): Promise<void> => {
+          const remainingMs = Math.max(deadline - Date.now(), 1);
+          const threadsResponse = await this.sendThreadsRequestBounded(proxyManager, remainingMs);
+          if (threadsResponse?.success === false) {
+            lastFailure = threadsResponse.message || `'threads' request failed`;
+            return;
           }
-          session.proxyManager.setCurrentThreadId(discoveredThreadId);
-          this.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
+          const reported = threadsResponse?.body?.threads;
+          if (Array.isArray(reported) && reported.length > 0) {
+            threads = reported;
+          } else {
+            lastFailure = 'debugger reported zero threads';
+          }
+        };
 
-          // Some debuggers (rdbg) do not suspend a running target on attach;
-          // issue an explicit pause so the PAUSED state we report is real.
-          const attachBehavior = this.selectPolicy(session.language).getAttachBehavior?.();
-          if (attachBehavior?.pauseAfterAttach) {
-            try {
-              await session.proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
-              this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
-            } catch (err) {
-              // Already stopped (e.g. target was started suspended) — fine.
-              this.logger.info(
-                `[SessionManager] Post-attach pause not needed/accepted: ${err instanceof Error ? err.message : String(err)}`
-              );
-            }
+        // First discovery attempt.
+        try {
+          await requestThreads();
+        } catch (err) {
+          lastFailure = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`[SessionManager] Initial thread discovery for attach failed: ${lastFailure}`);
+        }
+
+        // Retry until the deadline if the debugger has not reported threads yet.
+        while (!threads && Date.now() < deadline) {
+          const sleepMs = Math.min(pollIntervalMs, Math.max(deadline - Date.now(), 1));
+          await new Promise((resolve) => setTimeout(resolve, sleepMs));
+          if (Date.now() >= deadline) {
+            break;
+          }
+          try {
+            await requestThreads();
+          } catch (err) {
+            lastFailure = err instanceof Error ? err.message : String(err);
           }
         }
 
+        if (!threads) {
+          const reason = `Attach did not become debuggable: no threads reported within ${verifyTimeoutMs}ms (last failure: ${lastFailure})`;
+          this.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
+          // Tear down the proxy using the same mechanics as closeSession, but
+          // keep the session record so the failure is inspectable as ERROR.
+          try {
+            this.cleanupProxyEventHandlers(session, proxyManager);
+          } catch (cleanupError) {
+            this.logger.error(`[SessionManager] Error during listener cleanup for failed attach:`, cleanupError);
+          }
+          try {
+            await proxyManager.stop();
+          } catch (stopError) {
+            this.logger.error(`[SessionManager] Error stopping proxy for failed attach:`, stopError);
+          } finally {
+            session.proxyManager = undefined;
+          }
+          throw new Error(reason);
+        }
+
+        // Prefer a thread named "main" (common in JVM debugging)
+        const mainThread = threads.find(t => t.name === 'main');
+        const discoveredThreadId = mainThread ? mainThread.id : threads[0].id;
+        this.logger.info(`[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${mainThread?.name || threads[0].name})`);
+        proxyManager.setCurrentThreadId(discoveredThreadId);
+        this.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
+
+        // Some debuggers (rdbg; js-debug attaches with continueOnAttach) do
+        // not suspend a running target on attach; issue an explicit pause so
+        // the PAUSED state we report is real, and wait for the stop to be
+        // observed before reporting it. Sent after thread verification so it
+        // reaches the debuggee-owning session (for js-debug the pause is
+        // routed to the child session, which exists once threads are
+        // reported). A rejected pause means the target is already stopped
+        // (e.g. started suspended) — fine, no stop event will follow.
+        const attachBehavior = this.selectPolicy(session.language).getAttachBehavior?.();
+        if (attachBehavior?.pauseAfterAttach) {
+          let stopSettled = false;
+          let stopTimer: ReturnType<typeof setTimeout> | undefined;
+          let onStopped: (() => void) | undefined;
+          const stoppedSeen = new Promise<boolean>((resolve) => {
+            onStopped = () => {
+              if (!stopSettled) {
+                stopSettled = true;
+                if (stopTimer) clearTimeout(stopTimer);
+                resolve(true);
+              }
+            };
+            stopTimer = setTimeout(() => {
+              if (!stopSettled) {
+                stopSettled = true;
+                resolve(false);
+              }
+            }, this.attachPauseStopTimeoutMs);
+            proxyManager.once('stopped', onStopped);
+          });
+          try {
+            await proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
+            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
+            const stopObserved = await stoppedSeen;
+            if (!stopObserved) {
+              this.logger.warn(
+                `[SessionManager] No 'stopped' event within ${this.attachPauseStopTimeoutMs}ms after post-attach pause; reported state may lag the engine`
+              );
+            }
+          } catch (err) {
+            // Already stopped (e.g. target was started suspended) — fine.
+            this.logger.info(
+              `[SessionManager] Post-attach pause not needed/accepted: ${err instanceof Error ? err.message : String(err)}`
+            );
+          } finally {
+            stopSettled = true;
+            if (stopTimer) clearTimeout(stopTimer);
+            if (onStopped) proxyManager.removeListener('stopped', onStopped);
+          }
+        }
+
+        this._updateSessionState(session, SessionState.PAUSED);
+        finalState = SessionState.PAUSED;
         this.logger.info(`[SessionManager] Set session ${sessionId} to PAUSED after attach (stopOnEntry=${attachConfig.stopOnEntry})`);
       } else {
         // JVM is already running (suspend=n), set RUNNING state
@@ -1657,6 +1801,33 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         state: SessionState.ERROR,
         error: `Failed to attach: ${message}`
       };
+    }
+  }
+
+  /**
+   * Send a DAP 'threads' request bounded by a timeout so a hung request
+   * cannot stall attach verification past its deadline. The underlying
+   * request keeps its own lifecycle; only the wait here is bounded.
+   */
+  private async sendThreadsRequestBounded(
+    proxyManager: NonNullable<ManagedSession['proxyManager']>,
+    timeoutMs: number
+  ): Promise<DebugProtocol.ThreadsResponse | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {}),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`'threads' request did not respond within ${timeoutMs}ms`)),
+            timeoutMs
+          );
+        })
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
     }
   }
 

@@ -12,6 +12,8 @@ export interface StdioCommandDependencies {
   logger: WinstonLoggerType;
   serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
   exitProcess?: (code: number) => void;
+  /** Injectable stdin for tests; defaults to process.stdin. */
+  stdin?: NodeJS.ReadStream;
 }
 
 export async function handleStdioCommand(
@@ -64,12 +66,23 @@ export async function handleStdioCommand(
     };
     
     // Keep the process alive
-    process.stdin.resume();
+    const stdin = dependencies.stdin ?? process.stdin;
+    stdin.resume();
 
-    // In containerized stdio mode, stdin may close unexpectedly.
-    // Do not exit on stdin end; rely on transport close or signals for shutdown.
-    process.stdin.on('end', () => {
-      logger.warn('[MCP] Stdin ended; ignoring in stdio mode and waiting for transport close or signal.');
+    // Stdin EOF means the MCP client is gone — exit so we don't leak as an
+    // orphan (issue #122; on Windows a dying parent delivers no signal, and
+    // the SDK transport never notices EOF).
+    // Exception: container mode (MCP_CONTAINER=true), where stdin may close
+    // unexpectedly in detached `docker run` setups and the server must stay
+    // alive; rely on transport close or signals there (see c251b3ff).
+    stdin.on('end', () => {
+      if (process.env.MCP_CONTAINER === 'true') {
+        logger.warn('[MCP] Stdin ended; ignoring in container mode and waiting for transport close or signal.');
+        return;
+      }
+      logger.warn('[MCP] Stdin ended; MCP client disconnected — exiting.');
+      try { clearInterval(keepAlive); } catch { /* already cleared */ }
+      exitProcess(0);
     });
 
     // Add robust exit/signal diagnostics (logged to file; console output is silenced for protocol safety)

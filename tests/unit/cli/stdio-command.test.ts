@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
 import { handleStdioCommand } from '../../../src/cli/stdio-command.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
@@ -146,5 +147,60 @@ describe('STDIO Command Handler', () => {
 
     // Verify process exited with code 1
     expect(mockExitProcess).toHaveBeenCalledWith(1);
+  });
+
+  describe('stdin EOF handling (issue #122)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function makeFakeStdin() {
+      const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
+        resume: ReturnType<typeof vi.fn>;
+        emit: (event: string, ...args: unknown[]) => boolean;
+      };
+      (stdin as unknown as { resume: unknown }).resume = vi.fn();
+      return stdin;
+    }
+
+    it('exits 0 when stdin ends in host mode (MCP client disconnected)', async () => {
+      const stdin = makeFakeStdin();
+
+      await handleStdioCommand({}, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        exitProcess: mockExitProcess,
+        stdin
+      });
+
+      expect(stdin.resume).toHaveBeenCalled();
+      expect(mockExitProcess).not.toHaveBeenCalled();
+
+      stdin.emit('end');
+
+      expect(mockExitProcess).toHaveBeenCalledWith(0);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('MCP client disconnected')
+      );
+    });
+
+    it('keeps running on stdin end in container mode (MCP_CONTAINER=true)', async () => {
+      vi.stubEnv('MCP_CONTAINER', 'true');
+      const stdin = makeFakeStdin();
+
+      await handleStdioCommand({}, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        exitProcess: mockExitProcess,
+        stdin
+      });
+
+      stdin.emit('end');
+
+      expect(mockExitProcess).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('ignoring in container mode')
+      );
+    });
   });
 });

@@ -99,6 +99,40 @@ describe('ChildSessionManager', () => {
       }
     });
     
+    it('skips the entry-stop pause for attach-mode parents (issue #124)', async () => {
+      // MinimalDapClient.enrichChildConfig threads request:'attach' into the
+      // parentConfig of attach-mode children. For those, ensureChildStopped
+      // must be skipped entirely: attach targets emit no entry stop (waiting
+      // stalls adoption for 15s) and the SessionManager owns the post-attach
+      // pause via getAttachBehavior().pauseAfterAttach.
+      vi.useFakeTimers();
+      try {
+        const config = {
+          pendingId: 'test-pending-attach',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {
+            type: 'pwa-node',
+            request: 'attach'
+          }
+        };
+
+        const createPromise = manager.createChildSession(config);
+        // Only the post-attach initialized wait (3s) should be pending — the
+        // 15s ensureChildStopped stall must not run for attach parents.
+        await vi.advanceTimersByTimeAsync(4000);
+        await createPromise;
+
+        const child = manager.getActiveChild() as unknown as MockMinimalDapClient;
+        expect(child).toBeDefined();
+        const commands = child.requests.map(r => r.command);
+        expect(commands).not.toContain('pause');
+        expect(manager.hasActiveChildren()).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('should route commands to child when policy specifies', () => {
       // JavaScript policy routes many commands to child
       expect(manager.shouldRouteToChild('threads')).toBe(true);

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import { EventEmitter } from 'events';
 import { createHttpApp, handleHttpCommand } from '../../../src/cli/http-command.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
@@ -86,6 +87,7 @@ describe('HTTP Command Handler', () => {
 
   afterEach(() => {
     process.on = originalProcessOn;
+    vi.unstubAllEnvs();
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -460,6 +462,83 @@ describe('HTTP Command Handler', () => {
       expect(s2.stop).toHaveBeenCalled();
       expect(mockHttpServer.close).toHaveBeenCalled();
       expect(mockExitProcess).toHaveBeenCalledWith(0);
+    });
+
+    describe('stdin watchdog (MCP_EXIT_ON_STDIN_CLOSE, issue #122)', () => {
+      function makeFakeStdin() {
+        const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
+          resume: ReturnType<typeof vi.fn>;
+          emit: (event: string, ...args: unknown[]) => boolean;
+        };
+        (stdin as unknown as { resume: unknown }).resume = vi.fn();
+        return stdin;
+      }
+
+      beforeEach(() => {
+        mockApp.listen = vi.fn((_port: number, cb: Function) => {
+          cb();
+          return mockHttpServer;
+        });
+        process.on = vi.fn() as any;
+      });
+
+      it('shuts down gracefully and exits 0 when stdin ends and the env gate is set', async () => {
+        vi.stubEnv('MCP_EXIT_ON_STDIN_CLOSE', '1');
+        const stdin = makeFakeStdin();
+
+        await handleHttpCommand(
+          { port: '3001' },
+          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin }
+        );
+
+        // The watchdog must resume stdin so EOF is actually observed
+        expect(stdin.resume).toHaveBeenCalled();
+
+        // Inject an active session to prove graceful shutdown ran
+        const t1 = { close: vi.fn() };
+        const s1 = { stop: vi.fn().mockResolvedValue(undefined) };
+        ((mockApp as any).httpSessions as Map<string, any>).set('a', { transport: t1, server: s1 });
+
+        stdin.emit('end');
+
+        await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+        expect(t1.close).toHaveBeenCalled();
+        expect(s1.stop).toHaveBeenCalled();
+        expect(mockHttpServer.close).toHaveBeenCalled();
+      });
+
+      it('shuts down only once when end and close both fire', async () => {
+        vi.stubEnv('MCP_EXIT_ON_STDIN_CLOSE', '1');
+        const stdin = makeFakeStdin();
+
+        await handleHttpCommand(
+          { port: '3001' },
+          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin }
+        );
+
+        stdin.emit('end');
+        stdin.emit('close');
+
+        await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalled());
+        expect(mockExitProcess).toHaveBeenCalledTimes(1);
+        expect(mockHttpServer.close).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not watch stdin when the env gate is unset', async () => {
+        const stdin = makeFakeStdin();
+
+        await handleHttpCommand(
+          { port: '3001' },
+          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin }
+        );
+
+        expect(stdin.resume).not.toHaveBeenCalled();
+        stdin.emit('end');
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(mockExitProcess).not.toHaveBeenCalled();
+        expect(mockHttpServer.close).not.toHaveBeenCalled();
+      });
     });
 
     it('logs EADDRINUSE specifically and exits 1', async () => {

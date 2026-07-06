@@ -235,8 +235,14 @@ export class ChildSessionManager extends EventEmitter {
       // Skip when the user explicitly requested stopOnEntry=false: forcing a
       // pause contradicts intent and the resulting 'pause'-reason stopped
       // event would not be recognized by the auto-continue trigger.
+      // Also skip for attach-mode parents (request === 'attach', threaded in
+      // by MinimalDapClient.enrichChildConfig): attach targets emit no entry
+      // stop, so waiting for one here only stalls adoption, and the
+      // SessionManager already issues and verifies the post-attach pause via
+      // the policy's getAttachBehavior().pauseAfterAttach (issue #124).
       const wantsEntryStop = parentConfig?.stopOnEntry !== false;
-      if (this.dapBehavior.pauseAfterChildAttach && wantsEntryStop) {
+      const attachModeParent = parentConfig?.request === 'attach';
+      if (this.dapBehavior.pauseAfterChildAttach && wantsEntryStop && !attachModeParent) {
         await this.ensureChildStopped(child);
       }
       

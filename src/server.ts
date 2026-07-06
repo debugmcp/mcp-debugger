@@ -1144,6 +1144,11 @@ export class DebugMcpServer {
                     error instanceof SessionNotFoundError ||
                     error instanceof ProxyNotRunningError) {
                   result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+                } else if (error instanceof Error && !(error instanceof McpError)) {
+                  // DAP-level failures (e.g. "Child session not ready ...")
+                  // must surface as errors, not as an empty-but-successful
+                  // stack trace (issue #124).
+                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
                 } else {
                   // Re-throw unexpected errors
                   throw error;

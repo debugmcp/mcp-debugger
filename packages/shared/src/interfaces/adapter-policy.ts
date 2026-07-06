@@ -189,7 +189,18 @@ export interface AdapterPolicy {
   /**
    * Perform language-specific handshake after connecting to the debug adapter.
    * Some languages (like JavaScript) require a specific initialization sequence.
-   * 
+   *
+   * Contract: the SessionManager invokes this for BOTH launch
+   * (startDebugging) and attach (attachToProcess), right after
+   * startProxyManager succeeds. A policy that defines this method owns the
+   * full DAP start sequence — initialize, configuration and the
+   * launch/attach request itself; the proxy worker's built-in launch/attach
+   * flow does not run for command-queueing policies. Attach is
+   * distinguished from launch by `dapLaunchArgs.request === 'attach'`
+   * (and/or `__attachMode: true`) and by the transformed
+   * `launchConfig.request`. Policies that do not define this method are
+   * unaffected: the proxy worker drives their launch/attach sequence.
+   *
    * @param context Context object with session details and helper methods
    * @returns Promise that resolves when handshake is complete
    */
