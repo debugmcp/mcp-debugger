@@ -22,6 +22,8 @@ import {
   AdapterConfig,
   GenericLaunchConfig,
   LanguageSpecificLaunchConfig,
+  GenericAttachConfig,
+  LanguageSpecificAttachConfig,
   DebugFeature,
   FeatureRequirement,
   AdapterCapabilities,
@@ -57,6 +59,19 @@ interface PythonLaunchConfig extends LanguageSpecificLaunchConfig {
   showReturnValue?: boolean;    // Show function return values
   subProcess?: boolean;         // Debug child processes
   [key: string]: unknown;       // Required by LanguageSpecificLaunchConfig
+}
+
+/**
+ * Python-specific attach configuration (debugpy client-connect shape)
+ */
+interface PythonAttachConfig extends LanguageSpecificAttachConfig {
+  type: 'python';
+  request: 'attach';
+  name: string;
+  connect: { host: string; port: number };
+  justMyCode: boolean;
+  cwd?: string;
+  env?: Record<string, string>;
 }
 
 /**
@@ -381,7 +396,72 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       cwd: process.cwd()
     };
   }
-  
+
+  supportsAttach(): boolean {
+    return true;
+  }
+
+  supportsDetach(): boolean {
+    return true;
+  }
+
+  usesDirectConnectForAttach(): boolean {
+    return true;
+  }
+
+  transformAttachConfig(config: GenericAttachConfig): PythonAttachConfig {
+    const host = config.host || '127.0.0.1';
+    const port = config.port;
+
+    if (typeof port !== 'number') {
+      if (config.processId !== undefined || config.processName !== undefined) {
+        throw new AdapterError(
+          'Python attach does not support attaching by process ID or name. ' +
+          'Start the target with: python -m debugpy --listen 127.0.0.1:<port> script.py and attach to that port',
+          AdapterErrorCode.ENVIRONMENT_INVALID
+        );
+      }
+      throw new AdapterError(
+        'Python attach requires the port of a listening debugpy endpoint ' +
+        '(python -m debugpy --listen 127.0.0.1:<port> script.py)',
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
+    }
+
+    const attachConfig: PythonAttachConfig = {
+      type: 'python',
+      request: 'attach',
+      name: 'Python: Attach',
+      // debugpy client-connect convention. Top-level host/port must NOT be
+      // set alongside it — debugpy rejects that combination as mutually
+      // exclusive. The adapter policy's spawn config reads connect.* too.
+      connect: { host, port },
+      justMyCode: config.justMyCode ?? true
+    };
+
+    if (config.stopOnEntry !== undefined) {
+      attachConfig.stopOnEntry = config.stopOnEntry;
+    }
+
+    if (config.cwd) {
+      attachConfig.cwd = config.cwd;
+    }
+
+    if (config.env) {
+      attachConfig.env = config.env;
+    }
+
+    return attachConfig;
+  }
+
+  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
+    return {
+      request: 'attach',
+      host: '127.0.0.1',
+      justMyCode: true
+    };
+  }
+
   // ===== DAP Protocol Operations =====
   
   async sendDapRequest<T extends DebugProtocol.Response>(

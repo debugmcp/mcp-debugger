@@ -233,11 +233,20 @@ export const PythonAdapterPolicy: AdapterPolicy = {
   },
 
   /**
-   * Python adapter has no special initialization requirements
+   * debugpy emits 'initialized' only AFTER it receives the launch/attach
+   * request. Launch mode already sends launch first; attach must do the
+   * same or the worker deadlocks waiting for 'initialized' (issue #145).
    */
   getInitializationBehavior: () => {
-    return {};  // Python doesn't need any special initialization quirks
+    return {
+      sendAttachBeforeInitialized: true
+    };
   },
+
+  // debugpy does not suspend a running target on attach, so an explicit
+  // pause is required for the session to land in a truthful PAUSED state
+  // (same rationale as rdbg re-attach).
+  getAttachBehavior: () => ({ pauseAfterAttach: true }),
 
   /**
    * Python DAP client behaviors - minimal since Python doesn't use child sessions
@@ -275,6 +284,34 @@ export const PythonAdapterPolicy: AdapterPolicy = {
    * Get the configuration for spawning the Python debug adapter (debugpy)
    */
   getAdapterSpawnConfig: (payload) => {
+    const launchConfig = (payload.launchConfig ?? {}) as Record<string, unknown>;
+
+    // Attach: debugpy is already listening as a DAP server next to the target
+    // (python -m debugpy --listen host:port), so there is no adapter process
+    // to spawn — connect directly.
+    if (launchConfig.request === 'attach') {
+      const connect = launchConfig.connect as { host?: string; port?: number } | undefined;
+      const host = connect?.host
+        ?? (typeof launchConfig.host === 'string' && launchConfig.host.length > 0
+          ? launchConfig.host
+          : '127.0.0.1');
+      const port = connect?.port ?? launchConfig.port;
+
+      if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port > 65535) {
+        throw new Error(
+          `Python attach requires the TCP port of a listening debugpy endpoint (got: ${String(port)}). ` +
+          `Start the target with: python -m debugpy --listen 127.0.0.1:<port> [--wait-for-client] script.py`
+        );
+      }
+
+      return {
+        mode: 'connect',
+        host,
+        port,
+        logDir: payload.logDir
+      };
+    }
+
     // If a custom adapter command was provided, use it directly
     if (payload.adapterCommand) {
       return {

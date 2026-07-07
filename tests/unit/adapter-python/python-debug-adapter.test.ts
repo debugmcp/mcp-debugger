@@ -322,4 +322,80 @@ describe('PythonDebugAdapter', () => {
     expect(defaults.env).toEqual({});
     expect(defaults.cwd).toBe(process.cwd());
   });
+
+  describe('attach support (issue #145)', () => {
+    it('reports attach capabilities', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      expect(adapter.supportsAttach?.()).toBe(true);
+      expect(adapter.supportsDetach?.()).toBe(true);
+      expect(adapter.usesDirectConnectForAttach?.()).toBe(true);
+    });
+
+    it('keeps request=attach and emits the debugpy connect shape', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      const config = adapter.transformAttachConfig!({
+        request: 'attach',
+        host: '127.0.0.1',
+        port: 5679,
+        justMyCode: false,
+        cwd: '/work',
+        env: { FOO: '1' },
+        __attachMode: true
+      });
+
+      expect(config).toMatchObject({
+        type: 'python',
+        request: 'attach',
+        name: 'Python: Attach',
+        connect: { host: '127.0.0.1', port: 5679 },
+        justMyCode: false,
+        cwd: '/work',
+        env: { FOO: '1' }
+      });
+      // debugpy rejects configs carrying both `connect` and top-level
+      // host/port ("mutually exclusive"), so those must not leak through.
+      expect(config.host).toBeUndefined();
+      expect(config.port).toBeUndefined();
+      // No launch-template pollution (second bug in issue #145)
+      expect(config.console).toBeUndefined();
+      expect(config.__attachMode).toBeUndefined();
+    });
+
+    it('defaults attach host to 127.0.0.1 and justMyCode to true', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      const config = adapter.transformAttachConfig!({ request: 'attach', port: 5679 });
+
+      expect(config).toMatchObject({
+        connect: { host: '127.0.0.1', port: 5679 },
+        justMyCode: true
+      });
+    });
+
+    it('rejects attach without a port', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      expect(() => adapter.transformAttachConfig!({ request: 'attach' }))
+        .toThrow(/port/i);
+    });
+
+    it('rejects PID-based attach with guidance toward debugpy --listen', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      expect(() => adapter.transformAttachConfig!({ request: 'attach', processId: 1234 }))
+        .toThrow(/process id/i);
+    });
+
+    it('provides a default attach config', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      expect(adapter.getDefaultAttachConfig?.()).toEqual({
+        request: 'attach',
+        host: '127.0.0.1',
+        justMyCode: true
+      });
+    });
+  });
 });

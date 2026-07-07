@@ -1755,6 +1755,135 @@ describe('DapProxyWorker', () => {
         expect.stringContaining('Waiting for "initialized" event from adapter')
       );
     });
+
+    // debugpy ordering (issue #145): 'initialized' is only emitted AFTER the
+    // adapter receives the attach request, and the attach *response* only
+    // arrives after configurationDone. The worker must send attach first and
+    // must not block on the attach response before configurationDone.
+    it('python attach: sends attach before initialized and tolerates attach response deferred until configurationDone', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'py-attach-session',
+        language: 'python',
+        executablePath: 'python',
+        adapterHost: '127.0.0.1',
+        adapterPort: 40001,
+        logDir: '/logs',
+        scriptPath: 'attach://remote',
+        launchConfig: {
+          type: 'python',
+          request: 'attach',
+          connect: { host: '127.0.0.1', port: 5679 }
+        }
+        // No adapterCommand: direct-connect attach — debugpy is already listening
+      };
+
+      const processStub = {
+        spawn: vi.fn(),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const callOrder: string[] = [];
+      let resolveAttachResponse!: () => void;
+      const attachResponse = new Promise<void>((resolve) => {
+        resolveAttachResponse = resolve;
+      });
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+        }),
+        // debugpy does NOT emit 'initialized' after initialize alone
+        initializeSession: vi.fn().mockResolvedValue(undefined),
+        sendAttachRequest: vi.fn().mockImplementation(() => {
+          callOrder.push('attach');
+          // 'initialized' arrives only after the attach request is received
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          // the attach response arrives only after configurationDone
+          return attachResponse;
+        }),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockImplementation(async () => {
+          callOrder.push('configurationDone');
+          resolveAttachResponse();
+        }),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      mockMessageSender.send.mockClear();
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      // Direct connect: no adapter process spawned, socket opened to the attach port
+      expect(processStub.spawn).not.toHaveBeenCalled();
+      expect(connectionStub.connectWithRetry).toHaveBeenCalledWith('127.0.0.1', 5679);
+      // Attach was sent first; configurationDone followed the initialized event
+      expect(callOrder).toEqual(['attach', 'configurationDone']);
+    }, 20000);
+
+    it('python attach: fails fast when the attach request is rejected', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'py-attach-refused',
+        language: 'python',
+        executablePath: 'python',
+        adapterHost: '127.0.0.1',
+        adapterPort: 40002,
+        logDir: '/logs',
+        scriptPath: 'attach://remote',
+        launchConfig: {
+          type: 'python',
+          request: 'attach',
+          connect: { host: '127.0.0.1', port: 5679 }
+        }
+      };
+
+      const processStub = {
+        spawn: vi.fn(),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+        }),
+        initializeSession: vi.fn().mockResolvedValue(undefined),
+        // Attach fails immediately (e.g. debugpy rejects the request) and
+        // 'initialized' never arrives — the worker must not sit out the full
+        // initialized timeout before surfacing the failure.
+        sendAttachRequest: vi.fn().mockRejectedValue(
+          new Error('connect ECONNREFUSED 127.0.0.1:5679')
+        ),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      const started = Date.now();
+      await expect((worker as any).startAdapterAndConnect(payload)).rejects.toThrow(/ECONNREFUSED/);
+      // Fail-fast: well under the 15s initialized timeout
+      expect(Date.now() - started).toBeLessThan(5000);
+    }, 20000);
   });
 
   describe('Go/Java Launch Sequence', () => {
