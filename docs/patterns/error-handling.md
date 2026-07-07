@@ -206,6 +206,25 @@ return new Promise((resolve) => {
 });
 ```
 
+**Example**: SessionManager attach verification window (`src/session/session-manager-operations.ts`)
+
+After an attach handshake, DAP `threads` is polled until the debugger reports at
+least one thread. If the window elapses without threads, the attach is reported
+as a failure and the proxy is torn down (issue #124 — a debugger with no
+threads is not usable, and reporting "paused" would be a lie). Because a slow
+target (e.g. a busy or warming JVM) can legitimately need longer than the
+default window, the window is caller-configurable (issue #143):
+
+- The default lives in the protected, test-shrinkable field
+  `attachVerifyTimeoutMs` (5s), following the `stepGraceMs`/`pauseGraceMs`
+  field pattern.
+- Callers override it per attach via the `verifyTimeout` (ms) argument on
+  `attach_to_process` / `create_debug_session`; the value is validated
+  (positive finite number) and clamped to 10 minutes.
+- The failure text comes from `ErrorMessages.attachVerifyFailed(timeoutMs,
+  lastFailure)`, which names the `verifyTimeout` knob so a caller that hit the
+  window on a slow target knows how to retry.
+
 ## Error Response Patterns
 
 ### DebugResult Pattern

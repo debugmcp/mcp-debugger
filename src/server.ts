@@ -94,6 +94,7 @@ interface ToolArguments {
   host?: string;
   processId?: number | string;
   timeout?: number;
+  verifyTimeout?: number;
   sourcePaths?: string[];
   stopOnEntry?: boolean;
   justMyCode?: boolean;
@@ -117,6 +118,7 @@ const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 
   // numbers
   line: 'number', linesContext: 'number', scope: 'number',
   frameId: 'number', port: 'number', timeout: 'number', threadId: 'number',
+  verifyTimeout: 'number',
   // booleans
   includeInternals: 'boolean', includeSpecial: 'boolean',
   stopOnEntry: 'boolean', justMyCode: 'boolean',
@@ -561,7 +563,7 @@ export class DebugMcpServer {
       
       return {
         tools: [
-          { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' } }, required: ['language'] } },
+          { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000)' } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: ['sessionId', 'file', 'line'] } },
@@ -589,7 +591,7 @@ export class DebugMcpServer {
               required: ['sessionId', 'scriptPath'] 
             } 
           },
-          { name: 'attach_to_process', description: 'Attach to a running process for debugging', inputSchema: {
+          { name: 'attach_to_process', description: 'Attach to a running process for debugging. After the attach handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~5s default) the attach fails and the debug proxy is torn down', inputSchema: {
               type: 'object',
               properties: {
                 sessionId: { type: 'string', description: 'Debug session ID' },
@@ -597,6 +599,7 @@ export class DebugMcpServer {
                 host: { type: 'string', description: 'Host to attach to (default: localhost)' },
                 processId: { type: ['number', 'string'], description: 'Process ID (for local attach, language-specific)' },
                 timeout: { type: 'number', description: 'Connection timeout in milliseconds (default: 30000)' },
+                verifyTimeout: { type: 'number', description: 'How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000). Increase for targets that are slow to become debuggable, e.g. a busy or warming JVM' },
                 sourcePaths: { type: 'array', items: { type: 'string' }, description: 'Source paths for code mapping' },
                 stopOnEntry: { type: 'boolean', description: 'Stop on entry after attaching' },
                 justMyCode: { type: 'boolean', description: 'Only debug user code (skip library code)' }
@@ -694,6 +697,7 @@ export class DebugMcpServer {
                     host: (args.host as string) || 'localhost',
                     timeout: (args.timeout as number) || 30000,
                     stopOnEntry: args.stopOnEntry,
+                    verifyTimeout: args.verifyTimeout,
                   });
 
                   result = { content: [{ type: 'text', text: JSON.stringify({
@@ -881,6 +885,7 @@ export class DebugMcpServer {
                   host: args.host,
                   processId: args.processId,
                   timeout: args.timeout,
+                  verifyTimeout: args.verifyTimeout,
                   sourcePaths: args.sourcePaths,
                   stopOnEntry: args.stopOnEntry,
                   justMyCode: args.justMyCode

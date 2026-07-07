@@ -249,6 +249,32 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
         })
       );
     });
+
+    it('should forward verifyTimeout to the session manager (issue #143)', async () => {
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+      });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: {
+            language: 'python',
+            port: 5009,
+            verifyTimeout: 12000,
+          },
+        },
+      });
+
+      expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith(
+        'attach-session-1',
+        expect.objectContaining({
+          verifyTimeout: 12000,
+        })
+      );
+    });
   });
 
   describe('attach_to_process stopOnEntry', () => {
@@ -299,6 +325,32 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
         'test-session',
         expect.objectContaining({
           stopOnEntry: true,
+        })
+      );
+    });
+
+    it('should forward verifyTimeout to the session manager (issue #143)', async () => {
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+      });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: {
+            sessionId: 'test-session',
+            port: 5006,
+            verifyTimeout: 12000,
+          },
+        },
+      });
+
+      expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith(
+        'test-session',
+        expect.objectContaining({
+          verifyTimeout: 12000,
         })
       );
     });

@@ -64,6 +64,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * 'threads' is polled until the debugger reports at least one thread.
    * If the window elapses without any threads, the attach is reported as a
    * failure instead of a false "paused" success (issue #124).
+   * Callers can widen the window per attach via the 'verifyTimeout' tool
+   * argument for targets that are slow to become debuggable (issue #143).
    * Protected so tests can shrink the window.
    */
   protected attachVerifyTimeoutMs = 5000;
@@ -1583,6 +1585,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       sourcePaths?: string[];
       stopOnEntry?: boolean;
       justMyCode?: boolean;
+      verifyTimeout?: number;
     }
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
@@ -1590,6 +1593,32 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `[SessionManager] Attempting to attach to process for session ${sessionId}`,
       attachConfig
     );
+
+    // The verification-window override is consumed by the thread-discovery
+    // loop below, not by the adapter — strip it from the config that becomes
+    // the DAP attach arguments. Validate before any state mutation.
+    const { verifyTimeout, ...adapterAttachConfig } = attachConfig;
+    let verifyTimeoutOverride = verifyTimeout;
+    if (verifyTimeoutOverride !== undefined) {
+      if (
+        typeof verifyTimeoutOverride !== 'number' ||
+        !Number.isFinite(verifyTimeoutOverride) ||
+        verifyTimeoutOverride <= 0
+      ) {
+        return {
+          success: false,
+          state: session.state,
+          error: `'verifyTimeout' must be a positive number of milliseconds, got: ${String(verifyTimeoutOverride)}`
+        };
+      }
+      const maxVerifyTimeoutMs = 600000;
+      if (verifyTimeoutOverride > maxVerifyTimeoutMs) {
+        this.logger.warn(
+          `[SessionManager] verifyTimeout ${verifyTimeoutOverride}ms exceeds the maximum; clamping to ${maxVerifyTimeoutMs}ms`
+        );
+        verifyTimeoutOverride = maxVerifyTimeoutMs;
+      }
+    }
 
     if (session.proxyManager) {
       this.logger.warn(
@@ -1612,7 +1641,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
       // Pass attach config through dapLaunchArgs with special request type
       const attachLaunchArgs = {
-        ...attachConfig,
+        ...adapterAttachConfig,
         request: 'attach',
         __attachMode: true  // Internal flag to signal attach mode
       };
@@ -1667,7 +1696,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         }
         const proxyManager = session.proxyManager;
 
-        const verifyTimeoutMs = this.attachVerifyTimeoutMs;
+        const verifyTimeoutMs = verifyTimeoutOverride ?? this.attachVerifyTimeoutMs;
         const pollIntervalMs = this.attachVerifyIntervalMs;
         const deadline = Date.now() + verifyTimeoutMs;
 
@@ -1712,7 +1741,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         }
 
         if (!threads) {
-          const reason = `Attach did not become debuggable: no threads reported within ${verifyTimeoutMs}ms (last failure: ${lastFailure})`;
+          const reason = ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
           this.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
           // Tear down the proxy using the same mechanics as closeSession, but
           // keep the session record so the failure is inspectable as ERROR.

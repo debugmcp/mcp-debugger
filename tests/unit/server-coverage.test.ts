@@ -1344,6 +1344,12 @@ describe('coerceToolArguments', () => {
     expect(args.linesContext).toBe(5);
   });
 
+  it('converts verifyTimeout string to number', () => {
+    const args = { verifyTimeout: '9000' };
+    coerceToolArguments(args);
+    expect(args.verifyTimeout).toBe(9000);
+  });
+
   it('leaves empty string as-is for number fields', () => {
     const args = { line: '' };
     coerceToolArguments(args);
