@@ -365,26 +365,31 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.error).toContain('DAP protocol error');
     });
 
-    it('should handle stepOut failure with timeout', async () => {
+    it('should report a pending step when no stopped event arrives within the grace window', async () => {
       vi.useFakeTimers();
-      
+
       mockSession.state = SessionState.PAUSED;
-      // Simulate timeout by not calling the 'stopped' event
+      // Simulate a long-running step by not emitting the 'stopped' event
       mockProxyManager.sendDapRequest.mockResolvedValue({});
-      
+
       // Setup once to do nothing (no stopped event will fire)
       mockProxyManager.once.mockImplementation(() => {});
 
       const stepOutPromise = operations.stepOut('test-session');
-      
-      // Fast-forward past the timeout (5 seconds)
+
+      // Fast-forward past the grace window (5 seconds)
       await vi.advanceTimersByTimeAsync(5100);
-      
+
       const result = await stepOutPromise;
-      
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('did not complete within 5s');
-      
+
+      // A slow step is not a failure: the tool reports success with a pending
+      // marker and the session completes the step asynchronously.
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.RUNNING);
+      const data = result.data as { message?: string; pending?: boolean };
+      expect(data.pending).toBe(true);
+      expect(data.message).toContain('still executing');
+
       vi.useRealTimers();
     });
 
@@ -720,6 +725,71 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         'evaluate',
         expect.objectContaining({ expression: '6*7', frameId: 123 })
       );
+    });
+  });
+
+  describe('Evaluate Expression timeout override (issue #142)', () => {
+    beforeEach(() => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'stackTrace') {
+          return { body: { stackFrames: [{ id: 123 }] } };
+        }
+        if (command === 'evaluate') {
+          return { body: { result: '42', variablesReference: 0 } };
+        }
+        return {};
+      });
+    });
+
+    it('forwards the override to the evaluate request but not the stackTrace pre-request', async () => {
+      const result = await operations.evaluateExpression('test-session', '6*7', undefined, 120000);
+
+      expect(result.success).toBe(true);
+      // The internal stackTrace pre-request keeps the default timeout (2-arg call)
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'stackTrace',
+        expect.objectContaining({ threadId: 1 })
+      );
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'evaluate',
+        expect.objectContaining({ expression: '6*7', frameId: 123 }),
+        { timeoutMs: 120000 }
+      );
+    });
+
+    it('rejects a non-positive or non-finite timeout without sending any DAP request', async () => {
+      for (const bad of [0, -5, NaN]) {
+        const result = await operations.evaluateExpression('test-session', 'x', undefined, bad);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('timeout');
+      }
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalled();
+    });
+
+    it('clamps the override to 600000ms with a warning', async () => {
+      const result = await operations.evaluateExpression('test-session', 'x', 123, 900000);
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'evaluate',
+        expect.objectContaining({ expression: 'x', frameId: 123 }),
+        { timeoutMs: 600000 }
+      );
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('600000'));
+    });
+
+    it('appends a hint naming the timeout arg when the evaluate request times out', async () => {
+      mockProxyManager.sendDapRequest
+        .mockResolvedValueOnce({ body: { stackFrames: [{ id: 1 }] } })
+        .mockRejectedValueOnce(new Error("Request 'evaluate' timed out after 30s"));
+
+      const result = await operations.evaluateExpression('test-session', 'slow()');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('timed out');
+      expect(result.error).toContain("larger 'timeout'");
     });
   });
 
@@ -1399,6 +1469,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.ERROR);
       expect(result.error).toContain('no threads reported');
       expect(result.error).toContain('zero threads');
+      // The failure must tell the caller which knob raises the window (#143).
+      expect(result.error).toContain('verifyTimeout');
       expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
       // The proxy must be torn down so the session is not left half-attached.
       expect(mockProxyManager.stop).toHaveBeenCalled();
@@ -1558,6 +1630,116 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.PAUSED);
       expect(threadCalls).toBeGreaterThanOrEqual(3);
       expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(7);
+    });
+
+    it('should honor a caller-provided verifyTimeout over the default window', async () => {
+      // Issue #143: the window must be adjustable per call. A shorter
+      // override proves the caller's value is the one actually applied —
+      // if the default (raised to 5s here) were used instead, the failure
+      // message would name 5000ms and the test would take seconds.
+      (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 5000;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true,
+        verifyTimeout: 200
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('200ms');
+    });
+
+    it('should succeed when a larger verifyTimeout lets a slow target report threads', async () => {
+      // Models the #143 rescue: a target that only becomes debuggable after
+      // the default window (200ms via beforeEach) has elapsed succeeds when
+      // the caller extends the window.
+      (operations as unknown as { attachVerifyIntervalMs: number }).attachVerifyIntervalMs = 25;
+      const attachStartedAt = Date.now();
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          if (Date.now() - attachStartedAt < 400) {
+            return { body: { threads: [] } };
+          }
+          return { body: { threads: [{ id: 9, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true,
+        verifyTimeout: 2000
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(9);
+    });
+
+    it('should reject a non-positive verifyTimeout without starting a proxy', async () => {
+      const startSpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      for (const bad of [0, -5, Number.NaN]) {
+        const result = await operations.attachToProcess('test-session', {
+          port: 5005,
+          host: 'localhost',
+          stopOnEntry: true,
+          verifyTimeout: bad
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('verifyTimeout');
+      }
+      expect(startSpy).not.toHaveBeenCalled();
+    });
+
+    it('should not leak verifyTimeout into the adapter attach arguments', async () => {
+      // verifyTimeout is consumed by the session manager's verification loop;
+      // it must not ride the config spread into the DAP attach arguments.
+      const startSpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true,
+        verifyTimeout: 3000
+      });
+
+      expect(result.success).toBe(true);
+      const attachLaunchArgs = startSpy.mock.calls[0][3] as Record<string, unknown>;
+      expect(attachLaunchArgs).not.toHaveProperty('verifyTimeout');
+      expect(attachLaunchArgs).toMatchObject({ request: 'attach', __attachMode: true, port: 5005 });
     });
 
     it('should skip thread discovery when stopOnEntry is false', async () => {
@@ -2612,7 +2794,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.PAUSED);
     });
 
-    it('returns a pause-timeout error when no stopped event arrives', async () => {
+    it('reports a pending pause when no stopped event arrives within the grace window', async () => {
       vi.useFakeTimers();
       try {
         mockSession.state = SessionState.RUNNING;
@@ -2622,9 +2804,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         await vi.advanceTimersByTimeAsync(5000);
         const result = await promise;
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain("no 'stopped' event");
+        // A slow pause (e.g. target blocked in native code) is not a failure:
+        // the tool reports success with a pending marker; the session flips to
+        // PAUSED asynchronously when the stop lands.
+        expect(result.success).toBe(true);
         expect(result.state).toBe(SessionState.RUNNING);
+        const data = result.data as { message?: string; pending?: boolean };
+        expect(data.pending).toBe(true);
+        expect(data.message).toContain("no 'stopped' event");
       } finally {
         vi.useRealTimers();
       }

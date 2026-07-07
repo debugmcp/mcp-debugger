@@ -86,7 +86,7 @@ export class DapProxyWorker {
     hooks: DapProxyWorkerHooks = {}
   ) {
     this.requestTracker = new CallbackRequestTracker(
-      (requestId, command) => this.handleRequestTimeout(requestId, command)
+      (requestId, command, timeoutMs) => this.handleRequestTimeout(requestId, command, timeoutMs)
     );
     this.adapterState = DefaultAdapterPolicy.createInitialState();
 
@@ -747,8 +747,8 @@ export class DapProxyWorker {
         return;
       }
 
-      // Track request
-      this.requestTracker.track(payload.requestId, payload.dapCommand);
+      // Track request (payload.timeoutMs overrides the tracker default when present)
+      this.requestTracker.track(payload.requestId, payload.dapCommand, payload.timeoutMs);
 
       // Log setBreakpoints for debugging
       if (payload.dapCommand === 'setBreakpoints') {
@@ -769,7 +769,9 @@ export class DapProxyWorker {
 
       // Send request
       this.logger?.info(`[Worker] Sending '${payload.dapCommand}' to adapter`);
-      const response = await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
+      const response = payload.timeoutMs !== undefined
+        ? await this.dapClient.sendRequest(payload.dapCommand, dapArgs, payload.timeoutMs)
+        : await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
       
       // Update adapter state if needed
       if (this.adapterPolicy.updateStateOnCommand) {
@@ -840,8 +842,10 @@ export class DapProxyWorker {
           continue;
         }
 
-        this.requestTracker.track(payload.requestId, payload.dapCommand);
-        const response = await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
+        this.requestTracker.track(payload.requestId, payload.dapCommand, payload.timeoutMs);
+        const response = payload.timeoutMs !== undefined
+          ? await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs, payload.timeoutMs)
+          : await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs);
         
         if (this.adapterPolicy.updateStateOnCommand) {
           this.adapterPolicy.updateStateOnCommand(payload.dapCommand, payload.dapArgs || {}, this.adapterState);
@@ -912,9 +916,14 @@ export class DapProxyWorker {
   /**
    * Handle request timeout
    */
-  private handleRequestTimeout(requestId: string, command: string): void {
-    this.logger!.error(`[Worker] DAP request '${command}' (id: ${requestId}) timed out`);
-    this.sendDapResponse(requestId, false, undefined, `Request '${command}' timed out`);
+  private handleRequestTimeout(requestId: string, command: string, timeoutMs: number): void {
+    this.logger!.error(`[Worker] DAP request '${command}' (id: ${requestId}) timed out after ${timeoutMs}ms`);
+    this.sendDapResponse(
+      requestId,
+      false,
+      undefined,
+      `Request '${command}' timed out after ${Math.round(timeoutMs / 1000)}s`
+    );
   }
 
   /**

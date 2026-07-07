@@ -20,7 +20,7 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
   // Track calls for testing
   public startCalls: ProxyConfig[] = [];
   public stopCalls: number = 0;
-  public dapRequestCalls: Array<{ command: string; args?: any }> = [];
+  public dapRequestCalls: Array<{ command: string; args?: any; options?: { timeoutMs?: number } }> = [];
 
   // Control behavior for testing
   public shouldFailStart = false;
@@ -84,10 +84,11 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
   }
 
   async sendDapRequest<T extends DebugProtocol.Response>(
-    command: string, 
-    args?: any
+    command: string,
+    args?: any,
+    options?: { timeoutMs?: number }
   ): Promise<T> {
-    this.dapRequestCalls.push({ command, args });
+    this.dapRequestCalls.push({ command, args, ...(options !== undefined ? { options } : {}) });
 
     if (!this._isRunning) {
       throw new Error('Proxy not running');
