@@ -445,7 +445,7 @@ describe('ProxyManager.start', () => {
       fakeProcess.sendCommand.mockImplementation((cmd: any) => {
         if (cmd.cmd === 'init') {
           setTimeout(() => {
-            stderrEmitter.emit('data', Buffer.from('boot failure'));
+            stderrEmitter.emit('data', Buffer.from('boot failure\n'));
             fakeProcess.emit('exit', 2, 'SIGTERM');
           }, 0);
         }
@@ -476,9 +476,9 @@ describe('ProxyManager.start', () => {
           });
           setTimeout(() => {
             for (let i = 1; i <= 14; i++) {
-              stderrEmitter.emit('data', Buffer.from(`stderr-line-${String(i).padStart(2, '0')}`));
+              stderrEmitter.emit('data', Buffer.from(`stderr-line-${String(i).padStart(2, '0')}\n`));
             }
-            stderrEmitter.emit('data', Buffer.from('GITHUB_PAT=github_pat_supersecret1234567890'));
+            stderrEmitter.emit('data', Buffer.from('GITHUB_PAT=github_pat_supersecret1234567890\n'));
             fakeProcess.emit('exit', 1, null);
           }, 0);
         }, 0);
@@ -513,7 +513,7 @@ describe('ProxyManager.start', () => {
             // 12 lines of ~300 chars each; the last 10 joined exceed the 2000-char cap.
             for (let i = 1; i <= 12; i++) {
               const marker = `MARKER-${String(i).padStart(2, '0')}`;
-              stderrEmitter.emit('data', Buffer.from(marker + 'x'.repeat(300 - marker.length)));
+              stderrEmitter.emit('data', Buffer.from(marker + 'x'.repeat(300 - marker.length) + '\n'));
             }
             fakeProcess.emit('exit', 1, null);
           }, 0);
@@ -547,7 +547,7 @@ describe('ProxyManager.start', () => {
           setTimeout(() => {
             // 150 lines — the buffer must retain only the most recent 100.
             for (let i = 1; i <= 150; i++) {
-              stderrEmitter.emit('data', Buffer.from(`line-${String(i).padStart(3, '0')}`));
+              stderrEmitter.emit('data', Buffer.from(`line-${String(i).padStart(3, '0')}\n`));
             }
             fakeProcess.emit('exit', 1, null);
           }, 0);
@@ -564,6 +564,124 @@ describe('ProxyManager.start', () => {
     expect(err.message).toContain('line-150');
     expect(err.message).toContain('line-141');
     expect(err.message).not.toContain('line-140');
+  });
+
+  it('redacts a secret that straddles a stderr chunk boundary (issue #151)', async () => {
+    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+          setTimeout(() => {
+            // One secret assignment split mid-value across two stream chunks.
+            stderrEmitter.emit('data', Buffer.from('GITHUB_PAT=github_pat_supersecret'));
+            stderrEmitter.emit('data', Buffer.from('tail1234567890\n'));
+            fakeProcess.emit('exit', 1, null);
+          }, 0);
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
+    const err = await startPromise.catch((e: Error) => e);
+
+    // Neither half of the split secret may surface anywhere.
+    expect(err.message).not.toContain('supersecret');
+    expect(err.message).not.toContain('tail1234567890');
+    expect(err.message).toContain('[REDACTED — line contained sensitive data]');
+    for (const call of (logger.error as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(String(call[0])).not.toContain('tail1234567890');
+    }
+  });
+
+  it('sanitizes multi-line stderr chunks per line, not per chunk (issue #151)', async () => {
+    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+          setTimeout(() => {
+            // A benign line and a secret-bearing line arriving in the same chunk:
+            // only the secret-bearing line should be redacted.
+            stderrEmitter.emit('data', Buffer.from(
+              'benign-diagnostic-line\nGITHUB_PAT=github_pat_secret1234567890\n'
+            ));
+            fakeProcess.emit('exit', 1, null);
+          }, 0);
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
+    const err = await startPromise.catch((e: Error) => e);
+
+    expect(err.message).toContain('benign-diagnostic-line');
+    expect(err.message).not.toContain('github_pat_secret');
+    expect(err.message).toContain('[REDACTED — line contained sensitive data]');
+  });
+
+  it('flushes a trailing partial stderr line when the stream ends (issue #151)', async () => {
+    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+          setTimeout(() => {
+            // A crashing process's final write often lacks a trailing newline.
+            stderrEmitter.emit('data', Buffer.from('fatal: adapter exploded'));
+            stderrEmitter.emit('end');
+            fakeProcess.emit('exit', 1, null);
+          }, 0);
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
+    const err = await startPromise.catch((e: Error) => e);
+
+    expect(err.message).toContain('fatal: adapter exploded');
+  });
+
+  it('includes a partial stderr line flushed after exit in captured exit details (issue #151)', async () => {
+    vi.useFakeTimers();
+    try {
+      const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+      fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+        if (cmd.cmd === 'init') {
+          setTimeout(() => {
+            // The pipe can drain after the process 'exit' event: the trailing
+            // partial line arrives via stream 'end' only after exit fired.
+            stderrEmitter.emit('data', Buffer.from('late boot failure'));
+            fakeProcess.emit('exit', 2, 'SIGTERM');
+            stderrEmitter.emit('end');
+          }, 0);
+        }
+      });
+
+      const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      await vi.advanceTimersByTimeAsync(35000);
+      await expect(startPromise).rejects.toThrow(
+        /Proxy exit details -> code=2 signal=SIGTERM stderr:\nlate boot failure/
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('fails to start when bootstrap worker script is missing', async () => {
