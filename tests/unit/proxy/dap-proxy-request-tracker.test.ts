@@ -185,7 +185,7 @@ describe('CallbackRequestTracker', () => {
     // Advance time past timeout
     vi.advanceTimersByTime(1001);
 
-    expect(timeoutCallback).toHaveBeenCalledWith('req-1', 'continue');
+    expect(timeoutCallback).toHaveBeenCalledWith('req-1', 'continue', 1000);
     expect(timeoutCallback).toHaveBeenCalledTimes(1);
     expect(tracker.isPending('req-1')).toBe(false);
   });
@@ -200,6 +200,22 @@ describe('CallbackRequestTracker', () => {
     expect(timeoutCallback).not.toHaveBeenCalled();
   });
 
+  it('should pass the effective timeout to the callback for an explicit per-request timeout', () => {
+    tracker.track('req-1', 'evaluate', 60000);
+
+    vi.advanceTimersByTime(60001);
+
+    expect(timeoutCallback).toHaveBeenCalledWith('req-1', 'evaluate', 60000);
+  });
+
+  it('should pass the default timeout to the callback when none is provided', () => {
+    tracker.track('req-1', 'evaluate');
+
+    vi.advanceTimersByTime(1001);
+
+    expect(timeoutCallback).toHaveBeenCalledWith('req-1', 'evaluate', 1000);
+  });
+
   it('should handle multiple timeouts', () => {
     tracker.track('req-1', 'continue', 500);
     tracker.track('req-2', 'evaluate', 1000);
@@ -207,12 +223,12 @@ describe('CallbackRequestTracker', () => {
 
     // Advance to trigger first timeout
     vi.advanceTimersByTime(501);
-    expect(timeoutCallback).toHaveBeenCalledWith('req-1', 'continue');
+    expect(timeoutCallback).toHaveBeenCalledWith('req-1', 'continue', 500);
     expect(timeoutCallback).toHaveBeenCalledTimes(1);
 
     // Advance to trigger second timeout
     vi.advanceTimersByTime(500);
-    expect(timeoutCallback).toHaveBeenCalledWith('req-2', 'evaluate');
+    expect(timeoutCallback).toHaveBeenCalledWith('req-2', 'evaluate', 1000);
     expect(timeoutCallback).toHaveBeenCalledTimes(2);
 
     // Complete third request before timeout

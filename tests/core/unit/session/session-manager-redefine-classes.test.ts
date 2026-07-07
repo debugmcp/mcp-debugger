@@ -197,4 +197,60 @@ describe('SessionManager - redefineClasses', () => {
       sessionManager.redefineClasses('nonexistent', '/path/to/classes')
     ).rejects.toThrow();
   });
+
+  it('forwards a timeout override to the DAP request (issue #142)', async () => {
+    const session = await createRunningSession();
+
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'redefineClasses') {
+        return {
+          success: true,
+          body: {
+            redefined: [],
+            redefinedCount: 0,
+            skippedNotLoaded: 0,
+            failedCount: 0,
+            scannedFiles: 0,
+            newestTimestamp: 0,
+          }
+        };
+      }
+      return { success: true };
+    });
+
+    await sessionManager.redefineClasses(session.id, '/path/to/classes', 0, 120000);
+
+    const dapCall = dependencies.mockProxyManager.dapRequestCalls.find(
+      c => c.command === 'redefineClasses'
+    );
+    expect(dapCall).toBeDefined();
+    expect(dapCall!.options).toEqual({ timeoutMs: 120000 });
+  });
+
+  it('rejects a non-positive timeout override', async () => {
+    const session = await createRunningSession();
+
+    const result = await sessionManager.redefineClasses(session.id, '/path/to/classes', 0, -5);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('timeout');
+    expect(dependencies.mockProxyManager.dapRequestCalls).toHaveLength(0);
+  });
+
+  it('appends a hint naming the timeout arg when the request times out', async () => {
+    const session = await createRunningSession();
+
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'redefineClasses') {
+        throw new Error("Request 'redefineClasses' timed out after 30s");
+      }
+      return { success: true };
+    });
+
+    const result = await sessionManager.redefineClasses(session.id, '/path/to/classes');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('timed out');
+    expect(result.error).toContain("larger 'timeout'");
+  });
 });
