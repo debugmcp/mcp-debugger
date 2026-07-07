@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage } from '@debugmcp/shared';
+import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
@@ -181,20 +181,29 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.error).toBe('Not paused');
     });
 
-    it('should handle step timeout', async () => {
+    it('should report a pending step when the grace window elapses', async () => {
       const session = await createPausedSession();
-      
+
       // Configure mock to not emit stopped event after step
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({ success: true });
-      
+
       const stepPromise = sessionManager.stepOver(session.id);
-      
-      // Fast forward past timeout
+
+      // Fast forward past the grace window
       await vi.advanceTimersByTimeAsync(6000);
-      
+
       const result = await stepPromise;
-      expect(result.success).toBe(false);
-      expect(result.error).toBe(ErrorMessages.stepTimeout(5));
+      expect(result.success).toBe(true);
+      const data = result.data as { message?: string; pending?: boolean };
+      expect(data.pending).toBe(true);
+      expect(data.message).toBe(ErrorMessages.stepStillRunning(5));
+
+      // The pending step completes asynchronously: when the stop finally
+      // lands, the persistent core listener flips the session to PAUSED.
+      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.RUNNING);
+      dependencies.mockProxyManager.simulateStopped(1, 'step');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
     });
 
     it('should treat termination during step as a successful completion', async () => {

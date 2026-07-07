@@ -614,11 +614,11 @@ export class DebugMcpServer {
             }
           },
           { name: 'close_debug_session', description: 'Close a debugging session', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'step_over', description: 'Step over', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'step_into', description: 'Step into', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'step_out', description: 'Step out', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'continue_execution', description: 'Continue execution', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'pause_execution', description: 'Pause a running program', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, threadId: { type: 'number', description: 'Thread ID to pause. If omitted or 0, pauses all threads.' } }, required: ['sessionId'] } },
+          { name: 'step_over', description: 'Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state "running" and pending:true — the session becomes "paused" when the step completes (check list_debug_sessions, or call pause_execution to interrupt)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'step_into', description: 'Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state "running" and pending:true — the session becomes "paused" when the step completes', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'step_out', description: 'Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state "running" and pending:true — the session becomes "paused" when the step completes', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'continue_execution', description: 'Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. When a breakpoint is hit later the session state becomes "paused" (check list_debug_sessions)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'pause_execution', description: 'Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code), returns success with pending:true and the session reports "paused" once the stop lands', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, threadId: { type: 'number', description: 'Thread ID to pause. If omitted or 0, pauses all threads.' } }, required: ['sessionId'] } },
           { name: 'list_threads', description: 'List all threads in the debugged process', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
           { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' } }, required: ['sessionId'] } },
@@ -1001,14 +1001,23 @@ export class DebugMcpServer {
 
                 // Build response with location and line context if available
                 const stepType = toolName.replace('step_', '').replace('_', ' ');
+                const resultData = stepResult.data as { message?: string; location?: { file: string; line: number; column?: number }; pending?: boolean } | undefined;
                 const response: Record<string, unknown> = {
                   success: stepResult.success,
                   message: `Stepped ${stepType}`,
                   state: stepResult.state
                 };
 
+                // A pending step means the program is still executing (e.g. stepping
+                // over a long-running call); report that truthfully instead of "Stepped".
+                if (resultData?.pending) {
+                  response.pending = true;
+                  if (resultData.message) {
+                    response.message = resultData.message;
+                  }
+                }
+
                 // Extract location from result data
-                const resultData = stepResult.data as { message?: string; location?: { file: string; line: number; column?: number } } | undefined;
                 const location = resultData?.location;
 
                 if (location) {

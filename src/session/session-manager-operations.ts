@@ -76,6 +76,17 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    */
   protected attachPauseStopTimeoutMs = 5000;
 
+  /**
+   * Grace windows for step and pause operations: how long to wait for the
+   * 'stopped' event before returning a truthful "still running" success
+   * (data.pending = true). These are NOT deadlines on the debuggee — a step
+   * over a long-running call or a pause of a target blocked in native code
+   * completes asynchronously via the core handleStopped listener, which has
+   * no timeout. Protected so tests can shrink the windows.
+   */
+  protected stepGraceMs = 5000;
+  protected pauseGraceMs = 5000;
+
   protected async startProxyManager(
     session: ManagedSession,
     scriptPath: string,
@@ -1100,15 +1111,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       const onExit = () => success(exitedMessage);
 
       const timeout = setTimeout(() => {
-        this.logger.warn(
-          `[SM ${options.logTag} ${sessionId}] Timeout waiting for stopped or termination event`
+        this.logger.info(
+          `[SM ${options.logTag} ${sessionId}] Step still running after ${this.stepGraceMs}ms grace window; completing asynchronously`
         );
         settle({
-          success: false,
-          error: ErrorMessages.stepTimeout(5),
+          success: true,
           state: session.state,
+          data: {
+            message: ErrorMessages.stepStillRunning(this.stepGraceMs / 1000),
+            pending: true,
+          },
         });
-      }, 5000);
+      }, this.stepGraceMs);
 
       proxyManager.on('stopped', onStopped);
       proxyManager.on('terminated', onTerminated);
@@ -1292,15 +1306,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       });
 
       const timeout = setTimeout(() => {
-        this.logger.warn(
-          `[SessionManager pause] Timeout waiting for stopped event in session ${sessionId}`
+        this.logger.info(
+          `[SessionManager pause] No stopped event within ${this.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
         );
         settle({
-          success: false,
-          error: ErrorMessages.pauseTimeout(5),
+          success: true,
           state: session.state,
+          data: {
+            message: ErrorMessages.pausePending(this.pauseGraceMs / 1000),
+            pending: true,
+          },
         });
-      }, 5000);
+      }, this.pauseGraceMs);
 
       proxyManager.on('stopped', onStopped);
       proxyManager.on('terminated', onEnded);

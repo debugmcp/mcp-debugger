@@ -8,6 +8,7 @@ import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { Breakpoint } from '@debugmcp/shared';
+import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
@@ -341,6 +342,42 @@ describe('Server Control Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('Session not found: test-session');
+    });
+
+    it.each([
+      ['step_over', 'stepOver'],
+      ['step_into', 'stepInto'],
+      ['step_out', 'stepOut']
+    ])('should surface a pending %s truthfully while the program is still running', async (toolName, methodName) => {
+      // Mock session validation
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE' // Not terminated
+      });
+      // A step that outlives the grace window resolves with a pending marker
+      const stepResult = {
+        success: true,
+        state: 'running',
+        data: { message: ErrorMessages.stepStillRunning(5), pending: true }
+      };
+      mockSessionManager[methodName].mockResolvedValue(stepResult);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.state).toBe('running');
+      expect(content.pending).toBe(true);
+      // The truthful still-running message must replace the default "Stepped X"
+      expect(content.message).toBe(ErrorMessages.stepStillRunning(5));
+      // No stop yet, so there is no location to report
+      expect(content.location).toBeUndefined();
     });
 
     it.each([

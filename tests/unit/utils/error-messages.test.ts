@@ -15,10 +15,16 @@ describe('ErrorMessages', () => {
     expect(message).toMatch(/debug proxy/i);
   });
 
-  it('builds step timeout message', () => {
-    const message = ErrorMessages.stepTimeout(5);
+  it('builds step still-running message', () => {
+    const message = ErrorMessages.stepStillRunning(5);
     expect(message).toContain('5s');
-    expect(message).toContain('Step operation');
+    expect(message).toContain('still executing');
+  });
+
+  it('builds pause pending message', () => {
+    const message = ErrorMessages.pausePending(5);
+    expect(message).toContain('5s');
+    expect(message).toContain("no 'stopped' event");
   });
 
   it('builds adapter ready timeout message', () => {

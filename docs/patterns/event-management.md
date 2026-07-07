@@ -314,16 +314,21 @@ const handleExit = (code: number | null, signal?: string) => {
 **Location**: `src/session/session-manager-operations.ts`
 
 ```typescript
-// Wait for stopped event
+// Wait for stopped event, with a grace window rather than a hard deadline:
+// a step that outlives the window returns a truthful `pending` success and
+// completes asynchronously via the persistent handleStopped listener.
 return new Promise((resolve) => {
   const timeout = setTimeout(() => {
-    this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped event`);
-    resolve({ 
-      success: false, 
-      error: ErrorMessages.stepTimeout(5), 
-      state: session.state 
+    this.logger.info(`[SM stepOver ${sessionId}] Step still running after grace window; completing asynchronously`);
+    resolve({
+      success: true,
+      state: session.state, // still RUNNING
+      data: {
+        message: ErrorMessages.stepStillRunning(this.stepGraceMs / 1000),
+        pending: true,
+      },
     });
-  }, 5000);
+  }, this.stepGraceMs);
   
   session.proxyManager?.once('stopped', () => {
     clearTimeout(timeout);

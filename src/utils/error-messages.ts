@@ -30,28 +30,31 @@ export const ErrorMessages = {
     `Check that the required debug adapter is installed and accessible.`,
   
   /**
-   * Error message for step operation timeouts
-   * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event within the timeout
-   * Used in: src/session/session-manager.ts
-   * Default timeout: 5 seconds
-   * @param timeout - The timeout duration in seconds
+   * Informational message for step operations still executing after the grace window
+   * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event
+   * within the grace window — usually because the step runs long-lived user code, which is not an error
+   * Used in: src/session/session-manager-operations.ts
+   * Default grace window: 5 seconds
+   * @param graceSeconds - The grace window duration in seconds
    */
-  stepTimeout: (timeout: number) =>
-    `Step operation did not complete within ${timeout}s. ` +
-    `The debug adapter may have crashed or the program may be stuck. ` +
-    `Try restarting your debug session.`,
+  stepStillRunning: (graceSeconds: number) =>
+    `Step dispatched; the program is still executing after ${graceSeconds}s ` +
+    `(e.g. stepping over a long-running call). The session remains 'running' and will ` +
+    `become 'paused' when the step completes. Check the session state, or call ` +
+    `pause_execution to interrupt.`,
 
   /**
-   * Error message for pause operation timeouts
-   * Occurs when: A pause request doesn't receive a 'stopped' event within the timeout
+   * Informational message for pause requests not yet honored within the grace window
+   * Occurs when: A pause request is acknowledged but no 'stopped' event arrives within the grace
+   * window — the target may be blocked in native code or a syscall, which is not an error
    * Used in: src/session/session-manager-operations.ts
-   * Default timeout: 5 seconds
-   * @param timeout - The timeout duration in seconds
+   * Default grace window: 5 seconds
+   * @param graceSeconds - The grace window duration in seconds
    */
-  pauseTimeout: (timeout: number) =>
-    `Pause request was accepted but no 'stopped' event arrived within ${timeout}s. ` +
-    `The program may not be pausable right now (e.g. blocked in native code). ` +
-    `Check the session state or try again.`,
+  pausePending: (graceSeconds: number) =>
+    `Pause requested; no 'stopped' event within ${graceSeconds}s ` +
+    `(the program may be blocked in native code or a syscall). The session will report ` +
+    `'paused' once the stop lands. Check the session state to confirm.`,
 
 
   /**
