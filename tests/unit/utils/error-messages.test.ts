@@ -33,6 +33,14 @@ describe('ErrorMessages', () => {
     expect(message).toContain("no 'stopped' event");
   });
 
+  it('builds attach verify failed message naming the verifyTimeout knob', () => {
+    const message = ErrorMessages.attachVerifyFailed(5000, 'debugger reported zero threads');
+    expect(message).toContain('no threads reported');
+    expect(message).toContain('5000ms');
+    expect(message).toContain('debugger reported zero threads');
+    expect(message).toContain('verifyTimeout');
+  });
+
   it('builds adapter ready timeout message', () => {
     const message = ErrorMessages.adapterReadyTimeout(15);
     expect(message).toContain('15s');

@@ -1469,6 +1469,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.ERROR);
       expect(result.error).toContain('no threads reported');
       expect(result.error).toContain('zero threads');
+      // The failure must tell the caller which knob raises the window (#143).
+      expect(result.error).toContain('verifyTimeout');
       expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
       // The proxy must be torn down so the session is not left half-attached.
       expect(mockProxyManager.stop).toHaveBeenCalled();
@@ -1628,6 +1630,116 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.PAUSED);
       expect(threadCalls).toBeGreaterThanOrEqual(3);
       expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(7);
+    });
+
+    it('should honor a caller-provided verifyTimeout over the default window', async () => {
+      // Issue #143: the window must be adjustable per call. A shorter
+      // override proves the caller's value is the one actually applied —
+      // if the default (raised to 5s here) were used instead, the failure
+      // message would name 5000ms and the test would take seconds.
+      (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 5000;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true,
+        verifyTimeout: 200
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('200ms');
+    });
+
+    it('should succeed when a larger verifyTimeout lets a slow target report threads', async () => {
+      // Models the #143 rescue: a target that only becomes debuggable after
+      // the default window (200ms via beforeEach) has elapsed succeeds when
+      // the caller extends the window.
+      (operations as unknown as { attachVerifyIntervalMs: number }).attachVerifyIntervalMs = 25;
+      const attachStartedAt = Date.now();
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          if (Date.now() - attachStartedAt < 400) {
+            return { body: { threads: [] } };
+          }
+          return { body: { threads: [{ id: 9, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true,
+        verifyTimeout: 2000
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(9);
+    });
+
+    it('should reject a non-positive verifyTimeout without starting a proxy', async () => {
+      const startSpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      for (const bad of [0, -5, Number.NaN]) {
+        const result = await operations.attachToProcess('test-session', {
+          port: 5005,
+          host: 'localhost',
+          stopOnEntry: true,
+          verifyTimeout: bad
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('verifyTimeout');
+      }
+      expect(startSpy).not.toHaveBeenCalled();
+    });
+
+    it('should not leak verifyTimeout into the adapter attach arguments', async () => {
+      // verifyTimeout is consumed by the session manager's verification loop;
+      // it must not ride the config spread into the DAP attach arguments.
+      const startSpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true,
+        verifyTimeout: 3000
+      });
+
+      expect(result.success).toBe(true);
+      const attachLaunchArgs = startSpy.mock.calls[0][3] as Record<string, unknown>;
+      expect(attachLaunchArgs).not.toHaveProperty('verifyTimeout');
+      expect(attachLaunchArgs).toMatchObject({ request: 'attach', __attachMode: true, port: 5005 });
     });
 
     it('should skip thread discovery when stopOnEntry is false', async () => {

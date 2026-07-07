@@ -69,6 +69,21 @@ export const ErrorMessages = {
 
 
   /**
+   * Error message for attach verification failures
+   * Occurs when: After an attach handshake, the debugger does not report any
+   * threads within the verification window — either the attach is dead
+   * (issue #124) or the target is slow to become debuggable (issue #143)
+   * Used in: src/session/session-manager-operations.ts
+   * Default window: 5 seconds, overridable per call via 'verifyTimeout'
+   * @param timeoutMs - The verification window in milliseconds
+   * @param lastFailure - The last observed failure while polling 'threads'
+   */
+  attachVerifyFailed: (timeoutMs: number, lastFailure: string) =>
+    `Attach did not become debuggable: no threads reported within ${timeoutMs}ms ` +
+    `(last failure: ${lastFailure}). If the target is just slow to become debuggable ` +
+    `(e.g. a busy or warming JVM), retry with a larger 'verifyTimeout' (ms) on attach_to_process.`,
+
+  /**
    * Error message for adapter ready timeouts
    * Occurs when: Waiting for the debug adapter to be configured times out
    * Used in: src/session/session-manager.ts (logged as warning)
