@@ -439,20 +439,27 @@ export class DapProxyWorker {
         );
 
         if (isAttachMode && initBehavior.sendAttachBeforeInitialized) {
-          // ATTACH-FIRST MODE: Send attach immediately, then wait for initialized
-          // Some adapters only send 'initialized' AFTER processing the attach request
+          // ATTACH-FIRST MODE: Send attach immediately, then wait for initialized.
+          // Some adapters (debugpy) only send 'initialized' AFTER processing the
+          // attach request — and only respond to attach after configurationDone,
+          // so the attach response must not be awaited before handleInitializedEvent.
           const attachPayload = payload.launchConfig || {};
-          const payloadKeys = Object.keys(attachPayload);
-          const hasSymbolOpts = 'symbolOptions' in (attachPayload as Record<string, unknown>);
-          this.logger!.info(`[Worker] Attach-first mode — sending attach. Keys: ${payloadKeys.join(', ')}, symbolOptions: ${hasSymbolOpts ? JSON.stringify((attachPayload as Record<string, unknown>).symbolOptions) : 'absent'}`);
-          await this.connectionManager!.sendAttachRequest(
+          this.logger!.info(`[Worker] Attach-first mode — sending attach. Keys: ${Object.keys(attachPayload).join(', ')}`);
+          const attachRequest = this.connectionManager!.sendAttachRequest(
             this.dapClient,
             attachPayload
           );
+          // Surface early attach failures (connection refused, bad args) instead
+          // of waiting out the initialized timeout. Promise.race subscribes to
+          // every arm, so this rejection is consumed even when another arm wins.
+          const attachFailure = new Promise<never>((_, reject) => {
+            attachRequest.catch(reject);
+          });
 
           this.logger!.info('[Worker] Attach sent, waiting for "initialized" event');
           await Promise.race([
             this.initializedEventPromise!,
+            attachFailure,
             new Promise((_, reject) =>
               setTimeout(() => reject(new Error('Timeout waiting for initialized event after attach')), 15000)
             )
@@ -460,6 +467,9 @@ export class DapProxyWorker {
 
           this.deferInitializedHandling = false;
           await this.handleInitializedEvent();
+          // Now that configurationDone is sent, the adapter's attach response
+          // can arrive; propagate an attach failure if it rejected instead.
+          await attachRequest;
         } else if (isAttachMode) {
           // STANDARD ATTACH MODE: Wait for "initialized" event BEFORE sending attach
           // Some adapters send "initialized" after initialize response, before attach
