@@ -282,6 +282,68 @@ describe('ProxyRunner IPC communication', () => {
     expect(onMessage).toHaveBeenCalledWith(JSON.stringify({ cmd: 'init', sessionId: 'test-2' }));
   });
 
+  it('never logs adapter env values from IPC messages (issue #146)', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    const onMessage = vi.fn().mockResolvedValue(undefined);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage });
+    await runner.start();
+
+    const messageListeners = process.listeners('message');
+    const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
+
+    await ipcHandler({
+      cmd: 'init',
+      sessionId: 'env-leak',
+      adapterCommand: {
+        command: 'python',
+        args: ['-m', 'debugpy.adapter'],
+        env: { GITHUB_PAT: 'github_pat_SENTINEL', HOME: '/home/user-sentinel' }
+      }
+    });
+
+    const allLogged = JSON.stringify([
+      (logger.debug as any).mock.calls,
+      (logger.info as any).mock.calls,
+      (logger.warn as any).mock.calls,
+      (logger.error as any).mock.calls
+    ]);
+    expect(allLogged).not.toContain('github_pat_SENTINEL');
+    expect(allLogged).not.toContain('/home/user-sentinel');
+  });
+
+  it('never logs adapter env values when message processing fails (issue #146)', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    const onMessage = vi.fn().mockRejectedValue(new Error('processing failed'));
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage });
+    await runner.start();
+
+    const messageListeners = process.listeners('message');
+    const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
+
+    await ipcHandler({
+      cmd: 'init',
+      sessionId: 'env-leak-error',
+      adapterCommand: {
+        command: 'python',
+        args: ['-m', 'debugpy.adapter'],
+        env: { GITHUB_PAT: 'github_pat_SENTINEL', HOME: '/home/user-sentinel' }
+      }
+    });
+
+    const allLogged = JSON.stringify([
+      (logger.debug as any).mock.calls,
+      (logger.info as any).mock.calls,
+      (logger.warn as any).mock.calls,
+      (logger.error as any).mock.calls
+    ]);
+    expect(allLogged).not.toContain('github_pat_SENTINEL');
+    expect(allLogged).not.toContain('/home/user-sentinel');
+  });
+
   it('IPC message handler warns on unexpected message type', async () => {
     (process as any).send = vi.fn();
     Object.defineProperty(process, 'connected', { value: true, configurable: true });

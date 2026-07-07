@@ -462,6 +462,43 @@ describe('ProxyManager.start', () => {
     }
   });
 
+  it('caps stderr embedded in init-exit errors and never leaks secrets (issue #146)', async () => {
+    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          // Acknowledge init so start() reaches the wait-for-initialized phase,
+          // then dump 15 stderr lines (one secret-bearing) and exit.
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+          setTimeout(() => {
+            for (let i = 1; i <= 14; i++) {
+              stderrEmitter.emit('data', Buffer.from(`stderr-line-${String(i).padStart(2, '0')}`));
+            }
+            stderrEmitter.emit('data', Buffer.from('GITHUB_PAT=github_pat_supersecret1234567890'));
+            fakeProcess.emit('exit', 1, null);
+          }, 0);
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization\. Code: 1/);
+    const err = await startPromise.catch((e: Error) => e);
+
+    // Capped to the last 10 of 15 lines, labelled as such
+    expect(err.message).toContain('(last 10 of 15 lines)');
+    expect(err.message).toContain('stderr-line-06');
+    expect(err.message).toContain('stderr-line-14');
+    expect(err.message).not.toContain('stderr-line-05');
+    expect(err.message).not.toContain('stderr-line-01');
+    // The secret never reaches the user-facing error
+    expect(err.message).not.toContain('github_pat_supersecret');
+  });
+
   it('fails to start when bootstrap worker script is missing', async () => {
     (fileSystem.pathExists as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 

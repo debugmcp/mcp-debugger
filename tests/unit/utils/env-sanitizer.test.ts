@@ -61,6 +61,28 @@ describe('sanitizeEnvForLogging', () => {
     expect(result.Api_Key).toBe('[REDACTED]');
     expect(result.apiKey).toBe('[REDACTED]');
   });
+
+  it('redacts token-delimited sensitive keys like GITHUB_PAT (issue #146)', () => {
+    const env = {
+      GITHUB_PAT: 'github_pat_abc123',
+      MY_PWD: 'x',
+      SSH_KEY: 'y',
+      AWS_ACCESS_KEY_ID: 'z',
+      githubPat: 'camel'
+    };
+    const result = sanitizeEnvForLogging(env);
+    expect(result.GITHUB_PAT).toBe('[REDACTED]');
+    expect(result.MY_PWD).toBe('[REDACTED]');
+    expect(result.SSH_KEY).toBe('[REDACTED]');
+    expect(result.AWS_ACCESS_KEY_ID).toBe('[REDACTED]');
+    expect(result.githubPat).toBe('[REDACTED]');
+  });
+
+  it('does not over-redact keys where a token is a mere substring', () => {
+    const env = { PATH: '/usr/bin', PATTERN: '*.ts', KEYBOARD: 'us', MONKEY: 'banana' };
+    const result = sanitizeEnvForLogging(env);
+    expect(result).toEqual(env);
+  });
 });
 
 describe('sanitizePayloadForLogging', () => {
@@ -78,18 +100,21 @@ describe('sanitizePayloadForLogging', () => {
     expect(result.language).toBe('python');
   });
 
-  it('sanitizes adapterCommand.env', () => {
+  it('replaces adapterCommand.env with a count summary — no values logged (issue #146)', () => {
     const payload = {
       sessionId: 'abc',
       adapterCommand: {
         command: 'python',
         args: ['-m', 'debugpy'],
-        env: { HOME: '/home/user', API_KEY: 'secret-value' }
+        env: { HOME: '/home/user', API_KEY: 'secret-value', GITHUB_PAT: 'github_pat_XYZ' }
       }
     };
     const result = sanitizePayloadForLogging(payload) as any;
-    expect(result.adapterCommand.env.HOME).toBe('/home/user');
-    expect(result.adapterCommand.env.API_KEY).toBe('[REDACTED]');
+    expect(result.adapterCommand.env).toBe('<3 env vars redacted>');
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('/home/user');
+    expect(serialized).not.toContain('secret-value');
+    expect(serialized).not.toContain('github_pat_XYZ');
   });
 
   it('handles adapterCommand without env', () => {
@@ -138,6 +163,30 @@ describe('sanitizeStderr', () => {
   it('passes through clean lines', () => {
     const lines = ['Loading module...', 'Server started on port 3000', ''];
     expect(sanitizeStderr(lines)).toEqual(lines);
+  });
+
+  it('redacts lines with extended key patterns like GITHUB_PAT= without touching PATH=', () => {
+    const result = sanitizeStderr(['GITHUB_PAT=github_pat_abc', 'PATH=/usr/bin']);
+    expect(result[0]).toBe('[REDACTED — line contained sensitive data]');
+    expect(result[1]).toBe('PATH=/usr/bin');
+  });
+
+  it('redacts lines containing bare secret-shaped values (issue #146)', () => {
+    const lines = [
+      "env dump: { FOO: 'ghp_0123456789abcdefghij0123456789' }",
+      'github_pat_11ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      'aws AKIAIOSFODNN7EXAMPLE',
+      'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.sig',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'plain informational line'
+    ];
+    const result = sanitizeStderr(lines);
+    expect(result[0]).toBe('[REDACTED — line contained sensitive data]');
+    expect(result[1]).toBe('[REDACTED — line contained sensitive data]');
+    expect(result[2]).toBe('[REDACTED — line contained sensitive data]');
+    expect(result[3]).toBe('[REDACTED — line contained sensitive data]');
+    expect(result[4]).toBe('[REDACTED — line contained sensitive data]');
+    expect(result[5]).toBe('plain informational line');
   });
 
   it('handles empty array', () => {

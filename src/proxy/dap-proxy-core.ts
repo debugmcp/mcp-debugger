@@ -283,7 +283,7 @@ export class ProxyRunner {
             this.logger.debug(`[ProxyRunner] IPC message #${this.ipcMessageCounter} processed successfully (object)`);
           } catch (e) {
             this.logger.error('[ProxyRunner] Could not process object message:', {
-              message,
+              message: sanitizePayloadForLogging(message),
               error: getErrorMessage(e)
             });
             throw e;

@@ -274,7 +274,17 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         } else {
           let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
           if (this.stderrBuffer.length > 0) {
-            errorMessage += `\nStderr output:\n${this.stderrBuffer.join('\n')}`;
+            // Cap what gets embedded in the user-facing error — the full
+            // buffer is already in the logs (issue #146).
+            const lines = this.stderrBuffer.slice(-10);
+            let text = lines.join('\n');
+            if (text.length > 2000) {
+              text = '…' + text.slice(-2000);
+            }
+            const label = this.stderrBuffer.length > lines.length
+              ? ` (last ${lines.length} of ${this.stderrBuffer.length} lines)`
+              : '';
+            errorMessage += `\nStderr output${label}:\n${text}`;
           }
           reject(new Error(errorMessage));
         }
@@ -742,8 +752,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       // Sanitize before logging and storing — stderr may contain env vars
       const sanitizedLines = sanitizeStderr([output]);
       this.logger.error(`[ProxyManager STDERR] ${sanitizedLines[0]}`);
-      // Capture sanitized stderr for error reporting during initialization
+      // Capture sanitized stderr for error reporting during initialization.
+      // Bounded so a chatty proxy cannot grow the buffer (and everything it
+      // gets copied into) without limit.
       if (!this.isInitialized) {
+        if (this.stderrBuffer.length >= 100) {
+          this.stderrBuffer.shift();
+        }
         this.stderrBuffer.push(sanitizedLines[0]);
       }
     });

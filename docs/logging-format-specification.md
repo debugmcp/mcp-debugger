@@ -207,8 +207,11 @@ Truncation is applied in targeted locations rather than as a generic deep traver
 1. **Variable values in `get_variables` logging**: Individual variable `value` strings are truncated at 200 characters, and only the first 10 variables are included in the log entry.
 
 2. **Request/Response objects**: Targeted sanitization via `sanitizePayloadForLogging`:
-   - `adapterCommand.env` is sanitized by `sanitizeEnvForLogging`, which checks each key against a list of sensitive patterns (e.g., `api_key`, `secret`, `token`, `password`, `credential`, `auth`, `session_id`, `access_key`, `signing`, `private_key`). Matching keys have their values replaced with `[REDACTED]`; non-matching keys are passed through unchanged
+   - `adapterCommand.env` is replaced wholesale with a count summary (e.g., `<57 env vars redacted>`) — env values are never logged, since keyword redaction cannot anticipate every secret-bearing key name (issue #146)
+   - `sanitizeEnvForLogging` (for any direct use) redacts values whose key matches a sensitive pattern (e.g., `api_key`, `secret`, `token`, `password`, `credential`, `auth`, `session_id`, `access_key`, `signing`, `private_key`) or contains a sensitive token after splitting on delimiters and camelCase boundaries (`pat`, `key`, `pwd`, `passwd`, `cred`, `bearer`, `oauth`, `jwt` — catches `GITHUB_PAT` without redacting `PATH`)
    - Other request/response fields are not generically scrubbed; sanitization is intentionally targeted
+
+3. **Proxy stderr in errors**: stderr lines are sanitized at capture (`sanitizeStderr` redacts lines with sensitive key names like `GITHUB_PAT=...` or well-known secret value shapes like `ghp_...`, `github_pat_...`, `sk-...`, `AKIA...`, JWTs, PEM headers), the capture buffer is bounded to 100 lines, and the "Proxy exited during initialization" error embeds at most the last 10 lines (max 2000 chars)
 
 There is no generic array truncation (e.g., "show first 5 items") applied across all log entries.
 
