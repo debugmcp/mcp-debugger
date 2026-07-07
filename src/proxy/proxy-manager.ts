@@ -28,6 +28,7 @@ import type {
 } from '../dap-core/types.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { sanitizePayloadForLogging, sanitizeStderr } from '../utils/env-sanitizer.js';
+import { LineBuffer } from '../utils/line-buffer.js';
 import { ProxyConfig } from './proxy-config.js';
 import { IDebugAdapter, AdapterLaunchBarrier } from '@debugmcp/shared';
 
@@ -746,22 +747,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       );
     });
 
-    // Handle stderr
+    // Handle stderr. Chunks arrive at arbitrary byte boundaries, so they are
+    // line-buffered before sanitization — a secret assignment split across
+    // two chunks would otherwise leak its tail past the key/value redaction
+    // patterns (issue #151). Scoped to this process's handlers so a pending
+    // partial line survives until this stream's own 'end'/'close', and never
+    // bleeds into a later process's stderr.
+    const stderrLineBuffer = new LineBuffer();
     this.proxyProcess.stderr?.on('data', (data: Buffer | string) => {
-      const output = data.toString().trim();
-      // Sanitize before logging and storing — stderr may contain env vars
-      const sanitizedLines = sanitizeStderr([output]);
-      this.logger.error(`[ProxyManager STDERR] ${sanitizedLines[0]}`);
-      // Capture sanitized stderr for error reporting during initialization.
-      // Bounded so a chatty proxy cannot grow the buffer (and everything it
-      // gets copied into) without limit.
-      if (!this.isInitialized) {
-        if (this.stderrBuffer.length >= 100) {
-          this.stderrBuffer.shift();
-        }
-        this.stderrBuffer.push(sanitizedLines[0]);
-      }
+      this.recordStderrLines(stderrLineBuffer.append(data.toString()));
     });
+    // Flush the trailing partial line only once the stream itself is done.
+    // Flushing on process 'exit' would be wrong: the pipe can still deliver
+    // the rest of a split line afterwards, re-creating the straddle leak.
+    const flushStderr = () => this.recordStderrLines(stderrLineBuffer.flush());
+    this.proxyProcess.stderr?.on('end', flushStderr);
+    this.proxyProcess.stderr?.on('close', flushStderr);
 
     // Handle exit
     this.proxyProcess.on('exit', (code: number | null, signal: string | null) => {
@@ -790,6 +791,33 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.emit('error', err);
       this.cleanup();
     });
+  }
+
+  /**
+   * Log and capture complete stderr lines, sanitized. Lines can arrive after
+   * the process 'exit' event snapshotted the buffer (the pipe drains last),
+   * so late lines are also appended to the captured exit details.
+   */
+  private recordStderrLines(lines: string[]): void {
+    const sanitized = sanitizeStderr(lines.filter(line => line.trim().length > 0));
+    for (const line of sanitized) {
+      this.logger.error(`[ProxyManager STDERR] ${line}`);
+      // Capture sanitized stderr for error reporting during initialization.
+      // Bounded so a chatty proxy cannot grow the buffer (and everything it
+      // gets copied into) without limit.
+      if (!this.isInitialized) {
+        if (this.stderrBuffer.length >= 100) {
+          this.stderrBuffer.shift();
+        }
+        this.stderrBuffer.push(line);
+      }
+      if (this.lastExitDetails) {
+        if (this.lastExitDetails.capturedStderr.length >= 100) {
+          this.lastExitDetails.capturedStderr.shift();
+        }
+        this.lastExitDetails.capturedStderr.push(line);
+      }
+    }
   }
 
   private handleProxyMessage(rawMessage: unknown): void {
