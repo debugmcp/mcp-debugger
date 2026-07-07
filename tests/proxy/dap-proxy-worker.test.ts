@@ -1773,9 +1773,7 @@ describe('DapProxyWorker', () => {
         launchConfig: {
           type: 'python',
           request: 'attach',
-          connect: { host: '127.0.0.1', port: 5679 },
-          host: '127.0.0.1',
-          port: 5679
+          connect: { host: '127.0.0.1', port: 5679 }
         }
         // No adapterCommand: direct-connect attach — debugpy is already listening
       };
@@ -1846,9 +1844,7 @@ describe('DapProxyWorker', () => {
         launchConfig: {
           type: 'python',
           request: 'attach',
-          connect: { host: '127.0.0.1', port: 5679 },
-          host: '127.0.0.1',
-          port: 5679
+          connect: { host: '127.0.0.1', port: 5679 }
         }
       };
 

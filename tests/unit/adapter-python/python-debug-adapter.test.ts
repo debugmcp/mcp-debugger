@@ -350,12 +350,14 @@ describe('PythonDebugAdapter', () => {
         request: 'attach',
         name: 'Python: Attach',
         connect: { host: '127.0.0.1', port: 5679 },
-        host: '127.0.0.1',
-        port: 5679,
         justMyCode: false,
         cwd: '/work',
         env: { FOO: '1' }
       });
+      // debugpy rejects configs carrying both `connect` and top-level
+      // host/port ("mutually exclusive"), so those must not leak through.
+      expect(config.host).toBeUndefined();
+      expect(config.port).toBeUndefined();
       // No launch-template pollution (second bug in issue #145)
       expect(config.console).toBeUndefined();
       expect(config.__attachMode).toBeUndefined();

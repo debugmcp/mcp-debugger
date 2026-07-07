@@ -69,8 +69,6 @@ interface PythonAttachConfig extends LanguageSpecificAttachConfig {
   request: 'attach';
   name: string;
   connect: { host: string; port: number };
-  host: string;
-  port: number;
   justMyCode: boolean;
   cwd?: string;
   env?: Record<string, string>;
@@ -434,11 +432,10 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       type: 'python',
       request: 'attach',
       name: 'Python: Attach',
-      // Modern debugpy attach convention; host/port are also kept top-level
-      // so the adapter policy's spawn config can read them.
+      // debugpy client-connect convention. Top-level host/port must NOT be
+      // set alongside it — debugpy rejects that combination as mutually
+      // exclusive. The adapter policy's spawn config reads connect.* too.
       connect: { host, port },
-      host,
-      port,
       justMyCode: config.justMyCode ?? true
     };
 
