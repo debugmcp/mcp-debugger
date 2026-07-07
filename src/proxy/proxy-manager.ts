@@ -60,8 +60,9 @@ export interface IProxyManager extends EventEmitter {
   start(config: ProxyConfig): Promise<void>;
   stop(): Promise<void>;
   sendDapRequest<T extends DebugProtocol.Response>(
-    command: string, 
-    args?: unknown
+    command: string,
+    args?: unknown,
+    options?: { timeoutMs?: number }
   ): Promise<T>;
   isRunning(): boolean;
   getCurrentThreadId(): number | null;
@@ -107,6 +108,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private isStopped = false;
   /** Bounded wait for in-flight DAP requests to settle before stop() cancels them. */
   private stopDrainTimeoutMs = 1000;
+  /** Worker-side DAP request timeout assumed when no per-request override is given. */
+  private defaultDapRequestTimeoutMs = 30000;
+  /**
+   * Extra time the parent waits beyond the worker/socket timeout so the
+   * worker's own timeout (which produces the actionable error) fires first.
+   */
+  private dapParentMarginMs = 5000;
   private isDryRun = false;
   private dryRunCompleteReceived = false;
   private dryRunCommandSnapshot?: string;
@@ -371,8 +379,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   async sendDapRequest<T extends DebugProtocol.Response>(
-    command: string, 
-    args?: unknown
+    command: string,
+    args?: unknown,
+    options?: { timeoutMs?: number }
   ): Promise<T> {
     if (!this.proxyProcess || !this.isInitialized) {
       throw new Error('Proxy not initialized');
@@ -385,7 +394,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       sessionId: this.sessionId,
       requestId,
       dapCommand: command,
-      dapArgs: args
+      dapArgs: args,
+      // Conditional so the key is truly absent (not undefined) in IPC payloads
+      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {})
     };
 
     if (barrier && !barrier.awaitResponse) {
@@ -443,7 +454,11 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         reject(error);
       }
 
-      // Timeout handler
+      // Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
+      // fires first and produces the actionable error; this parent timer is a
+      // backstop that only fires if the worker never responds at all.
+      const effectiveTimeoutMs =
+        (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
       setTimeout(() => {
         if (this.pendingDapRequests.has(requestId)) {
           this.pendingDapRequests.delete(requestId);
@@ -453,9 +468,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
             this.clearActiveLaunchBarrier();
           }
-          reject(new Error(ErrorMessages.dapRequestTimeout(command, 35)));
+          reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
         }
-      }, 35000);
+      }, effectiveTimeoutMs);
     });
   }
 

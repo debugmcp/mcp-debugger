@@ -369,6 +369,34 @@ describe('MessageParser', () => {
       expect(() => MessageParser.validateDapPayload(payload))
         .toThrow("DAP payload 'dapArgs' should not be null");
     });
+
+    it('should keep a valid timeoutMs (issue #142)', () => {
+      const payload = {
+        cmd: 'dap',
+        sessionId: 'test-session',
+        requestId: 'req-123',
+        dapCommand: 'evaluate',
+        timeoutMs: 60000
+      };
+
+      const result = MessageParser.validateDapPayload(payload);
+      expect(result.timeoutMs).toBe(60000);
+    });
+
+    it('should drop non-finite or non-positive timeoutMs', () => {
+      for (const bad of [0, -5, NaN, Infinity, '5000', {}]) {
+        const payload = {
+          cmd: 'dap',
+          sessionId: 'test-session',
+          requestId: 'req-123',
+          dapCommand: 'evaluate',
+          timeoutMs: bad
+        };
+
+        const result = MessageParser.validateDapPayload(payload);
+        expect(result.timeoutMs, `timeoutMs=${String(bad)}`).toBeUndefined();
+      }
+    });
   });
 
   describe('validateTerminatePayload', () => {

@@ -1110,6 +1110,60 @@ describe('DapProxyWorker', () => {
 
       mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
     });
+
+    it('forwards payload timeoutMs to the request tracker and DAP client (issue #142)', async () => {
+      mockMessageSender.send.mockClear();
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).logger = mockLogger;
+
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+      const trackSpy = vi.spyOn((worker as any).requestTracker, 'track');
+
+      const payload: DapCommandPayload = {
+        cmd: 'dap',
+        sessionId: 'test-session',
+        requestId: 'req-timeout-fwd',
+        dapCommand: 'evaluate',
+        dapArgs: { expression: 'x' },
+        timeoutMs: 60000
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(trackSpy).toHaveBeenCalledWith('req-timeout-fwd', 'evaluate', 60000);
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('evaluate', { expression: 'x' }, 60000);
+
+      trackSpy.mockRestore();
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+    });
+
+    it('omits the timeout argument to the DAP client when payload has no timeoutMs', async () => {
+      mockMessageSender.send.mockClear();
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).logger = mockLogger;
+
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+
+      const payload: DapCommandPayload = {
+        cmd: 'dap',
+        sessionId: 'test-session',
+        requestId: 'req-no-timeout',
+        dapCommand: 'threads',
+        dapArgs: {}
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('threads', {});
+
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+    });
   });
 
   describe('JavaScript Adapter Command Queueing', () => {
@@ -1218,6 +1272,46 @@ describe('DapProxyWorker', () => {
       expect(responses).toHaveLength(1);
       expect(responses[0][0].success).toBe(true);
     });
+
+    it('retains payload timeoutMs on queued commands (issue #142)', async () => {
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).logger = mockLogger;
+      (worker as any).state = ProxyState.CONNECTED;
+
+      const queuePolicy = {
+        ...DefaultAdapterPolicy,
+        shouldQueueCommand: vi.fn(() => ({
+          shouldQueue: true,
+          shouldDefer: false,
+          reason: 'Queue for test'
+        })),
+        requiresCommandQueueing: vi.fn(() => true)
+      };
+
+      (worker as any).adapterPolicy = queuePolicy;
+      (worker as any).adapterState = queuePolicy.createInitialState();
+
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+      mockMessageSender.send.mockClear();
+      const trackSpy = vi.spyOn((worker as any).requestTracker, 'track');
+
+      const payload: DapCommandPayload = {
+        cmd: 'dap',
+        sessionId: 'queue-session',
+        requestId: 'req-queue-timeout',
+        dapCommand: 'evaluate',
+        dapArgs: { expression: 'x' },
+        timeoutMs: 45000
+      };
+
+      await worker.handleCommand(payload);
+
+      expect(trackSpy).toHaveBeenCalledWith('req-queue-timeout', 'evaluate', 45000);
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('evaluate', { expression: 'x' }, 45000);
+
+      trackSpy.mockRestore();
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+    });
   });
 
   describe('Pre-connect queue handling', () => {
@@ -1256,20 +1350,20 @@ describe('DapProxyWorker', () => {
       mockMessageSender.send.mockClear();
 
       const tracker = (worker as any).requestTracker;
-      tracker.track('timeout-req', 'threads', 50);
+      tracker.track('timeout-req', 'threads', 2000);
 
-      await vi.advanceTimersByTimeAsync(60);
+      await vi.advanceTimersByTimeAsync(2001);
       await Promise.resolve();
 
       expect(mockLogger.error).toHaveBeenCalledWith(
-        "[Worker] DAP request 'threads' (id: timeout-req) timed out"
+        "[Worker] DAP request 'threads' (id: timeout-req) timed out after 2000ms"
       );
       expect(mockMessageSender.send).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'dapResponse',
           requestId: 'timeout-req',
           success: false,
-          error: "Request 'threads' timed out"
+          error: "Request 'threads' timed out after 2s"
         })
       );
 

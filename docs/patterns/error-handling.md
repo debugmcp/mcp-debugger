@@ -167,14 +167,34 @@ async startDebugging(
 
 **Example**: ProxyManager DAP request timeout (`src/proxy/proxy-manager.ts`)
 
+A DAP request rides a three-layer timeout stack, ordered so the layer with the
+most actionable error message fires first:
+
+1. **Socket** (`minimal-dap.ts`) — 30s default, per-request `timeoutMs` override
+2. **Worker request tracker** (`dap-proxy-request-tracker.ts`) — 30s default, same override; its
+   `Request '<cmd>' timed out after Ns` failure is what callers normally see
+3. **Parent** (`proxy-manager.ts`) — override (or 30s default) **plus a 5s margin**, a backstop
+   that only fires if the worker never responds at all
+
+`evaluate_expression` and `redefine_classes` expose the override as a `timeout` (ms) tool
+argument (issue #142). `SessionManagerOperations` validates it (positive, finite, clamped to
+600000) and passes `{ timeoutMs }` to `sendDapRequest`, which threads it over IPC
+(`DapCommandPayload.timeoutMs`) to the worker and socket. On a timeout failure those
+operations append `ErrorMessages.dapRequestTimeoutHint()` naming the `timeout` argument.
+The margin invariant (worker fires before parent) must hold for any new override plumbing.
+
 ```typescript
-// Timeout handler
+// Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
+// fires first and produces the actionable error; this parent timer is a
+// backstop that only fires if the worker never responds at all.
+const effectiveTimeoutMs =
+  (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
 setTimeout(() => {
   if (this.pendingDapRequests.has(requestId)) {
     this.pendingDapRequests.delete(requestId);
-    reject(new Error(ErrorMessages.dapRequestTimeout(command, 35)));
+    reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
   }
-}, 35000);
+}, effectiveTimeoutMs);
 ```
 
 **Example**: SessionManager step operation grace window (`src/session/session-manager-operations.ts`)

@@ -157,6 +157,13 @@ export class MessageParser {
       throw new Error(`DAP payload 'dapArgs' should not be null`);
     }
 
+    // Defensive normalization: a per-request timeout override must be a finite
+    // positive number of milliseconds; anything else falls back to defaults.
+    if (obj.timeoutMs !== undefined &&
+        (typeof obj.timeoutMs !== 'number' || !Number.isFinite(obj.timeoutMs) || obj.timeoutMs <= 0)) {
+      delete obj.timeoutMs;
+    }
+
     // Type assertion via unknown to satisfy TypeScript
     return obj as unknown as DapCommandPayload;
   }
