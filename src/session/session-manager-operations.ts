@@ -1381,6 +1381,44 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     return value.length > maxLength ? value.substring(0, maxLength) + '... (truncated)' : value;
   }
 
+  /** Upper bound for caller-supplied per-request DAP timeouts (10 minutes). */
+  private static readonly MAX_DAP_TIMEOUT_MS = 600000;
+
+  /**
+   * Validate and clamp a caller-supplied per-request DAP timeout override (ms).
+   * Returns { error } for invalid values, { timeoutMs } with the (possibly
+   * clamped) override, or {} when no override was given.
+   */
+  private resolveDapTimeoutOverride(
+    timeoutMs: number | undefined,
+    logContext: string
+  ): { error?: string; timeoutMs?: number } {
+    if (timeoutMs === undefined) {
+      return {};
+    }
+    if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return {
+        error: `Invalid 'timeout': must be a positive number of milliseconds (got ${timeoutMs})`
+      };
+    }
+    if (timeoutMs > SessionManagerOperations.MAX_DAP_TIMEOUT_MS) {
+      this.logger.warn(
+        `[${logContext}] 'timeout' ${timeoutMs}ms exceeds the maximum; clamping to ${SessionManagerOperations.MAX_DAP_TIMEOUT_MS}ms`
+      );
+      return { timeoutMs: SessionManagerOperations.MAX_DAP_TIMEOUT_MS };
+    }
+    return { timeoutMs };
+  }
+
+  /** Append the 'timeout' tool-arg hint to DAP timeout failures. */
+  private withTimeoutHint(errorMessage: string): string {
+    if (!/timed out|did not respond/i.test(errorMessage)) {
+      return errorMessage;
+    }
+    const separator = errorMessage.trimEnd().endsWith('.') ? ' ' : '. ';
+    return `${errorMessage}${separator}${ErrorMessages.dapRequestTimeoutHint()}`;
+  }
+
   /**
    * Evaluate an expression in the context of the current debug session.
    * The debugger must be paused for evaluation to work.
@@ -1389,12 +1427,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * @param sessionId - The session ID
    * @param expression - The expression to evaluate
    * @param frameId - Optional stack frame ID for context (defaults to current frame)
+   * @param timeoutMs - Optional per-request timeout override (ms) for the DAP
+   *   evaluate request (default 30s, max 600000). Issue #142.
    * @returns Evaluation result with value, type, and optional variable reference
    */
   async evaluateExpression(
     sessionId: string,
     expression: string,
-    frameId?: number
+    frameId?: number,
+    timeoutMs?: number
   ): Promise<EvaluateResult> {
     const session = this._getSessionById(sessionId);
     // Some debuggers (rdbg) reject the default 'variables' context; let the
@@ -1411,6 +1452,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     if (!expression || expression.trim().length === 0) {
       this.logger.warn(`[SM evaluateExpression ${sessionId}] Empty expression provided`);
       return { success: false, error: 'Expression cannot be empty' };
+    }
+
+    const timeoutOverride = this.resolveDapTimeoutOverride(
+      timeoutMs,
+      `SM evaluateExpression ${sessionId}`
+    );
+    if (timeoutOverride.error) {
+      this.logger.warn(`[SM evaluateExpression ${sessionId}] ${timeoutOverride.error}`);
+      return { success: false, error: timeoutOverride.error };
     }
 
     // Validate session state
@@ -1486,12 +1536,14 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         )}", frameId: ${frameId}, context: ${context}`
       );
 
-      const response =
-        await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>('evaluate', {
-          expression,
-          frameId,
-          context,
-        });
+      // Conditional 3-arg call: only pass options when an override is present,
+      // so the default path keeps its exact 2-arg contract.
+      const evaluateArgs = { expression, frameId, context };
+      const response = timeoutOverride.timeoutMs !== undefined
+        ? await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>(
+            'evaluate', evaluateArgs, { timeoutMs: timeoutOverride.timeoutMs })
+        : await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>(
+            'evaluate', evaluateArgs);
 
       // Log raw response in debug mode
       this.logger.debug(`[SM evaluateExpression ${sessionId}] DAP evaluate raw response:`, response);
@@ -1568,7 +1620,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         userError = `Invalid frame context: ${errorMessage}`;
       }
 
-      return { success: false, error: userError };
+      return { success: false, error: this.withTimeoutHint(userError) };
   }
 }
 
@@ -1947,22 +1999,36 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   async redefineClasses(
     sessionId: string,
     classesDir: string,
-    sinceTimestamp: number = 0
+    sinceTimestamp: number = 0,
+    timeoutMs?: number
   ): Promise<RedefineClassesResult> {
     const session = this._getSessionById(sessionId);
     this.logger.info(
       `[SM redefineClasses ${sessionId}] classesDir: "${classesDir}", since: ${sinceTimestamp}`
     );
 
+    const timeoutOverride = this.resolveDapTimeoutOverride(
+      timeoutMs,
+      `SM redefineClasses ${sessionId}`
+    );
+    if (timeoutOverride.error) {
+      this.logger.warn(`[SM redefineClasses ${sessionId}] ${timeoutOverride.error}`);
+      return { success: false, error: timeoutOverride.error };
+    }
+
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       return { success: false, error: 'No active debug session' };
     }
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await session.proxyManager.sendDapRequest<any>(
-        'redefineClasses', { classesDir, sinceTimestamp }
-      );
+      const redefineArgs = { classesDir, sinceTimestamp };
+      const response = timeoutOverride.timeoutMs !== undefined
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? await session.proxyManager.sendDapRequest<any>(
+            'redefineClasses', redefineArgs, { timeoutMs: timeoutOverride.timeoutMs })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : await session.proxyManager.sendDapRequest<any>(
+            'redefineClasses', redefineArgs);
 
       const body = response?.body;
       if (!body) {
@@ -1983,7 +2049,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: this.withTimeoutHint(error instanceof Error ? error.message : String(error)),
       };
     }
   }

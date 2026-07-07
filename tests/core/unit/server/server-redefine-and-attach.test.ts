@@ -98,6 +98,14 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(tool.inputSchema.required).toContain('sessionId');
       expect(tool.inputSchema.required).toContain('classesDir');
       expect(tool.inputSchema.properties.sinceTimestamp).toBeDefined();
+      expect(tool.inputSchema.properties.timeout).toBeDefined();
+    });
+
+    it('evaluate_expression schema should expose a timeout property', async () => {
+      const result = await listToolsHandler({ method: 'tools/list', params: {} });
+      const tool = result.tools.find((t: any) => t.name === 'evaluate_expression');
+      expect(tool).toBeDefined();
+      expect(tool.inputSchema.properties.timeout).toBeDefined();
     });
   });
 
@@ -128,7 +136,8 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(mockSessionManager.redefineClasses).toHaveBeenCalledWith(
         'test-session',
         '/path/to/classes',
-        1000000
+        1000000,
+        undefined
       );
 
       const content = JSON.parse(result.content[0].text);
@@ -163,7 +172,70 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(mockSessionManager.redefineClasses).toHaveBeenCalledWith(
         'test-session',
         '/path/to/classes',
-        0
+        0,
+        undefined
+      );
+    });
+
+    it('forwards args.timeout to sessionManager.redefineClasses (issue #142)', async () => {
+      mockSessionManager.redefineClasses.mockResolvedValue({
+        success: true,
+        redefined: [],
+        redefinedCount: 0,
+        skippedNotLoaded: 0,
+        failedCount: 0,
+        scannedFiles: 0,
+        newestTimestamp: 0,
+      });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'redefine_classes',
+          arguments: {
+            sessionId: 'test-session',
+            classesDir: '/path/to/classes',
+            sinceTimestamp: 1000000,
+            timeout: 90000,
+          },
+        },
+      });
+
+      expect(mockSessionManager.redefineClasses).toHaveBeenCalledWith(
+        'test-session',
+        '/path/to/classes',
+        1000000,
+        90000
+      );
+    });
+
+    it('forwards args.timeout to sessionManager.evaluateExpression (issue #142)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'active'
+      });
+      mockSessionManager.evaluateExpression.mockResolvedValue({
+        success: true,
+        result: '42'
+      });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'evaluate_expression',
+          arguments: {
+            sessionId: 'test-session',
+            expression: '6*7',
+            timeout: 120000,
+          },
+        },
+      });
+
+      expect(mockSessionManager.evaluateExpression).toHaveBeenCalledWith(
+        'test-session',
+        '6*7',
+        undefined,
+        120000
       );
     });
 

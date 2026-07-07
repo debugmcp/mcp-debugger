@@ -12,11 +12,22 @@ export const ErrorMessages = {
    * @param command - The DAP command that timed out (e.g., 'stackTrace', 'variables')
    * @param timeout - The timeout duration in seconds
    */
-  dapRequestTimeout: (command: string, timeout: number) => 
+  dapRequestTimeout: (command: string, timeout: number) =>
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
     `Try restarting your debug session. If the problem persists, check the debug adapter logs.`,
-  
+
+  /**
+   * Hint appended to timeout failures on operations that accept a per-request
+   * 'timeout' tool argument (evaluate_expression, redefine_classes)
+   * Occurs when: A DAP request times out but the operation may simply need more time than the default allows
+   * Used in: src/session/session-manager-operations.ts
+   * Note: DAP has no cancel — the debuggee keeps executing the operation after the timeout fires
+   */
+  dapRequestTimeoutHint: () =>
+    `If the operation is expected to take this long, retry with a larger 'timeout' (ms) argument. ` +
+    `Note the operation may still be running in the debuggee.`,
+
   /**
    * Error message for proxy initialization timeouts
    * Occurs when: The debug proxy process fails to initialize within the timeout period

@@ -41,6 +41,11 @@ export interface DapCommandPayload {
   dapCommand: string;
   dapArgs?: unknown;
   sessionId: string;
+  /**
+   * Per-request timeout override (ms) for the worker request tracker and the
+   * DAP socket. Absent = layer defaults (30s). Issue #142.
+   */
+  timeoutMs?: number;
 }
 
 export interface TerminatePayload {
@@ -119,7 +124,7 @@ export interface IProcessSpawner {
  */
 export interface IDapClient {
   connect(): Promise<void>;
-  sendRequest<T = unknown>(command: string, args?: unknown): Promise<T>;
+  sendRequest<T = unknown>(command: string, args?: unknown, timeoutMs?: number): Promise<T>;
   disconnect(): void;
   /**
    * Reject all pending requests, clear timers, dispose resources.
@@ -202,7 +207,7 @@ export interface TrackedRequest {
  * Request tracker interface
  */
 export interface IRequestTracker {
-  track(requestId: string, command: string, timeoutMs: number): void;
+  track(requestId: string, command: string, timeoutMs?: number): void;
   complete(requestId: string): void;
   clear(): void;
   getPending(): Map<string, TrackedRequest>;

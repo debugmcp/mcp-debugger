@@ -728,6 +728,71 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
   });
 
+  describe('Evaluate Expression timeout override (issue #142)', () => {
+    beforeEach(() => {
+      mockSession.state = SessionState.PAUSED;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'stackTrace') {
+          return { body: { stackFrames: [{ id: 123 }] } };
+        }
+        if (command === 'evaluate') {
+          return { body: { result: '42', variablesReference: 0 } };
+        }
+        return {};
+      });
+    });
+
+    it('forwards the override to the evaluate request but not the stackTrace pre-request', async () => {
+      const result = await operations.evaluateExpression('test-session', '6*7', undefined, 120000);
+
+      expect(result.success).toBe(true);
+      // The internal stackTrace pre-request keeps the default timeout (2-arg call)
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'stackTrace',
+        expect.objectContaining({ threadId: 1 })
+      );
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'evaluate',
+        expect.objectContaining({ expression: '6*7', frameId: 123 }),
+        { timeoutMs: 120000 }
+      );
+    });
+
+    it('rejects a non-positive or non-finite timeout without sending any DAP request', async () => {
+      for (const bad of [0, -5, NaN]) {
+        const result = await operations.evaluateExpression('test-session', 'x', undefined, bad);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('timeout');
+      }
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalled();
+    });
+
+    it('clamps the override to 600000ms with a warning', async () => {
+      const result = await operations.evaluateExpression('test-session', 'x', 123, 900000);
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'evaluate',
+        expect.objectContaining({ expression: 'x', frameId: 123 }),
+        { timeoutMs: 600000 }
+      );
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('600000'));
+    });
+
+    it('appends a hint naming the timeout arg when the evaluate request times out', async () => {
+      mockProxyManager.sendDapRequest
+        .mockResolvedValueOnce({ body: { stackFrames: [{ id: 1 }] } })
+        .mockRejectedValueOnce(new Error("Request 'evaluate' timed out after 30s"));
+
+      const result = await operations.evaluateExpression('test-session', 'slow()');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('timed out');
+      expect(result.error).toContain("larger 'timeout'");
+    });
+  });
+
   describe('Start Debugging Error Scenarios', () => {
     it('should return timeout result when dry run never completes', async () => {
       vi.stubEnv('CI', 'true');

@@ -9,6 +9,12 @@ describe('ErrorMessages', () => {
     expect(message).toContain('10s');
   });
 
+  it('builds dap request timeout hint naming the timeout tool arg', () => {
+    const message = ErrorMessages.dapRequestTimeoutHint();
+    expect(message).toContain("'timeout'");
+    expect(message).toContain('ms');
+  });
+
   it('builds proxy initialization timeout message', () => {
     const message = ErrorMessages.proxyInitTimeout(30);
     expect(message).toContain('30s');

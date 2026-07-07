@@ -65,8 +65,8 @@ export class TestProxyManager extends ProxyManager {
   /**
    * Override sendDapRequest to return mock responses
    */
-  async sendDapRequest(command: string, args?: any): Promise<DebugProtocol.Response> {
-    this.lastSentCommand = { command, args };
+  async sendDapRequest(command: string, args?: any, options?: { timeoutMs?: number }): Promise<DebugProtocol.Response> {
+    this.lastSentCommand = { command, args, ...(options !== undefined ? { options } : {}) };
 
     // Check if proxy is running
     if (!this.isRunning()) {
