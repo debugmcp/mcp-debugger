@@ -489,6 +489,34 @@ describe('MinimalDapClient', () => {
       mockSocket.emit('data', createDapMessage(lateResponse));
     });
 
+    it('should honor an explicit per-request timeoutMs (issue #142)', async () => {
+      // Recreate client with deterministic timers: only a 60s timer (the
+      // override) fires immediately; the 30s default would never fire here.
+      client.shutdown();
+      const scheduledDelays: number[] = [];
+      const fakeTimers = {
+        setTimeout: ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+          scheduledDelays.push(delay ?? 0);
+          if (delay === 60000) {
+            return setTimeout(() => callback(...args), 0);
+          }
+          return setTimeout(callback, delay, ...args);
+        }) as typeof setTimeout,
+        clearTimeout: ((timer: NodeJS.Timeout) => {
+          clearTimeout(timer);
+        }) as typeof clearTimeout
+      };
+      client = new MinimalDapClient('localhost', 5678, undefined, { timers: fakeTimers });
+
+      await client.connect();
+
+      await expect(
+        client.sendRequest('evaluate', { expression: 'test' }, 60000)
+      ).rejects.toThrow("DAP request 'evaluate' (seq 1) timed out");
+
+      expect(scheduledDelays).toContain(60000);
+    });
+
     it('should handle unknown response sequences', async () => {
       await client.connect();
 

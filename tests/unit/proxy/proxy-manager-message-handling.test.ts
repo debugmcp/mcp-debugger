@@ -640,6 +640,82 @@ describe('ProxyManager Message Handling', () => {
       expect(pending.size).toBe(0);
     });
 
+    function makeInitializedProxyManager() {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+      const sendCommand = vi.fn();
+
+      (proxyManager as unknown as { sessionId: string }).sessionId = 'timeout-session';
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { proxyProcess: unknown }).proxyProcess = {
+        sendCommand,
+        killed: false
+      };
+
+      return { proxyManager, sendCommand };
+    }
+
+    it('honors a per-request timeoutMs override, rejecting after override + parent margin (issue #142)', async () => {
+      const { proxyManager } = makeInitializedProxyManager();
+
+      vi.useFakeTimers();
+
+      const request = proxyManager.sendDapRequest('evaluate', { expression: 'slow()' }, { timeoutMs: 60000 });
+      let settled = false;
+      request.catch(() => { settled = true; });
+
+      // The old hardcoded 35s deadline must NOT fire...
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(settled).toBe(false);
+
+      // ...but 60s override + 5s parent margin = 65s does, reporting the actual deadline.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(request).rejects.toThrow(/within 65s/);
+    });
+
+    it('applies the parent margin to short timeoutMs overrides', async () => {
+      const { proxyManager } = makeInitializedProxyManager();
+
+      vi.useFakeTimers();
+
+      const request = proxyManager.sendDapRequest('evaluate', { expression: 'x' }, { timeoutMs: 1000 });
+      let settled = false;
+      request.catch(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(5_999);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(request).rejects.toThrow(/within 6s/);
+    });
+
+    it('includes timeoutMs in the IPC payload when set and omits it otherwise', async () => {
+      const { proxyManager, sendCommand } = makeInitializedProxyManager();
+
+      vi.useFakeTimers();
+
+      const withOverride = proxyManager.sendDapRequest('evaluate', { expression: 'x' }, { timeoutMs: 60000 });
+      const withoutOverride = proxyManager.sendDapRequest('threads');
+      withOverride.catch(() => {});
+      withoutOverride.catch(() => {});
+
+      const firstPayload = sendCommand.mock.calls[0][0] as Record<string, unknown>;
+      const secondPayload = sendCommand.mock.calls[1][0] as Record<string, unknown>;
+      expect(firstPayload).toMatchObject({ dapCommand: 'evaluate', timeoutMs: 60000 });
+      // Assert the key is absent, not merely undefined: IPC serialization drops
+      // undefined, so presence here would still leak into JSON payloads.
+      expect('timeoutMs' in secondPayload).toBe(false);
+
+      // Flush both pending timers so nothing dangles across tests.
+      await vi.advanceTimersByTimeAsync(65_000);
+    });
+
     it('throws helpful error when proxy bootstrap is missing', async () => {
       const logger = createMockLogger();
       const fileSystem = createMockFileSystem();

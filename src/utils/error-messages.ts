@@ -12,11 +12,22 @@ export const ErrorMessages = {
    * @param command - The DAP command that timed out (e.g., 'stackTrace', 'variables')
    * @param timeout - The timeout duration in seconds
    */
-  dapRequestTimeout: (command: string, timeout: number) => 
+  dapRequestTimeout: (command: string, timeout: number) =>
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
     `Try restarting your debug session. If the problem persists, check the debug adapter logs.`,
-  
+
+  /**
+   * Hint appended to timeout failures on operations that accept a per-request
+   * 'timeout' tool argument (evaluate_expression, redefine_classes)
+   * Occurs when: A DAP request times out but the operation may simply need more time than the default allows
+   * Used in: src/session/session-manager-operations.ts
+   * Note: DAP has no cancel — the debuggee keeps executing the operation after the timeout fires
+   */
+  dapRequestTimeoutHint: () =>
+    `If the operation is expected to take this long, retry with a larger 'timeout' (ms) argument. ` +
+    `Note the operation may still be running in the debuggee.`,
+
   /**
    * Error message for proxy initialization timeouts
    * Occurs when: The debug proxy process fails to initialize within the timeout period
@@ -30,29 +41,47 @@ export const ErrorMessages = {
     `Check that the required debug adapter is installed and accessible.`,
   
   /**
-   * Error message for step operation timeouts
-   * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event within the timeout
-   * Used in: src/session/session-manager.ts
-   * Default timeout: 5 seconds
-   * @param timeout - The timeout duration in seconds
+   * Informational message for step operations still executing after the grace window
+   * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event
+   * within the grace window — usually because the step runs long-lived user code, which is not an error
+   * Used in: src/session/session-manager-operations.ts
+   * Default grace window: 5 seconds
+   * @param graceSeconds - The grace window duration in seconds
    */
-  stepTimeout: (timeout: number) =>
-    `Step operation did not complete within ${timeout}s. ` +
-    `The debug adapter may have crashed or the program may be stuck. ` +
-    `Try restarting your debug session.`,
+  stepStillRunning: (graceSeconds: number) =>
+    `Step dispatched; the program is still executing after ${graceSeconds}s ` +
+    `(e.g. stepping over a long-running call). The session remains 'running' and will ` +
+    `become 'paused' when the step completes. Check the session state, or call ` +
+    `pause_execution to interrupt.`,
 
   /**
-   * Error message for pause operation timeouts
-   * Occurs when: A pause request doesn't receive a 'stopped' event within the timeout
+   * Informational message for pause requests not yet honored within the grace window
+   * Occurs when: A pause request is acknowledged but no 'stopped' event arrives within the grace
+   * window — the target may be blocked in native code or a syscall, which is not an error
    * Used in: src/session/session-manager-operations.ts
-   * Default timeout: 5 seconds
-   * @param timeout - The timeout duration in seconds
+   * Default grace window: 5 seconds
+   * @param graceSeconds - The grace window duration in seconds
    */
-  pauseTimeout: (timeout: number) =>
-    `Pause request was accepted but no 'stopped' event arrived within ${timeout}s. ` +
-    `The program may not be pausable right now (e.g. blocked in native code). ` +
-    `Check the session state or try again.`,
+  pausePending: (graceSeconds: number) =>
+    `Pause requested; no 'stopped' event within ${graceSeconds}s ` +
+    `(the program may be blocked in native code or a syscall). The session will report ` +
+    `'paused' once the stop lands. Check the session state to confirm.`,
 
+
+  /**
+   * Error message for attach verification failures
+   * Occurs when: After an attach handshake, the debugger does not report any
+   * threads within the verification window — either the attach is dead
+   * (issue #124) or the target is slow to become debuggable (issue #143)
+   * Used in: src/session/session-manager-operations.ts
+   * Default window: 5 seconds, overridable per call via 'verifyTimeout'
+   * @param timeoutMs - The verification window in milliseconds
+   * @param lastFailure - The last observed failure while polling 'threads'
+   */
+  attachVerifyFailed: (timeoutMs: number, lastFailure: string) =>
+    `Attach did not become debuggable: no threads reported within ${timeoutMs}ms ` +
+    `(last failure: ${lastFailure}). If the target is just slow to become debuggable ` +
+    `(e.g. a busy or warming JVM), retry with a larger 'verifyTimeout' (ms) on attach_to_process.`,
 
   /**
    * Error message for adapter ready timeouts

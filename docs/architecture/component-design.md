@@ -181,7 +181,11 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
 
 ### Request Tracking
 
-ProxyManager tracks pending DAP requests with timeout handling:
+ProxyManager tracks pending DAP requests with timeout handling. The timeout is
+derived, not hardcoded: a per-request `timeoutMs` override (from the `timeout`
+tool argument on `evaluate_expression`/`redefine_classes`, issue #142) or the
+30s default, plus a 5s margin so the worker/socket timeout — which produces the
+actionable error — always fires before this parent backstop:
 
 ```typescript
 private pendingDapRequests = new Map<string, {
@@ -191,12 +195,14 @@ private pendingDapRequests = new Map<string, {
 }>();
 
 // Timeout handler
+const effectiveTimeoutMs =
+  (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
 setTimeout(() => {
   if (this.pendingDapRequests.has(requestId)) {
     this.pendingDapRequests.delete(requestId);
-    reject(new Error(ErrorMessages.dapRequestTimeout(command, 35)));
+    reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
   }
-}, 35000);
+}, effectiveTimeoutMs);
 ```
 
 ### Process Management

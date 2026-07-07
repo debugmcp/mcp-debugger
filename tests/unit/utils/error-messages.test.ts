@@ -9,16 +9,36 @@ describe('ErrorMessages', () => {
     expect(message).toContain('10s');
   });
 
+  it('builds dap request timeout hint naming the timeout tool arg', () => {
+    const message = ErrorMessages.dapRequestTimeoutHint();
+    expect(message).toContain("'timeout'");
+    expect(message).toContain('ms');
+  });
+
   it('builds proxy initialization timeout message', () => {
     const message = ErrorMessages.proxyInitTimeout(30);
     expect(message).toContain('30s');
     expect(message).toMatch(/debug proxy/i);
   });
 
-  it('builds step timeout message', () => {
-    const message = ErrorMessages.stepTimeout(5);
+  it('builds step still-running message', () => {
+    const message = ErrorMessages.stepStillRunning(5);
     expect(message).toContain('5s');
-    expect(message).toContain('Step operation');
+    expect(message).toContain('still executing');
+  });
+
+  it('builds pause pending message', () => {
+    const message = ErrorMessages.pausePending(5);
+    expect(message).toContain('5s');
+    expect(message).toContain("no 'stopped' event");
+  });
+
+  it('builds attach verify failed message naming the verifyTimeout knob', () => {
+    const message = ErrorMessages.attachVerifyFailed(5000, 'debugger reported zero threads');
+    expect(message).toContain('no threads reported');
+    expect(message).toContain('5000ms');
+    expect(message).toContain('debugger reported zero threads');
+    expect(message).toContain('verifyTimeout');
   });
 
   it('builds adapter ready timeout message', () => {

@@ -64,6 +64,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * 'threads' is polled until the debugger reports at least one thread.
    * If the window elapses without any threads, the attach is reported as a
    * failure instead of a false "paused" success (issue #124).
+   * Callers can widen the window per attach via the 'verifyTimeout' tool
+   * argument for targets that are slow to become debuggable (issue #143).
    * Protected so tests can shrink the window.
    */
   protected attachVerifyTimeoutMs = 5000;
@@ -75,6 +77,17 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * PAUSED anyway with a warning. Protected so tests can shrink the window.
    */
   protected attachPauseStopTimeoutMs = 5000;
+
+  /**
+   * Grace windows for step and pause operations: how long to wait for the
+   * 'stopped' event before returning a truthful "still running" success
+   * (data.pending = true). These are NOT deadlines on the debuggee — a step
+   * over a long-running call or a pause of a target blocked in native code
+   * completes asynchronously via the core handleStopped listener, which has
+   * no timeout. Protected so tests can shrink the windows.
+   */
+  protected stepGraceMs = 5000;
+  protected pauseGraceMs = 5000;
 
   protected async startProxyManager(
     session: ManagedSession,
@@ -1100,15 +1113,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       const onExit = () => success(exitedMessage);
 
       const timeout = setTimeout(() => {
-        this.logger.warn(
-          `[SM ${options.logTag} ${sessionId}] Timeout waiting for stopped or termination event`
+        this.logger.info(
+          `[SM ${options.logTag} ${sessionId}] Step still running after ${this.stepGraceMs}ms grace window; completing asynchronously`
         );
         settle({
-          success: false,
-          error: ErrorMessages.stepTimeout(5),
+          success: true,
           state: session.state,
+          data: {
+            message: ErrorMessages.stepStillRunning(this.stepGraceMs / 1000),
+            pending: true,
+          },
         });
-      }, 5000);
+      }, this.stepGraceMs);
 
       proxyManager.on('stopped', onStopped);
       proxyManager.on('terminated', onTerminated);
@@ -1292,15 +1308,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       });
 
       const timeout = setTimeout(() => {
-        this.logger.warn(
-          `[SessionManager pause] Timeout waiting for stopped event in session ${sessionId}`
+        this.logger.info(
+          `[SessionManager pause] No stopped event within ${this.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
         );
         settle({
-          success: false,
-          error: ErrorMessages.pauseTimeout(5),
+          success: true,
           state: session.state,
+          data: {
+            message: ErrorMessages.pausePending(this.pauseGraceMs / 1000),
+            pending: true,
+          },
         });
-      }, 5000);
+      }, this.pauseGraceMs);
 
       proxyManager.on('stopped', onStopped);
       proxyManager.on('terminated', onEnded);
@@ -1362,6 +1381,44 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     return value.length > maxLength ? value.substring(0, maxLength) + '... (truncated)' : value;
   }
 
+  /** Upper bound for caller-supplied per-request DAP timeouts (10 minutes). */
+  private static readonly MAX_DAP_TIMEOUT_MS = 600000;
+
+  /**
+   * Validate and clamp a caller-supplied per-request DAP timeout override (ms).
+   * Returns { error } for invalid values, { timeoutMs } with the (possibly
+   * clamped) override, or {} when no override was given.
+   */
+  private resolveDapTimeoutOverride(
+    timeoutMs: number | undefined,
+    logContext: string
+  ): { error?: string; timeoutMs?: number } {
+    if (timeoutMs === undefined) {
+      return {};
+    }
+    if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return {
+        error: `Invalid 'timeout': must be a positive number of milliseconds (got ${timeoutMs})`
+      };
+    }
+    if (timeoutMs > SessionManagerOperations.MAX_DAP_TIMEOUT_MS) {
+      this.logger.warn(
+        `[${logContext}] 'timeout' ${timeoutMs}ms exceeds the maximum; clamping to ${SessionManagerOperations.MAX_DAP_TIMEOUT_MS}ms`
+      );
+      return { timeoutMs: SessionManagerOperations.MAX_DAP_TIMEOUT_MS };
+    }
+    return { timeoutMs };
+  }
+
+  /** Append the 'timeout' tool-arg hint to DAP timeout failures. */
+  private withTimeoutHint(errorMessage: string): string {
+    if (!/timed out|did not respond/i.test(errorMessage)) {
+      return errorMessage;
+    }
+    const separator = errorMessage.trimEnd().endsWith('.') ? ' ' : '. ';
+    return `${errorMessage}${separator}${ErrorMessages.dapRequestTimeoutHint()}`;
+  }
+
   /**
    * Evaluate an expression in the context of the current debug session.
    * The debugger must be paused for evaluation to work.
@@ -1370,12 +1427,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * @param sessionId - The session ID
    * @param expression - The expression to evaluate
    * @param frameId - Optional stack frame ID for context (defaults to current frame)
+   * @param timeoutMs - Optional per-request timeout override (ms) for the DAP
+   *   evaluate request (default 30s, max 600000). Issue #142.
    * @returns Evaluation result with value, type, and optional variable reference
    */
   async evaluateExpression(
     sessionId: string,
     expression: string,
-    frameId?: number
+    frameId?: number,
+    timeoutMs?: number
   ): Promise<EvaluateResult> {
     const session = this._getSessionById(sessionId);
     // Some debuggers (rdbg) reject the default 'variables' context; let the
@@ -1392,6 +1452,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     if (!expression || expression.trim().length === 0) {
       this.logger.warn(`[SM evaluateExpression ${sessionId}] Empty expression provided`);
       return { success: false, error: 'Expression cannot be empty' };
+    }
+
+    const timeoutOverride = this.resolveDapTimeoutOverride(
+      timeoutMs,
+      `SM evaluateExpression ${sessionId}`
+    );
+    if (timeoutOverride.error) {
+      this.logger.warn(`[SM evaluateExpression ${sessionId}] ${timeoutOverride.error}`);
+      return { success: false, error: timeoutOverride.error };
     }
 
     // Validate session state
@@ -1467,12 +1536,14 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         )}", frameId: ${frameId}, context: ${context}`
       );
 
-      const response =
-        await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>('evaluate', {
-          expression,
-          frameId,
-          context,
-        });
+      // Conditional 3-arg call: only pass options when an override is present,
+      // so the default path keeps its exact 2-arg contract.
+      const evaluateArgs = { expression, frameId, context };
+      const response = timeoutOverride.timeoutMs !== undefined
+        ? await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>(
+            'evaluate', evaluateArgs, { timeoutMs: timeoutOverride.timeoutMs })
+        : await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>(
+            'evaluate', evaluateArgs);
 
       // Log raw response in debug mode
       this.logger.debug(`[SM evaluateExpression ${sessionId}] DAP evaluate raw response:`, response);
@@ -1549,7 +1620,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         userError = `Invalid frame context: ${errorMessage}`;
       }
 
-      return { success: false, error: userError };
+      return { success: false, error: this.withTimeoutHint(userError) };
   }
 }
 
@@ -1566,6 +1637,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       sourcePaths?: string[];
       stopOnEntry?: boolean;
       justMyCode?: boolean;
+      verifyTimeout?: number;
     }
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
@@ -1573,6 +1645,32 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `[SessionManager] Attempting to attach to process for session ${sessionId}`,
       attachConfig
     );
+
+    // The verification-window override is consumed by the thread-discovery
+    // loop below, not by the adapter — strip it from the config that becomes
+    // the DAP attach arguments. Validate before any state mutation.
+    const { verifyTimeout, ...adapterAttachConfig } = attachConfig;
+    let verifyTimeoutOverride = verifyTimeout;
+    if (verifyTimeoutOverride !== undefined) {
+      if (
+        typeof verifyTimeoutOverride !== 'number' ||
+        !Number.isFinite(verifyTimeoutOverride) ||
+        verifyTimeoutOverride <= 0
+      ) {
+        return {
+          success: false,
+          state: session.state,
+          error: `'verifyTimeout' must be a positive number of milliseconds, got: ${String(verifyTimeoutOverride)}`
+        };
+      }
+      const maxVerifyTimeoutMs = 600000;
+      if (verifyTimeoutOverride > maxVerifyTimeoutMs) {
+        this.logger.warn(
+          `[SessionManager] verifyTimeout ${verifyTimeoutOverride}ms exceeds the maximum; clamping to ${maxVerifyTimeoutMs}ms`
+        );
+        verifyTimeoutOverride = maxVerifyTimeoutMs;
+      }
+    }
 
     if (session.proxyManager) {
       this.logger.warn(
@@ -1595,7 +1693,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
       // Pass attach config through dapLaunchArgs with special request type
       const attachLaunchArgs = {
-        ...attachConfig,
+        ...adapterAttachConfig,
         request: 'attach',
         __attachMode: true  // Internal flag to signal attach mode
       };
@@ -1650,7 +1748,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         }
         const proxyManager = session.proxyManager;
 
-        const verifyTimeoutMs = this.attachVerifyTimeoutMs;
+        const verifyTimeoutMs = verifyTimeoutOverride ?? this.attachVerifyTimeoutMs;
         const pollIntervalMs = this.attachVerifyIntervalMs;
         const deadline = Date.now() + verifyTimeoutMs;
 
@@ -1695,7 +1793,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         }
 
         if (!threads) {
-          const reason = `Attach did not become debuggable: no threads reported within ${verifyTimeoutMs}ms (last failure: ${lastFailure})`;
+          const reason = ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
           this.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
           // Tear down the proxy using the same mechanics as closeSession, but
           // keep the session record so the failure is inspectable as ERROR.
@@ -1901,22 +1999,36 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   async redefineClasses(
     sessionId: string,
     classesDir: string,
-    sinceTimestamp: number = 0
+    sinceTimestamp: number = 0,
+    timeoutMs?: number
   ): Promise<RedefineClassesResult> {
     const session = this._getSessionById(sessionId);
     this.logger.info(
       `[SM redefineClasses ${sessionId}] classesDir: "${classesDir}", since: ${sinceTimestamp}`
     );
 
+    const timeoutOverride = this.resolveDapTimeoutOverride(
+      timeoutMs,
+      `SM redefineClasses ${sessionId}`
+    );
+    if (timeoutOverride.error) {
+      this.logger.warn(`[SM redefineClasses ${sessionId}] ${timeoutOverride.error}`);
+      return { success: false, error: timeoutOverride.error };
+    }
+
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       return { success: false, error: 'No active debug session' };
     }
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await session.proxyManager.sendDapRequest<any>(
-        'redefineClasses', { classesDir, sinceTimestamp }
-      );
+      const redefineArgs = { classesDir, sinceTimestamp };
+      const response = timeoutOverride.timeoutMs !== undefined
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? await session.proxyManager.sendDapRequest<any>(
+            'redefineClasses', redefineArgs, { timeoutMs: timeoutOverride.timeoutMs })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        : await session.proxyManager.sendDapRequest<any>(
+            'redefineClasses', redefineArgs);
 
       const body = response?.body;
       if (!body) {
@@ -1937,7 +2049,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: this.withTimeoutHint(error instanceof Error ? error.message : String(error)),
       };
     }
   }

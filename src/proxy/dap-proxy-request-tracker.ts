@@ -94,10 +94,10 @@ export class RequestTracker implements IRequestTracker {
  * Enhanced request tracker with timeout callbacks
  */
 export class CallbackRequestTracker extends RequestTracker {
-  private onTimeout: (requestId: string, command: string) => void;
+  private onTimeout: (requestId: string, command: string, timeoutMs: number) => void;
 
   constructor(
-    onTimeout: (requestId: string, command: string) => void,
+    onTimeout: (requestId: string, command: string, timeoutMs: number) => void,
     defaultTimeoutMs: number = 30000
   ) {
     super(defaultTimeoutMs);
@@ -114,7 +114,7 @@ export class CallbackRequestTracker extends RequestTracker {
       if (request) {
         this.pendingRequests.delete(requestId);
         // Call the timeout handler
-        this.onTimeout(requestId, command);
+        this.onTimeout(requestId, command, timeout);
       }
     }, timeout);
 

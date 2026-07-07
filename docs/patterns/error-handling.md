@@ -28,10 +28,11 @@ export const ErrorMessages = {
     `This may indicate that the debug adapter failed to start or is not properly configured. ` +
     `Check that the required debug adapter is installed and accessible.`,
   
-  stepTimeout: (timeout: number) =>
-    `Step operation did not complete within ${timeout}s. ` +
-    `The debug adapter may have crashed or the program may be stuck. ` +
-    `Try restarting your debug session.`,
+  stepStillRunning: (graceSeconds: number) =>
+    `Step dispatched; the program is still executing after ${graceSeconds}s ` +
+    `(e.g. stepping over a long-running call). The session remains 'running' and will ` +
+    `become 'paused' when the step completes. Check the session state, or call ` +
+    `pause_execution to interrupt.`,
   
   adapterReadyTimeout: (timeout: number) =>
     `Timed out waiting for debug adapter to be ready after ${timeout}s. ` +
@@ -166,28 +167,56 @@ async startDebugging(
 
 **Example**: ProxyManager DAP request timeout (`src/proxy/proxy-manager.ts`)
 
+A DAP request rides a three-layer timeout stack, ordered so the layer with the
+most actionable error message fires first:
+
+1. **Socket** (`minimal-dap.ts`) — 30s default, per-request `timeoutMs` override
+2. **Worker request tracker** (`dap-proxy-request-tracker.ts`) — 30s default, same override; its
+   `Request '<cmd>' timed out after Ns` failure is what callers normally see
+3. **Parent** (`proxy-manager.ts`) — override (or 30s default) **plus a 5s margin**, a backstop
+   that only fires if the worker never responds at all
+
+`evaluate_expression` and `redefine_classes` expose the override as a `timeout` (ms) tool
+argument (issue #142). `SessionManagerOperations` validates it (positive, finite, clamped to
+600000) and passes `{ timeoutMs }` to `sendDapRequest`, which threads it over IPC
+(`DapCommandPayload.timeoutMs`) to the worker and socket. On a timeout failure those
+operations append `ErrorMessages.dapRequestTimeoutHint()` naming the `timeout` argument.
+The margin invariant (worker fires before parent) must hold for any new override plumbing.
+
 ```typescript
-// Timeout handler
+// Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
+// fires first and produces the actionable error; this parent timer is a
+// backstop that only fires if the worker never responds at all.
+const effectiveTimeoutMs =
+  (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
 setTimeout(() => {
   if (this.pendingDapRequests.has(requestId)) {
     this.pendingDapRequests.delete(requestId);
-    reject(new Error(ErrorMessages.dapRequestTimeout(command, 35)));
+    reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
   }
-}, 35000);
+}, effectiveTimeoutMs);
 ```
 
-**Example**: SessionManager step operation timeout (`src/session/session-manager-operations.ts`)
+**Example**: SessionManager step operation grace window (`src/session/session-manager-operations.ts`)
+
+Note: a step that outlives the grace window is *not* an error — the debuggee may
+legitimately run for a long time (e.g. stepping over a slow call). The tool
+returns a truthful `pending` success and the step completes asynchronously via
+the persistent `handleStopped` listener in `session-manager-core.ts`.
 
 ```typescript
 return new Promise((resolve) => {
   const timeout = setTimeout(() => {
-    this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped event`);
-    resolve({ 
-      success: false, 
-      error: ErrorMessages.stepTimeout(5), 
-      state: session.state 
+    this.logger.info(`[SM stepOver ${sessionId}] Step still running after grace window; completing asynchronously`);
+    resolve({
+      success: true,
+      state: session.state, // still RUNNING
+      data: {
+        message: ErrorMessages.stepStillRunning(this.stepGraceMs / 1000),
+        pending: true,
+      },
     });
-  }, 5000);
+  }, this.stepGraceMs);
   
   session.proxyManager?.once('stopped', () => {
     clearTimeout(timeout);
@@ -196,6 +225,25 @@ return new Promise((resolve) => {
   });
 });
 ```
+
+**Example**: SessionManager attach verification window (`src/session/session-manager-operations.ts`)
+
+After an attach handshake, DAP `threads` is polled until the debugger reports at
+least one thread. If the window elapses without threads, the attach is reported
+as a failure and the proxy is torn down (issue #124 — a debugger with no
+threads is not usable, and reporting "paused" would be a lie). Because a slow
+target (e.g. a busy or warming JVM) can legitimately need longer than the
+default window, the window is caller-configurable (issue #143):
+
+- The default lives in the protected, test-shrinkable field
+  `attachVerifyTimeoutMs` (5s), following the `stepGraceMs`/`pauseGraceMs`
+  field pattern.
+- Callers override it per attach via the `verifyTimeout` (ms) argument on
+  `attach_to_process` / `create_debug_session`; the value is validated
+  (positive finite number) and clamped to 10 minutes.
+- The failure text comes from `ErrorMessages.attachVerifyFailed(timeoutMs,
+  lastFailure)`, which names the `verifyTimeout` knob so a caller that hit the
+  window on a slow target knows how to retry.
 
 ## Error Response Patterns
 
