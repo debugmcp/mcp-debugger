@@ -28,10 +28,11 @@ export const ErrorMessages = {
     `This may indicate that the debug adapter failed to start or is not properly configured. ` +
     `Check that the required debug adapter is installed and accessible.`,
   
-  stepTimeout: (timeout: number) =>
-    `Step operation did not complete within ${timeout}s. ` +
-    `The debug adapter may have crashed or the program may be stuck. ` +
-    `Try restarting your debug session.`,
+  stepStillRunning: (graceSeconds: number) =>
+    `Step dispatched; the program is still executing after ${graceSeconds}s ` +
+    `(e.g. stepping over a long-running call). The session remains 'running' and will ` +
+    `become 'paused' when the step completes. Check the session state, or call ` +
+    `pause_execution to interrupt.`,
   
   adapterReadyTimeout: (timeout: number) =>
     `Timed out waiting for debug adapter to be ready after ${timeout}s. ` +
@@ -176,18 +177,26 @@ setTimeout(() => {
 }, 35000);
 ```
 
-**Example**: SessionManager step operation timeout (`src/session/session-manager-operations.ts`)
+**Example**: SessionManager step operation grace window (`src/session/session-manager-operations.ts`)
+
+Note: a step that outlives the grace window is *not* an error — the debuggee may
+legitimately run for a long time (e.g. stepping over a slow call). The tool
+returns a truthful `pending` success and the step completes asynchronously via
+the persistent `handleStopped` listener in `session-manager-core.ts`.
 
 ```typescript
 return new Promise((resolve) => {
   const timeout = setTimeout(() => {
-    this.logger.warn(`[SM stepOver ${sessionId}] Timeout waiting for stopped event`);
-    resolve({ 
-      success: false, 
-      error: ErrorMessages.stepTimeout(5), 
-      state: session.state 
+    this.logger.info(`[SM stepOver ${sessionId}] Step still running after grace window; completing asynchronously`);
+    resolve({
+      success: true,
+      state: session.state, // still RUNNING
+      data: {
+        message: ErrorMessages.stepStillRunning(this.stepGraceMs / 1000),
+        pending: true,
+      },
     });
-  }, 5000);
+  }, this.stepGraceMs);
   
   session.proxyManager?.once('stopped', () => {
     clearTimeout(timeout);

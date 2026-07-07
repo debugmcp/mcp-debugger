@@ -365,26 +365,31 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.error).toContain('DAP protocol error');
     });
 
-    it('should handle stepOut failure with timeout', async () => {
+    it('should report a pending step when no stopped event arrives within the grace window', async () => {
       vi.useFakeTimers();
-      
+
       mockSession.state = SessionState.PAUSED;
-      // Simulate timeout by not calling the 'stopped' event
+      // Simulate a long-running step by not emitting the 'stopped' event
       mockProxyManager.sendDapRequest.mockResolvedValue({});
-      
+
       // Setup once to do nothing (no stopped event will fire)
       mockProxyManager.once.mockImplementation(() => {});
 
       const stepOutPromise = operations.stepOut('test-session');
-      
-      // Fast-forward past the timeout (5 seconds)
+
+      // Fast-forward past the grace window (5 seconds)
       await vi.advanceTimersByTimeAsync(5100);
-      
+
       const result = await stepOutPromise;
-      
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('did not complete within 5s');
-      
+
+      // A slow step is not a failure: the tool reports success with a pending
+      // marker and the session completes the step asynchronously.
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.RUNNING);
+      const data = result.data as { message?: string; pending?: boolean };
+      expect(data.pending).toBe(true);
+      expect(data.message).toContain('still executing');
+
       vi.useRealTimers();
     });
 
@@ -2612,7 +2617,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.PAUSED);
     });
 
-    it('returns a pause-timeout error when no stopped event arrives', async () => {
+    it('reports a pending pause when no stopped event arrives within the grace window', async () => {
       vi.useFakeTimers();
       try {
         mockSession.state = SessionState.RUNNING;
@@ -2622,9 +2627,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         await vi.advanceTimersByTimeAsync(5000);
         const result = await promise;
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain("no 'stopped' event");
+        // A slow pause (e.g. target blocked in native code) is not a failure:
+        // the tool reports success with a pending marker; the session flips to
+        // PAUSED asynchronously when the stop lands.
+        expect(result.success).toBe(true);
         expect(result.state).toBe(SessionState.RUNNING);
+        const data = result.data as { message?: string; pending?: boolean };
+        expect(data.pending).toBe(true);
+        expect(data.message).toContain("no 'stopped' event");
       } finally {
         vi.useRealTimers();
       }
