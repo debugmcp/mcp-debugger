@@ -243,6 +243,11 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     };
   },
 
+  // debugpy does not suspend a running target on attach, so an explicit
+  // pause is required for the session to land in a truthful PAUSED state
+  // (same rationale as rdbg re-attach).
+  getAttachBehavior: () => ({ pauseAfterAttach: true }),
+
   /**
    * Python DAP client behaviors - minimal since Python doesn't use child sessions
    */

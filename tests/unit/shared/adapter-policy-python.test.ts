@@ -95,6 +95,12 @@ describe('PythonAdapterPolicy', () => {
     });
   });
 
+  it('pauses the target after attach', () => {
+    // debugpy does not suspend a running target on attach, so an explicit
+    // pause is required for the session to land in a truthful PAUSED state.
+    expect(PythonAdapterPolicy.getAttachBehavior?.()).toEqual({ pauseAfterAttach: true });
+  });
+
   describe('getAdapterSpawnConfig', () => {
     const basePayload = {
       executablePath: 'python',
