@@ -499,6 +499,73 @@ describe('ProxyManager.start', () => {
     expect(err.message).not.toContain('github_pat_supersecret');
   });
 
+  it('truncates an oversized stderr tail embedded in the init-exit error (issue #146)', async () => {
+    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+          setTimeout(() => {
+            // 12 lines of ~300 chars each; the last 10 joined exceed the 2000-char cap.
+            for (let i = 1; i <= 12; i++) {
+              const marker = `MARKER-${String(i).padStart(2, '0')}`;
+              stderrEmitter.emit('data', Buffer.from(marker + 'x'.repeat(300 - marker.length)));
+            }
+            fakeProcess.emit('exit', 1, null);
+          }, 0);
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
+    const err = await startPromise.catch((e: Error) => e);
+
+    // Truncation marker present; the stderr tail is bounded near the 2000-char cap.
+    expect(err.message).toContain('…');
+    const stderrPortion = err.message.slice(err.message.indexOf('\nStderr output'));
+    expect(stderrPortion.length).toBeLessThan(2200);
+    // The newest line survives; the front of the last-10 block was sliced off.
+    expect(err.message).toContain('MARKER-12');
+    expect(err.message).not.toContain('MARKER-03');
+  });
+
+  it('bounds the stderr capture buffer to 100 lines (issue #146)', async () => {
+    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+          setTimeout(() => {
+            // 150 lines — the buffer must retain only the most recent 100.
+            for (let i = 1; i <= 150; i++) {
+              stderrEmitter.emit('data', Buffer.from(`line-${String(i).padStart(3, '0')}`));
+            }
+            fakeProcess.emit('exit', 1, null);
+          }, 0);
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
+    const err = await startPromise.catch((e: Error) => e);
+
+    // Buffer bounded at 100 (not 150), so the label reports 100 and the newest line survives.
+    expect(err.message).toContain('(last 10 of 100 lines)');
+    expect(err.message).toContain('line-150');
+    expect(err.message).toContain('line-141');
+    expect(err.message).not.toContain('line-140');
+  });
+
   it('fails to start when bootstrap worker script is missing', async () => {
     (fileSystem.pathExists as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 
