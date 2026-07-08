@@ -128,6 +128,101 @@ describe('GenericAdapterManager', () => {
         // Not exact match - just that it was called
       );
     });
+
+    it('does not log adapter env values verbatim in the spawn configuration', async () => {
+      await manager.spawn({
+        command: 'node',
+        args: ['adapter.js'],
+        logDir: '/logs',
+        env: {
+          NODE_OPTIONS: '--require /tmp/hook.js ghp_0123456789abcdefghij0123456789',
+          PATH: '/usr/bin'
+        }
+      });
+
+      const allInfoText = (logger.info as any).mock.calls
+        .map((call: unknown[]) => JSON.stringify(call))
+        .join('\n');
+      expect(allInfoText).not.toContain('ghp_0123456789abcdefghij0123456789');
+    });
+  });
+
+  describe('stderr sanitization (issue #153)', () => {
+    const REDACTED = '[REDACTED — line contained sensitive data]';
+
+    const errorText = () => (logger.error as any).mock.calls
+      .map((call: unknown[]) => call.map(String).join(' '))
+      .join('\n');
+
+    beforeEach(async () => {
+      await manager.spawn({ command: 'python', args: [], logDir: '/logs' });
+    });
+
+    it('redacts a secret-bearing stderr line', () => {
+      mockProcess.stderr.emit('data', Buffer.from('GITHUB_PAT=github_pat_supersecret1234567890\n'));
+
+      expect(errorText()).toContain(REDACTED);
+      expect(errorText()).not.toContain('github_pat_supersecret1234567890');
+    });
+
+    it('redacts a secret that straddles a chunk boundary', () => {
+      mockProcess.stderr.emit('data', Buffer.from('GITHUB_PAT=github_pat_supersecret'));
+      mockProcess.stderr.emit('data', Buffer.from('tail1234567890\n'));
+
+      expect(errorText()).toContain(REDACTED);
+      expect(errorText()).not.toContain('supersecret');
+      expect(errorText()).not.toContain('tail1234567890');
+    });
+
+    it('sanitizes multi-line chunks per line, logging each line separately', () => {
+      mockProcess.stderr.emit(
+        'data',
+        Buffer.from('starting up\nAPI_KEY=zzz-secret-value\nready\n')
+      );
+
+      expect(logger.error).toHaveBeenCalledWith('[AdapterManager STDERR] starting up');
+      expect(logger.error).toHaveBeenCalledWith(`[AdapterManager STDERR] ${REDACTED}`);
+      expect(logger.error).toHaveBeenCalledWith('[AdapterManager STDERR] ready');
+      expect(errorText()).not.toContain('zzz-secret-value');
+    });
+
+    it('flushes a trailing partial line on stream end, not process exit', () => {
+      mockProcess.stderr.emit('data', Buffer.from('no newline yet'));
+      mockProcess.emit('exit', 0, null);
+      expect(errorText()).not.toContain('no newline yet');
+
+      mockProcess.stderr.emit('end');
+      expect(logger.error).toHaveBeenCalledWith('[AdapterManager STDERR] no newline yet');
+    });
+
+    it('sanitizes the flushed trailing partial line', () => {
+      mockProcess.stderr.emit('data', Buffer.from('SECRET_TOKEN=abcdef123456'));
+      mockProcess.stderr.emit('end');
+
+      expect(errorText()).toContain(REDACTED);
+      expect(errorText()).not.toContain('abcdef123456');
+    });
+
+    it('does not double-log the flush when end is followed by close', () => {
+      mockProcess.stderr.emit('data', Buffer.from('partial line'));
+      mockProcess.stderr.emit('end');
+      mockProcess.stderr.emit('close');
+
+      const matches = (logger.error as any).mock.calls
+        .filter((call: unknown[]) => String(call[0]).includes('partial line'));
+      expect(matches).toHaveLength(1);
+    });
+
+    it('drains stdout through the same sanitized path at debug level', () => {
+      mockProcess.stdout.emit('data', Buffer.from('diag line\nMY_PWD=hunter2\n'));
+
+      expect(logger.debug).toHaveBeenCalledWith('[AdapterManager STDOUT] diag line');
+      expect(logger.debug).toHaveBeenCalledWith(`[AdapterManager STDOUT] ${REDACTED}`);
+      const debugText = (logger.debug as any).mock.calls
+        .map((call: unknown[]) => call.map(String).join(' '))
+        .join('\n');
+      expect(debugText).not.toContain('hunter2');
+    });
   });
 
   describe('shutdown', () => {
