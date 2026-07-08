@@ -142,6 +142,45 @@ describe('sanitizePayloadForLogging', () => {
     sanitizePayloadForLogging(payload);
     expect((payload.adapterCommand.env as any).API_KEY).toBe('secret');
   });
+
+  it('redacts env objects anywhere in the payload, including launchConfig.env', () => {
+    const payload = {
+      cmd: 'init',
+      launchConfig: {
+        type: 'pwa-node',
+        env: { HOME: '/home/user', GITHUB_PAT: 'github_pat_XYZ' },
+        nested: { deeper: { env: { TOKEN: 'tok' } } }
+      }
+    };
+    const result = sanitizePayloadForLogging(payload) as any;
+    expect(result.launchConfig.env).toBe('<2 env vars redacted>');
+    expect(result.launchConfig.nested.deeper.env).toBe('<1 env vars redacted>');
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('github_pat_XYZ');
+    expect(serialized).not.toContain('/home/user');
+    expect(serialized).not.toContain('tok');
+  });
+
+  it('redacts env objects inside arrays', () => {
+    const payload = { configurations: [{ env: { A: '1' } }, { name: 'ok' }] };
+    const result = sanitizePayloadForLogging(payload) as any;
+    expect(result.configurations[0].env).toBe('<1 env vars redacted>');
+    expect(result.configurations[1].name).toBe('ok');
+  });
+
+  it('leaves non-object env values alone', () => {
+    const payload = { env: 'production', config: { env: 42 } };
+    const result = sanitizePayloadForLogging(payload) as any;
+    expect(result.env).toBe('production');
+    expect(result.config.env).toBe(42);
+  });
+
+  it('survives circular payloads without throwing', () => {
+    const payload: any = { launchConfig: { env: { X: '1' } } };
+    payload.self = payload;
+    const result = sanitizePayloadForLogging(payload) as any;
+    expect(result.launchConfig.env).toBe('<1 env vars redacted>');
+  });
 });
 
 describe('sanitizeStderr', () => {

@@ -102,6 +102,24 @@ describe('SessionManager - Integration Tests', () => {
       );
     });
 
+    it('does not log env values passed in dapLaunchArgs', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py', [], {
+        stopOnEntry: false,
+        env: { GITHUB_PAT: 'github_pat_SESSIONLEAK1' }
+      } as never);
+      await vi.runAllTimersAsync();
+
+      const logged = (dependencies.logger.info as ReturnType<typeof vi.fn>).mock.calls
+        .map((call: unknown[]) => JSON.stringify(call))
+        .join('\n');
+      expect(logged).not.toContain('github_pat_SESSIONLEAK1');
+    });
+
     it('should log errors appropriately', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,

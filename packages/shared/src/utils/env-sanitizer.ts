@@ -51,27 +51,40 @@ export function sanitizeEnvForLogging(env: Record<string, string>): Record<strin
 }
 
 /**
- * Shallow-sanitize a proxy init payload or command object before logging.
- * Specifically targets the `adapterCommand.env` field which contains process.env.
+ * Sanitize a payload (proxy init message, launch/attach config, DAP request)
+ * before logging or tracing it: every object-valued `env` property, at any
+ * depth, is replaced with a count summary.
  *
- * The env body is replaced with a count summary rather than a per-key
- * redacted copy: logs never need the values, and keyword redaction cannot
- * anticipate every secret-bearing key name (issue #146).
+ * The env body is replaced with a count rather than a per-key redacted copy:
+ * logs never need the values, and keyword redaction cannot anticipate every
+ * secret-bearing key name (issue #146). Recursive because env objects ride
+ * along in more places than `adapterCommand.env` — e.g. `launchConfig.env`
+ * and the DAP `launch` request arguments carry the debuggee's environment.
  */
 export function sanitizePayloadForLogging(payload: unknown): unknown {
-  if (!payload || typeof payload !== 'object') return payload;
+  return redactEnvDeep(payload, new WeakSet());
+}
 
-  const obj = { ...(payload as Record<string, unknown>) };
-
-  if (obj.adapterCommand && typeof obj.adapterCommand === 'object') {
-    const cmd = { ...(obj.adapterCommand as Record<string, unknown>) };
-    if (cmd.env && typeof cmd.env === 'object') {
-      cmd.env = `<${Object.keys(cmd.env as Record<string, string>).length} env vars redacted>`;
+function redactEnvDeep(value: unknown, ancestors: WeakSet<object>): unknown {
+  if (!value || typeof value !== 'object') return value;
+  if (ancestors.has(value)) return '[circular]';
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map(item => redactEnvDeep(item, ancestors));
     }
-    obj.adapterCommand = cmd;
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (key === 'env' && entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        out[key] = `<${Object.keys(entry as Record<string, unknown>).length} env vars redacted>`;
+      } else {
+        out[key] = redactEnvDeep(entry, ancestors);
+      }
+    }
+    return out;
+  } finally {
+    ancestors.delete(value);
   }
-
-  return obj;
 }
 
 /**
