@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import which from 'which';
+import { sanitizeStderr, sanitizeStderrTail } from '@debugmcp/shared';
 
 // Simple logger interface (kept local to avoid external coupling)
 interface Logger {
@@ -193,10 +194,11 @@ class WhichCommandFinder implements CommandFinder {
             });
 
             child.on('exit', (code) => {
+              // Sanitized: this diagnostic goes to console.error verbatim
               if (code === 0) {
-                resolve(`SUCCESS: ${output.trim()}`);
+                resolve(`SUCCESS: ${sanitizeStderrTail(output)}`);
               } else {
-                resolve(`exit code ${code}: ${errorOutput || 'no output'}`);
+                resolve(`exit code ${code}: ${sanitizeStderrTail(errorOutput) || 'no output'}`);
               }
             });
 
@@ -286,7 +288,7 @@ async function hasDebugpy(pythonPath: string, logger: Logger = noopLogger): Prom
     child.on('exit', (code) => {
       const hasIt = code === 0 && output.trim().length > 0;
       if (hasIt) {
-        logger.debug?.(`[Python Detection] debugpy version: ${output.trim()}`);
+        logger.debug?.(`[Python Detection] debugpy version: ${sanitizeStderrTail(output)}`);
       }
       resolve(hasIt);
     });
@@ -491,7 +493,9 @@ export async function getPythonVersion(pythonPath: string): Promise<string | nul
     child.on('exit', (code) => {
       if (code === 0 && output) {
         const match = output.match(/Python (\d+\.\d+\.\d+)/);
-        resolve(match ? match[1] : output.trim());
+        // Fallback surfaces raw child output into validation messages —
+        // keep only the first line, redacted if secret-looking
+        resolve(match ? match[1] : (sanitizeStderr([output.trim().split(/\r?\n/)[0]])[0] ?? null));
       } else {
         resolve(null);
       }

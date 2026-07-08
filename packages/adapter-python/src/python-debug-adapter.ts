@@ -33,6 +33,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
+import { sanitizeStderrTail } from '@debugmcp/shared';
 import { findPythonExecutable, getPythonVersion } from './utils/python-utils.js';
 
 /**
@@ -743,7 +744,7 @@ You can also specify the Python path explicitly in your debug configuration.`;
         this.pythonPathCache.set(pythonPath, { ...(cached ?? {}), hasDebugpy, path: pythonPath, timestamp: Date.now() });
 
         if (hasDebugpy) {
-          this.dependencies.logger?.info(`[PythonDebugAdapter] debugpy version: ${output.trim()}`);
+          this.dependencies.logger?.info(`[PythonDebugAdapter] debugpy version: ${sanitizeStderrTail(output)}`);
         }
 
         resolve(hasDebugpy);

@@ -130,6 +130,20 @@ describe('rust-utils process checks', () => {
     expect(failure.output).toContain('error: build failed');
   });
 
+  it('redacts secret-looking lines from build output', async () => {
+    spawnMock.mockImplementationOnce(() =>
+      createMockProcess({
+        stderrChunks: ['GITHUB_PAT=github_pat_ABCDEFGHIJKLMNOPQRSTUV123456\nerror: build failed\n'],
+        exitCode: 101
+      })
+    );
+
+    const failure = await rustUtils.buildRustProject('/workspace/project');
+    expect(failure.output).toContain('[REDACTED — line contained sensitive data]');
+    expect(failure.output).not.toContain('github_pat_ABCDEFGHIJKLMNOPQRSTUV123456');
+    expect(failure.output).toContain('error: build failed');
+  });
+
   it('retrieves rust host triple from rustc', async () => {
     spawnMock.mockImplementation(() =>
       createMockProcess({

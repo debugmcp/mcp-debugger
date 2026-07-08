@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import os from 'os';
 import which from 'which';
+import { sanitizeStderr } from '@debugmcp/shared';
 
 /**
  * Check if Cargo is installed and available
@@ -138,7 +139,8 @@ export async function buildRustProject(
     buildProcess.on('exit', (code) => {
       resolve({
         success: code === 0,
-        output: output + errorOutput
+        // Redact secret-looking lines; compiler diagnostics pass through
+        output: sanitizeStderr((output + errorOutput).split(/\r?\n/)).join('\n')
       });
     });
   });

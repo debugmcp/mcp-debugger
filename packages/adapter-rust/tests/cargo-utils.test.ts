@@ -226,6 +226,19 @@ describe('runCargoTest', () => {
     expect(result.success).toBe(false);
     expect(result.output).toContain('spawn failed');
   });
+
+  it('redacts secret-looking lines from the collected output', async () => {
+    spawnMock.mockImplementation(() =>
+      createMockProcess({
+        stderrChunks: ['GITHUB_PAT=github_pat_ABCDEFGHIJKLMNOPQRSTUV123456\ntest failed\n'],
+        exitCode: 1
+      })
+    );
+    const result = await cargoUtils.runCargoTest('/workspace/demo');
+    expect(result.output).toContain('[REDACTED — line contained sensitive data]');
+    expect(result.output).not.toContain('github_pat_ABCDEFGHIJKLMNOPQRSTUV123456');
+    expect(result.output).toContain('test failed');
+  });
 });
 
 describe('needsRebuild', () => {
@@ -388,6 +401,19 @@ describe('runCargoBuild', () => {
     expect(result.success).toBe(false);
     expect(result.output).toContain('error: build failed');
   });
+
+  it('redacts secret-looking lines from the collected output', async () => {
+    spawnMock.mockImplementation(() =>
+      createMockProcess({
+        stderrChunks: ['SECRET_TOKEN=abc123def456\nerror: linker failed\n'],
+        exitCode: 101
+      })
+    );
+    const result = await cargoUtils.runCargoBuild('/workspace/demo', ['build']);
+    expect(result.output).toContain('[REDACTED — line contained sensitive data]');
+    expect(result.output).not.toContain('abc123def456');
+    expect(result.output).toContain('error: linker failed');
+  });
 });
 
 describe('buildCargoProject', () => {
@@ -476,5 +502,59 @@ describe('buildCargoProject', () => {
     const result = await cargoUtils.buildCargoProject(project, logger);
     expect(result.success).toBe(false);
     expect(result.error).toContain('spawn error');
+  });
+
+  it('redacts secret-looking lines from the returned error and the failure log', async () => {
+    const project = await createTempProject('build-secret');
+    spawnMock.mockImplementationOnce(() =>
+      createMockProcess({
+        stderrChunks: ['error: build failed\nGITHUB_PAT=github_pat_ABCDEFGHIJKLMNOPQRSTUV123456\n'],
+        exitCode: 1
+      })
+    );
+    const logger = { info: vi.fn(), error: vi.fn() };
+
+    const result = await cargoUtils.buildCargoProject(project, logger);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('[REDACTED — line contained sensitive data]');
+    expect(result.error).not.toContain('github_pat_ABCDEFGHIJKLMNOPQRSTUV123456');
+    expect(result.error).toContain('error: build failed');
+
+    const loggedErrors = (logger.error as Mock).mock.calls
+      .map((call) => call.map(String).join(' '))
+      .join('\n');
+    expect(loggedErrors).not.toContain('github_pat_ABCDEFGHIJKLMNOPQRSTUV123456');
+  });
+
+  it('passes ordinary compiler diagnostics through verbatim', async () => {
+    const project = await createTempProject('build-diag');
+    spawnMock.mockImplementationOnce(() =>
+      createMockProcess({
+        stderrChunks: ['error[E0308]: mismatched types\n --> src/main.rs:2:5\n'],
+        exitCode: 1
+      })
+    );
+    const logger = { info: vi.fn(), error: vi.fn() };
+
+    const result = await cargoUtils.buildCargoProject(project, logger);
+    expect(result.error).toContain('error[E0308]: mismatched types');
+    expect(result.error).toContain('--> src/main.rs:2:5');
+  });
+
+  it('caps the returned build error to the last 50 lines', async () => {
+    const project = await createTempProject('build-verbose');
+    const noise = Array.from({ length: 60 }, (_, i) => `diagnostic line ${i + 1}`).join('\n');
+    spawnMock.mockImplementationOnce(() =>
+      createMockProcess({
+        stderrChunks: [noise + '\n'],
+        exitCode: 1
+      })
+    );
+    const logger = { info: vi.fn(), error: vi.fn() };
+
+    const result = await cargoUtils.buildCargoProject(project, logger);
+    expect(result.error).toContain('(last 50 of 60 lines)');
+    expect(result.error).toContain('diagnostic line 60');
+    expect(result.error).not.toContain('diagnostic line 10\n');
   });
 });

@@ -68,7 +68,12 @@ export function createBridge(
       }
     });
 
-    // Log stderr but don't forward (it's not DAP)
+    // Log stderr but don't forward (it's not DAP).
+    // Deliberately verbatim: this bridge runs standalone in the NPX bundle
+    // (copied as a dependency-free .js — it must NOT import
+    // @debugmcp/shared), and its own stderr is consumed upstream by
+    // GenericAdapterManager, which line-buffers and sanitizes it
+    // (issue #153).
     netcoredbg.stderr!.on('data', (data: Buffer) => {
       stderrStream.write(data);
     });
