@@ -983,18 +983,23 @@ export class DapProxyWorker {
     // Clear request tracking
     this.requestTracker.clear();
 
-    // Reject any in-flight DAP requests and clear timers immediately
-    if (this.dapClient) {
-      this.dapClient.shutdown('worker shutdown');
-    }
-
-    // Disconnect DAP client — for attach mode via handleTerminate(), dapClient is
-    // already null (handled by auto-detach above). But if shutdown() is reached through
-    // other paths (signals, crashes, parent death), dapClient may still be live.
-    // In attach mode, always use terminateDebuggee=false to preserve the debuggee.
+    // Graceful DAP disconnect FIRST, while the socket is still alive (#156) —
+    // launch-mode adapters only terminate their debuggee when they receive
+    // disconnect with terminateDebuggee=true (rdbg keeps it alive and re-arms
+    // on a bare socket drop). For attach mode via handleTerminate(), dapClient
+    // is already null (handled by auto-detach above); on other paths (signals,
+    // crashes, parent death) attach mode uses terminateDebuggee=false to
+    // preserve the debuggee. disconnect() caps the request at 1s and a dead
+    // socket rejects synchronously, so this cannot stall shutdown.
     if (this.connectionManager && this.dapClient) {
       const terminateDebuggee = !this.isAttachMode;
       await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
+    }
+
+    // THEN reject any in-flight DAP requests and destroy the socket (no-op if
+    // connectionManager.disconnect() above already tore the client down).
+    if (this.dapClient) {
+      this.dapClient.shutdown('worker shutdown');
     }
     this.dapClient = null;
 
@@ -1010,9 +1015,13 @@ export class DapProxyWorker {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Terminate adapter process
+    // Terminate adapter process. Launch mode owns the debuggee, which may be
+    // a grandchild of the adapter (e.g. rdbg -c), so request a process-tree
+    // kill; attach mode must never tree-kill (the guard is explicit so a
+    // future attach flow that proxies through a spawned process cannot take
+    // a pre-existing debuggee down with it — see #156).
     if (this.processManager && this.adapterProcess) {
-      await this.processManager.shutdown(this.adapterProcess);
+      await this.processManager.shutdown(this.adapterProcess, { killProcessTree: !this.isAttachMode });
     }
     this.adapterProcess = null;
 

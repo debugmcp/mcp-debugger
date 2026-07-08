@@ -26,6 +26,8 @@ function createMockProcess(pid = 12345) {
   const proc = new EventEmitter() as any;
   proc.pid = pid;
   proc.killed = false;
+  proc.exitCode = null;
+  proc.signalCode = null;
   proc.kill = vi.fn();
   proc.unref = vi.fn();
   proc.stdout = new EventEmitter();
@@ -302,6 +304,111 @@ describe('GenericAdapterManager', () => {
         expect.stringContaining('Error during adapter process termination'),
         expect.anything()
       );
+    });
+  });
+
+  describe('shutdown with killProcessTree (launch mode)', () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+
+    const setPlatform = (value: string) => {
+      Object.defineProperty(process, 'platform', { value, configurable: true });
+    };
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', originalPlatform);
+      vi.useRealTimers();
+    });
+
+    it('tree-kills via taskkill while the parent is still alive on win32', async () => {
+      setPlatform('win32');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      // taskkill takes the tree down: simulate the adapter exiting right after
+      (spawner.spawn as any).mockImplementation(() => {
+        process.nextTick(() => proc.emit('exit', 1, null));
+        return createMockProcess(555);
+      });
+
+      const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
+      await vi.advanceTimersByTimeAsync(300);
+      await shutdownPromise;
+
+      expect(spawner.spawn).toHaveBeenCalledWith(
+        'taskkill',
+        ['/PID', '999', '/T', '/F'],
+        expect.objectContaining({ windowsHide: true })
+      );
+      // A bare parent kill is TerminateProcess (near-instant) and taskkill /T
+      // cannot discover children of a dead parent — the debuggee grandchild
+      // would be orphaned (issue #156). The tree-kill must be the first strike.
+      expect(proc.kill).not.toHaveBeenCalledWith('SIGTERM');
+      expect(proc.kill).not.toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('does not kill anything when the adapter already exited (PID may be recycled)', async () => {
+      setPlatform('win32');
+
+      const proc = createMockProcess(999);
+      // Adapter honored the DAP disconnect and exited during the grace wait —
+      // its PID may already belong to an unrelated process.
+      proc.exitCode = 1;
+
+      await manager.shutdown(proc, { killProcessTree: true });
+
+      expect(spawner.spawn).not.toHaveBeenCalled();
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('already exited')
+      );
+    });
+
+    it('escalates to SIGKILL when taskkill does not terminate the adapter', async () => {
+      setPlatform('win32');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      // spawner.spawn succeeds but the adapter never exits
+
+      const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
+      await vi.advanceTimersByTimeAsync(300);
+      await shutdownPromise;
+
+      expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('keeps the SIGTERM-first path on win32 without killProcessTree', async () => {
+      setPlatform('win32');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      proc.kill.mockImplementation(() => {
+        process.nextTick(() => proc.emit('exit', 0, null));
+      });
+
+      const shutdownPromise = manager.shutdown(proc);
+      await vi.advanceTimersByTimeAsync(300);
+      await shutdownPromise;
+
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(spawner.spawn).not.toHaveBeenCalled();
+    });
+
+    it('keeps the SIGTERM-first path on non-win32 even with killProcessTree', async () => {
+      setPlatform('linux');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      proc.kill.mockImplementation(() => {
+        process.nextTick(() => proc.emit('exit', 0, null));
+      });
+
+      const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
+      await vi.advanceTimersByTimeAsync(300);
+      await shutdownPromise;
+
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(spawner.spawn).not.toHaveBeenCalled();
     });
   });
 });
