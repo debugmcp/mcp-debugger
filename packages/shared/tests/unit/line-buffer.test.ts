@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { LineBuffer } from '../../../src/utils/line-buffer.js';
+import { LineBuffer } from '../../src/utils/line-buffer.js';
 
 describe('LineBuffer', () => {
   it('returns complete lines and holds the trailing partial', () => {

@@ -100,3 +100,27 @@ export function sanitizeStderr(lines: string[]): string[] {
     return line;
   });
 }
+
+/**
+ * Sanitize accumulated child-process output and cap it for embedding in an
+ * error message or log entry. Splits on CRLF/LF, drops blank lines, redacts
+ * secret-looking lines, then keeps only the last `maxLines` lines and at most
+ * `maxChars` characters (ellipsis-prefixed), labelled "(last N of M lines)"
+ * when lines were dropped — the same bounds ProxyManager applies to stderr
+ * embedded in init-failure errors (issue #146).
+ */
+export function sanitizeStderrTail(
+  text: string,
+  opts: { maxLines?: number; maxChars?: number } = {}
+): string {
+  const { maxLines = 10, maxChars = 2000 } = opts;
+  const all = sanitizeStderr(text.split(/\r?\n/).filter(line => line.trim().length > 0));
+  const tail = all.slice(-maxLines);
+  let out = tail.join('\n');
+  if (out.length > maxChars) {
+    out = '…' + out.slice(-maxChars);
+  }
+  return all.length > tail.length
+    ? `${out} (last ${tail.length} of ${all.length} lines)`
+    : out;
+}

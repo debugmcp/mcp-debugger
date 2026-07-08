@@ -15,7 +15,7 @@ import {
   ProxyState 
 } from './dap-proxy-interfaces.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
-import { sanitizePayloadForLogging } from '../utils/env-sanitizer.js';
+import { sanitizePayloadForLogging } from '@debugmcp/shared';
 
 export interface ProxyRunnerOptions {
   /**

@@ -5,8 +5,9 @@ import { describe, it, expect } from 'vitest';
 import {
   sanitizeEnvForLogging,
   sanitizePayloadForLogging,
-  sanitizeStderr
-} from '../../../src/utils/env-sanitizer.js';
+  sanitizeStderr,
+  sanitizeStderrTail
+} from '../../src/utils/env-sanitizer.js';
 
 describe('sanitizeEnvForLogging', () => {
   it('redacts keys matching sensitive patterns', () => {
@@ -191,5 +192,56 @@ describe('sanitizeStderr', () => {
 
   it('handles empty array', () => {
     expect(sanitizeStderr([])).toEqual([]);
+  });
+});
+
+describe('sanitizeStderrTail', () => {
+  it('returns short clean text unchanged, without a truncation label', () => {
+    const text = 'line one\nline two\nline three';
+    expect(sanitizeStderrTail(text)).toBe(text);
+  });
+
+  it('keeps only the last 10 lines and appends the "(last N of M lines)" label', () => {
+    const text = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join('\n');
+    const result = sanitizeStderrTail(text);
+    expect(result).toContain('line 25');
+    expect(result).toContain('line 16');
+    expect(result).not.toContain('line 15\n');
+    expect(result).toContain('(last 10 of 25 lines)');
+  });
+
+  it('truncates oversized output to maxChars with a leading ellipsis', () => {
+    const text = Array.from({ length: 5 }, () => 'x'.repeat(600)).join('\n');
+    const result = sanitizeStderrTail(text);
+    expect(result.startsWith('…')).toBe(true);
+    // ellipsis + exactly maxChars; no line-count label since no lines dropped
+    expect(result.length).toBe(2001);
+  });
+
+  it('redacts secret-bearing lines inside the retained tail', () => {
+    const text = 'building...\nGITHUB_PAT=github_pat_ABCDEFGHIJKLMNOPQRSTUV123456\ndone';
+    const result = sanitizeStderrTail(text);
+    expect(result).toContain('[REDACTED — line contained sensitive data]');
+    expect(result).not.toContain('github_pat_ABCDEFGHIJKLMNOPQRSTUV123456');
+    expect(result).toContain('building...');
+    expect(result).toContain('done');
+  });
+
+  it('splits CRLF line endings and drops blank lines', () => {
+    const result = sanitizeStderrTail('one\r\n\r\ntwo\r\n');
+    expect(result).toBe('one\ntwo');
+  });
+
+  it('honours custom maxLines and maxChars', () => {
+    const text = ['a', 'b', 'c', 'd'].join('\n');
+    expect(sanitizeStderrTail(text, { maxLines: 2 })).toBe('c\nd (last 2 of 4 lines)');
+    const long = 'y'.repeat(50);
+    const capped = sanitizeStderrTail(long, { maxChars: 10 });
+    expect(capped).toBe('…' + 'y'.repeat(10));
+  });
+
+  it('returns an empty string for empty or whitespace-only input', () => {
+    expect(sanitizeStderrTail('')).toBe('');
+    expect(sanitizeStderrTail('  \n \r\n')).toBe('');
   });
 });

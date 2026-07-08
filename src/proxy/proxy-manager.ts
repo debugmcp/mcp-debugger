@@ -27,10 +27,14 @@ import type {
   ProxyMessage
 } from '../dap-core/types.js';
 import { ErrorMessages } from '../utils/error-messages.js';
-import { sanitizePayloadForLogging, sanitizeStderr } from '../utils/env-sanitizer.js';
-import { LineBuffer } from '../utils/line-buffer.js';
 import { ProxyConfig } from './proxy-config.js';
-import { IDebugAdapter, AdapterLaunchBarrier } from '@debugmcp/shared';
+import {
+  IDebugAdapter,
+  AdapterLaunchBarrier,
+  sanitizePayloadForLogging,
+  sanitizeStderr,
+  LineBuffer
+} from '@debugmcp/shared';
 
 /**
  * Events emitted by ProxyManager
