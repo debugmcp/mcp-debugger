@@ -30,6 +30,7 @@ import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { installShutdownHandlers, killChildGracefully } from './shutdown.mjs';
+import { createBackendLogger, sanitizeStderrTail, sharedUtilsLoaded } from './backend-logger.mjs';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -55,13 +56,15 @@ function log(msg) {
   process.stderr.write(`[dev-proxy] ${msg}\n`);
 }
 
-function logBackend(data) {
-  const lines = data.toString().split('\n');
-  for (const line of lines) {
-    if (line.trim()) {
-      process.stderr.write(`[backend] ${line}\n`);
-    }
-  }
+// Backend output is line-buffered and sanitized per stream (issue #154);
+// see backend-logger.mjs. One logger per stream, flushed on the stream's
+// own 'end'/'close'.
+function attachBackendLogger(stream) {
+  if (!stream) return;
+  const logger = createBackendLogger((text) => process.stderr.write(text));
+  stream.on('data', logger.onData);
+  stream.on('end', logger.flush);
+  stream.on('close', logger.flush);
 }
 
 // ---------------------------------------------------------------------------
@@ -176,8 +179,8 @@ class BackendManager {
         env: { ...process.env, MCP_EXIT_ON_STDIN_CLOSE: '1' },
       });
 
-      this.child.stdout.on('data', logBackend);
-      this.child.stderr.on('data', logBackend);
+      attachBackendLogger(this.child.stdout);
+      attachBackendLogger(this.child.stderr);
 
       this.child.on('exit', (code, signal) => {
         log(`Backend exited (code=${code}, signal=${signal})`);
@@ -246,15 +249,24 @@ class BackendManager {
 
   rebuild() {
     log(`Running build: ${BUILD_CMD}`);
-    const result = execSync(BUILD_CMD, {
-      cwd: PROJECT_ROOT,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 120000,
-      env: { ...process.env },
-    });
+    let result;
+    try {
+      result = execSync(BUILD_CMD, {
+        cwd: PROJECT_ROOT,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 120000,
+        env: { ...process.env },
+      });
+    } catch (err) {
+      // execSync's error message embeds raw build stderr — sanitize before it
+      // reaches tool responses via err.message (issue #154). Include stdout
+      // too: build tools (tsc via npm) print their diagnostics there.
+      const output = [err.stdout, err.stderr].filter(Boolean).join('\n') || err.message || String(err);
+      throw new Error(`Build failed: ${sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 })}`);
+    }
     log('Build succeeded');
-    return result;
+    return sanitizeStderrTail(result, { maxLines: 50, maxChars: 2000 });
   }
 
   async rebuildAndRestart() {
@@ -338,9 +350,7 @@ class BackendManager {
       this.stdioTransport = transport;
 
       // Log backend stderr output
-      if (transport.stderr) {
-        transport.stderr.on('data', logBackend);
-      }
+      attachBackendLogger(transport.stderr);
 
       transport.onerror = (err) => {
         log(`Stdio transport error: ${err.message}`);
@@ -593,7 +603,7 @@ async function handleDevTool(backend, server, name, args) {
                   {
                     success: true,
                     action: 'rebuild_and_restart',
-                    buildOutput: buildOutput.substring(0, 2000),
+                    buildOutput,
                     status: backend.getStatus(),
                   },
                   null,
@@ -633,7 +643,7 @@ async function handleDevTool(backend, server, name, args) {
                 {
                   success: true,
                   action: 'rebuild_and_restart',
-                  buildOutput: buildOutput.substring(0, 2000),
+                  buildOutput,
                   status: backend.getStatus(),
                 },
                 null,
@@ -669,6 +679,10 @@ async function handleDevTool(backend, server, name, args) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  if (!sharedUtilsLoaded) {
+    log('WARNING: @debugmcp/shared dist not found — backend output redaction disabled until the project is built');
+  }
+
   const backend = new BackendManager();
 
   // Create the MCP Server that Claude Code talks to (via stdio)
