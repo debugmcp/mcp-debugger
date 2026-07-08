@@ -974,7 +974,58 @@ describe('DapProxyWorker', () => {
       // Launch mode: shutdown calls disconnect with terminateDebuggee=true
       expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient, true);
       expect(mockDapClient.shutdown).toHaveBeenCalledWith('worker shutdown');
+      // The disconnect must be sent while the socket is still alive — i.e.
+      // BEFORE dapClient.shutdown() destroys it — or the adapter never
+      // receives terminateDebuggee and orphans its debuggee (issue #156).
+      expect(connectionStub.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
+        (mockDapClient.shutdown as Mock).mock.invocationCallOrder[0]
+      );
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
+    });
+
+    it('shutdown requests an adapter process tree-kill in launch mode', async () => {
+      vi.useFakeTimers();
+      try {
+        const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+        const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+        const adapterProc = { pid: 4242 };
+        (worker as any).dapClient = mockDapClient;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterProcess = adapterProc;
+        (worker as any).state = ProxyState.CONNECTED;
+
+        const terminatePromise = worker.handleTerminate();
+        await vi.advanceTimersByTimeAsync(500);
+        await terminatePromise;
+
+        expect(processStub.shutdown).toHaveBeenCalledWith(adapterProc, { killProcessTree: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shutdown must not request a tree-kill in attach mode', async () => {
+      vi.useFakeTimers();
+      try {
+        const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+        const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+        const adapterProc = { pid: 4242 };
+        (worker as any).dapClient = mockDapClient;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterProcess = adapterProc;
+        (worker as any).state = ProxyState.CONNECTED;
+        (worker as any).isAttachMode = true;
+
+        const terminatePromise = worker.handleTerminate();
+        await vi.advanceTimersByTimeAsync(500);
+        await terminatePromise;
+
+        expect(processStub.shutdown).toHaveBeenCalledWith(adapterProc, { killProcessTree: false });
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('handleTerminate should auto-detach in attach mode', async () => {
