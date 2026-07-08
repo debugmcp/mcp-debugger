@@ -540,6 +540,70 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  describe('Payload sanitization in logs and trace (issue #146 family)', () => {
+    const allLoggedText = () =>
+      loggerInstances
+        .flatMap(l => [l.info, l.debug, l.warn, l.error].flatMap(fn => fn.mock.calls))
+        .map(call => JSON.stringify(call))
+        .join('\n');
+
+    it('redacts env objects from the outgoing request log but not from the wire', async () => {
+      await client.connect();
+
+      const requestPromise = client.sendRequest('launch', {
+        program: 'app.js',
+        env: { SECRET_TOKEN: 'wire-not-log-123' }
+      });
+      requestPromise.catch(() => {}); // resolved on shutdown in afterEach
+
+      // The adapter must receive the real environment over the socket
+      const written = mockSocket.write.mock.calls.map((c: unknown[]) => String(c[0])).join('');
+      expect(written).toContain('wire-not-log-123');
+
+      // No logger output may contain it
+      expect(allLoggedText()).not.toContain('wire-not-log-123');
+      expect(allLoggedText()).toContain('env vars redacted');
+    });
+
+    it('redacts env objects from the reverse-request log', async () => {
+      await client.connect();
+
+      mockSocket.emit('data', createDapMessage({
+        seq: 99,
+        type: 'request',
+        command: 'someAdapterRequest',
+        arguments: { env: { SECRET_TOKEN: 'reverse-secret-456' } }
+      }));
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(allLoggedText()).not.toContain('reverse-secret-456');
+    });
+
+    it('redacts env objects in the DAP trace file', async () => {
+      const tracePath = `${process.env.TEMP || '/tmp'}/dap-trace-sanitize-test-${process.pid}.ndjson`;
+      process.env.DAP_TRACE_FILE = tracePath;
+      let traceClient: MinimalDapClient | undefined;
+      try {
+        traceClient = new MinimalDapClient('localhost', 5678);
+        await traceClient.connect();
+
+        const requestPromise = traceClient.sendRequest('launch', {
+          program: 'app.js',
+          env: { SECRET_TOKEN: 'trace-secret-789' }
+        });
+        requestPromise.catch(() => {});
+
+        const trace = fs.readFileSync(tracePath, 'utf8');
+        expect(trace).not.toContain('trace-secret-789');
+        expect(trace).toContain('env vars redacted');
+      } finally {
+        delete process.env.DAP_TRACE_FILE;
+        traceClient?.shutdown();
+        fs.rmSync(tracePath, { force: true });
+      }
+    });
+  });
+
   describe('Event Handling', () => {
     it('should emit DAP events', async () => {
       await client.connect();

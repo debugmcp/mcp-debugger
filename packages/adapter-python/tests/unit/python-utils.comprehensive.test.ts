@@ -548,6 +548,24 @@ describe('getPythonVersion', () => {
     expect(version).toBe('Python dev version');
   });
 
+  it('sanitizes the fallback output when the version regex misses', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, stdout: 'AUTH_TOKEN: ghp_0123456789abcdefghij0123456789' })
+    );
+
+    const version = await getPythonVersion('/usr/bin/python3');
+    expect(version).toBe('[REDACTED — line contained sensitive data]');
+  });
+
+  it('returns only the first line of multi-line fallback output', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, stdout: 'Custom Python Build\ndebug noise line' })
+    );
+
+    const version = await getPythonVersion('/usr/bin/python3');
+    expect(version).toBe('Custom Python Build');
+  });
+
   it('returns version from stderr if present', async () => {
     spawnMock.mockImplementation(() =>
       createSpawn({ exitCode: 0, stderr: 'Python 3.9.0' })

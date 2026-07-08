@@ -4,6 +4,8 @@
  */
 
 import { ChildProcess } from 'child_process';
+import type { Readable } from 'stream';
+import { LineBuffer, sanitizeStderr } from '@debugmcp/shared';
 import {
   IProcessSpawner,
   ILogger,
@@ -72,15 +74,21 @@ export class GenericAdapterManager {
       spawnOptions.cwd = cwd;
     }
 
-    // Log critical environment variables for debugging
+    // Log critical environment variables for debugging. These key names are
+    // not secret-shaped, so key-based redaction would pass every value
+    // through — run the values through the stderr value-shape redaction
+    // instead (catches tokens, JWTs, PEM headers smuggled into e.g.
+    // NODE_OPTIONS).
+    const describeEnvVar = (value: string | undefined): string =>
+      value === undefined ? '<not set>' : sanitizeStderr([value])[0];
     const criticalEnvVars = {
-      NODE_OPTIONS: spawnOptions.env?.NODE_OPTIONS || '<not set>',
-      NODE_DEBUG: spawnOptions.env?.NODE_DEBUG || '<not set>',
-      NODE_ENV: spawnOptions.env?.NODE_ENV || '<not set>',
-      DEBUG: spawnOptions.env?.DEBUG || '<not set>',
-      VSCODE_INSPECTOR_OPTIONS: spawnOptions.env?.VSCODE_INSPECTOR_OPTIONS || '<not set>',
+      NODE_OPTIONS: describeEnvVar(spawnOptions.env?.NODE_OPTIONS),
+      NODE_DEBUG: describeEnvVar(spawnOptions.env?.NODE_DEBUG),
+      NODE_ENV: describeEnvVar(spawnOptions.env?.NODE_ENV),
+      DEBUG: describeEnvVar(spawnOptions.env?.DEBUG),
+      VSCODE_INSPECTOR_OPTIONS: describeEnvVar(spawnOptions.env?.VSCODE_INSPECTOR_OPTIONS),
       // Check for any inspector-related variables
-      hasInspectVars: Object.keys(spawnOptions.env || {}).some(k => 
+      hasInspectVars: Object.keys(spawnOptions.env || {}).some(k =>
         k.includes('INSPECT') || k.includes('DEBUG')
       )
     };
@@ -135,19 +143,47 @@ export class GenericAdapterManager {
       this.logger.error('[AdapterManager] Adapter process spawn error:', err);
     });
 
-    // Capture stderr for diagnostics (when stdio is piped or inherited, stderr may be available)
+    // Capture stderr for diagnostics. Chunks arrive at arbitrary byte
+    // boundaries, so they are line-buffered before sanitization — a secret
+    // assignment split across two chunks would otherwise leak its tail past
+    // the key/value redaction patterns (issues #151/#153).
     if (adapterProcess.stderr) {
-      adapterProcess.stderr.on('data', (data: Buffer | string) => {
-        const output = data.toString().trim();
-        if (output) {
-          this.logger.error(`[AdapterManager STDERR] ${output}`);
-        }
-      });
+      this.consumeStream(adapterProcess.stderr, line =>
+        this.logger.error(`[AdapterManager STDERR] ${line}`)
+      );
+    }
+
+    // stdout is piped but carries no DAP traffic (that goes over TCP); drain
+    // it through the same sanitized path so a chatty adapter cannot fill the
+    // pipe buffer and stall, and its diagnostics land in the log at debug.
+    if (adapterProcess.stdout) {
+      this.consumeStream(adapterProcess.stdout, line =>
+        this.logger.debug(`[AdapterManager STDOUT] ${line}`)
+      );
     }
 
     adapterProcess.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       this.logger.info(`[AdapterManager] Adapter process exited. Code: ${code}, Signal: ${signal}`);
     });
+  }
+
+  /**
+   * Line-buffer, sanitize, and log a child output stream. The trailing
+   * partial line is flushed on the stream's own 'end'/'close', never on
+   * process 'exit' — the pipe can still deliver the rest of a split line
+   * after exit, which would re-create the straddle leak (issue #151).
+   */
+  private consumeStream(stream: Readable, logLine: (line: string) => void): void {
+    const buffer = new LineBuffer();
+    const record = (lines: string[]) => {
+      for (const line of sanitizeStderr(lines.filter(l => l.trim().length > 0))) {
+        logLine(line);
+      }
+    };
+    stream.on('data', (data: Buffer | string) => record(buffer.append(data.toString())));
+    const flush = () => record(buffer.flush());
+    stream.on('end', flush);
+    stream.on('close', flush);
   }
 
   /**

@@ -313,6 +313,36 @@ describe('ProxyRunner IPC communication', () => {
     expect(allLogged).not.toContain('/home/user-sentinel');
   });
 
+  it('never logs launchConfig env values from IPC messages (issue #146 family)', async () => {
+    (process as any).send = vi.fn();
+    Object.defineProperty(process, 'connected', { value: true, configurable: true });
+    const onMessage = vi.fn().mockResolvedValue(undefined);
+
+    runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage });
+    await runner.start();
+
+    const messageListeners = process.listeners('message');
+    const ipcHandler = messageListeners[messageListeners.length - 1] as Function;
+
+    await ipcHandler({
+      cmd: 'init',
+      sessionId: 'launch-env-leak',
+      launchConfig: {
+        type: 'pwa-node',
+        env: { GITHUB_PAT: 'github_pat_LAUNCH_SENTINEL', HOME: '/home/launch-sentinel' }
+      }
+    });
+
+    const allLogged = JSON.stringify([
+      (logger.debug as any).mock.calls,
+      (logger.info as any).mock.calls,
+      (logger.warn as any).mock.calls,
+      (logger.error as any).mock.calls
+    ]);
+    expect(allLogged).not.toContain('github_pat_LAUNCH_SENTINEL');
+    expect(allLogged).not.toContain('/home/launch-sentinel');
+  });
+
   it('never logs adapter env values when message processing fails (issue #146)', async () => {
     (process as any).send = vi.fn();
     Object.defineProperty(process, 'connected', { value: true, configurable: true });

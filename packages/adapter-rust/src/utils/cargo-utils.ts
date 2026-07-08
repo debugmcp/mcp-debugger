@@ -5,6 +5,17 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn } from 'child_process';
+import { sanitizeStderr, sanitizeStderrTail } from '@debugmcp/shared';
+
+/**
+ * Redact secret-looking lines from accumulated cargo output while keeping
+ * ordinary compiler diagnostics verbatim. Cargo output is returned to
+ * callers (and from there can reach MCP tool errors), so it must never
+ * carry env-var dumps or token-shaped values.
+ */
+function sanitizeCargoOutput(output: string): string {
+  return sanitizeStderr(output.split(/\r?\n/)).join('\n');
+}
 
 /**
  * Cargo target information
@@ -160,7 +171,7 @@ export async function runCargoTest(
       settled = true;
       resolve({
         success: code === 0,
-        output: output + errorOutput
+        output: sanitizeCargoOutput(output + errorOutput)
       });
     });
   });
@@ -276,10 +287,9 @@ export async function runCargoBuild(
     buildProcess.on('exit', (code) => {
       if (settled) return;
       settled = true;
-      const fullOutput = output + errorOutput;
       resolve({
         success: code === 0,
-        output: fullOutput
+        output: sanitizeCargoOutput(output + errorOutput)
       });
     });
   });
@@ -363,9 +373,10 @@ export async function buildCargoProject(
     buildProcess.stdout?.on('data', (data) => {
       const msg = data.toString();
       stdout += msg;
-      // Show compilation progress
+      // Show compilation progress (sanitized: the chunk can carry more
+      // than the Compiling line)
       if (msg.includes('Compiling')) {
-        logger?.info?.(`[Rust Build] ${msg.trim()}`);
+        logger?.info?.(`[Rust Build] ${sanitizeCargoOutput(msg.trim())}`);
       }
     });
 
@@ -402,8 +413,15 @@ export async function buildCargoProject(
           resolve({ success: false, error: errorMsg });
         }
       } else {
-        logger?.error?.(`[Rust Debugger] Build failed with code ${code}:\n${stderr}`);
-        resolve({ success: false, error: stderr || stdout });
+        logger?.error?.(`[Rust Debugger] Build failed with code ${code}:\n${sanitizeCargoOutput(stderr)}`);
+        // This error string reaches MCP tool responses. Capped looser than
+        // the usual 10/2000 (see sanitizeStderrTail defaults) because the
+        // actionable part of a cargo failure is multi-line compiler
+        // diagnostics — still bounded, and secret-looking lines redact.
+        resolve({
+          success: false,
+          error: sanitizeStderrTail(stderr || stdout, { maxLines: 50, maxChars: 4000 })
+        });
       }
     });
   });

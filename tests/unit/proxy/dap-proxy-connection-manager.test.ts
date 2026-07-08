@@ -475,6 +475,53 @@ describe('DapConnectionManager', () => {
         connectionManager.sendLaunchRequest(mockDapClient as any, scriptPath)
       ).rejects.toThrow('Launch failed');
     });
+
+    it('does not log launch env values while still sending them to the adapter', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+
+      await connectionManager.sendLaunchRequest(
+        mockDapClient as any,
+        scriptPath,
+        [],
+        true,
+        true,
+        { type: 'pwa-node', env: { GITHUB_PAT: 'github_pat_LOGLEAK123' } }
+      );
+
+      // The adapter must still receive the real environment
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith(
+        'launch',
+        expect.objectContaining({ env: { GITHUB_PAT: 'github_pat_LOGLEAK123' } })
+      );
+
+      const logged = (mockLogger.info as any).mock.calls
+        .map((call: unknown[]) => JSON.stringify(call))
+        .join('\n');
+      expect(logged).not.toContain('github_pat_LOGLEAK123');
+      expect(logged).toContain('env vars redacted');
+    });
+  });
+
+  describe('sendAttachRequest', () => {
+    it('does not log attach config env values while still sending them to the adapter', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+
+      await connectionManager.sendAttachRequest(mockDapClient as any, {
+        host: 'localhost',
+        port: 5678,
+        env: { SECRET_TOKEN: 'attach-secret-1' }
+      });
+
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith(
+        'attach',
+        expect.objectContaining({ env: { SECRET_TOKEN: 'attach-secret-1' } })
+      );
+
+      const logged = (mockLogger.info as any).mock.calls
+        .map((call: unknown[]) => JSON.stringify(call))
+        .join('\n');
+      expect(logged).not.toContain('attach-secret-1');
+    });
   });
 
   describe('setBreakpoints', () => {

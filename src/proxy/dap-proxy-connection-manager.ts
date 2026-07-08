@@ -11,6 +11,7 @@ import {
   ExtendedInitializeArgs
 } from './dap-proxy-interfaces.js';
 import type { AdapterPolicy } from '@debugmcp/shared';
+import { sanitizePayloadForLogging } from '@debugmcp/shared';
 
 export class DapConnectionManager {
   // Increased initial delay to give debugpy more time to start
@@ -236,7 +237,8 @@ export class DapConnectionManager {
       launchArgs.console = 'internalConsole';
     }
 
-    this.logger.info('[ConnectionManager] Sending "launch" request to adapter with args:', launchArgs);
+    // Sanitized: launch configs can carry the debuggee's full environment
+    this.logger.info('[ConnectionManager] Sending "launch" request to adapter with args:', sanitizePayloadForLogging(launchArgs));
     await client.sendRequest('launch', launchArgs);
     this.logger.info('[ConnectionManager] DAP "launch" request sent.');
   }
@@ -248,7 +250,7 @@ export class DapConnectionManager {
     client: IDapClient,
     attachConfig: Record<string, unknown>
   ): Promise<void> {
-    this.logger.info('[ConnectionManager] Sending "attach" request to adapter with config:', attachConfig);
+    this.logger.info('[ConnectionManager] Sending "attach" request to adapter with config:', sanitizePayloadForLogging(attachConfig));
     await client.sendRequest('attach', attachConfig);
     this.logger.info('[ConnectionManager] DAP "attach" request sent.');
   }

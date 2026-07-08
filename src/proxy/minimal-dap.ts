@@ -9,12 +9,13 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { createLogger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
-import { 
-  AdapterPolicy, 
-  DefaultAdapterPolicy, 
+import {
+  AdapterPolicy,
+  DefaultAdapterPolicy,
   DapClientBehavior,
   DapClientContext,
-  ChildSessionConfig 
+  ChildSessionConfig,
+  sanitizePayloadForLogging
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
@@ -212,7 +213,9 @@ export class MinimalDapClient extends EventEmitter {
       logger.info(`[MinimalDapClient] Reverse request: ${req.command}`, {
         command: req.command,
         seq: req.seq,
-        arguments: req.arguments
+        // Sanitized: js-debug's startDebugging carries a child launch
+        // configuration that can include the debuggee's full environment
+        arguments: sanitizePayloadForLogging(req.arguments)
       });
     } else if (message.type === 'event') {
       const evt = message as DebugProtocol.Event;
@@ -329,7 +332,9 @@ export class MinimalDapClient extends EventEmitter {
     try {
       fs.appendFileSync(
         this.traceFile,
-        JSON.stringify({ ts: new Date().toISOString(), direction, payload }) + '\n',
+        // env objects are redacted: the trace file persists next to the logs
+        // and the launch request embeds the debuggee's full environment
+        JSON.stringify({ ts: new Date().toISOString(), direction, payload: sanitizePayloadForLogging(payload) }) + '\n',
         'utf8'
       );
     } catch {
@@ -638,7 +643,8 @@ export class MinimalDapClient extends EventEmitter {
     logger.info(`[MinimalDapClient] Sending request:`, {
       command,
       seq: requestSeq,
-      args: args || {}
+      // Sanitized: 'launch'/'attach' args carry the debuggee's full environment
+      args: sanitizePayloadForLogging(args || {})
     });
     
     return new Promise<T>((resolve, reject) => {

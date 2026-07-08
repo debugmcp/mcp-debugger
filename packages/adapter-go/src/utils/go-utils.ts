@@ -6,6 +6,7 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import { sanitizeStderrTail } from '@debugmcp/shared';
 
 interface Logger {
   debug?(message: string): void;
@@ -166,10 +167,12 @@ export async function checkDelveDapSupport(dlvPath: string): Promise<{ supported
 
     child.on('error', (err) => resolve({ supported: false, stderr: err.message }));
     child.on('exit', (code) => {
-      // If dlv dap --help exits with code 0, DAP is supported
+      // If dlv dap --help exits with code 0, DAP is supported.
+      // The stderr text gets embedded verbatim into validation error
+      // messages that reach MCP tool responses, so redact and cap it here.
       resolve({
         supported: code === 0,
-        stderr: stderrOutput.trim() || undefined
+        stderr: stderrOutput.trim() ? sanitizeStderrTail(stderrOutput) : undefined
       });
     });
   });

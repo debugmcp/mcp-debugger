@@ -200,3 +200,14 @@ export { NodeFileSystem, setDefaultFileSystem, getDefaultFileSystem } from './in
 
 // ===== Re-export VSCode Debug Protocol types for convenience =====
 export type { DebugProtocol } from '@vscode/debugprotocol';
+
+// ===== Logging-safety utilities =====
+// Sanitization helpers shared by the server and adapter packages so that
+// child-process output never reaches logs or tool errors unsanitized.
+export {
+  sanitizeEnvForLogging,
+  sanitizePayloadForLogging,
+  sanitizeStderr,
+  sanitizeStderrTail
+} from './utils/env-sanitizer.js';
+export { LineBuffer } from './utils/line-buffer.js';

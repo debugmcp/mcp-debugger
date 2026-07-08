@@ -278,6 +278,44 @@ describe('go-utils', () => {
       expect(result.supported).toBe(false);
       expect(result.stderr).toBe('spawn failed');
     });
+
+    it('redacts secret-looking lines from dlv stderr (embedded in validation errors)', async () => {
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          proc.stderr.emit('data', 'GITHUB_PAT=github_pat_ABCDEFGHIJKLMNOPQRSTUV123456\nusage: dlv dap\n');
+          proc.emit('exit', 1);
+        });
+        return proc;
+      });
+
+      const result = await checkDelveDapSupport('/home/user/go/bin/dlv');
+      expect(result.supported).toBe(false);
+      expect(result.stderr).toContain('[REDACTED — line contained sensitive data]');
+      expect(result.stderr).not.toContain('github_pat_ABCDEFGHIJKLMNOPQRSTUV123456');
+      expect(result.stderr).toContain('usage: dlv dap');
+    });
+
+    it('caps oversized dlv stderr to the last 10 lines', async () => {
+      const noise = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join('\n');
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          proc.stderr.emit('data', noise + '\n');
+          proc.emit('exit', 1);
+        });
+        return proc;
+      });
+
+      const result = await checkDelveDapSupport('/home/user/go/bin/dlv');
+      expect(result.stderr).toContain('(last 10 of 25 lines)');
+      expect(result.stderr).toContain('line 25');
+      expect(result.stderr).not.toContain('line 15\n');
+    });
   });
 
   describe('getGoSearchPaths', () => {

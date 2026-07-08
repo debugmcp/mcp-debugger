@@ -3,10 +3,11 @@
  * continuing, and breakpoint management.
  */
 import { v4 as uuidv4 } from 'uuid';
-import { 
-  Breakpoint, 
-  SessionState, 
-  SessionLifecycleState
+import {
+  Breakpoint,
+  SessionState,
+  SessionLifecycleState,
+  sanitizePayloadForLogging
 } from '@debugmcp/shared';
 import { ManagedSession, ToolchainValidationState } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -418,7 +419,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     const session = this._getSessionById(sessionId);
     this.logger.info(
       `Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`,
-      dapLaunchArgs
+      sanitizePayloadForLogging(dapLaunchArgs)
     );
 
     if (session.proxyManager) {
