@@ -36,15 +36,26 @@ function hasSensitiveToken(key: string): boolean {
 }
 
 /**
+ * Assign an own enumerable property even for exotic key names: a plain
+ * `obj[key] = value` with key '__proto__' hits the Object.prototype setter
+ * instead — the entry silently vanishes (and an object value would replace
+ * the prototype). Env vars and JSON payloads can legitimately carry such
+ * keys, so the sanitizers must not lose or misroute them.
+ */
+function setOwnProperty<T>(target: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+/**
  * Redact sensitive environment variable values for safe logging.
  */
 export function sanitizeEnvForLogging(env: Record<string, string>): Record<string, string> {
   const sanitized: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (SENSITIVE_PATTERNS.some(p => p.test(key)) || hasSensitiveToken(key)) {
-      sanitized[key] = '[REDACTED]';
+      setOwnProperty(sanitized, key, '[REDACTED]');
     } else {
-      sanitized[key] = value;
+      setOwnProperty(sanitized, key, value);
     }
   }
   return sanitized;
@@ -76,9 +87,9 @@ function redactEnvDeep(value: unknown, ancestors: WeakSet<object>): unknown {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       if (key === 'env' && entry && typeof entry === 'object' && !Array.isArray(entry)) {
-        out[key] = `<${Object.keys(entry as Record<string, unknown>).length} env vars redacted>`;
+        setOwnProperty(out, key, `<${Object.keys(entry as Record<string, unknown>).length} env vars redacted>`);
       } else {
-        out[key] = redactEnvDeep(entry, ancestors);
+        setOwnProperty(out, key, redactEnvDeep(entry, ancestors));
       }
     }
     return out;
