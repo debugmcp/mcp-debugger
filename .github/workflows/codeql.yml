@@ -9,14 +9,16 @@ on:
     - cron: '0 6 * * 1'  # Monday 6:00 UTC
 
 permissions:
-  security-events: write
   contents: read
-  actions: read
 
 jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
 
     strategy:
       fail-fast: false
