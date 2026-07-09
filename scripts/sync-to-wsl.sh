@@ -125,7 +125,7 @@ fi
 # 9. Install dependencies (unless --no-install)
 if [ "$NO_INSTALL" = false ]; then
     echo -e "${GREEN}Installing npm dependencies...${NC}"
-    npm install
+    pnpm install --frozen-lockfile
 else
     echo -e "${YELLOW}Skipping npm install (--no-install flag set)${NC}"
 fi
