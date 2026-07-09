@@ -151,10 +151,17 @@ describe('sanitizeEnvForLogging properties', () => {
     );
   });
 
+  // Exotic keys are always in the pool: '__proto__' found a real bug here
+  // (plain assignment routed it to the prototype setter and dropped the entry).
+  const envKey = fc.oneof(
+    stringOf(ALNUM + '_-', 1, 20),
+    fc.constantFrom('__proto__', 'constructor', 'hasOwnProperty', 'toString')
+  );
+
   it('preserves the key set, passes values through or redacts them, and is idempotent', () => {
     fc.assert(
       fc.property(
-        fc.dictionary(stringOf(ALNUM + '_-', 1, 20), fc.string(), { maxKeys: 10 }),
+        fc.dictionary(envKey, fc.string(), { maxKeys: 10 }),
         (env) => {
           const output = sanitizeEnvForLogging(env);
           expect(Object.keys(output).sort()).toEqual(Object.keys(env).sort());
@@ -165,6 +172,14 @@ describe('sanitizeEnvForLogging properties', () => {
         }
       )
     );
+  });
+
+  it('keeps a literal __proto__ env var as an own property (regression)', () => {
+    const env = JSON.parse('{"__proto__": "shady-value", "PATH": "/usr/bin"}') as Record<string, string>;
+    const output = sanitizeEnvForLogging(env);
+    expect(Object.keys(output).sort()).toEqual(['PATH', '__proto__']);
+    expect(Object.getOwnPropertyDescriptor(output, '__proto__')?.value).toBe('shady-value');
+    expect(Object.getPrototypeOf(output)).toBe(Object.prototype);
   });
 });
 
