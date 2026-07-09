@@ -12,6 +12,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/debugmcp/mcp-debugger.svg)](https://hub.docker.com/r/debugmcp/mcp-debugger)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/debugmcp/mcp-debugger/badge)](https://scorecard.dev/viewer/?uri=github.com/debugmcp/mcp-debugger)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13543/badge)](https://www.bestpractices.dev/projects/13543)
 
 ## 🎯 Overview
 
