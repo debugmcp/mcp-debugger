@@ -41,3 +41,17 @@ updates:
     # pip supports only `default-days`.
     cooldown:
       default-days: 3
+
+  # Keep digest-pinned base images (Dockerfile FROM ...@sha256:) fresh.
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /docker
+      - /examples/ruby/remote-attach
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "docker"
+    cooldown:
+      default-days: 3

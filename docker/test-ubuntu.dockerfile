@@ -17,8 +17,9 @@ RUN apt-get update && apt-get install -y \
     git \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install debugpy (pinned version)
-RUN pip3 install "debugpy==1.8.14"
+# Install debugpy (hash-pinned)
+COPY requirements/debugpy.txt /tmp/debugpy-requirements.txt
+RUN pip3 install --require-hashes -r /tmp/debugpy-requirements.txt && rm /tmp/debugpy-requirements.txt
 
 # Set working directory
 WORKDIR /app
