@@ -74,7 +74,6 @@ jobs:
 
     - name: Audit dependencies
       run: pnpm audit --prod --audit-level=high
-      continue-on-error: true
 
     - name: Vendor adapter binaries
       run: pnpm run vendor:adapters
