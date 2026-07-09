@@ -5,8 +5,10 @@ FROM node:22-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a68
 ARG DISABLE_LANGUAGES
 ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
-# Install pnpm (using version 10 to match local development)
-RUN npm install -g pnpm@10.33.0
+# Install pnpm via corepack (version 10 to match local development).
+# corepack ships with the node base image; unlike `npm install -g`, the
+# activated version is integrity-checked against the version spec.
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Set application directory
 WORKDIR /app
@@ -103,6 +105,7 @@ ENV MCP_CONTAINER=true
 ENV MCP_WORKSPACE_ROOT=/workspace
 
 # Install Python, LLDB, and supporting tools (Node copied from builder)
+COPY requirements/debugpy.txt /tmp/debugpy-requirements.txt
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       curl \
@@ -120,7 +123,8 @@ RUN apt-get update && \
       openjdk-21-jdk-headless && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    pip3 install --break-system-packages --no-cache-dir "debugpy==1.8.14"
+    pip3 install --break-system-packages --no-cache-dir --require-hashes -r /tmp/debugpy-requirements.txt && \
+    rm /tmp/debugpy-requirements.txt
 
 # Copy Node runtime from builder to avoid installing system-wide Node.js
 COPY --from=builder /usr/local/bin/node /usr/local/bin/node

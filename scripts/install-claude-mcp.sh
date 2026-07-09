@@ -21,7 +21,7 @@ fi
 # Build the project
 echo "Building mcp-debugger..."
 cd "$PROJECT_DIR"
-npm install
+pnpm install --frozen-lockfile
 npm run build
 
 # Remove any existing configuration

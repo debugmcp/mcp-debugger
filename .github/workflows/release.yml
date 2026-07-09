@@ -45,8 +45,8 @@ jobs:
 
     - name: Install Python dependencies
       run: |
-        python -m pip install "pip==25.0.1"
-        pip install "debugpy==1.8.14"
+        python -m pip install --require-hashes -r requirements/pip.txt
+        python -m pip install --require-hashes -r requirements/debugpy.txt
 
     - name: Setup Go
       uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
