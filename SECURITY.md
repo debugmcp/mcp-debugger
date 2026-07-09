@@ -81,3 +81,4 @@ mcp-debugger follows these security principles:
 - **UX-level path validation**: File paths are checked for existence at request boundaries to give the MCP client immediate feedback on bad inputs. This is not an access-control mechanism — see [Trust Model](#trust-model).
 - **Least privilege**: CI workflows use minimal GitHub token permissions
 - **Supply chain hardening**: GitHub Actions are SHA-pinned, dependencies are audited, npm packages are published with sigstore provenance
+- **Self-assessed against community baselines**: [OpenSSF Best Practices "passing" badge](https://www.bestpractices.dev/projects/13543) and [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/debugmcp/mcp-debugger)
