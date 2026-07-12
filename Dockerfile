@@ -119,6 +119,7 @@ RUN apt-get update && \
       python3-pip \
       python3-venv \
       libstdc++6 \
+      libatomic1 \
       lldb \
       python3-lldb \
       openjdk-21-jdk-headless && \
