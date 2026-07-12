@@ -1,14 +1,15 @@
 # Stage 1: Build and bundle the TypeScript application
 ARG DISABLE_LANGUAGES=rust
 
-FROM node:22-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732 AS builder
+FROM node:26-slim@sha256:ffc78385a788964bb3cbab5e434ff79a10bdc25b8ae6db03fe5fe6cb14053c09 AS builder
 ARG DISABLE_LANGUAGES
 ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
 # Install pnpm via corepack (version 10 to match local development).
-# corepack ships with the node base image; unlike `npm install -g`, the
-# activated version is integrity-checked against the version spec.
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+# node:26-slim no longer bundles corepack, so install it explicitly (pinned,
+# matching the rest of this Dockerfile's exact-version pins) before enabling;
+# the activated pnpm version is still integrity-checked against the spec.
+RUN npm install -g corepack@0.35.0 && corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Set application directory
 WORKDIR /app
@@ -118,6 +119,7 @@ RUN apt-get update && \
       python3-pip \
       python3-venv \
       libstdc++6 \
+      libatomic1 \
       lldb \
       python3-lldb \
       openjdk-21-jdk-headless && \
