@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-07-09
+
+### Added
+- **`verifyTimeout` parameter** on `create_debug_session` and `attach_to_process` — controls how long (ms) attach mode waits for the debugger to report at least one thread before failing the attach (default: 5000, max: 600000). Increase for targets slow to become debuggable, e.g. a busy or warming JVM (#147, fixes #143)
+- **`timeout` parameter** on `evaluate_expression` and `redefine_classes` — controls the max time (ms) to wait for the operation to complete (default: 30000, max: 600000) (#148, fixes #142)
+
+### Fixed
+- **Slow step/pause no longer reported as failure** — `step_over`, `step_into`, `step_out`, `pause_execution`, and `continue_execution` now return `pending: true` with a truthful "still running" message instead of `success: false` when the operation outlives its grace window (#144)
+- **Python attach handshake** — attach-first DAP handshake sequencing for debugpy attach (#149, fixes #145)
+- **DAP disconnect ordering** — send DAP disconnect before destroying the socket; Windows launch-mode tree-kill now runs first, with an already-exited PID guard (#157, fixes #156)
+- **Dev proxy backend output** — line-buffered and sanitized before logging, matching the main proxy's handling (#158, fixes #154)
+
+### Security
+- **Comprehensive stderr/env secret-redaction audit** across the proxy and dev-proxy, closing gaps where adapter/backend output could leak into logs or tool errors unsanitized (#150, #152, #155, fixes #146, #151, #153)
+- **All 23 open dependency advisories resolved** via `pnpm.overrides` (hono, fast-uri, vite, qs, ip-address, esbuild, brace-expansion); CI's `pnpm audit` step is no longer `continue-on-error` (#160)
+- **CI workflow token permissions job-scoped**; the last unpinned GitHub Action (`dependabot/fetch-metadata`) SHA-pinned; a stray compiled Go example binary untracked (#161)
+- **Dependency pinning sweep** — hash-pinned pip installs (`pip`, `debugpy`), pnpm installed via corepack instead of `npm install -g`, `ruby:3.3-slim` pinned by digest, Dependabot now covers the `docker` ecosystem (#163)
+- **Signed release artifacts** — GitHub releases now ship the published npm tarballs alongside SLSA provenance (`multiple.intoto.jsonl`), verifiable with `slsa-verifier` (#164)
+- **OpenSSF Scorecard 6.0 → 8.7** and an [OpenSSF Best Practices "passing" badge](https://www.bestpractices.dev/projects/13543) (#160–#164, #174)
+
+### Changed
+- Added `fast-check` property-based tests covering the log sanitizers, stream line-buffering, and DAP wire framing — caught and fixed a real bug where env vars named `__proto__` were silently dropped by the sanitizer (#162)
+
 ## [0.22.0] - 2026-07-06
 
 ### Added
