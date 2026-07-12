@@ -378,21 +378,51 @@ jobs:
         if-no-files-found: error
 
   provenance:
-    name: Generate SLSA provenance
+    name: Generate build provenance attestation
     needs: npm-publish
+    runs-on: ubuntu-latest
     permissions:
-      actions: read    # read the release-artifacts workflow artifact
-      id-token: write  # sign the provenance (sigstore)
+      id-token: write     # sign the attestation (sigstore)
+      attestations: write # persist it to the GitHub Attestations API
       contents: read
-    # SLSA reusable workflows must be referenced by version tag, not commit SHA:
-    # slsa-verifier resolves the trusted builder identity from the tag, and the
-    # generator refuses to run from a mutable/unknown ref. Scorecard's
-    # Pinned-Dependencies check exempts slsa-framework/slsa-github-generator.
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
-    with:
-      base64-subjects: ${{ needs.npm-publish.outputs.hashes }}
-      provenance-name: multiple.intoto.jsonl
-      upload-assets: false  # create-release attaches it together with the tarballs
+    # Uses actions/attest-build-provenance (a plain composite action) rather than
+    # slsa-framework/slsa-github-generator's reusable workflow: this org has
+    # "Write permissions for workflows" disabled, and GitHub validates a calling
+    # job's permissions against that policy at PARSE TIME for external reusable
+    # *workflow* calls specifically -- even read-only-looking permission sets on
+    # such a job made the whole run fail with startup_failure before any job
+    # (even unrelated ones) could start. A normal action inside a normal job
+    # (like npm-publish's existing id-token: write) isn't subject to that check.
+    steps:
+    - name: Download release artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: release-artifacts
+        path: release-artifacts
+
+    - name: Generate attestation
+      id: attest
+      uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+      with:
+        subject-path: release-artifacts/*.tgz
+
+    # The bundle is a JSON-serialized Sigstore bundle wrapping an in-toto
+    # statement -- genuinely valid under both extensions Scorecard's
+    # Signed-Releases probes scan release assets for (releasesAreSigned:
+    # .sigstore.json; releasesHaveProvenance: .intoto.jsonl).
+    - name: Name provenance files for release assets
+      run: |
+        cp "${{ steps.attest.outputs.bundle-path }}" multiple.intoto.jsonl
+        cp "${{ steps.attest.outputs.bundle-path }}" multiple.sigstore.json
+
+    - name: Upload provenance files
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: provenance
+        path: |
+          multiple.intoto.jsonl
+          multiple.sigstore.json
+        if-no-files-found: error
 
   create-release:
     name: Create GitHub Release
@@ -421,10 +451,10 @@ jobs:
         name: release-artifacts
         path: release-artifacts
 
-    - name: Download SLSA provenance
+    - name: Download provenance attestation
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
       with:
-        name: multiple.intoto.jsonl
+        name: provenance
         path: provenance
 
     - name: Generate changelog
@@ -491,13 +521,12 @@ jobs:
         fi
         
         # Create the release using GitHub CLI, attaching the npm tarballs and
-        # their SLSA provenance (verify with:
-        #   slsa-verifier verify-artifact <tarball> \
-        #     --provenance-path multiple.intoto.jsonl \
-        #     --source-uri github.com/debugmcp/mcp-debugger)
+        # their build provenance attestation (verify with:
+        #   gh attestation verify <tarball> --repo debugmcp/mcp-debugger)
         gh release create "${{ github.ref_name }}" \
           --title "Release ${{ steps.changelog.outputs.VERSION }}" \
           --notes-file release_notes.md \
           $PRERELEASE_FLAG \
           release-artifacts/*.tgz \
-          provenance/multiple.intoto.jsonl
+          provenance/multiple.intoto.jsonl \
+          provenance/multiple.sigstore.json
