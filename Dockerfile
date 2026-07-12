@@ -6,9 +6,10 @@ ARG DISABLE_LANGUAGES
 ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
 # Install pnpm via corepack (version 10 to match local development).
-# corepack ships with the node base image; unlike `npm install -g`, the
-# activated version is integrity-checked against the version spec.
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+# node:26-slim no longer bundles corepack, so install it explicitly (pinned,
+# matching the rest of this Dockerfile's exact-version pins) before enabling;
+# the activated pnpm version is still integrity-checked against the spec.
+RUN npm install -g corepack@0.35.0 && corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Set application directory
 WORKDIR /app
