@@ -1,7 +1,7 @@
 {
   "name": "mcp-debugger-monorepo",
   "private": true,
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Run-time step-through debugging for LLM agents - Monorepo root",
   "homepage": "https://github.com/debugmcp/mcp-debugger",
   "repository": {
@@ -167,9 +167,9 @@
     "@types/debug": "^4.1.13",
     "@types/express": "^5.0.6",
     "@types/fs-extra": "^11.0.4",
-    "@types/node": "^26.0.1",
-    "@vitest/coverage-istanbul": "^4.1.9",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@types/node": "^26.1.0",
+    "@vitest/coverage-istanbul": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.10",
     "c8": "^11.0.0",
     "cross-env": "^10.1.0",
     "esbuild": "^0.28.1",
@@ -183,7 +183,7 @@
     "tsup": "^8.5.1",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.62.1",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
