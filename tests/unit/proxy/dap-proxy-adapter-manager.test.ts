@@ -308,19 +308,16 @@ describe('GenericAdapterManager', () => {
   });
 
   describe('shutdown with killProcessTree (launch mode)', () => {
-    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-
-    const setPlatform = (value: string) => {
-      Object.defineProperty(process, 'platform', { value, configurable: true });
-    };
+    // Platform is constructor-injected (issue #183) — no global mutation.
+    const makeManager = (platform: NodeJS.Platform) =>
+      new GenericAdapterManager(spawner, logger, fileSystem, platform);
 
     afterEach(() => {
-      Object.defineProperty(process, 'platform', originalPlatform);
       vi.useRealTimers();
     });
 
     it('tree-kills via taskkill while the parent is still alive on win32', async () => {
-      setPlatform('win32');
+      manager = makeManager('win32');
       vi.useFakeTimers();
 
       const proc = createMockProcess(999);
@@ -347,7 +344,7 @@ describe('GenericAdapterManager', () => {
     });
 
     it('does not kill anything when the adapter already exited (PID may be recycled)', async () => {
-      setPlatform('win32');
+      manager = makeManager('win32');
 
       const proc = createMockProcess(999);
       // Adapter honored the DAP disconnect and exited during the grace wait —
@@ -364,7 +361,7 @@ describe('GenericAdapterManager', () => {
     });
 
     it('escalates to SIGKILL when taskkill does not terminate the adapter', async () => {
-      setPlatform('win32');
+      manager = makeManager('win32');
       vi.useFakeTimers();
 
       const proc = createMockProcess(999);
@@ -378,7 +375,7 @@ describe('GenericAdapterManager', () => {
     });
 
     it('keeps the SIGTERM-first path on win32 without killProcessTree', async () => {
-      setPlatform('win32');
+      manager = makeManager('win32');
       vi.useFakeTimers();
 
       const proc = createMockProcess(999);
@@ -395,7 +392,7 @@ describe('GenericAdapterManager', () => {
     });
 
     it('keeps the SIGTERM-first path on non-win32 even with killProcessTree', async () => {
-      setPlatform('linux');
+      manager = makeManager('linux');
       vi.useFakeTimers();
 
       const proc = createMockProcess(999);

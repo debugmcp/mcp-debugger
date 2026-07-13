@@ -31,7 +31,9 @@ export class GenericAdapterManager {
   constructor(
     private processSpawner: IProcessSpawner,
     private logger: ILogger,
-    private fileSystem: IFileSystem
+    private fileSystem: IFileSystem,
+    /** Platform override for tests (issue #183); defaults to the real platform. */
+    private platform: NodeJS.Platform = globalThis.process.platform
   ) {}
 
   /**
@@ -212,7 +214,7 @@ export class GenericAdapterManager {
 
     this.logger.info(`[AdapterManager] Attempting to terminate adapter process PID: ${process.pid}`);
 
-    const treeKillFirst = options.killProcessTree === true && globalThis.process.platform === 'win32';
+    const treeKillFirst = options.killProcessTree === true && this.platform === 'win32';
 
     try {
       if (!process.killed) {
