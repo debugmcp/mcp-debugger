@@ -29,6 +29,10 @@ describe('ProcessEnvironment', () => {
   });
 
   it('returns current working directory', () => {
+    // Sanctioned boundary test (issue #183): ProcessEnvironment IS the
+    // adapter over the global process, so its delegation test legitimately
+    // spies the global. Method-level, auto-restored, listener-free — cannot
+    // trip the process-listener leak guard.
     const fakeCwd = 'C:\\fake-path';
     vi.spyOn(process, 'cwd').mockReturnValue(fakeCwd);
 

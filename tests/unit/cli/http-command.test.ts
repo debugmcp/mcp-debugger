@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import { createHttpApp, handleHttpCommand } from '../../../src/cli/http-command.js';
+import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
 
@@ -19,7 +20,7 @@ describe('HTTP Command Handler', () => {
   let mockExitProcess: ReturnType<typeof vi.fn>;
   let mockServer: DebugMcpServer;
   let mockTransport: any;
-  let originalProcessOn: typeof process.on;
+  let fakeProc: FakeCurrentProcess;
   let mockApp: any;
 
   // Track transports created so tests can drive them
@@ -45,7 +46,9 @@ describe('HTTP Command Handler', () => {
 
     mockServerFactory = vi.fn().mockReturnValue(mockServer);
     mockExitProcess = vi.fn();
-    originalProcessOn = process.on;
+    // Signal handlers attach to the fake's emitter, never the real process
+    // (issues #159/#183).
+    fakeProc = new FakeCurrentProcess();
 
     createdTransports = [];
 
@@ -86,7 +89,6 @@ describe('HTTP Command Handler', () => {
   });
 
   afterEach(() => {
-    process.on = originalProcessOn;
     vi.unstubAllEnvs();
     vi.clearAllTimers();
     vi.useRealTimers();
@@ -396,11 +398,9 @@ describe('HTTP Command Handler', () => {
       });
       mockApp.listen = listen;
 
-      process.on = vi.fn() as any;
-
       await handleHttpCommand(
         { port: '4000', logLevel: 'debug' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess }
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(mockLogger.level).toBe('debug');
@@ -409,8 +409,8 @@ describe('HTTP Command Handler', () => {
         expect.stringContaining('http://localhost:4000/mcp')
       );
       expect(mockExitProcess).not.toHaveBeenCalled();
-      expect(process.on).toHaveBeenCalledWith('SIGINT', expect.any(Function));
-      expect(process.on).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
+      expect(fakeProc.listenerCount('SIGINT')).toBe(1);
+      expect(fakeProc.listenerCount('SIGTERM')).toBe(1);
     });
 
     it('exits with code 1 when the app cannot be created', async () => {
@@ -429,21 +429,19 @@ describe('HTTP Command Handler', () => {
     });
 
     it('handles SIGINT by closing all transports, stopping all servers, then exiting', async () => {
-      let sigintHandler: Function = () => {};
       const listen = vi.fn((_port: number, cb: Function) => {
         cb();
         return mockHttpServer;
       });
       mockApp.listen = listen;
 
-      process.on = vi.fn((event: string, handler: Function) => {
-        if (event === 'SIGINT') sigintHandler = handler;
-      }) as any;
-
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess }
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
+
+      // gracefulShutdown is async — grab the registered listener so it can be awaited
+      const sigintHandler = fakeProc.lastListener('SIGINT');
 
       // Inject mock sessions
       const t1 = { close: vi.fn() };
@@ -479,16 +477,15 @@ describe('HTTP Command Handler', () => {
           cb();
           return mockHttpServer;
         });
-        process.on = vi.fn() as any;
       });
 
       it('shuts down gracefully and exits 0 when stdin ends and the env gate is set', async () => {
-        vi.stubEnv('MCP_EXIT_ON_STDIN_CLOSE', '1');
+        fakeProc.env.MCP_EXIT_ON_STDIN_CLOSE = '1';
         const stdin = makeFakeStdin();
 
         await handleHttpCommand(
           { port: '3001' },
-          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin }
+          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
         );
 
         // The watchdog must resume stdin so EOF is actually observed
@@ -508,12 +505,12 @@ describe('HTTP Command Handler', () => {
       });
 
       it('shuts down only once when end and close both fire', async () => {
-        vi.stubEnv('MCP_EXIT_ON_STDIN_CLOSE', '1');
+        fakeProc.env.MCP_EXIT_ON_STDIN_CLOSE = '1';
         const stdin = makeFakeStdin();
 
         await handleHttpCommand(
           { port: '3001' },
-          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin }
+          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
         );
 
         stdin.emit('end');
@@ -529,7 +526,7 @@ describe('HTTP Command Handler', () => {
 
         await handleHttpCommand(
           { port: '3001' },
-          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin }
+          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
         );
 
         expect(stdin.resume).not.toHaveBeenCalled();
@@ -551,11 +548,10 @@ describe('HTTP Command Handler', () => {
       mockHttpServer.on = vi.fn((event: string, handler: Function) => {
         if (event === 'error') errorHandler = handler;
       });
-      process.on = vi.fn() as any;
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess }
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       const err = Object.assign(new Error('addr in use'), { code: 'EADDRINUSE' });

@@ -92,6 +92,8 @@ jobs:
       run: pnpm run test:ci-coverage
       env:
         CI: true
+        # Hard-fail on process-listener leaks (issues #159/#183)
+        LEAK_GUARD_STRICT: '1'
     
     - name: Upload Windows test diagnostics
       if: failure() && matrix.os == 'windows-latest'

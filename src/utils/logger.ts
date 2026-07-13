@@ -50,13 +50,18 @@ const fileTransportCache = new Map<string, winston.transport>();
 
 let staleLogCleanupDone = false;
 
+/** Sends a signal to a pid; injectable so tests never spy the global process.kill (issue #183). */
+type SignalFn = (pid: number, signal: NodeJS.Signals | number) => void;
+
+const defaultSignal: SignalFn = (pid, signal) => process.kill(pid, signal);
+
 /**
  * Best-effort check whether a pid belongs to a live process.
  * EPERM means "alive but not ours" — treat as alive.
  */
-function isProcessAlive(pid: number): boolean {
+function isProcessAlive(pid: number, signal: SignalFn = defaultSignal): boolean {
   try {
-    process.kill(pid, 0);
+    signal(pid, 0);
     return true;
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'EPERM';
@@ -76,10 +81,11 @@ function isProcessAlive(pid: number): boolean {
  */
 export function cleanupStaleLogFiles(
   logDir: string,
-  opts: { maxAgeMs?: number; now?: number } = {}
+  opts: { maxAgeMs?: number; now?: number; signal?: SignalFn } = {}
 ): void {
   const maxAgeMs = opts.maxAgeMs ?? STALE_LOG_MAX_AGE_MS;
   const now = opts.now ?? Date.now();
+  const signal = opts.signal ?? defaultSignal;
 
   let entries: string[];
   try {
@@ -94,7 +100,7 @@ export function cleanupStaleLogFiles(
       continue;
     }
     const pid = Number(match[1]);
-    if (pid === process.pid || isProcessAlive(pid)) {
+    if (pid === process.pid || isProcessAlive(pid, signal)) {
       continue;
     }
     const fullPath = path.join(logDir, name);

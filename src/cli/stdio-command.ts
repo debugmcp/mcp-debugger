@@ -2,6 +2,7 @@ import type { Logger as WinstonLoggerType } from 'winston';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../server.js';
 import { StdioOptions } from './setup.js';
+import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
 export interface ServerFactoryOptions {
   logLevel?: string;
@@ -12,15 +13,18 @@ export interface StdioCommandDependencies {
   logger: WinstonLoggerType;
   serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
   exitProcess?: (code: number) => void;
-  /** Injectable stdin for tests; defaults to process.stdin. */
+  /** Injectable stdin for tests; defaults to proc.stdin. */
   stdin?: NodeJS.ReadStream;
+  /** Injectable process handle for signals/env/exit diagnostics (issue #183); defaults to the global process. */
+  proc?: ProcessLike;
 }
 
 export async function handleStdioCommand(
-  options: StdioOptions, 
+  options: StdioOptions,
   dependencies: StdioCommandDependencies
 ): Promise<void> {
-  const { logger, serverFactory, exitProcess = process.exit } = dependencies;
+  const proc = dependencies.proc ?? process;
+  const { logger, serverFactory, exitProcess = (code: number) => proc.exit(code) } = dependencies;
   
   if (options.logLevel) {
     logger.level = options.logLevel;
@@ -66,7 +70,7 @@ export async function handleStdioCommand(
     };
     
     // Keep the process alive
-    const stdin = dependencies.stdin ?? process.stdin;
+    const stdin: NodeJS.ReadableStream = dependencies.stdin ?? proc.stdin;
     stdin.resume();
 
     // Stdin EOF means the MCP client is gone — exit so we don't leak as an
@@ -76,7 +80,7 @@ export async function handleStdioCommand(
     // unexpectedly in detached `docker run` setups and the server must stay
     // alive; rely on transport close or signals there (see c251b3ff).
     stdin.on('end', () => {
-      if (process.env.MCP_CONTAINER === 'true') {
+      if (proc.env.MCP_CONTAINER === 'true') {
         logger.warn('[MCP] Stdin ended; ignoring in container mode and waiting for transport close or signal.');
         return;
       }
@@ -86,22 +90,22 @@ export async function handleStdioCommand(
     });
 
     // Add robust exit/signal diagnostics (logged to file; console output is silenced for protocol safety)
-    process.on('SIGTERM', () => {
+    proc.on('SIGTERM', () => {
       logger.warn('[MCP] SIGTERM received, exiting.');
       try { clearInterval(keepAlive); } catch {}
       exitProcess(0);
     });
-    process.on('SIGINT', () => {
+    proc.on('SIGINT', () => {
       logger.warn('[MCP] SIGINT received, exiting.');
       try { clearInterval(keepAlive); } catch {}
       exitProcess(0);
     });
-    process.on('exit', (code) => {
+    proc.on('exit', (code) => {
       logger.error('[MCP] Process exiting', {
         code,
-        argv: process.argv,
-        env_console_silenced: process.env.CONSOLE_OUTPUT_SILENCED,
-        uptime: process.uptime()
+        argv: proc.argv,
+        env_console_silenced: proc.env.CONSOLE_OUTPUT_SILENCED,
+        uptime: proc.uptime()
       });
     });
   } catch (error) {

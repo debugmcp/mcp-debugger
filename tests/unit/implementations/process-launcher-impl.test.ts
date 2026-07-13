@@ -83,15 +83,12 @@ describe('ProxyProcessLauncherImpl', () => {
     vi.stubEnv('MCP_CONTAINER', 'true');
 
     const spawnSpy = vi.spyOn(processManager, 'spawn');
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
 
     const launcher = new ProxyProcessLauncherImpl(processManager);
     launcher.launchProxy('./dist/proxy.js', 'session-container');
 
     const options = spawnSpy.mock.calls[0]?.[2] as any;
     expect(options.detached).toBe(false);
-
-    platformSpy.mockRestore();
   });
 
   it('reuses initialization promise for concurrent callers', async () => {

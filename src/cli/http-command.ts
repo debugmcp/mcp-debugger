@@ -9,6 +9,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../server.js';
 import { SSEOptions } from './setup.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
+import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
 export interface ServerFactoryOptions {
   logLevel?: string;
@@ -19,8 +20,10 @@ export interface HttpCommandDependencies {
   logger: WinstonLoggerType;
   serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
   exitProcess?: (code: number) => void;
-  /** Injectable stdin for tests; defaults to process.stdin. */
+  /** Injectable stdin for tests; defaults to proc.stdin. */
   stdin?: NodeJS.ReadStream;
+  /** Injectable process handle for signals/env/exit (issue #183); defaults to the global process. */
+  proc?: ProcessLike;
 }
 
 interface SessionData {
@@ -170,7 +173,8 @@ export async function handleHttpCommand(
   options: SSEOptions,
   dependencies: HttpCommandDependencies
 ): Promise<void> {
-  const { logger, exitProcess = process.exit } = dependencies;
+  const proc = dependencies.proc ?? process;
+  const { logger, exitProcess = (code: number) => proc.exit(code) } = dependencies;
 
   if (options.logLevel) {
     logger.level = options.logLevel;
@@ -225,18 +229,19 @@ export async function handleHttpCommand(
       });
     };
 
-    process.on('SIGINT', gracefulShutdown);
-    process.on('SIGTERM', gracefulShutdown);
+    proc.on('SIGINT', gracefulShutdown);
+    proc.on('SIGTERM', gracefulShutdown);
 
     // Orphan self-defense (issue #122): when spawned by a supervisor with
     // MCP_EXIT_ON_STDIN_CLOSE=1 and a stdin pipe, shut down gracefully if
     // that pipe closes (supervisor died or asked us to stop). Strictly
     // opt-in — standalone/detached servers are unaffected.
     watchStdinForParentExit({
-      stdin: dependencies.stdin ?? process.stdin,
+      stdin: dependencies.stdin ?? proc.stdin,
       logger,
       shutdown: gracefulShutdown,
       exitProcess,
+      env: proc.env,
     });
   } catch (error) {
     logger.error('Failed to start server in HTTP mode', { error });

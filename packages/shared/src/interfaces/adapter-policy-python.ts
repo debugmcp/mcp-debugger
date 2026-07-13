@@ -97,7 +97,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     };
   },
   
-  resolveExecutablePath: (providedPath?: string) => {
+  resolveExecutablePath: (providedPath?: string, platform: NodeJS.Platform = process.platform) => {
     // Python-specific executable path resolution
     // Priority: provided path > PYTHON_PATH env > default python command
     if (providedPath) {
@@ -110,7 +110,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     }
 
     // Platform-specific default: 'python' on Windows, 'python3' on Unix-like systems
-    return process.platform === 'win32' ? 'python' : 'python3';
+    return platform === 'win32' ? 'python' : 'python3';
   },
   
   getDebuggerConfiguration: () => {

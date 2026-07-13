@@ -120,11 +120,8 @@ describe('version probes', () => {
 });
 
 describe('buildRdbgInvocation platform behavior', () => {
-  afterEach(() => Object.defineProperty(process, 'platform', originalPlatform));
-
   it('returns the command unchanged for non-shim paths on Windows', () => {
-    setPlatform('win32');
-    expect(buildRdbgInvocation('C:\\tools\\rdbg.exe', ['--version'])).toEqual({
+    expect(buildRdbgInvocation('C:\\tools\\rdbg.exe', ['--version'], undefined, 'win32')).toEqual({
       command: 'C:\\tools\\rdbg.exe',
       args: ['--version']
     });

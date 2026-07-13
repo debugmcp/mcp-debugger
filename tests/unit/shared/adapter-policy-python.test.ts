@@ -1,19 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PythonAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-python.js';
 
 describe('PythonAdapterPolicy', () => {
-  let originalPlatform: PropertyDescriptor | undefined;
-
-  beforeEach(() => {
-    originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
-  });
-
-  afterEach(() => {
-    if (originalPlatform) {
-      Object.defineProperty(process, 'platform', originalPlatform);
-    }
-  });
-
   it('rejects child session support', () => {
     expect(() => PythonAdapterPolicy.buildChildStartArgs('', {})).toThrow(/does not support child sessions/);
   });
@@ -52,15 +40,8 @@ describe('PythonAdapterPolicy', () => {
     expect(PythonAdapterPolicy.resolveExecutablePath('/explicit/python')).toBe('/explicit/python');
 
     vi.stubEnv('PYTHON_PATH', undefined);
-    Object.defineProperty(process, 'platform', {
-      value: 'win32'
-    });
-    expect(PythonAdapterPolicy.resolveExecutablePath()).toBe('python');
-
-    Object.defineProperty(process, 'platform', {
-      value: 'linux'
-    });
-    expect(PythonAdapterPolicy.resolveExecutablePath()).toBe('python3');
+    expect(PythonAdapterPolicy.resolveExecutablePath(undefined, 'win32')).toBe('python');
+    expect(PythonAdapterPolicy.resolveExecutablePath(undefined, 'linux')).toBe('python3');
   });
 
   it('does not queue commands and reports initialization state', () => {

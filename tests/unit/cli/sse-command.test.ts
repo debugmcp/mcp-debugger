@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import express from 'express';
 import { createSSEApp, handleSSECommand } from '../../../src/cli/sse-command.js';
+import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
 import { EventEmitter } from 'events';
@@ -20,7 +21,7 @@ describe('SSE Command Handler', () => {
   let mockExitProcess: ReturnType<typeof vi.fn>;
   let mockServer: DebugMcpServer;
   let mockTransport: any;
-  let originalProcessOn: typeof process.on;
+  let fakeProc: FakeCurrentProcess;
 
   beforeEach(() => {
     // Create mock logger
@@ -47,8 +48,9 @@ describe('SSE Command Handler', () => {
     // Create mock exit function
     mockExitProcess = vi.fn();
 
-    // Store original process.on
-    originalProcessOn = process.on;
+    // Signal handlers attach to the fake's emitter, never the real process
+    // (issues #159/#183).
+    fakeProc = new FakeCurrentProcess();
 
     // Setup mock transport
     MockedSSEServerTransport.mockImplementation(function(path: string, res: any) {
@@ -72,8 +74,6 @@ describe('SSE Command Handler', () => {
   });
 
   afterEach(() => {
-    // Restore original process.on
-    process.on = originalProcessOn;
     // Clear all timers
     vi.clearAllTimers();
     vi.useRealTimers();
@@ -615,13 +615,11 @@ describe('SSE Command Handler', () => {
         sseTransports: new Map()
       } as any);
 
-      // Mock process.on to prevent actual signal handlers
-      process.on = vi.fn() as any;
-
       await handleSSECommand(options, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
-        exitProcess: mockExitProcess
+        exitProcess: mockExitProcess,
+        proc: fakeProc
       });
 
       // Verify log level was set
@@ -635,15 +633,15 @@ describe('SSE Command Handler', () => {
       // Verify server listen was called
       expect(mockListen).toHaveBeenCalledWith(4000, expect.any(Function));
 
-      // Verify SIGINT handler was registered
-      expect(process.on).toHaveBeenCalledWith('SIGINT', expect.any(Function));
+      // Verify SIGINT handler was registered on the injected handle
+      expect(fakeProc.listenerCount('SIGINT')).toBe(1);
 
       // Verify process did not exit
       expect(mockExitProcess).not.toHaveBeenCalled();
     });
 
     it('shuts down gracefully when stdin ends and MCP_EXIT_ON_STDIN_CLOSE=1 (issue #122)', async () => {
-      vi.stubEnv('MCP_EXIT_ON_STDIN_CLOSE', '1');
+      fakeProc.env.MCP_EXIT_ON_STDIN_CLOSE = '1';
 
       const httpServer = {
         close: vi.fn((cb?: Function) => cb && cb()),
@@ -659,7 +657,6 @@ describe('SSE Command Handler', () => {
         post: vi.fn(),
         listen: mockListen
       } as any);
-      process.on = vi.fn() as any;
 
       const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
         resume: ReturnType<typeof vi.fn>;
@@ -671,7 +668,8 @@ describe('SSE Command Handler', () => {
         logger: mockLogger,
         serverFactory: mockServerFactory,
         exitProcess: mockExitProcess,
-        stdin
+        stdin,
+        proc: fakeProc
       });
 
       expect(stdin.resume).toHaveBeenCalled();
@@ -684,8 +682,6 @@ describe('SSE Command Handler', () => {
       const sharedDebugServer = mockServerFactory.mock.results[0].value;
       expect(sharedDebugServer.stop).toHaveBeenCalled();
       expect(httpServer.close).toHaveBeenCalled();
-
-      vi.unstubAllEnvs();
     });
 
     it('should handle server start failure', async () => {
@@ -730,13 +726,11 @@ describe('SSE Command Handler', () => {
         sseTransports: new Map()
       } as any);
 
-      // Mock process.on
-      process.on = vi.fn() as any;
-
       await handleSSECommand(options, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
-        exitProcess: mockExitProcess
+        exitProcess: mockExitProcess,
+        proc: fakeProc
       });
 
       // Verify listen was called with integer port
@@ -745,7 +739,6 @@ describe('SSE Command Handler', () => {
 
     it('should handle SIGINT for graceful shutdown', async () => {
       const options = { port: '3001' };
-      let sigintHandler: Function = () => {};
 
       // Create mock app with sseTransports
       const mockApp = {
@@ -762,18 +755,15 @@ describe('SSE Command Handler', () => {
 
       vi.mocked(express).mockReturnValue(mockApp as any);
 
-      // Capture SIGINT handler
-      process.on = vi.fn((event, handler) => {
-        if (event === 'SIGINT') {
-          sigintHandler = handler as Function;
-        }
-      }) as any;
-
       await handleSSECommand(options, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
-        exitProcess: mockExitProcess
+        exitProcess: mockExitProcess,
+        proc: fakeProc
       });
+
+      // gracefulShutdown is async — grab the registered listener so it can be awaited
+      const sigintHandler = fakeProc.lastListener('SIGINT');
 
       // Add some mock sessions
       const mockSession1 = { transport: { close: vi.fn() } };
@@ -801,10 +791,9 @@ describe('SSE Command Handler', () => {
       expect(mockExitProcess).toHaveBeenCalledWith(0);
     });
 
-    it('should use process.exit by default if exitProcess is not provided', async () => {
-      const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    it('should fall back to proc.exit if exitProcess is not provided', async () => {
       const error = new Error('Server start failed');
-      
+
       // Mock express to throw error
       vi.mocked(express).mockImplementation(() => {
         throw error;
@@ -812,13 +801,12 @@ describe('SSE Command Handler', () => {
 
       await handleSSECommand({ port: '3001' }, {
         logger: mockLogger,
-        serverFactory: mockServerFactory
+        serverFactory: mockServerFactory,
+        proc: fakeProc
       });
 
-      // Verify process.exit was called
-      expect(processExitSpy).toHaveBeenCalledWith(1);
-
-      processExitSpy.mockRestore();
+      // Verify the injected process handle's exit was called
+      expect(fakeProc.exit).toHaveBeenCalledWith(1);
     });
 
     it('should not change log level if not provided', async () => {
@@ -838,12 +826,11 @@ describe('SSE Command Handler', () => {
         sseTransports: new Map()
       } as any);
 
-      process.on = vi.fn() as any;
-
       await handleSSECommand(options, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
-        exitProcess: mockExitProcess
+        exitProcess: mockExitProcess,
+        proc: fakeProc
       });
 
       // Verify log level was not changed

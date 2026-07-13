@@ -61,4 +61,6 @@ jobs:
       run: pnpm run test:flake
       env:
         CI: true
+        # Hard-fail on process-listener leaks (issues #159/#183)
+        LEAK_GUARD_STRICT: '1'
         FLAKE_RUNS: ${{ github.event.inputs.runs || '10' }}

@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { setupErrorHandlers } from '../../../src/cli/error-handlers.js';
+import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 
 describe('Error Handlers', () => {
   let mockLogger: WinstonLoggerType;
   let mockExitProcess: ReturnType<typeof vi.fn>;
-  let originalProcessOn: typeof process.on;
-  let processListeners: Map<string, Function[]>;
+  let fakeProc: FakeCurrentProcess;
 
   beforeEach(() => {
     // Create mock logger
@@ -21,50 +21,29 @@ describe('Error Handlers', () => {
     // Create mock exit function
     mockExitProcess = vi.fn();
 
-    // Store original process.on
-    originalProcessOn = process.on;
-    processListeners = new Map();
-
-    // Mock process.on to capture listeners
-    process.on = vi.fn((event: string, listener: Function) => {
-      if (!processListeners.has(event)) {
-        processListeners.set(event, []);
-      }
-      processListeners.get(event)!.push(listener);
-      return process;
-    }) as any;
-  });
-
-  afterEach(() => {
-    // Restore original process.on
-    process.on = originalProcessOn;
-    processListeners.clear();
+    // Handlers attach to the fake's emitter, never the real process (issue #183)
+    fakeProc = new FakeCurrentProcess();
   });
 
   it('should set up uncaughtException handler', () => {
-    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess });
+    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess, proc: fakeProc });
 
-    expect(process.on).toHaveBeenCalledWith('uncaughtException', expect.any(Function));
+    expect(fakeProc.listenerCount('uncaughtException')).toBe(1);
   });
 
   it('should set up unhandledRejection handler', () => {
-    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess });
+    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess, proc: fakeProc });
 
-    expect(process.on).toHaveBeenCalledWith('unhandledRejection', expect.any(Function));
+    expect(fakeProc.listenerCount('unhandledRejection')).toBe(1);
   });
 
   it('should handle uncaughtException by logging and exiting', () => {
-    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess });
+    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess, proc: fakeProc });
 
     const error = new Error('Test error');
     error.stack = 'Test stack trace';
-    const origin = 'uncaughtException';
 
-    // Get the uncaughtException handler
-    const uncaughtExceptionHandler = processListeners.get('uncaughtException')![0] as (err: Error, origin: string) => void;
-    
-    // Trigger the handler
-    uncaughtExceptionHandler(error, origin);
+    fakeProc.emit('uncaughtException', error, 'uncaughtException');
 
     // Verify logger was called with correct params
     expect(mockLogger.error).toHaveBeenCalledWith(
@@ -81,7 +60,7 @@ describe('Error Handlers', () => {
   });
 
   it('should handle unhandledRejection by logging without exiting', async () => {
-    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess });
+    setupErrorHandlers({ logger: mockLogger, exitProcess: mockExitProcess, proc: fakeProc });
 
     const reason = 'Test rejection reason';
     const promise = Promise.reject(reason);
@@ -89,11 +68,7 @@ describe('Error Handlers', () => {
     // Catch the rejection to prevent unhandled rejection warning
     promise.catch(() => {});
 
-    // Get the unhandledRejection handler
-    const unhandledRejectionHandler = processListeners.get('unhandledRejection')![0] as (reason: any, promise: Promise<unknown>) => void;
-
-    // Trigger the handler
-    unhandledRejectionHandler(reason, promise);
+    fakeProc.emit('unhandledRejection', reason, promise);
 
     // Verify logger was called
     expect(mockLogger.error).toHaveBeenCalledWith('[Server UNHANDLED_REJECTION] Reason:', { reason });
@@ -103,23 +78,12 @@ describe('Error Handlers', () => {
     expect(mockExitProcess).not.toHaveBeenCalled();
   });
 
-  it('should use process.exit by default if exitProcess is not provided', () => {
-    const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-    
-    setupErrorHandlers({ logger: mockLogger });
+  it('should fall back to proc.exit if exitProcess is not provided', () => {
+    setupErrorHandlers({ logger: mockLogger, proc: fakeProc });
 
-    const error = new Error('Test error');
-    const origin = 'uncaughtException';
+    fakeProc.emit('uncaughtException', new Error('Test error'), 'uncaughtException');
 
-    // Get the uncaughtException handler
-    const uncaughtExceptionHandler = processListeners.get('uncaughtException')![0] as (err: Error, origin: string) => void;
-    
-    // Trigger the handler
-    uncaughtExceptionHandler(error, origin);
-
-    // Verify process.exit was called
-    expect(processExitSpy).toHaveBeenCalledWith(1);
-
-    processExitSpy.mockRestore();
+    // Verify the injected process handle's exit was called
+    expect(fakeProc.exit).toHaveBeenCalledWith(1);
   });
 });
