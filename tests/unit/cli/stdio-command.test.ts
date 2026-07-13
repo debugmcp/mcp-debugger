@@ -11,6 +11,17 @@ describe('STDIO Command Handler', () => {
   let mockServerFactory: ReturnType<typeof vi.fn>;
   let mockExitProcess: ReturnType<typeof vi.fn>;
   let mockServer: DebugMcpServer;
+  const originalProcessOn = process.on;
+  let capturedProcessListeners: Map<string, Function[]>;
+
+  function makeFakeStdin() {
+    const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
+      resume: ReturnType<typeof vi.fn>;
+      emit: (event: string, ...args: unknown[]) => boolean;
+    };
+    (stdin as unknown as { resume: unknown }).resume = vi.fn();
+    return stdin;
+  }
 
   beforeEach(() => {
     // Create mock logger
@@ -36,6 +47,26 @@ describe('STDIO Command Handler', () => {
 
     // Create mock exit function
     mockExitProcess = vi.fn();
+
+    // Capture process listeners WITHOUT attaching them (issue #159): a
+    // successful handleStdioCommand registers real SIGTERM/SIGINT/exit
+    // listeners that would otherwise leak into the vitest fork worker.
+    capturedProcessListeners = new Map();
+    process.on = vi.fn(function (this: NodeJS.Process, event: string, listener: (...args: unknown[]) => void) {
+      const list = capturedProcessListeners.get(event) ?? [];
+      list.push(listener);
+      capturedProcessListeners.set(event, list);
+      return this;
+    }) as unknown as typeof process.on;
+  });
+
+  afterEach(() => {
+    process.on = originalProcessOn;
+    // Fire captured SIGTERM handlers once: each closes over the 60s keepAlive
+    // interval and clears it; the exit goes to the mocked exitProcess.
+    for (const listener of capturedProcessListeners.get('SIGTERM') ?? []) {
+      listener();
+    }
   });
 
   it('should start server successfully in stdio mode', async () => {
@@ -47,7 +78,8 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand(options, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
-      exitProcess: mockExitProcess
+      exitProcess: mockExitProcess,
+      stdin: makeFakeStdin()
     });
 
     // Verify log level was set
@@ -79,7 +111,8 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand(options, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
-      exitProcess: mockExitProcess
+      exitProcess: mockExitProcess,
+      stdin: makeFakeStdin()
     });
 
     // Verify log level was not changed
@@ -153,15 +186,6 @@ describe('STDIO Command Handler', () => {
     afterEach(() => {
       vi.unstubAllEnvs();
     });
-
-    function makeFakeStdin() {
-      const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
-        resume: ReturnType<typeof vi.fn>;
-        emit: (event: string, ...args: unknown[]) => boolean;
-      };
-      (stdin as unknown as { resume: unknown }).resume = vi.fn();
-      return stdin;
-    }
 
     it('exits 0 when stdin ends in host mode (MCP client disconnected)', async () => {
       const stdin = makeFakeStdin();
