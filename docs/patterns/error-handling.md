@@ -52,13 +52,7 @@ export const ErrorMessages = {
 
 ### 1. Process-Level Error Handling
 
-Two implementations of global error handlers exist in the codebase:
-
-1. **`ProxyRunner.setupGlobalErrorHandlers()`** (`src/proxy/dap-proxy-core.ts`) -- Logs errors and sends IPC messages, but does **not** call `process.exit()` for unhandled rejections. Used when the entry point wires up error handling through the ProxyRunner instance.
-
-2. **`setupGlobalErrorHandlers()` standalone function** (`src/proxy/dap-proxy-dependencies.ts`) -- A standalone function that logs errors, sends IPC messages, and **always exits the process** after shutdown (including for unhandled rejections). Available as an alternative bootstrap path. Note: `dap-proxy-entry.ts` actually uses `runner.setupGlobalErrorHandlers()` (the ProxyRunner instance method), not this standalone function.
-
-**ProxyRunner version** (`src/proxy/dap-proxy-core.ts`):
+Global error handlers for the proxy process are registered by **`ProxyRunner.setupGlobalErrorHandlers()`** (`src/proxy/dap-proxy-core.ts`), wired up by `dap-proxy-entry.ts`. It logs errors and sends IPC messages, but does **not** exit the process for unhandled rejections. All handlers are registered on the runner's injected process handle (`this.proc`, defaulting to the global `process` — issue #183), so unit tests can drive them through a fake without touching the real process object.
 
 ```typescript
 setupGlobalErrorHandlers(
@@ -66,7 +60,7 @@ setupGlobalErrorHandlers(
   getCurrentSessionId: () => string | null
 ): void {
   // Uncaught exception handler - exits after shutdown
-  process.on('uncaughtException', (error: Error) => {
+  this.proc.on('uncaughtException', (error: Error) => {
     this.logger.error('[ProxyRunner] Uncaught exception:', error);
     const sessionId = getCurrentSessionId() || 'unknown';
 
@@ -77,12 +71,12 @@ setupGlobalErrorHandlers(
     });
 
     errorShutdown().finally(() => {
-      process.exit(1);
+      this.proc.exit(1);
     });
   });
 
   // Unhandled rejection handler - logs but does NOT exit
-  process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  this.proc.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
     this.logger.error('[ProxyRunner] Unhandled rejection:', { reason, promise });
     const sessionId = getCurrentSessionId() || 'unknown';
 
@@ -94,31 +88,23 @@ setupGlobalErrorHandlers(
   });
 
   // Graceful shutdown on signals
-  process.on('SIGTERM', () => {
+  this.proc.on('SIGTERM', () => {
     this.logger.info('[ProxyRunner] Received SIGTERM, shutting down gracefully');
     errorShutdown().finally(() => {
-      process.exit(0);
+      this.proc.exit(0);
     });
   });
 
-  process.on('SIGINT', () => {
+  this.proc.on('SIGINT', () => {
     this.logger.info('[ProxyRunner] Received SIGINT, shutting down gracefully');
     errorShutdown().finally(() => {
-      process.exit(0);
+      this.proc.exit(0);
     });
   });
 }
 ```
 
-**Standalone version** (`src/proxy/dap-proxy-dependencies.ts`) exits after shutdown for **all** error types, including unhandled rejections:
-
-```typescript
-process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
-  logger.error('[Proxy Worker UNHANDLED_REJECTION] Reason:', reason);
-  messageSender.send({ type: 'error', message: `...`, sessionId: '...' });
-  shutdownFn().finally(() => process.exit(1));  // exits the process
-});
-```
+(A divergent standalone `setupGlobalErrorHandlers()` used to exist in `src/proxy/dap-proxy-dependencies.ts`; it was dead in production and removed with issue #183.)
 
 ### 2. Component-Level Error Handling
 

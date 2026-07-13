@@ -12,11 +12,17 @@ import {
   ILogger,
   ILoggerFactory
 } from './dap-proxy-interfaces.js';
+import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
 /**
  * Create production dependencies for the DAP Proxy Worker
+ *
+ * @param proc injectable process handle for the messageSender's IPC/stdout
+ * channel (issue #183); defaults to the global `process`.
  */
-export function createProductionDependencies(): DapProxyDependencies {
+export function createProductionDependencies(
+  proc: Pick<ProcessLike, 'send' | 'stdout'> = process
+): DapProxyDependencies {
   // Logger factory for delayed initialization
   const loggerFactory: ILoggerFactory = async (sessionId: string, logDir: string) => {
     const logPath = path.join(logDir, `proxy-${sessionId}.log`);
@@ -44,10 +50,10 @@ export function createProductionDependencies(): DapProxyDependencies {
     
     messageSender: {
       send: (message: unknown) => {
-        if (process.send) {
-          process.send(message);
+        if (proc.send) {
+          proc.send(message);
         } else {
-          process.stdout.write(JSON.stringify(message) + '\n');
+          proc.stdout.write(JSON.stringify(message) + '\n');
         }
       }
     }
@@ -64,46 +70,4 @@ export function createConsoleLogger(): ILogger {
     debug: (...args: unknown[]) => console.error('[DEBUG]', ...args),
     warn: (...args: unknown[]) => console.error('[WARN]', ...args)
   };
-}
-
-/**
- * Setup global error handlers for the proxy process
- */
-export function setupGlobalErrorHandlers(
-  logger: ILogger,
-  messageSender: { send: (msg: unknown) => void },
-  shutdownFn: () => Promise<void>,
-  getCurrentSessionId: () => string | null
-): void {
-  process.on('uncaughtException', (err: Error, origin: string) => {
-    logger.error(`[Proxy Worker UNCAUGHT_EXCEPTION] Origin: ${origin}`, err);
-    messageSender.send({
-      type: 'error',
-      message: `Proxy worker uncaught exception: ${err.message} (origin: ${origin})`,
-      sessionId: getCurrentSessionId() || 'unknown'
-    });
-    shutdownFn().finally(() => process.exit(1));
-  });
-
-  process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
-    logger.error('[Proxy Worker UNHANDLED_REJECTION] Reason:', reason, 'Promise:', promise);
-    messageSender.send({
-      type: 'error',
-      message: `Proxy worker unhandled rejection: ${String(reason)}`,
-      sessionId: getCurrentSessionId() || 'unknown'
-    });
-    shutdownFn().finally(() => process.exit(1));
-  });
-
-  process.on('SIGINT', async () => {
-    logger.info('[Proxy] SIGINT received, shutting down proxy worker.');
-    await shutdownFn();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', async () => {
-    logger.info('[Proxy] SIGTERM received, shutting down proxy worker.');
-    await shutdownFn();
-    process.exit(0);
-  });
 }
