@@ -44,6 +44,19 @@ function createMockLogger(): ILogger {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Safety net (issue #159)                                            */
+/* ------------------------------------------------------------------ */
+
+// No code path in this file may hard-exit the fork worker: ProxyRunner.start()
+// arms a real 10s init timeout that calls process.exit(1). Describes that
+// assert on exit re-spy process.exit and get this same mock instance back.
+// Restoration is centralized in tests/vitest.setup.ts (restoreAllMocks), which
+// runs after file-local afterEach hooks have awaited runner.stop().
+beforeEach(() => {
+  vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+});
+
+/* ------------------------------------------------------------------ */
 /*  ProxyRunner                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -430,7 +443,6 @@ describe('ProxyRunner IPC communication', () => {
     await new Promise(r => setTimeout(r, 10));
 
     expect(exitSpy).toHaveBeenCalledWith(0);
-    exitSpy.mockRestore();
   });
 
   it('error handler logs IPC channel error', async () => {
@@ -505,8 +517,6 @@ describe('ProxyRunner stdin communication', () => {
     );
     expect(shutdownSpy).toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(0);
-
-    exitSpy.mockRestore();
   });
 
   it('stop() closing the stdin interface does not exit the process', async () => {
@@ -523,8 +533,6 @@ describe('ProxyRunner stdin communication', () => {
     expect(logger.warn).not.toHaveBeenCalledWith(
       expect.stringContaining('stdin closed')
     );
-
-    exitSpy.mockRestore();
   });
 });
 
@@ -581,8 +589,6 @@ describe('ProxyRunner heartbeat and init timeout', () => {
     expect(fakeSend).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'ipc-heartbeat-tick', counter: 2 })
     );
-
-    exitSpy.mockRestore();
   });
 
   it('shuts down and exits(1) when heartbeat tick send fails', async () => {
@@ -611,8 +617,6 @@ describe('ProxyRunner heartbeat and init timeout', () => {
     exitSpy.mockClear();
     await vi.advanceTimersByTimeAsync(15000);
     expect(exitSpy).not.toHaveBeenCalled();
-
-    exitSpy.mockRestore();
   });
 
   it('init timeout fires after 10 seconds', async () => {
@@ -627,8 +631,6 @@ describe('ProxyRunner heartbeat and init timeout', () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('No initialization received')
     );
-
-    exitSpy.mockRestore();
   });
 
   it('init timeout does not fire before 10 seconds', async () => {
@@ -640,8 +642,6 @@ describe('ProxyRunner heartbeat and init timeout', () => {
 
     vi.advanceTimersByTime(9999);
     expect(exitSpy).not.toHaveBeenCalled();
-
-    exitSpy.mockRestore();
   });
 });
 
@@ -656,18 +656,41 @@ describe('ProxyRunner.setupGlobalErrorHandlers', () => {
   const originalSend = process.send;
   let processOnSpy: ReturnType<typeof vi.spyOn>;
   let exitSpy: ReturnType<typeof vi.spyOn>;
+  let capturedHandlers: Record<string, Function>;
+  const guardedEvents = ['uncaughtException', 'unhandledRejection', 'SIGTERM', 'SIGINT'] as const;
+  let listenerBaseline: Map<string, Function[]>;
 
   beforeEach(() => {
     deps = createMockDependencies();
     logger = createMockLogger();
     delete (process as any).send;
-    processOnSpy = vi.spyOn(process, 'on');
+    listenerBaseline = new Map(
+      guardedEvents.map((event) => [event, process.rawListeners(event) as Function[]])
+    );
+    // Capture handlers WITHOUT attaching them: a real uncaughtException /
+    // SIGTERM listener that outlives the test calls process.exit() and can
+    // hard-kill the vitest fork worker (issue #159).
+    capturedHandlers = {};
+    processOnSpy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
+      capturedHandlers[event] = fn;
+      return this;
+    });
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
   });
 
   afterEach(async () => {
     processOnSpy.mockRestore();
     exitSpy.mockRestore();
+    // Belt-and-braces: remove anything that still reached the real process.
+    for (const event of guardedEvents) {
+      const evt: string = event;
+      const baseline = listenerBaseline.get(evt) ?? [];
+      for (const listener of process.rawListeners(evt)) {
+        if (!baseline.includes(listener as Function)) {
+          process.removeListener(evt, listener as (...args: unknown[]) => void);
+        }
+      }
+    }
     if (originalSend) {
       process.send = originalSend;
     } else {
@@ -690,12 +713,6 @@ describe('ProxyRunner.setupGlobalErrorHandlers', () => {
   });
 
   it('uncaughtException handler sends error and calls shutdown', async () => {
-    const capturedHandlers: Record<string, Function> = {};
-    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-
     runner = new ProxyRunner(deps, logger);
     const shutdownFn = vi.fn().mockResolvedValue(undefined);
     const getSessionId = vi.fn().mockReturnValue('sess-1');
@@ -713,12 +730,6 @@ describe('ProxyRunner.setupGlobalErrorHandlers', () => {
   });
 
   it('unhandledRejection handler sends error but does not exit', () => {
-    const capturedHandlers: Record<string, Function> = {};
-    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-
     runner = new ProxyRunner(deps, logger);
     const shutdownFn = vi.fn().mockResolvedValue(undefined);
     const getSessionId = vi.fn().mockReturnValue(null);
@@ -734,12 +745,6 @@ describe('ProxyRunner.setupGlobalErrorHandlers', () => {
   });
 
   it('SIGTERM handler shuts down and exits with 0', async () => {
-    const capturedHandlers: Record<string, Function> = {};
-    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-
     runner = new ProxyRunner(deps, logger);
     const shutdownFn = vi.fn().mockResolvedValue(undefined);
 
@@ -753,12 +758,6 @@ describe('ProxyRunner.setupGlobalErrorHandlers', () => {
   });
 
   it('SIGINT handler shuts down and exits with 0', async () => {
-    const capturedHandlers: Record<string, Function> = {};
-    processOnSpy.mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-
     runner = new ProxyRunner(deps, logger);
     const shutdownFn = vi.fn().mockResolvedValue(undefined);
 

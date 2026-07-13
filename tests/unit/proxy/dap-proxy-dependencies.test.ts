@@ -181,7 +181,7 @@ describe('setupGlobalErrorHandlers', () => {
     exitSpy.mockRestore();
   });
 
-  it('unhandledRejection handler sends error message', () => {
+  it('unhandledRejection handler sends error, shuts down, and exits(1)', async () => {
     const capturedHandlers: Record<string, Function> = {};
     const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
       capturedHandlers[event] = fn;
@@ -203,6 +203,14 @@ describe('setupGlobalErrorHandlers', () => {
     expect(messageSender.send).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'error', sessionId: 'unknown' })
     );
+
+    // The handler schedules shutdownFn().finally(() => process.exit(1)) as a
+    // microtask chain. Settle it BEFORE restoring the exit spy — restoring
+    // first lets a REAL exit(1) fire between tests, which can hard-kill the
+    // vitest fork worker (issue #159).
+    await new Promise(r => setTimeout(r, 0));
+    expect(shutdownFn).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     spy.mockRestore();
     exitSpy.mockRestore();

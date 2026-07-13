@@ -53,7 +53,8 @@ function onConsoleLog(log: string, type: 'stdout' | 'stderr'): boolean | void {
     '[Discovery Test]',
     '[Workflow Test]',
     '[Test Server]',
-    '[env-utils]'
+    '[env-utils]',
+    '[process-listener-leak]'
   ];
   if (importantPatterns.some(pattern => log.includes(pattern))) {
     return true;
@@ -183,8 +184,10 @@ export default defineConfig({
     // Seed is unpinned (defaults to Date.now()); reproduce a failure with
     // `vitest run --project <name> --sequence.seed=<n> [--sequence.shuffle.tests]`.
     sequence: { shuffle: { files: true, tests: false } },
-    // Reporter configuration
-    reporters: process.env.CI ? ['dot'] : ['default'],
+    // Reporter configuration. On CI, 'json' (written from the main process, so
+    // it survives a fork-worker death) records which file never reported —
+    // attribution the dot reporter cannot give for pool errors (issue #159).
+    reporters: process.env.CI ? ['dot', 'json'] : ['default'],
     outputFile: {
       json: './test-results.json'
     },

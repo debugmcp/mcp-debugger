@@ -103,6 +103,7 @@ jobs:
           dist/**/*.log
           logs/tests/**/*.log
           logs/tests/adapters/failures/**/*.json
+          test-results.json
         if-no-files-found: warn
     
     - name: Upload coverage reports
