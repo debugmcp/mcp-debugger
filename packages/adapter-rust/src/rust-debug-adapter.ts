@@ -112,7 +112,11 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   private currentThreadId: number | null = null;
   private connected = false;
   
-  constructor(dependencies: AdapterDependencies) {
+  constructor(
+    dependencies: AdapterDependencies,
+    /** Platform override for tests (issue #186); defaults to the real platform. */
+    private readonly platform: NodeJS.Platform = process.platform
+  ) {
     super();
     this.dependencies = dependencies;
     this.msvcBehavior = this.resolveMsvcBehavior();
@@ -229,8 +233,8 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       ]
         .filter(Boolean)
         .join(' ');
-      if (process.platform === 'win32') {
-        const dlltoolPath = await findDlltoolExecutable();
+      if (this.platform === 'win32') {
+        const dlltoolPath = await findDlltoolExecutable(this.platform);
         if (dlltoolPath) {
           this.dlltoolPath = dlltoolPath;
         } else if (/-pc-windows-gnu/i.test(gnuSignals)) {
@@ -252,7 +256,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       }
       
       // Check for Windows-specific requirements
-      if (process.platform === 'win32') {
+      if (this.platform === 'win32') {
         // Check for MSVC runtime (optional but recommended for native debugging)
         const hasMSVC = process.env['VCINSTALLDIR'] || process.env['VS140COMNTOOLS'];
         if (!hasMSVC) {
@@ -398,13 +402,13 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     const rustupHome = process.env.RUSTUP_HOME || path.join(process.env.HOME || '', '.rustup');
     const cargoHome = process.env.CARGO_HOME || path.join(process.env.HOME || '', '.cargo');
     
-    if (process.platform === 'win32') {
+    if (this.platform === 'win32') {
       paths.push(
         path.join(cargoHome, 'bin'),
         path.join(rustupHome, 'toolchains', 'stable-x86_64-pc-windows-msvc', 'bin'),
         'C:\\Program Files\\Rust\\bin'
       );
-    } else if (process.platform === 'darwin') {
+    } else if (this.platform === 'darwin') {
       paths.push(
         path.join(cargoHome, 'bin'),
         path.join(rustupHome, 'toolchains', 'stable-x86_64-apple-darwin', 'bin'),
@@ -508,7 +512,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   private prepareCodelldbExecutablePath(originalPath: string | null): string | null {
-    if (!originalPath || process.platform !== 'win32' || !originalPath.includes(' ')) {
+    if (!originalPath || this.platform !== 'win32' || !originalPath.includes(' ')) {
       return originalPath;
     }
 
@@ -677,7 +681,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     const args = ['--port', String(config.adapterPort)];
 
     // Point codelldb at the vendored liblldb so it can locate its Python runtime.
-    const libExt = process.platform === 'darwin' ? '.dylib' : process.platform === 'win32' ? '.dll' : '.so';
+    const libExt = this.platform === 'darwin' ? '.dylib' : this.platform === 'win32' ? '.dll' : '.so';
     const liblldbPath = path.resolve(path.dirname(codelldbPath), '..', 'lldb', 'bin', `liblldb${libExt}`);
     if (existsSync(liblldbPath)) {
       args.push('--liblldb', liblldbPath);
@@ -689,7 +693,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     const env: Record<string, string> = { ...process.env as Record<string, string> };
     
     // Windows: Enable native PDB reader for MSVC-compiled Rust
-    if (process.platform === 'win32') {
+    if (this.platform === 'win32') {
       env.LLDB_USE_NATIVE_PDB_READER = '1';
       if (this.dlltoolPath && !env.DLLTOOL) {
         env.DLLTOOL = this.dlltoolPath;
@@ -724,7 +728,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   private resolveCodeLLDBExecutableSync(): string | null {
     // Determine platform directory (same logic as async resolver)
-    const platform = process.platform;
+    const platform = this.platform;
     const arch = process.arch;
     
     let platformDir = '';
@@ -830,7 +834,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
           // Determine binary path
           const binaryName = await getDefaultBinary(projectRoot);
           const buildMode = rustConfig.cargo?.release ? 'release' : 'debug';
-          const extension = process.platform === 'win32' ? '.exe' : '';
+          const extension = this.platform === 'win32' ? '.exe' : '';
           const binaryPath = path.join(
             projectRoot,
             'target',
@@ -887,7 +891,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
         this.dependencies.logger?.warn('[RustDebugAdapter] No binary specified, defaulting to "main"');
       }
       
-      const extension = process.platform === 'win32' ? '.exe' : '';
+      const extension = this.platform === 'win32' ? '.exe' : '';
       launchConfig.program = path.join(targetDir, `${binaryName}${extension}`);
     } else {
       throw new AdapterError(

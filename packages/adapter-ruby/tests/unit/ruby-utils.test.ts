@@ -18,35 +18,25 @@ import {
 
 const whichMock = vi.mocked(which) as unknown as ReturnType<typeof vi.fn>;
 
-const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-const setPlatform = (platform: string) =>
-  Object.defineProperty(process, 'platform', { value: platform });
-
 describe('search paths', () => {
-  afterEach(() => Object.defineProperty(process, 'platform', originalPlatform));
-
   it('includes RubyInstaller bin dirs for both ruby and rdbg on Windows', () => {
-    setPlatform('win32');
     // Regression: rdbg search paths originally omitted the RubyInstaller dirs,
     // so a standard install found ruby but not rdbg.
-    expect(getRubySearchPaths()).toContain('C:\\Ruby34-x64\\bin');
-    expect(getRdbgSearchPaths()).toContain('C:\\Ruby34-x64\\bin');
+    expect(getRubySearchPaths('win32')).toContain('C:\\Ruby34-x64\\bin');
+    expect(getRdbgSearchPaths('win32')).toContain('C:\\Ruby34-x64\\bin');
   });
 
   it('includes Homebrew paths on macOS', () => {
-    setPlatform('darwin');
-    expect(getRubySearchPaths()).toContain('/opt/homebrew/bin');
+    expect(getRubySearchPaths('darwin')).toContain('/opt/homebrew/bin');
   });
 
   it('includes system and gem paths on Linux', () => {
-    setPlatform('linux');
-    expect(getRubySearchPaths()).toContain('/usr/bin');
-    expect(getRdbgSearchPaths()).toContain('/usr/local/bin');
+    expect(getRubySearchPaths('linux')).toContain('/usr/bin');
+    expect(getRdbgSearchPaths('linux')).toContain('/usr/local/bin');
   });
 
   it('appends PATH entries and de-duplicates', () => {
-    setPlatform('linux');
-    const paths = getRubySearchPaths();
+    const paths = getRubySearchPaths('linux');
     expect(new Set(paths).size).toBe(paths.length);
   });
 });

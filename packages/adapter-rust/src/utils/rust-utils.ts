@@ -152,15 +152,16 @@ export async function buildRustProject(
 export async function getRustBinaryPath(
   projectPath: string,
   binaryName: string,
-  release: boolean = false
+  release: boolean = false,
+  platform: NodeJS.Platform = process.platform
 ): Promise<string | null> {
   const targetDir = path.join(
     projectPath,
     'target',
     release ? 'release' : 'debug'
   );
-  
-  const extension = process.platform === 'win32' ? '.exe' : '';
+
+  const extension = platform === 'win32' ? '.exe' : '';
   const binaryPath = path.join(targetDir, `${binaryName}${extension}`);
   
   try {
@@ -208,7 +209,9 @@ export async function getRustHostTriple(): Promise<string | null> {
 /**
  * Attempt to locate dlltool.exe in PATH, DLLTOOL env override, or rustup toolchains.
  */
-export async function findDlltoolExecutable(): Promise<string | null> {
+export async function findDlltoolExecutable(
+  platform: NodeJS.Platform = process.platform
+): Promise<string | null> {
   const explicit = process.env.DLLTOOL;
   if (explicit) {
     try {
@@ -228,7 +231,7 @@ export async function findDlltoolExecutable(): Promise<string | null> {
     // not on PATH
   }
 
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     const rustupHome =
       process.env.RUSTUP_HOME || path.join(os.homedir(), '.rustup');
     const toolchainsDir = path.join(rustupHome, 'toolchains');

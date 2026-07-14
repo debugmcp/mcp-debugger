@@ -43,13 +43,14 @@ export class JavascriptAdapterFactory extends BaseAdapterFactory {
    * - Node.js version >= 14
    * - Bundled js-debug adapter present
    * - TypeScript runner availability (warnings only)
+   *
+   * @param nodeVersion Node version override for tests (issue #186); defaults to process.version
    */
-  async validate(): Promise<FactoryValidationResult> {
+  async validate(nodeVersion: string = process.version): Promise<FactoryValidationResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Node.js version check
-    const nodeVersion = process.version; // e.g., v20.11.1
+    // Node.js version check (nodeVersion e.g. v20.11.1)
     let major = 0;
     const m = /^v?(\d+)\./.exec(nodeVersion);
     if (m) {
