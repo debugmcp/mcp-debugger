@@ -175,24 +175,16 @@ describe('findDotnetBackend', () => {
 });
 
 describe('listDotnetProcesses', () => {
-  const originalPlatform = process.platform;
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('returns empty array on non-Windows platforms', async () => {
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-
-    const result = await listDotnetProcesses();
+    const result = await listDotnetProcesses(undefined, 'linux');
     expect(result).toEqual([]);
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   });
 
   it('parses tasklist CSV output on Windows', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-
     spawnMock.mockReturnValue(createSpawn({
       exitCode: 0,
       stdout: [
@@ -203,35 +195,25 @@ describe('listDotnetProcesses', () => {
       ].join('\n')
     }));
 
-    const result = await listDotnetProcesses();
+    const result = await listDotnetProcesses(undefined, 'win32');
 
     expect(result).toHaveLength(2);
     expect(result).toContainEqual({ name: 'NinjaTrader.exe', pid: 12345 });
     expect(result).toContainEqual({ name: 'devenv.exe', pid: 67890 });
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   });
 
   it('returns empty array when tasklist fails', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-
     spawnMock.mockReturnValue(createSpawn({ exitCode: 1 }));
 
-    const result = await listDotnetProcesses();
+    const result = await listDotnetProcesses(undefined, 'win32');
     expect(result).toEqual([]);
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   });
 
   it('returns empty array when tasklist spawn errors', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-
     spawnMock.mockReturnValue(createSpawn({ exitCode: 0, error: new Error('spawn failed') }));
 
-    const result = await listDotnetProcesses();
+    const result = await listDotnetProcesses(undefined, 'win32');
     expect(result).toEqual([]);
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   });
 });
 
@@ -366,19 +348,11 @@ describe('findNetcoredbgExecutable (additional coverage)', () => {
 });
 
 describe('listDotnetProcesses (additional coverage)', () => {
-  const originalPlatform = process.platform;
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
-  });
-
   it('skips malformed CSV lines', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-
     spawnMock.mockReturnValue(createSpawn({
       exitCode: 0,
       stdout: [
@@ -389,23 +363,19 @@ describe('listDotnetProcesses (additional coverage)', () => {
       ].join('\n')
     }));
 
-    const result = await listDotnetProcesses();
+    const result = await listDotnetProcesses(undefined, 'win32');
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({ name: 'NinjaTrader.exe', pid: 12345 });
   });
 
   it('returns empty array for empty output', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-
     spawnMock.mockReturnValue(createSpawn({ exitCode: 0, stdout: '' }));
 
-    const result = await listDotnetProcesses();
+    const result = await listDotnetProcesses(undefined, 'win32');
     expect(result).toEqual([]);
   });
 
   it('recognizes all known .NET processes', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-
     spawnMock.mockReturnValue(createSpawn({
       exitCode: 0,
       stdout: [
@@ -418,7 +388,7 @@ describe('listDotnetProcesses (additional coverage)', () => {
       ].join('\n')
     }));
 
-    const result = await listDotnetProcesses();
+    const result = await listDotnetProcesses(undefined, 'win32');
     expect(result).toHaveLength(5);
   });
 });
@@ -777,70 +747,51 @@ describe('getExeArchitecture', () => {
 });
 
 describe('getProcessExecutablePath', () => {
-  const originalPlatform = process.platform;
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
-  });
-
   it('returns null on non-Windows platforms', () => {
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-    expect(getProcessExecutablePath(1234)).toBeNull();
+    expect(getProcessExecutablePath(1234, 'linux')).toBeNull();
   });
 
   it('returns executable path via WMIC on Windows', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     spawnSyncMock.mockReturnValue({
       status: 0,
       stdout: Buffer.from('\r\nExecutablePath=C:\\Program Files\\App\\app.exe\r\n\r\n'),
       stderr: Buffer.from('')
     });
 
-    expect(getProcessExecutablePath(1234)).toBe('C:\\Program Files\\App\\app.exe');
+    expect(getProcessExecutablePath(1234, 'win32')).toBe('C:\\Program Files\\App\\app.exe');
   });
 
   it('returns null when WMIC fails', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     spawnSyncMock.mockReturnValue({ status: 1, stdout: Buffer.from(''), stderr: Buffer.from('') });
 
-    expect(getProcessExecutablePath(1234)).toBeNull();
+    expect(getProcessExecutablePath(1234, 'win32')).toBeNull();
   });
 
   it('returns null when WMIC output has no ExecutablePath', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     spawnSyncMock.mockReturnValue({
       status: 0,
       stdout: Buffer.from('No Instance(s) Available.\r\n'),
       stderr: Buffer.from('')
     });
 
-    expect(getProcessExecutablePath(1234)).toBeNull();
+    expect(getProcessExecutablePath(1234, 'win32')).toBeNull();
   });
 });
 
 describe('getProcessArchitecture', () => {
-  const originalPlatform = process.platform;
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
-  });
-
   it('returns null on non-Windows platforms', () => {
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
-    expect(getProcessArchitecture(1234)).toBeNull();
+    expect(getProcessArchitecture(1234, 'linux')).toBeNull();
   });
 
   it('returns x86 for a 32-bit process', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-
     // WMIC returns exe path
     spawnSyncMock.mockReturnValue({
       status: 0,
@@ -864,14 +815,13 @@ describe('getProcessArchitecture', () => {
     });
     closeSyncMock.mockReturnValue(undefined);
 
-    expect(getProcessArchitecture(1234)).toBe('x86');
+    expect(getProcessArchitecture(1234, 'win32')).toBe('x86');
   });
 
   it('returns null when exe path cannot be determined', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     spawnSyncMock.mockReturnValue({ status: 1, stdout: Buffer.from(''), stderr: Buffer.from('') });
 
-    expect(getProcessArchitecture(1234)).toBeNull();
+    expect(getProcessArchitecture(1234, 'win32')).toBeNull();
   });
 });
 

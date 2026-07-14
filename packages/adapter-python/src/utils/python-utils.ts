@@ -31,19 +31,22 @@ export class CommandNotFoundError extends Error {
 }
 
 export interface CommandFinder {
-  find(cmd: string): Promise<string>;
+  /**
+   * @param platform Platform override for tests (issue #186); implementations default it to process.platform
+   */
+  find(cmd: string, platform?: NodeJS.Platform): Promise<string>;
 }
 
 class WhichCommandFinder implements CommandFinder {
   private cache = new Map<string, string>();
   constructor(private useCache = true) {}
 
-  async find(cmd: string): Promise<string> {
+  async find(cmd: string, platform: NodeJS.Platform = process.platform): Promise<string> {
     if (this.useCache && this.cache.has(cmd)) {
       return this.cache.get(cmd)!;
     }
 
-    const isWindows = process.platform === 'win32';
+    const isWindows = platform === 'win32';
     const verboseDiscovery = process.env.DEBUG_PYTHON_DISCOVERY === 'true';
     try {
       // Fix for Windows: which library fails if PATH is undefined but Path exists
@@ -174,7 +177,7 @@ class WhichCommandFinder implements CommandFinder {
         });
 
         // Test if we can spawn the command directly without 'which'
-        if (process.platform === 'win32') {
+        if (isWindows) {
           console.error(`[Python Discovery] Testing direct spawn of ${cmd}...`);
           const testResult = await new Promise<string>((resolve) => {
             const child = spawn(cmd, ['--version'], {
@@ -300,13 +303,15 @@ async function hasDebugpy(pythonPath: string, logger: Logger = noopLogger): Prom
  * @param preferredPath Optional preferred Python path to check first
  * @param logger Optional logger instance for logging detection info
  * @param commandFinder Optional CommandFinder instance (defaults to WhichCommandFinder)
+ * @param platform Platform override for tests (issue #186); defaults to the real platform
  */
 export async function findPythonExecutable(
   preferredPath?: string,
   logger: Logger = noopLogger,
-  commandFinder: CommandFinder = defaultCommandFinder
+  commandFinder: CommandFinder = defaultCommandFinder,
+  platform: NodeJS.Platform = process.platform
 ): Promise<string> {
-  const isWindows = process.platform === 'win32';
+  const isWindows = platform === 'win32';
   const triedPaths: string[] = [];
   const validPythonPaths: string[] = [];
 
@@ -320,7 +325,7 @@ export async function findPythonExecutable(
     const pythonPaths = pathEntries.filter(p => p.toLowerCase().includes('python'));
 
     const debugInfo = {
-      platform: process.platform,
+      platform,
       CI: process.env.CI,
       GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
       PATH_defined: !!process.env.PATH,
@@ -345,7 +350,7 @@ export async function findPythonExecutable(
   // 1. User-specified path (if provided, prefer it regardless of debugpy)
   if (preferredPath) {
     try {
-      const resolved = await commandFinder.find(preferredPath);
+      const resolved = await commandFinder.find(preferredPath, platform);
       triedPaths.push(`${preferredPath} → ${resolved}`);
       if (!isWindows || await isValidPythonExecutable(resolved, logger)) {
         logger.debug?.(`[Python Detection] Using user-specified Python: ${resolved}`);
@@ -364,7 +369,7 @@ export async function findPythonExecutable(
   const envPython = process.env.PYTHON_PATH || process.env.PYTHON_EXECUTABLE;
   if (envPython) {
     try {
-      const resolved = await commandFinder.find(envPython);
+      const resolved = await commandFinder.find(envPython, platform);
       triedPaths.push(`${envPython} → ${resolved}`);
       if (!isWindows || await isValidPythonExecutable(resolved, logger)) {
         logger.debug?.(`[Python Detection] Using environment variable Python: ${resolved}`);
@@ -418,7 +423,7 @@ export async function findPythonExecutable(
   for (const cmd of pythonCommands) {
     logger.debug?.(`[Python Detection] Trying command: ${cmd}`);
     try {
-      const resolved = await commandFinder.find(cmd);
+      const resolved = await commandFinder.find(cmd, platform);
       triedPaths.push(`${cmd} → ${resolved}`);
       if (!isWindows || await isValidPythonExecutable(resolved, logger)) {
         // Don't return immediately, collect all valid ones
@@ -459,7 +464,7 @@ export async function findPythonExecutable(
   // Log failure details (keep concise by default in CI)
   if (process.env.CI === 'true') {
     const failureInfo = {
-      platform: process.platform,
+      platform,
       triedPaths: triedPaths,
       validPythonPaths: validPythonPaths,
       PATH: process.env.PATH ? 'defined' : 'undefined',

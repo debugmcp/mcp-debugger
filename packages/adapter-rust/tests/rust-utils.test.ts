@@ -55,12 +55,6 @@ const createTempDir = async (name: string): Promise<string> => {
   return dir;
 };
 
-const overridePlatform = (platform: NodeJS.Platform) => {
-  const original = process.platform;
-  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-  return () => Object.defineProperty(process, 'platform', { value: original, configurable: true });
-};
-
 beforeEach(() => {
   spawnMock.mockReset();
   whichMock.mockReset();
@@ -174,13 +168,14 @@ describe('rust-utils filesystem helpers', () => {
     const project = await createTempDir('binary');
     const targetDir = path.join(project, 'target', 'debug');
     await fs.mkdir(targetDir, { recursive: true });
-    const binPath = path.join(targetDir, process.platform === 'win32' ? 'app.exe' : 'app');
+    const binPath = path.join(targetDir, 'app.exe');
     await fs.writeFile(binPath, '');
 
-    await expect(rustUtils.getRustBinaryPath(project, 'app')).resolves.toBe(binPath);
+    await expect(rustUtils.getRustBinaryPath(project, 'app', false, 'win32')).resolves.toBe(binPath);
+    await expect(rustUtils.getRustBinaryPath(project, 'app', false, 'linux')).resolves.toBeNull();
 
     await fs.rm(binPath);
-    await expect(rustUtils.getRustBinaryPath(project, 'app')).resolves.toBeNull();
+    await expect(rustUtils.getRustBinaryPath(project, 'app', false, 'win32')).resolves.toBeNull();
   });
 });
 
@@ -200,7 +195,6 @@ describe('findDlltoolExecutable', () => {
   });
 
   it('scans rustup toolchains on Windows platforms', async () => {
-    const restorePlatform = overridePlatform('win32');
     const rustupHome = await createTempDir('rustup');
     vi.stubEnv('RUSTUP_HOME', rustupHome);
 
@@ -218,8 +212,6 @@ describe('findDlltoolExecutable', () => {
 
     whichMock.mockRejectedValueOnce(new Error('not found'));
 
-    await expect(rustUtils.findDlltoolExecutable()).resolves.toBe(candidate);
-
-    restorePlatform();
+    await expect(rustUtils.findDlltoolExecutable('win32')).resolves.toBe(candidate);
   });
 });

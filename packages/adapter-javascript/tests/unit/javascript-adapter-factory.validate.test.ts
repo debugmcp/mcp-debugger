@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { JavascriptAdapterFactory } from '../../src/index.js';
@@ -12,18 +12,7 @@ function isVendorPath(p: unknown): boolean {
 }
 
 describe('JavascriptAdapterFactory.validate', () => {
-  let versionDescriptor: PropertyDescriptor | undefined;
-
-  beforeEach(() => {
-    // Save original process.version descriptor so we can restore it
-    versionDescriptor = Object.getOwnPropertyDescriptor(process, 'version');
-  });
-
   afterEach(() => {
-    // Restore process.version
-    if (versionDescriptor) {
-      Object.defineProperty(process, 'version', versionDescriptor);
-    }
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -46,12 +35,6 @@ describe('JavascriptAdapterFactory.validate', () => {
   });
 
   it('flags error when Node version is too old (< 14)', async () => {
-    // Force Node v12
-    Object.defineProperty(process, 'version', {
-      configurable: true,
-      get: () => 'v12.22.0'
-    });
-
     // Vendor present
     vi.spyOn(fs, 'existsSync').mockImplementation((p: unknown) => {
       return isVendorPath(p);
@@ -59,7 +42,7 @@ describe('JavascriptAdapterFactory.validate', () => {
     vi.stubEnv('PATH', '');
 
     const factory = new JavascriptAdapterFactory();
-    const res = await factory.validate();
+    const res = await factory.validate('v12.22.0');
 
     expect(res.valid).toBe(false);
     expect(res.errors.some(e => e.includes('Node.js 14+ required') && e.includes('v12.22.0'))).toBe(true);

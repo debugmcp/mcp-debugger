@@ -263,7 +263,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
   /**
    * Get the configuration for spawning the Rust debug adapter (CodeLLDB)
    */
-  getAdapterSpawnConfig: (payload) => {
+  getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) => {
     // If a custom adapter command was provided, use it directly
     if (payload.adapterCommand) {
       return {
@@ -278,9 +278,6 @@ export const RustAdapterPolicy: AdapterPolicy = {
     }
 
     // Otherwise, use the vendored CodeLLDB
-    const platform = process.platform;
-    const arch = process.arch;
-    
     let platformDir = '';
     if (platform === 'win32') {
       platformDir = arch === 'arm64' ? 'win32-arm64' : 'win32-x64';

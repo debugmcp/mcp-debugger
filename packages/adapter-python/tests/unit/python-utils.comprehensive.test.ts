@@ -115,7 +115,6 @@ describe('WhichCommandFinder integration', () => {
 
   describe('Windows platform behavior', () => {
     it('handles Path to PATH conversion on Windows', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       // NOTE: process.env is case-insensitive on Windows, so PATH and Path alias the
       // same key. Stub PATH (undefined) FIRST, then Path, so the Path value survives on
       // Windows; on case-sensitive platforms PATH stays unset and the code copies Path→PATH.
@@ -130,16 +129,11 @@ describe('WhichCommandFinder integration', () => {
 
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
-      try {
-        await findPythonExecutable(undefined, loggerMock);
-        expect(process.env.PATH).toBeDefined();
-      } finally {
-        platformSpy.mockRestore();
-      }
+      await findPythonExecutable(undefined, loggerMock, undefined, 'win32');
+      expect(process.env.PATH).toBeDefined();
     });
 
     it('filters Windows Store aliases', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('pythonLocation', undefined);
       vi.stubEnv('PythonLocation', undefined);
@@ -154,16 +148,11 @@ describe('WhichCommandFinder integration', () => {
 
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
-      try {
-        const result = await findPythonExecutable(undefined, loggerMock);
-        expect(result).toBe('C:\\Python311\\python.exe');
-      } finally {
-        platformSpy.mockRestore();
-      }
+      const result = await findPythonExecutable(undefined, loggerMock, undefined, 'win32');
+      expect(result).toBe('C:\\Python311\\python.exe');
     });
 
     it('handles .exe extension on Windows', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('pythonLocation', undefined);
 
@@ -182,17 +171,15 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        const result = await findPythonExecutable(undefined, loggerMock, finder);
+        const result = await findPythonExecutable(undefined, loggerMock, finder, 'win32');
         expect(result).toBe('C:\\Python311\\python.exe');
         expect(finder.find).toHaveBeenCalled();
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
       }
     });
 
     it('logs verbose discovery information when DEBUG_PYTHON_DISCOVERY=true', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
       vi.stubEnv('PATH', 'C:\\Python311;C:\\Windows');
       vi.stubEnv('pythonLocation', undefined);
@@ -209,7 +196,7 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow();
+        await expect(findPythonExecutable(undefined, loggerMock, finder, 'win32')).rejects.toThrow();
         // Verbose discovery logs to console.log and console.error with [PYTHON_DISCOVERY_DEBUG]
         expect(consoleLogSpy).toHaveBeenCalledWith(
           '[PYTHON_DISCOVERY_DEBUG]',
@@ -217,14 +204,12 @@ describe('WhichCommandFinder integration', () => {
         );
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
         consoleErrorSpy.mockRestore();
         consoleLogSpy.mockRestore();
       }
     });
 
     it('detects Windows Store alias by stderr content', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('pythonLocation', undefined);
 
@@ -248,17 +233,15 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow('Python not found');
+        await expect(findPythonExecutable(undefined, loggerMock, finder, 'win32')).rejects.toThrow('Python not found');
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
       }
     });
   });
 
   describe('Environment variable handling', () => {
     it('uses PYTHON_EXECUTABLE environment variable', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('PYTHON_EXECUTABLE', '/opt/python/bin/python3');
       vi.stubEnv('PYTHON_PATH', undefined);
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
@@ -268,16 +251,11 @@ describe('WhichCommandFinder integration', () => {
 
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
-      try {
-        const result = await findPythonExecutable(undefined, loggerMock);
-        expect(result).toBe('/opt/python/bin/python3');
-      } finally {
-        platformSpy.mockRestore();
-      }
+      const result = await findPythonExecutable(undefined, loggerMock, undefined, 'linux');
+      expect(result).toBe('/opt/python/bin/python3');
     });
 
     it('uses PythonLocation (uppercase) environment variable on Windows', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       const pythonRoot = 'C:\\PythonLocation\\3.11.9';
       // NOTE: process.env is case-insensitive on Windows, so pythonLocation and
       // PythonLocation alias the same key. Stub the lowercase variant (undefined) FIRST,
@@ -299,17 +277,15 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        const result = await findPythonExecutable(undefined, loggerMock);
+        const result = await findPythonExecutable(undefined, loggerMock, undefined, 'win32');
         expect(result).toBe(path.join(pythonRoot, 'python.exe'));
       } finally {
         setDefaultCommandFinder({ find: async () => { throw new CommandNotFoundError(''); } });
         fsExists.mockRestore();
-        platformSpy.mockRestore();
       }
     });
 
     it('uses pythonLocation on non-Windows with bin subdirectory', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       const pythonRoot = '/opt/python/3.11.9';
       vi.stubEnv('pythonLocation', pythonRoot);
       vi.stubEnv('PYTHON_PATH', undefined);
@@ -327,19 +303,17 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        const result = await findPythonExecutable(undefined, loggerMock);
+        const result = await findPythonExecutable(undefined, loggerMock, undefined, 'linux');
         expect(result).toBe(path.join(pythonRoot, 'bin', 'python3'));
       } finally {
         setDefaultCommandFinder({ find: async () => { throw new CommandNotFoundError(''); } });
         fsExists.mockRestore();
-        platformSpy.mockRestore();
       }
     });
   });
 
   describe('preferredPath parameter', () => {
     it('returns preferredPath immediately when valid on non-Windows', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
       const finder: CommandFinder = {
@@ -352,17 +326,15 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        const result = await findPythonExecutable('my-python', loggerMock, finder);
+        const result = await findPythonExecutable('my-python', loggerMock, finder, 'linux');
         expect(result).toBe('/custom/path/my-python');
-        expect(finder.find).toHaveBeenCalledWith('my-python');
+        expect(finder.find).toHaveBeenCalledWith('my-python', 'linux');
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
       }
     });
 
     it('skips invalid preferredPath and continues discovery', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('pythonLocation', undefined);
       vi.stubEnv('PythonLocation', undefined);
@@ -382,16 +354,14 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        const result = await findPythonExecutable('invalid-python', loggerMock, finder);
+        const result = await findPythonExecutable('invalid-python', loggerMock, finder, 'linux');
         expect(result).toBe('/usr/bin/python3');
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
       }
     });
 
     it('throws error when preferredPath finder throws non-CommandNotFoundError', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
       const customError = new Error('Permission denied');
@@ -403,17 +373,15 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        await expect(findPythonExecutable('python', loggerMock, finder)).rejects.toThrow('Permission denied');
+        await expect(findPythonExecutable('python', loggerMock, finder, 'linux')).rejects.toThrow('Permission denied');
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
       }
     });
   });
 
   describe('Multiple Python installations with debugpy preference', () => {
     it('prefers Python with debugpy installed', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('pythonLocation', undefined);
 
@@ -442,17 +410,15 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        const result = await findPythonExecutable(undefined, loggerMock, finder);
+        const result = await findPythonExecutable(undefined, loggerMock, finder, 'linux');
         expect(result).toBe('/usr/local/bin/python');
         expect(loggerMock.debug).toHaveBeenCalledWith(expect.stringContaining('Found Python with debugpy'));
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
       }
     });
 
     it('returns first valid Python when none have debugpy', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('pythonLocation', undefined);
 
@@ -471,19 +437,17 @@ describe('WhichCommandFinder integration', () => {
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       try {
-        const result = await findPythonExecutable(undefined, loggerMock, finder);
+        const result = await findPythonExecutable(undefined, loggerMock, finder, 'linux');
         expect(result).toBe('/usr/bin/python3');
         expect(loggerMock.debug).toHaveBeenCalledWith(expect.stringContaining('debugpy will need to be installed'));
       } finally {
         setDefaultCommandFinder(previousFinder);
-        platformSpy.mockRestore();
       }
     });
   });
 
   describe('Error scenarios', () => {
     it('throws error with tried paths when no Python found', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('PYTHON_PATH', undefined);
       vi.stubEnv('pythonLocation', undefined);
@@ -492,15 +456,10 @@ describe('WhichCommandFinder integration', () => {
 
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
-      try {
-        await expect(findPythonExecutable(undefined, loggerMock)).rejects.toThrow(/Python not found.*Tried:/s);
-      } finally {
-        platformSpy.mockRestore();
-      }
+      await expect(findPythonExecutable(undefined, loggerMock, undefined, 'linux')).rejects.toThrow(/Python not found.*Tried:/s);
     });
 
     it('logs detailed failure info in CI environment', async () => {
-      const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
       vi.stubEnv('CI', 'true');
       vi.stubEnv('pythonLocation', undefined);
@@ -509,14 +468,10 @@ describe('WhichCommandFinder integration', () => {
 
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
-      try {
-        await expect(findPythonExecutable(undefined, loggerMock)).rejects.toThrow();
-        expect(loggerMock.error).toHaveBeenCalledWith(
-          expect.stringContaining('[PYTHON_DISCOVERY_FAILED]')
-        );
-      } finally {
-        platformSpy.mockRestore();
-      }
+      await expect(findPythonExecutable(undefined, loggerMock, undefined, 'linux')).rejects.toThrow();
+      expect(loggerMock.error).toHaveBeenCalledWith(
+        expect.stringContaining('[PYTHON_DISCOVERY_FAILED]')
+      );
     });
   });
 });
@@ -614,7 +569,6 @@ describe('WhichCommandFinder class behavior', () => {
   });
 
   it('handles spawn error when checking debugpy', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
     vi.stubEnv('pythonLocation', undefined);
 
@@ -632,17 +586,15 @@ describe('WhichCommandFinder class behavior', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      const result = await findPythonExecutable(undefined, loggerMock, finder);
+      const result = await findPythonExecutable(undefined, loggerMock, finder, 'linux');
       // Should still return first valid Python even when debugpy check errors
       expect(result).toBe('/usr/bin/python3');
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 
   it('logs debug messages during Python discovery', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
     vi.stubEnv('pythonLocation', undefined);
 
@@ -659,16 +611,14 @@ describe('WhichCommandFinder class behavior', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await findPythonExecutable(undefined, loggerMock, finder);
+      await findPythonExecutable(undefined, loggerMock, finder, 'linux');
       expect(loggerMock.debug).toHaveBeenCalledWith(expect.stringContaining('[Python Detection]'));
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 
   it('handles Windows Store alias detected by AppData path in stderr', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
     vi.stubEnv('pythonLocation', undefined);
 
@@ -690,16 +640,14 @@ describe('WhichCommandFinder class behavior', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow('Python not found');
+      await expect(findPythonExecutable(undefined, loggerMock, finder, 'win32')).rejects.toThrow('Python not found');
       expect(loggerMock.error).toHaveBeenCalledWith(expect.stringContaining('Windows Store alias'));
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 
   it('handles errors other than CommandNotFoundError in environment variable lookup', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('PYTHON_EXECUTABLE', '/invalid/python');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
@@ -712,15 +660,13 @@ describe('WhichCommandFinder class behavior', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow('Invalid path');
+      await expect(findPythonExecutable(undefined, loggerMock, finder, 'linux')).rejects.toThrow('Invalid path');
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 
   it('checks all pythonLocation candidates on non-Windows', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     const pythonRoot = '/opt/python/3.11.9';
     vi.stubEnv('pythonLocation', pythonRoot);
     vi.stubEnv('PYTHON_PATH', undefined);
@@ -739,17 +685,15 @@ describe('WhichCommandFinder class behavior', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      const result = await findPythonExecutable(undefined, loggerMock);
+      const result = await findPythonExecutable(undefined, loggerMock, undefined, 'linux');
       expect(result).toBe(path.join(pythonRoot, 'python'));
     } finally {
       setDefaultCommandFinder({ find: async () => { throw new CommandNotFoundError(''); } });
       fsExists.mockRestore();
-      platformSpy.mockRestore();
     }
   });
 
   it('continues to next pythonLocation candidate when validation fails', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const pythonRoot = 'C:\\Python311';
     vi.stubEnv('pythonLocation', pythonRoot);
     vi.stubEnv('PYTHON_PATH', undefined);
@@ -774,12 +718,11 @@ describe('WhichCommandFinder class behavior', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      const result = await findPythonExecutable(undefined, loggerMock);
+      const result = await findPythonExecutable(undefined, loggerMock, undefined, 'win32');
       expect(result).toBe(path.join(pythonRoot, 'python'));
     } finally {
       setDefaultCommandFinder({ find: async () => { throw new CommandNotFoundError(''); } });
       fsExists.mockRestore();
-      platformSpy.mockRestore();
     }
   });
 });
@@ -794,7 +737,6 @@ describe('Additional edge cases', () => {
   });
 
   it('handles errors during auto-detect loop', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
     vi.stubEnv('pythonLocation', undefined);
     vi.stubEnv('PYTHON_PATH', undefined);
@@ -811,15 +753,13 @@ describe('Additional edge cases', () => {
 
     try {
       // Should handle the unexpected error and continue to next command
-      await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow();
+      await expect(findPythonExecutable(undefined, loggerMock, finder, 'linux')).rejects.toThrow();
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 
   it('handles Windows Store alias detected by "Windows Store" in stderr', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
     vi.stubEnv('pythonLocation', undefined);
 
@@ -837,15 +777,13 @@ describe('Additional edge cases', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow();
+      await expect(findPythonExecutable(undefined, loggerMock, finder, 'win32')).rejects.toThrow();
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 
   it('validates Python executable on Windows before returning', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
     vi.stubEnv('PYTHON_PATH', 'C:\\Python\\python.exe');
 
@@ -859,18 +797,16 @@ describe('Additional edge cases', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      const result = await findPythonExecutable(undefined, loggerMock, finder);
+      const result = await findPythonExecutable(undefined, loggerMock, finder, 'win32');
       expect(result).toBe('C:\\Python\\python.exe');
       // Verify validation was called
       expect(spawnMock).toHaveBeenCalled();
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 
   it('checks multiple pythonLocation candidates when first does not exist', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const pythonRoot = 'C:\\Python311';
     vi.stubEnv('pythonLocation', pythonRoot);
     vi.stubEnv('PYTHON_PATH', undefined);
@@ -891,18 +827,16 @@ describe('Additional edge cases', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      const result = await findPythonExecutable(undefined, loggerMock);
+      const result = await findPythonExecutable(undefined, loggerMock, undefined, 'win32');
       expect(result).toBe(path.join(pythonRoot, 'python'));
       expect(fsExists).toHaveBeenCalled();
     } finally {
       setDefaultCommandFinder({ find: async () => { throw new CommandNotFoundError(''); } });
       fsExists.mockRestore();
-      platformSpy.mockRestore();
     }
   });
 
   it('returns first valid Python when collecting multiple candidates', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
     vi.stubEnv('pythonLocation', undefined);
     vi.stubEnv('PYTHON_PATH', undefined);
@@ -922,12 +856,11 @@ describe('Additional edge cases', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      const result = await findPythonExecutable(undefined, loggerMock, finder);
+      const result = await findPythonExecutable(undefined, loggerMock, finder, 'linux');
       expect(result).toBe('/usr/bin/python3');
       expect(loggerMock.debug).toHaveBeenCalledWith(expect.stringContaining('debugpy will need to be installed'));
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
     }
   });
 });
@@ -943,7 +876,6 @@ describe('Verbose discovery logging', () => {
   });
 
   it('logs verbose discovery info when DEBUG_PYTHON_DISCOVERY=true on Windows', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
     vi.stubEnv('CI', 'true');
     vi.stubEnv('GITHUB_ACTIONS', 'true');
@@ -968,7 +900,7 @@ describe('Verbose discovery logging', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await findPythonExecutable(undefined, loggerMock, finder);
+      await findPythonExecutable(undefined, loggerMock, finder, 'win32');
       expect(consoleLogSpy).toHaveBeenCalledWith(
         '[PYTHON_DISCOVERY_DEBUG]',
         expect.stringContaining('platform')
@@ -979,14 +911,12 @@ describe('Verbose discovery logging', () => {
       );
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
       consoleLogSpy.mockRestore();
       consoleErrorSpy.mockRestore();
     }
   });
 
   it('logs PATH issues when detected', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
     vi.stubEnv('PATH', 'C:\\Path1;;C:\\Path2');  // Empty entry
     vi.stubEnv('pythonLocation', undefined);
@@ -1004,7 +934,7 @@ describe('Verbose discovery logging', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow();
+      await expect(findPythonExecutable(undefined, loggerMock, finder, 'win32')).rejects.toThrow();
       // When Python is not found, verbose discovery logs basic info
       expect(consoleLogSpy).toHaveBeenCalledWith(
         '[PYTHON_DISCOVERY_DEBUG]',
@@ -1012,14 +942,12 @@ describe('Verbose discovery logging', () => {
       );
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
       consoleErrorSpy.mockRestore();
       consoleLogSpy.mockRestore();
     }
   });
 
   it('logs Python PATH entries when found', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
     vi.stubEnv('PATH', 'C:\\Python311;C\\Windows;C:\\Python39');
     vi.stubEnv('pythonLocation', undefined);
@@ -1041,19 +969,17 @@ describe('Verbose discovery logging', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await findPythonExecutable(undefined, loggerMock, finder);
+      await findPythonExecutable(undefined, loggerMock, finder, 'win32');
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         '[PYTHON_DISCOVERY_DEBUG] Python PATH entries found:'
       );
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
       consoleErrorSpy.mockRestore();
     }
   });
 
   it('logs verbose failure info when discovery fails in CI with DEBUG enabled', async () => {
-    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
     vi.stubEnv('CI', 'true');
     vi.stubEnv('PATH', '/usr/bin');
@@ -1072,7 +998,7 @@ describe('Verbose discovery logging', () => {
     const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
     try {
-      await expect(findPythonExecutable(undefined, loggerMock, finder)).rejects.toThrow();
+      await expect(findPythonExecutable(undefined, loggerMock, finder, 'linux')).rejects.toThrow();
       // Verify verbose failure logging
       expect(consoleLogSpy).toHaveBeenCalledWith(
         '[PYTHON_DISCOVERY_FAILED]',
@@ -1084,7 +1010,6 @@ describe('Verbose discovery logging', () => {
       );
     } finally {
       setDefaultCommandFinder(previousFinder);
-      platformSpy.mockRestore();
       consoleLogSpy.mockRestore();
       consoleErrorSpy.mockRestore();
     }

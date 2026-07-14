@@ -346,9 +346,11 @@ export interface AdapterPolicy {
    * listening — e.g. attach to a remote rdbg — so connect directly without
    * spawning anything).
    * @param payload The initialization payload containing ports, paths, etc.
+   * @param platform Platform override for tests (issue #186); implementations default it to process.platform
+   * @param arch Architecture override for tests (issue #186); implementations default it to process.arch
    * @returns Spawn or connect configuration, or undefined if not applicable
    */
-  getAdapterSpawnConfig?(payload: AdapterSpawnPayload): AdapterSpawnConfig | undefined;
+  getAdapterSpawnConfig?(payload: AdapterSpawnPayload, platform?: NodeJS.Platform, arch?: NodeJS.Architecture): AdapterSpawnConfig | undefined;
 }
 
 /**

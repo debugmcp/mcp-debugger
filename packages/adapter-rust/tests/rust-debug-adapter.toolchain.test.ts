@@ -75,14 +75,6 @@ const createDependencies = (): AdapterDependencies => ({
   }
 });
 
-const setPlatform = (platform: NodeJS.Platform): (() => void) => {
-  const original = process.platform;
-  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-  return () => {
-    Object.defineProperty(process, 'platform', { value: original, configurable: true });
-  };
-};
-
 describe('RustDebugAdapter toolchain logic', () => {
   let adapter: RustDebugAdapter;
   let dependencies: AdapterDependencies;
@@ -168,41 +160,37 @@ describe('RustDebugAdapter toolchain logic', () => {
     });
 
     it('warns when dlltool is missing for GNU toolchain on Windows', async () => {
-      const restorePlatform = setPlatform('win32');
+      const winAdapter = new RustDebugAdapter(dependencies, 'win32');
       vi.mocked(resolveCodeLLDBExecutable).mockResolvedValueOnce('C:\\\\codelldb.exe');
       checkCargoInstallation.mockResolvedValueOnce(true);
       checkRustInstallation.mockResolvedValueOnce(true);
       getRustHostTriple.mockResolvedValueOnce('x86_64-pc-windows-gnu');
       findDlltoolExecutable.mockResolvedValueOnce(undefined);
 
-      try {
-        const result = await adapter.validateEnvironment();
-        expect(result.valid).toBe(true);
-        const warningCodes = result.warnings?.map((warning) => warning.code);
-        expect(warningCodes).toContain('DLLTOOL_NOT_FOUND');
-      } finally {
-        restorePlatform();
-      }
+      const result = await winAdapter.validateEnvironment();
+      expect(result.valid).toBe(true);
+      const warningCodes = result.warnings?.map((warning) => warning.code);
+      expect(warningCodes).toContain('DLLTOOL_NOT_FOUND');
     });
   });
 
   describe('buildAdapterCommand environment wiring', () => {
     it('injects dlltool path into environment when available on Windows', () => {
-      const restorePlatform = setPlatform('win32');
+      const winAdapter = new RustDebugAdapter(dependencies, 'win32');
       vi.stubEnv('PATH', '/usr/bin');
       vi.stubEnv('DLLTOOL', undefined);
 
-      const adapterWithMethod = adapter as unknown as {
+      const adapterWithMethod = winAdapter as unknown as {
         resolveCodeLLDBExecutableSync: () => string | null;
       };
       const resolveSpy = vi
         .spyOn(adapterWithMethod, 'resolveCodeLLDBExecutableSync')
         .mockReturnValue('C:\\\\CodeLLDB\\\\adapter\\\\codelldb.exe');
 
-      (adapter as unknown as { dlltoolPath?: string }).dlltoolPath = './dlltool.exe';
+      (winAdapter as unknown as { dlltoolPath?: string }).dlltoolPath = './dlltool.exe';
 
       try {
-        const command = adapter.buildAdapterCommand({
+        const command = winAdapter.buildAdapterCommand({
           sessionId: 'session',
           executablePath: 'cargo',
           adapterHost: '127.0.0.1',
@@ -218,7 +206,6 @@ describe('RustDebugAdapter toolchain logic', () => {
         expect(command.args).toEqual(['--port', '4000']);
       } finally {
         resolveSpy.mockRestore();
-        restorePlatform();
       }
     });
   });
@@ -421,10 +408,10 @@ describe('RustDebugAdapter toolchain logic', () => {
     });
 
     it('derives executable search paths per platform', () => {
-      const restoreLinux = setPlatform('linux');
+      const linuxAdapter = new RustDebugAdapter(dependencies, 'linux');
       vi.stubEnv('HOME', '/tmp/tester');
       vi.stubEnv('PATH', '/usr/bin:/usr/local/bin');
-      const searchPaths = adapter
+      const searchPaths = linuxAdapter
         .getExecutableSearchPaths()
         .map((entry) => entry.replace(/\\/g, '/'));
       expect(searchPaths).toEqual(
@@ -435,16 +422,14 @@ describe('RustDebugAdapter toolchain logic', () => {
       );
       expect(searchPaths.some((entry) => entry.includes('/usr/bin'))).toBe(true);
       expect(searchPaths.some((entry) => entry.includes('/usr/local/bin'))).toBe(true);
-      restoreLinux();
 
-      const restoreWindows = setPlatform('win32');
+      const winAdapter = new RustDebugAdapter(dependencies, 'win32');
       vi.stubEnv('HOME', 'C:\\Users\\tester');
       vi.stubEnv('RUSTUP_HOME', 'C:\\Rustup');
       vi.stubEnv('CARGO_HOME', 'C:\\Cargo');
-      const windowsPaths = adapter.getExecutableSearchPaths();
+      const windowsPaths = winAdapter.getExecutableSearchPaths();
       expect(windowsPaths.some((entry) => entry.includes('Cargo'))).toBe(true);
       expect(windowsPaths.some((entry) => entry.includes('Program Files'))).toBe(true);
-      restoreWindows();
     });
 
     it('scrubs python variables when configuring embedded environment', async () => {
@@ -480,7 +465,7 @@ describe('RustDebugAdapter toolchain logic', () => {
     });
 
     it('sanitizes CodeLLDB paths containing spaces on Windows', async () => {
-      const restorePlatform = setPlatform('win32');
+      const winAdapter = new RustDebugAdapter(dependencies, 'win32');
       const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codelldb-src-'));
       const platformDir = path.join(baseDir, 'platform dir');
       const adapterDir = path.join(platformDir, 'adapter');
@@ -489,7 +474,7 @@ describe('RustDebugAdapter toolchain logic', () => {
       await fs.writeFile(exePath, 'binary');
       await fs.writeFile(path.join(platformDir, 'version.json'), '"1.0"');
 
-      const sanitized = (adapter as unknown as {
+      const sanitized = (winAdapter as unknown as {
         prepareCodelldbExecutablePath: (path: string) => string | null;
       }).prepareCodelldbExecutablePath(exePath);
 
@@ -498,7 +483,6 @@ describe('RustDebugAdapter toolchain logic', () => {
 
       await fs.rm(path.join(os.tmpdir(), 'debug-mcp-codelldb'), { recursive: true, force: true });
       await fs.rm(baseDir, { recursive: true, force: true });
-      restorePlatform();
     });
 
     it('exposes adapter metadata helpers', () => {

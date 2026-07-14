@@ -20,17 +20,6 @@ vi.mock('child_process', async () => {
   };
 });
 
-const setPlatform = (platform: NodeJS.Platform, arch: NodeJS.Architecture = process.arch) => {
-  const originalPlatform = process.platform;
-  const originalArch = process.arch;
-  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-  Object.defineProperty(process, 'arch', { value: arch, configurable: true });
-  return () => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
-    Object.defineProperty(process, 'arch', { value: originalArch, configurable: true });
-  };
-};
-
 describe('RustAdapterPolicy', () => {
   beforeEach(() => {
     accessMock.mockReset();
@@ -174,18 +163,16 @@ describe('RustAdapterPolicy', () => {
     });
 
     it('builds vendored codelldb command per platform', () => {
-      const restore = setPlatform('win32');
       const config = RustAdapterPolicy.getAdapterSpawnConfig!({
         adapterHost: '127.0.0.1',
         adapterPort: 9000,
         logDir: '/tmp/logs'
-      });
+      }, 'win32', 'x64');
 
       const normalizedCommand = config.command.replace(/\\/g, '/');
       expect(normalizedCommand).toMatch(/vendor\/codelldb\/win32-x64\/adapter\/codelldb\.exe$/);
       expect(config.args).toEqual(['--port', '9000']);
       expect(config.env?.LLDB_USE_NATIVE_PDB_READER).toBe('1');
-      restore();
     });
   });
 

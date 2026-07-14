@@ -78,11 +78,11 @@ async function findExecutable(
   throw new Error(`${label} not found. Tried: ${tried.join(', ')}`);
 }
 
-export function getRubySearchPaths(): string[] {
+export function getRubySearchPaths(platform: NodeJS.Platform = process.platform): string[] {
   const paths: string[] = [];
   const home = process.env.HOME || process.env.USERPROFILE || '';
 
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     paths.push(
       'C:\\Ruby31-x64\\bin',
       'C:\\Ruby32-x64\\bin',
@@ -90,7 +90,7 @@ export function getRubySearchPaths(): string[] {
       'C:\\Ruby34-x64\\bin',
       path.join(home, 'scoop', 'apps', 'ruby', 'current', 'bin')
     );
-  } else if (process.platform === 'darwin') {
+  } else if (platform === 'darwin') {
     paths.push(
       '/usr/local/bin',
       '/opt/homebrew/bin',
@@ -111,11 +111,11 @@ export function getRubySearchPaths(): string[] {
   return Array.from(new Set(paths.filter(Boolean)));
 }
 
-export function getRdbgSearchPaths(): string[] {
+export function getRdbgSearchPaths(platform: NodeJS.Platform = process.platform): string[] {
   const paths: string[] = [];
   const home = process.env.HOME || process.env.USERPROFILE || '';
 
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     paths.push(
       // RubyInstaller ships rdbg (bundled debug gem) alongside ruby.exe
       'C:\\Ruby31-x64\\bin',
@@ -143,20 +143,22 @@ export function getRdbgSearchPaths(): string[] {
 
 export async function findRubyExecutable(
   preferredPath?: string,
-  logger: Logger = noopLogger
+  logger: Logger = noopLogger,
+  platform: NodeJS.Platform = process.platform
 ): Promise<string> {
   const envRuby = process.env.RUBY_PATH || process.env.RUBY_EXECUTABLE;
-  const candidates = process.platform === 'win32' ? ['ruby.exe', 'ruby'] : ['ruby'];
-  return findExecutable(preferredPath, envRuby, candidates, getRubySearchPaths(), 'Ruby', logger);
+  const candidates = platform === 'win32' ? ['ruby.exe', 'ruby'] : ['ruby'];
+  return findExecutable(preferredPath, envRuby, candidates, getRubySearchPaths(platform), 'Ruby', logger);
 }
 
 export async function findRdbgExecutable(
   preferredPath?: string,
-  logger: Logger = noopLogger
+  logger: Logger = noopLogger,
+  platform: NodeJS.Platform = process.platform
 ): Promise<string> {
   const envRdbg = process.env.RDBG_PATH;
-  const candidates = process.platform === 'win32' ? ['rdbg.bat', 'rdbg.cmd', 'rdbg.exe', 'rdbg'] : ['rdbg'];
-  return findExecutable(preferredPath, envRdbg, candidates, getRdbgSearchPaths(), 'rdbg', logger);
+  const candidates = platform === 'win32' ? ['rdbg.bat', 'rdbg.cmd', 'rdbg.exe', 'rdbg'] : ['rdbg'];
+  return findExecutable(preferredPath, envRdbg, candidates, getRdbgSearchPaths(platform), 'rdbg', logger);
 }
 
 export interface RdbgInvocation {

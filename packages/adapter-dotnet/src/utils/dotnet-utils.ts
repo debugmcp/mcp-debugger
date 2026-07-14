@@ -207,9 +207,10 @@ export async function findDotnetBackend(
  * @returns Array of process info objects
  */
 export async function listDotnetProcesses(
-  logger: Logger = noopLogger
+  logger: Logger = noopLogger,
+  platform: NodeJS.Platform = process.platform
 ): Promise<Array<{ name: string; pid: number }>> {
-  if (process.platform !== 'win32') {
+  if (platform !== 'win32') {
     logger.debug?.('[Dotnet Detection] Process listing is currently Windows-only');
     return [];
   }
@@ -269,8 +270,8 @@ export async function listDotnetProcesses(
  * @param pid Process ID
  * @returns Full path to the process executable, or null if not found
  */
-export function getProcessExecutablePath(pid: number | string): string | null {
-  if (process.platform !== 'win32') {
+export function getProcessExecutablePath(pid: number | string, platform: NodeJS.Platform = process.platform): string | null {
+  if (platform !== 'win32') {
     return null;
   }
 
@@ -304,8 +305,8 @@ export function getProcessExecutablePath(pid: number | string): string | null {
  * @param pid Process ID
  * @returns Directory containing the process executable, or null if not found
  */
-export function getProcessExecutableDir(pid: number | string): string | null {
-  const exePath = getProcessExecutablePath(pid);
+export function getProcessExecutableDir(pid: number | string, platform: NodeJS.Platform = process.platform): string | null {
+  const exePath = getProcessExecutablePath(pid, platform);
   return exePath ? path.dirname(exePath) : null;
 }
 
@@ -352,8 +353,8 @@ export function getExeArchitecture(exePath: string): 'x86' | 'x64' | null {
  * @param pid Process ID
  * @returns 'x86' or 'x64', or null if detection fails
  */
-export function getProcessArchitecture(pid: number | string): 'x86' | 'x64' | null {
-  const exePath = getProcessExecutablePath(pid);
+export function getProcessArchitecture(pid: number | string, platform: NodeJS.Platform = process.platform): 'x86' | 'x64' | null {
+  const exePath = getProcessExecutablePath(pid, platform);
   if (!exePath) return null;
   return getExeArchitecture(exePath);
 }
