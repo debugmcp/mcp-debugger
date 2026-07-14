@@ -250,15 +250,9 @@ describe('getPolicyForLanguage', () => {
 });
 
 describe('buildRdbgInvocation', () => {
-  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
   let tmpDir: string | null = null;
 
-  const setPlatform = (platform: string) => {
-    Object.defineProperty(process, 'platform', { value: platform });
-  };
-
   afterEach(() => {
-    Object.defineProperty(process, 'platform', originalPlatform);
     if (tmpDir) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
       tmpDir = null;
@@ -266,30 +260,27 @@ describe('buildRdbgInvocation', () => {
   });
 
   it('passes through unchanged on non-Windows platforms', () => {
-    setPlatform('linux');
-    expect(buildRdbgInvocation('/usr/bin/rdbg', ['--open'])).toEqual({
+    expect(buildRdbgInvocation('/usr/bin/rdbg', ['--open'], undefined, 'linux')).toEqual({
       command: '/usr/bin/rdbg',
       args: ['--open']
     });
   });
 
   it('runs the sibling rdbg script via ruby for a .bat shim (RubyInstaller layout)', () => {
-    setPlatform('win32');
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdbg-test-'));
     const batPath = path.join(tmpDir, 'rdbg.bat');
     const scriptPath = path.join(tmpDir, 'rdbg');
     fs.writeFileSync(batPath, '@echo off');
     fs.writeFileSync(scriptPath, '#!/usr/bin/env ruby');
 
-    expect(buildRdbgInvocation(batPath, ['--open'], 'C:\\Ruby34-x64\\bin\\ruby.exe')).toEqual({
+    expect(buildRdbgInvocation(batPath, ['--open'], 'C:\\Ruby34-x64\\bin\\ruby.exe', 'win32')).toEqual({
       command: 'C:\\Ruby34-x64\\bin\\ruby.exe',
       args: [scriptPath, '--open']
     });
   });
 
   it('throws with RDBG_PATH guidance when no sibling script exists', () => {
-    setPlatform('win32');
-    expect(() => buildRdbgInvocation('rdbg.bat', ['--open', '--port', '1']))
+    expect(() => buildRdbgInvocation('rdbg.bat', ['--open', '--port', '1'], undefined, 'win32'))
       .toThrow(/Set RDBG_PATH to the rdbg Ruby script/);
   });
 });

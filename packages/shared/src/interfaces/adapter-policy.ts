@@ -139,11 +139,12 @@ export interface AdapterPolicy {
   /**
    * Resolve the executable path for this language.
    * Handles language-specific executable resolution logic.
-   * 
+   *
    * @param providedPath Optional path provided by the user
+   * @param platform Platform override for tests (issue #183); implementations default it to process.platform
    * @returns The resolved executable path or undefined
    */
-  resolveExecutablePath(providedPath?: string): string | undefined;
+  resolveExecutablePath(providedPath?: string, platform?: NodeJS.Platform): string | undefined;
 
   /**
    * Get debugger configuration and requirements.

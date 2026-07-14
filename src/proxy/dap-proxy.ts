@@ -21,8 +21,7 @@ export type {
 // Re-export dependencies for testing
 export {
   createProductionDependencies,
-  createConsoleLogger,
-  setupGlobalErrorHandlers
+  createConsoleLogger
 } from './dap-proxy-dependencies.js';
 
 // Re-export message parser

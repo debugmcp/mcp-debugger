@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { handleStdioCommand } from '../../../src/cli/stdio-command.js';
+import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
 
@@ -11,8 +12,7 @@ describe('STDIO Command Handler', () => {
   let mockServerFactory: ReturnType<typeof vi.fn>;
   let mockExitProcess: ReturnType<typeof vi.fn>;
   let mockServer: DebugMcpServer;
-  const originalProcessOn = process.on;
-  let capturedProcessListeners: Map<string, Function[]>;
+  let fakeProc: FakeCurrentProcess;
 
   function makeFakeStdin() {
     const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
@@ -48,25 +48,15 @@ describe('STDIO Command Handler', () => {
     // Create mock exit function
     mockExitProcess = vi.fn();
 
-    // Capture process listeners WITHOUT attaching them (issue #159): a
-    // successful handleStdioCommand registers real SIGTERM/SIGINT/exit
-    // listeners that would otherwise leak into the vitest fork worker.
-    capturedProcessListeners = new Map();
-    process.on = vi.fn(function (this: NodeJS.Process, event: string, listener: (...args: unknown[]) => void) {
-      const list = capturedProcessListeners.get(event) ?? [];
-      list.push(listener);
-      capturedProcessListeners.set(event, list);
-      return this;
-    }) as unknown as typeof process.on;
+    // Signal/exit listeners attach to the fake's emitter, never the real
+    // process (issues #159/#183).
+    fakeProc = new FakeCurrentProcess();
   });
 
   afterEach(() => {
-    process.on = originalProcessOn;
-    // Fire captured SIGTERM handlers once: each closes over the 60s keepAlive
+    // Fire the SIGTERM handlers once: each closes over the 60s keepAlive
     // interval and clears it; the exit goes to the mocked exitProcess.
-    for (const listener of capturedProcessListeners.get('SIGTERM') ?? []) {
-      listener();
-    }
+    fakeProc.emit('SIGTERM');
   });
 
   it('should start server successfully in stdio mode', async () => {
@@ -79,7 +69,8 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       exitProcess: mockExitProcess,
-      stdin: makeFakeStdin()
+      stdin: makeFakeStdin(),
+      proc: fakeProc
     });
 
     // Verify log level was set
@@ -104,6 +95,31 @@ describe('STDIO Command Handler', () => {
     expect(mockExitProcess).not.toHaveBeenCalled();
   });
 
+  it('should register SIGTERM/SIGINT/exit listeners on the injected process handle', async () => {
+    await handleStdioCommand({}, {
+      logger: mockLogger,
+      serverFactory: mockServerFactory,
+      exitProcess: mockExitProcess,
+      stdin: makeFakeStdin(),
+      proc: fakeProc
+    });
+
+    expect(fakeProc.listenerCount('SIGTERM')).toBe(1);
+    expect(fakeProc.listenerCount('SIGINT')).toBe(1);
+    expect(fakeProc.listenerCount('exit')).toBe(1);
+
+    // SIGINT exits 0 through the injected exitProcess
+    fakeProc.emit('SIGINT');
+    expect(mockExitProcess).toHaveBeenCalledWith(0);
+
+    // 'exit' diagnostics read argv/env/uptime from the handle
+    fakeProc.emit('exit', 0);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      '[MCP] Process exiting',
+      expect.objectContaining({ code: 0, argv: fakeProc.argv, uptime: 0 })
+    );
+  });
+
   it('should not change log level if not provided in options', async () => {
     const options = {};
     mockLogger.level = 'warn';
@@ -112,7 +128,8 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       exitProcess: mockExitProcess,
-      stdin: makeFakeStdin()
+      stdin: makeFakeStdin(),
+      proc: fakeProc
     });
 
     // Verify log level was not changed
@@ -128,14 +145,15 @@ describe('STDIO Command Handler', () => {
   it('should handle server start failure', async () => {
     const options = {};
     const error = new Error('Server start failed');
-    
+
     // Make server.start reject
     mockServer.start = vi.fn().mockRejectedValue(error);
 
     await handleStdioCommand(options, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
-      exitProcess: mockExitProcess
+      exitProcess: mockExitProcess,
+      proc: fakeProc
     });
 
     // Verify error was logged
@@ -145,22 +163,20 @@ describe('STDIO Command Handler', () => {
     expect(mockExitProcess).toHaveBeenCalledWith(1);
   });
 
-  it('should use process.exit by default if exitProcess is not provided', async () => {
-    const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+  it('should fall back to proc.exit if exitProcess is not provided', async () => {
     const error = new Error('Server start failed');
-    
+
     // Make server.start reject
     mockServer.start = vi.fn().mockRejectedValue(error);
 
     await handleStdioCommand({}, {
       logger: mockLogger,
-      serverFactory: mockServerFactory
+      serverFactory: mockServerFactory,
+      proc: fakeProc
     });
 
-    // Verify process.exit was called
-    expect(processExitSpy).toHaveBeenCalledWith(1);
-
-    processExitSpy.mockRestore();
+    // Verify the injected process handle's exit was called
+    expect(fakeProc.exit).toHaveBeenCalledWith(1);
   });
 
   it('should handle server factory throwing an error', async () => {
@@ -172,7 +188,8 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand({}, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
-      exitProcess: mockExitProcess
+      exitProcess: mockExitProcess,
+      proc: fakeProc
     });
 
     // Verify error was logged
@@ -183,10 +200,6 @@ describe('STDIO Command Handler', () => {
   });
 
   describe('stdin EOF handling (issue #122)', () => {
-    afterEach(() => {
-      vi.unstubAllEnvs();
-    });
-
     it('exits 0 when stdin ends in host mode (MCP client disconnected)', async () => {
       const stdin = makeFakeStdin();
 
@@ -194,7 +207,8 @@ describe('STDIO Command Handler', () => {
         logger: mockLogger,
         serverFactory: mockServerFactory,
         exitProcess: mockExitProcess,
-        stdin
+        stdin,
+        proc: fakeProc
       });
 
       expect(stdin.resume).toHaveBeenCalled();
@@ -209,14 +223,15 @@ describe('STDIO Command Handler', () => {
     });
 
     it('keeps running on stdin end in container mode (MCP_CONTAINER=true)', async () => {
-      vi.stubEnv('MCP_CONTAINER', 'true');
+      fakeProc.env.MCP_CONTAINER = 'true';
       const stdin = makeFakeStdin();
 
       await handleStdioCommand({}, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
         exitProcess: mockExitProcess,
-        stdin
+        stdin,
+        proc: fakeProc
       });
 
       stdin.emit('end');

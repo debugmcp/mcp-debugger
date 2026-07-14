@@ -261,19 +261,19 @@ describe('cleanupStaleLogFiles', () => {
     return filePath;
   }
 
-  function stubProcessKill(errorCode: string) {
-    return vi.spyOn(process, 'kill').mockImplementation(() => {
+  /** Injected signal fn that throws an ErrnoException with the given code (issue #183). */
+  function throwingSignal(errorCode: string): () => never {
+    return () => {
       const err = new Error(errorCode) as NodeJS.ErrnoException;
       err.code = errorCode;
       throw err;
-    });
+    };
   }
 
   it('deletes old per-pid log files of dead processes', () => {
-    stubProcessKill('ESRCH');
     const stale = makeAgedFile('debug-mcp-server-424242.log', WEEK_MS + 1000);
 
-    loggerModule.cleanupStaleLogFiles(tmpDir);
+    loggerModule.cleanupStaleLogFiles(tmpDir, { signal: throwingSignal('ESRCH') });
 
     expect(fs.existsSync(stale)).toBe(false);
   });
@@ -286,40 +286,36 @@ describe('cleanupStaleLogFiles', () => {
     expect(fs.existsSync(own)).toBe(true);
   });
 
-  it('skips files whose pid is alive but not ours (EPERM from process.kill)', () => {
-    stubProcessKill('EPERM');
+  it('skips files whose pid is alive but not ours (EPERM from the signal)', () => {
     const kept = makeAgedFile('debug-mcp-server-424242.log', WEEK_MS + 1000);
 
-    loggerModule.cleanupStaleLogFiles(tmpDir);
+    loggerModule.cleanupStaleLogFiles(tmpDir, { signal: throwingSignal('EPERM') });
 
     expect(fs.existsSync(kept)).toBe(true);
   });
 
-  it('skips files whose pid is alive (process.kill(pid, 0) succeeds)', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => true);
+  it('skips files whose pid is alive (signalling 0 succeeds)', () => {
     const kept = makeAgedFile('debug-mcp-server-424242.log', WEEK_MS + 1000);
 
-    loggerModule.cleanupStaleLogFiles(tmpDir);
+    loggerModule.cleanupStaleLogFiles(tmpDir, { signal: () => {} });
 
     expect(fs.existsSync(kept)).toBe(true);
   });
 
   it('keeps recent per-pid files of dead processes', () => {
-    stubProcessKill('ESRCH');
     const fresh = makeAgedFile('debug-mcp-server-424242.log', 60_000);
 
-    loggerModule.cleanupStaleLogFiles(tmpDir);
+    loggerModule.cleanupStaleLogFiles(tmpDir, { signal: throwingSignal('ESRCH') });
 
     expect(fs.existsSync(fresh)).toBe(true);
   });
 
   it('never touches non-pid log files, however old', () => {
-    stubProcessKill('ESRCH');
     const legacy = makeAgedFile('debug-mcp-server.log', WEEK_MS * 10);
     const proxy = makeAgedFile('proxy-session-abc.log', WEEK_MS * 10);
     const other = makeAgedFile('something-else.txt', WEEK_MS * 10);
 
-    loggerModule.cleanupStaleLogFiles(tmpDir);
+    loggerModule.cleanupStaleLogFiles(tmpDir, { signal: throwingSignal('ESRCH') });
 
     expect(fs.existsSync(legacy)).toBe(true);
     expect(fs.existsSync(proxy)).toBe(true);
@@ -327,10 +323,9 @@ describe('cleanupStaleLogFiles', () => {
   });
 
   it('supports overriding retention age', () => {
-    stubProcessKill('ESRCH');
     const stale = makeAgedFile('debug-mcp-server-424242.log', 5_000);
 
-    loggerModule.cleanupStaleLogFiles(tmpDir, { maxAgeMs: 1_000 });
+    loggerModule.cleanupStaleLogFiles(tmpDir, { maxAgeMs: 1_000, signal: throwingSignal('ESRCH') });
 
     expect(fs.existsSync(stale)).toBe(false);
   });

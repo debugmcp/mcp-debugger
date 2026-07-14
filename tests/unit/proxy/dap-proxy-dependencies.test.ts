@@ -1,12 +1,17 @@
 /**
  * Unit tests for dap-proxy-dependencies.ts
+ *
+ * The messageSender tests inject a FakeCurrentProcess (issue #183) instead of
+ * mutating the global process object. The standalone setupGlobalErrorHandlers
+ * was deleted with issue #183 — production uses
+ * ProxyRunner.setupGlobalErrorHandlers (covered in dap-proxy-core.test.ts).
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   createProductionDependencies,
-  createConsoleLogger,
-  setupGlobalErrorHandlers
+  createConsoleLogger
 } from '../../../src/proxy/dap-proxy-dependencies.js';
+import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 
 /* ------------------------------------------------------------------ */
 /*  createProductionDependencies                                       */
@@ -43,20 +48,26 @@ describe('createProductionDependencies', () => {
     expect(typeof deps.dapClientFactory.create).toBe('function');
   });
 
-  it('messageSender.send uses stdout when process.send is unavailable', () => {
-    const originalSend = process.send;
-    delete (process as any).send;
+  it('messageSender.send uses stdout when proc.send is unavailable', async () => {
+    const fakeProc = new FakeCurrentProcess().disableIPC();
 
-    const stdoutWrite = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
-    const deps = createProductionDependencies();
+    const deps = createProductionDependencies(fakeProc);
     deps.messageSender.send({ type: 'test', data: 123 });
 
-    expect(stdoutWrite).toHaveBeenCalledWith(
+    // Let the PassThrough 'data' event flush
+    await new Promise(r => setImmediate(r));
+    expect(fakeProc.stdoutChunks.join('')).toBe(
       JSON.stringify({ type: 'test', data: 123 }) + '\n'
     );
+  });
 
-    stdoutWrite.mockRestore();
-    if (originalSend) process.send = originalSend;
+  it('messageSender.send uses proc.send when available', () => {
+    const fakeProc = new FakeCurrentProcess();
+
+    const deps = createProductionDependencies(fakeProc);
+    deps.messageSender.send({ type: 'test' });
+
+    expect(fakeProc.send).toHaveBeenCalledWith({ type: 'test' });
   });
 });
 
@@ -103,189 +114,5 @@ describe('createConsoleLogger', () => {
     logger.warn('caution');
     expect(spy).toHaveBeenCalledWith('[WARN]', 'caution');
     spy.mockRestore();
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  setupGlobalErrorHandlers                                           */
-/* ------------------------------------------------------------------ */
-
-describe('setupGlobalErrorHandlers', () => {
-  const handlers: Record<string, Function[]> = {};
-
-  afterEach(() => {
-    // Clean up all registered handlers
-    for (const [event, fns] of Object.entries(handlers)) {
-      for (const fn of fns) {
-        process.removeListener(event, fn as any);
-      }
-    }
-    for (const key of Object.keys(handlers)) {
-      delete handlers[key];
-    }
-  });
-
-  it('registers handlers for uncaughtException, unhandledRejection, SIGINT, SIGTERM', () => {
-    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
-      if (!handlers[event]) handlers[event] = [];
-      handlers[event].push(fn);
-      return this;
-    });
-
-    const logger = createConsoleLogger();
-    const messageSender = { send: vi.fn() };
-    const shutdownFn = vi.fn().mockResolvedValue(undefined);
-    const getSessionId = vi.fn().mockReturnValue(null);
-
-    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
-
-    const registeredEvents = spy.mock.calls.map(([event]) => event);
-    expect(registeredEvents).toContain('uncaughtException');
-    expect(registeredEvents).toContain('unhandledRejection');
-    expect(registeredEvents).toContain('SIGINT');
-    expect(registeredEvents).toContain('SIGTERM');
-
-    spy.mockRestore();
-  });
-
-  it('uncaughtException handler sends error and calls shutdown', async () => {
-    const capturedHandlers: Record<string, Function> = {};
-    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
-    const logger = createConsoleLogger();
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const messageSender = { send: vi.fn() };
-    const shutdownFn = vi.fn().mockResolvedValue(undefined);
-    const getSessionId = vi.fn().mockReturnValue('session-1');
-
-    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
-
-    const handler = capturedHandlers['uncaughtException'];
-    expect(handler).toBeDefined();
-
-    await handler(new Error('test crash'), 'uncaughtException');
-    // Allow .finally() microtask to run
-    await new Promise(r => setTimeout(r, 0));
-
-    expect(messageSender.send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', sessionId: 'session-1' })
-    );
-    expect(shutdownFn).toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(1);
-
-    spy.mockRestore();
-    exitSpy.mockRestore();
-  });
-
-  it('unhandledRejection handler sends error, shuts down, and exits(1)', async () => {
-    const capturedHandlers: Record<string, Function> = {};
-    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
-    const logger = createConsoleLogger();
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const messageSender = { send: vi.fn() };
-    const shutdownFn = vi.fn().mockResolvedValue(undefined);
-    const getSessionId = vi.fn().mockReturnValue(null);
-
-    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
-
-    const handler = capturedHandlers['unhandledRejection'];
-    handler('some reason', Promise.resolve());
-
-    expect(messageSender.send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error', sessionId: 'unknown' })
-    );
-
-    // The handler schedules shutdownFn().finally(() => process.exit(1)) as a
-    // microtask chain. Settle it BEFORE restoring the exit spy — restoring
-    // first lets a REAL exit(1) fire between tests, which can hard-kill the
-    // vitest fork worker (issue #159).
-    await new Promise(r => setTimeout(r, 0));
-    expect(shutdownFn).toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(1);
-
-    spy.mockRestore();
-    exitSpy.mockRestore();
-  });
-
-  it('SIGTERM handler calls shutdown and exits with 0', async () => {
-    const capturedHandlers: Record<string, Function> = {};
-    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
-    const logger = createConsoleLogger();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const messageSender = { send: vi.fn() };
-    const shutdownFn = vi.fn().mockResolvedValue(undefined);
-    const getSessionId = vi.fn().mockReturnValue(null);
-
-    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
-
-    await capturedHandlers['SIGTERM']();
-    expect(shutdownFn).toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(0);
-
-    spy.mockRestore();
-    exitSpy.mockRestore();
-  });
-
-  it('SIGINT handler calls shutdown and exits with 0', async () => {
-    const capturedHandlers: Record<string, Function> = {};
-    const spy = vi.spyOn(process, 'on').mockImplementation(function (this: any, event: string, fn: any) {
-      capturedHandlers[event] = fn;
-      return this;
-    });
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
-    const logger = createConsoleLogger();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const messageSender = { send: vi.fn() };
-    const shutdownFn = vi.fn().mockResolvedValue(undefined);
-    const getSessionId = vi.fn().mockReturnValue(null);
-
-    setupGlobalErrorHandlers(logger, messageSender, shutdownFn, getSessionId);
-
-    await capturedHandlers['SIGINT']();
-    expect(shutdownFn).toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(0);
-
-    spy.mockRestore();
-    exitSpy.mockRestore();
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  messageSender.send with process.send available                     */
-/* ------------------------------------------------------------------ */
-
-describe('messageSender with process.send', () => {
-  it('uses process.send when available', () => {
-    const originalSend = process.send;
-    const fakeSend = vi.fn();
-    (process as any).send = fakeSend;
-
-    const deps = createProductionDependencies();
-    deps.messageSender.send({ type: 'test' });
-
-    expect(fakeSend).toHaveBeenCalledWith({ type: 'test' });
-
-    if (originalSend) {
-      process.send = originalSend;
-    } else {
-      delete (process as any).send;
-    }
   });
 });

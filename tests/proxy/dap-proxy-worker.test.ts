@@ -96,22 +96,17 @@ describe('DapProxyWorker', () => {
   let mockDapClient: IDapClient;
   let mockMessageSender: ReturnType<typeof createMockMessageSender>;
 
-  // Guard: unit tests must NEVER call the real process.exit. The worker schedules
-  // its exit via setImmediate + setTimeout(100ms) (see handleInit's error path), so
-  // a worker built with the DEFAULT (real process.exit) hook can leak a pending
-  // timer that fires during a LATER test once `sequence.shuffle` randomizes order.
-  // Spying process.exit to a no-op for every test makes such a leak harmless; the
-  // two tests that assert on process.exit install their own spy on top. The global
-  // afterEach in tests/vitest.setup.ts (vi.restoreAllMocks) restores this each time.
-  beforeEach(() => {
-    vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-  });
+  // Every worker in this file is constructed with an injected exit hook
+  // (issue #183): no test can reach the real process.exit, even via the
+  // worker's setImmediate + setTimeout(100ms) exit scheduling (see
+  // handleInit's error path), and no global process spy net is needed.
+  let workerExitSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     mockLogger = createMockLogger();
     mockDapClient = createMockDapClient();
     mockMessageSender = createMockMessageSender();
-    
+
     dependencies = {
       fileSystem: createMockFileSystem(),
       loggerFactory: vi.fn().mockResolvedValue(mockLogger),
@@ -121,8 +116,9 @@ describe('DapProxyWorker', () => {
       },
       messageSender: mockMessageSender
     };
-    
-    worker = new DapProxyWorker(dependencies);
+
+    workerExitSpy = vi.fn();
+    worker = new DapProxyWorker(dependencies, { exit: workerExitSpy });
   });
 
   afterEach(async () => {
@@ -1066,7 +1062,7 @@ describe('DapProxyWorker', () => {
       await worker.handleCommand(initPayload);
 
       // Reset state to allow DAP commands (but still not connected)
-      worker = new DapProxyWorker(dependencies);
+      worker = new DapProxyWorker(dependencies, { exit: workerExitSpy });
 
       const dapPayload: DapCommandPayload = {
         cmd: 'dap',
@@ -1091,7 +1087,7 @@ describe('DapProxyWorker', () => {
 
     it('should reject commands when shutting down', async () => {
       // Create a new worker and manually set it up in a connected state
-      const testWorker = new DapProxyWorker(dependencies);
+      const testWorker = new DapProxyWorker(dependencies, { exit: vi.fn() });
       
       // Manually set up the worker state
       (testWorker as any).state = ProxyState.CONNECTED;
@@ -1220,7 +1216,7 @@ describe('DapProxyWorker', () => {
   describe('JavaScript Adapter Command Queueing', () => {
     it('should queue commands for JavaScript adapter', async () => {
       // Create a fresh worker in initialized state but not connected
-      let jsWorker = new DapProxyWorker(dependencies);
+      let jsWorker = new DapProxyWorker(dependencies, { exit: vi.fn() });
       // Set up JavaScript policy detection
       const jsInitPayload: ProxyInitPayload = {
         cmd: 'init',
@@ -1236,18 +1232,12 @@ describe('DapProxyWorker', () => {
         }
       };
       
-      // Mock process.exit to avoid test termination
-      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-      
       try {
         // This will fail to connect but will set up JS policy
         await jsWorker.handleCommand(jsInitPayload);
       } catch {
         // Expected to fail - that's okay
       }
-      
-      // Restore process.exit
-      exitSpy.mockRestore();
 
       // Now send a command - it should be queued for JavaScript adapter
       await jsWorker.handleCommand({
@@ -1441,21 +1431,17 @@ describe('DapProxyWorker', () => {
         executablePath: 'python'
       };
 
-      // Mock process.exit to prevent test from actually exiting
-      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
       await worker.handleCommand(payload);
 
       // Advance past the setImmediate + setTimeout(100ms) IPC flush pattern
       await vi.advanceTimersByTimeAsync(200);
 
-      // Verify that process.exit was called with error code
+      // Verify that the exit hook was called with error code
       // This is the key behavior - critical errors during init cause process exit
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(workerExitSpy).toHaveBeenCalledWith(1);
 
       // Note: Logger won't be called since it's created AFTER ensureDir, which is what's failing
 
-      exitSpy.mockRestore();
       vi.useRealTimers();
     });
 

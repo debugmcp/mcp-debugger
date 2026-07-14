@@ -228,10 +228,15 @@ export function parseArgs(pid: number, args: string[]): TaggedJvm | null {
   return { pid, ownerPid, sessionTag };
 }
 
-export function isPidAlive(pid: number): boolean {
+/** Sends a signal to a pid; injectable so tests never spy the global process.kill (issue #183). */
+export type SignalFn = (pid: number, signal: NodeJS.Signals | number) => void;
+
+const defaultSignal: SignalFn = (pid, signal) => process.kill(pid, signal);
+
+export function isPidAlive(pid: number, signal: SignalFn = defaultSignal): boolean {
   if (pid <= 0) return false;
   try {
-    process.kill(pid, 0);
+    signal(pid, 0);
     return true;
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
@@ -243,9 +248,9 @@ export function isPidAlive(pid: number): boolean {
 }
 
 /** @internal Exposed for unit tests; not part of the public module API. */
-export function defaultKill(pid: number): boolean {
+export function defaultKill(pid: number, signal: SignalFn = defaultSignal): boolean {
   try {
-    process.kill(pid, 'SIGKILL');
+    signal(pid, 'SIGKILL');
     return true;
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;

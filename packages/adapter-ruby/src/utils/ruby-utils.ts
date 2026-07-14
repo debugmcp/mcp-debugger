@@ -175,9 +175,10 @@ export interface RdbgInvocation {
 export function buildRdbgInvocation(
   rdbgPath: string,
   args: string[],
-  rubyPath?: string
+  rubyPath?: string,
+  platform: NodeJS.Platform = process.platform
 ): RdbgInvocation {
-  if (process.platform === 'win32' && /\.(bat|cmd)$/i.test(rdbgPath)) {
+  if (platform === 'win32' && /\.(bat|cmd)$/i.test(rdbgPath)) {
     const scriptPath = rdbgPath.replace(/\.(bat|cmd)$/i, '');
     if (path.isAbsolute(scriptPath) && fs.existsSync(scriptPath)) {
       return { command: rubyPath || 'ruby', args: [scriptPath, ...args] };

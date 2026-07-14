@@ -17,7 +17,8 @@ export const STDIN_CLOSE_ENV_VAR = 'MCP_EXIT_ON_STDIN_CLOSE';
 const DEFAULT_BACKSTOP_MS = 5000;
 
 export interface StdinWatchdogOptions {
-  stdin: NodeJS.ReadStream;
+  /** Only .on() and .resume() are used, so any readable stream (incl. test fakes) works. */
+  stdin: NodeJS.ReadableStream;
   logger: { warn: (msg: string) => void };
   /** Graceful shutdown to initiate; expected to eventually exit the process. */
   shutdown: () => void | Promise<void>;

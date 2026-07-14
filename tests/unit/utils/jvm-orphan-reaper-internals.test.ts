@@ -122,79 +122,59 @@ describe('parseArgs', () => {
   });
 });
 
+/** Injected signal fn that throws an ErrnoException with the given code (issue #183). */
+function throwWith(code: string): () => never {
+  return () => {
+    const err = new Error(code) as NodeJS.ErrnoException;
+    err.code = code;
+    throw err;
+  };
+}
+
 describe('isPidAlive', () => {
-  it('returns false for pid <= 0 without calling process.kill', () => {
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
-    expect(isPidAlive(0)).toBe(false);
-    expect(isPidAlive(-1)).toBe(false);
-    expect(killSpy).not.toHaveBeenCalled();
+  it('returns false for pid <= 0 without signalling', () => {
+    const signal = vi.fn();
+    expect(isPidAlive(0, signal)).toBe(false);
+    expect(isPidAlive(-1, signal)).toBe(false);
+    expect(signal).not.toHaveBeenCalled();
   });
 
-  it('returns true when process.kill(pid, 0) succeeds', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => true);
-    expect(isPidAlive(12345)).toBe(true);
+  it('returns true when signalling pid 0 succeeds', () => {
+    const signal = vi.fn();
+    expect(isPidAlive(12345, signal)).toBe(true);
+    expect(signal).toHaveBeenCalledWith(12345, 0);
   });
 
-  it('returns true when process.kill throws EPERM (process exists, no permission)', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      const err = new Error('permission denied') as NodeJS.ErrnoException;
-      err.code = 'EPERM';
-      throw err;
-    });
-    expect(isPidAlive(12345)).toBe(true);
+  it('returns true when the signal throws EPERM (process exists, no permission)', () => {
+    expect(isPidAlive(12345, throwWith('EPERM'))).toBe(true);
   });
 
-  it('returns false when process.kill throws ESRCH (no such process)', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      const err = new Error('no such process') as NodeJS.ErrnoException;
-      err.code = 'ESRCH';
-      throw err;
-    });
-    expect(isPidAlive(12345)).toBe(false);
+  it('returns false when the signal throws ESRCH (no such process)', () => {
+    expect(isPidAlive(12345, throwWith('ESRCH'))).toBe(false);
   });
 
   it('returns false on unexpected error codes', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      const err = new Error('invalid arg') as NodeJS.ErrnoException;
-      err.code = 'EINVAL';
-      throw err;
-    });
-    expect(isPidAlive(12345)).toBe(false);
+    expect(isPidAlive(12345, throwWith('EINVAL'))).toBe(false);
   });
 });
 
 describe('defaultKill', () => {
   it('returns true when SIGKILL succeeds', () => {
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
-    expect(defaultKill(9001)).toBe(true);
-    expect(killSpy).toHaveBeenCalledWith(9001, 'SIGKILL');
+    const signal = vi.fn();
+    expect(defaultKill(9001, signal)).toBe(true);
+    expect(signal).toHaveBeenCalledWith(9001, 'SIGKILL');
   });
 
   it('returns false on ESRCH (process already gone)', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      const err = new Error('no such process') as NodeJS.ErrnoException;
-      err.code = 'ESRCH';
-      throw err;
-    });
-    expect(defaultKill(9001)).toBe(false);
+    expect(defaultKill(9001, throwWith('ESRCH'))).toBe(false);
   });
 
   it('returns false on EPERM (foreign-owned process)', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      const err = new Error('permission denied') as NodeJS.ErrnoException;
-      err.code = 'EPERM';
-      throw err;
-    });
-    expect(defaultKill(9001)).toBe(false);
+    expect(defaultKill(9001, throwWith('EPERM'))).toBe(false);
   });
 
   it('rethrows on unexpected error codes', () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      const err = new Error('invalid arg') as NodeJS.ErrnoException;
-      err.code = 'EINVAL';
-      throw err;
-    });
-    expect(() => defaultKill(9001)).toThrow('invalid arg');
+    expect(() => defaultKill(9001, throwWith('EINVAL'))).toThrow('EINVAL');
   });
 });
 

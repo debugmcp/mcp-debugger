@@ -47,6 +47,8 @@
     "posttest:watch": "node scripts/cleanup-test-processes.js",
     "test:unit": "vitest run --project unit",
     "posttest:unit": "node scripts/cleanup-test-processes.js",
+    "test:strict": "cross-env LEAK_GUARD_STRICT=1 vitest run --project unit --project integration",
+    "posttest:strict": "node scripts/cleanup-test-processes.js",
     "test:flake": "node scripts/flake-hunt.mjs",
     "posttest:flake": "node scripts/cleanup-test-processes.js",
     "test:integration": "vitest run --project integration",
