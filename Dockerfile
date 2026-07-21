@@ -1,7 +1,7 @@
 # Stage 1: Build and bundle the TypeScript application
 ARG DISABLE_LANGUAGES=rust
 
-FROM node:26-slim@sha256:ffc78385a788964bb3cbab5e434ff79a10bdc25b8ae6db03fe5fe6cb14053c09 AS builder
+FROM node:26-slim@sha256:715e55e4b84e4bb0ff48e49b398a848f08e55daed8eb6a0ea1839ae53bc57583 AS builder
 ARG DISABLE_LANGUAGES
 ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
@@ -93,7 +93,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/
 
 # Stage 2: Create runtime image with full LLDB dependencies
-FROM ubuntu:26.04@sha256:b7f48194d4d8b763a478a621cdc81c27be222ba2206ca3ca6bc42b49685f3d9e
+FROM ubuntu:26.04@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
 # Disable Go at runtime too — Delve isn't installed in the container
 ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet
 
