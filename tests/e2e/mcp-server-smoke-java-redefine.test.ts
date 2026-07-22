@@ -7,7 +7,7 @@
  * 3. Hitting a breakpoint, verifying getValue() == 42
  * 4. Recompiling with RedefineTargetV2 (getValue() returns 99)
  * 5. Calling redefine_classes to hot-swap the class
- * 6. Continuing, hitting second breakpoint, verifying getValue() == 99
+ * 6. Evaluating getValue() at the same breakpoint after hot-swap, verifying result == 99
  *
  * Prerequisites: JDK installed (java + javac on PATH)
  */

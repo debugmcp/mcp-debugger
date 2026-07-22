@@ -422,7 +422,7 @@ describe('Server Language Discovery Tests', () => {
 
       expect(result.content[0].type).toBe('text');
       const content = JSON.parse(result.content[0].text);
-      // Success should be false since mock doesn't actually start debugging
+      // startDebugging is mocked to resolve successfully; assert only that the response carries a success field.
       expect(content.success).toBeDefined();
     });
 
@@ -452,7 +452,7 @@ describe('Server Language Discovery Tests', () => {
 
       expect(result.content[0].type).toBe('text');
       const content = JSON.parse(result.content[0].text);
-      // Success should be false since mock doesn't actually start debugging
+      // startDebugging is mocked to resolve successfully; assert only that the response carries a success field.
       expect(content.success).toBeDefined();
     });
   });

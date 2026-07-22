@@ -61,15 +61,12 @@ class DebugMCPLauncher:
         except FileNotFoundError:
             self.log("npx command not found. Node.js may not be installed.", error=True)
             return 1
-        except subprocess.CalledProcessError as e:
-            self.log(f"Process failed with error: {e}", error=True)
-            return e.returncode
         except KeyboardInterrupt:
             self.log("\nShutting down...")
             return 0
         finally:
             self._cleanup()
-    
+
     def launch_with_docker(self, mode: str = "stdio", port: Optional[int] = None) -> int:
         """Launch the server using Docker."""
         cmd = ["docker", "run", "-it", "--rm"]

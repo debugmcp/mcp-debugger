@@ -4,13 +4,14 @@ mcp-debugger is a Model Context Protocol (MCP) server that bridges MCP clients (
 
 ## Monorepo Structure
 
-The project uses pnpm workspaces with 9 packages:
+The project uses pnpm workspaces with 10 packages:
 
 ```
 packages/
   shared/             Core interfaces and types (IDebugAdapter, IAdapterFactory)
   adapter-python/     Python debugging via debugpy
   adapter-javascript/ JavaScript/Node.js debugging via js-debug
+  adapter-ruby/       Ruby debugging via rdbg
   adapter-rust/       Rust debugging via CodeLLDB
   adapter-go/         Go debugging via Delve
   adapter-java/       Java debugging via JDI bridge

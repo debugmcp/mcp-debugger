@@ -22,6 +22,10 @@ export const ErrorMessages = {
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
     `Try restarting your debug session. If the problem persists, check the debug adapter logs.`,
+
+  dapRequestTimeoutHint: () =>
+    `If the operation is expected to take this long, retry with a larger 'timeout' (ms) argument. ` +
+    `Note the operation may still be running in the debuggee.`,
   
   proxyInitTimeout: (timeout: number) =>
     `Debug proxy initialization did not complete within ${timeout}s. ` +
@@ -33,6 +37,16 @@ export const ErrorMessages = {
     `(e.g. stepping over a long-running call). The session remains 'running' and will ` +
     `become 'paused' when the step completes. Check the session state, or call ` +
     `pause_execution to interrupt.`,
+
+  pausePending: (graceSeconds: number) =>
+    `Pause requested; no 'stopped' event within ${graceSeconds}s ` +
+    `(the program may be blocked in native code or a syscall). The session will report ` +
+    `'paused' once the stop lands. Check the session state to confirm.`,
+
+  attachVerifyFailed: (timeoutMs: number, lastFailure: string) =>
+    `Attach did not become debuggable: no threads reported within ${timeoutMs}ms ` +
+    `(last failure: ${lastFailure}). If the target is just slow to become debuggable ` +
+    `(e.g. a busy or warming JVM), retry with a larger 'verifyTimeout' (ms) on attach_to_process.`,
   
   adapterReadyTimeout: (timeout: number) =>
     `Timed out waiting for debug adapter to be ready after ${timeout}s. ` +
@@ -331,14 +345,34 @@ this.logger.error(`[Component] Error description`, {
 ```typescript
 async stop(): Promise<void> {
   if (!this.proxyProcess) {
-    return; // Already stopped, no error
+    // No proxy process, but still dispose adapter to release instance slot
+    this.cleanup();
+    return;
   }
 
   this.logger.info(`[ProxyManager] Stopping proxy for session ${this.sessionId}`);
 
+  // Give in-flight DAP requests a bounded window to settle before we stop
+  // processing messages and cancel them (issue #122 follow-up).
+  await this.drainPendingDapRequests(this.stopDrainTimeoutMs);
+
+  // The proxy may have exited while we drained; re-check before touching
+  // the process handle.
+  const process = this.proxyProcess;
+  if (!process) {
+    this.isStopped = true;
+    this.cleanup();
+    return;
+  }
+
+  // Mark as shutting down to stop processing new messages, then clean up
+  // (cancels whatever is still pending after the drain)
+  this.isStopped = true;
+  this.cleanup();
+
   // Send terminate command
   try {
-    this.sendCommand({ cmd: 'terminate' });
+    process.send({ cmd: 'terminate', sessionId: this.sessionId });
   } catch (error) {
     this.logger.error(`[ProxyManager] Error sending terminate command:`, error);
     // Continue with force kill
@@ -348,11 +382,11 @@ async stop(): Promise<void> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       this.logger.warn(`[ProxyManager] Timeout waiting for proxy exit. Force killing.`);
-      this.proxyProcess?.kill('SIGKILL');
+      process.kill('SIGKILL');
       resolve();
     }, 5000);
 
-    this.proxyProcess?.once('exit', () => {
+    process.once('exit', () => {
       clearTimeout(timeout);
       resolve();
     });

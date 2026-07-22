@@ -113,7 +113,7 @@ async function testCoverageSummary() {
       fs.unlinkSync(jsonFile);
     }
     
-    process.exit(exitCode);
+    process.exit(Math.max(childExitCode ?? 0, exitCode));
     
   } catch (error) {
     console.error('Error reading results:', error.message);

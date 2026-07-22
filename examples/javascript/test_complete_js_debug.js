@@ -22,7 +22,7 @@ function deepFunction(level) {
     return deepFunction(level - 1);
   } else {
     const localVar = "Bottom of stack";
-    console.log("At bottom of stack"); // Line 24 - good for breakpoint
+    console.log("At bottom of stack"); // Line 25 - good for breakpoint
     return localVar;
   }
 }

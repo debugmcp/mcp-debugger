@@ -25,11 +25,11 @@ public class InfiniteWait {
         // Sleep to allow time for debugger attach and class loading.
         // With suspend=y, JDI bridge sets breakpoints via ClassPrepareRequest;
         // after VM resume + class load, deferred breakpoints resolve automatically.
-        Thread.sleep(2000);               // line 27 — pause for breakpoint setup
-        int x = 42;                       // line 28
-        int y = 58;                       // line 29
-        int sum = compute(x, y);          // line 30 — calls compute
-        String msg = format("Sum", sum);  // line 31 — calls format
+        Thread.sleep(2000);               // line 28 — pause for breakpoint setup
+        int x = 42;                       // line 29
+        int y = 58;                       // line 30
+        int sum = compute(x, y);          // line 31 — calls compute
+        String msg = format("Sum", sum);  // line 32 — calls format
         System.out.println(msg);
     }
 }

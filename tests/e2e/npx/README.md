@@ -4,7 +4,7 @@ Tests for the packaged npm distribution artifact intended for npx/npm-exec usage
 
 ## What These Tests Do
 
-1. **Build the project** - Runs `pnpm build`
+1. **Verify build artifacts** - The tests do not build. `ensureWorkspaceBuilt()` checks that the root and mcp-debugger package `dist` output already exist (the `pretest:e2e:npx` hook runs `pnpm build` once before the suite) and throws `Workspace build output missing` if either is absent.
 2. **Create npm package** - Runs `npm pack` to create tarball
 3. **Install globally** - Installs the package from tarball
 4. **Test via global install** - Runs the MCP server using global installation and direct Node.js invocation (not npx)

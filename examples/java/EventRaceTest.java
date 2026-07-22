@@ -31,7 +31,7 @@ public class EventRaceTest {
 
         // Now reference LateLoadedHelper — triggers class loading
         // If a breakpoint was set in LateLoadedHelper, a ClassPrepareEvent fires
-        String msg = LateLoadedHelper.greet("World");  // line 33
+        String msg = LateLoadedHelper.greet("World");  // line 34
         System.out.println(msg);
 
         System.out.println("EventRaceTest done.");

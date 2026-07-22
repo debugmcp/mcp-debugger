@@ -1949,6 +1949,11 @@ public class JdiDapServer {
 
         private Value parseExpression() { return parseOr(); }
 
+        // Known limitation: this evaluator fuses parsing and evaluation, so the
+        // right-hand operand of || and && is always evaluated to consume its
+        // tokens even when Java's short-circuit semantics would skip it. Any
+        // side effects (e.g. method calls) in a short-circuited RHS still occur,
+        // unlike real Java. The final boolean result returned is still correct.
         private Value parseOr() {
             Value left = parseAnd();
             while (match(TT.OR)) {
@@ -1963,6 +1968,8 @@ public class JdiDapServer {
             return left;
         }
 
+        // Known limitation: see parseOr() above -- the RHS of && is always
+        // evaluated (for side effects too) even when short-circuited.
         private Value parseAnd() {
             Value left = parseEquality();
             while (match(TT.AND)) {
@@ -2089,6 +2096,11 @@ public class JdiDapServer {
                     String text = t.text;
                     // Strip L/l suffix
                     text = text.substring(0, text.length() - 1);
+                    if (text.startsWith("0x") || text.startsWith("0X")) {
+                        return vm.mirrorOf(Long.parseUnsignedLong(text.substring(2), 16));
+                    } else if (text.startsWith("0b") || text.startsWith("0B")) {
+                        return vm.mirrorOf(Long.parseUnsignedLong(text.substring(2), 2));
+                    }
                     return vm.mirrorOf(Long.parseLong(text));
                 }
                 case FLOAT: {

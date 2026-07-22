@@ -14,13 +14,13 @@ This document explains the AdapterPolicy pattern and how it relates to the main 
 - **Purpose**: Complete debug adapter implementation
 - **Scope**: Handles all DAP protocol communication and language runtime management
 - **Location**: `packages/adapter-<language>/`
-- **Examples**: `JavascriptDebugAdapter`, `PythonDebugAdapter`, `MockDebugAdapter`, `RustDebugAdapter`, `GoDebugAdapter`
+- **Examples**: `JavascriptDebugAdapter`, `PythonDebugAdapter`, `MockDebugAdapter`, `RustDebugAdapter`, `GoDebugAdapter`, `RubyDebugAdapter`, `JavaDebugAdapter`, `DotnetDebugAdapter`
 
 ### AdapterPolicy (Supporting Pattern)
 - **Purpose**: Language-specific policies for session management
 - **Scope**: Lightweight behaviors used by SessionManager and DAP proxy layer
 - **Location**: `packages/shared/src/interfaces/adapter-policy-*.ts`
-- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`
+- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`
 
 ## AdapterPolicy Interface
 
@@ -136,6 +136,7 @@ Client Request → Server → SessionManager
 | `DefaultAdapterPolicy` | `adapter-policy.ts` | `'default'` | `'default'` | No | No |
 | `PythonAdapterPolicy` | `adapter-policy-python.ts` | `'python'` | `'debugpy'` | No | No |
 | `JsDebugAdapterPolicy` | `adapter-policy-js.ts` | `'js-debug'` | `'pwa-node'` | Yes | Yes |
+| `RubyAdapterPolicy` | `adapter-policy-ruby.ts` | `'ruby'` | `'rdbg'` | No | No |
 | `RustAdapterPolicy` | `adapter-policy-rust.ts` | `'rust'` | `'lldb'` | No | No |
 | `GoAdapterPolicy` | `adapter-policy-go.ts` | `'go'` | `'dlv-dap'` | No | No |
 | `JavaAdapterPolicy` | `adapter-policy-java.ts` | `'java'` | `'java'` | No | No |
@@ -158,10 +159,10 @@ Client Request → Server → SessionManager
 - `resolveExecutablePath()` checks `PYTHON_PATH` env var, then defaults to `'python'` (Windows) or `'python3'` (Unix)
 - `validateExecutable()` spawns Python to detect Windows Store aliases
 - `extractLocalVariables()` filters out `special variables`, `function variables`, dunder variables, and `_pydev*` internals
-- `getLocalScopeName()` returns `['Locals']`
+- `getLocalScopeName()` returns `['Locals', 'Local']`
 
 **RustAdapterPolicy**:
-- `resolveExecutablePath()` prefers an explicitly provided path, then `CARGO_PATH` env var, otherwise returns `undefined` to let downstream adapter discovery decide. Despite the name, this does not resolve the vendored CodeLLDB path; actual adapter spawn path selection happens in `getAdapterSpawnConfig()`.
+- `resolveExecutablePath()` prefers an explicitly provided path, otherwise returns `undefined` to let downstream adapter discovery (codelldb-resolver.ts, which checks `CODELLDB_PATH`) decide. Despite the name, this does not resolve the vendored CodeLLDB path; actual adapter spawn path selection happens in `getAdapterSpawnConfig()`.
 - `validateExecutable()` checks filesystem existence of the candidate executable, then spawns it with `--version` and verifies stdout contains `codelldb`
 - `getAdapterSpawnConfig()` resolves a vendored CodeLLDB binary based on platform/arch
 - `getLocalScopeName()` returns `['Local', 'Locals']`
@@ -203,24 +204,7 @@ Session management classes use a `selectPolicy()` method to get the appropriate 
 ```typescript
 export class SessionManagerData extends SessionManagerCore {
   protected selectPolicy(language: string | DebugLanguage): AdapterPolicy {
-    switch (language) {
-      case DebugLanguage.PYTHON:
-        return PythonAdapterPolicy;
-      case DebugLanguage.JAVASCRIPT:
-        return JsDebugAdapterPolicy;
-      case DebugLanguage.RUST:
-        return RustAdapterPolicy;
-      case DebugLanguage.GO:
-        return GoAdapterPolicy;
-      case DebugLanguage.JAVA:
-        return JavaAdapterPolicy;
-      case DebugLanguage.DOTNET:
-        return DotnetAdapterPolicy;
-      case DebugLanguage.MOCK:
-        return MockAdapterPolicy;
-      default:
-        return DefaultAdapterPolicy;
-    }
+    return getPolicyForLanguage(language);
   }
 
   async getStackTrace(sessionId: string): Promise<StackFrame[]> {
@@ -236,6 +220,11 @@ export class SessionManagerData extends SessionManagerCore {
   }
 }
 ```
+
+The language → policy switch itself lives in `getPolicyForLanguage()`
+(`packages/shared/src/interfaces/adapter-policy-map.ts`), which is the single
+source of truth shared by `SessionManager`, `SessionStore`, and the DAP proxy
+worker so the mapping cannot drift between processes.
 
 ## Migration from Hardcoded Conditionals
 

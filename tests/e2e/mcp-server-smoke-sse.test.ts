@@ -60,7 +60,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           });
           
           // If still not killed, use SIGKILL
-          if (proc && !proc.killed) {
+          if (proc && proc.exitCode === null) {
             console.log('[SSE Smoke Test] Graceful shutdown failed, using SIGKILL...');
             proc.kill('SIGKILL');
           } else {

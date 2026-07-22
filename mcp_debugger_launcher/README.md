@@ -84,6 +84,7 @@ debug-mcp-server --help
 - **sse**: Server-Sent Events mode for HTTP-based communication
   - Default port: 3001
   - Custom port: Use `--port` option
+  - > **Deprecated:** SSE transport is deprecated in the debug-mcp-server and will be removed in a future release; the server prints a deprecation warning at startup. This launcher currently forwards only `stdio` and `sse`, so for HTTP-based transport invoke the server's `http` subcommand directly (`mcp-debugger http -p <port>`) until the launcher adds an `http` mode.
 
 ## Troubleshooting
 

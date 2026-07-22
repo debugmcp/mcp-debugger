@@ -73,7 +73,7 @@ class TestResultsAnalyzer {
     // Coverage summary if available
     if (results.coverageMap) {
       console.log('\nCoverage Summary:');
-      console.log('  (Run with --level=detailed for coverage breakdown)');
+      console.log('  (Detailed coverage breakdown not implemented)');
     }
   }
 

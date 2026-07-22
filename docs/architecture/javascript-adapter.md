@@ -10,7 +10,7 @@ Goals:
 
 ## Modular by default
 
-The MCP Debugger ships without auto-installing optional adapters. The adapter loader has a hardcoded known-adapter registry for all seven languages (mock, python, javascript, rust, go, java, dotnet), but not all are built by default. JavaScript is available as an optional adapter in a separate package:
+The MCP Debugger ships without auto-installing optional adapters. The adapter loader has a hardcoded known-adapter registry for all eight languages (mock, python, javascript, ruby, rust, go, java, dotnet), but not all are built by default. JavaScript is available as an optional adapter in a separate package:
 
 - Package name: `@debugmcp/adapter-javascript`
 - Factory export: `JavascriptAdapterFactory`
@@ -58,7 +58,7 @@ The shared model defines:
 The display name ("JavaScript/TypeScript") and default executable (`node`) are defined in the adapter implementation (`packages/adapter-javascript/`) and its factory metadata, not in the shared model itself. The shared model only carries the language enum value.
 
 Unit tests were updated to reflect the addition:
-- `tests/core/unit/session/models.test.ts` now expects seven languages (python, javascript, rust, go, java, dotnet, mock) and verifies inclusion of `javascript`.
+- `tests/core/unit/session/models.test.ts` now expects eight languages (python, javascript, ruby, rust, go, java, dotnet, mock) and verifies inclusion of `javascript`.
 
 ## Verification steps
 
@@ -104,7 +104,6 @@ Adapter exports include:
 - Utility re-exports include:
   - `resolveNodeExecutable` -- resolves the Node runtime path in a cross-platform, deterministic manner.
   - `detectTsRunners` -- detects available TypeScript runners (ts-node, tsx, etc.) in the environment.
-  - `transformConfig` -- transforms generic launch config into js-debug-specific configuration.
 
 The `packages/adapter-javascript/package.json` manifest includes:
 - `"exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } }` -- ESM import with type declarations

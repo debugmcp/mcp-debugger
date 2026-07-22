@@ -94,7 +94,7 @@ tests/
 │   └── utils/                 # Type guards, session migration
 │
 ├── e2e/                       # End-to-end tests
-│   ├── mcp-server-smoke-*.ts  # Per-language smoke tests (python, javascript, rust, go, java, dotnet)
+│   ├── mcp-server-smoke-*.ts  # Per-language smoke tests (python, javascript, ruby, rust, go, java, dotnet)
 │   ├── docker/                # Docker container tests (python, javascript, rust, entrypoint)
 │   └── npx/                   # NPX distribution tests (python, javascript)
 │

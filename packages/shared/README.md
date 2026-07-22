@@ -97,6 +97,7 @@ Everything below is exported from the package root (`import { ... } from '@debug
 | `CommandHandling` | type | How the adapter handles launch commands |
 | `DefaultAdapterPolicy` | class | Lightweight default/placeholder policy |
 | `PythonAdapterPolicy` | class | Python/debugpy policy |
+| `RubyAdapterPolicy` | class | Ruby/rdbg adapter policy |
 | `JsDebugAdapterPolicy` | class | JavaScript/js-debug policy |
 | `RustAdapterPolicy` | class | Rust/CodeLLDB policy |
 | `RustAdapterPolicyInterface` | type | Rust policy interface (for mocking) |
@@ -104,6 +105,7 @@ Everything below is exported from the package root (`import { ... } from '@debug
 | `JavaAdapterPolicy` | class | Java/JDI bridge policy |
 | `DotnetAdapterPolicy` | class | .NET/netcoredbg policy |
 | `MockAdapterPolicy` | class | Mock adapter policy for testing |
+| `getPolicyForLanguage` | function | Dispatch: returns the `AdapterPolicy` for a given `DebugLanguage` |
 
 ### DAP Client Behavior
 
@@ -119,7 +121,7 @@ Everything below is exported from the package root (`import { ... } from '@debug
 
 | Export | Kind | Description |
 |--------|------|-------------|
-| `DebugLanguage` | enum | Supported languages (Python, JavaScript, Rust, Go, Java, Dotnet, Mock) |
+| `DebugLanguage` | enum | Supported languages (Python, Ruby, JavaScript, Rust, Go, Java, Dotnet, Mock) |
 | `SessionState` | enum | Session states (CREATED → READY → RUNNING ⇄ PAUSED → STOPPED) |
 | `SessionLifecycleState` | enum | Coarse lifecycle (CREATED → ACTIVE → TERMINATED) |
 | `ExecutionState` | enum | Fine-grained execution state |
@@ -174,6 +176,17 @@ Everything below is exported from the package root (`import { ... } from '@debug
 | Export | Source | Description |
 |--------|--------|-------------|
 | `DebugProtocol` | `@vscode/debugprotocol` | VSCode Debug Adapter Protocol type namespace |
+
+### Logging-Safety Utilities
+
+| Export | Kind | Description |
+|--------|------|-------------|
+| `sanitizeEnvForLogging` | function | Sanitize a child-process environment map before logging |
+| `sanitizePayloadForLogging` | function | Sanitize an arbitrary payload before logging |
+| `sanitizeStderr` | function | Sanitize a stderr chunk before it reaches logs or tool errors |
+| `sanitizeStderrTail` | function | Sanitize the trailing tail of stderr output before it reaches logs or tool errors |
+
+These helpers ensure unsanitized child-process output and environment data never reach logs or tool error responses.
 
 ## Package Structure
 

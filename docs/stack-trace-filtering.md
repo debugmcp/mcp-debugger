@@ -8,6 +8,7 @@ The MCP Debugger Server now supports language-specific stack trace filtering to 
 - **Go**: Filters out `/runtime/` and `/testing/` frames by default (implements `filterStackFrames`)
 - **Java**: Filters out JDK internal frames by default (implements `filterStackFrames`)
 - **.NET/C#**: Filters out `System.*` and `Microsoft.*` runtime frames and sourceless frames by default
+- **Ruby**: Filters out `<internal:>` and `/gems/` frames by default (implements `filterStackFrames`)
 - **Python**: No filtering applied (shows all frames)
 - **Configurable**: Use `includeInternals: true` to see all frames
 

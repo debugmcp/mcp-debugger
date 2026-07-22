@@ -171,7 +171,8 @@ describe('Server Inspection Tools Tests', () => {
         };
       }
 
-      // The server now returns a success response with error message instead of throwing
+      // An unknown session makes validateSession throw McpError('Session not found'); the try/catch above
+      // normalizes that thrown error into the success:false shape asserted below.
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('Session not found: test-session');

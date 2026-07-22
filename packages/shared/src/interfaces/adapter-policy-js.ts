@@ -5,6 +5,7 @@
  * generic DAP flow in core code.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import * as path from 'path';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -376,8 +377,6 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     } else {
       // LAUNCH flow (default for MCP). Use adapter-configured policy; do not add parent attach-by-port afterward
       try {
-        // Dynamic import to avoid circular dependency issues
-        const path = await import('path');
         if (typeof baseLaunchConfig.program !== 'string' || !baseLaunchConfig.program.length) {
           baseLaunchConfig.program = scriptPath;
         }

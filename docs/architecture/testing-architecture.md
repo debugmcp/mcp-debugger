@@ -148,7 +148,7 @@ Cleanup: `afterAll` closes the MCP client and kills the server process. `afterEa
 
 ### STDIO Smoke Test Matrix
 
-Nine per-language STDIO smoke tests: Python, JavaScript, Rust, Go, Java (launch), Java (attach), Java (evaluate), Java (inner class), .NET. Each follows the standard lifecycle:
+Sixteen per-language STDIO smoke tests: Python, Python (attach), JavaScript, JavaScript (attach), Rust, Go, Java (launch), Java (attach), Java (evaluate), Java (inner class), Java (pause), Java (event race), Java (redefine), .NET, Ruby, Ruby (attach). Each follows the standard lifecycle:
 
 1. Create session → set breakpoint → start debugging
 2. Inspect: stack trace, scopes, variables
@@ -165,7 +165,7 @@ Two SSE test files test the SSE HTTP transport: Python over SSE (`mcp-server-smo
 
 **File:** `tests/e2e/comprehensive-mcp-tools.test.ts`
 
-Tests all 20 MCP tools across 7 languages (Python, JavaScript, Mock, Rust, Go, Java, Dotnet) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
+Tests all 20 MCP tools across 8 languages (Python, JavaScript, Mock, Rust, Go, Java, Dotnet, Ruby) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
 
 ### Docker E2E
 
@@ -252,7 +252,7 @@ Protocol-level correctness checks. `breakpoint-messages/` contains Python script
 - CLI entry points (`cli-entry.ts`) — process-level stdio handling, not unit-testable
 - Proxy entry point (`dap-proxy-entry.ts`) — runs as a separate process
 - Mock adapter process (`mock-adapter-process.ts`) — tested via E2E, not importable
-- Module-init side-effects (`batteries-included.ts`) — only import statements
+- Module-init side-effects (`batteries-included.ts`) — static adapter imports plus a module-level side effect that registers each adapter factory into a `globalThis[GLOBAL_KEY]` registry with language-based deduplication
 - Barrel/index exports — prevent duplicate coverage counting
 - Factory pattern files with minimal logic
 

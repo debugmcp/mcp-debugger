@@ -16,25 +16,6 @@ import { createMockFileSystem, createMockLogger } from '../../../test-utils/help
 import { IAdapterRegistry } from '@debugmcp/shared';
 import { createMockAdapterRegistry as createCentralizedMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
-// Mock modules that SessionManager may import transitively during tests
-vi.mock('./dist/implementations/index.js', () => ({
-  FileSystemImpl: vi.fn(),
-  ProcessManagerImpl: vi.fn(),
-  NetworkManagerImpl: vi.fn(),
-  ProxyProcessLauncherImpl: vi.fn(),
-})); 
-
-vi.mock('./dist/proxy/proxy-manager.js', () => ({
-  ProxyManager: vi.fn().mockImplementation(function() { return ({
-    on: vi.fn(),
-    start: vi.fn().mockResolvedValue(undefined),
-    stop: vi.fn().mockResolvedValue(undefined),
-    sendDapRequest: vi.fn().mockResolvedValue({ success: true }),
-    isRunning: vi.fn().mockReturnValue(false),
-    getCurrentThreadId: vi.fn().mockReturnValue(null),
-  }); }),
-}));
-
 /**
  * Create a mock environment for testing
  */

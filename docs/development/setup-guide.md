@@ -106,6 +106,7 @@ mcp-debugger/
 │   ├── adapter-go/        # Go adapter (Delve)
 │   ├── adapter-java/      # Java debug adapter (JDI)
 │   ├── adapter-dotnet/    # .NET debug adapter (netcoredbg)
+│   ├── adapter-ruby/      # Ruby debug adapter (rdbg)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
@@ -162,7 +163,15 @@ npm run lint:fix
 node dist/index.js stdio
 ```
 
-#### SSE Mode
+#### HTTP Mode (Streamable HTTP, recommended)
+
+```bash
+node dist/index.js http -p 3001
+```
+
+#### SSE Mode (deprecated)
+
+SSE transport is deprecated -- use the `http` subcommand instead.
 
 ```bash
 node dist/index.js sse -p 3001
@@ -171,10 +180,10 @@ node dist/index.js sse -p 3001
 #### With Debug Logging
 
 ```bash
-node dist/index.js sse -p 3001 --log-level debug --log-file ./logs/debug.log
+node dist/index.js http -p 3001 --log-level debug --log-file ./logs/debug.log
 ```
 
-Note: Console output is unconditionally silenced at process startup for all transport modes (STDIO and SSE) to prevent any stray output from corrupting protocol communication. Use `--log-file` to capture logs.
+Note: Console output is unconditionally silenced at process startup for all transport modes (STDIO, HTTP, and SSE) to prevent any stray output from corrupting protocol communication. Use `--log-file` to capture logs.
 
 ## VS Code Setup
 

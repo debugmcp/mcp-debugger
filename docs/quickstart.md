@@ -4,8 +4,8 @@ This guide will help you get started with `mcp-debugger` quickly, using real exa
 
 ## Prerequisites
 
-- **Node.js** (v18+) and npm installed
-- **Python** (3.7+) with `debugpy` installed
+- **Node.js** (v22+) and npm installed
+- **Python** (3.8+) with `debugpy` installed
 - **MCP Client** (Claude Desktop, or custom implementation)
 
 ## Installation

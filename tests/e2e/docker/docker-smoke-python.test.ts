@@ -23,6 +23,13 @@ describe.skipIf(SKIP_DOCKER)('Docker: Python Debugging Smoke Tests', () => {
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;
   let containerName: string | null = null;
+  let anyFailed = false;
+
+  afterEach((ctx) => {
+    if (ctx.task.result?.state === 'fail') {
+      anyFailed = true;
+    }
+  });
 
   beforeAll(async () => {
     console.log('[Docker Python] Building Docker image...');
@@ -59,7 +66,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: Python Debugging Smoke Tests', () => {
     }
     
     // Print Docker logs for debugging if test failed
-    if (containerName && process.env.VITEST_FAILED) {
+    if (containerName && anyFailed) {
       console.log('[Docker Python] Container logs:');
       const logs = await getDockerLogs(containerName);
       console.log(logs);
