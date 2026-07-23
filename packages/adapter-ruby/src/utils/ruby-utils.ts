@@ -204,7 +204,8 @@ export async function getRubyVersion(rubyPath: string): Promise<string | null> {
     child.stderr?.on('data', (data) => { output += data.toString(); });
 
     child.on('error', () => resolve(null));
-    child.on('exit', (code) => {
+    // 'close' (not 'exit') so stdio is fully drained before we read `output`
+    child.on('close', (code) => {
       if (code !== 0 || output.length === 0) {
         resolve(null);
         return;
@@ -232,7 +233,8 @@ export async function getRdbgVersion(rdbgPath: string): Promise<string | null> {
     child.stderr?.on('data', (data) => { output += data.toString(); });
 
     child.on('error', () => resolve(null));
-    child.on('exit', (code) => {
+    // 'close' (not 'exit') so stdio is fully drained before we read `output`
+    child.on('close', (code) => {
       if (code !== 0 || output.length === 0) {
         resolve(null);
         return;

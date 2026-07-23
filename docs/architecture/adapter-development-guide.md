@@ -133,7 +133,7 @@ Based on `packages/adapter-go/tsconfig.json`:
 
 ### 4. Implement `IAdapterFactory`
 
-The factory creates adapter instances, provides metadata, and validates the environment. Either implement `IAdapterFactory` directly (as the Go reference and most adapters do) or extend the abstract `BaseAdapterFactory` (exported from `@debugmcp/shared`), which provides default `getMetadata()`, a default `validate()`, and version-compat helpers (as `JavascriptAdapterFactory` does).
+The factory creates adapter instances, provides metadata, and validates the environment. Either implement `IAdapterFactory` directly (as the Go reference and most adapters do) or extend the abstract `BaseAdapterFactory` (exported from `@debugmcp/shared`), which provides default `getMetadata()` and a default `validate()` (as `JavascriptAdapterFactory` does).
 
 **Interface** (3 required methods):
 ```typescript
@@ -275,7 +275,8 @@ export * from './utils/go-utils.js';
 
 import { GoAdapterFactory as _GoAdapterFactory } from './go-adapter-factory.js';
 
-// Default export required by mcp-debugger dynamic loader
+// Convenience default export — NOT used by the mcp-debugger dynamic loader,
+// which imports the named {Language}AdapterFactory export only
 export default {
   name: 'go',
   factory: _GoAdapterFactory

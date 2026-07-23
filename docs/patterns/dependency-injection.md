@@ -137,8 +137,10 @@ export interface IProcessManager {
   exec(command: string): Promise<{ stdout: string; stderr: string }>;
 }
 
-// Process launching (used by AdapterDependencies — note this is a different interface)
-// IProxyProcessLauncher is in process-interfaces.ts and is what adapters receive
+// Process launching (note this is a different interface from IProcessManager)
+// IProxyProcessLauncher is in process-interfaces.ts and is consumed by
+// ProxyManagerFactory/ProxyManager — adapters receive AdapterDependencies
+// (fileSystem, logger, environment, networkManager?) instead
 // (see "Process-Specific Interfaces" below for its full definition).
 // IProcessManager is in external-dependencies.ts and is the lower-level system abstraction.
 

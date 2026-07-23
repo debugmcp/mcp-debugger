@@ -66,7 +66,7 @@ class SessionManager {
   async stepOut(sessionId: string): Promise<DebugResult>
   async continue(sessionId: string): Promise<DebugResult>
   async pause(sessionId: string): Promise<DebugResult>
-  async evaluateExpression(sessionId: string, expression: string, frameId?: number, context?: string): Promise<EvaluateResult>
+  async evaluateExpression(sessionId: string, expression: string, frameId?: number, timeoutMs?: number): Promise<EvaluateResult>
   async attachToProcess(sessionId: string, attachConfig: { port?: number; host?: string; processId?: number | string; timeout?: number; sourcePaths?: string[]; stopOnEntry?: boolean; justMyCode?: boolean; verifyTimeout?: number; }): Promise<DebugResult>
   async detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>

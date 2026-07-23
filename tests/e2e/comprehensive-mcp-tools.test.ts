@@ -569,7 +569,7 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
             const stepRes = await callToolSafely(mcpClient!, 'step_out', { sessionId: currentSessionId });
             await new Promise(r => setTimeout(r, 2000));
             // step_out may fail if we're at the top frame — that's acceptable
-            const ok = stepRes.success !== false || !stepRes.message?.includes('error');
+            const ok = stepRes.success !== false || (!!stepRes.message && !stepRes.message.includes('error'));
             record('step_out', lang.language, ok ? 'PASS' : 'FAIL',
               `success=${stepRes.success}, msg=${(stepRes.message ?? '').slice(0, 100)}`,
               Date.now() - t0);
