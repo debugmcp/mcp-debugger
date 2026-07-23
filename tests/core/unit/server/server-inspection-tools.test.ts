@@ -146,33 +146,18 @@ describe('Server Inspection Tools Tests', () => {
       // Mock getSession to return null - session not found
       mockSessionManager.getSession.mockReturnValue(null);
 
-      let result;
-      try {
-        result = await callToolHandler({
-          method: 'tools/call',
-          params: {
-            name: 'get_variables',
-            arguments: {
-              sessionId: 'test-session',
-              scope: 100
-            }
+      // Session-lifecycle failures must surface as structured results, not thrown protocol errors
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'get_variables',
+          arguments: {
+            sessionId: 'test-session',
+            scope: 100
           }
-        });
-      } catch (error) {
-        // If error is thrown, convert it to the expected format
-        result = {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error.message
-            })
-          }]
-        };
-      }
+        }
+      });
 
-      // An unknown session makes validateSession throw McpError('Session not found'); the try/catch above
-      // normalizes that thrown error into the success:false shape asserted below.
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('Session not found: test-session');
@@ -210,29 +195,15 @@ describe('Server Inspection Tools Tests', () => {
     it('should handle missing session', async () => {
       mockSessionManager.getSession.mockReturnValue(null);
 
-      let result;
-      try {
-        result = await callToolHandler({
-          method: 'tools/call',
-          params: {
-            name: 'get_stack_trace',
-            arguments: { sessionId: 'non-existent' }
-          }
-        });
-      } catch (error) {
-        // If error is thrown, convert it to the expected format
-        result = {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error.message
-            })
-          }]
-        };
-      }
+      // Session-lifecycle failures must surface as structured results, not thrown protocol errors
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'get_stack_trace',
+          arguments: { sessionId: 'non-existent' }
+        }
+      });
 
-      // The server now returns a success response with error message
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('Session not found: non-existent');
