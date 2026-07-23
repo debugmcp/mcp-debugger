@@ -4,10 +4,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { Breakpoint } from '@debugmcp/shared';
+import { Breakpoint, SessionLifecycleState } from '@debugmcp/shared';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import {
@@ -504,13 +503,37 @@ describe('Server Control Tools Tests', () => {
     it('should handle pause on non-existent session', async () => {
       mockSessionManager.getSession.mockReturnValue(null);
 
-      await expect(callToolHandler({
+      const result = await callToolHandler({
         method: 'tools/call',
         params: {
           name: 'pause_execution',
           arguments: { sessionId: 'non-existent' }
         }
-      })).rejects.toThrow(McpError);
+      });
+
+      // Session-lifecycle failures surface as structured results, not protocol errors
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('Session not found: non-existent');
+    });
+
+    it('should handle pause on terminated session', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.TERMINATED
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'pause_execution',
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('Session is terminated: test-session');
     });
   });
 
@@ -545,13 +568,37 @@ describe('Server Control Tools Tests', () => {
     it('should handle list_threads on non-existent session', async () => {
       mockSessionManager.getSession.mockReturnValue(null);
 
-      await expect(callToolHandler({
+      const result = await callToolHandler({
         method: 'tools/call',
         params: {
           name: 'list_threads',
           arguments: { sessionId: 'test-session' }
         }
-      })).rejects.toThrow(McpError);
+      });
+
+      // Session-lifecycle failures surface as structured results, not protocol errors
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('Session not found: test-session');
+    });
+
+    it('should handle list_threads on terminated session', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.TERMINATED
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_threads',
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('Session is terminated: test-session');
     });
 
     it('should reject list_threads with missing sessionId', async () => {

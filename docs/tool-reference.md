@@ -767,8 +767,10 @@ Tools can return errors in two formats:
 2. **Application-level failures**: JSON payloads with `{ "success": false, "error": "..." }`. Most tool failures use this format, where the HTTP/transport layer succeeds but the operation itself failed.
 
 ### Common Error Codes (MCP transport errors)
-- `-32603`: Internal error (feature not implemented, session not found, etc.)
-- `-32602`: Invalid parameters
+- `-32603`: Internal error (feature not implemented, unexpected failures)
+- `-32602`: Invalid parameters (e.g., missing `sessionId`)
+
+Session-lifecycle failures (unknown/terminated session, proxy not running) are application-level failures: they return `{ "success": false, "error": "..." }` rather than an MCP transport error.
 
 ### MCP Error Response Format
 ```json

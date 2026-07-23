@@ -612,11 +612,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       });
     });
 
-    it('handlePause throws McpError when session validation fails', async () => {
+    it('handlePause returns success:false when session validation fails', async () => {
       mockSessionManager.pause = vi.fn().mockRejectedValue(new Error('some pause error'));
-      (server as any).validateSession = vi.fn().mockImplementation(() => { throw new McpError(McpErrorCode.InvalidParams, 'Session not found: test-session'); });
+      mockSessionManager.getSession.mockReturnValue(null);
 
-      await expect((server as any).handlePause({ sessionId: 'test-session' })).rejects.toThrow('Session not found');
+      const result = await (server as any).handlePause({ sessionId: 'test-session' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('Session not found: test-session');
     });
   });
 
@@ -782,7 +786,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(payload.threads[0]).toEqual({ id: 1, name: 'main' });
     });
 
-    it('should re-throw McpError subclasses (SessionTerminatedError etc.)', async () => {
+    it('converts typed session errors (SessionTerminatedError etc.) into success:false results', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
@@ -790,8 +794,11 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       const { SessionTerminatedError } = await import('../../src/errors/debug-errors');
       mockSessionManager.listThreads = vi.fn().mockRejectedValue(new SessionTerminatedError('test-session'));
 
-      await expect((server as any).handleListThreads({ sessionId: 'test-session' }))
-        .rejects.toThrow(McpError);
+      const result = await (server as any).handleListThreads({ sessionId: 'test-session' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('Session is terminated: test-session');
     });
 
     it('should throw McpError for unknown errors', async () => {
@@ -866,26 +873,32 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(payload.state).toBe('paused');
     });
 
-    it('re-throws SessionTerminatedError (extends McpError)', async () => {
+    it('converts SessionTerminatedError into a success:false result', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
       mockSessionManager.pause = vi.fn().mockRejectedValue(new SessionTerminatedError('test-session'));
 
-      await expect((server as any).handlePause({ sessionId: 'test-session' }))
-        .rejects.toThrow(McpError);
+      const result = await (server as any).handlePause({ sessionId: 'test-session' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('Session is terminated: test-session');
     });
 
-    it('re-throws ProxyNotRunningError (extends McpError)', async () => {
+    it('converts ProxyNotRunningError into a success:false result', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
       mockSessionManager.pause = vi.fn().mockRejectedValue(new ProxyNotRunningError('test-session'));
 
-      await expect((server as any).handlePause({ sessionId: 'test-session' }))
-        .rejects.toThrow(McpError);
+      const result = await (server as any).handlePause({ sessionId: 'test-session' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('test-session');
     });
 
     it('wraps generic errors as McpError', async () => {

@@ -273,11 +273,13 @@ export class DebugMcpServer {
   private validateSession(sessionId: string): void {
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
-      throw new McpError(McpErrorCode.InvalidParams, `Session not found: ${sessionId}`);
+      // Typed subclass of McpError (same code/message) so per-tool catch blocks
+      // can convert session-lifecycle failures into {success: false} results
+      throw new SessionNotFoundError(sessionId);
     }
     // Check the new lifecycle state instead of legacy state
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
-      throw new McpError(McpErrorCode.InvalidRequest, `Session is terminated: ${sessionId}`);
+      throw new SessionTerminatedError(sessionId);
     }
   }
 
@@ -1282,12 +1284,12 @@ export class DebugMcpServer {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       this.logger.error('Failed to pause execution', { error });
-      if (error instanceof McpError) throw error;
       if (error instanceof SessionTerminatedError ||
           error instanceof SessionNotFoundError ||
           error instanceof ProxyNotRunningError) {
         return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
       }
+      if (error instanceof McpError) throw error;
       throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
     }
   }
@@ -1299,6 +1301,11 @@ export class DebugMcpServer {
       return { content: [{ type: 'text', text: JSON.stringify({ success: true, threads }) }] };
     } catch (error) {
       this.logger.error('Failed to list threads', { error });
+      if (error instanceof SessionTerminatedError ||
+          error instanceof SessionNotFoundError ||
+          error instanceof ProxyNotRunningError) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+      }
       if (error instanceof McpError) throw error;
       throw new McpError(McpErrorCode.InternalError, `Failed to list threads: ${(error as Error).message}`);
     }
@@ -1428,6 +1435,11 @@ export class DebugMcpServer {
       };
     } catch (error) {
       this.logger.error('Failed to get source context', { error });
+      if (error instanceof SessionTerminatedError ||
+          error instanceof SessionNotFoundError ||
+          error instanceof ProxyNotRunningError) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+      }
       if (error instanceof McpError) throw error;
       throw new McpError(McpErrorCode.InternalError, `Failed to get source context: ${(error as Error).message}`);
     }
