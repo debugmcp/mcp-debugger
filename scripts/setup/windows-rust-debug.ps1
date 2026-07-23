@@ -8,11 +8,12 @@
   bundled Rust examples, and optionally runs the Rust smoke test suite.
 
 .PARAMETER UpdateUserPath
-  When supplied, the script permanently appends rustup's self-contained GNU bin
-  directory (which hosts dlltool.exe and ld.exe) to the current user's PATH and
-  sets the DLLTOOL user environment variable. Without this switch, the script
-  only amends the PATH for the current PowerShell session and prints manual
-  instructions for the user.
+  When supplied, the script permanently appends the directory containing the
+  preferred dlltool.exe -- the MSYS2 MinGW bin directory when the MSYS2/MinGW-w64
+  toolchain could be provisioned, otherwise rustup's self-contained GNU bin
+  directory -- to the current user's PATH, and sets the DLLTOOL user environment
+  variable. Without this switch, the script only amends the PATH for the current
+  PowerShell session and prints manual instructions for the user.
 
 .PARAMETER SkipBuild
   Skip building the Rust examples. Useful when just validating dependencies.

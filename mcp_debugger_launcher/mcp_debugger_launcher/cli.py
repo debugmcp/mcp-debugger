@@ -105,7 +105,7 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
     # Check for conflicting options
     if docker and npm:
         print("❌ Error: Cannot specify both --docker and --npm", file=sys.stderr)
-        return 1
+        sys.exit(1)
     
     # Detect available runtimes
     print("🚀 debug-mcp-server Launcher")
@@ -119,34 +119,34 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
         if not runtimes["docker"]["available"]:
             print("\n❌ Error: Docker is not installed or not available", file=sys.stderr)
             print_installation_help()
-            return 1
+            sys.exit(1)
         if "daemon not running" in (runtimes["docker"]["version"] or ""):
             print("\n❌ Error: Docker daemon is not running", file=sys.stderr)
             print("   Please start Docker Desktop and try again.", file=sys.stderr)
-            return 1
+            sys.exit(1)
         runtime = "docker"
     elif npm:
         if not runtimes["nodejs"]["available"]:
             print("\n❌ Error: Node.js is not installed", file=sys.stderr)
             print_installation_help()
-            return 1
+            sys.exit(1)
         if not runtimes["nodejs"]["npx_available"]:
             print("\n❌ Error: npx is not available", file=sys.stderr)
             print("   This usually comes with Node.js. Try reinstalling Node.js.", file=sys.stderr)
-            return 1
+            sys.exit(1)
         runtime = "npx"
     else:
         # Auto-detect
         if verbose:
             print_runtime_status(runtimes, verbose=True)
-        
+
         runtime = RuntimeDetector.get_recommended_runtime(runtimes)
-        
+
         if not runtime:
             print("\n❌ No suitable runtime found!", file=sys.stderr)
             print_runtime_status(runtimes, verbose=False)
             print_installation_help()
-            return 1
+            sys.exit(1)
     
     # Display what we're going to do
     print(f"\n🎯 Mode: {mode.upper()}")
@@ -165,18 +165,18 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
             if mode == "sse" and port:
                 cmd.extend(["--port", str(port)])
             print(f"\n🔍 Would execute: {' '.join(cmd)}")
-            return 0
-        
+            sys.exit(0)
+
         # Check if we need to provide installation instructions
         if not runtimes["nodejs"]["package_accessible"]:
             print("\n📦 Package not installed locally. npx will download it automatically.")
             print("   This may take a moment on first run...\n")
-        
+
         print("\n" + "─" * 40)
         print("Starting debug-mcp-server...")
         print("─" * 40 + "\n")
-        
-        return launcher.launch_with_npx(mode, port)
+
+        sys.exit(launcher.launch_with_npx(mode, port))
         
     elif runtime == "docker":
         if dry_run:
@@ -188,15 +188,15 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
             if mode == "sse" and port:
                 cmd.extend(["--port", str(port)])
             print(f"\n🔍 Would execute: {' '.join(cmd)}")
-            return 0
-        
+            sys.exit(0)
+
         print("\n" + "─" * 40)
         print("Starting debug-mcp-server...")
         print("─" * 40 + "\n")
-        
-        return launcher.launch_with_docker(mode, port)
-    
-    return 0
+
+        sys.exit(launcher.launch_with_docker(mode, port))
+
+    sys.exit(0)
 
 if __name__ == "__main__":
     sys.exit(main())

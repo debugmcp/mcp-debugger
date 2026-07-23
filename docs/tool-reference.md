@@ -35,7 +35,7 @@ Creates a new debugging session.
 
 **Parameters:**
 - `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. The default fallback languages (when dynamic discovery is unavailable) are `"python"` and `"mock"`. When all adapters are available, the full list is: `"python"`, `"ruby"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are discoverable at runtime.
-- `name` (string, optional): A descriptive name for the debug session. Defaults to `"session-<8 chars>"` (e.g., `"session-a4d1acc8"`).
+- `name` (string, optional): A descriptive name for the debug session. Defaults to `"<language>-debug-<timestamp>"` (e.g., `"python-debug-1711500000000"`), built from the session language and `Date.now()`.
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 
 **Response:**
@@ -129,6 +129,7 @@ Sets a breakpoint in a source file.
 - `file` (string, required): Path to the source file (absolute or relative to project root).
 - `line` (number, required): Line number where to set breakpoint (1-indexed).
 - `condition` (string, optional): Conditional expression for the breakpoint *(not verified to work)*.
+- `suspendPolicy` (string, optional): Suspend policy when the breakpoint is hit — `"all"` suspends all threads (default), `"thread"` suspends only the event thread. Only supported by the Java/JDI adapter.
 
 **Response:**
 ```json
@@ -557,6 +558,7 @@ Evaluates an expression in the context of the current debug session.
 - `sessionId` (string, required): The ID of the debug session.
 - `expression` (string, required): The expression to evaluate.
 - `frameId` (number, optional): Stack frame ID for context. If not provided, automatically uses the current (top) frame.
+- `timeout` (number, optional): Maximum time in milliseconds to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee.
 
 **Response:**
 ```json
@@ -713,6 +715,7 @@ Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redef
 - `sessionId` (string, required): The debug session ID (must be an active Java session)
 - `classesDir` (string, required): Absolute path to compiled classes directory (e.g., `build/classes/java/main/`)
 - `sinceTimestamp` (number, optional): Unix timestamp in milliseconds. Only redefine `.class` files modified after this time. `0` or omitted = scan all files.
+- `timeout` (number, optional): Maximum time in milliseconds to wait for the redefinition to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once.
 
 **Response:**
 ```json

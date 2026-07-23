@@ -65,19 +65,28 @@ Here's a real example of debugging a Python script with a bug:
 
 ```python
 # swap_vars.py
+# A simple script that swaps two variables, with an intentional bug for debugging.
+
 def swap_variables(a, b):
     print(f"Initial values: a = {a}, b = {b}")
+    # Intentionally buggy swap logic for demonstration
+    # Correct logic would use a temporary variable: temp = a; a = b; b = temp
+    # Or Python's tuple assignment: a, b = b, a
+    
     a = b  # Bug: 'a' loses its original value here
     b = a  # Bug: 'b' gets the new value of 'a' (which is original 'b')
+    
     print(f"Swapped values: a = {a}, b = {b}")
     return a, b
 
 def main():
     x = 10
     y = 20
+    
     print("Starting variable swap demo...")
     swapped_x, swapped_y = swap_variables(x, y)
     
+    # Verification
     if swapped_x == 20 and swapped_y == 10:
         print("Swap successful!")
     else:
@@ -114,16 +123,16 @@ Set a breakpoint where the bug occurs:
 {
   "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
   "file": "swap_vars.py",
-  "line": 4
+  "line": 10
 }
 // Response:
 {
   "success": true,
   "breakpointId": "28e06119-619e-43c0-b029-339cec2615df",
   "file": "C:\\path\\to\\swap_vars.py",
-  "line": 4,
+  "line": 10,
   "verified": false,
-  "message": "Breakpoint set at C:\\path\\to\\swap_vars.py:4"
+  "message": "Breakpoint set at C:\\path\\to\\swap_vars.py:10"
 }
 ```
 
@@ -164,21 +173,21 @@ Set a breakpoint where the bug occurs:
       "id": 3,
       "name": "swap_variables",
       "file": "C:\\path\\to\\swap_vars.py",
-      "line": 4,
+      "line": 10,
       "column": 1
     },
     {
       "id": 4,
       "name": "main",
       "file": "C:\\path\\to\\swap_vars.py",
-      "line": 13,
+      "line": 21,
       "column": 1
     },
     {
       "id": 2,
       "name": "<module>",
       "file": "C:\\path\\to\\swap_vars.py",
-      "line": 21,
+      "line": 30,
       "column": 1
     }
   ],
@@ -372,7 +381,7 @@ You can also evaluate arbitrary expressions in the current debug context:
 
 ## Fully Implemented Features
 
-All 20 tools are fully implemented, including:
+All 21 tools are fully implemented, including:
 
 - **pause_execution**: Sends a DAP pause request and returns immediately; paused state is updated asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
 - **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. When `frameId` is not specified, the server infers it by fetching the stack trace and using the topmost frame -- this works reliably only when a single frame exists or the top frame is the desired context. Callers should provide `frameId` explicitly when debugging code with multiple stack frames. Expressions with side effects are allowed (can modify program state).
@@ -387,4 +396,4 @@ All 20 tools are fully implemented, including:
 
 ---
 
-*Last updated: 2026-03-21 - All 20 tools including list_threads, pause_execution, and evaluate_expression are fully implemented (v0.19.0)*
+*Last updated: 2026-03-21 - All 21 tools including list_threads, pause_execution, and evaluate_expression are fully implemented (v0.23.0)*

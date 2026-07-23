@@ -365,7 +365,7 @@ sequenceDiagram
   "name": "create_debug_session",
   "inputSchema": {
     "properties": {
-      "language": { "enum": ["python", "javascript", "rust", "go", "java", "dotnet", "mock"] },
+      "language": { "enum": ["python", "ruby", "javascript", "rust", "go", "java", "dotnet", "mock"] },
       "executablePath": { "type": "string" }
     }
   }

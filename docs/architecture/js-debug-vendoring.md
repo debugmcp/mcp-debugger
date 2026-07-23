@@ -100,7 +100,7 @@ try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch { /* optional CJ
 
 // NEW: Search-and-copy support JS sidecars from anywhere in the extracted tree
 const supportTargets = new Set(['bootloader.js', 'hash.js', 'watchdog.js']);
-const supportFiles = await findAllByBasename(path.dirname(found.abs), supportTargets);
+const supportFiles = await findAllByBasename(extractDir, supportTargets);
 
 // Copy any found support files to the vendor root, preserving basename
 for (const supportSrc of supportFiles) {

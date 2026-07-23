@@ -76,7 +76,8 @@ Here's the recommended configuration for your MCP settings file:
         "get_scopes",
         "evaluate_expression",
         "get_source_context",
-        "list_threads"
+        "list_threads",
+        "redefine_classes"
       ],
       "disabled": false,
       "timeout": 60

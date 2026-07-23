@@ -156,7 +156,7 @@ npx vitest run tests/e2e/npx/  # NPX smoke tests
 
 The smoke tests provide comprehensive coverage of:
 1. **Transport Methods**: stdio, SSE, JavaScript-SSE, containerized stdio
-2. **Language Adapters**: All 7 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Mock)
+2. **Language Adapters**: All 8 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Ruby, Mock)
 3. **Path Resolution**: Different working directories, path translation, absolute vs relative paths
 4. **Environment Handling**: Container environment variables, volume mounts
 5. **Error Scenarios**: Proper cleanup on failure, detailed error logging

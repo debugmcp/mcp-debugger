@@ -40,7 +40,7 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 
 ### Useful environment flags
 
-- `CODELLDB_VERSION`: override the release tag (the runtime resolver defaults to `1.11.8` when reading vendored version metadata fails)
+- `CODELLDB_VERSION`: override the release tag (downloaded by the vendor script, which defaults to `1.11.8`)
 - `CODELLDB_FORCE_REBUILD=true`: ignore cached binaries and re-download
 - `CODELLDB_PLATFORMS=win32-x64,linux-x64,linux-arm64,darwin-x64,darwin-arm64`: vendor specific platforms (comma-separated)
 - `CODELLDB_VENDOR_ALL=false`: opt out of the "vendor every platform" default and fall back to host-only downloads
@@ -161,7 +161,8 @@ Our test suite uses `tests/e2e/rust-example-utils.ts` to make sure every rust sm
    ```
 2. **Resolve the correct binary path for `start_debugging`.** Breakpoints should always reference the `.rs` source file (absolute paths avoid MCP resolution issues), but `start_debugging.scriptPath` must point to the compiled artifact:
    - Windows GNU: `examples/rust/<name>/target/x86_64-pc-windows-gnu/debug/<name>.exe`
-   - Windows MSVC fallback: `examples/rust/<name>/target/debug/<name>.exe`
+   - Windows MSVC: `examples/rust/<name>/target/x86_64-pc-windows-msvc/debug/<name>.exe`
+   - Windows generic fallback: `examples/rust/<name>/target/debug/<name>.exe`
    - Unix-like hosts: `examples/rust/<name>/target/debug/<name>`
 
    Tokio/async builds use exactly the same rule—the helper’s `prepareRustExample('async_example')` just compiles a different crate and returns `{ sourcePath, binaryPath }` so the smoke tests can reuse those paths.

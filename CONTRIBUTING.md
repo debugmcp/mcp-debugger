@@ -281,6 +281,7 @@ mcp-debugger/
 ├── packages/               # Monorepo workspace packages
 │   ├── shared/            # Shared interfaces, types, and utilities
 │   ├── adapter-python/    # Python debug adapter (debugpy)
+│   ├── adapter-ruby/      # Ruby debug adapter (rdbg/debug gem)
 │   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
 │   ├── adapter-rust/      # Rust adapter (CodeLLDB)
 │   ├── adapter-go/        # Go adapter (Delve)
@@ -312,7 +313,7 @@ mcp-debugger/
 - **DAP Proxy**: Handles communication with debug adapters via DAP protocol
 - **Adapter Registry**: Dynamically loads and manages language-specific adapters
 - **Adapter Policies**: Language-specific behavior via policy pattern
-- **MCP Tools**: Implements the 20 MCP protocol tools
+- **MCP Tools**: Implements the 21 MCP protocol tools
 
 ## 🏃 Running the Demo
 

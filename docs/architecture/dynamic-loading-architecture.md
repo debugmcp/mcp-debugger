@@ -1,6 +1,6 @@
 # Dynamic Loading Architecture
 
-Status: v0.19.0
+Status: v0.23.0
 Scope: Adapter discovery, lazy loading, caching, error handling, and container considerations
 
 ## Overview
@@ -59,7 +59,7 @@ cache.set(language, factory);
   - Registers the loaded factory and immediately uses it
 - Provides:
   - `getSupportedLanguages()` for currently registered factories
-  - `listLanguages()` returns registered languages plus the hardcoded known-adapter catalog entries (not true filesystem or package discovery) when dynamic loading is enabled (not just installed adapters)
+  - `listLanguages()` returns statically registered languages unioned with the adapters the loader reports as installed (each hardcoded catalog entry is probed via a real dynamic import to set install status). Known-but-uninstalled catalog entries are excluded unless statically registered.
   - `listAvailableAdapters()` for installed metadata (name, package, description)
 - Enforces instance limits and auto-dispose timers
 
@@ -146,7 +146,7 @@ sequenceDiagram
 - Preloading vs Lazy:
   - Prefer lazy for most cases to keep cold-start minimal
   - Calling `listLanguages()` early probes discoverability/availability, but actual registry registration and adapter initialization still occur on `create(...)` or explicit `loadAdapter(...)` paths. To truly preload, construct sessions or call `loadAdapter()` on startup if your environment benefits from it.
-  - **Container mode exception**: When `MCP_CONTAINER=true`, startup pre-registers known adapters (mock, python, javascript, rust, go, java) via `tryRegister` calls in `dependencies.ts`, so the first `create(...)` call does not incur a dynamic import cost. Note that dotnet is not pre-registered in container mode.
+  - **Container mode exception**: When `MCP_CONTAINER=true`, startup pre-registers known adapters (mock, python, javascript, ruby, rust, go, java) via `tryRegister` calls in `dependencies.ts`, so the first `create(...)` call does not incur a dynamic import cost. Note that dotnet is not pre-registered in container mode.
 
 ## Container Considerations
 
@@ -185,7 +185,7 @@ sequenceDiagram
   - Run `DEBUG=mcp:*` in your client environment if supported
 - Verify adapter presence:
   - `npm ls @debugmcp/adapter-*`
-  - Call `list_supported_languages` tool to see what the server reports. Note that this tool may include known but uninstalled adapters (marked with `installed: false`) when dynamic loading is enabled, since it merges the hardcoded known-adapter catalog with actually registered factories.
+  - Call `list_supported_languages` tool to see what the server reports. Note that this tool merges the hardcoded known-adapter catalog with actually registered factories, and probes each catalog entry with a real dynamic import to report accurate `installed: true`/`false` status.
 - Use the diagnostic client:
   - `node scripts/diagnose-stdio-client.mjs` verifies connect → list → create → close flow
 

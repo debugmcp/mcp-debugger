@@ -1,5 +1,7 @@
 /**
- * Tests edge case handling for different return types from the promisified exec function.
+ * Tests ProcessManagerImpl: spawn delegation to child_process.spawn (command/args/options,
+ * default-args, and spawn-error propagation) plus exec return-type edge-case handling for the
+ * promisified exec function.
  */
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 

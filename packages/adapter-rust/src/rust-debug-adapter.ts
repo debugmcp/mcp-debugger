@@ -886,9 +886,9 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       } else if (rustConfig.cargo.test) {
         binaryName = rustConfig.cargo.test;
       } else {
-        // Try to find default binary
-        binaryName = 'main';  // Will need to be resolved from Cargo.toml
-        this.dependencies.logger?.warn('[RustDebugAdapter] No binary specified, defaulting to "main"');
+        // Resolve default binary from Cargo.toml (mirrors the .rs branch above)
+        const { getDefaultBinary } = await import('./utils/cargo-utils.js');
+        binaryName = await getDefaultBinary(rustConfig.cwd || process.cwd());
       }
       
       const extension = this.platform === 'win32' ? '.exe' : '';

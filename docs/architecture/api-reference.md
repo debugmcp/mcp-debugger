@@ -60,8 +60,10 @@ Gets the currently active thread ID during debugging.
 
 ### Environment Validation Methods
 
-#### `validateEnvironment(): Promise<ValidationResult>`
+#### `validateEnvironment(executablePath?: string): Promise<ValidationResult>`
 Comprehensive environment check for debugging readiness.
+
+**Parameters**: `executablePath` (optional) — a user-specified interpreter/executable path to validate.
 
 **Returns**:
 ```typescript
@@ -179,6 +181,11 @@ Transforms generic attach config to language-specific format. Only called if `su
 Gets default attach configuration for this language.
 
 **Returns**: Default attach configuration with language-specific defaults
+
+#### `usesDirectConnectForAttach?(): boolean`
+Whether attach connects directly to an already-listening DAP server (e.g. `rdbg` started with `--open`) instead of spawning an adapter process. When `true`, no adapter command is built for attach sessions; the adapter policy returns a `'connect'` spawn config from the attach host/port.
+
+**Returns**: `true` if attach uses direct connection
 
 ### Launch Barrier (Optional)
 
@@ -347,16 +354,19 @@ Gets variable scopes for a stack frame.
 #### `getVariables(sessionId: string, variablesReference: number): Promise<Variable[]>`
 Gets variables in a scope.
 
-#### `evaluateExpression(sessionId: string, expression: string, frameId?: number, context?: string): Promise<EvaluateResult>`
+#### `evaluateExpression(sessionId: string, expression: string, frameId?: number, timeoutMs?: number): Promise<EvaluateResult>`
 Evaluates an expression in the current context. Returns a structured `EvaluateResult` with `result`, `type`, `variablesReference`, and optional error text.
 
-**Note**: The `context` parameter is accepted by the API but the DAP `evaluate` request is always sent with `context: 'variables'` internally, regardless of the value passed.
+**Note**: The DAP `evaluate` `context` is chosen by the adapter policy's `getEvaluateContext()` (defaults to `'variables'`; the Ruby policy uses `'repl'`). There is no client-supplied context parameter.
 
 #### `attachToProcess(sessionId: string, attachConfig: AttachConfig): Promise<DebugResult>`
 Attaches the debugger to a running process.
 
 #### `detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>`
 Detaches the debugger from an attached process.
+
+#### `redefineClasses(sessionId: string, classesDir: string, sinceTimestamp?: number, timeoutMs?: number): Promise<RedefineClassesResult>`
+Java only. Hot-swaps changed classes into a running JVM via a custom DAP `redefineClasses` request. `sinceTimestamp` (ms) limits the scan to `.class` files modified after that time (0/omitted = all); `timeoutMs` overrides the DAP request timeout. Exposed as the `redefine_classes` MCP tool.
 
 #### `listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>`
 Lists all threads in the debug session.
@@ -435,6 +445,27 @@ Checks if a language has a registered adapter.
 #### `getSupportedLanguages(): string[]`
 Lists all registered languages.
 
+#### `unregister(language: string): boolean`
+Removes an adapter factory and disposes any active adapters for the language. Returns `false` if no factory was registered.
+
+#### `getAdapterInfo(language: string): AdapterInfo | undefined`
+Returns metadata for a registered adapter, or `undefined`.
+
+#### `getAllAdapterInfo(): Map<string, AdapterInfo>`
+Returns metadata for all registered adapters.
+
+#### `async listLanguages(): Promise<string[]>`
+Lists all known languages from static registration and dynamic discovery (used by server.ts for language advertisement).
+
+#### `async listAvailableAdapters(): Promise<AdapterMetadata[]>`
+Lists detailed adapter metadata (known adapters plus install status).
+
+#### `disposeAll(): Promise<void>`
+Disposes all created adapters, clears factories, and resets the registry.
+
+#### `getActiveAdapterCount(): number`
+Returns the total number of active adapter instances across all languages.
+
 ## Event System
 
 ### Adapter Events
@@ -481,6 +512,7 @@ Common sequences:
 ```typescript
 enum DebugLanguage {
   PYTHON = 'python',
+  RUBY = 'ruby',
   JAVASCRIPT = 'javascript',
   RUST = 'rust',
   GO = 'go',

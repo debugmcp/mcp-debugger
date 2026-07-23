@@ -4,7 +4,7 @@ This guide covers how to debug the MCP Debug Server itself during development. Y
 
 ## Overview
 
-> **Warning**: `console.log`, `console.error`, and all other `console` methods are silenced at process startup (in both STDIO and SSE modes) to protect stdio/IPC transports from being corrupted by unexpected output. Any `console.*` calls you add to server or proxy code will produce no output. Use `this.logger.debug(...)` (or another Winston logger method) for in-process logging, or write directly to a file (e.g., `fs.appendFileSync('/tmp/debug.log', ...)`) for low-level startup diagnostics.
+> **Warning**: `console.log`, `console.error`, and all other `console` methods are silenced at process startup (regardless of transport mode — STDIO, SSE, and HTTP) to protect stdio/IPC transports from being corrupted by unexpected output. Any `console.*` calls you add to server or proxy code will produce no output. Use `this.logger.debug(...)` (or another Winston logger method) for in-process logging, or write directly to a file (e.g., `fs.appendFileSync('/tmp/debug.log', ...)`) for low-level startup diagnostics.
 
 Debugging a debug server presents unique challenges:
 - Multiple processes (server, proxy, debug adapter)
@@ -374,12 +374,12 @@ case 'debug_diagnostics':
 
 ### 3. Health Checks
 
-The SSE command handler (`src/cli/sse-command.ts`) already exposes a `GET /health` endpoint on the same port as the SSE server. No separate server is needed:
+Note: SSE transport is deprecated in favor of `mcp-debugger http` (the recommended production transport); the HTTP transport exposes the same health endpoint. Both the HTTP command handler (`src/cli/http-command.ts`) and the SSE command handler (`src/cli/sse-command.ts`) expose a `GET /health` endpoint on the same port as the server. No separate server is needed:
 
 ```bash
 # Query the built-in health endpoint (default port 3001)
 curl http://localhost:3001/health
-# Returns: { "status": "ok", "mode": "sse", "connections": N, "sessions": [...] }
+# Returns: { "status": "ok", "mode": "http", "connections": N, "sessions": [...] }
 ```
 
 ## Debugging Checklists

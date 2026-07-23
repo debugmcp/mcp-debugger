@@ -73,8 +73,8 @@ if (!session.proxyManager?.isRunning()) {
 The error handling uses a mixed strategy across three layers:
 
 1. **Implementation Layer (Backend)** - Uses typed `McpError` subclasses (e.g., `SessionNotFoundError`, `ProxyNotRunningError`) for infrastructure failures (unknown session, terminated session, proxy not running). These are defined in `src/errors/debug-errors.ts`. Operation-level failures (e.g., session not paused, missing thread ID) return structured `DebugResult` objects with `success: false` rather than throwing.
-2. **Server Layer** - The MCP server (`src/server.ts`) may also throw `McpError` directly (e.g., for invalid parameters before reaching the session manager). The MCP SDK serializes all `McpError` instances into protocol-level error responses. `DebugResult` failures are returned as successful tool responses with `success: false`.
-3. **Client Layer** - Receives either a protocol-level MCP error (from typed backend errors or server-level `McpError`) or a structured failure result with `success: false`, depending on which layer the failure originated in
+2. **Server Layer** - The MCP server (`src/server.ts`) throws `McpError` directly only for invalid parameters before reaching the session manager (e.g., missing `sessionId`) or for unexpected non-`Error` throws. The typed session-lifecycle errors from the implementation layer (`SessionNotFoundError`, `SessionTerminatedError`, `ProxyNotRunningError`) are caught in each tool handler and converted into a successful tool response whose JSON payload has `success: false, error: <message>` -- they are not propagated as protocol-level `McpError`. `DebugResult` failures are likewise returned as successful tool responses with `success: false`.
+3. **Client Layer** - Receives either a protocol-level MCP error (only from invalid-parameter checks or unexpected non-`Error` throws) or a structured failure result with `success: false` (for typed session errors and `DebugResult` failures), depending on which layer the failure originated in
 
 ```typescript
 // Implementation (throws typed error for infrastructure failures)
@@ -86,15 +86,23 @@ async continue(sessionId: string): Promise<DebugResult> {
   // ... continue logic
 }
 
-// Server (automatic serialization by MCP)
+// Server (catches typed session errors per-tool)
 try {
-  await this.sessionManager.continue(sessionId);
+  const continueResult = await this.continueExecution(sessionId);
+  result = { content: [{ type: 'text', text: JSON.stringify({ success: continueResult }) }] };
 } catch (error) {
-  // MCP framework serializes error.message automatically
-  throw error;
+  if (error instanceof SessionTerminatedError ||
+      error instanceof SessionNotFoundError ||
+      error instanceof ProxyNotRunningError) {
+    result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+  } else if (error instanceof Error) {
+    result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+  } else {
+    throw error;
+  }
 }
 
-// Client receives: "Session not found: test-session"
+// Client receives a successful tool response: { success: false, error: "Session not found: test-session" }
 ```
 
 ## Testing Patterns

@@ -27,7 +27,7 @@ High-level modules depend on abstractions, not concrete implementations.
 
 **Location**: `src/session/session-manager-core.ts`
 
-> **Note**: `SessionManager` (in `session-manager.ts`) extends `SessionManagerOperations`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`. `SessionManager` implements `handleAutoContinue(sessionId)` which calls `this.continue(sessionId)` to auto-continue past entry breakpoints.
+> **Note**: `SessionManager` (in `session-manager.ts`) extends `SessionManagerOperations`, which extends `SessionManagerData`, which extends `SessionManagerCore`. The dependency injection and core logic live in `SessionManagerCore`. `SessionManager` implements `handleAutoContinue(sessionId)` which calls `this.continue(sessionId)` to auto-continue past entry breakpoints.
 
 ```typescript
 // Define dependencies interface
@@ -37,7 +37,6 @@ export interface SessionManagerDependencies {
   logger: ILogger;
   proxyManagerFactory: IProxyManagerFactory;
   sessionStoreFactory: ISessionStoreFactory;
-  debugTargetLauncher: IDebugTargetLauncher;
   environment: IEnvironment;
   adapterRegistry: IAdapterRegistry;
 }
@@ -53,7 +52,6 @@ constructor(
   this.environment = dependencies.environment;
   this.proxyManagerFactory = dependencies.proxyManagerFactory;
   this.sessionStoreFactory = dependencies.sessionStoreFactory;
-  this.debugTargetLauncher = dependencies.debugTargetLauncher;
   this.adapterRegistry = dependencies.adapterRegistry;
 
   // Use injected dependencies
@@ -118,7 +116,7 @@ This factory pattern allows SessionManager to create ProxyManager instances with
 
 ### Core External Dependencies
 
-**Location**: `packages/shared/src/interfaces/external-dependencies.ts` (defines `IFileSystem`, `IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`) and `packages/shared/src/interfaces/process-interfaces.ts` (defines `IProcessLauncher`, `IProxyProcessLauncher`)
+**Location**: `packages/shared/src/interfaces/external-dependencies.ts` (defines `IFileSystem`, `IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`) and `packages/shared/src/interfaces/process-interfaces.ts` (defines `IProxyProcessLauncher` and related IProcess/IProxyProcess types)
 
 ```typescript
 // File system operations
@@ -139,12 +137,12 @@ export interface IProcessManager {
   exec(command: string): Promise<{ stdout: string; stderr: string }>;
 }
 
-// Process launching (used by AdapterDependencies — note this is a different interface)
-// IProcessLauncher is in process-interfaces.ts and is what adapters receive.
+// Process launching (note this is a different interface from IProcessManager)
+// IProxyProcessLauncher is in process-interfaces.ts and is consumed by
+// ProxyManagerFactory/ProxyManager — adapters receive AdapterDependencies
+// (fileSystem, logger, environment, networkManager?) instead
+// (see "Process-Specific Interfaces" below for its full definition).
 // IProcessManager is in external-dependencies.ts and is the lower-level system abstraction.
-export interface IProcessLauncher {
-  launch(command: string, args: string[], options?: IProcessOptions): IProcess;
-}
 
 // Network operations
 export interface INetworkManager {
@@ -199,9 +197,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   const networkManager = new NetworkManagerImpl();
 
   // Process launchers
-  const processLauncher = new ProcessLauncherImpl(processManager);
   const proxyProcessLauncher = new ProxyProcessLauncherImpl(processManager);
-  const debugTargetLauncher = new DebugTargetLauncherImpl(processLauncher, networkManager);
 
   // Factories
   const proxyManagerFactory = new ProxyManagerFactory(proxyProcessLauncher, fileSystem, logger);
@@ -216,7 +212,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 
   return {
     fileSystem, processManager, networkManager, logger, environment,
-    processLauncher, proxyProcessLauncher, debugTargetLauncher,
+    proxyProcessLauncher,
     proxyManagerFactory, sessionStoreFactory, adapterRegistry
   };
 }
@@ -229,17 +225,15 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 ```typescript
 // Returns a Dependencies object (defined in tests/test-utils/helpers/test-dependencies.ts)
 // containing: fileSystem, processManager, networkManager, logger,
-//             processLauncher, proxyProcessLauncher, debugTargetLauncher,
+//             proxyProcessLauncher,
 //             proxyManagerFactory, sessionStoreFactory
-export async function createMockDependencies(): Promise<Dependencies> {
+export function createMockDependencies(): Dependencies {
   const logger = createMockLogger();
   const fileSystem = createMockFileSystem();
   const processManager = createMockProcessManager();
   const networkManager = createMockNetworkManager();
 
-  const processLauncher = new FakeProcessLauncher();
-  const proxyProcessLauncher = new FakeProxyProcessLauncher();
-  const debugTargetLauncher = new FakeDebugTargetLauncher();
+  const proxyProcessLauncher = createMockProxyProcessLauncher();
 
   const proxyManagerFactory = new MockProxyManagerFactory();
   proxyManagerFactory.createFn = () => new MockProxyManager();
@@ -247,24 +241,14 @@ export async function createMockDependencies(): Promise<Dependencies> {
 
   return {
     fileSystem, processManager, networkManager, logger,
-    processLauncher, proxyProcessLauncher, debugTargetLauncher,
+    proxyProcessLauncher,
     proxyManagerFactory, sessionStoreFactory
   };
 }
 
-// There is also a synchronous helper for SessionManager-specific tests:
-export function createMockSessionManagerDependencies(): SessionManagerDependencies {
-  return {
-    fileSystem: createMockFileSystem(),
-    networkManager: createMockNetworkManager(),
-    logger: createMockLogger(),
-    proxyManagerFactory: new MockProxyManagerFactory(),
-    sessionStoreFactory: new MockSessionStoreFactory(),
-    debugTargetLauncher: createMockDebugTargetLauncher(),
-    environment: createMockEnvironment(),
-    adapterRegistry: createMockAdapterRegistry()
-  };
-}
+// A separate SessionManager-specific mock helper (also named createMockDependencies)
+// lives in tests/core/unit/session/session-manager-test-utils.ts and returns
+// SessionManagerDependencies.
 
 export function createMockFileSystem(): IFileSystem {
   return {

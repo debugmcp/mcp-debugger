@@ -81,6 +81,19 @@ class TransportTester {
         clearTimeout(timeout);
         reject(err);
       });
+
+      // If the child exits before becoming ready (e.g. EADDRINUSE on a port
+      // collision), surface the real failure immediately instead of waiting
+      // out the full startup timeout.
+      let stderrBuf = '';
+      this.sseServer.stderr?.on('data', (d) => { stderrBuf += d.toString(); });
+      this.sseServer.on('exit', (code) => {
+        if (code !== null && code !== 0) {
+          clearInterval(checkReady);
+          clearTimeout(timeout);
+          reject(new Error(`SSE server exited (code ${code}) before ready: ${stderrBuf.trim()}`));
+        }
+      });
     });
   }
   

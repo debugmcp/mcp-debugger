@@ -42,7 +42,7 @@ packages/adapter-<language>/
 Naming conventions:
 - Package name: `@debugmcp/adapter-<language>`
 - Factory class: `<Language>AdapterFactory` (e.g., `GoAdapterFactory`)
-- File names: kebab-case (e.g., `go-debug-adapter.ts`, not `GoDebugAdapter.ts`)
+- File names: kebab-case is the recommended convention for new adapters (used by 7 of the 8 shipped adapters), e.g. `go-debug-adapter.ts`. The .NET adapter uses PascalCase (`DotnetAdapterFactory.ts`, `DotnetDebugAdapter.ts`) for historical reasons.
 
 ---
 
@@ -133,7 +133,7 @@ Based on `packages/adapter-go/tsconfig.json`:
 
 ### 4. Implement `IAdapterFactory`
 
-The factory creates adapter instances, provides metadata, and validates the environment. Implement the `IAdapterFactory` interface from `@debugmcp/shared` — do not extend a base class.
+The factory creates adapter instances, provides metadata, and validates the environment. Either implement `IAdapterFactory` directly (as the Go reference and most adapters do) or extend the abstract `BaseAdapterFactory` (exported from `@debugmcp/shared`), which provides default `getMetadata()` and a default `validate()` (as `JavascriptAdapterFactory` does).
 
 **Interface** (3 required methods):
 ```typescript
@@ -273,10 +273,13 @@ export { GoDebugAdapter } from './go-debug-adapter.js';
 export { GoAdapterFactory } from './go-adapter-factory.js';
 export * from './utils/go-utils.js';
 
-// Optional default export (not used by the dynamic loader, but included by some adapters)
+import { GoAdapterFactory as _GoAdapterFactory } from './go-adapter-factory.js';
+
+// Convenience default export — NOT used by the mcp-debugger dynamic loader,
+// which imports the named {Language}AdapterFactory export only
 export default {
   name: 'go',
-  factory: (await import('./go-adapter-factory.js')).GoAdapterFactory
+  factory: _GoAdapterFactory
 };
 ```
 
@@ -360,13 +363,11 @@ The policy implements the `AdapterPolicy` interface (from `adapter-policy.ts`). 
 
 See `packages/shared/src/interfaces/adapter-policy-go.ts` for a minimal, clean policy example.
 
-### Wiring the policy (3 locations)
+### Wiring the policy (2 locations)
 
-1. **DAP proxy** — `src/proxy/dap-proxy-worker.ts` → `selectAdapterPolicy()` method: add a new `else if` branch matching your adapter command.
+1. **Policy map (required)** — add a `case` for your `DebugLanguage` in `getPolicyForLanguage()` in `packages/shared/src/interfaces/adapter-policy-map.ts`. This is consumed by both the DAP proxy and session manager. (The `else if` command-shape chain in `dap-proxy-worker.ts` `selectAdapterPolicy()` is a legacy fallback; add a branch there only if you must support sessions that arrive without a language field.)
 
-2. **Session manager** — `src/session/session-manager-data.ts` → `selectPolicy()` method: add a new `case` branch for your `DebugLanguage` value.
-
-3. **Export** — Add the policy to `packages/shared/src/index.ts` so both locations can import it.
+2. **Export** — Add the policy to `packages/shared/src/index.ts` so `adapter-policy-map.ts` can import it.
 
 ---
 
@@ -477,8 +478,7 @@ The loader:
 - [ ] `DebugLanguage` enum updated in `packages/shared/src/models/index.ts`
 - [ ] Adapter policy created in `packages/shared/src/interfaces/adapter-policy-<language>.ts`
 - [ ] Policy exported from `packages/shared/src/index.ts`
-- [ ] Policy wired into `selectAdapterPolicy()` in `src/proxy/dap-proxy-worker.ts`
-- [ ] Policy wired into `selectPolicy()` in `src/session/session-manager-data.ts`
+- [ ] Policy `case` added to `getPolicyForLanguage()` in `packages/shared/src/interfaces/adapter-policy-map.ts`
 - [ ] Registered in root `package.json` optionalDependencies
 - [ ] Added to known adapters list in `src/adapters/adapter-loader.ts`
 - [ ] Vitest alias added in `vitest.config.ts`

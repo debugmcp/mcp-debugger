@@ -35,7 +35,7 @@ State
 - `getCurrentThreadId(): number | null` — Active thread (if any)
 
 Environment validation
-- `validateEnvironment(): Promise<ValidationResult>` — Check runtime prerequisites
+- `validateEnvironment(executablePath?: string): Promise<ValidationResult>` — Check runtime prerequisites (optional `executablePath` validates a specific user-configured interpreter instead of an auto-detected one)
 - `getRequiredDependencies(): DependencyInfo[]` — Declare dependencies (name/version/required)
 
 Executable management
@@ -59,6 +59,7 @@ Attach support (optional)
 - `supportsDetach?(): boolean` — Whether the adapter supports detaching without terminating the debuggee
 - `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig` — Transforms generic attach config to language-specific format
 - `getDefaultAttachConfig?(): Partial<GenericAttachConfig>` — Gets default attach configuration for this language
+- `usesDirectConnectForAttach?(): boolean` — when true, attach connects directly to an already-listening DAP server (e.g. rdbg started with `--open`) instead of spawning an adapter process; `ProxyManager` skips `buildAdapterCommand` and the adapter policy returns a `'connect'` spawn config from the attach host/port
 
 Debug configuration
 - `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch)

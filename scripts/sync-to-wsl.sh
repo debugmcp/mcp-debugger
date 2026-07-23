@@ -114,23 +114,15 @@ echo -e "${GREEN}Fixing file permissions...${NC}"
 # Make shell scripts executable
 chmod +x scripts/*.sh 2>/dev/null || true
 
-# 8. Check if package-lock.json exists, if not we need to generate it
-if [ ! -f "package-lock.json" ]; then
-    echo -e "${YELLOW}package-lock.json not found (excluded from sync for speed)${NC}"
-    if [ "$NO_INSTALL" = false ]; then
-        echo -e "${GREEN}Will be regenerated during npm install${NC}"
-    fi
-fi
-
-# 9. Install dependencies (unless --no-install)
+# 8. Install dependencies (unless --no-install)
 if [ "$NO_INSTALL" = false ]; then
-    echo -e "${GREEN}Installing npm dependencies...${NC}"
+    echo -e "${GREEN}Installing dependencies via pnpm...${NC}"
     pnpm install --frozen-lockfile
 else
-    echo -e "${YELLOW}Skipping npm install (--no-install flag set)${NC}"
+    echo -e "${YELLOW}Skipping pnpm install (--no-install flag set)${NC}"
 fi
 
-# 10. Build project (unless --no-build)
+# 9. Build project (unless --no-build)
 if [ "$NO_BUILD" = false ]; then
     echo -e "${GREEN}Building project...${NC}"
     npm run build

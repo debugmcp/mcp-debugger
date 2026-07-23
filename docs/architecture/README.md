@@ -31,7 +31,7 @@ export interface IDebugAdapter extends EventEmitter {
   dispose(): Promise<void>;
   
   // Environment validation
-  validateEnvironment(): Promise<ValidationResult>;
+  validateEnvironment(executablePath?: string): Promise<ValidationResult>;
   resolveExecutablePath(preferredPath?: string): Promise<string>;
   
   // DAP operations
@@ -61,9 +61,9 @@ Each supported language implements the IDebugAdapter interface:
 The **[AdapterRegistry](../../src/adapters/adapter-registry.ts)** manages available adapters through two mechanisms: explicit registration and dynamic loading. Factories can be pre-registered at startup, or loaded on demand via `AdapterLoader` when `enableDynamicLoading` is enabled (or `MCP_CONTAINER=true`):
 
 ```typescript
-// Explicit registration
-registry.register('python', new PythonAdapterFactory());
-registry.register('mock', new MockAdapterFactory());
+// Explicit registration (register is async and returns Promise<void>)
+await registry.register('python', new PythonAdapterFactory());
+await registry.register('mock', new MockAdapterFactory());
 
 // Dynamic loading happens automatically when create() is called
 // for a language without a pre-registered factory
@@ -227,7 +227,7 @@ The `stopped` event means PAUSED, not terminated:
 ```typescript
 // ❌ Wrong: Confusing stopped with terminated
 if (event.event === 'stopped') {
-  this.state = AdapterState.TERMINATED; // NO!
+  this.state = AdapterState.DISCONNECTED; // NO!
 }
 
 // ✅ Correct: Stopped = paused for debugging

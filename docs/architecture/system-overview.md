@@ -72,7 +72,6 @@ graph TB
     logger: ILogger;
     proxyManagerFactory: IProxyManagerFactory;
     sessionStoreFactory: ISessionStoreFactory;
-    debugTargetLauncher: IDebugTargetLauncher;
     environment: IEnvironment;
     adapterRegistry: IAdapterRegistry;
   }

@@ -236,11 +236,8 @@ export const NewLanguagePolicy: AdapterPolicy = {
 };
 ```
 
-### Step 3: Add to selectPolicy() and update DebugLanguage enum
-Add your language to the `DebugLanguage` enum in `@debugmcp/shared`, then add your policy to **all three** `selectPolicy()` locations:
-- `src/session/session-manager-data.ts` (session-level data operations)
-- `src/proxy/dap-proxy-worker.ts` (proxy-level adapter behavior via `selectAdapterPolicy()`)
-- `src/session/session-store.ts` (session persistence policy selection)
+### Step 3: Add to getPolicyForLanguage() and update DebugLanguage enum
+Add your language to the `DebugLanguage` enum in `@debugmcp/shared`, then add a case (plus its import) to `getPolicyForLanguage()` in `packages/shared/src/interfaces/adapter-policy-map.ts`. This is the single source of truth for language-to-policy mapping — `session-manager-data.ts`, `session-store.ts`, and `dap-proxy-worker.ts` (`selectAdapterPolicy()`) all delegate to it, so there is no need to edit them separately:
 
 ```typescript
 case DebugLanguage.NEWLANG:

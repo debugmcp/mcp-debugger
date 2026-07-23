@@ -1,2 +1,6 @@
 [push]
 endpoint = "https://api.osojicode.ai"
+
+[audit]
+# Archived investigation docs: near-zero audit value, dominant doc-analysis cost.
+exclude = ["docs/archive/**"]

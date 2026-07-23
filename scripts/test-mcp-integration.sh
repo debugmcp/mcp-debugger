@@ -76,6 +76,7 @@ if echo "$output" | python3 -m json.tool > /dev/null 2>&1; then
 else
     echo -e "${YELLOW}⚠ WARNING${NC}"
     echo "  Auto-detection may not be working, explicit stdio argument required"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Test 5: Claude CLI integration

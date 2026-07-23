@@ -328,9 +328,9 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
     command: string, 
     args?: unknown
   ): Promise<T> {
-    // This will be handled by ProxyManager
-    // Mock adapter just validates the request is appropriate
-    
+    // Actual DAP communication is handled by ProxyManager. This mock performs
+    // no validation -- it only logs the request and returns an empty response.
+
     this.dependencies.logger?.debug(`[MockDebugAdapter] DAP request: ${command}`, args);
     
     // ProxyManager will handle actual communication

@@ -66,9 +66,11 @@ class SessionManager {
   async stepOut(sessionId: string): Promise<DebugResult>
   async continue(sessionId: string): Promise<DebugResult>
   async pause(sessionId: string): Promise<DebugResult>
-  async evaluateExpression(sessionId: string, expression: string, frameId?: number, context?: string): Promise<EvaluateResult>
-  async attachToProcess(sessionId: string, attachConfig: {...}): Promise<DebugResult>
+  async evaluateExpression(sessionId: string, expression: string, frameId?: number, timeoutMs?: number): Promise<EvaluateResult>
+  async attachToProcess(sessionId: string, attachConfig: { port?: number; host?: string; processId?: number | string; timeout?: number; sourcePaths?: string[]; stopOnEntry?: boolean; justMyCode?: boolean; verifyTimeout?: number; }): Promise<DebugResult>
   async detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>
+  async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>
+  async redefineClasses(sessionId: string, classesDir: string, sinceTimestamp?: number, timeoutMs?: number): Promise<RedefineClassesResult>
 
   // Adapter registry (from SessionManagerCore)
   public adapterRegistry: IAdapterRegistry
@@ -356,6 +358,9 @@ SessionStore provides centralized storage and management for debug sessions with
 
 ```typescript
 class SessionStore {
+  // Policy
+  selectPolicy(language: DebugLanguage): AdapterPolicy
+
   // Creation
   createSession(params: CreateSessionParams): DebugSessionInfo
   
@@ -364,9 +369,16 @@ class SessionStore {
   getOrThrow(sessionId: string): ManagedSession
   getAll(): DebugSessionInfo[]
   getAllManaged(): ManagedSession[]
+  has(sessionId: string): boolean
   
   // Updates
+  set(sessionId: string, session: ManagedSession): void
+  update(sessionId: string, updates: Partial<ManagedSession>): void
   updateState(sessionId: string, state: SessionState): void
+
+  // Removal
+  remove(sessionId: string): boolean
+  clear(): void
   
   // Metadata
   size(): number
@@ -395,6 +407,8 @@ Centralized error messages ensure consistency and provide helpful troubleshootin
    - DAP request timeouts
    - Proxy initialization failures
    - Step operation timeouts
+   - Pause grace-window feedback
+   - Attach verification failures
    - Adapter readiness timeouts
 
 ### Example Implementation
@@ -448,16 +462,13 @@ The dependency injection system enables comprehensive testing by abstracting all
      logger: ILogger;
      proxyManagerFactory: IProxyManagerFactory;
      sessionStoreFactory: ISessionStoreFactory;
-     debugTargetLauncher: IDebugTargetLauncher;
      environment: IEnvironment;
      adapterRegistry: IAdapterRegistry;
    }
    ```
 
-   The top-level `Dependencies` container (in `src/container/dependencies.ts`) also includes launcher services that are used by the proxy and session layers:
-   - `processLauncher: IProcessLauncher` -- general-purpose process spawning
+   The top-level `Dependencies` container (in `src/container/dependencies.ts`) has this field set: `fileSystem`, `processManager`, `networkManager`, `logger`, `environment`, `proxyProcessLauncher`, `proxyManagerFactory`, `sessionStoreFactory`, `adapterRegistry`. The launcher service used by the proxy and session layers is:
    - `proxyProcessLauncher: IProxyProcessLauncher` -- spawning proxy worker child processes
-   - `debugTargetLauncher: IDebugTargetLauncher` -- spawning the debug target (uses `processLauncher` and `networkManager`)
 
 ### Benefits
 

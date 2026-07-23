@@ -413,7 +413,7 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
 
       if (lang.language !== 'mock') {
         // Real language: full debug workflow
-        it(`Tools 6-15,19: full debug workflow (${lang.language})`, async () => {
+        it(`Tools 6-15,20: full debug workflow (${lang.language})`, async () => {
           // Create fresh session
           const createRes = await mcpClient!.callTool({
             name: 'create_debug_session',
@@ -569,7 +569,7 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
             const stepRes = await callToolSafely(mcpClient!, 'step_out', { sessionId: currentSessionId });
             await new Promise(r => setTimeout(r, 2000));
             // step_out may fail if we're at the top frame — that's acceptable
-            const ok = stepRes.success !== false || (stepRes.message && !stepRes.message.includes('error'));
+            const ok = stepRes.success !== false || (!!stepRes.message && !stepRes.message.includes('error'));
             record('step_out', lang.language, ok ? 'PASS' : 'FAIL',
               `success=${stepRes.success}, msg=${(stepRes.message ?? '').slice(0, 100)}`,
               Date.now() - t0);

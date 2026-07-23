@@ -24,8 +24,16 @@ mcp-debugger stdio
 ```
 
 ### SSE mode
+
+> **Deprecated:** SSE transport is deprecated and will be removed in a future release. Use `mcp-debugger http --port 3001` instead.
+
 ```bash
 mcp-debugger sse --port 3001
+```
+
+### HTTP mode (recommended)
+```bash
+mcp-debugger http --port 3001
 ```
 
 ## Batteries-Included Adapters
@@ -57,8 +65,8 @@ Analyzes a Rust executable to determine whether it was built with the GNU or MSV
 - `--log-level <level>` - Set log level (error, warn, info, debug)
 - `--log-file <path>` - Log to file instead of console
 
-### SSE-only options
-- `-p, --port <number>` - Port for SSE mode (default: 3001)
+### SSE and HTTP options
+- `-p, --port <number>` - Port for SSE or HTTP mode (default: 3001)
 
 ## Documentation
 

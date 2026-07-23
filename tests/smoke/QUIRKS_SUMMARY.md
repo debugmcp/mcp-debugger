@@ -98,7 +98,7 @@ const newVarsResult = await callToolSafely(mcpClient!, 'get_variables', {
 #### Python Path Resolution
 ```typescript
 // Always use absolute paths for Python:
-const scriptPath = path.resolve(ROOT, 'test-scripts', 'test_python_debug.py');
+const scriptPath = path.resolve(ROOT, 'examples', 'python', 'test_python_debug.py');
 ```
 
 #### Quirk-Aware Assertions

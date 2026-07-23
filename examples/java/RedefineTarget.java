@@ -19,7 +19,7 @@ public class RedefineTarget {
         System.out.println("val1 = " + val1);
 
         // After hot-reload, getValue() should return 99
-        int val2 = getValue();              // line 23 — second breakpoint target
+        int val2 = getValue();              // line 22 — second breakpoint target
         System.out.println("val2 = " + val2);
 
         System.out.println("RedefineTarget done.");
