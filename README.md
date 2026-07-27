@@ -1,5 +1,7 @@
 # mcp-debugger
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fdebugmcp%2Fmcp-debugger.svg)](https://mcptoplist.com/server/glama%2Fdebugmcp%2Fmcp-debugger)
+
 <div align="center">
   <img src="assets/logo.png" alt="MCP Debugger Logo - A stylized circuit board with debug breakpoints" width="400" height="400">
 </div>
