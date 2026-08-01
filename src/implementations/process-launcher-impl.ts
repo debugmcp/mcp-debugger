@@ -451,7 +451,8 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
       cwd: projectRoot, // Use project root instead of process.cwd() which might be VS Code's directory
       // Do NOT detach the process - this can interfere with IPC communication
       // especially when the debugged process pauses at a breakpoint
-      detached: false
+      detached: false,
+      windowsHide: true
     };
 
     // Get the raw child process directly to avoid double-wrapping

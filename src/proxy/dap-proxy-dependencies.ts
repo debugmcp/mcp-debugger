@@ -41,7 +41,9 @@ export function createProductionDependencies(
     },
     
     processSpawner: {
-      spawn
+      // Default windowsHide so no spawn from the proxy can allocate a visible
+      // console window on Windows (#215); callers may still override.
+      spawn: (command, args, options) => spawn(command, args, { windowsHide: true, ...options })
     },
     
     dapClientFactory: {

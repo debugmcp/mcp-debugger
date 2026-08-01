@@ -34,6 +34,7 @@ export interface IProcessOptions {
   shell?: boolean;
   stdio?: any; // eslint-disable-line @typescript-eslint/no-explicit-any -- Required for Node.js StdioOptions compatibility
   detached?: boolean;
+  windowsHide?: boolean;
 }
 
 /**

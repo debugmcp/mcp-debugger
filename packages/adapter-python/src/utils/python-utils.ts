@@ -250,7 +250,8 @@ async function isValidPythonExecutable(pythonCmd: string, logger: Logger = noopL
   logger.debug?.(`[Python Detection] Validating Python executable: ${pythonCmd}`);
   return new Promise((resolve) => {
     const child = spawn(pythonCmd, ['-c', 'import sys; sys.exit(0)'], {
-      stdio: ['ignore', 'ignore', 'pipe']
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true
     });
 
     let stderrData = '';
@@ -281,7 +282,8 @@ async function isValidPythonExecutable(pythonCmd: string, logger: Logger = noopL
 async function hasDebugpy(pythonPath: string, logger: Logger = noopLogger): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
     
     let output = '';
@@ -488,7 +490,7 @@ export async function findPythonExecutable(
  */
 export async function getPythonVersion(pythonPath: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(pythonPath, ['--version'], { stdio: 'pipe' });
+    const child = spawn(pythonPath, ['--version'], { stdio: 'pipe', windowsHide: true });
     let output = '';
 
     child.stdout?.on('data', (data) => { output += data.toString(); });

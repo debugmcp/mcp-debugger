@@ -479,7 +479,8 @@ export function convertPdbsToTemp(sourceDirs: string[], pdb2pdbPath: string): st
       // Convert: Pdb2Pdb.exe <dll> -- auto-finds the adjacent PDB
       const result = spawnSync(pdb2pdbPath, [path.join(tempDir, dllFile)], {
         timeout: 30000,
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
       });
 
       // Pdb2Pdb outputs to <name>.pdb2, rename to .pdb

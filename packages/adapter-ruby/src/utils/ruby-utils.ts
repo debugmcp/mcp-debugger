@@ -197,7 +197,7 @@ export function buildRdbgInvocation(
 
 export async function getRubyVersion(rubyPath: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(rubyPath, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(rubyPath, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let output = '';
 
     child.stdout?.on('data', (data) => { output += data.toString(); });
@@ -226,7 +226,7 @@ export async function getRdbgVersion(rdbgPath: string): Promise<string | null> {
     return null;
   }
   return new Promise((resolve) => {
-    const child = spawn(invocation.command, invocation.args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(invocation.command, invocation.args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let output = '';
 
     child.stdout?.on('data', (data) => { output += data.toString(); });

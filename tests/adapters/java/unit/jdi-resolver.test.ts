@@ -144,14 +144,22 @@ describe('jdi-resolver', () => {
         return false;
       });
 
-      // which javac returns a path
-      mockExecSync.mockReturnValue('/usr/bin/javac\n');
-      mockExecFileSync.mockReturnValue(Buffer.from(''));
+      // which/where javac returns a path; the compile call returns empty output
+      mockExecFileSync.mockImplementation(((cmd: string) =>
+        cmd === 'which' || cmd === 'where' ? '/usr/bin/javac\n' : Buffer.from('')) as any);
 
       ensureJdiBridgeCompiled();
 
-      expect(mockExecSync).toHaveBeenCalled();
-      expect(mockExecFileSync).toHaveBeenCalled();
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        expect.stringMatching(/^(which|where)$/),
+        ['javac'],
+        expect.objectContaining({ windowsHide: true })
+      );
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        '/usr/bin/javac',
+        expect.arrayContaining(['--release', '21']),
+        expect.anything()
+      );
     });
 
     it('should return null when javac not found', () => {
@@ -164,8 +172,8 @@ describe('jdi-resolver', () => {
         return false;
       });
 
-      // which javac fails
-      mockExecSync.mockImplementation(() => {
+      // which/where javac fails
+      mockExecFileSync.mockImplementation(() => {
         throw new Error('not found');
       });
 

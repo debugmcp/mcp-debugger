@@ -108,7 +108,8 @@ export async function findDelveExecutable(
 export async function getGoVersion(goPath: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(goPath, ['version'], {
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let output = '';
@@ -133,7 +134,8 @@ export async function getGoVersion(goPath: string): Promise<string | null> {
 export async function getDelveVersion(dlvPath: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(dlvPath, ['version'], {
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let output = '';
@@ -159,7 +161,8 @@ export async function getDelveVersion(dlvPath: string): Promise<string | null> {
 export async function checkDelveDapSupport(dlvPath: string): Promise<{ supported: boolean; stderr?: string }> {
   return new Promise((resolve) => {
     const child = spawn(dlvPath, ['dap', '--help'], {
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     });
 
     let stderrOutput = '';

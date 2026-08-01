@@ -100,6 +100,7 @@ export const JavaAdapterPolicy: AdapterPolicy = {
     return new Promise((resolve) => {
       const child = spawn(javaCmd, ['-version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
       let hasOutput = false;
