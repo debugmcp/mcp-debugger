@@ -176,12 +176,13 @@ export class SessionStore {
    */
   getAll(): DebugSessionInfo[] {
     return Array.from(this.sessions.values()).map(s => ({
-      id: s.id, 
-      name: s.name, 
-      language: s.language, 
-      state: s.state, 
-      createdAt: s.createdAt, 
-      updatedAt: s.updatedAt
+      id: s.id,
+      name: s.name,
+      language: s.language,
+      state: s.state,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      lastStop: s.lastStop
     }));
   }
 

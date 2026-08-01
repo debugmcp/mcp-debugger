@@ -77,6 +77,69 @@ describe('SessionManager - Integration Tests', () => {
     });
   });
 
+  describe('Stop reason persistence (issue #214)', () => {
+    it('records lastStop when a breakpoint is hit', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'breakpoint');
+
+      const managed = sessionManager.getSession(session.id);
+      expect(managed?.lastStop).toMatchObject({ reason: 'breakpoint', threadId: 1 });
+      expect(typeof managed?.lastStop?.timestamp).toBe('number');
+    });
+
+    it('reports exception as the reason for a later stop, not the first one', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'breakpoint');
+      dependencies.mockProxyManager.simulateEvent('continued');
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'exception');
+
+      expect(sessionManager.getSession(session.id)?.lastStop?.reason).toBe('exception');
+    });
+
+    it('does not record auto-continued entry stops', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'entry');
+
+      expect(sessionManager.getSession(session.id)?.lastStop).toBeUndefined();
+    });
+
+    it('exposes lastStop through getAllSessions', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('stopped', 7, 'exception');
+
+      const listed = sessionManager.getAllSessions().find((s) => s.id === session.id);
+      expect(listed?.lastStop).toMatchObject({ reason: 'exception', threadId: 7 });
+    });
+  });
+
   describe('Logger Integration', () => {
     it('should log all major operations', async () => {
       const session = await sessionManager.createSession({ 
