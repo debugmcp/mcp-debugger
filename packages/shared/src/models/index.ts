@@ -254,6 +254,18 @@ export interface DebugSession {
 /**
  * Subset of DebugSession for list operations (if needed, otherwise use DebugSession)
  */
+/**
+ * Details of the most recent user-visible stop (issue #214).
+ * Auto-continued entry stops are not recorded.
+ */
+export interface SessionStopInfo {
+  /** DAP stop reason, e.g. 'breakpoint', 'exception', 'step', 'pause', 'entry' */
+  reason: string;
+  threadId?: number;
+  /** Epoch milliseconds when the stop was observed */
+  timestamp: number;
+}
+
 export interface DebugSessionInfo {
   id: string;
   language: DebugLanguage;
@@ -261,6 +273,8 @@ export interface DebugSessionInfo {
   state: SessionState;
   createdAt: Date;
   updatedAt?: Date; // Optional, as it might not always be present or needed for list views
+  /** Why the session last stopped; present after the first user-visible stop */
+  lastStop?: SessionStopInfo;
 }
 
 

@@ -216,6 +216,7 @@ export abstract class SessionManagerCore {
 
     // Reset first-stop tracking for this launch — a session may be re-launched.
     session.firstStopHandled = false;
+    session.lastStop = undefined;
 
     // Adapters whose first stopped event after launch may not carry
     // reason='entry' (e.g., js-debug emits 'pause'/'breakpoint' from
@@ -285,6 +286,10 @@ export abstract class SessionManagerCore {
           this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
         });
       } else {
+        // Record why we stopped so it stays queryable after the fact
+        // (list_debug_sessions / get_stack_trace, issue #214). Auto-continued
+        // entry stops are deliberately not recorded — the user never saw them.
+        session.lastStop = { reason, threadId, timestamp: Date.now() };
         this._updateSessionState(session, SessionState.PAUSED);
       }
 
