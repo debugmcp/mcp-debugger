@@ -381,11 +381,13 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
     if (process.platform !== 'win32') {
       return executablePath;
     }
-    const base = path.basename(executablePath);
+    // path.win32 explicitly: this is Windows path logic and must behave the
+    // same when unit-tested on posix hosts.
+    const base = path.win32.basename(executablePath);
     if (!/^python(\d+(\.\d+)*)?\.exe$/i.test(base)) {
       return executablePath;
     }
-    const pythonw = path.join(path.dirname(executablePath), base.replace(/^python/i, 'pythonw'));
+    const pythonw = path.win32.join(path.win32.dirname(executablePath), base.replace(/^python/i, 'pythonw'));
     return existsSync(pythonw) ? pythonw : executablePath;
   }
   
