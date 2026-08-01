@@ -8,6 +8,11 @@ vi.mock('child_process', () => ({
   exec: vi.fn()
 }));
 
+vi.mock('fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('fs')>()),
+  existsSync: vi.fn(() => false)
+}));
+
 vi.mock('../../../packages/adapter-python/src/utils/python-utils.js', () => ({
   findPythonExecutable: vi.fn(),
   getPythonVersion: vi.fn()
@@ -15,6 +20,7 @@ vi.mock('../../../packages/adapter-python/src/utils/python-utils.js', () => ({
 
 const { findPythonExecutable, getPythonVersion } = await import('../../../packages/adapter-python/src/utils/python-utils.js');
 const { spawn } = await import('child_process');
+const { existsSync } = await import('fs');
 
 const createDependencies = () => ({
   fileSystem: {} as unknown,
@@ -242,7 +248,7 @@ describe('PythonDebugAdapter', () => {
     expect(spawnMock).toHaveBeenCalledWith(
       '/usr/bin/python',
       ['-c', 'import debugpy; print(debugpy.__version__)'],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
+      { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }
     );
   });
 
@@ -277,6 +283,78 @@ describe('PythonDebugAdapter', () => {
     expect(config.showReturnValue).toBe(true);
     expect(config.stopOnEntry).toBe(true);
     expect(config.justMyCode).toBe(false);
+  });
+
+  it('honors a user-supplied console mode instead of forcing internalConsole (#215)', async () => {
+    const adapter = new PythonDebugAdapter(createDependencies());
+    const config = await adapter.transformLaunchConfig({
+      console: 'integratedTerminal'
+    } as any);
+
+    expect(config.console).toBe('integratedTerminal');
+  });
+
+  describe('pythonw.exe adapter interpreter preference (#215)', () => {
+    const buildCommand = (adapter: PythonDebugAdapter, executablePath: string) =>
+      adapter.buildAdapterCommand({
+        sessionId: 's1',
+        executablePath,
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp/logs',
+        scriptPath: '/app/main.py',
+        launchConfig: {}
+      });
+
+    const withPlatform = (platform: string, fn: () => void) => {
+      const original = process.platform;
+      Object.defineProperty(process, 'platform', { value: platform });
+      try {
+        fn();
+      } finally {
+        Object.defineProperty(process, 'platform', { value: original });
+      }
+    };
+
+    it('swaps python.exe for a sibling pythonw.exe on win32', () => {
+      (existsSync as Mock).mockReturnValue(true);
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      withPlatform('win32', () => {
+        const cmd = buildCommand(adapter, 'C:\\Python313\\python.exe');
+        expect(cmd.command.toLowerCase()).toContain('pythonw.exe');
+      });
+    });
+
+    it('keeps python.exe when no sibling pythonw.exe exists', () => {
+      (existsSync as Mock).mockReturnValue(false);
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      withPlatform('win32', () => {
+        const cmd = buildCommand(adapter, 'C:\\Python313\\python.exe');
+        expect(cmd.command).toBe('C:\\Python313\\python.exe');
+      });
+    });
+
+    it('leaves the interpreter untouched off win32', () => {
+      (existsSync as Mock).mockReturnValue(true);
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      withPlatform('linux', () => {
+        const cmd = buildCommand(adapter, '/usr/bin/python');
+        expect(cmd.command).toBe('/usr/bin/python');
+      });
+    });
+
+    it('leaves an explicit pythonw.exe untouched', () => {
+      (existsSync as Mock).mockReturnValue(true);
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      withPlatform('win32', () => {
+        const cmd = buildCommand(adapter, 'C:\\Python313\\pythonw.exe');
+        expect(cmd.command).toBe('C:\\Python313\\pythonw.exe');
+      });
+    });
   });
 
   it('disposes by clearing state and emitting event', async () => {

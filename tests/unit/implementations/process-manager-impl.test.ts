@@ -66,7 +66,7 @@ describe('ProcessManagerImpl', () => {
       
       const result = processManager.spawn('node', ['--version'], { cwd: '/test/dir', env: { NODE_ENV: 'test' } });
       
-      expect(spawn).toHaveBeenCalledWith('node', ['--version'], { cwd: '/test/dir', env: { NODE_ENV: 'test' } });
+      expect(spawn).toHaveBeenCalledWith('node', ['--version'], { windowsHide: true, cwd: '/test/dir', env: { NODE_ENV: 'test' } });
       expect(result).toBe(mockProcess);
     });
 
@@ -76,7 +76,7 @@ describe('ProcessManagerImpl', () => {
       
       const result = processManager.spawn('ls', ['-la']);
       
-      expect(spawn).toHaveBeenCalledWith('ls', ['-la'], {});
+      expect(spawn).toHaveBeenCalledWith('ls', ['-la'], { windowsHide: true });
       expect(result).toBe(mockProcess);
     });
 
@@ -93,8 +93,17 @@ describe('ProcessManagerImpl', () => {
       // Call spawn without args parameter to test default value
       const result = processManager.spawn('pwd');
       
-      expect(spawn).toHaveBeenCalledWith('pwd', [], {});
+      expect(spawn).toHaveBeenCalledWith('pwd', [], { windowsHide: true });
       expect(result).toBe(mockProcess);
+    });
+
+    it('should default windowsHide to true but let callers opt out (#215)', () => {
+      const mockProcess = { pid: 12345, stdout: { on: vi.fn() }, stderr: { on: vi.fn() }, on: vi.fn(), kill: vi.fn() };
+      (spawn as any).mockReturnValue(mockProcess);
+
+      processManager.spawn('node', [], { windowsHide: false });
+
+      expect(spawn).toHaveBeenCalledWith('node', [], { windowsHide: false });
     });
   });
 

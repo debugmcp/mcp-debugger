@@ -16,7 +16,8 @@ export async function checkCargoInstallation(): Promise<boolean> {
   return new Promise((resolve) => {
     const cargoProcess = spawn('cargo', ['--version'], {
       stdio: 'ignore',
-      shell: true
+      shell: true,
+      windowsHide: true
     });
     
     cargoProcess.on('error', () => resolve(false));
@@ -31,7 +32,8 @@ export async function checkRustInstallation(): Promise<boolean> {
   return new Promise((resolve) => {
     const rustcProcess = spawn('rustc', ['--version'], {
       stdio: 'ignore',
-      shell: true
+      shell: true,
+      windowsHide: true
     });
     
     rustcProcess.on('error', () => resolve(false));
@@ -45,7 +47,8 @@ export async function checkRustInstallation(): Promise<boolean> {
 export async function getCargoVersion(): Promise<string | null> {
   return new Promise((resolve) => {
     const cargoProcess = spawn('cargo', ['--version'], {
-      shell: true
+      shell: true,
+      windowsHide: true
     });
     
     let output = '';
@@ -115,7 +118,8 @@ export async function buildRustProject(
     
     const buildProcess = spawn('cargo', args, {
       cwd: projectPath,
-      shell: true
+      shell: true,
+      windowsHide: true
     });
     
     let output = '';
@@ -178,7 +182,8 @@ export async function getRustBinaryPath(
 export async function getRustHostTriple(): Promise<string | null> {
   return new Promise((resolve) => {
     const rustcProcess = spawn('rustc', ['-Vv'], {
-      shell: true
+      shell: true,
+      windowsHide: true
     });
 
     let output = '';

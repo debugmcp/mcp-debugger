@@ -48,6 +48,7 @@ export async function validateJavaExecutable(javaPath: string): Promise<boolean>
     try {
       const child = spawn(javaPath, ['-version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
       let hasOutput = false;
@@ -82,6 +83,7 @@ export async function getJavaVersion(javaPath?: string): Promise<string | null> 
     try {
       const child = spawn(cmd, ['-version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
       let output = '';

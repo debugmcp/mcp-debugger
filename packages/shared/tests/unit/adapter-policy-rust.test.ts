@@ -96,7 +96,8 @@ describe('RustAdapterPolicy', () => {
 
       await expect(RustAdapterPolicy.validateExecutable!('/tmp/codelldb')).resolves.toBe(true);
       expect(spawnMock).toHaveBeenCalledWith('/tmp/codelldb', ['--version'], {
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
       });
     });
 

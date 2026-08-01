@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, statSync } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -107,8 +107,8 @@ export function ensureJdiBridgeCompiled(): string | null {
   if (!javac) {
     try {
       /* istanbul ignore next -- platform-specific command */
-      const cmd = process.platform === 'win32' ? 'where javac' : 'which javac';
-      const result = execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const finder = process.platform === 'win32' ? 'where' : 'which';
+      const result = execFileSync(finder, ['javac'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
       if (result) javac = result.split('\n')[0].trim();
     } catch {
       // not found
@@ -121,7 +121,8 @@ export function ensureJdiBridgeCompiled(): string | null {
     mkdirSync(outDir, { recursive: true });
     execFileSync(javac, ['--release', '21', sourceFile, '-d', outDir], {
       stdio: 'inherit',
-      cwd: sourceDir
+      cwd: sourceDir,
+      windowsHide: true
     });
     return outDir;
   } catch {

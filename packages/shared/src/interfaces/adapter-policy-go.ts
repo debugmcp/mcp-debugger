@@ -126,6 +126,7 @@ export const GoAdapterPolicy: AdapterPolicy = {
     return new Promise((resolve) => {
       const child = spawn(dlvCmd, ['version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
       let hasOutput = false;

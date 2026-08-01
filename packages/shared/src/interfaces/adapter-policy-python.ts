@@ -135,6 +135,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     return new Promise((resolve) => {
       const child = spawn(pythonCmd, ['-c', 'import sys; sys.exit(0)'], {
         stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
       });
 
       let stderrData = '';

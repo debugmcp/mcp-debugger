@@ -9,6 +9,7 @@
  */
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import { 
@@ -349,7 +350,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     return {
-      command: config.executablePath,
+      command: this.preferNoConsoleInterpreter(config.executablePath),
       args: [
         '-m', 'debugpy.adapter',
         '--host', config.adapterHost,
@@ -361,6 +362,31 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
         DEBUGPY_LOG_DIR: config.logDir
       }
     };
+  }
+
+  /**
+   * On Windows, run the adapter under the sibling pythonw.exe when it exists.
+   *
+   * The adapter is spawned detached, so it has no console; debugpy's launcher
+   * (a console-subsystem grandchild that Node's windowsHide cannot reach) then
+   * gets a fresh *visible* console allocated by Windows — one window per debug
+   * session (#215). pythonw.exe is the GUI-subsystem build of the same
+   * interpreter (same directory ⇒ same version, site-packages, and venv), and
+   * since the launch config does not pin `python`, the launcher and debuggee
+   * inherit it too, so no process in the chain ever gets a console. Debuggee
+   * output is unaffected: with internalConsole it flows through pipes owned by
+   * the launcher, not a console.
+   */
+  private preferNoConsoleInterpreter(executablePath: string): string {
+    if (process.platform !== 'win32') {
+      return executablePath;
+    }
+    const base = path.basename(executablePath);
+    if (!/^python(\d+(\.\d+)*)?\.exe$/i.test(base)) {
+      return executablePath;
+    }
+    const pythonw = path.join(path.dirname(executablePath), base.replace(/^python/i, 'pythonw'));
+    return existsSync(pythonw) ? pythonw : executablePath;
   }
   
   getAdapterModuleName(): string {
@@ -374,18 +400,21 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Debug Configuration =====
   
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+    const requestedConsole = (config as PythonLaunchConfig).console;
     const pythonConfig: PythonLaunchConfig = {
       ...config,
       type: 'python',
       request: 'launch',
       name: 'Python: Current File',
-      console: 'internalConsole',
+      // Honor a user-supplied console mode (#215); default to internalConsole
+      // since this server is headless and cannot service runInTerminal requests.
+      console: requestedConsole ?? 'internalConsole',
       redirectOutput: true,
       showReturnValue: true,
       justMyCode: config.justMyCode ?? true,
       stopOnEntry: config.stopOnEntry ?? false
     };
-    
+
     return pythonConfig;
   }
   
@@ -730,7 +759,8 @@ You can also specify the Python path explicitly in your debug configuration.`;
     
     return new Promise((resolve) => {
       const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
       });
       
       let output = '';
@@ -758,7 +788,8 @@ You can also specify the Python path explicitly in your debug configuration.`;
   private async detectVirtualEnv(pythonPath: string): Promise<boolean> {
     return new Promise((resolve) => {
       const child = spawn(pythonPath, ['-c', 'import sys; print(hasattr(sys, "real_prefix") or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix))'], {
-        stdio: ['ignore', 'pipe', 'ignore']
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true
       });
       
       let output = '';

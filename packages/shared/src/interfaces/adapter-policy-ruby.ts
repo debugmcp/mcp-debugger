@@ -70,7 +70,8 @@ export const RubyAdapterPolicy: AdapterPolicy = {
 
     return new Promise((resolve) => {
       const child = spawn(rubyCmd, ['--version'], {
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
       });
 
       let hasOutput = false;

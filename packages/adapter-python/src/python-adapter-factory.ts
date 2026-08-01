@@ -96,7 +96,8 @@ export class PythonAdapterFactory implements IAdapterFactory {
   private checkDebugpyInstalled(pythonPath: string): Promise<boolean> {
     return new Promise((resolve) => {
       const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
       });
       
       let output = '';

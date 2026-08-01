@@ -129,6 +129,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
       return new Promise((resolve) => {
         const child = spawn(codelldbPath, ['--version'], {
           stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
         });
 
         let output = '';

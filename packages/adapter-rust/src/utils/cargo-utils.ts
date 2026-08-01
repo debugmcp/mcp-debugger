@@ -69,7 +69,8 @@ export async function getCargoTargets(projectPath: string): Promise<CargoTarget[
     let settled = false;
     const metadataProcess = spawn('cargo', ['metadata', '--format-version', '1'], {
       cwd: projectPath,
-      shell: true
+      shell: true,
+      windowsHide: true
     });
 
     let output = '';
@@ -143,7 +144,8 @@ export async function runCargoTest(
 
     const testProcess = spawn('cargo', args, {
       cwd: projectPath,
-      shell: true
+      shell: true,
+      windowsHide: true
     });
 
     let output = '';
@@ -259,7 +261,8 @@ export async function runCargoBuild(
   return new Promise((resolve) => {
     const buildProcess = spawn('cargo', args, {
       cwd: projectPath,
-      shell: true
+      shell: true,
+      windowsHide: true
     });
     
     let output = '';
@@ -364,7 +367,8 @@ export async function buildCargoProject(
     let settled = false;
     const buildProcess = spawn('cargo', args, {
       cwd: projectRoot,
-      shell: true
+      shell: true,
+      windowsHide: true
     });
 
     let stdout = '';
