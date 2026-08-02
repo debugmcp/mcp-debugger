@@ -6,6 +6,10 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
   ErrorCode as McpErrorCode,
   McpError,
   ServerResult,
@@ -104,6 +108,9 @@ interface ToolArguments {
   // redefine_classes parameters
   classesDir?: string;
   sinceTimestamp?: number;
+  // get_output parameters
+  since?: number;
+  limit?: number;
 }
 
 /**
@@ -118,7 +125,8 @@ const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 
   // numbers
   line: 'number', linesContext: 'number', scope: 'number',
   frameId: 'number', port: 'number', timeout: 'number', threadId: 'number',
-  verifyTimeout: 'number',
+  verifyTimeout: 'number', since: 'number', limit: 'number',
+  sinceTimestamp: 'number',
   // booleans
   includeInternals: 'boolean', includeSpecial: 'boolean',
   stopOnEntry: 'boolean', justMyCode: 'boolean',
@@ -177,6 +185,16 @@ export class DebugMcpServer {
   private fileChecker: SimpleFileChecker;
   private lineReader: LineReader;
   private environment: IEnvironment;
+
+  // Debuggee-output resource subscriptions (issue #218).
+  // URIs subscribed via resources/subscribe; updated-pings are debounced so
+  // notification volume is independent of debuggee output volume.
+  private static readonly OUTPUT_UPDATE_DEBOUNCE_MS = 150;
+  private subscribedUris = new Set<string>();
+  private outputUpdateTimers = new Map<string, NodeJS.Timeout>();
+  private handleOutputCaptured = (sessionId: string): void => {
+    this.scheduleOutputResourceUpdated(sessionId);
+  };
 
   // Get supported languages from adapter registry
   private async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -491,7 +509,7 @@ export class DebugMcpServer {
 
     this.server = new Server(
       { name: 'debug-mcp-server', version: '0.1.0' },
-      { capabilities: { tools: {} } }
+      { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true } } }
     );
 
     const sessionManagerConfig: SessionManagerConfig = {
@@ -501,6 +519,8 @@ export class DebugMcpServer {
     this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
 
     this.registerTools();
+    this.registerResources();
+    this.sessionManager.on('output-captured', this.handleOutputCaptured);
     this.server.onerror = (error) => {
       this.logger.error('Server error', { error });
     };
@@ -622,7 +642,7 @@ export class DebugMcpServer {
           { name: 'step_over', description: 'Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state "running" and pending:true — the session becomes "paused" when the step completes (check list_debug_sessions, or call pause_execution to interrupt)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'step_into', description: 'Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state "running" and pending:true — the session becomes "paused" when the step completes', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'step_out', description: 'Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state "running" and pending:true — the session becomes "paused" when the step completes', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'continue_execution', description: 'Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. When the program stops again the session state becomes "paused" — check list_debug_sessions or get_stack_trace, whose lastStop/stopReason tells you why it stopped (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'continue_execution', description: 'Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. When the program stops again the session state becomes "paused" — check list_debug_sessions or get_stack_trace, whose lastStop/stopReason tells you why it stopped (e.g. "breakpoint" vs "exception"). Use get_output to read the program\'s stdout/stderr', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'pause_execution', description: 'Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code), returns success with pending:true and the session reports "paused" once the stop lands', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, threadId: { type: 'number', description: 'Thread ID to pause. If omitted or 0, pauses all threads.' } }, required: ['sessionId'] } },
           { name: 'list_threads', description: 'List all threads in the debugged process', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
@@ -631,6 +651,7 @@ export class DebugMcpServer {
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
           { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state. Waits up to 30s for the result by default; pass timeout for long-running expressions', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee. Note: your MCP client may enforce its own overall request timeout' } }, required: ['sessionId', 'expression'] } },
           { name: 'get_source_context', description: 'Get source context around a specific line in a file', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number to get context for' }, linesContext: { type: 'number', description: 'Number of lines before and after to include (default: 5)' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'get_output', description: 'Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, since: { type: 'number', description: 'Only return entries with seq greater than this cursor (use nextSince from the previous response). Default: 0 = from the start of the buffer' }, limit: { type: 'number', description: 'Maximum entries to return (default: 100, max: 1000). hasMore:true in the response means more entries are available' } }, required: ['sessionId'] } },
           { name: 'redefine_classes', description: 'Hot-swap changed Java classes into a running JVM. Scans a classes directory for .class files modified after sinceTimestamp, matches them against loaded classes in the target JVM, and redefines them using JDI. Returns which classes were redefined and the newest file timestamp (pass as sinceTimestamp on next call for incremental updates). Only works with Java debug sessions.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, classesDir: { type: 'string', description: 'Absolute path to compiled classes directory (e.g. build/classes/java/main/)' }, sinceTimestamp: { type: 'number', description: 'Unix timestamp (ms). Only redefine .class files modified after this time. 0 or omitted = all files.' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the redefinition to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once' } }, required: ['sessionId', 'classesDir'] } },
         ],
       };
@@ -680,6 +701,9 @@ export class DebugMcpServer {
                 executablePath: args.executablePath,
                 timestamp: Date.now()
               });
+
+              // A new output resource is now listable (issue #218)
+              this.notifyResourceListChanged();
 
               // Check if attach mode is requested (host/port provided)
               const isAttachMode = args.port !== undefined;
@@ -984,6 +1008,12 @@ export class DebugMcpServer {
                   sessionName: sessionName,
                   timestamp: Date.now()
                 });
+
+                // The session's output resource is gone (issue #218)
+                const outputUri = this.outputResourceUri(args.sessionId);
+                this.subscribedUris.delete(outputUri);
+                this.clearOutputUpdateTimer(outputUri);
+                this.notifyResourceListChanged();
               }
               
               result = { content: [{ type: 'text', text: JSON.stringify({ success: closed, message: closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}` }) }] };
@@ -1206,6 +1236,10 @@ export class DebugMcpServer {
               result = await this.handleGetLocalVariables(args as { sessionId: string; includeSpecial?: boolean });
               break;
             }
+            case 'get_output': {
+              result = await this.handleGetOutput(args as { sessionId: string; since?: number; limit?: number });
+              break;
+            }
             case 'list_supported_languages': {
               result = await this.handleListSupportedLanguages();
               break;
@@ -1255,6 +1289,109 @@ export class DebugMcpServer {
     );
   }
 
+  // ===== Debuggee-output resources (issue #218) =====
+
+  private outputResourceUri(sessionId: string): string {
+    return `debug://sessions/${sessionId}/output`;
+  }
+
+  /** Returns the sessionId encoded in a debug output resource URI, or undefined. */
+  private parseOutputResourceUri(uri: string): string | undefined {
+    const match = /^debug:\/\/sessions\/([^/]+)\/output$/.exec(uri);
+    return match?.[1];
+  }
+
+  /**
+   * Registers MCP resource handlers. Each debug session exposes its captured
+   * debuggee output as debug://sessions/{id}/output — a verbatim console
+   * transcript (all categories interleaved, in arrival order). Clients may
+   * subscribe to receive coalesced resources/updated pings as output arrives;
+   * structured/cursor access is available via the get_output tool.
+   */
+  private registerResources(): void {
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+      const sessions = this.sessionManager.getAllSessions();
+      return {
+        resources: sessions.map(session => ({
+          uri: this.outputResourceUri(session.id),
+          name: `Debuggee output — ${session.name}`,
+          description: `stdout/stderr/console output captured for ${session.language} debug session '${session.name}'`,
+          mimeType: 'text/plain'
+        }))
+      };
+    });
+
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const uri = request.params.uri;
+      const sessionId = this.parseOutputResourceUri(uri);
+      const session = sessionId ? this.sessionManager.getSession(sessionId) : undefined;
+      if (!session) {
+        throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      }
+      return {
+        contents: [{
+          uri,
+          mimeType: 'text/plain',
+          // Empty until the first launch creates the buffer
+          text: session.outputBuffer?.renderText() ?? ''
+        }]
+      };
+    });
+
+    this.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+      const uri = request.params.uri;
+      const sessionId = this.parseOutputResourceUri(uri);
+      if (!sessionId || !this.sessionManager.getSession(sessionId)) {
+        throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      }
+      this.subscribedUris.add(uri);
+      return {};
+    });
+
+    this.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+      const uri = request.params.uri;
+      this.subscribedUris.delete(uri);
+      this.clearOutputUpdateTimer(uri);
+      return {};
+    });
+  }
+
+  /**
+   * Throttled resources/updated ping for a session's output resource: the
+   * first captured event after a quiet period arms a timer; everything that
+   * arrives inside the window rides the same ping.
+   */
+  private scheduleOutputResourceUpdated(sessionId: string): void {
+    const uri = this.outputResourceUri(sessionId);
+    if (!this.subscribedUris.has(uri) || this.outputUpdateTimers.has(uri)) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.outputUpdateTimers.delete(uri);
+      this.server.sendResourceUpdated({ uri }).catch((error: unknown) => {
+        // Not connected yet / transport gone — nothing to notify, not an error.
+        this.logger.debug(`[Server] Failed to send resources/updated for ${uri}`, { error });
+      });
+    }, DebugMcpServer.OUTPUT_UPDATE_DEBOUNCE_MS);
+    timer.unref?.();
+    this.outputUpdateTimers.set(uri, timer);
+  }
+
+  private clearOutputUpdateTimer(uri: string): void {
+    const timer = this.outputUpdateTimers.get(uri);
+    if (timer) {
+      clearTimeout(timer);
+      this.outputUpdateTimers.delete(uri);
+    }
+  }
+
+  /** Fire-and-forget resources/list_changed (sessions appeared/disappeared). */
+  private notifyResourceListChanged(): void {
+    this.server.sendResourceListChanged().catch((error: unknown) => {
+      this.logger.debug('[Server] Failed to send resources/list_changed', { error });
+    });
+  }
+
   private async handleListDebugSessions(): Promise<ServerResult> {
     try {
       const sessionsInfo: DebugSessionInfo[] = this.sessionManager.getAllSessions();
@@ -1279,6 +1416,29 @@ export class DebugMcpServer {
       this.logger.error('Failed to list debug sessions', { error });
       throw new McpError(McpErrorCode.InternalError, `Failed to list debug sessions: ${(error as Error).message}`);
     }
+  }
+
+  private async handleGetOutput(args: { sessionId: string; since?: number; limit?: number }): Promise<ServerResult> {
+    // Deliberately no validateSession(): that rejects TERMINATED sessions, but
+    // reading output after the program finished is the primary use case.
+    // Output stays readable until close_debug_session removes the session.
+    const session = this.sessionManager.getSession(args.sessionId);
+    if (!session) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: `Session not found: ${args.sessionId}` }) }] };
+    }
+    const since = Math.max(0, args.since ?? 0);
+    const limit = Math.min(Math.max(1, args.limit ?? 100), 1000);
+    const read = session.outputBuffer
+      ? session.outputBuffer.read(since, limit)
+      : { entries: [], nextSince: since, hasMore: false, dropped: 0 }; // session created but never launched
+    return { content: [{ type: 'text', text: JSON.stringify({
+      success: true,
+      sessionId: args.sessionId,
+      entries: read.entries,
+      nextSince: read.nextSince,
+      hasMore: read.hasMore,
+      dropped: read.dropped
+    }) }] };
   }
 
   private async handlePause(args: { sessionId: string; threadId?: number }): Promise<ServerResult> {
@@ -1592,6 +1752,14 @@ export class DebugMcpServer {
 
   public async stop(): Promise<void> {
     await this.sessionManager.closeAllSessions();
+    // Tear down output-resource bookkeeping (issue #218): pending debounce
+    // timers and the SessionManager listener must not outlive the server
+    // (the test suite runs with a strict leak guard).
+    for (const uri of this.outputUpdateTimers.keys()) {
+      this.clearOutputUpdateTimer(uri);
+    }
+    this.subscribedUris.clear();
+    this.sessionManager.removeListener('output-captured', this.handleOutputCaptured);
     this.logger.info('Debug MCP Server stopped');
   }
 

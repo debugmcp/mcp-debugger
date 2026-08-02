@@ -1,5 +1,5 @@
 /**
- * Comprehensive MCP Debugger Test - All 20 Tools x All Languages
+ * Comprehensive MCP Debugger Test - All 21 Tools x All Languages
  *
  * Broad coverage of MCP tools across available language adapters.
  * Produces a detailed matrix report (PASS/FAIL/SKIP per tool per language).
@@ -145,7 +145,7 @@ const LANGUAGES: LangDef[] = [
     dapLaunchArgs: { mainClass: 'HelloWorld', classpath: JAVA_CLASS_DIR, cwd: JAVA_CLASS_DIR } },
 ];
 
-/* ---------- all 20 tools ---------- */
+/* ---------- all 21 tools ---------- */
 
 const ALL_TOOLS = [
   'list_supported_languages',
@@ -165,6 +165,7 @@ const ALL_TOOLS = [
   'continue_execution',
   'pause_execution',
   'list_threads',
+  'get_output',
   'attach_to_process',
   'detach_from_process',
   'close_debug_session',
@@ -172,7 +173,7 @@ const ALL_TOOLS = [
 
 /* ---------- test suite ---------- */
 
-describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} Languages`, () => {
+describe(`Comprehensive MCP Debugger Test — 21 Tools × ${LANGUAGES.length} Languages`, () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
 
@@ -590,7 +591,24 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
             record('continue_execution', lang.language, 'FAIL', err.message, Date.now() - t0);
           }
 
-          /* ---- Tool 20: close_debug_session ---- */
+          /* ---- Tool 16: get_output (issue #218) ---- */
+          // Lenient: entries may legitimately be empty (Ruby routes debuggee
+          // stdio to the adapter process; the adapter may emit no DAP output
+          // events) — only the tool contract is asserted per-language.
+          t0 = Date.now();
+          try {
+            const outRes = await callToolSafely(mcpClient!, 'get_output', { sessionId: currentSessionId });
+            if (outRes.success === true) {
+              const count = Array.isArray(outRes.entries) ? outRes.entries.length : 0;
+              record('get_output', lang.language, 'PASS', `entries=${count}`, Date.now() - t0);
+            } else {
+              record('get_output', lang.language, 'FAIL', `success=${outRes.success}: ${outRes.error ?? outRes.message ?? ''}`, Date.now() - t0);
+            }
+          } catch (err: any) {
+            record('get_output', lang.language, 'FAIL', err.message, Date.now() - t0);
+          }
+
+          /* ---- Tool 21: close_debug_session ---- */
           t0 = Date.now();
           try {
             const closeRes = await callToolSafely(mcpClient!, 'close_debug_session', { sessionId: currentSessionId });
@@ -645,8 +663,9 @@ describe(`Comprehensive MCP Debugger Test — 20 Tools × ${LANGUAGES.length} La
 
           await new Promise(r => setTimeout(r, 2000));
 
-          // Try inspection tools on mock
-          for (const tool of ['get_stack_trace', 'get_local_variables', 'step_over', 'continue_execution'] as const) {
+          // Try inspection tools on mock (get_output: mock emits no DAP output
+          // events, so this asserts the empty-success contract)
+          for (const tool of ['get_stack_trace', 'get_local_variables', 'step_over', 'continue_execution', 'get_output'] as const) {
             t0 = Date.now();
             try {
               const args: Record<string, unknown> = { sessionId: currentSessionId };

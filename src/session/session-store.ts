@@ -28,6 +28,7 @@ export interface CreateSessionParams {
 }
 
 import { IProxyManager } from '../proxy/proxy-manager.js';
+import { OutputRingBuffer } from './output-buffer.js';
 
 export interface ToolchainValidationState {
   compatible: boolean;
@@ -59,6 +60,9 @@ export interface ManagedSession extends DebugSessionInfo {
   // run on a remote filesystem (container, pod, other machine), so host-side
   // file existence checks do not apply to their source paths.
   attachMode?: boolean;
+  // Debuggee output captured from DAP 'output' events (issue #218).
+  // Created fresh on each launch/attach; readable until the session is closed.
+  outputBuffer?: OutputRingBuffer;
 }
 
 /**

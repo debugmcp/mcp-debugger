@@ -266,6 +266,24 @@ export interface SessionStopInfo {
   timestamp: number;
 }
 
+/**
+ * One captured debuggee output event (issue #218).
+ * Buffered per launch; exposed via the get_output tool and the
+ * debug://sessions/{id}/output resource.
+ */
+export interface SessionOutputEntry {
+  /** Monotonic per-launch sequence number, starting at 1 */
+  seq: number;
+  /** DAP output category: 'stdout', 'stderr', 'console', 'important', ... ('console' when the adapter omits it) */
+  category: string;
+  /** Output text as emitted by the adapter (chunking is adapter-defined; may end with a newline) */
+  output: string;
+  /** Epoch milliseconds when the server received the event */
+  timestamp: number;
+  /** Present and true when the entry exceeded the per-entry size cap and was cut */
+  truncated?: boolean;
+}
+
 export interface DebugSessionInfo {
   id: string;
   language: DebugLanguage;

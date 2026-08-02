@@ -140,6 +140,119 @@ describe('SessionManager - Integration Tests', () => {
     });
   });
 
+  describe('Debuggee output capture (issue #218)', () => {
+    async function startSession(dapLaunchArgs?: { stopOnEntry?: boolean }) {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py', [], dapLaunchArgs);
+      await vi.runAllTimersAsync();
+      return session;
+    }
+
+    it('captures stdout and stderr output events with increasing seq', async () => {
+      const session = await startSession();
+
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'hello\n' });
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stderr', output: 'oops\n' });
+
+      const read = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(read?.entries).toHaveLength(2);
+      expect(read?.entries[0]).toMatchObject({ seq: 1, category: 'stdout', output: 'hello\n' });
+      expect(read?.entries[1]).toMatchObject({ seq: 2, category: 'stderr', output: 'oops\n' });
+      expect(typeof read?.entries[0].timestamp).toBe('number');
+    });
+
+    it('defaults a missing category to console', async () => {
+      const session = await startSession();
+
+      dependencies.mockProxyManager.simulateEvent('output', { output: 'no category\n' } as never);
+
+      const read = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(read?.entries[0]).toMatchObject({ category: 'console', output: 'no category\n' });
+    });
+
+    it('filters telemetry events at write time', async () => {
+      const session = await startSession();
+
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'telemetry', output: '{"event":"x"}' });
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'real\n' });
+
+      const read = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(read?.entries).toHaveLength(1);
+      expect(read?.entries[0].output).toBe('real\n');
+    });
+
+    it('ignores malformed output bodies', async () => {
+      const session = await startSession();
+
+      dependencies.mockProxyManager.simulateEvent('output', {} as never);
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: '' });
+      dependencies.mockProxyManager.simulateEvent('output', undefined as never);
+
+      const read = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(read?.entries).toHaveLength(0);
+    });
+
+    it('captures output emitted before the first stop (entry auto-continue window)', async () => {
+      const session = await startSession({ stopOnEntry: false });
+
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'early\n' });
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'entry');
+
+      const read = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(read?.entries.map(e => e.output)).toEqual(['early\n']);
+    });
+
+    it('keeps output readable after termination but stops capturing (handlers removed)', async () => {
+      const session = await startSession();
+
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'before exit\n' });
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'after exit\n' });
+
+      const read = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(read?.entries.map(e => e.output)).toEqual(['before exit\n']);
+    });
+
+    it('starts a fresh buffer with restarted seq on re-launch', async () => {
+      const session = await startSession();
+
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'first launch\n' });
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      // Let the first launch's teardown (proxy exit) finish before re-launching —
+      // the shared mock ProxyManager would otherwise tear down the new handlers.
+      await vi.runAllTimersAsync();
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const empty = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(empty?.entries).toHaveLength(0);
+
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'second launch\n' });
+      const read = sessionManager.getSession(session.id)?.outputBuffer?.read(0, 100);
+      expect(read?.entries).toHaveLength(1);
+      expect(read?.entries[0].seq).toBe(1);
+    });
+
+    it("emits 'output-captured' with the session id and entry", async () => {
+      const captured: Array<{ sessionId: string; entry: unknown }> = [];
+      sessionManager.on('output-captured', (sessionId: string, entry: unknown) => {
+        captured.push({ sessionId, entry });
+      });
+
+      const session = await startSession();
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'stdout', output: 'ping\n' });
+      dependencies.mockProxyManager.simulateEvent('output', { category: 'telemetry', output: 'noise' });
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].sessionId).toBe(session.id);
+      expect(captured[0].entry).toMatchObject({ seq: 1, category: 'stdout', output: 'ping\n' });
+    });
+  });
+
   describe('Logger Integration', () => {
     it('should log all major operations', async () => {
       const session = await sessionManager.createSession({ 

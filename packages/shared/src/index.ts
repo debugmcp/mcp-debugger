@@ -138,6 +138,7 @@ export type {
   Breakpoint,
   DebugSession,
   DebugSessionInfo,
+  SessionOutputEntry,
 
   // Debug info types
   Variable,

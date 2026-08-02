@@ -75,6 +75,8 @@ export function createMockServer() {
     setRequestHandler: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
+    sendResourceUpdated: vi.fn().mockResolvedValue(undefined),
+    sendResourceListChanged: vi.fn().mockResolvedValue(undefined),
     onerror: undefined as any
   };
 }
@@ -103,7 +105,10 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     attachToProcess: vi.fn(),
     redefineClasses: vi.fn(),
     getAdapterRegistry: vi.fn().mockReturnValue(mockAdapterRegistry),
-    adapterRegistry: mockAdapterRegistry
+    adapterRegistry: mockAdapterRegistry,
+    // EventEmitter surface used by DebugMcpServer for output-captured (issue #218)
+    on: vi.fn(),
+    removeListener: vi.fn()
   };
 }
 
@@ -116,5 +121,17 @@ export function getToolHandlers(mockServer: any) {
   return {
     listToolsHandler: handlers[0]?.[1], // First handler is for ListToolsRequestSchema
     callToolHandler: handlers[1]?.[1]   // Second handler is for CallToolRequestSchema
+  };
+}
+
+// Resource handlers are registered by registerResources() right after the two
+// tool handlers, in this order (issue #218).
+export function getResourceHandlers(mockServer: any) {
+  const handlers = mockServer.setRequestHandler.mock.calls;
+  return {
+    listResourcesHandler: handlers[2]?.[1],
+    readResourceHandler: handlers[3]?.[1],
+    subscribeHandler: handlers[4]?.[1],
+    unsubscribeHandler: handlers[5]?.[1]
   };
 }

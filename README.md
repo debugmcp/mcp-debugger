@@ -144,6 +144,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `pause_execution` | Pause running execution | ✅ Implemented |
 | `evaluate_expression` | Evaluate expressions in debug context | ✅ Implemented |
 | `get_source_context` | Get source code context | ✅ Implemented |
+| `get_output` | Read captured debuggee output (stdout/stderr) | ✅ Implemented |
 | `close_debug_session` | Close a session | ✅ Implemented |
 | `redefine_classes` | Hot-swap changed Java classes into a running JVM (Java only) | ✅ Implemented |
 

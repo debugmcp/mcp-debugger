@@ -47,6 +47,8 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       stepInto: vi.fn(),
       stepOut: vi.fn(),
       evaluateExpression: vi.fn(),
+      on: vi.fn(),
+      removeListener: vi.fn(),
       adapterRegistry: {
         getSupportedLanguages: vi.fn().mockReturnValue(['python', 'mock']),
         listLanguages: vi.fn().mockResolvedValue(['python', 'mock']),

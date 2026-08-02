@@ -15,6 +15,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -102,6 +103,16 @@ describe('MCP Server Python Debugging Smoke Test', () => {
     expect(createResponse.sessionId).toBeDefined();
     sessionId = createResponse.sessionId as string;
     console.log(`[Python Smoke Test] Session created: ${sessionId}`);
+
+    // 1.5 Subscribe to the session's output resource (issue #218) so we can
+    // assert that resources/updated pings arrive as the debuggee prints.
+    const outputResourceUri = `debug://sessions/${sessionId}/output`;
+    const updatedUris: string[] = [];
+    mcpClient!.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+      updatedUris.push(notification.params.uri);
+    });
+    await mcpClient!.subscribeResource({ uri: outputResourceUri });
+    console.log('[Python Smoke Test] Subscribed to output resource');
 
     // 2. Set breakpoint (initially returns verified: false; verified on launch)
     console.log('[Python Smoke Test] Setting breakpoint at line 32...');
@@ -229,9 +240,36 @@ describe('MCP Server Python Debugging Smoke Test', () => {
     // 7. Continue execution
     console.log('[Python Smoke Test] Continuing execution...');
     const continueResult = await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-    
+
     // Wait for script to complete
     await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // 7.5 Debuggee output must be retrievable (issue #218) — the script's
+    // print() output flows back as DAP output events into the session buffer.
+    console.log('[Python Smoke Test] Fetching debuggee output...');
+    const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+    expect(outputResult.success).toBe(true);
+    const outputEntries = outputResult.entries as Array<{ seq: number; category: string; output: string }>;
+    console.log(`[Python Smoke Test] Captured ${outputEntries.length} output entries`);
+    const factorialEntry = outputEntries.find(e => e.output.includes('Factorial of 5'));
+    expect(factorialEntry).toBeDefined();
+    expect(factorialEntry!.category).toBe('stdout');
+
+    // Cursor round-trip: draining from nextSince returns nothing new
+    const drained = await callToolSafely(mcpClient!, 'get_output', {
+      sessionId,
+      since: outputResult.nextSince as number
+    });
+    expect(drained.success).toBe(true);
+    expect(drained.entries).toEqual([]);
+
+    // Resource flow (issue #218): the subscription produced updated-pings and
+    // the resource read returns the plain-text transcript.
+    expect(updatedUris).toContain(outputResourceUri);
+    const resource = await mcpClient!.readResource({ uri: outputResourceUri });
+    const transcript = (resource.contents[0] as { text?: string }).text ?? '';
+    expect(transcript).toContain('Factorial of 5');
+    console.log('[Python Smoke Test] Output resource verified');
 
     // 8. Close session
     console.log('[Python Smoke Test] Closing session...');

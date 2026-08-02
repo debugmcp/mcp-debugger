@@ -214,7 +214,15 @@ function handleDapEvent(
         args: []
       });
       break;
-    
+
+    case 'output':
+      commands.push({
+        type: 'emitEvent',
+        event: 'output',
+        args: [message.body]
+      });
+      break;
+
     default:
       // Forward unknown events as generic DAP events
       commands.push({

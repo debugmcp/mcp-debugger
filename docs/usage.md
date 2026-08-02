@@ -381,9 +381,10 @@ You can also evaluate arbitrary expressions in the current debug context:
 
 ## Fully Implemented Features
 
-All 21 tools are fully implemented, including:
+All 22 tools are fully implemented, including:
 
 - **pause_execution**: Sends a DAP pause request and returns immediately; paused state is updated asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
+- **get_output**: Returns the debuggee's stdout/stderr/console output, buffered per launch from DAP output events. Cursor-based (`since`/`nextSince`) for incremental polling; output stays readable after the program exits until the session is closed. The same data is exposed as a subscribable MCP resource (`debug://sessions/{id}/output`).
 - **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. When `frameId` is not specified, the server infers it by fetching the stack trace and using the topmost frame -- this works reliably only when a single frame exists or the top frame is the desired context. Callers should provide `frameId` explicitly when debugging code with multiple stack frames. Expressions with side effects are allowed (can modify program state).
 
 ## Best Practices
@@ -396,4 +397,4 @@ All 21 tools are fully implemented, including:
 
 ---
 
-*Last updated: 2026-03-21 - All 21 tools including list_threads, pause_execution, and evaluate_expression are fully implemented (v0.23.0)*
+*Last updated: 2026-08-02 - All 22 tools including get_output (debuggee output capture, issue #218) are fully implemented*

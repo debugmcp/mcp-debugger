@@ -15,6 +15,7 @@ import {
   createMockStdioTransport,
   getToolHandlers
 } from './server-test-helpers.js';
+import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
 
 // Mock dependencies
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -338,6 +339,91 @@ describe('Server Inspection Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('Session not found: test-session');
+    });
+  });
+
+  describe('get_output', () => {
+    function makeBuffer(lines: string[]): OutputRingBuffer {
+      const buffer = new OutputRingBuffer();
+      for (const line of lines) {
+        buffer.push('stdout', line);
+      }
+      return buffer;
+    }
+
+    async function callGetOutput(args: Record<string, unknown>) {
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_output', arguments: args }
+      });
+      return JSON.parse(result.content[0].text);
+    }
+
+    it('returns buffered entries with cursor metadata', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE',
+        outputBuffer: makeBuffer(['one\n', 'two\n'])
+      });
+
+      const content = await callGetOutput({ sessionId: 'test-session' });
+      expect(content.success).toBe(true);
+      expect(content.entries.map((e: { output: string }) => e.output)).toEqual(['one\n', 'two\n']);
+      expect(content.nextSince).toBe(2);
+      expect(content.hasMore).toBe(false);
+      expect(content.dropped).toBe(0);
+    });
+
+    it('works on TERMINATED sessions (post-exit output is the primary use case)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'TERMINATED',
+        outputBuffer: makeBuffer(['final result\n'])
+      });
+
+      const content = await callGetOutput({ sessionId: 'test-session' });
+      expect(content.success).toBe(true);
+      expect(content.entries).toHaveLength(1);
+    });
+
+    it('returns success:false for an unknown session', async () => {
+      mockSessionManager.getSession.mockReturnValue(undefined);
+
+      const content = await callGetOutput({ sessionId: 'nope' });
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('Session not found: nope');
+    });
+
+    it('honours the since cursor and clamps limit', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE',
+        outputBuffer: makeBuffer(['a\n', 'b\n', 'c\n'])
+      });
+
+      const incremental = await callGetOutput({ sessionId: 'test-session', since: 2 });
+      expect(incremental.entries.map((e: { output: string }) => e.output)).toEqual(['c\n']);
+      expect(incremental.nextSince).toBe(3);
+
+      // limit below 1 clamps to 1; negative since clamps to 0
+      const clamped = await callGetOutput({ sessionId: 'test-session', since: -5, limit: 0 });
+      expect(clamped.entries).toHaveLength(1);
+      expect(clamped.entries[0].output).toBe('a\n');
+      expect(clamped.hasMore).toBe(true);
+    });
+
+    it('returns an empty success for sessions that never launched (no buffer)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'CREATED'
+      });
+
+      const content = await callGetOutput({ sessionId: 'test-session', since: 7 });
+      expect(content.success).toBe(true);
+      expect(content.entries).toEqual([]);
+      expect(content.nextSince).toBe(7);
+      expect(content.hasMore).toBe(false);
+      expect(content.dropped).toBe(0);
     });
   });
 });
