@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  labels: { app: checkout }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: checkout }
+  template:
+    metadata:
+      labels: { app: checkout }
+    spec:
+      containers:
+        - name: checkout
+          image: sick-pod-checkout:tutorial
+          imagePullPolicy: Never   # kind: image is side-loaded, never pulled
+          ports:
+            - containerPort: 8080  # service traffic
+            - containerPort: 5678  # debugpy (NEVER expose via a Service/Ingress)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+spec:
+  selector: { app: checkout }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
