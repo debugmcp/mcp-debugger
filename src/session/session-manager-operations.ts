@@ -7,7 +7,8 @@ import {
   Breakpoint,
   SessionState,
   SessionLifecycleState,
-  sanitizePayloadForLogging
+  sanitizePayloadForLogging,
+  type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ManagedSession, ToolchainValidationState } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -96,7 +97,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     scriptArgs?: string[],
     dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
     dryRunSpawn?: boolean,
-    adapterLaunchConfig?: Record<string, unknown>
+    adapterLaunchConfig?: Record<string, unknown>,
+    breakOnExceptions?: ExceptionBreakMode
   ): Promise<LanguageSpecificLaunchConfig> {
     const sessionId = session.id;
     
@@ -330,6 +332,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       justMyCode: justMyCodeFlag,
       initialBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
+      breakOnExceptions,
       launchConfig: launchConfigData,
       adapterCommand, // Pass the adapter command
     };
@@ -414,7 +417,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     scriptArgs?: string[],
     dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
     dryRunSpawn?: boolean,
-    adapterLaunchConfig?: Record<string, unknown>
+    adapterLaunchConfig?: Record<string, unknown>,
+    breakOnExceptions?: ExceptionBreakMode
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
     this.logger.info(
@@ -528,7 +532,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
       // Normal (non-dry-run) flow
       // Start the proxy manager
-      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig);
+      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig, breakOnExceptions);
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
@@ -542,7 +546,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             scriptPath,
             scriptArgs,
             breakpoints: session.breakpoints,
-            launchConfig: launchConfigData
+            launchConfig: launchConfigData,
+            breakOnExceptions
           });
         } catch (handshakeErr) {
           this.logger.warn(
@@ -1641,6 +1646,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       stopOnEntry?: boolean;
       justMyCode?: boolean;
       verifyTimeout?: number;
+      breakOnExceptions?: ExceptionBreakMode;
     }
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
@@ -1652,7 +1658,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // The verification-window override is consumed by the thread-discovery
     // loop below, not by the adapter — strip it from the config that becomes
     // the DAP attach arguments. Validate before any state mutation.
-    const { verifyTimeout, ...adapterAttachConfig } = attachConfig;
+    // breakOnExceptions maps to setExceptionBreakpoints, not attach args —
+    // strip it too and thread it through the proxy config instead.
+    const { verifyTimeout, breakOnExceptions, ...adapterAttachConfig } = attachConfig;
     let verifyTimeoutOverride = verifyTimeout;
     if (verifyTimeoutOverride !== undefined) {
       if (
@@ -1706,7 +1714,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         placeholderPath,
         undefined,
         attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
-        false
+        false,
+        undefined,
+        breakOnExceptions
       );
 
       // Perform language-specific handshake if required, mirroring
@@ -1725,7 +1735,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             scriptPath: placeholderPath,
             scriptArgs: undefined,
             breakpoints: session.breakpoints,
-            launchConfig: attachConfigData
+            launchConfig: attachConfigData,
+            breakOnExceptions
           });
         } catch (handshakeErr) {
           this.logger.warn(

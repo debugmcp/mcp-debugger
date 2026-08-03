@@ -126,6 +126,15 @@ export class MinimalDapClient extends EventEmitter {
   }
 
   /**
+   * Record the session's break-on-exception mode and propagate it to the
+   * child-session manager so child sessions arm the same exception filters
+   * (issue #220).
+   */
+  setExceptionBreakMode(mode: 'uncaught' | 'all' | 'none'): void {
+    this.childSessionManager?.setExceptionBreakMode(mode);
+  }
+
+  /**
    * Handle raw data using the same algorithm as vscode's ProtocolServer
    * This ensures compatibility and proper message boundaries
    */

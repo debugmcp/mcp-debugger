@@ -159,7 +159,13 @@ export const MockAdapterPolicy: AdapterPolicy = {
    * Mock adapter has no special initialization requirements
    */
   getInitializationBehavior: () => {
-    return {};  // Mock adapter has no special initialization requirements
+    return {
+      // Matched by the mock-adapter-process setExceptionBreakpoints handler
+      exceptionFilters: {
+        uncaught: ['uncaught'],
+        all: ['all']
+      }
+    };
   },
 
   /**

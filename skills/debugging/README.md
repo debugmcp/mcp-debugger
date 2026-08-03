@@ -32,4 +32,4 @@ mkdir -p ~/.copilot/skills && cp -r skills/debugging ~/.copilot/skills/mcp-debug
 
 ## Keeping it honest
 
-The skill states current limitations (no exception breakpoints yet, per-language output-capture gaps) with issue links. If you hit a behavior the skill doesn't describe, please [open an issue](https://github.com/debugmcp/mcp-debugger/issues) — the skill is maintained against real agent transcripts.
+The skill states current limitations (per-language output-capture gaps, no breakpoint listing yet) with issue links. If you hit a behavior the skill doesn't describe, please [open an issue](https://github.com/debugmcp/mcp-debugger/issues) — the skill is maintained against real agent transcripts.

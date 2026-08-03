@@ -38,7 +38,8 @@ import {
   RubyAdapterPolicy,
   DotnetAdapterPolicy,
   MockAdapterPolicy,
-  getPolicyForLanguage
+  getPolicyForLanguage,
+  resolveExceptionFilters
 } from '@debugmcp/shared';
 
 export type DapProxyWorkerHooks = {
@@ -399,6 +400,10 @@ export class DapProxyWorker {
         spawnConfig.port
       );
 
+      // Record the break-on-exception mode on the client so DAP child
+      // sessions (js-debug) can apply the same filters (issue #220).
+      this.dapClient.setExceptionBreakMode?.(payload.breakOnExceptions ?? 'none');
+
       // Set up event handlers
       this.setupDapEventHandlers();
 
@@ -686,6 +691,29 @@ export class DapProxyWorker {
             this.dapClient,
             filePath,
             breakpoints
+          );
+        }
+      }
+
+      // Arm exception breakpoints when requested (issue #220). A failure must
+      // not abort the launch — the outer catch tears the session down — so
+      // errors are swallowed with a warning.
+      const exceptionMode = this.currentInitPayload.breakOnExceptions;
+      if (exceptionMode && exceptionMode !== 'none') {
+        const exceptionFilters = resolveExceptionFilters(this.adapterPolicy, exceptionMode);
+        if (exceptionFilters.length > 0) {
+          try {
+            await this.connectionManager.setExceptionBreakpoints(this.dapClient, exceptionFilters);
+          } catch (err) {
+            this.logger!.warn(
+              `[Worker] setExceptionBreakpoints failed (continuing without exception breakpoints): ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        } else {
+          this.logger!.warn(
+            `[Worker] breakOnExceptions '${exceptionMode}' is not supported by adapter policy '${this.adapterPolicy.name}'; skipping setExceptionBreakpoints`
           );
         }
       }

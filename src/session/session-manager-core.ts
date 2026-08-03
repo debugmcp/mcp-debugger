@@ -224,6 +224,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Reset first-stop tracking for this launch — a session may be re-launched.
     session.firstStopHandled = false;
     session.lastStop = undefined;
+    session.exitCode = undefined;
     // Each launch/attach starts with a fresh output buffer (issue #218).
     session.outputBuffer = new OutputRingBuffer();
 
@@ -244,7 +245,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
 
     // Named function for stopped event
-    const handleStopped = (threadId: number | undefined, reason: string) => {
+    const handleStopped = (threadId: number | undefined, reason: string, body?: DebugProtocol.StoppedEvent['body']) => {
       this.logger.debug(`[SessionManager] handleStopped: session=${sessionId} currentState=${session.state} reason=${reason} threadId=${threadId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
 
@@ -298,7 +299,14 @@ export abstract class SessionManagerCore extends EventEmitter {
         // Record why we stopped so it stays queryable after the fact
         // (list_debug_sessions / get_stack_trace, issue #214). Auto-continued
         // entry stops are deliberately not recorded — the user never saw them.
-        session.lastStop = { reason, threadId, timestamp: Date.now() };
+        // description/text carry e.g. the exception class/message (issue #220).
+        session.lastStop = {
+          reason,
+          threadId,
+          timestamp: Date.now(),
+          ...(body?.description ? { description: body.description } : {}),
+          ...(body?.text ? { text: body.text } : {})
+        };
         this._updateSessionState(session, SessionState.PAUSED);
       }
 
@@ -368,9 +376,14 @@ export abstract class SessionManagerCore extends EventEmitter {
     handlers.set('terminated', handleTerminated);
 
     // Named function for exited event
-    const handleExited = () => {
-      this.logger.debug(`[SessionManager] handleExited: session=${sessionId} currentState=${session.state}`);
-      this.logger.info(`[ProxyManager ${sessionId}] Exited event`);
+    const handleExited = (exitCode?: number) => {
+      this.logger.debug(`[SessionManager] handleExited: session=${sessionId} currentState=${session.state} exitCode=${exitCode}`);
+      this.logger.info(`[ProxyManager ${sessionId}] Exited event (exitCode=${exitCode})`);
+      // Record the debuggee exit code so a crash (non-zero) is
+      // distinguishable from a clean exit after the fact (issue #220)
+      if (typeof exitCode === 'number') {
+        session.exitCode = exitCode;
+      }
       this._updateSessionState(session, SessionState.STOPPED);
 
       // Clean up listeners since proxy is gone

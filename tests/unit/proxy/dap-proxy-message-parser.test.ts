@@ -176,12 +176,33 @@ describe('MessageParser', () => {
       });
     });
 
+    it('should accept each valid breakOnExceptions value and absence', () => {
+      const base = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        executablePath: '/usr/bin/python3',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/home/user/script.py'
+      };
+
+      for (const breakOnExceptions of ['uncaught', 'all', 'none'] as const) {
+        const result = MessageParser.validateInitPayload({ ...base, breakOnExceptions });
+        expect(result.breakOnExceptions).toBe(breakOnExceptions);
+      }
+
+      const withoutMode = MessageParser.validateInitPayload(base);
+      expect(withoutMode.breakOnExceptions).toBeUndefined();
+    });
+
     it('should throw on invalid optional fields', () => {
       const invalidOptionals = [
         { scriptArgs: 'not-an-array', error: 'scriptArgs' },
         { stopOnEntry: 'not-a-boolean', error: 'stopOnEntry' },
         { justMyCode: 123, error: 'justMyCode' },
         { dryRunSpawn: [], error: 'dryRunSpawn' },
+        { breakOnExceptions: 'sometimes', error: 'breakOnExceptions' },
         { initialBreakpoints: 'not-an-array', error: 'initialBreakpoints' }
       ];
 

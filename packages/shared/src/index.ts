@@ -138,6 +138,8 @@ export type {
   Breakpoint,
   DebugSession,
   DebugSessionInfo,
+  SessionStopInfo,
+  ExceptionBreakMode,
   SessionOutputEntry,
 
   // Debug info types
@@ -173,7 +175,7 @@ export type {
   AdapterSpawnPayload,
   AdapterSpawnConfig
 } from './interfaces/adapter-policy.js';
-export { DefaultAdapterPolicy } from './interfaces/adapter-policy.js';
+export { DefaultAdapterPolicy, resolveExceptionFilters } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
 export { RubyAdapterPolicy } from './interfaces/adapter-policy-ruby.js';

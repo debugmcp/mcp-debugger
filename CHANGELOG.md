@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Break-on-exception support** — new `breakOnExceptions` option (`"uncaught"` | `"all"` | `"none"`, default `"none"`) on `start_debugging` and `attach_to_process`: an uncaught exception now pauses at the crash site with the stack and locals inspectable instead of terminating the session. The abstract mode is resolved to per-language debugger filter IDs by the adapter policy (Python `uncaught`/`raised`+`uncaught`, JavaScript `uncaught`/`all` — runtime-verified against js-debug, Java `uncaught`/`caught`+`uncaught`, .NET `user-unhandled`/`all`, Go `fatal`+`panic`, Rust `rust_panic`/`+cpp_throw`, Ruby `all`-only via `any`); an unsupported mode is skipped with a warning and never aborts the launch (fixes #220)
+- **Exception detail on stops** — `lastStop` now records the DAP stopped event's `description` and `text` (e.g. exception class and message), surfaced via `list_debug_sessions`, `get_stack_trace`, and the `start_debugging` response (#220)
+- **Debuggee exit code surfaced** — the exit code from the DAP `exited` event is stored on the session and returned as `exitCode` in `list_debug_sessions`, making a crash (non-zero) distinguishable from a clean exit (#220)
+
+### Fixed
+- Mock adapter now answers `setExceptionBreakpoints` (previously an unhandled-command error) and emits `exited` before `terminated`, matching real adapter ordering (#220)
+- Corrected the JavaScript adapter's declared `exceptionBreakpointFilters` to the IDs js-debug actually reports (`all`, `uncaught`) (#220)
+
 ## [0.23.0] - 2026-07-09
 
 ### Added

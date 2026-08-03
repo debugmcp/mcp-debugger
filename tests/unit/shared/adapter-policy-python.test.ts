@@ -72,7 +72,11 @@ describe('PythonAdapterPolicy', () => {
     // debugpy only emits 'initialized' AFTER it receives the attach request;
     // waiting for the event before sending attach deadlocks (issue #145).
     expect(PythonAdapterPolicy.getInitializationBehavior()).toEqual({
-      sendAttachBeforeInitialized: true
+      sendAttachBeforeInitialized: true,
+      exceptionFilters: {
+        uncaught: ['uncaught'],
+        all: ['raised', 'uncaught']
+      }
     });
   });
 

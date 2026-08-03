@@ -125,6 +125,51 @@ describe('ProxyManager.start', () => {
     await expect(proxyManager.start(baseConfig)).rejects.toThrow('Proxy already running');
   });
 
+  it('includes breakOnExceptions in the init command when set (issue #220)', async () => {
+    await proxyManager.start({ ...baseConfig, breakOnExceptions: 'uncaught' });
+
+    expect(fakeProcess.sendCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'init',
+        breakOnExceptions: 'uncaught'
+      })
+    );
+  });
+
+  it('sends breakOnExceptions as undefined in the init command when not set', async () => {
+    await proxyManager.start(baseConfig);
+
+    const initCommand = fakeProcess.sendCommand.mock.calls.find(
+      ([cmd]) => cmd.cmd === 'init'
+    )?.[0];
+    expect(initCommand).toBeDefined();
+    expect(initCommand.breakOnExceptions).toBeUndefined();
+  });
+
+  it('forwards the debuggee exit code on the exited event (issue #220)', async () => {
+    await completeStart();
+
+    const exitCodes: Array<number | undefined> = [];
+    proxyManager.on('exited', (exitCode?: number) => {
+      exitCodes.push(exitCode);
+    });
+
+    fakeProcess.emit('message', {
+      type: 'dapEvent',
+      sessionId: baseConfig.sessionId,
+      event: 'exited',
+      body: { exitCode: 3 }
+    });
+    fakeProcess.emit('message', {
+      type: 'dapEvent',
+      sessionId: baseConfig.sessionId,
+      event: 'exited',
+      body: {}
+    });
+
+    expect(exitCodes).toEqual([3, undefined]);
+  });
+
   it('records adapter command snapshot for dry-run completion', async () => {
     const config: ProxyConfig = {
       ...baseConfig,

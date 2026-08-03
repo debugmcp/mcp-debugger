@@ -33,7 +33,8 @@ import {
     DebugLanguage,
     Breakpoint,
     SessionLifecycleState,
-    IEnvironment
+    IEnvironment,
+    ExceptionBreakMode
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
@@ -89,6 +90,7 @@ interface ToolArguments {
   args?: string[];
   dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>;
   dryRunSpawn?: boolean;
+  breakOnExceptions?: string;
   adapterLaunchConfig?: Record<string, unknown>;
   scope?: number;
   frameId?: number;
@@ -304,6 +306,19 @@ export class DebugMcpServer {
     }
   }
 
+  private validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value !== 'uncaught' && value !== 'all' && value !== 'none') {
+      throw new McpError(
+        McpErrorCode.InvalidParams,
+        `breakOnExceptions must be one of 'uncaught', 'all', 'none' (got '${value}')`
+      );
+    }
+    return value;
+  }
+
   // Public methods to expose SessionManager functionality for testing/external use
   public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
     // Validate language support using dynamic discovery
@@ -340,31 +355,33 @@ export class DebugMcpServer {
   }
 
   public async startDebugging(
-    sessionId: string, 
-    scriptPath: string, 
-    args?: string[], 
-    dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>, 
+    sessionId: string,
+    scriptPath: string,
+    args?: string[],
+    dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>,
     dryRunSpawn?: boolean,
-    adapterLaunchConfig?: Record<string, unknown>
+    adapterLaunchConfig?: Record<string, unknown>,
+    breakOnExceptions?: ExceptionBreakMode
   ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
     this.validateSession(sessionId);
-    
+
     // Check script file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(scriptPath);
     if (!fileCheck.exists) {
       throw this.fileNotFoundError('Script file', scriptPath, fileCheck);
     }
-    
+
     this.logger.info(`[DebugMcpServer.startDebugging] Script file exists: ${fileCheck.effectivePath} (original: ${scriptPath})`);
-    
+
     // Pass the effective path (which has been resolved for container) to session manager
     const result = await this.sessionManager.startDebugging(
-      sessionId, 
-      fileCheck.effectivePath, 
-      args, 
-      dapLaunchArgs, 
+      sessionId,
+      fileCheck.effectivePath,
+      args,
+      dapLaunchArgs,
       dryRunSpawn,
-      adapterLaunchConfig
+      adapterLaunchConfig,
+      breakOnExceptions
     );
     return result;
   }
@@ -611,12 +628,13 @@ export class DebugMcpServer {
                   additionalProperties: true
                 },
                 dryRunSpawn: { type: 'boolean' },
+                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site instead of terminating the session; "all" also pauses on caught/raised exceptions (language-dependent). Default "none"' },
                 adapterLaunchConfig: {
                   type: 'object',
                   description: 'Optional adapter-specific launch configuration overrides',
                   additionalProperties: true
                 }
-              }, 
+              },
               required: ['sessionId', 'scriptPath'] 
             } 
           },
@@ -631,7 +649,8 @@ export class DebugMcpServer {
                 verifyTimeout: { type: 'number', description: 'How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000). Increase for targets that are slow to become debuggable, e.g. a busy or warming JVM' },
                 sourcePaths: { type: 'array', items: { type: 'string' }, description: 'Source paths for code mapping' },
                 stopOnEntry: { type: 'boolean', description: 'Stop on entry after attaching' },
-                justMyCode: { type: 'boolean', description: 'Only debug user code (skip library code)' }
+                justMyCode: { type: 'boolean', description: 'Only debug user code (skip library code)' },
+                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site; "all" also pauses on caught/raised exceptions (language-dependent). Default "none"' }
               },
               required: ['sessionId']
             }
@@ -875,7 +894,8 @@ export class DebugMcpServer {
                   args.args,
                   args.dapLaunchArgs,
                   args.dryRunSpawn,
-                  args.adapterLaunchConfig
+                  args.adapterLaunchConfig,
+                  this.validateBreakOnExceptions(args.breakOnExceptions)
                 );
                 const responsePayload: Record<string, unknown> = {
                   success: debugResult.success,
@@ -921,7 +941,8 @@ export class DebugMcpServer {
                   verifyTimeout: args.verifyTimeout,
                   sourcePaths: args.sourcePaths,
                   stopOnEntry: args.stopOnEntry,
-                  justMyCode: args.justMyCode
+                  justMyCode: args.justMyCode,
+                  breakOnExceptions: this.validateBreakOnExceptions(args.breakOnExceptions)
                 });
 
                 const responsePayload: Record<string, unknown> = {
@@ -1448,6 +1469,9 @@ export class DebugMcpServer {
         }
         if (session.lastStop) {
             mappedSession.lastStop = session.lastStop;
+        }
+        if (session.exitCode !== undefined) {
+            mappedSession.exitCode = session.exitCode;
         }
         return mappedSession;
       });

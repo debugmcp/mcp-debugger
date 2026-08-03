@@ -102,6 +102,11 @@ class MockDebugAdapterProcess {
   private nextVariableReference = 1000;
   private currentLine = 1;
   private threads = [{ id: 1, name: 'main' }];
+  // Exception simulation state (issue #220): armed via setExceptionBreakpoints,
+  // triggered once per launch for programs whose path matches /throws|error/i
+  private exceptionFilters: string[] = [];
+  private programPath = '';
+  private exceptionSimulated = false;
   
   constructor() {
     // Parse command line arguments
@@ -206,6 +211,10 @@ class MockDebugAdapterProcess {
       case 'setBreakpoints':
         this.handleSetBreakpoints(request as DebugProtocol.SetBreakpointsRequest);
         break;
+
+      case 'setExceptionBreakpoints':
+        this.handleSetExceptionBreakpoints(request as DebugProtocol.SetExceptionBreakpointsRequest);
+        break;
         
       case 'threads':
         this.handleThreads(request as DebugProtocol.ThreadsRequest);
@@ -273,7 +282,10 @@ class MockDebugAdapterProcess {
         supportsConditionalBreakpoints: true,
         supportsHitConditionalBreakpoints: false,
         supportsEvaluateForHovers: true,
-        exceptionBreakpointFilters: [],
+        exceptionBreakpointFilters: [
+          { filter: 'uncaught', label: 'Uncaught Exceptions', default: false },
+          { filter: 'all', label: 'All Exceptions', default: false }
+        ],
         supportsStepBack: false,
         supportsSetVariable: true,
         supportsRestartFrame: false,
@@ -325,10 +337,53 @@ class MockDebugAdapterProcess {
     });
   }
   
+  private handleSetExceptionBreakpoints(request: DebugProtocol.SetExceptionBreakpointsRequest): void {
+    this.exceptionFilters = request.arguments?.filters ?? [];
+    this.log(`Exception breakpoints set: ${JSON.stringify(this.exceptionFilters)}`);
+    this.sendResponse({
+      seq: 0,
+      type: 'response',
+      request_seq: request.seq,
+      command: request.command,
+      success: true
+    });
+  }
+
+  /**
+   * Whether to simulate an uncaught exception instead of running to
+   * completion (issue #220). Double-gated: exception filters must be armed
+   * AND the program path must look like a crashing fixture. Fires at most
+   * once per launch so a continue past the exception terminates.
+   */
+  private shouldSimulateException(): boolean {
+    return this.exceptionFilters.length > 0 &&
+      !this.exceptionSimulated &&
+      /throws|error/i.test(this.programPath);
+  }
+
+  private sendExceptionStopped(): void {
+    this.exceptionSimulated = true;
+    this.log(`Simulating uncaught exception stop (filters: ${JSON.stringify(this.exceptionFilters)})`);
+    this.sendEvent({
+      seq: 0,
+      type: 'event',
+      event: 'stopped',
+      body: {
+        reason: 'exception',
+        threadId: 1,
+        allThreadsStopped: true,
+        description: 'MockError',
+        text: 'Mock uncaught exception'
+      }
+    } as DebugProtocol.StoppedEvent);
+  }
+
   private handleLaunch(request: DebugProtocol.LaunchRequest): void {
-    const args = request.arguments as DebugProtocol.LaunchRequestArguments & { stopOnEntry?: boolean };
+    const args = request.arguments as DebugProtocol.LaunchRequestArguments & { stopOnEntry?: boolean; program?: string };
     this.log(`Launching with args: ${JSON.stringify(args)}`);
-    
+    this.programPath = typeof args.program === 'string' ? args.program : '';
+    this.exceptionSimulated = false;
+
     this.sendResponse({
       seq: 0,
       type: 'response',
@@ -375,22 +430,26 @@ class MockDebugAdapterProcess {
               allThreadsStopped: true
             }
           } as DebugProtocol.StoppedEvent);
+        } else if (this.shouldSimulateException()) {
+          this.sendExceptionStopped();
         } else {
           this.log(`No breakpoints set, program would run to completion`);
-          this.sendEvent({
-            seq: 0,
-            type: 'event',
-            event: 'terminated'
-          } as DebugProtocol.TerminatedEvent);
-          
+          // exited first, then terminated — matches real adapters (debugpy);
+          // the SessionManager tears down its handlers on 'terminated'
           this.sendEvent({
             seq: 0,
             type: 'event',
             event: 'exited',
             body: {
-              exitCode: 0
+              exitCode: this.exceptionSimulated ? 1 : 0
             }
           } as DebugProtocol.ExitedEvent);
+
+          this.sendEvent({
+            seq: 0,
+            type: 'event',
+            event: 'terminated'
+          } as DebugProtocol.TerminatedEvent);
         }
       }, 200);
     }
@@ -591,23 +650,29 @@ class MockDebugAdapterProcess {
             allThreadsStopped: true
           }
         } as DebugProtocol.StoppedEvent);
+      } else if (this.shouldSimulateException()) {
+        // Crash before completion: uncaught exception past the last breakpoint
+        this.sendExceptionStopped();
       } else {
         // No more breakpoints - program terminated
         this.log(`No more breakpoints after line ${this.currentLine}, terminating program`);
-        this.sendEvent({
-          seq: 0,
-          type: 'event',
-          event: 'terminated'
-        } as DebugProtocol.TerminatedEvent);
-        
+        // exited first, then terminated — matches real adapters (debugpy);
+        // the SessionManager tears down its handlers on 'terminated'
         this.sendEvent({
           seq: 0,
           type: 'event',
           event: 'exited',
           body: {
-            exitCode: 0
+            // An uncaught exception exits non-zero once continued past
+            exitCode: this.exceptionSimulated ? 1 : 0
           }
         } as DebugProtocol.ExitedEvent);
+
+        this.sendEvent({
+          seq: 0,
+          type: 'event',
+          event: 'terminated'
+        } as DebugProtocol.TerminatedEvent);
       }
     }, 200);
   }

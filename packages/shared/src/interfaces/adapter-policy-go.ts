@@ -233,6 +233,11 @@ export const GoAdapterPolicy: AdapterPolicy = {
       // Delve may send 'initialized' immediately after 'initialize' or after 'launch'.
       // The proxy uses two-phase handling: brief wait before launch, fallback after launch.
       sendLaunchBeforeConfig: true,
+      // Delve has no caught/uncaught distinction; both modes arm panic + fatal
+      exceptionFilters: {
+        uncaught: ['fatal', 'panic'],
+        all: ['fatal', 'panic']
+      },
     };
   },
 

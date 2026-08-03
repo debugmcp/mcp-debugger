@@ -107,6 +107,15 @@ export class MessageParser {
       throw new Error(`Init payload 'dryRunSpawn' must be a boolean if provided`);
     }
 
+    if (
+      obj.breakOnExceptions !== undefined &&
+      obj.breakOnExceptions !== 'uncaught' &&
+      obj.breakOnExceptions !== 'all' &&
+      obj.breakOnExceptions !== 'none'
+    ) {
+      throw new Error(`Init payload 'breakOnExceptions' must be one of 'uncaught', 'all', 'none' if provided`);
+    }
+
     // Validate initialBreakpoints if provided
     if (obj.initialBreakpoints !== undefined) {
       if (!Array.isArray(obj.initialBreakpoints)) {

@@ -226,7 +226,13 @@ export const RustAdapterPolicy: AdapterPolicy = {
    * Rust adapter has no special initialization requirements
    */
   getInitializationBehavior: () => {
-    return {};  // CodeLLDB doesn't need any special initialization quirks
+    return {
+      // CodeLLDB filter IDs
+      exceptionFilters: {
+        uncaught: ['rust_panic'],
+        all: ['rust_panic', 'cpp_throw']
+      }
+    };
   },
 
   /**

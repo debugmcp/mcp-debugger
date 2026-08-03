@@ -162,7 +162,13 @@ describe('RubyAdapterPolicy behavior surface', () => {
       requiresStrictHandshake: false,
       supportsVariableType: true
     });
-    expect(RubyAdapterPolicy.getInitializationBehavior?.()).toEqual({ sendLaunchBeforeConfig: true });
+    expect(RubyAdapterPolicy.getInitializationBehavior?.()).toEqual({
+      sendLaunchBeforeConfig: true,
+      exceptionFilters: {
+        uncaught: [],
+        all: ['any']
+      }
+    });
     expect(RubyAdapterPolicy.requiresCommandQueueing()).toBe(false);
     expect(RubyAdapterPolicy.shouldQueueCommand('next', undefined, {} as never)).toMatchObject({
       shouldQueue: false,

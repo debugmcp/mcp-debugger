@@ -284,6 +284,23 @@ export class DapConnectionManager {
   }
 
   /**
+   * Set exception breakpoints (issue #220). Filters are concrete adapter
+   * filter IDs already resolved from the abstract breakOnExceptions mode.
+   */
+  async setExceptionBreakpoints(
+    client: IDapClient,
+    filters: string[]
+  ): Promise<DebugProtocol.SetExceptionBreakpointsResponse> {
+    this.logger.info(`[ConnectionManager] Sending "setExceptionBreakpoints" with filters: ${JSON.stringify(filters)}`);
+    const response = await client.sendRequest<DebugProtocol.SetExceptionBreakpointsResponse>(
+      'setExceptionBreakpoints',
+      { filters }
+    );
+    this.logger.info('[ConnectionManager] Exception breakpoints set.');
+    return response;
+  }
+
+  /**
    * Send configuration done notification
    */
   async sendConfigurationDone(client: IDapClient): Promise<void> {

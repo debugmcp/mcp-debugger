@@ -26,6 +26,8 @@ export interface ProxyInitPayload {
   justMyCode?: boolean;
   initialBreakpoints?: { file: string; line: number; condition?: string }[];
   dryRunSpawn?: boolean;
+  /** Abstract break-on-exception mode; resolved to concrete DAP filters via the adapter policy (issue #220) */
+  breakOnExceptions?: 'uncaught' | 'all' | 'none';
   launchConfig?: LanguageSpecificLaunchConfig;
   // Adapter command info for language-agnostic adapter spawning
   adapterCommand?: {
@@ -135,6 +137,12 @@ export interface IDapClient {
   off(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
   once(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
   removeAllListeners(): void;
+  /**
+   * Record the session's break-on-exception mode so DAP child sessions can
+   * apply the same exception filters (issue #220). Optional: only
+   * MinimalDapClient (js-debug child sessions) implements it.
+   */
+  setExceptionBreakMode?(mode: 'uncaught' | 'all' | 'none'): void;
 }
 
 /**
