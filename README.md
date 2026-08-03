@@ -18,6 +18,27 @@
 
 mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across seven languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
 
+**No IDE required.** mcp-debugger runs anywhere Node.js runs: CI runners, Docker containers, Kubernetes pods, SSH boxes, and the sandboxes that cloud coding agents live in. It's the debugger for where IDEs can't go.
+
+### When to use mcp-debugger vs an IDE-bound debug server
+
+Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's debugger over MCP and is a good choice when your agent works *inside* a running VS Code. The two projects make different structural trade-offs:
+
+| | mcp-debugger | microsoft/DebugMCP |
+|---|---|---|
+| Runs headless (CI, containers, k8s, cloud agents) | ✅ standalone Node process | ❌ requires a running VS Code |
+| Transports | stdio + Streamable HTTP | Streamable HTTP (localhost) |
+| Distribution | npx, npm, Docker image | VS Code Marketplace extension |
+| Remote attach without an IDE | ✅ debugpy / rdbg / JDWP, incl. pods via port-forward | ❌ |
+| Per-session process isolation | ✅ one proxy process per session | shares the VS Code instance |
+| Java hot-swap (`redefine_classes`) | ✅ | ❌ |
+| Debuggee output as subscribable MCP resource | ✅ | ❌ |
+| In-IDE debugging UX alongside the agent | ❌ (planned: [#217](https://github.com/debugmcp/mcp-debugger/issues/217)) | ✅ native |
+| C/C++, PHP | ❌ | ✅ via VS Code extensions |
+| Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
+
+If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to attach to a process on another machine — you want mcp-debugger.
+
 > 🆕 **v0.22.0** — **Ruby debugging support** lands (launch + attach via `rdbg`, including remote attach to containers and Kubernetes pods), alongside JavaScript attach-mode fixes and session/proxy lifecycle hardening. See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
 ## ✨ Key Features
@@ -40,6 +61,19 @@ mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through 
 - 🛡️ **Path validation** – Prevents crashes from non-existent files
 - 📝 **AI-aware line context** – Intelligent breakpoint placement with code context
 - ✅ **Comprehensive test suite** – unit, integration, and end-to-end coverage across every adapter ([CI status](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml))
+
+## 🧠 Agent Skill
+
+Tools tell an agent *what* it can do; a skill teaches it *how to debug well*. This repo ships an [agent skill](skills/debugging/) covering the session golden path, root-cause discipline (bisection over line-by-line stepping), attach/remote recipes, and per-language quirks:
+
+```bash
+# Claude Code (user-level)
+cp -r skills/debugging ~/.claude/skills/mcp-debugger
+# Cross-agent directories (Copilot CLI and friends)
+cp -r skills/debugging ~/.agents/skills/mcp-debugger
+```
+
+The server also serves condensed guidance in-band: MCP `instructions` on connect, plus a `debugging-workflow` prompt any MCP client can request. See [skills/debugging/README.md](skills/debugging/README.md) for details.
 
 ## 🚀 Quick Start
 
