@@ -135,3 +135,11 @@ export function getResourceHandlers(mockServer: any) {
     unsubscribeHandler: handlers[5]?.[1]
   };
 }
+
+export function getPromptHandlers(mockServer: any) {
+  const handlers = mockServer.setRequestHandler.mock.calls;
+  return {
+    listPromptsHandler: handlers[6]?.[1],
+    getPromptHandler: handlers[7]?.[1]
+  };
+}
