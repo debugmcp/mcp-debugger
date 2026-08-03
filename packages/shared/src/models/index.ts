@@ -264,7 +264,17 @@ export interface SessionStopInfo {
   threadId?: number;
   /** Epoch milliseconds when the stop was observed */
   timestamp: number;
+  /** DAP stopped-event description, e.g. the exception class ('ZeroDivisionError') */
+  description?: string;
+  /** DAP stopped-event text, e.g. the exception message ('division by zero') */
+  text?: string;
 }
+
+/**
+ * Abstract break-on-exception mode (issue #220). Mapped per-language to
+ * concrete DAP exceptionBreakpointFilters by the adapter policy.
+ */
+export type ExceptionBreakMode = 'uncaught' | 'all' | 'none';
 
 /**
  * One captured debuggee output event (issue #218).
@@ -293,6 +303,8 @@ export interface DebugSessionInfo {
   updatedAt?: Date; // Optional, as it might not always be present or needed for list views
   /** Why the session last stopped; present after the first user-visible stop */
   lastStop?: SessionStopInfo;
+  /** Debuggee exit code from the DAP 'exited' event, when the adapter reports one */
+  exitCode?: number;
 }
 
 

@@ -7,6 +7,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import { resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -198,7 +199,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    * This includes the strict initialization sequence required by js-debug.
    */
   performHandshake: async (context) => {
-    const { proxyManager, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints, launchConfig } = context;
+    const { proxyManager, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints, launchConfig, breakOnExceptions } = context;
     
     // Type assertion for proxyManager since we use 'unknown' in the interface
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -257,8 +258,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
 
     // 3) setExceptionBreakpoints + setBreakpoints
     try {
-      console.info(`[JsDebugAdapterPolicy] [JS] Sending 'setExceptionBreakpoints' []`);
-      await pm.sendDapRequest('setExceptionBreakpoints', { filters: [] });
+      const exceptionFilters = resolveExceptionFilters(JsDebugAdapterPolicy, breakOnExceptions);
+      console.info(`[JsDebugAdapterPolicy] [JS] Sending 'setExceptionBreakpoints' ${JSON.stringify(exceptionFilters)}`);
+      await pm.sendDapRequest('setExceptionBreakpoints', { filters: exceptionFilters });
     } catch (e) {
       console.warn(
         `[JsDebugAdapterPolicy] [JS] 'setExceptionBreakpoints' failed or unsupported: ${
@@ -644,7 +646,12 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       addRuntimeExecutable: true,      // Needs to add runtimeExecutable to launch args
       trackInitializeResponse: true,   // Must track initialize response separately
       requiresInitialStop: true,       // Must ensure initial stop after launch/attach
-      defaultStopOnEntry: false        // Default to false unless user explicitly requests
+      defaultStopOnEntry: false,       // Default to false unless user explicitly requests
+      // js-debug filter IDs ('all' = caught + uncaught)
+      exceptionFilters: {
+        uncaught: ['uncaught'],
+        all: ['all']
+      }
     };
   },
 

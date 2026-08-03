@@ -9,8 +9,9 @@
 import { randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from '@debugmcp/shared';
+import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
 import type { DapClientBehavior, ChildSessionConfig } from '@debugmcp/shared';
+import { resolveExceptionFilters } from '@debugmcp/shared';
 import { createLogger } from '../utils/logger.js';
 import type { MinimalDapClient } from './minimal-dap.js';
 import path from 'path';
@@ -78,6 +79,10 @@ export class ChildSessionManager extends EventEmitter {
   // Breakpoint mirroring
   private storedBreakpoints = new Map<string, DebugProtocol.SourceBreakpoint[]>();
 
+  // Break-on-exception mode for child sessions (issue #220); resolved to
+  // concrete filters via the adapter policy when configuring a child
+  private exceptionBreakMode: ExceptionBreakMode = 'none';
+
   // State tracking
   private adoptionInProgress = false;
   private readonly instanceId: string;
@@ -90,6 +95,15 @@ export class ChildSessionManager extends EventEmitter {
     this.port = options.port;
     this.instanceId = createInstanceId();
     logger.info(`[ChildSessionManager:${this.instanceId}] created`);
+  }
+
+  /**
+   * Record the session's break-on-exception mode, applied to child sessions
+   * created afterwards (issue #220). Set at worker init, before any child
+   * session exists.
+   */
+  setExceptionBreakMode(mode: ExceptionBreakMode): void {
+    this.exceptionBreakMode = mode;
   }
 
   /**
@@ -290,10 +304,11 @@ export class ChildSessionManager extends EventEmitter {
   private async configureChild(child: MinimalDapClient, pendingId: string, _parentConfig: Record<string, unknown>): Promise<void> {
     void _parentConfig; // Currently unused but may be needed for future policy implementations
     
-    // Set exception breakpoints
+    // Set exception breakpoints ([] unless breakOnExceptions was requested)
+    const exceptionFilters = resolveExceptionFilters(this.policy, this.exceptionBreakMode);
     try {
-      logger.info(`[child:${pendingId}] setExceptionBreakpoints`);
-      await child.sendRequest('setExceptionBreakpoints', { filters: [] });
+      logger.info(`[child:${pendingId}] setExceptionBreakpoints ${JSON.stringify(exceptionFilters)}`);
+      await child.sendRequest('setExceptionBreakpoints', { filters: exceptionFilters });
     } catch {
       logger.warn(`[child:${pendingId}] setExceptionBreakpoints failed or not supported`);
     }
@@ -363,7 +378,9 @@ export class ChildSessionManager extends EventEmitter {
     if (sawPostInit && this.dapBehavior.mirrorBreakpointsToChild) {
       // Re-send configuration after post-attach initialized
       try {
-        await child.sendRequest('setExceptionBreakpoints', { filters: [] });
+        await child.sendRequest('setExceptionBreakpoints', {
+          filters: resolveExceptionFilters(this.policy, this.exceptionBreakMode)
+        });
       } catch {}
       
       for (const [srcPath, bps] of this.storedBreakpoints) {

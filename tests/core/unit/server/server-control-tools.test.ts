@@ -225,12 +225,68 @@ describe('Server Control Tools Tests', () => {
         ['--debug'],
         { stopOnEntry: true, justMyCode: false },
         undefined,
+        undefined,
         undefined
       );
-      
+
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);
       expect(content.state).toBe('running');
+    });
+
+    it('should pass breakOnExceptions through to the session manager', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Debugging started' }
+      });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            breakOnExceptions: 'uncaught'
+          }
+        }
+      });
+
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session',
+        expect.stringContaining('/path/to/test.py'),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'uncaught'
+      );
+    });
+
+    it('should reject an invalid breakOnExceptions value', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            breakOnExceptions: 'sometimes'
+          }
+        }
+      })).rejects.toThrow(/breakOnExceptions must be one of/);
+
+      expect(mockSessionManager.startDebugging).not.toHaveBeenCalled();
     });
 
     it('should handle dry run mode', async () => {
@@ -263,6 +319,7 @@ describe('Server Control Tools Tests', () => {
         undefined,
         undefined,
         true,
+        undefined,
         undefined
       );
       

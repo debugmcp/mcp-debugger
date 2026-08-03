@@ -13,7 +13,7 @@
  * @since 2.1.0
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { StackFrame, Variable } from '../models/index.js';
+import type { ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 import type { SessionState } from '@debugmcp/shared';
 import type { LanguageSpecificLaunchConfig } from './debug-adapter.js';
@@ -213,6 +213,8 @@ export interface AdapterPolicy {
     scriptArgs?: string[];
     breakpoints: Map<string, unknown>;  // Will be Breakpoint in implementation
     launchConfig?: LanguageSpecificLaunchConfig;
+    /** Abstract break-on-exception mode requested by the user (issue #220) */
+    breakOnExceptions?: ExceptionBreakMode;
   }): Promise<void>;
 
   /**
@@ -314,6 +316,13 @@ export interface AdapterPolicy {
      *  Some adapters send initialized only AFTER processing the attach request, so waiting
      *  for initialized before sending attach causes a deadlock. */
     sendAttachBeforeInitialized?: boolean;
+    /** Concrete DAP exceptionBreakpointFilters IDs per abstract breakOnExceptions
+     *  mode (issue #220). Omitted (or an empty array for a mode) means the mode
+     *  is unsupported for this adapter and setExceptionBreakpoints is skipped. */
+    exceptionFilters?: {
+      uncaught: string[];
+      all: string[];
+    };
   };
 
   /**
@@ -427,3 +436,19 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
   getInitializationBehavior: () => ({}),
   getDapClientBehavior: (): DapClientBehavior => ({})
 };
+
+/**
+ * Resolve an abstract break-on-exception mode to the concrete DAP
+ * exceptionBreakpointFilters IDs for the given adapter policy (issue #220).
+ * Returns [] when the mode is unset, 'none', or unsupported by the policy —
+ * callers skip the setExceptionBreakpoints request in that case.
+ */
+export function resolveExceptionFilters(
+  policy: AdapterPolicy,
+  mode: ExceptionBreakMode | undefined
+): string[] {
+  if (!mode || mode === 'none') {
+    return [];
+  }
+  return policy.getInitializationBehavior().exceptionFilters?.[mode] ?? [];
+}

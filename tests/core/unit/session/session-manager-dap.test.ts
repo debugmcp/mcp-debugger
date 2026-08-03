@@ -389,12 +389,95 @@ describe('SessionManager - DAP Operations', () => {
       
       variables = await sessionManager.getVariables(session.id, 100);
       expect(variables).toEqual([]);
-      
+
       stackFrames = await sessionManager.getStackTrace(session.id);
       expect(stackFrames).toEqual([]);
-      
+
       scopes = await sessionManager.getScopes(session.id, 1);
       expect(scopes).toEqual([]);
+    });
+  });
+
+  describe('Exception Breakpoints and Stop Detail (issue #220)', () => {
+    it('threads breakOnExceptions into the ProxyConfig', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py', undefined, undefined, undefined, undefined, 'uncaught');
+      await vi.runAllTimersAsync();
+
+      expect(dependencies.mockProxyManager.startCalls).toHaveLength(1);
+      expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBe('uncaught');
+    });
+
+    it('leaves breakOnExceptions undefined in the ProxyConfig when not requested', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBeUndefined();
+    });
+
+    it('records description and text from the stopped event body on lastStop', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'ZeroDivisionError',
+        text: 'division by zero'
+      });
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop).toMatchObject({
+        reason: 'exception',
+        threadId: 1,
+        description: 'ZeroDivisionError',
+        text: 'division by zero'
+      });
+      expect(managedSession?.state).toBe(SessionState.PAUSED);
+    });
+
+    it('handles a stopped event without a body (lastStop has no detail fields)', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop?.reason).toBe('breakpoint');
+      expect(managedSession?.lastStop?.description).toBeUndefined();
+      expect(managedSession?.lastStop?.text).toBeUndefined();
+    });
+
+    it('records the debuggee exit code from the exited event', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.simulateExited(1);
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.exitCode).toBe(1);
+      expect(managedSession?.state).toBe(SessionState.STOPPED);
+
+      // Projection includes the exit code
+      const infos = sessionManager.getAllSessions();
+      const info = infos.find(s => s.id === session.id);
+      expect(info?.exitCode).toBe(1);
+    });
+
+    it('leaves exitCode undefined when the exited event has no code', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.simulateExited(undefined);
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.exitCode).toBeUndefined();
+      expect(managedSession?.state).toBe(SessionState.STOPPED);
     });
   });
 });

@@ -1041,6 +1041,149 @@ describe('DapProxyWorker', () => {
     });
   });
 
+  describe('Exception Breakpoints (issue #220)', () => {
+    const buildPayload = (breakOnExceptions?: 'uncaught' | 'all' | 'none'): ProxyInitPayload => ({
+      cmd: 'init',
+      sessionId: 'ex-session',
+      executablePath: 'python',
+      adapterHost: 'localhost',
+      adapterPort: 5678,
+      logDir: '/logs',
+      scriptPath: '/path/to/script.py',
+      initialBreakpoints: [{ file: '/path/to/script.py', line: 3 }],
+      ...(breakOnExceptions ? { breakOnExceptions } : {})
+    });
+
+    const buildConnectionStub = () => ({
+      setBreakpoints: vi.fn().mockResolvedValue(undefined),
+      setExceptionBreakpoints: vi.fn().mockResolvedValue(undefined),
+      sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined)
+    });
+
+    const primeWorker = (payload: ProxyInitPayload, connectionStub: object, policy = PythonAdapterPolicy) => {
+      (worker as any).logger = mockLogger;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = policy;
+      (worker as any).adapterState = policy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).state = ProxyState.INITIALIZING;
+    };
+
+    it('sends setExceptionBreakpoints with resolved filters between setBreakpoints and configurationDone', async () => {
+      const payload = buildPayload('uncaught');
+      const connectionStub = buildConnectionStub();
+      primeWorker(payload, connectionStub);
+
+      await (worker as any).handleInitializedEvent();
+
+      expect(connectionStub.setExceptionBreakpoints).toHaveBeenCalledTimes(1);
+      expect(connectionStub.setExceptionBreakpoints).toHaveBeenCalledWith(mockDapClient, ['uncaught']);
+      // Order: setBreakpoints -> setExceptionBreakpoints -> configurationDone
+      const bpOrder = connectionStub.setBreakpoints.mock.invocationCallOrder[0];
+      const exOrder = connectionStub.setExceptionBreakpoints.mock.invocationCallOrder[0];
+      const configOrder = connectionStub.sendConfigurationDone.mock.invocationCallOrder[0];
+      expect(bpOrder).toBeLessThan(exOrder);
+      expect(exOrder).toBeLessThan(configOrder);
+      expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it("resolves 'all' mode through the adapter policy", async () => {
+      const payload = buildPayload('all');
+      const connectionStub = buildConnectionStub();
+      primeWorker(payload, connectionStub);
+
+      await (worker as any).handleInitializedEvent();
+
+      expect(connectionStub.setExceptionBreakpoints).toHaveBeenCalledWith(mockDapClient, ['raised', 'uncaught']);
+    });
+
+    it('does not send setExceptionBreakpoints when the mode is absent or none', async () => {
+      for (const mode of [undefined, 'none' as const]) {
+        const payload = buildPayload(mode);
+        const connectionStub = buildConnectionStub();
+        primeWorker(payload, connectionStub);
+        (worker as any).initializedEventHandled = false;
+
+        await (worker as any).handleInitializedEvent();
+
+        expect(connectionStub.setExceptionBreakpoints).not.toHaveBeenCalled();
+        expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it('continues the launch when setExceptionBreakpoints fails', async () => {
+      const payload = buildPayload('uncaught');
+      const connectionStub = buildConnectionStub();
+      connectionStub.setExceptionBreakpoints.mockRejectedValue(new Error('unsupported'));
+      primeWorker(payload, connectionStub);
+
+      await (worker as any).handleInitializedEvent();
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('setExceptionBreakpoints failed')
+      );
+      expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+      const statusCall = mockMessageSender.send.mock.calls.find(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      );
+      expect(statusCall).toBeDefined();
+      expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it('skips the request and warns when the policy does not support the mode', async () => {
+      const payload = buildPayload('uncaught');
+      const connectionStub = buildConnectionStub();
+      primeWorker(payload, connectionStub, DefaultAdapterPolicy);
+
+      await (worker as any).handleInitializedEvent();
+
+      expect(connectionStub.setExceptionBreakpoints).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("breakOnExceptions 'uncaught' is not supported")
+      );
+      expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+    });
+
+    it('forwards the mode to the DAP client for child sessions during startAdapterAndConnect', async () => {
+      const payload = buildPayload('uncaught');
+      const setExceptionBreakMode = vi.fn();
+      Object.assign(mockDapClient, { setExceptionBreakMode });
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({
+          process: new EventEmitter() as unknown as ChildProcess,
+          pid: 654
+        }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn().mockResolvedValue(undefined),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        setExceptionBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      expect(setExceptionBreakMode).toHaveBeenCalledWith('uncaught');
+    });
+  });
+
   describe('DAP Command Handling', () => {
     it('should reject DAP commands before connection', async () => {
       // Initialize worker with dry run to avoid connection issues

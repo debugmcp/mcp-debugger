@@ -231,7 +231,12 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
       // We must defer configurationDone handling and send launch first,
       // because netcoredbg requires launch before configurationDone.
       sendLaunchBeforeConfig: true,
-      sendAttachBeforeInitialized: false
+      sendAttachBeforeInitialized: false,
+      // netcoredbg filter IDs
+      exceptionFilters: {
+        uncaught: ['user-unhandled'],
+        all: ['all']
+      }
     };
   },
 

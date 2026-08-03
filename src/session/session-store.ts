@@ -186,7 +186,8 @@ export class SessionStore {
       state: s.state,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
-      lastStop: s.lastStop
+      lastStop: s.lastStop,
+      exitCode: s.exitCode
     }));
   }
 

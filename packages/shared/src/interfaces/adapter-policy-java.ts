@@ -170,7 +170,12 @@ export const JavaAdapterPolicy: AdapterPolicy = {
   // then send launch, then breakpoints + configurationDone.
   getInitializationBehavior: () => {
     return {
-      sendLaunchBeforeConfig: true
+      sendLaunchBeforeConfig: true,
+      // JdiDapServer honors exactly 'caught' and 'uncaught'
+      exceptionFilters: {
+        uncaught: ['uncaught'],
+        all: ['caught', 'uncaught']
+      }
     };
   },
 

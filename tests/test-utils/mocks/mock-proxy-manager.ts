@@ -205,9 +205,13 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this.emit(event, ...args);
   }
 
-  simulateStopped(threadId: number, reason: string): void {
+  simulateStopped(threadId: number, reason: string, body?: DebugProtocol.StoppedEvent['body']): void {
     this._currentThreadId = threadId;
-    this.emit('stopped', threadId, reason);
+    this.emit('stopped', threadId, reason, body);
+  }
+
+  simulateExited(exitCode?: number): void {
+    this.emit('exited', exitCode);
   }
 
   simulateError(error: Error): void {

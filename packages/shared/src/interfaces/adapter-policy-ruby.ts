@@ -124,7 +124,12 @@ export const RubyAdapterPolicy: AdapterPolicy = {
   },
   getInitializationBehavior: () => {
     return {
-      sendLaunchBeforeConfig: true
+      sendLaunchBeforeConfig: true,
+      // rdbg only offers 'any' (break on every raise) — no uncaught-only filter
+      exceptionFilters: {
+        uncaught: [],
+        all: ['any']
+      }
     };
   },
   // rdbg rejects the DAP-default 'variables' evaluate context

@@ -240,7 +240,12 @@ export const PythonAdapterPolicy: AdapterPolicy = {
    */
   getInitializationBehavior: () => {
     return {
-      sendAttachBeforeInitialized: true
+      sendAttachBeforeInitialized: true,
+      // debugpy filter IDs; 'userUnhandled' exists but is noisy in practice
+      exceptionFilters: {
+        uncaught: ['uncaught'],
+        all: ['raised', 'uncaught']
+      }
     };
   },
 

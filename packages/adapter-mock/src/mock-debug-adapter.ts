@@ -442,7 +442,10 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
       supportsConditionalBreakpoints: this.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS),
       supportsHitConditionalBreakpoints: false,
       supportsEvaluateForHovers: this.supportsFeature(DebugFeature.EVALUATE_FOR_HOVERS),
-      exceptionBreakpointFilters: [],
+      exceptionBreakpointFilters: [
+        { filter: 'uncaught', label: 'Uncaught Exceptions', default: false },
+        { filter: 'all', label: 'All Exceptions', default: false }
+      ],
       supportsStepBack: false,
       supportsSetVariable: this.supportsFeature(DebugFeature.SET_VARIABLE),
       supportsRestartFrame: false,

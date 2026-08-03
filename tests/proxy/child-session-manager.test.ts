@@ -94,6 +94,44 @@ describe('ChildSessionManager', () => {
         expect(childCreatedSpy).toHaveBeenCalledWith('test-pending-1', expect.any(Object));
         expect(manager.getActiveChild()).toBeDefined();
         expect(manager.hasActiveChildren()).toBe(true);
+
+        // Default (no breakOnExceptions): child config sends empty filters,
+        // preserving pre-#220 behavior byte for byte
+        const child = childCreatedSpy.mock.calls[0][1] as MockMinimalDapClient;
+        const exceptionRequests = child.requests.filter(r => r.command === 'setExceptionBreakpoints');
+        expect(exceptionRequests.length).toBeGreaterThan(0);
+        expect(exceptionRequests[0].args).toEqual({ filters: [] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sends resolved exception filters to the child when a break mode is set (issue #220)', async () => {
+      vi.useFakeTimers();
+      try {
+        manager.setExceptionBreakMode('uncaught');
+
+        const childCreatedSpy = vi.fn();
+        manager.on('childCreated', childCreatedSpy);
+
+        const createPromise = manager.createChildSession({
+          pendingId: 'test-pending-ex',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {
+            type: 'pwa-node',
+            request: 'launch'
+          }
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const child = childCreatedSpy.mock.calls[0][1] as MockMinimalDapClient;
+        const exceptionRequests = child.requests.filter(r => r.command === 'setExceptionBreakpoints');
+        expect(exceptionRequests.length).toBeGreaterThan(0);
+        for (const req of exceptionRequests) {
+          expect(req.args).toEqual({ filters: ['uncaught'] });
+        }
       } finally {
         vi.useRealTimers();
       }

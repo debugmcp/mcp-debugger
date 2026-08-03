@@ -44,7 +44,7 @@ export interface ProxyManagerEvents {
   'stopped': (threadId: number | undefined, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
   'continued': () => void;
   'terminated': () => void;
-  'exited': () => void;
+  'exited': (exitCode?: number) => void;
   'output': (body: DebugProtocol.OutputEvent['body']) => void;
 
   // Proxy lifecycle events
@@ -224,6 +224,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       justMyCode: config.justMyCode,
       initialBreakpoints: config.initialBreakpoints,
       dryRunSpawn: config.dryRunSpawn,
+      breakOnExceptions: config.breakOnExceptions,
       launchConfig: config.launchConfig,
       // Pass adapter command info for language-agnostic adapter spawning
       adapterCommand: config.adapterCommand
@@ -998,9 +999,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.emit('terminated');
         break;
       
-      case 'exited':
-        this.emit('exited');
+      case 'exited': {
+        // Forward the debuggee exit code so it can be surfaced on the session
+        const exitedBody = message.body as { exitCode?: number } | undefined;
+        const exitCode = typeof exitedBody?.exitCode === 'number' ? exitedBody.exitCode : undefined;
+        this.emit('exited', exitCode);
         break;
+      }
 
       case 'output':
         this.emit('output', message.body as DebugProtocol.OutputEvent['body']);

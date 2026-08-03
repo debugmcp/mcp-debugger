@@ -749,9 +749,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       supportsExceptionInfoRequest: true,
       supportsTerminateRequest: true,
       supportsBreakpointLocationsRequest: true,
+      // Matches the filters js-debug actually declares in its initialize
+      // response (runtime-verified for issue #220): 'all' and 'uncaught'
       exceptionBreakpointFilters: [
-        { filter: 'uncaught', label: 'Uncaught Exceptions', default: true },
-        { filter: 'userUnhandled', label: 'User-Unhandled Exceptions', default: false }
+        { filter: 'all', label: 'Caught Exceptions', default: false },
+        { filter: 'uncaught', label: 'Uncaught Exceptions', default: false }
       ]
     };
   }
