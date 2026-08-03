@@ -53,7 +53,7 @@ describe('Server Initialization Tests', () => {
       
       expect(Server).toHaveBeenCalledWith(
         { name: 'debug-mcp-server', version: '0.1.0' },
-        { capabilities: { tools: {} } }
+        { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true } } }
       );
       
       expect(createProductionDependencies).toHaveBeenCalledWith({
@@ -88,11 +88,11 @@ describe('Server Initialization Tests', () => {
       expect(() => new DebugMcpServer()).toThrow('Failed to create dependencies');
     });
 
-    it('should register tool handlers', () => {
+    it('should register tool and resource handlers', () => {
       debugServer = new DebugMcpServer();
-      
-      // Should register ListTools and CallTool handlers
-      expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(2);
+
+      // ListTools + CallTool, plus ListResources/ReadResource/Subscribe/Unsubscribe (issue #218)
+      expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(6);
     });
 
     it('should set error handler', () => {
@@ -137,6 +137,7 @@ describe('Server Initialization Tests', () => {
       expect(toolNames).toContain('get_scopes');
       expect(toolNames).toContain('evaluate_expression');
       expect(toolNames).toContain('get_source_context');
+      expect(toolNames).toContain('get_output');
     });
 
     it('should handle unknown tool error', async () => {

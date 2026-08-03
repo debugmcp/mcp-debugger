@@ -24,6 +24,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [get_local_variables](#get_local_variables)
    - [evaluate_expression](#evaluate_expression)
    - [get_source_context](#get_source_context)
+   - [get_output](#get_output)
 
 ---
 
@@ -691,6 +692,49 @@ Gets source code context around a specific line in a file.
 - Returns the requested line content and surrounding context
 - Handles file boundaries gracefully (won't return lines before 1 or after EOF)
 - Uses efficient line reading with LRU caching for performance
+
+---
+
+### get_output
+
+Gets the debuggee's output (stdout/stderr/console) captured for a session. Output is delivered by the debug adapter as DAP `output` events and buffered per launch (issue #218).
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `since` (number, optional): Sequence cursor — only entries with `seq` greater than this are returned. Pass `nextSince` from the previous response to fetch only new output. Default: `0` (start of the buffer).
+- `limit` (number, optional): Maximum entries to return (default: 100, max: 1000).
+
+**Response:**
+```json
+{
+  "success": true,
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
+  "entries": [
+    { "seq": 1, "category": "stdout", "output": "Factorial of 5: 120\n", "timestamp": 1754140800123 },
+    { "seq": 2, "category": "stderr", "output": "warning: deprecated\n", "timestamp": 1754140800345 }
+  ],
+  "nextSince": 2,
+  "hasMore": false,
+  "dropped": 0
+}
+```
+
+**Notes:**
+- The buffer holds the last 1000 entries per launch; older entries are evicted and counted in `dropped`. Individual entries longer than 8192 characters are cut and flagged `"truncated": true`.
+- Adapter-internal `telemetry` events are filtered out at capture time; all other categories (`stdout`, `stderr`, `console`, `important`, ...) are kept. Adapters that omit a category default to `console`.
+- Works while the program is running and after it finishes — output stays readable until `close_debug_session`. Re-launching a session starts a fresh buffer (seq restarts at 1).
+- `hasMore: true` means more entries matched than `limit` allowed; call again with `since: nextSince`.
+- Incremental polling recipe: call once, remember `nextSince`, and pass it as `since` on the next call — you'll only ever see new output.
+- Adapter support: Python (`redirectOutput`), JavaScript (`outputCapture: 'std'`), and Java forward debuggee stdio as output events; Go and .NET typically do as well. Ruby currently routes debuggee stdio to the adapter process, so no entries are captured (tracked upstream).
+
+#### Output resources & subscriptions
+
+Each session also exposes its captured output as an MCP resource:
+
+- **URI:** `debug://sessions/{sessionId}/output` (`text/plain`) — the verbatim console transcript (all categories interleaved in arrival order).
+- **`resources/list`** enumerates one output resource per session; the list changes on session create/close (`notifications/resources/list_changed`).
+- **`resources/subscribe`** to a session's URI to receive `notifications/resources/updated` pings as output arrives. Pings are coalesced (~150 ms), so notification volume is independent of how fast the debuggee prints — on a ping, re-read the resource or call `get_output` with your cursor.
+- Subscriptions are tracked per server instance and cleaned up when the session closes.
 
 ---
 

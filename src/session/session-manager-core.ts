@@ -2,11 +2,13 @@
  * Core session management functionality including lifecycle, state management,
  * and event handling.
  */
+import { EventEmitter } from 'events';
 import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
-  AdapterPolicy
+  AdapterPolicy, SessionOutputEntry
 } from '@debugmcp/shared';
 import { SessionStore, ManagedSession } from './session-store.js';
+import { OutputRingBuffer } from './output-buffer.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
 import os from 'os';
@@ -61,9 +63,13 @@ export interface SessionManagerConfig {
 }
 
 /**
- * Core session management functionality
+ * Core session management functionality.
+ *
+ * Emits:
+ * - 'output-captured' (sessionId: string, entry: SessionOutputEntry) — a debuggee
+ *   output event was appended to the session's output buffer (issue #218).
  */
-export abstract class SessionManagerCore {
+export abstract class SessionManagerCore extends EventEmitter {
   protected sessionStore: SessionStore;
   protected logDirBase: string;
   protected logger: ILogger;
@@ -87,6 +93,7 @@ export abstract class SessionManagerCore {
     config: SessionManagerConfig,
     dependencies: SessionManagerDependencies
   ) {
+    super();
     this.logger = dependencies.logger;
     this.fileSystem = dependencies.fileSystem;
     this.networkManager = dependencies.networkManager;
@@ -217,6 +224,8 @@ export abstract class SessionManagerCore {
     // Reset first-stop tracking for this launch — a session may be re-launched.
     session.firstStopHandled = false;
     session.lastStop = undefined;
+    // Each launch/attach starts with a fresh output buffer (issue #218).
+    session.outputBuffer = new OutputRingBuffer();
 
     // Adapters whose first stopped event after launch may not carry
     // reason='entry' (e.g., js-debug emits 'pause'/'breakpoint' from
@@ -442,6 +451,29 @@ export abstract class SessionManagerCore {
     };
     proxyManager.on('exit', handleExit);
     handlers.set('exit', handleExit);
+
+    // Named function for debuggee output events (issue #218). Captures every
+    // DAP 'output' event into the session's ring buffer so output stays
+    // queryable (get_output tool / output resource) while running and after
+    // the program exits, until the session is closed.
+    const handleOutput = (body: DebugProtocol.OutputEvent['body'] | undefined) => {
+      if (!body || typeof body.output !== 'string' || body.output.length === 0) {
+        return;
+      }
+      // DAP: category defaults to 'console' when omitted. 'telemetry' is
+      // adapter-internal noise (js-debug emits it constantly) — never debuggee
+      // output, so it is dropped at write time.
+      const category = body.category ?? 'console';
+      if (category === 'telemetry') {
+        return;
+      }
+      const entry: SessionOutputEntry | undefined = session.outputBuffer?.push(category, body.output);
+      if (entry) {
+        this.emit('output-captured', sessionId, entry);
+      }
+    };
+    proxyManager.on('output', handleOutput);
+    handlers.set('output', handleOutput);
 
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);

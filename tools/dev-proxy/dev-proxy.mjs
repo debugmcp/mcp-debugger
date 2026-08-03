@@ -25,7 +25,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -336,6 +343,18 @@ class BackendManager {
 
   async _connectClient(command, args) {
     this.mcpClient = new Client({ name: 'dev-proxy', version: '1.0.0' });
+
+    // Relay backend resource notifications (resources/updated, list_changed)
+    // to the front client (issue #218). Registered as the fallback handler so
+    // unknown future notifications are ignored rather than crashing.
+    this.mcpClient.fallbackNotificationHandler = async (notification) => {
+      if (
+        notification?.method === 'notifications/resources/updated' ||
+        notification?.method === 'notifications/resources/list_changed'
+      ) {
+        this.onResourceNotification?.(notification);
+      }
+    };
 
     if (this.backendTransport === 'stdio') {
       // Stdio mode: StdioClientTransport spawns the child
@@ -688,8 +707,15 @@ async function main() {
   // Create the MCP Server that Claude Code talks to (via stdio)
   const server = new Server(
     { name: 'dev-proxy', version: '1.0.0' },
-    { capabilities: { tools: { listChanged: true } } }
+    { capabilities: { tools: { listChanged: true }, resources: { subscribe: true, listChanged: true } } }
   );
+
+  // Relay backend resource notifications to the front client (issue #218)
+  backend.onResourceNotification = (notification) => {
+    server.notification(notification).catch((err) => {
+      log(`Failed to relay ${notification.method}: ${err.message}`);
+    });
+  };
 
   // ListTools: forward live to backend, fall back to dev-tools-only when backend is down
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -735,6 +761,32 @@ async function main() {
         isError: true,
       };
     }
+  });
+
+  // Resources: pure passthrough to the backend (issue #218). Note that
+  // subscriptions live in the backend process, so they are lost when the
+  // backend is restarted (dev_rebuild_and_restart) — re-subscribe after.
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    if (backend.state === 'running' && backend.mcpClient) {
+      try {
+        return await backend.mcpClient.listResources();
+      } catch (err) {
+        log(`Live resources/list failed: ${err.message}`);
+      }
+    }
+    return { resources: [] };
+  });
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    return await backend.mcpClient.readResource(request.params);
+  });
+
+  server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    return await backend.mcpClient.subscribeResource(request.params);
+  });
+
+  server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    return await backend.mcpClient.unsubscribeResource(request.params);
   });
 
   // Connect to stdio transport for Claude Code

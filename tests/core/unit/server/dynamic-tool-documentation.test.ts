@@ -30,8 +30,10 @@ vi.mock('../../../../src/container/dependencies.js', () => ({
   }))
 }));
 
+// NOTE: implementation is passed directly to vi.fn() (not .mockImplementation)
+// so the global afterEach vi.resetAllMocks() restores it instead of wiping it.
 vi.mock('../../../../src/session/session-manager.js', () => ({
-  SessionManager: vi.fn().mockImplementation(function() { return ({
+  SessionManager: vi.fn(function() { return ({
     createSession: vi.fn(),
     closeSession: vi.fn(),
     closeAllSessions: vi.fn(),
@@ -45,7 +47,9 @@ vi.mock('../../../../src/session/session-manager.js', () => ({
     continue: vi.fn(),
     stepOver: vi.fn(),
     stepInto: vi.fn(),
-    stepOut: vi.fn()
+    stepOut: vi.fn(),
+    on: vi.fn(),
+    removeListener: vi.fn()
   }); })
 }));
 

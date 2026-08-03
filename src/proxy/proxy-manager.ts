@@ -45,6 +45,7 @@ export interface ProxyManagerEvents {
   'continued': () => void;
   'terminated': () => void;
   'exited': () => void;
+  'output': (body: DebugProtocol.OutputEvent['body']) => void;
 
   // Proxy lifecycle events
   'initialized': () => void;
@@ -1000,7 +1001,11 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       case 'exited':
         this.emit('exited');
         break;
-      
+
+      case 'output':
+        this.emit('output', message.body as DebugProtocol.OutputEvent['body']);
+        break;
+
       // Forward other events as generic DAP events
       default:
         this.emit('dap-event', message.event, message.body);

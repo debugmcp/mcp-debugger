@@ -200,10 +200,12 @@ describe('ProxyManager branch coverage scenarios', () => {
     expect((manager as unknown as { currentThreadId: number | null }).currentThreadId).toBe(42);
   });
 
-  it('emits continued and default dap events', () => {
+  it('emits continued, typed output, and default dap events', () => {
     const continuedListener = vi.fn();
+    const outputListener = vi.fn();
     const defaultListener = vi.fn();
     manager.on('continued', continuedListener);
+    manager.on('output', outputListener);
     manager.on('dap-event', defaultListener);
 
     (manager as unknown as { handleDapEvent: (msg: unknown) => void }).handleDapEvent({
@@ -219,8 +221,18 @@ describe('ProxyManager branch coverage scenarios', () => {
       body: { category: 'console', output: 'log' }
     });
 
+    (manager as unknown as { handleDapEvent: (msg: unknown) => void }).handleDapEvent({
+      type: 'dapEvent',
+      sessionId: 'session-1',
+      event: 'loadedSource',
+      body: { reason: 'new' }
+    });
+
     expect(continuedListener).toHaveBeenCalledTimes(1);
-    expect(defaultListener).toHaveBeenCalledWith('output', { category: 'console', output: 'log' });
+    expect(outputListener).toHaveBeenCalledWith({ category: 'console', output: 'log' });
+    // output is a first-class event now; only unhandled events ride 'dap-event'
+    expect(defaultListener).toHaveBeenCalledTimes(1);
+    expect(defaultListener).toHaveBeenCalledWith('loadedSource', { reason: 'new' });
   });
 
   it('resolves await-response launch barriers once dap response arrives', async () => {
