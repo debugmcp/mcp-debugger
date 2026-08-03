@@ -10,10 +10,13 @@ import {
   ReadResourceRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   ErrorCode as McpErrorCode,
   McpError,
   ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
+import { SERVER_INSTRUCTIONS, DEBUGGING_WORKFLOW_PROMPT } from './skill-content.js';
 import {
   SessionNotFoundError,
   SessionTerminatedError,
@@ -509,7 +512,10 @@ export class DebugMcpServer {
 
     this.server = new Server(
       { name: 'debug-mcp-server', version: '0.1.0' },
-      { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true } } }
+      {
+        capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
+        instructions: SERVER_INSTRUCTIONS
+      }
     );
 
     const sessionManagerConfig: SessionManagerConfig = {
@@ -520,6 +526,7 @@ export class DebugMcpServer {
 
     this.registerTools();
     this.registerResources();
+    this.registerPrompts();
     this.sessionManager.on('output-captured', this.handleOutputCaptured);
     this.server.onerror = (error) => {
       this.logger.error('Server error', { error });
@@ -1353,6 +1360,39 @@ export class DebugMcpServer {
       this.subscribedUris.delete(uri);
       this.clearOutputUpdateTimer(uri);
       return {};
+    });
+  }
+
+  /**
+   * Registers MCP prompt handlers. The single `debugging-workflow` prompt
+   * serves the condensed debugging skill in-band so any connected agent can
+   * pull workflow guidance without a separate skill install (the full skill
+   * with per-language references ships in skills/debugging/).
+   */
+  private registerPrompts(): void {
+    const promptDescriptor = {
+      name: 'debugging-workflow',
+      description:
+        'How to debug effectively with mcp-debugger: session golden path, root-cause discipline, attach/remote recipes, and per-language quirks.'
+    };
+
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+      prompts: [promptDescriptor]
+    }));
+
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      if (request.params.name !== promptDescriptor.name) {
+        throw new McpError(McpErrorCode.InvalidParams, `Unknown prompt: ${request.params.name}`);
+      }
+      return {
+        description: promptDescriptor.description,
+        messages: [
+          {
+            role: 'user' as const,
+            content: { type: 'text' as const, text: DEBUGGING_WORKFLOW_PROMPT }
+          }
+        ]
+      };
     });
   }
 
