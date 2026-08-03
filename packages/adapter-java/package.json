@@ -44,7 +44,7 @@
     "jdi-bridge",
     "dap"
   ],
-  "author": "mcp-debugger team",
+  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)",
   "license": "MIT",
   "repository": {
     "type": "git",

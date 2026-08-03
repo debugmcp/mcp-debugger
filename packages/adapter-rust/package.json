@@ -40,5 +40,6 @@
   },
   "engines": {
     "node": ">=22.0.0"
-  }
+  },
+  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
 }
