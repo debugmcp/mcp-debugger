@@ -177,6 +177,7 @@ Starts debugging a script.
   - `justMyCode` (boolean): Debug only user code
 - `adapterLaunchConfig` (object, optional): Adapter-specific launch configuration overrides. Use this for language-specific settings that go beyond standard DAP arguments (e.g., `mainClass` and `classpath` for Java, `buildCommand` for Rust).
 - `dryRunSpawn` (boolean, optional): Test spawn without actually starting
+- `breakOnExceptions` (string, optional): `"uncaught"` pauses at uncaught exceptions at the crash site (stack and locals inspectable) instead of terminating the session; `"all"` also pauses on caught/raised exceptions (language-dependent). Default `"none"`. The abstract mode maps to per-language debugger filters (e.g. Python `uncaught`/`raised`, JavaScript `uncaught`/`all`, Java `uncaught`/`caught`, .NET `user-unhandled`/`all`, Go `panic`+`fatal`, Rust `rust_panic`). Ruby supports only `"all"` (rdbg has no uncaught-only filter); `"uncaught"` is skipped with a warning there.
 
 **Response:**
 ```json
@@ -195,6 +196,9 @@ Starts debugging a script.
 - `"breakpoint"`: Stopped at a breakpoint
 - `"step"`: Stopped after a step operation
 - `"entry"`: Stopped on entry (if configured)
+- `"exception"`: Stopped at an exception (requires `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them.
+
+**Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions`, so a crash (non-zero) is distinguishable from a clean exit.
 
 ---
 
@@ -743,7 +747,7 @@ Each session also exposes its captured output as an MCP resource:
 The following tools are also available but are not fully documented with examples here:
 
 - **list_supported_languages**: Lists all supported debugging languages with metadata (installed status, display name, default executable). Takes no parameters.
-- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, and adapter-specific attach configuration.
+- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, adapter-specific attach configuration, and optionally `breakOnExceptions` (same semantics as on `start_debugging`).
 - **detach_from_process**: Detaches the debugger from an attached process. Parameters include `sessionId` and optional `terminateProcess` flag.
 - **list_threads**: Lists all threads in the debug session. Parameters include `sessionId`.
 

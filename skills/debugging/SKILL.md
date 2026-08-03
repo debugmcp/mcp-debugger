@@ -68,9 +68,13 @@ attach_to_process {sessionId, host: "localhost", port: 5678, localRoot: "<local 
 
 `detach_from_process` leaves the target running; `close_debug_session` after detach cleans up the session.
 
+## Crash diagnosis
+
+- Pass `breakOnExceptions: "uncaught"` to `start_debugging` (or `attach_to_process`) to pause at an uncaught exception with the stack and locals live instead of losing the session; `"all"` also stops on caught raises (language-dependent; Ruby supports only `"all"`).
+- On an exception stop, `lastStop.description`/`lastStop.text` carry the exception class and message; after termination, `exitCode` in `list_debug_sessions` distinguishes a crash (non-zero) from a clean exit.
+
 ## Current limitations (be honest with yourself)
 
-- No exception breakpoints yet (#220): an uncaught exception terminates the session instead of pausing. To catch a throw, set a line breakpoint just inside the failing try/handler or on the raise path.
 - No breakpoint listing/removal tools yet: track what you set; re-creating the session resets breakpoints.
 - `pause_execution` support varies by adapter; prefer breakpoints over pausing a free-running program.
 

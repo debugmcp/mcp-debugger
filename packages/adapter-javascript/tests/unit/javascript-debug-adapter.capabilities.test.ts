@@ -67,13 +67,13 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
     expect(caps.supportsTerminateRequest).toBe(true);
     expect(caps.supportsBreakpointLocationsRequest).toBe(true);
 
-    // Exception filters: uncaught and userUnhandled
+    // Exception filters: the IDs js-debug actually declares in its
+    // initialize response (runtime-verified for issue #220)
     expect(Array.isArray(caps.exceptionBreakpointFilters)).toBe(true);
     const filters = caps.exceptionBreakpointFilters || [];
+    expect(filters.map(f => f.filter).sort()).toEqual(['all', 'uncaught']);
     const uncaught = filters.find(f => f.filter === 'uncaught');
-    const userUnhandled = filters.find(f => f.filter === 'userUnhandled');
-    expect(uncaught?.default).toBe(true);
-    expect(userUnhandled?.default).toBe(false);
+    expect(uncaught?.default).toBe(false);
   });
 
   it('getFeatureRequirements returns minimal requirements for log points', () => {
