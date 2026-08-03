@@ -40,5 +40,6 @@
     "@debugmcp/adapter-ruby": "workspace:*",
     "@debugmcp/adapter-rust": "workspace:*",
     "@debugmcp/shared": "workspace:*"
-  }
+  },
+  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
 }

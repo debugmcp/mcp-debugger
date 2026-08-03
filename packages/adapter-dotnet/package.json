@@ -40,5 +40,6 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
 }

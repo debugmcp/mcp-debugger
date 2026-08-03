@@ -470,6 +470,27 @@ jobs:
         echo "$CHANGELOG" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
     
+    # SBOMs (SPDX + CycloneDX) are generated from the exact release ref and
+    # attached to the GitHub release — required by many corporate/government
+    # procurement processes (EO 14028) and useful for downstream scanners.
+    - name: Generate SBOM (SPDX)
+      uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+      with:
+        path: .
+        format: spdx-json
+        output-file: sbom.spdx.json
+        upload-artifact: false
+        upload-release-assets: false
+
+    - name: Generate SBOM (CycloneDX)
+      uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+      with:
+        path: .
+        format: cyclonedx-json
+        output-file: sbom.cyclonedx.json
+        upload-artifact: false
+        upload-release-assets: false
+
     - name: Create Release with GitHub CLI
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -529,4 +550,6 @@ jobs:
           $PRERELEASE_FLAG \
           release-artifacts/*.tgz \
           provenance/multiple.intoto.jsonl \
-          provenance/multiple.sigstore.json
+          provenance/multiple.sigstore.json \
+          sbom.spdx.json \
+          sbom.cyclonedx.json

@@ -42,7 +42,7 @@
     "dap",
     "debug-adapter-protocol"
   ],
-  "author": "debugmcp <debug@sycamore.llc>",
+  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/debugmcp/mcp-debugger/issues"
