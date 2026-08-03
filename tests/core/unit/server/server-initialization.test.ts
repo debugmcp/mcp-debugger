@@ -53,7 +53,10 @@ describe('Server Initialization Tests', () => {
       
       expect(Server).toHaveBeenCalledWith(
         { name: 'debug-mcp-server', version: '0.1.0' },
-        { capabilities: { tools: {}, resources: { subscribe: true, listChanged: true } } }
+        {
+          capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
+          instructions: expect.stringContaining('mcp-debugger drives real step-through debuggers')
+        }
       );
       
       expect(createProductionDependencies).toHaveBeenCalledWith({
@@ -91,8 +94,9 @@ describe('Server Initialization Tests', () => {
     it('should register tool and resource handlers', () => {
       debugServer = new DebugMcpServer();
 
-      // ListTools + CallTool, plus ListResources/ReadResource/Subscribe/Unsubscribe (issue #218)
-      expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(6);
+      // ListTools + CallTool, ListResources/ReadResource/Subscribe/Unsubscribe (issue #218),
+      // plus ListPrompts/GetPrompt for the debugging-workflow prompt
+      expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(8);
     });
 
     it('should set error handler', () => {
