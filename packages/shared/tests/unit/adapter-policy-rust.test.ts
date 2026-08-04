@@ -175,6 +175,33 @@ describe('RustAdapterPolicy', () => {
       expect(config.args).toEqual(['--port', '9000']);
       expect(config.env?.LLDB_USE_NATIVE_PDB_READER).toBe('1');
     });
+
+    it('opts into adapter-stdio forwarding on win32 only (issue #223)', () => {
+      // Windows: LLDB's console mode lets the debuggee inherit the adapter
+      // process's stdio — forwarding is the only way output reaches get_output.
+      const win = RustAdapterPolicy.getAdapterSpawnConfig!({
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp/logs'
+      }, 'win32', 'x64');
+      expect(win.forwardStdio).toEqual({});
+
+      const winCustom = RustAdapterPolicy.getAdapterSpawnConfig!({
+        adapterCommand: { command: 'custom', args: [] },
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp/logs'
+      }, 'win32', 'x64');
+      expect(winCustom.forwardStdio).toEqual({});
+
+      // POSIX: CodeLLDB emits DAP output events itself (LLDB holds the pipes)
+      const linux = RustAdapterPolicy.getAdapterSpawnConfig!({
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp/logs'
+      }, 'linux', 'x64');
+      expect(linux.forwardStdio).toBeUndefined();
+    });
   });
 
   it('handles reverse requests via DAP client behavior', async () => {

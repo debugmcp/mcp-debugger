@@ -13,6 +13,9 @@ import {
   AdapterSpawnResult
 } from './dap-proxy-interfaces.js';
 
+/** Which adapter-process stream a forwarded line came from. */
+export type AdapterStdioSource = 'stdout' | 'stderr';
+
 /**
  * Configuration for spawning any debug adapter
  */
@@ -22,6 +25,15 @@ export interface GenericAdapterConfig {
   logDir: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * When set, every raw line read from the adapter process's stdout/stderr —
+   * including blank lines, unsanitized — is also delivered here (issue #222:
+   * some adapters hand the debuggee their own stdio, so these lines ARE the
+   * program's output). The sanitized, blank-dropping log path is unchanged;
+   * the redaction that protects persisted logs must not rewrite what the
+   * debugging client sees, matching debugpy/js-debug output-event behavior.
+   */
+  onStdioLine?: (source: AdapterStdioSource, line: string) => void;
 }
 
 /**
@@ -129,7 +141,7 @@ export class GenericAdapterManager {
     this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers and stderr capture
-    this.setupProcessHandlers(adapterProcess);
+    this.setupProcessHandlers(adapterProcess, config.onStdioLine);
 
     return {
       process: adapterProcess,
@@ -140,7 +152,10 @@ export class GenericAdapterManager {
   /**
    * Set up process event handlers
    */
-  private setupProcessHandlers(adapterProcess: ChildProcess): void {
+  private setupProcessHandlers(
+    adapterProcess: ChildProcess,
+    onStdioLine?: (source: AdapterStdioSource, line: string) => void
+  ): void {
     adapterProcess.on('error', (err: Error) => {
       this.logger.error('[AdapterManager] Adapter process spawn error:', err);
     });
@@ -150,8 +165,10 @@ export class GenericAdapterManager {
     // assignment split across two chunks would otherwise leak its tail past
     // the key/value redaction patterns (issues #151/#153).
     if (adapterProcess.stderr) {
-      this.consumeStream(adapterProcess.stderr, line =>
-        this.logger.error(`[AdapterManager STDERR] ${line}`)
+      this.consumeStream(
+        adapterProcess.stderr,
+        line => this.logger.error(`[AdapterManager STDERR] ${line}`),
+        onStdioLine && (line => onStdioLine('stderr', line))
       );
     }
 
@@ -159,8 +176,10 @@ export class GenericAdapterManager {
     // it through the same sanitized path so a chatty adapter cannot fill the
     // pipe buffer and stall, and its diagnostics land in the log at debug.
     if (adapterProcess.stdout) {
-      this.consumeStream(adapterProcess.stdout, line =>
-        this.logger.debug(`[AdapterManager STDOUT] ${line}`)
+      this.consumeStream(
+        adapterProcess.stdout,
+        line => this.logger.debug(`[AdapterManager STDOUT] ${line}`),
+        onStdioLine && (line => onStdioLine('stdout', line))
       );
     }
 
@@ -175,9 +194,20 @@ export class GenericAdapterManager {
    * process 'exit' — the pipe can still deliver the rest of a split line
    * after exit, which would re-create the straddle leak (issue #151).
    */
-  private consumeStream(stream: Readable, logLine: (line: string) => void): void {
+  private consumeStream(
+    stream: Readable,
+    logLine: (line: string) => void,
+    forwardLine?: (line: string) => void
+  ): void {
     const buffer = new LineBuffer();
     const record = (lines: string[]) => {
+      if (forwardLine) {
+        // Debuggee-output fan-out (issue #222): raw lines, blank lines
+        // included — they are program output, not log noise.
+        for (const line of lines) {
+          forwardLine(line);
+        }
+      }
       for (const line of sanitizeStderr(lines.filter(l => l.trim().length > 0))) {
         logLine(line);
       }

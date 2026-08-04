@@ -729,7 +729,7 @@ Gets the debuggee's output (stdout/stderr/console) captured for a session. Outpu
 - Works while the program is running and after it finishes — output stays readable until `close_debug_session`. Re-launching a session starts a fresh buffer (seq restarts at 1).
 - `hasMore: true` means more entries matched than `limit` allowed; call again with `since: nextSince`.
 - Incremental polling recipe: call once, remember `nextSince`, and pass it as `since` on the next call — you'll only ever see new output.
-- Adapter support: Python (`redirectOutput`), JavaScript (`outputCapture: 'std'`), Go (`outputMode: 'remote'`), and Java forward debuggee stdio as output events; .NET typically does as well. Ruby routes debuggee stdio to the adapter process, so no entries are captured (#222); Rust does the same on Windows, where LLDB's console mode inherits stdio instead of emitting output events (#223).
+- Adapter support: Python (`redirectOutput`), JavaScript (`outputCapture: 'std'`), Go (`outputMode: 'remote'`), and Java forward debuggee stdio as output events; .NET typically does as well. Ruby launch mode and Rust on Windows route debuggee stdio to the adapter process; the proxy forwards those lines as synthesized `stdout`/`stderr` events (#222/#223), excluding rdbg's `DEBUGGER:` banners. Ruby **attach** captures nothing — the target's stdio stays wherever the process was started.
 
 #### Output resources & subscriptions
 

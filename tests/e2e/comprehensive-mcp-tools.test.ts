@@ -136,8 +136,10 @@ const LANGUAGES: LangDef[] = [
   { language: 'python', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: true },
   { language: 'javascript', script: JS_SCRIPT, bpLine: JS_BP_LINE, available: true },
   { language: 'mock', script: PYTHON_SCRIPT, bpLine: PYTHON_BP_LINE, available: true },
-  { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed' },
-  { language: 'ruby', script: RUBY_SCRIPT, bpLine: RUBY_BP_LINE, available: hasRuby, skipReason: hasRuby ? undefined : 'Ruby/rdbg not installed' },
+  { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed',
+    outputMarker: 'Hello, MCP Debugger!' },
+  { language: 'ruby', script: RUBY_SCRIPT, bpLine: RUBY_BP_LINE, available: hasRuby, skipReason: hasRuby ? undefined : 'Ruby/rdbg not installed',
+    outputMarker: '1: 1' },  // iteration 1's puts — the loop breakpoint re-arms, so later output isn't guaranteed
   { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go/Delve not installed',
     dapLaunchArgs: { mode: 'exec' }, outputMarker: 'Hello, World!' },  // launchScript set in beforeAll after build
   { language: 'dotnet', script: DOTNET_SCRIPT, bpLine: DOTNET_BP_LINE, available: hasDotnet, skipReason: hasDotnet ? undefined : '.NET/netcoredbg not installed',

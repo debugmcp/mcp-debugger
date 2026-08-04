@@ -20,7 +20,7 @@ import {
   ErrorMessage
 } from './dap-proxy-interfaces.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
-import { GenericAdapterManager } from './dap-proxy-adapter-manager.js';
+import { GenericAdapterManager, AdapterStdioSource } from './dap-proxy-adapter-manager.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
   validateProxyInitPayload
@@ -68,6 +68,8 @@ export class DapProxyWorker {
   // wins over synthesis, and parent+child terminated events synthesize once
   private exitedEventSeen: boolean = false;
   private exitSynthesisAttempted: boolean = false;
+  /** Armed when adapter stdio forwarding is active (issue #222): resolves once both stdio streams close. */
+  private adapterStdioDrained: Promise<void> | null = null;
   private initializedEventPending: boolean = false;
   private deferInitializedHandling: boolean = false;
   private initializedEventHandled: boolean = false;
@@ -373,9 +375,15 @@ export class DapProxyWorker {
         spawnConfig.cwd = process.env.MCP_WORKSPACE_ROOT;
       }
 
-      const spawnResult = await this.processManager!.spawn(spawnConfig);
+      const spawnResult = await this.processManager!.spawn({
+        ...spawnConfig,
+        onStdioLine: this.buildStdioForwarder(spawnConfig.forwardStdio)
+      });
 
       this.adapterProcess = spawnResult.process;
+      if (spawnConfig.forwardStdio) {
+        this.adapterStdioDrained = this.createStdioDrainBarrier(spawnResult.process);
+      }
       this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
 
       this.adapterProcess.on('error', (err) => {
@@ -637,14 +645,22 @@ export class DapProxyWorker {
         this.logger!.debug('[Worker] DAP event: thread', body);
         this.sendDapEvent('thread', body);
       },
-      onExited: (body) => {
+      onExited: async (body) => {
         this.logger!.info(`[Worker] DAP event: exited exitCode=${body.exitCode}`);
-        // A real exited event stays authoritative - suppress synthesis (issue #247)
+        // A real exited event stays authoritative - suppress synthesis (issue #247).
+        // Set synchronously, before any await, so a racing terminated sees it.
         this.exitedEventSeen = true;
+        await this.waitForAdapterStdioDrain();
         this.sendDapEvent('exited', body);
       },
       onTerminated: async (body) => {
         this.logger!.info(`[Worker] DAP event: terminated body=${JSON.stringify(body)}`);
+        // When adapter stdio is forwarded as debuggee output, the exit-time
+        // flush of a block-buffered pipe arrives milliseconds AFTER the DAP
+        // terminated event — but the SessionManager reacts to terminated by
+        // stopping the proxy, which drops late messages. Hold terminated
+        // until the streams have drained so the output wins the race.
+        await this.waitForAdapterStdioDrain();
         // Must complete before terminated is forwarded: whichever of
         // exited/terminated reaches the SessionManager first strips the
         // other's handler, and shutdown() below tears down the client
@@ -656,8 +672,13 @@ export class DapProxyWorker {
         this.logger!.error('[Worker] DAP client error:', err);
         this.sendError(`DAP client error: ${err.message}`);
       },
-      onClose: () => {
+      onClose: async () => {
         this.logger!.info('[Worker] DAP client connection closed.');
+        // Adapters that close the DAP socket at debuggee exit (rdbg) race the
+        // exit-time stdio flush exactly like terminated does — the parent
+        // reacts to dap_connection_closed by tearing down its listeners, so
+        // hold this path behind the same drain barrier (issue #222).
+        await this.waitForAdapterStdioDrain();
         this.sendStatus('dap_connection_closed');
         this.shutdown();
       }
@@ -1136,6 +1157,77 @@ export class DapProxyWorker {
         // Best effort - a stray ~3-byte temp file is acceptable
       }
     }
+  }
+
+  /**
+   * Resolves when both adapter stdio streams have closed — i.e. every byte
+   * the debuggee flushed on exit has been read and forwarded (issue #222).
+   * Only armed when stdio forwarding is active.
+   */
+  private createStdioDrainBarrier(adapterProcess: ChildProcess): Promise<void> {
+    const streamClosed = (stream: NodeJS.ReadableStream | null): Promise<void> =>
+      !stream || (stream as unknown as { closed?: boolean }).closed
+        ? Promise.resolve()
+        : new Promise(resolve => stream.once('close', () => resolve()));
+    return Promise.all([
+      streamClosed(adapterProcess.stdout),
+      streamClosed(adapterProcess.stderr)
+    ]).then(() => undefined);
+  }
+
+  /**
+   * Hold exited/terminated forwarding until adapter stdio has drained: a
+   * debuggee printing to a block-buffered pipe flushes everything at exit,
+   * milliseconds after the adapter's terminated event, and the SessionManager
+   * stops the proxy on terminated — dropping late messages. Stream 'data'
+   * fires before 'close' and IPC is FIFO, so waiting here guarantees the
+   * forwarded output reaches the session buffer first. 2s backstop for
+   * adapters that never close their pipes. No-op when forwarding is off.
+   */
+  private async waitForAdapterStdioDrain(): Promise<void> {
+    if (!this.adapterStdioDrained) {
+      return;
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const backstop = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, 2000);
+    });
+    try {
+      await Promise.race([this.adapterStdioDrained, backstop]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  /**
+   * Build the raw-stdio → DAP 'output' forwarder for adapters whose debuggee
+   * inherits the adapter process's stdio (issue #222: rdbg -c on all
+   * platforms, CodeLLDB's console mode on Windows). Returns undefined when
+   * the policy did not opt in via spawnConfig.forwardStdio — the adapter
+   * manager then drains stdio to logs only, exactly as before.
+   */
+  private buildStdioForwarder(
+    forwardConfig: { excludeStderrLinePattern?: RegExp } | undefined
+  ): ((source: AdapterStdioSource, line: string) => void) | undefined {
+    if (!forwardConfig) {
+      return undefined;
+    }
+    const exclude = forwardConfig.excludeStderrLinePattern;
+    return (source, line) => {
+      if (source === 'stderr' && exclude?.test(line)) {
+        return; // adapter diagnostic banner: log path only
+      }
+      try {
+        // '\n' restores the line ending LineBuffer stripped, and keeps blank
+        // lines past handleOutput's empty-output drop.
+        this.sendDapEvent('output', { category: source, output: line + '\n' });
+      } catch (err) {
+        // IPC gone during teardown; a stream 'data' handler must never throw.
+        this.logger?.debug?.('[Worker] Failed to forward adapter stdio line', err);
+      }
+    };
   }
 
   private sendDapEvent(event: string, body: unknown): void {

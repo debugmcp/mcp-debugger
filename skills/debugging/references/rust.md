@@ -53,7 +53,7 @@ Not supported. The Rust adapter implements launch mode only — `attach_to_proce
 
 - **Windows toolchain (critical):** MSVC-built binaries give control flow only — breakpoints/stepping work, but strings, Vecs, and structs show `<unavailable>` or corrupted values. `RUST_MSVC_BEHAVIOR` controls what happens when an MSVC binary is detected: `warn` (default — log and proceed), `error` (fail with `ENVIRONMENT_INVALID`), `continue` (silent). Check any binary first with `mcp-debugger check-rust-binary target/debug/app.exe` — it reports `Toolchain: GNU` or `MSVC`.
 - **Windows initial stop:** debugging may first stop in system functions (not user code). Issue one `continue_execution` to reach your breakpoint; auto-continue through these system stops is not yet implemented.
-- **KNOWN ISSUE — `get_output` may be empty on Windows (issue #223):** in CodeLLDB's console mode the debuggee inherits the adapter process's stdio, and on Windows LLDB does not convert it to DAP output events. Do not rely on print debugging there — inspect state with `evaluate_expression`, `get_local_variables`, and breakpoints instead.
+- **Debuggee output is captured:** on POSIX CodeLLDB forwards the program's stdio as DAP output events; on Windows (where LLDB's console mode makes the debuggee inherit the adapter process's stdio) the proxy forwards the adapter's stdio instead. Either way the program's stdout/stderr arrives as `get_output` entries.
 - Expression evaluation goes through LLDB: simple field access and method calls like `my_vec.len()` work, but Rust-specific syntax (closures, trait methods) may not.
 - Debug builds only: release builds need `debug = true` in `[profile.release]` and still inline/optimize away variables. Prefer `opt-level = 0`.
 - GNU builds of crates that import Windows DLLs (`tokio`, `windows-sys`, `parking_lot_core`, ...) need full MinGW binutils — rustup's self-contained toolchain lacks `as.exe`, so `dlltool` fails. Install via MSYS2 (`mingw-w64-x86_64-binutils`, `-gcc`) and prepend `C:\msys64\mingw64\bin` to PATH.
@@ -68,4 +68,3 @@ Not supported. The Rust adapter implements launch mode only — `attach_to_proce
 | "Can't find CodeLLDB" | Adapter not vendored / npx package on non-Linux | Run `pnpm --filter @debugmcp/adapter-rust run build:adapter`, or set `CODELLDB_PATH` |
 | First stop is in system/ntdll frames | Windows initial system breakpoint | `continue_execution` once, then you land on your breakpoint |
 | `dlltool ... CreateProcess` build error | rustup GNU toolchain missing `as.exe` | Install MSYS2 mingw-w64 binutils/gcc; prepend `C:\msys64\mingw64\bin` to PATH |
-| `get_output` returns no stdout (Windows) | Issue #223 — debuggee stdio inherited by adapter process | Use `evaluate_expression` / variables at breakpoints instead |

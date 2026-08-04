@@ -197,5 +197,21 @@ describe('MCP Server Ruby Debugging Smoke Test @requires-ruby', () => {
     // 8. Continue to completion (no further matching breakpoints)
     const contResult = await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
     expect(contResult.success).toBe(true);
+
+    // 9. Debuggee output must be retrievable (issue #222): rdbg -c gives the
+    // debuggee the adapter process's stdio, which the proxy forwards as
+    // synthesized output events. Wait for the script to finish and flush.
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+    expect(outputResult.success).toBe(true);
+    const outputEntries = outputResult.entries as Array<{ category: string; output: string }>;
+    const fizzEntry = outputEntries.find(e => e.output.includes('6: Fizz'));
+    expect(fizzEntry).toBeDefined();
+    expect(fizzEntry!.category).toBe('stdout');
+    const warnEntry = outputEntries.find(e => e.output.includes('fizzbuzz complete'));
+    expect(warnEntry).toBeDefined();
+    expect(warnEntry!.category).toBe('stderr');
+    // rdbg's own banners must stay out of the output buffer
+    expect(outputEntries.some(e => e.output.startsWith('DEBUGGER:'))).toBe(false);
   }, 90000); // Ruby interpreter startup under rdbg takes several seconds
 });

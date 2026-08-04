@@ -65,6 +65,15 @@ reports a `Local variables` scope), `get_local_variables`, `evaluate_expression`
 (evaluated in rdbg's `repl` context — expressions can read and modify program state),
 `step_over` / `step_into` / `step_out`, and `continue_execution`.
 
+### Program output
+
+`rdbg -c` runs the script as a child of the adapter process with inherited stdio, so the
+program's `puts`/`warn` output lands on the adapter's pipes rather than in DAP output
+events. The proxy forwards those lines as synthesized `stdout`/`stderr` entries, so
+`get_output` (and the `debug://sessions/{id}/output` resource) returns the script's
+output as usual; rdbg's own `DEBUGGER:` stderr banners are excluded and only appear in
+the session log.
+
 ### Bundler projects
 
 Pass `useBundler` through the launch configuration to run the target via `bundle exec`:
@@ -105,6 +114,10 @@ detach_from_process { "sessionId": "...", "terminateProcess": false }
 
 The target keeps running after detach, and `rdbg` keeps listening — you can re-attach
 later. Pass `terminateProcess: true` to kill the target instead.
+
+Note: in attach mode there is no adapter process between mcp-debugger and the target, so
+`get_output` captures nothing — the program's stdio stays on whatever terminal (or pod
+log) the process was started in.
 
 ## Remote attach (containers and Kubernetes)
 

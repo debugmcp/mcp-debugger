@@ -269,6 +269,14 @@ export const RustAdapterPolicy: AdapterPolicy = {
    * Get the configuration for spawning the Rust debug adapter (CodeLLDB)
    */
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) => {
+    // Windows only (issue #223): CodeLLDB's console mode performs no stdio
+    // redirection, and unlike POSIX (where LLDB holds the debuggee's stdio
+    // pipes and CodeLLDB emits DAP output events from the STDOUT/STDERR
+    // process broadcasts), LLDB on Windows lets the debuggee inherit the
+    // adapter process's pipes. Forward those as output events there; on
+    // POSIX the channels are exclusive, so this stays off to avoid noise.
+    const forwardStdio = platform === 'win32' ? {} : undefined;
+
     // If a custom adapter command was provided, use it directly
     if (payload.adapterCommand) {
       return {
@@ -278,7 +286,8 @@ export const RustAdapterPolicy: AdapterPolicy = {
         host: payload.adapterHost,
         port: payload.adapterPort,
         logDir: payload.logDir,
-        env: payload.adapterCommand.env
+        env: payload.adapterCommand.env,
+        forwardStdio
       };
     }
 
@@ -320,7 +329,8 @@ export const RustAdapterPolicy: AdapterPolicy = {
         ...process.env,
         // Windows specific: enable native PDB reader
         ...(platform === 'win32' ? { LLDB_USE_NATIVE_PDB_READER: '1' } : {})
-      }
+      },
+      forwardStdio
     };
   }
 };
