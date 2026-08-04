@@ -111,6 +111,8 @@ describe('DapClientBehavior', () => {
         expect(behavior.childRoutedCommands?.has('scopes')).toBe(true);
         expect(behavior.childRoutedCommands?.has('variables')).toBe(true);
         expect(behavior.childRoutedCommands?.has('evaluate')).toBe(true);
+        // The exception stops in the child session (issue #243)
+        expect(behavior.childRoutedCommands?.has('exceptionInfo')).toBe(true);
       });
       
       it('should not route initialization commands to child', () => {

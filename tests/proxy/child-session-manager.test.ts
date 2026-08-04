@@ -203,6 +203,7 @@ describe('ChildSessionManager', () => {
       expect(manager.shouldRouteToChild('pause')).toBe(true);
       expect(manager.shouldRouteToChild('continue')).toBe(true);
       expect(manager.shouldRouteToChild('stackTrace')).toBe(true);
+      expect(manager.shouldRouteToChild('exceptionInfo')).toBe(true);
       
       // But not all commands
       expect(manager.shouldRouteToChild('initialize')).toBe(false);

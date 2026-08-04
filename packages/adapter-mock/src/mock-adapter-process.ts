@@ -256,6 +256,10 @@ class MockDebugAdapterProcess {
         this.handleEvaluate(request);
         break;
 
+      case 'exceptionInfo':
+        this.handleExceptionInfo(request as DebugProtocol.ExceptionInfoRequest);
+        break;
+
       case 'disconnect':
         this.handleDisconnect(request as DebugProtocol.DisconnectRequest);
         break;
@@ -296,7 +300,7 @@ class MockDebugAdapterProcess {
         supportsRestartRequest: false,
         supportsExceptionOptions: false,
         supportsValueFormattingOptions: false,
-        supportsExceptionInfoRequest: false,
+        supportsExceptionInfoRequest: true,
         supportTerminateDebuggee: true,
         supportSuspendDebuggee: false,
         supportsDelayedStackTraceLoading: false,
@@ -359,6 +363,30 @@ class MockDebugAdapterProcess {
     return this.exceptionFilters.length > 0 &&
       !this.exceptionSimulated &&
       /throws|error/i.test(this.programPath);
+  }
+
+  /**
+   * DAP exceptionInfo (issue #243): coherent with sendExceptionStopped so the
+   * enrichment path can be exercised end-to-end against the mock adapter.
+   */
+  private handleExceptionInfo(request: DebugProtocol.ExceptionInfoRequest): void {
+    this.sendResponse({
+      seq: 0,
+      type: 'response',
+      request_seq: request.seq,
+      command: request.command,
+      success: true,
+      body: {
+        exceptionId: 'MockError',
+        breakMode: 'unhandled',
+        description: 'Mock uncaught exception',
+        details: {
+          message: 'Mock uncaught exception',
+          typeName: 'MockError',
+          fullTypeName: 'mock.MockError'
+        }
+      }
+    } as DebugProtocol.ExceptionInfoResponse);
   }
 
   private sendExceptionStopped(): void {

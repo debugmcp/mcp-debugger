@@ -69,7 +69,7 @@ detach_from_process leaves the target running.
 
 ## Crash diagnosis
 - Pass breakOnExceptions: "uncaught" to start_debugging (or attach_to_process) to pause at an uncaught exception with stack + locals live instead of losing the session; "all" also stops on caught raises (Ruby supports only "all").
-- lastStop.description/text carry the exception class and message; exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
+- lastStop.description/text carry the exception class and message; where supported (Python/JS/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
 
 ## Current limitations
 - No breakpoint list/remove tools yet: track what you set.

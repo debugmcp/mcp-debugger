@@ -52,6 +52,7 @@ export type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'dry_run_complete'; command: string; script: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_connected'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_configured_and_launched'; data?: unknown }
+  | { type: 'status'; sessionId: string; status: 'adapter_capabilities'; capabilities: DebugProtocol.Capabilities; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; data?: unknown };
 
 export type ProxyDapEventMessage = { 

@@ -268,6 +268,31 @@ export interface SessionStopInfo {
   description?: string;
   /** DAP stopped-event text, e.g. the exception message ('division by zero') */
   text?: string;
+  /**
+   * Best-effort DAP exceptionInfo enrichment for exception stops (issue #243).
+   * Requested asynchronously after the pause, so it may appear a moment after
+   * the stop is first observable; absent when the adapter doesn't support
+   * exceptionInfo or the request failed.
+   */
+  exceptionInfo?: SessionStopExceptionInfo;
+}
+
+/**
+ * Lean projection of the DAP exceptionInfo response merged into
+ * SessionStopInfo (issue #243).
+ */
+export interface SessionStopExceptionInfo {
+  /** Adapter-specific exception identifier, e.g. the exception class */
+  exceptionId: string;
+  /** DAP ExceptionBreakMode: 'never' | 'always' | 'unhandled' | 'userUnhandled' */
+  breakMode: string;
+  description?: string;
+  details?: {
+    message?: string;
+    typeName?: string;
+    fullTypeName?: string;
+    stackTrace?: string;
+  };
 }
 
 /**

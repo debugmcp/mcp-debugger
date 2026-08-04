@@ -456,7 +456,7 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
       supportsRestartRequest: false,
       supportsExceptionOptions: false,
       supportsValueFormattingOptions: false,
-      supportsExceptionInfoRequest: false,
+      supportsExceptionInfoRequest: true,
       supportTerminateDebuggee: true,
       supportSuspendDebuggee: false,
       supportsDelayedStackTraceLoading: false,

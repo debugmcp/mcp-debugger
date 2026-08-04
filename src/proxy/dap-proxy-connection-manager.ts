@@ -79,9 +79,15 @@ export class DapConnectionManager {
   }
 
   /**
-   * Initialize DAP session
+   * Initialize DAP session. Returns the adapter's advertised capabilities
+   * (the initialize response body) when available (issue #243); test stubs
+   * and degenerate adapters may yield undefined.
    */
-  async initializeSession(client: IDapClient, sessionId: string, adapterId: string = 'python'): Promise<void> {
+  async initializeSession(
+    client: IDapClient,
+    sessionId: string,
+    adapterId: string = 'python'
+  ): Promise<DebugProtocol.Capabilities | undefined> {
     const initializeArgs: ExtendedInitializeArgs = {
       clientID: `mcp-proxy-${sessionId}`,
       clientName: 'MCP Debug Proxy',
@@ -95,8 +101,9 @@ export class DapConnectionManager {
     };
 
     this.logger.info('[ConnectionManager] Sending DAP "initialize" request');
-    await client.sendRequest('initialize', initializeArgs);
+    const response = await client.sendRequest<DebugProtocol.InitializeResponse>('initialize', initializeArgs);
     this.logger.info('[ConnectionManager] DAP "initialize" request sent and response received.');
+    return response?.body;
   }
 
   /**
