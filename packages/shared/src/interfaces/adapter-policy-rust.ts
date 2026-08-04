@@ -14,7 +14,6 @@ export const RustAdapterPolicy: AdapterPolicy = {
   name: 'rust',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: () => {
     throw new Error('RustAdapterPolicy does not support child sessions');
   },
@@ -255,7 +254,6 @@ export const RustAdapterPolicy: AdapterPolicy = {
       
       // Rust-specific behaviors
       mirrorBreakpointsToChild: false,
-      deferParentConfigDone: false,
       pauseAfterChildAttach: false,
       
       // No adapter ID normalization needed

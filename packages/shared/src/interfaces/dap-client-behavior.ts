@@ -58,11 +58,6 @@ export interface DapClientBehavior {
   mirrorBreakpointsToChild?: boolean;
   
   /**
-   * Whether to defer parent's configurationDone until child is configured
-   */
-  deferParentConfigDone?: boolean;
-  
-  /**
    * Whether to attempt pause after launching/attaching child
    */
   pauseAfterChildAttach?: boolean;

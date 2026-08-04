@@ -59,13 +59,6 @@ export interface AdapterPolicy {
   childSessionStrategy: ChildSessionStrategy;
 
   /**
-   * Whether to defer sending configurationDone in the parent session temporarily
-   * to ensure the child session is fully configured before the target resumes.
-   * This should return true only for adapters that require it (e.g., js-debug).
-   */
-  shouldDeferParentConfigDone(parentConfig: Record<string, unknown>): boolean;
-
-  /**
    * Build the child start request (launch or attach) for a given pending target ID.
    * This should include just the necessary args; consumers may sanitize/augment further.
    */
@@ -408,7 +401,6 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
   name: 'default',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: (pendingId: string) => {
     throw new Error(
       `DefaultAdapterPolicy is a placeholder and cannot start child sessions (pendingId=${pendingId}).`

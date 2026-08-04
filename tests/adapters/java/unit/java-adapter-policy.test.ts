@@ -203,12 +203,6 @@ describe('JavaAdapterPolicy', () => {
     });
   });
 
-  describe('shouldDeferParentConfigDone', () => {
-    it('should return false', () => {
-      expect(JavaAdapterPolicy.shouldDeferParentConfigDone()).toBe(false);
-    });
-  });
-
   describe('extractLocalVariables', () => {
     it('should return empty array when no stack frames', () => {
       const result = JavaAdapterPolicy.extractLocalVariables([], {}, {});
@@ -297,7 +291,6 @@ describe('JavaAdapterPolicy', () => {
     it('should return behavior configuration', () => {
       const behavior = JavaAdapterPolicy.getDapClientBehavior();
       expect(behavior.mirrorBreakpointsToChild).toBe(false);
-      expect(behavior.deferParentConfigDone).toBe(false);
       expect(behavior.pauseAfterChildAttach).toBe(false);
       expect(behavior.childInitTimeout).toBe(5000);
       expect(behavior.suppressPostAttachConfigDone).toBe(false);

@@ -25,7 +25,6 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   name: 'js-debug',
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',
-  shouldDeferParentConfigDone: () => true,
   buildChildStartArgs: (pendingId: string, parentConfig: Record<string, unknown>) => {
     const type = typeof parentConfig?.type === 'string' ? (parentConfig.type as string) : 'pwa-node';
     return {
@@ -733,7 +732,6 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       
       // JavaScript-specific child session behaviors
       mirrorBreakpointsToChild: true,
-      deferParentConfigDone: true,
       pauseAfterChildAttach: true,
       stackTraceRequiresChild: true,
       

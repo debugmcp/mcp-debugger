@@ -31,14 +31,12 @@ function createChildSafePolicy(policy: AdapterPolicy): AdapterPolicy {
     ...policy,
     supportsReverseStartDebugging: false,
     childSessionStrategy: 'none',
-    shouldDeferParentConfigDone: () => false,
     getDapClientBehavior: (): DapClientBehavior => {
       const baseBehavior = policy.getDapClientBehavior();
       const behavior: DapClientBehavior = {
         ...baseBehavior,
         childRoutedCommands: new Set<string>(),
         mirrorBreakpointsToChild: false,
-        deferParentConfigDone: false,
         pauseAfterChildAttach: false,
         stackTraceRequiresChild: false,
       };
@@ -63,6 +61,57 @@ export interface ChildSessionOptions {
   policy: AdapterPolicy;
   host: string;
   port: number;
+}
+
+/**
+ * Settle-once death signal for a child client during adoption (issue #248).
+ * Modeled on JsDebugLaunchBarrier: pre-caught so an unused latch never becomes
+ * an unhandled rejection, and disposed once adoption settles either way.
+ */
+interface ChildDeathLatch {
+  isDead(): boolean;
+  error(): Error | null;
+  /** Race a step against child death; rejects immediately once the child dies. */
+  race<T>(step: Promise<T>): Promise<T>;
+  dispose(): void;
+}
+
+function createChildDeathLatch(child: MinimalDapClient, pendingId: string): ChildDeathLatch {
+  let dead: Error | null = null;
+  let rejectDeath: ((err: Error) => void) | null = null;
+  const deathPromise = new Promise<never>((_, reject) => {
+    rejectDeath = reject;
+  });
+  // Pre-catch: if no race is in flight when death fires, nothing awaits this
+  deathPromise.catch(() => {});
+
+  const markDead = (why: string) => (cause?: Error) => {
+    if (dead) return;
+    const detail = cause?.message ? `: ${cause.message}` : '';
+    dead = new Error(`Child session ${pendingId} ${why} during adoption${detail}`);
+    rejectDeath?.(dead);
+  };
+  const onClose = markDead('closed');
+  const onError = markDead('errored');
+  child.on('close', onClose);
+  child.on('error', onError);
+
+  return {
+    isDead: () => dead !== null,
+    error: () => dead,
+    race<T>(step: Promise<T>): Promise<T> {
+      // A losing step may reject later (e.g. socket teardown); keep it handled
+      step.catch(() => {});
+      if (dead) {
+        return Promise.reject(dead);
+      }
+      return Promise.race([step, deathPromise]);
+    },
+    dispose: () => {
+      child.off('close', onClose);
+      child.off('error', onError);
+    }
+  };
 }
 
 export class ChildSessionManager extends EventEmitter {
@@ -215,36 +264,41 @@ export class ChildSessionManager extends EventEmitter {
     this.adoptionInProgress = true;
     logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = true for ${pendingId}`);
     this.adoptedTargets.add(pendingId);
-    
+
+    let child: MinimalDapClient | null = null;
+    let death: ChildDeathLatch | null = null;
     try {
       // Import MinimalDapClient dynamically to avoid circular dependency
       const { MinimalDapClient } = await import('./minimal-dap.js');
-      
+
       // Create child client with a policy that disables recursive reverse debugging
       const childPolicy = createChildSafePolicy(this.policy);
-      const child = new MinimalDapClient(this.host, this.port, childPolicy);
+      child = new MinimalDapClient(this.host, this.port, childPolicy);
       await child.connect();
-      
+
       // Wire up event forwarding
       this.wireChildEvents(child);
-      
+
+      // Abort remaining adoption steps the moment the child dies (issue #248)
+      death = createChildDeathLatch(child, pendingId);
+
       // Store and activate child
       this.childSessions.set(pendingId, child);
       this.activeChild = child;
       logger.info(`[ChildSessionManager:${this.instanceId}] *** ACTIVE CHILD SET *** for ${pendingId} at timestamp ${Date.now()}`);
-      
+
       // Initialize child session
-      await this.initializeChild(child, pendingId, parentConfig);
-      
+      await death.race(this.initializeChild(child, pendingId, parentConfig));
+
       // Configure child session
-      await this.configureChild(child, pendingId, parentConfig);
-      
+      await death.race(this.configureChild(child, pendingId, parentConfig));
+
       // Attach to pending target
-      await this.attachChild(child, pendingId, parentConfig);
-      
+      await this.attachChild(child, pendingId, parentConfig, death);
+
       // Handle post-attach initialization if needed
-      await this.handlePostAttachInit(child);
-      
+      await death.race(this.handlePostAttachInit(child));
+
       // Ensure initial stop if policy requires it.
       // Skip when the user explicitly requested stopOnEntry=false: forcing a
       // pause contradicts intent and the resulting 'pause'-reason stopped
@@ -257,23 +311,40 @@ export class ChildSessionManager extends EventEmitter {
       const wantsEntryStop = parentConfig?.stopOnEntry !== false;
       const attachModeParent = parentConfig?.request === 'attach';
       if (this.dapBehavior.pauseAfterChildAttach && wantsEntryStop && !attachModeParent) {
-        await this.ensureChildStopped(child);
+        await death.race(this.ensureChildStopped(child));
       }
-      
+
       this.adoptionInProgress = false;
       logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = false for ${pendingId} (success)`);
 
       logger.info(`[ChildSessionManager:${this.instanceId}] Child session created successfully for ${pendingId}`);
       this.emit('childCreated', pendingId, child);
-      
+
     } catch (error) {
       this.adoptionInProgress = false;
       this.adoptedTargets.delete(pendingId);
+      // Roll back registration so a later adoption attempt is not latched out
+      // by hasActiveChildren(), and release the half-adopted socket (issue #248)
+      if (child) {
+        if (this.childSessions.get(pendingId) === child) {
+          this.childSessions.delete(pendingId);
+        }
+        if (this.activeChild === child) {
+          this.activeChild = null;
+        }
+        try {
+          child.shutdown('adoption failed');
+        } catch {
+          // Best effort — the socket may already be gone
+        }
+      }
       logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = false for ${pendingId} (error)`);
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(`[ChildSessionManager:${this.instanceId}] Failed to create child session for ${pendingId}: ${msg}`);
       this.emit('childError', pendingId, error);
       throw error;
+    } finally {
+      death?.dispose();
     }
   }
 
@@ -343,29 +414,73 @@ export class ChildSessionManager extends EventEmitter {
   /**
    * Attach child to pending target
    */
-  private async attachChild(child: MinimalDapClient, pendingId: string, parentConfig: Record<string, unknown>): Promise<void> {
+  private async attachChild(
+    child: MinimalDapClient,
+    pendingId: string,
+    parentConfig: Record<string, unknown>,
+    death: ChildDeathLatch
+  ): Promise<void> {
     const attachArgs = this.policy.buildChildStartArgs(pendingId, parentConfig);
-    
-    // Retry logic for attachment
+
+    // Retry logic for attachment, bounded by a total deadline so a live but
+    // unresponsive adapter cannot pin the worker for retries x timeout (#248)
     const maxRetries = 20;
+    const totalDeadlineMs = 60000;
+    const deadline = Date.now() + totalDeadlineMs;
     let adopted = false;
     let lastError: unknown;
-    
+
     for (let i = 0; i < maxRetries && !adopted; i++) {
+      if (death.isDead()) {
+        throw death.error();
+      }
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        break;
+      }
       try {
         logger.info(`[child:${pendingId}] ${attachArgs.command} attempt ${i + 1}`);
-        await child.sendRequest(attachArgs.command, attachArgs.args, 20000);
+        await death.race(
+          this.withTimeout(
+            child.sendRequest(attachArgs.command, attachArgs.args, 20000),
+            remainingMs,
+            `${attachArgs.command} deadline exceeded`
+          )
+        );
         adopted = true;
       } catch (e) {
+        if (death.isDead()) {
+          throw death.error();
+        }
         lastError = e;
         await this.sleep(200);
       }
     }
-    
+
     if (!adopted) {
       const msg = lastError instanceof Error ? lastError.message : String(lastError);
-      throw new Error(`Failed to attach child after ${maxRetries} attempts: ${msg}`);
+      throw new Error(`Failed to attach child after ${maxRetries} attempts or ${totalDeadlineMs}ms deadline: ${msg}`);
     }
+  }
+
+  /**
+   * Bound a step with its own timer (used to cap attach attempts at the
+   * remaining total deadline regardless of per-request timeouts)
+   */
+  private withTimeout<T>(step: Promise<T>, ms: number, message: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(message)), ms);
+      step.then(
+        value => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        err => {
+          clearTimeout(timer);
+          reject(err);
+        }
+      );
+    });
   }
 
   /**
@@ -412,15 +527,15 @@ export class ChildSessionManager extends EventEmitter {
           logger.info(`[child] Pausing thread ${threadId}`);
           
           try {
-            await child.sendRequest('pause', { threadId });
+            await child.sendRequest('pause', { threadId }, 5000);
           } catch {
             // Ignore pause errors
           }
-          
+
           // For js-debug quirk: also try threadId 1 if we got 0
           if (threadId === 0) {
             try {
-              await child.sendRequest('pause', { threadId: 1 });
+              await child.sendRequest('pause', { threadId: 1 }, 5000);
             } catch {}
           }
         }
@@ -457,35 +572,45 @@ export class ChildSessionManager extends EventEmitter {
    * Wait for a specific event with timeout
    */
   private waitForEvent(
-    client: MinimalDapClient, 
-    eventName: string, 
+    client: MinimalDapClient,
+    eventName: string,
     timeoutMs: number,
     required: boolean = true
   ): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       let done = false;
-      
-      const onEvent = (evt: DebugProtocol.Event) => {
-        if (done) return;
-        if (evt && evt.event === eventName) {
-          done = true;
-          client.off('event', onEvent);
-          clearTimeout(timer);
-          resolve(true);
-        }
-      };
-      
-      const timer = setTimeout(() => {
+
+      const settle = (value: boolean) => {
         if (done) return;
         done = true;
         client.off('event', onEvent);
-        if (required) {
+        client.off('close', onDeath);
+        client.off('error', onDeath);
+        clearTimeout(timer);
+        resolve(value);
+      };
+
+      const onEvent = (evt: DebugProtocol.Event) => {
+        if (evt && evt.event === eventName) {
+          settle(true);
+        }
+      };
+
+      // Don't wait out the timer against a dead client (issue #248)
+      const onDeath = () => {
+        settle(false);
+      };
+
+      const timer = setTimeout(() => {
+        if (required && !done) {
           logger.warn(`Timeout waiting for '${eventName}' event`);
         }
-        resolve(false);
+        settle(false);
       }, timeoutMs);
-      
+
       client.on('event', onEvent);
+      client.on('close', onDeath);
+      client.on('error', onDeath);
     });
   }
 

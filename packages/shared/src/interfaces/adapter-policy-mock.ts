@@ -12,7 +12,6 @@ export const MockAdapterPolicy: AdapterPolicy = {
   name: 'mock',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: () => {
     throw new Error('MockAdapterPolicy does not support child sessions');
   },
@@ -181,7 +180,6 @@ export const MockAdapterPolicy: AdapterPolicy = {
       
       // Mock-specific behaviors (all disabled)
       mirrorBreakpointsToChild: false,
-      deferParentConfigDone: false,
       pauseAfterChildAttach: false,
       
       // No adapter ID normalization needed

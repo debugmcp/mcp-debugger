@@ -23,10 +23,6 @@ describe('DotnetAdapterPolicy', () => {
     expect(() => DotnetAdapterPolicy.buildChildStartArgs('', {})).toThrow(/does not support child sessions/);
   });
 
-  it('shouldDeferParentConfigDone returns false', () => {
-    expect(DotnetAdapterPolicy.shouldDeferParentConfigDone()).toBe(false);
-  });
-
   it('isChildReadyEvent returns true for initialized event', () => {
     expect(DotnetAdapterPolicy.isChildReadyEvent({ event: 'initialized', seq: 1, type: 'event' } as any)).toBe(true);
   });
@@ -286,7 +282,6 @@ describe('DotnetAdapterPolicy', () => {
   it('getDapClientBehavior returns expected defaults', () => {
     const behavior = DotnetAdapterPolicy.getDapClientBehavior();
     expect(behavior.mirrorBreakpointsToChild).toBe(false);
-    expect(behavior.deferParentConfigDone).toBe(false);
     expect(behavior.pauseAfterChildAttach).toBe(false);
     expect(behavior.suppressPostAttachConfigDone).toBe(false);
     expect(behavior.childInitTimeout).toBe(5000);

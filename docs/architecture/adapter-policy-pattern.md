@@ -34,7 +34,6 @@ export interface AdapterPolicy {
   // === Child Session / Multi-session Support ===
   supportsReverseStartDebugging: boolean;
   childSessionStrategy: ChildSessionStrategy; // 'none' | 'launchWithPendingTarget' | 'attachByPort' | 'adoptInParent'
-  shouldDeferParentConfigDone(parentConfig: Record<string, unknown>): boolean;
   buildChildStartArgs(pendingId: string, parentConfig: Record<string, unknown>):
     { command: 'launch' | 'attach'; args: Record<string, unknown> };
   isChildReadyEvent(evt: DebugProtocol.Event): boolean;
