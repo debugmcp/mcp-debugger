@@ -28,6 +28,10 @@ export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
       this.resolve = resolve;
       this.reject = reject;
     });
+    // ProxyManager can dispose the barrier before waitUntilReady() is ever
+    // awaited (sendCommand-throw path); pre-attach a handler so the
+    // dispose-time rejection never surfaces as an unhandled rejection.
+    this.promise.catch(() => {});
 
     this.timeoutHandle = setTimeout(() => {
       if (this.settled) {
@@ -67,11 +71,23 @@ export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
   }
 
   onDapEvent(event: string, _body: DebugProtocol.Event['body'] | undefined): void {
-    if (this.settled || event !== 'stopped') {
+    if (this.settled) {
       return;
     }
-    this.logger?.info?.('[JavascriptAdapter] js-debug launch confirmed by stopped event');
-    this.resolveBarrier();
+    if (event === 'stopped') {
+      this.logger?.info?.('[JavascriptAdapter] js-debug launch confirmed by stopped event');
+      this.resolveBarrier();
+      return;
+    }
+    // A debuggee that dies during the launch window ends the launch phase too.
+    // Resolving (not rejecting) lets start_debugging return promptly with the
+    // session's stopped state and exit code, matching other adapters (#242).
+    if (event === 'terminated' || event === 'exited') {
+      this.logger?.info?.(
+        `[JavascriptAdapter] js-debug debuggee ${event} during launch; treating launch phase as complete`
+      );
+      this.resolveBarrier();
+    }
   }
 
   onProxyExit(code: number | null, signal: string | null): void {
@@ -96,6 +112,14 @@ export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
     if (this.adapterConnectedHandle) {
       clearTimeout(this.adapterConnectedHandle);
       this.adapterConnectedHandle = null;
+    }
+    // Backstop: a dispose with the promise still pending would otherwise
+    // orphan the awaiter forever (#242). Settle inline — resolveBarrier/
+    // rejectBarrier call dispose() after setting `settled`, so routing
+    // through rejectBarrier() here would re-enter.
+    if (!this.settled) {
+      this.settled = true;
+      this.reject(new Error('js-debug launch barrier disposed before readiness'));
     }
   }
 

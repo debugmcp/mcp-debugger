@@ -44,6 +44,13 @@ export interface AdapterLaunchBarrier {
   /**
    * Called when ProxyManager is cleaning up or when the barrier resolves.
    * Implementations should release timers/resources here.
+   *
+   * CONTRACT: dispose() MUST settle a still-pending waitUntilReady() promise
+   * (reject with a descriptive error). ProxyManager disposes barriers during
+   * cleanup and when a barrier is superseded — an awaiter must never be left
+   * hanging (#242). Implementations must also pre-attach a rejection handler
+   * to the promise so a dispose-time rejection that fires before any await
+   * does not become an unhandled rejection.
    */
   dispose(): void;
 }

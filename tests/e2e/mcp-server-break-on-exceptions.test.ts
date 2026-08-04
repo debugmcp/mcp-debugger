@@ -298,12 +298,30 @@ describe('Break-on-exception (issue #220)', () => {
       expect(frames.length).toBeGreaterThan(0);
     }, 60000);
 
-    // No js "runs to termination without the option" e2e here: launching a
-    // fast-crashing js script WITHOUT breakOnExceptions hangs start_debugging
-    // on a pre-existing launch-orchestration race (issue #242, reproduced on
-    // main). The no-option wire behavior is byte-identical to pre-#220
-    // ({filters: []} everywhere) and is covered by child-session-manager unit
-    // tests; the mock and python regression guards cover the contract e2e.
+    // Regression guard for issue #242: launching a fast-crashing js script
+    // WITHOUT breakOnExceptions used to hang start_debugging (the js-debug
+    // launch barrier was disposed unsettled when the debuggee died mid-launch).
+    it('terminates without pausing when breakOnExceptions is not set (regression guard, issue #242)', async () => {
+      sessionId = await createSession('javascript', 'js-no-break-on-exceptions');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: JS_CRASHING_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false }
+        }
+      }));
+      expect(startRes.success).toBe(true);
+
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 20000);
+      expect(stopped, 'js session should terminate promptly instead of hanging (issue #242)').toBeDefined();
+      // No user-visible stop was recorded on the way down
+      expect(stopped!.lastStop?.reason).not.toBe('exception');
+    }, 60000);
   });
 
   describe('Python attach', () => {

@@ -184,6 +184,81 @@ describe('JsDebugAdapterPolicy', () => {
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(true);
     });
 
+    it('does not miss an initialized event emitted before the initialize response settles (issue #242)', async () => {
+      vi.useFakeTimers();
+      try {
+        const events = new EventEmitter();
+        // js-debug can emit 'initialized' before the initialize response is
+        // processed; the handshake must not burn its 10s window when that happens.
+        const sendDapRequest = vi.fn().mockImplementation((cmd: string) => {
+          if (cmd === 'initialize') {
+            events.emit('dap-event', { event: 'initialized' });
+          }
+          return Promise.resolve({});
+        });
+
+        const proxyManager = Object.assign(events, {
+          isRunning: () => true,
+          sendDapRequest,
+          removeListener: events.removeListener.bind(events)
+        });
+
+        const context = {
+          proxyManager,
+          sessionId: 'session-3',
+          dapLaunchArgs: { stopOnEntry: false },
+          scriptPath: '/workspace/app.js',
+          scriptArgs: [],
+          breakpoints: new Map()
+        };
+
+        const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
+        let done = false;
+        handshakePromise.then(() => { done = true; });
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(done).toBe(true);
+        expect(events.listenerCount('dap-event')).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('removes the initialized listener when the wait times out (issue #242)', async () => {
+      vi.useFakeTimers();
+      try {
+        const events = new EventEmitter();
+        const sendDapRequest = vi.fn().mockResolvedValue({});
+
+        const proxyManager = Object.assign(events, {
+          isRunning: () => true,
+          sendDapRequest,
+          removeListener: events.removeListener.bind(events)
+        });
+
+        const context = {
+          proxyManager,
+          sessionId: 'session-4',
+          dapLaunchArgs: { stopOnEntry: false },
+          scriptPath: '/workspace/app.js',
+          scriptArgs: [],
+          breakpoints: new Map()
+        };
+
+        const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
+        let done = false;
+        handshakePromise.then(() => { done = true; });
+        // Never emit 'initialized' — the 10s timeout path must still complete
+        // the handshake and must not leak the dap-event listener.
+        await vi.advanceTimersByTimeAsync(10000);
+
+        expect(done).toBe(true);
+        expect(events.listenerCount('dap-event')).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('uses attach flow when attach port provided', async () => {
       vi.useFakeTimers();
       const events = new EventEmitter();

@@ -212,7 +212,25 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       return;
     }
 
-    // 1) initialize with supportsStartDebuggingRequest
+    // 1) initialize with supportsStartDebuggingRequest.
+    // The 'initialized' listener is attached BEFORE the request goes out:
+    // js-debug can emit the event before the initialize response is processed,
+    // and a listener attached afterwards misses it and burns the full wait
+    // window below (#242).
+    let initializedSeen = false;
+    let notifyInitialized: (() => void) | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const onInitialized = (event: any) => {
+      // Handle both event object and string formats
+      const eventName = typeof event === 'string' ? event : event?.event;
+      if (eventName === 'initialized') {
+        initializedSeen = true;
+        pm.removeListener('dap-event', onInitialized);
+        notifyInitialized?.();
+      }
+    };
+    pm.on('dap-event', onInitialized);
+
     try {
       console.info(`[JsDebugAdapterPolicy] [JS] Sending 'initialize' request`);
       await pm.sendDapRequest('initialize', {
@@ -232,29 +250,21 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       );
     }
 
-    // 2) wait for DAP 'initialized'
-    await new Promise<void>((resolve) => {
-      let done = false;
-      const timer = setTimeout(() => {
-        if (done) return;
-        done = true;
-        console.warn(`[JsDebugAdapterPolicy] [JS] Timeout waiting for DAP 'initialized' event`);
-        resolve();
-      }, 10000);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const onHandler = (event: any) => {
-        if (done) return;
-        // Handle both event object and string formats
-        const eventName = typeof event === 'string' ? event : event?.event;
-        if (eventName === 'initialized') {
-          done = true;
-          clearTimeout(timer);
-          pm.removeListener('dap-event', onHandler);
+    // 2) wait for DAP 'initialized'. The timeout is armed only now so a slow
+    // initialize round-trip does not consume the wait window.
+    if (!initializedSeen) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          pm.removeListener('dap-event', onInitialized);
+          console.warn(`[JsDebugAdapterPolicy] [JS] Timeout waiting for DAP 'initialized' event`);
           resolve();
-        }
-      };
-      pm.on('dap-event', onHandler);
-    });
+        }, 10000);
+        notifyInitialized = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+    }
 
     // 3) setExceptionBreakpoints + setBreakpoints
     try {

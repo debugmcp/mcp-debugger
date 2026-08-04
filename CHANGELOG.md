@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Debuggee exit code surfaced** — the exit code from the DAP `exited` event is stored on the session and returned as `exitCode` in `list_debug_sessions`, making a crash (non-zero) distinguishable from a clean exit (#220)
 
 ### Fixed
+- **js-debug launch no longer hangs on fast-exiting scripts** — the launch barrier now settles when the debuggee emits `terminated`/`exited` during the launch window, and `dispose()` rejects a still-pending wait as a structural backstop; `start_debugging` for a JavaScript script that crashes (or completes) within seconds of launch now returns promptly with state `stopped` instead of hanging past the MCP client timeout. Also removes an intermittent ~10s stall when js-debug's `initialized` event raced the handshake listener (fixes #242)
 - Mock adapter now answers `setExceptionBreakpoints` (previously an unhandled-command error) and emits `exited` before `terminated`, matching real adapter ordering (#220)
 - Corrected the JavaScript adapter's declared `exceptionBreakpointFilters` to the IDs js-debug actually reports (`all`, `uncaught`) (#220)
 
