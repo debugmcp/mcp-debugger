@@ -14,7 +14,6 @@ export const GoAdapterPolicy: AdapterPolicy = {
   name: 'go',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: () => {
     throw new Error('GoAdapterPolicy does not support child sessions');
   },
@@ -261,7 +260,6 @@ export const GoAdapterPolicy: AdapterPolicy = {
       
       // Go-specific behaviors
       mirrorBreakpointsToChild: false,
-      deferParentConfigDone: false,
       pauseAfterChildAttach: false,
       
       // No adapter ID normalization needed

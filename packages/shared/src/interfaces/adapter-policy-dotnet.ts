@@ -43,7 +43,6 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   name: 'dotnet',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: () => {
     throw new Error('DotnetAdapterPolicy does not support child sessions');
   },
@@ -252,7 +251,6 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
 
       childRoutedCommands: undefined,
       mirrorBreakpointsToChild: false,
-      deferParentConfigDone: false,
       pauseAfterChildAttach: false,
       normalizeAdapterId: undefined,
       childInitTimeout: 5000,

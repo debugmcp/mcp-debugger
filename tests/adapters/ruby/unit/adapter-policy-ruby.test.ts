@@ -174,7 +174,6 @@ describe('RubyAdapterPolicy behavior surface', () => {
       shouldQueue: false,
       shouldDefer: false
     });
-    expect(RubyAdapterPolicy.shouldDeferParentConfigDone()).toBe(false);
     expect(RubyAdapterPolicy.isChildReadyEvent({ event: 'initialized' } as never)).toBe(true);
     expect(RubyAdapterPolicy.isChildReadyEvent({ event: 'stopped' } as never)).toBe(false);
     expect(() => RubyAdapterPolicy.buildChildStartArgs('x', {})).toThrow(/child sessions/);

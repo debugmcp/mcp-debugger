@@ -13,7 +13,6 @@ export const PythonAdapterPolicy: AdapterPolicy = {
   name: 'python',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: () => {
     throw new Error('PythonAdapterPolicy does not support child sessions');
   },
@@ -274,7 +273,6 @@ export const PythonAdapterPolicy: AdapterPolicy = {
       
       // Python-specific behaviors
       mirrorBreakpointsToChild: false,
-      deferParentConfigDone: false,
       pauseAfterChildAttach: false,
       
       // No adapter ID normalization needed

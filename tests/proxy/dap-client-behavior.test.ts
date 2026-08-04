@@ -123,7 +123,6 @@ describe('DapClientBehavior', () => {
     describe('configuration', () => {
       it('should have JavaScript-specific settings', () => {
         expect(behavior.mirrorBreakpointsToChild).toBe(true);
-        expect(behavior.deferParentConfigDone).toBe(true);
         expect(behavior.pauseAfterChildAttach).toBe(true);
         expect(behavior.childInitTimeout).toBe(12000);
         expect(behavior.suppressPostAttachConfigDone).toBe(false); // Child needs configurationDone
@@ -174,7 +173,6 @@ describe('DapClientBehavior', () => {
       it('should have Python-specific settings', () => {
         expect(behavior.childRoutedCommands).toBeUndefined();
         expect(behavior.mirrorBreakpointsToChild).toBe(false);
-        expect(behavior.deferParentConfigDone).toBe(false);
         expect(behavior.pauseAfterChildAttach).toBe(false);
         expect(behavior.normalizeAdapterId).toBeUndefined();
         expect(behavior.childInitTimeout).toBe(5000);
@@ -189,7 +187,6 @@ describe('DapClientBehavior', () => {
       expect(behavior.handleReverseRequest).toBeUndefined();
       expect(behavior.childRoutedCommands).toBeUndefined();
       expect(behavior.mirrorBreakpointsToChild).toBe(false);
-      expect(behavior.deferParentConfigDone).toBe(false);
       expect(behavior.pauseAfterChildAttach).toBe(false);
       expect(behavior.normalizeAdapterId).toBeUndefined();
       expect(behavior.childInitTimeout).toBe(1000);
