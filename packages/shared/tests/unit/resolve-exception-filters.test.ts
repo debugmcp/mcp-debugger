@@ -30,7 +30,8 @@ interface PolicyExpectation {
 const EXPECTATIONS: PolicyExpectation[] = [
   { name: 'python', policy: PythonAdapterPolicy, uncaught: ['uncaught'], all: ['raised', 'uncaught'], defaultMode: 'uncaught' },
   { name: 'js-debug', policy: JsDebugAdapterPolicy, uncaught: ['uncaught'], all: ['all'], defaultMode: 'uncaught' },
-  { name: 'go', policy: GoAdapterPolicy, uncaught: ['fatal', 'panic'], all: ['fatal', 'panic'], defaultMode: 'uncaught' },
+  // Delve's real filter IDs (dlv 1.26); shorthand 'panic'/'fatal' was silently ignored by Delve
+  { name: 'go', policy: GoAdapterPolicy, uncaught: ['unrecovered-panic', 'runtime-fatal-throw'], all: ['unrecovered-panic', 'runtime-fatal-throw'], defaultMode: 'uncaught' },
   { name: 'java', policy: JavaAdapterPolicy, uncaught: ['uncaught'], all: ['caught', 'uncaught'], defaultMode: 'uncaught' },
   { name: 'dotnet', policy: DotnetAdapterPolicy, uncaught: ['user-unhandled'], all: ['all'], defaultMode: 'uncaught' },
   // Ruby: no uncaught-only filter in rdbg → no launch default; crashes run to termination

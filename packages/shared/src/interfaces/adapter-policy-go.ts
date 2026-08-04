@@ -232,10 +232,14 @@ export const GoAdapterPolicy: AdapterPolicy = {
       // Delve may send 'initialized' immediately after 'initialize' or after 'launch'.
       // The proxy uses two-phase handling: brief wait before launch, fallback after launch.
       sendLaunchBeforeConfig: true,
-      // Delve has no caught/uncaught distinction; both modes arm panic + fatal
+      // Delve has no caught/uncaught distinction; both modes arm the same
+      // filters. IDs are Delve's real ones ('unrecovered-panic',
+      // 'runtime-fatal-throw', dlv 1.26) — the shorthand 'panic'/'fatal'
+      // shipped in #220 was silently accepted-and-ignored by Delve, caught
+      // live by the #243 capability drift warning during #244 validation.
       exceptionFilters: {
-        uncaught: ['fatal', 'panic'],
-        all: ['fatal', 'panic']
+        uncaught: ['unrecovered-panic', 'runtime-fatal-throw'],
+        all: ['unrecovered-panic', 'runtime-fatal-throw']
       },
       // Launch sessions pause at panics by default (issue #244)
       defaultExceptionBreakMode: 'uncaught',

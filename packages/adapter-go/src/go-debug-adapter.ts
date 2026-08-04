@@ -558,16 +558,16 @@ You can also specify the Go path explicitly in your debug configuration.`;
       supportsEvaluateForHovers: true,
       exceptionBreakpointFilters: [
         {
-          filter: 'panic',
-          label: 'Panic',
-          description: 'Break on panic',
+          filter: 'unrecovered-panic',
+          label: 'Unrecovered Panic',
+          description: 'Break on unrecovered panics',
           default: true,
           supportsCondition: false
         },
         {
-          filter: 'fatal',
-          label: 'Fatal Error',
-          description: 'Break on fatal errors',
+          filter: 'runtime-fatal-throw',
+          label: 'Runtime Fatal Throw',
+          description: 'Break on fatal runtime errors',
           default: true,
           supportsCondition: false
         }

@@ -246,13 +246,13 @@ describe('GoDebugAdapter', () => {
       expect(caps.supportsStepBack).toBe(false);
     });
 
-    it('should include panic and fatal exception filters', () => {
+    it("should declare Delve's real exception filter IDs", () => {
       const caps = adapter.getCapabilities();
-      
+
       expect(caps.exceptionBreakpointFilters).toBeDefined();
       expect(caps.exceptionBreakpointFilters?.length).toBe(2);
-      expect(caps.exceptionBreakpointFilters?.[0].filter).toBe('panic');
-      expect(caps.exceptionBreakpointFilters?.[1].filter).toBe('fatal');
+      expect(caps.exceptionBreakpointFilters?.[0].filter).toBe('unrecovered-panic');
+      expect(caps.exceptionBreakpointFilters?.[1].filter).toBe('runtime-fatal-throw');
     });
   });
 
