@@ -64,6 +64,10 @@ export class DapProxyWorker {
   private currentInitPayload: ProxyInitPayload | null = null;
   private state: ProxyState = ProxyState.UNINITIALIZED;
   private isAttachMode: boolean = false;
+  // Exit-code synthesis bookkeeping (issue #247): a real DAP exited event
+  // wins over synthesis, and parent+child terminated events synthesize once
+  private exitedEventSeen: boolean = false;
+  private exitSynthesisAttempted: boolean = false;
   private initializedEventPending: boolean = false;
   private deferInitializedHandling: boolean = false;
   private initializedEventHandled: boolean = false;
@@ -635,10 +639,16 @@ export class DapProxyWorker {
       },
       onExited: (body) => {
         this.logger!.info(`[Worker] DAP event: exited exitCode=${body.exitCode}`);
+        // A real exited event stays authoritative - suppress synthesis (issue #247)
+        this.exitedEventSeen = true;
         this.sendDapEvent('exited', body);
       },
-      onTerminated: (body) => {
+      onTerminated: async (body) => {
         this.logger!.info(`[Worker] DAP event: terminated body=${JSON.stringify(body)}`);
+        // Must complete before terminated is forwarded: whichever of
+        // exited/terminated reaches the SessionManager first strips the
+        // other's handler, and shutdown() below tears down the client
+        await this.maybeSynthesizeExitedEvent();
         this.sendDapEvent('terminated', body);
         this.shutdown();
       },
@@ -1081,6 +1091,51 @@ export class DapProxyWorker {
       } : { error })
     };
     this.dependencies.messageSender.send(message);
+  }
+
+  /**
+   * Replay the debuggee's recorded exit code as a DAP 'exited' event
+   * (issue #247). js-debug never emits one; the JavaScript adapter's launch
+   * transform preloads a shim that writes the code to a per-session file
+   * whose path travels in the launch config env. Self-gating: sessions
+   * without the env marker (every other adapter) skip instantly, and a
+   * missing file (signal kill, user stop) is the normal no-exitCode path.
+   */
+  private async maybeSynthesizeExitedEvent(): Promise<void> {
+    if (this.exitedEventSeen || this.exitSynthesisAttempted) {
+      return;
+    }
+    this.exitSynthesisAttempted = true;
+
+    const env = this.currentInitPayload?.launchConfig?.env as Record<string, string> | undefined;
+    const exitFile = env?.MCP_DEBUGGER_EXITCODE_FILE;
+    if (!exitFile) {
+      return;
+    }
+
+    try {
+      if (!(await this.dependencies.fileSystem.pathExists(exitFile))) {
+        this.logger?.info?.('[Worker] No recorded exit code (signal kill or user stop); exitCode stays unknown');
+        return;
+      }
+      const raw = (await this.dependencies.fileSystem.readFile(exitFile, 'utf8')).trim();
+      const exitCode = Number.parseInt(raw, 10);
+      if (Number.isFinite(exitCode)) {
+        this.logger?.info?.(`[Worker] Synthesizing 'exited' from recorded debuggee exit code ${exitCode}`);
+        this.sendDapEvent('exited', { exitCode });
+      } else {
+        this.logger?.warn?.(`[Worker] Unparseable exit code file content: '${raw}'`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger?.warn?.(`[Worker] Exit code synthesis failed: ${msg}`);
+    } finally {
+      try {
+        await this.dependencies.fileSystem.remove(exitFile);
+      } catch {
+        // Best effort - a stray ~3-byte temp file is acceptable
+      }
+    }
   }
 
   private sendDapEvent(event: string, body: unknown): void {

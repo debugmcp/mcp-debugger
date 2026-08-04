@@ -112,6 +112,8 @@ export interface ILogger {
 export interface IFileSystem {
   ensureDir(path: string): Promise<void>;
   pathExists(path: string): Promise<boolean>;
+  readFile(path: string, encoding: 'utf8'): Promise<string>;
+  remove(path: string): Promise<void>;
 }
 
 /**

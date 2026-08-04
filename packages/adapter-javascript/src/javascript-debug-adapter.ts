@@ -4,7 +4,9 @@
  * @since 0.1.0
  */
 import { EventEmitter } from 'events';
+import * as os from 'os';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
@@ -380,6 +382,12 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       ? (userEnv.NODE_ENV as string)
       : 'development';
 
+    // js-debug never emits a DAP 'exited' event, so preload a shim that
+    // records the debuggee's exit code for the proxy worker to replay as a
+    // synthesized event (issue #247). Launch mode only - attach targets run
+    // with an environment we don't control.
+    this.injectExitCodeShim(mergedEnv);
+
     // Skip files defaults with optional user merge (dedupe)
     const defaultSkip = ['<node_internals>/**', '**/node_modules/**'];
     const userSkip = Array.isArray(u.skipFiles) ? (u.skipFiles as string[]) : undefined;
@@ -557,6 +565,53 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       env: {},
       cwd: process.cwd()
     };
+  }
+
+  /**
+   * Inject the exit-code preload shim into the debuggee's environment
+   * (issue #247). The shim writes the debuggee's exit code to a per-session
+   * temp file; the proxy worker reads it on 'terminated' and synthesizes the
+   * DAP 'exited' event js-debug never sends. Missing shim asset degrades
+   * gracefully to today's behavior (no exitCode), never a failed launch.
+   */
+  private injectExitCodeShim(env: Record<string, string>): void {
+    // Idempotency: the merged env starts from process.env, so a server
+    // itself launched with the shim must not append a second preload
+    if (/exitcode-shim\.cjs/.test(env.NODE_OPTIONS ?? '')) {
+      return;
+    }
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const candidates = [
+      path.resolve(__dirname, '../assets/exitcode-shim.cjs'),
+      path.resolve(__dirname, '../../assets/exitcode-shim.cjs'),
+      // In bundled npx distribution
+      path.resolve(__dirname, 'assets/exitcode-shim.cjs'),
+      // In container builds
+      '/app/packages/adapter-javascript/assets/exitcode-shim.cjs',
+      '/app/node_modules/@debugmcp/adapter-javascript/assets/exitcode-shim.cjs'
+    ];
+
+    let shimPath: string | undefined;
+    try {
+      shimPath = candidates.find(p => this.dependencies.fileSystem?.existsSync?.(p));
+    } catch {
+      shimPath = undefined;
+    }
+
+    if (!shimPath) {
+      this.dependencies.logger?.warn?.(
+        '[JavascriptDebugAdapter] exitcode-shim.cjs not found; debuggee exit code will not be captured'
+      );
+      return;
+    }
+
+    env.MCP_DEBUGGER_EXITCODE_FILE = path.join(os.tmpdir(), `mcp-exitcode-${randomUUID()}.txt`);
+    // Double quotes survive NODE_OPTIONS parsing for paths with spaces;
+    // forward slashes sidestep backslash-escape ambiguity on Windows
+    const requireArg = `--require "${shimPath.replace(/\\/g, '/')}"`;
+    env.NODE_OPTIONS = env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ${requireArg}`.trim() : requireArg;
   }
 
   // ===== Attach Support =====
