@@ -235,7 +235,9 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
       exceptionFilters: {
         uncaught: ['user-unhandled'],
         all: ['all']
-      }
+      },
+      // Launch sessions pause at unhandled exceptions by default (issue #244)
+      defaultExceptionBreakMode: 'uncaught'
     };
   },
 

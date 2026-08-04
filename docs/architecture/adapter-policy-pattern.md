@@ -53,6 +53,8 @@ export interface AdapterPolicy {
     defaultStopOnEntry?: boolean;
     sendLaunchBeforeConfig?: boolean;
     sendAttachBeforeInitialized?: boolean;
+    exceptionFilters?: { uncaught: string[]; all: string[] };  // per-mode DAP filter IDs (#220)
+    defaultExceptionBreakMode?: ExceptionBreakMode;            // launch default when user unset (#244)
   };
   getDapClientBehavior(): DapClientBehavior;
 

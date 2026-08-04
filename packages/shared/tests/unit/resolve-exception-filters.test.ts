@@ -23,21 +23,29 @@ interface PolicyExpectation {
   policy: AdapterPolicy;
   uncaught: string[];
   all: string[];
+  /** Launch-session default applied when the user didn't pass breakOnExceptions (issue #244) */
+  defaultMode: ExceptionBreakMode | undefined;
 }
 
 const EXPECTATIONS: PolicyExpectation[] = [
-  { name: 'python', policy: PythonAdapterPolicy, uncaught: ['uncaught'], all: ['raised', 'uncaught'] },
-  { name: 'js-debug', policy: JsDebugAdapterPolicy, uncaught: ['uncaught'], all: ['all'] },
-  { name: 'go', policy: GoAdapterPolicy, uncaught: ['fatal', 'panic'], all: ['fatal', 'panic'] },
-  { name: 'java', policy: JavaAdapterPolicy, uncaught: ['uncaught'], all: ['caught', 'uncaught'] },
-  { name: 'dotnet', policy: DotnetAdapterPolicy, uncaught: ['user-unhandled'], all: ['all'] },
-  { name: 'ruby', policy: RubyAdapterPolicy, uncaught: [], all: ['any'] },
-  { name: 'rust', policy: RustAdapterPolicy, uncaught: ['rust_panic'], all: ['rust_panic', 'cpp_throw'] },
-  { name: 'mock', policy: MockAdapterPolicy, uncaught: ['uncaught'], all: ['all'] }
+  { name: 'python', policy: PythonAdapterPolicy, uncaught: ['uncaught'], all: ['raised', 'uncaught'], defaultMode: 'uncaught' },
+  { name: 'js-debug', policy: JsDebugAdapterPolicy, uncaught: ['uncaught'], all: ['all'], defaultMode: 'uncaught' },
+  // Delve's real filter IDs (dlv 1.26); shorthand 'panic'/'fatal' was silently ignored by Delve
+  { name: 'go', policy: GoAdapterPolicy, uncaught: ['unrecovered-panic', 'runtime-fatal-throw'], all: ['unrecovered-panic', 'runtime-fatal-throw'], defaultMode: 'uncaught' },
+  { name: 'java', policy: JavaAdapterPolicy, uncaught: ['uncaught'], all: ['caught', 'uncaught'], defaultMode: 'uncaught' },
+  { name: 'dotnet', policy: DotnetAdapterPolicy, uncaught: ['user-unhandled'], all: ['all'], defaultMode: 'uncaught' },
+  // Ruby: no uncaught-only filter in rdbg → no launch default; crashes run to termination
+  { name: 'ruby', policy: RubyAdapterPolicy, uncaught: [], all: ['any'], defaultMode: undefined },
+  { name: 'rust', policy: RustAdapterPolicy, uncaught: ['rust_panic'], all: ['rust_panic', 'cpp_throw'], defaultMode: 'uncaught' },
+  { name: 'mock', policy: MockAdapterPolicy, uncaught: ['uncaught'], all: ['all'], defaultMode: 'uncaught' }
 ];
 
 describe('resolveExceptionFilters', () => {
-  describe.each(EXPECTATIONS)('$name policy', ({ policy, uncaught, all }) => {
+  describe.each(EXPECTATIONS)('$name policy', ({ policy, uncaught, all, defaultMode }) => {
+    it(`declares defaultExceptionBreakMode ${JSON.stringify(defaultMode)} (issue #244)`, () => {
+      expect(policy.getInitializationBehavior().defaultExceptionBreakMode).toEqual(defaultMode);
+    });
+
     it(`resolves 'uncaught' to ${JSON.stringify(uncaught)}`, () => {
       expect(resolveExceptionFilters(policy, 'uncaught')).toEqual(uncaught);
     });
@@ -60,5 +68,9 @@ describe('resolveExceptionFilters', () => {
     for (const mode of modes) {
       expect(resolveExceptionFilters(DefaultAdapterPolicy, mode)).toEqual([]);
     }
+  });
+
+  it('DefaultAdapterPolicy declares no defaultExceptionBreakMode (issue #244)', () => {
+    expect(DefaultAdapterPolicy.getInitializationBehavior().defaultExceptionBreakMode).toBeUndefined();
   });
 });

@@ -18,7 +18,7 @@ Key rules:
 - Breakpoints may report unverified until the module/class loads — that is normal.
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass nextCursor back to read only new output.
 - attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward.
-- Diagnosing a crash? Pass breakOnExceptions: "uncaught" to start_debugging/attach_to_process to pause at the uncaught exception with stack and locals live instead of losing the session.
+- Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.
 
 For the full debugging workflow (root-cause discipline, per-language quirks), request the "debugging-workflow" prompt or install the agent skill from skills/debugging/ in the repo.`;
 
@@ -68,7 +68,7 @@ detach_from_process leaves the target running.
 - .NET: scriptPath is the compiled .dll; PDBs must be Portable format.
 
 ## Crash diagnosis
-- Pass breakOnExceptions: "uncaught" to start_debugging (or attach_to_process) to pause at an uncaught exception with stack + locals live instead of losing the session; "all" also stops on caught raises (Ruby supports only "all").
+- Launch sessions pause at uncaught exceptions by default with stack + locals live ("none" opts out; "all" also stops on caught raises; Ruby has no uncaught filter so its crashes still terminate). Attach applies no default.
 - lastStop.description/text carry the exception class and message; where supported (Python/JS/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
 
 ## Current limitations

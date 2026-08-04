@@ -174,7 +174,9 @@ export const JavaAdapterPolicy: AdapterPolicy = {
       exceptionFilters: {
         uncaught: ['uncaught'],
         all: ['caught', 'uncaught']
-      }
+      },
+      // Launch sessions pause at uncaught exceptions by default (issue #244)
+      defaultExceptionBreakMode: 'uncaught'
     };
   },
 
