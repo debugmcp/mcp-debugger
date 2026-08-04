@@ -112,4 +112,21 @@ describe('GoDebugAdapter.transformLaunchConfig — mode inference', () => {
 
     expect(cfg.stopOnEntry).toBe(false);
   });
+
+  it('defaults outputMode to "remote" so target stdio arrives as DAP output events (issue #225)', async () => {
+    const cfg = await adapter.transformLaunchConfig({
+      program: '/proj/main.go'
+    } as unknown as GenericLaunchConfig);
+
+    expect(cfg.outputMode).toBe('remote');
+  });
+
+  it('preserves a user-supplied outputMode override', async () => {
+    const cfg = await adapter.transformLaunchConfig({
+      program: '/proj/main.go',
+      outputMode: 'local'
+    } as unknown as GenericLaunchConfig);
+
+    expect(cfg.outputMode).toBe('local');
+  });
 });

@@ -129,6 +129,7 @@ interface LangDef {
   available: boolean;
   skipReason?: string;
   dapLaunchArgs?: Record<string, unknown>;  // language-specific DAP launch args
+  outputMarker?: string;   // text the script prints — get_output must capture it (issues #223/#225)
 }
 
 const LANGUAGES: LangDef[] = [
@@ -138,7 +139,7 @@ const LANGUAGES: LangDef[] = [
   { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed' },
   { language: 'ruby', script: RUBY_SCRIPT, bpLine: RUBY_BP_LINE, available: hasRuby, skipReason: hasRuby ? undefined : 'Ruby/rdbg not installed' },
   { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go/Delve not installed',
-    dapLaunchArgs: { mode: 'exec' } },  // launchScript set in beforeAll after build
+    dapLaunchArgs: { mode: 'exec' }, outputMarker: 'Hello, World!' },  // launchScript set in beforeAll after build
   { language: 'dotnet', script: DOTNET_SCRIPT, bpLine: DOTNET_BP_LINE, available: hasDotnet, skipReason: hasDotnet ? undefined : '.NET/netcoredbg not installed',
     dapLaunchArgs: { justMyCode: true } },  // launchScript set in beforeAll after build
   { language: 'java', script: JAVA_SCRIPT, bpLine: JAVA_BP_LINE, available: hasJava, skipReason: hasJava ? undefined : 'JDK not installed',
@@ -592,15 +593,26 @@ describe(`Comprehensive MCP Debugger Test — 21 Tools × ${LANGUAGES.length} La
           }
 
           /* ---- Tool 16: get_output (issue #218) ---- */
-          // Lenient: entries may legitimately be empty (Ruby routes debuggee
-          // stdio to the adapter process; the adapter may emit no DAP output
-          // events) — only the tool contract is asserted per-language.
+          // Languages with an outputMarker must capture the script's own
+          // output (issues #223/#225). Others stay lenient: entries may
+          // legitimately be empty (e.g. Ruby routes debuggee stdio to the
+          // adapter process) — only the tool contract is asserted.
           t0 = Date.now();
           try {
             const outRes = await callToolSafely(mcpClient!, 'get_output', { sessionId: currentSessionId });
             if (outRes.success === true) {
-              const count = Array.isArray(outRes.entries) ? outRes.entries.length : 0;
-              record('get_output', lang.language, 'PASS', `entries=${count}`, Date.now() - t0);
+              const entries = (Array.isArray(outRes.entries) ? outRes.entries : []) as Array<{ category: string; output: string }>;
+              const markerEntry = lang.outputMarker
+                ? entries.find(e => e.output.includes(lang.outputMarker!))
+                : undefined;
+              if (lang.outputMarker && !markerEntry) {
+                record('get_output', lang.language, 'FAIL',
+                  `marker "${lang.outputMarker}" not captured (entries=${entries.length})`, Date.now() - t0);
+              } else {
+                record('get_output', lang.language, 'PASS',
+                  `entries=${entries.length}${markerEntry ? `, marker category=${markerEntry.category}` : ''}`,
+                  Date.now() - t0);
+              }
             } else {
               record('get_output', lang.language, 'FAIL', `success=${outRes.success}: ${outRes.error ?? outRes.message ?? ''}`, Date.now() - t0);
             }

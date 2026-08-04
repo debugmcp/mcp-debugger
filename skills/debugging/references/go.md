@@ -46,7 +46,7 @@ Not supported. The Go adapter implements launch mode only — `attach_to_process
 
 ## Quirks
 
-- **KNOWN ISSUE — debuggee stdout not forwarded (issue #225):** `get_output` does not capture the Go program's stdout. Do not debug by adding `fmt.Println` calls — set breakpoints and inspect state with `evaluate_expression`, `get_local_variables`, and `get_variables` instead.
+- **Debuggee output is captured:** the adapter launches with Delve's `outputMode: 'remote'`, so the program's stdout/stderr arrives as `get_output` entries (categories `stdout`/`stderr`).
 - **`stopOnEntry` is forced to `false`** by the Go adapter policy (unless you explicitly set it) to dodge Delve's "unknown goroutine 1" quirk. If you force `stopOnEntry: true` and see that error, it is harmless — execution continues. Set a breakpoint on the first line of `main` if you need an entry stop.
 - Goroutine-aware, with limits: stack traces show the current goroutine's frames; Go runtime and testing frames (paths with `/runtime/` or `/testing/`) are filtered out by default — pass `includeInternals: true` to `get_stack_trace` to see them. There are no MCP tools to list or switch goroutines.
 - Exception breakpoints `panic` and `fatal` are enabled by default — panics stop the debugger without any setup (`get_stack_trace` reports `stopReason`).
@@ -61,5 +61,4 @@ Not supported. The Go adapter implements launch mode only — `attach_to_process
 | "Go executable not found" | `go` not on PATH | Install Go 1.18+; verify `go version` |
 | Breakpoints not hit | Optimized binary (exec mode) or wrong path/line | Rebuild with `-gcflags="all=-N -l"`; absolute paths; line must be an executable statement |
 | "unknown goroutine 1" error | `stopOnEntry: true` with Delve | Leave `stopOnEntry` unset/false; the error is harmless if it appears |
-| `get_output` empty despite prints | Issue #225 — Go stdout not forwarded | Inspect state via `evaluate_expression` / breakpoints, not stdout |
 | Stack full of runtime frames | `includeInternals: true` set, or panic inside runtime | Omit `includeInternals` for user frames only |

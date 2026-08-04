@@ -248,9 +248,21 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       // 5. Continue execution
       console.log('[Go Smoke Test] Continuing execution...');
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-      
+
       // Wait for script to complete
       await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // 6. Debuggee output must be retrievable (issue #225) — outputMode
+      // 'remote' makes Delve forward the target's stdio as DAP output events
+      // instead of writing it to dlv's own stdout.
+      console.log('[Go Smoke Test] Fetching debuggee output...');
+      const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+      expect(outputResult.success).toBe(true);
+      const outputEntries = outputResult.entries as Array<{ category: string; output: string }>;
+      console.log(`[Go Smoke Test] Captured ${outputEntries.length} output entries`);
+      const helloEntry = outputEntries.find(e => e.output.includes('Hello, World!'));
+      expect(helloEntry).toBeDefined();
+      expect(helloEntry!.category).toBe('stdout');
 
     } finally {
       // Clean up test binary

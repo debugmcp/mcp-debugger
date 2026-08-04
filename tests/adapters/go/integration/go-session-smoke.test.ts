@@ -98,6 +98,8 @@ describe('Go adapter - session smoke (integration)', () => {
     expect(transformed.program).toBe(path.join(projectRoot, 'main.go'));
     expect(transformed.cwd).toBe(projectRoot);
     expect(transformed.args).toEqual(['--sample']);
+    // Route the target's stdio through DAP output events (issue #225)
+    expect(transformed.outputMode).toBe('remote');
   });
 
   it('handles test mode configuration', async () => {

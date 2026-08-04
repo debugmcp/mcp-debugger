@@ -227,8 +227,43 @@ describe('RustDebugAdapter', () => {
       const config = {
         args: ['--verbose']
       };
-      
+
       await expect(adapter.transformLaunchConfig(config)).rejects.toThrow('No program specified');
+    });
+
+    it('should default to terminal "console" so debuggee stdio arrives as DAP output events (issue #223)', async () => {
+      const transformed = await adapter.transformLaunchConfig({
+        program: './target/debug/myapp'
+      });
+
+      expect(transformed.terminal).toBe('console');
+      expect(transformed.console).toBeUndefined();
+    });
+
+    it('should translate legacy console values to CodeLLDB terminal values', async () => {
+      const cases: Array<[string, string]> = [
+        ['internalConsole', 'console'],
+        ['integratedTerminal', 'integrated'],
+        ['externalTerminal', 'external']
+      ];
+      for (const [legacy, expected] of cases) {
+        const transformed = await adapter.transformLaunchConfig({
+          program: './target/debug/myapp',
+          console: legacy
+        });
+        expect(transformed.terminal).toBe(expected);
+        expect(transformed.console).toBeUndefined();
+      }
+    });
+
+    it('should let an explicit terminal value win over a legacy console value', async () => {
+      const transformed = await adapter.transformLaunchConfig({
+        program: './target/debug/myapp',
+        terminal: 'integrated',
+        console: 'externalTerminal'
+      });
+
+      expect(transformed.terminal).toBe('integrated');
     });
   });
   

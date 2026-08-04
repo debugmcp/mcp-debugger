@@ -61,6 +61,7 @@ interface GoLaunchConfig extends LanguageSpecificLaunchConfig {
   hideSystemGoroutines?: boolean;
   goroutineFilters?: string[];
   substitutePath?: Array<{ from: string; to: string }>;
+  outputMode?: 'local' | 'remote';
   [key: string]: unknown;
 }
 
@@ -345,7 +346,12 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
     goConfig.stackTraceDepth = 50;
     goConfig.showGlobalVariables = false;
     goConfig.hideSystemGoroutines = true;
-    
+
+    // Delve's default outputMode 'local' writes the target's stdout/stderr to
+    // the dlv process's own stdio, which never reaches get_output; 'remote'
+    // forwards it as DAP output events (issue #225).
+    goConfig.outputMode = (rawConfig.outputMode as GoLaunchConfig['outputMode']) ?? 'remote';
+
     return goConfig;
   }
   
