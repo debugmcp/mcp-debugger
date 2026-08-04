@@ -40,7 +40,9 @@ const createMockLogger = (): ILogger => ({
 
 const createMockFileSystem = (): IFileSystem => ({
   ensureDir: vi.fn().mockResolvedValue(undefined),
-  pathExists: vi.fn().mockResolvedValue(true)
+  pathExists: vi.fn().mockResolvedValue(true),
+  readFile: vi.fn().mockResolvedValue(''),
+  remove: vi.fn().mockResolvedValue(undefined)
 });
 
 const createMockProcessSpawner = (): IProcessSpawner => ({
@@ -2204,6 +2206,110 @@ describe('DapProxyWorker', () => {
       });
 
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
+    });
+  });
+
+  describe('JS debuggee exit code synthesis (issue #247)', () => {
+    const exitFile = 'C:/tmp/mcp-exitcode-test.txt';
+    let connectionHandlers: Record<string, (arg?: unknown) => unknown>;
+    let shutdownSpy: ReturnType<typeof vi.spyOn>;
+
+    const wireHandlers = (env?: Record<string, string>) => {
+      connectionHandlers = {};
+      const connectionStub = {
+        setupEventHandlers: vi.fn((_client: unknown, handlers: Record<string, (arg?: unknown) => unknown>) => {
+          Object.assign(connectionHandlers, handlers);
+        })
+      };
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JsDebugAdapterPolicy;
+      (worker as any).adapterState = JsDebugAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = { launchConfig: env ? { env } : {} };
+      shutdownSpy = vi.spyOn(worker as any, 'shutdown').mockResolvedValue(undefined) as ReturnType<typeof vi.spyOn>;
+      (worker as any).setupDapEventHandlers();
+      mockMessageSender.send.mockClear();
+    };
+
+    const dapEvents = () =>
+      mockMessageSender.send.mock.calls
+        .map(call => call[0] as { type: string; event?: string; body?: unknown })
+        .filter(msg => msg.type === 'dapEvent');
+
+    afterEach(() => {
+      shutdownSpy?.mockRestore();
+    });
+
+    it('synthesizes exited from the recorded exit code before forwarding terminated', async () => {
+      wireHandlers({ MCP_DEBUGGER_EXITCODE_FILE: exitFile });
+      (dependencies.fileSystem.pathExists as Mock).mockResolvedValue(true);
+      (dependencies.fileSystem.readFile as Mock).mockResolvedValue('3');
+
+      await connectionHandlers.onTerminated?.({});
+
+      const events = dapEvents();
+      expect(events[0]).toEqual(expect.objectContaining({ event: 'exited', body: { exitCode: 3 } }));
+      expect(events[1]).toEqual(expect.objectContaining({ event: 'terminated' }));
+      expect(dependencies.fileSystem.remove).toHaveBeenCalledWith(exitFile);
+      expect(shutdownSpy).toHaveBeenCalled();
+    });
+
+    it('forwards only terminated when no exit code file exists (signal kill, user stop)', async () => {
+      wireHandlers({ MCP_DEBUGGER_EXITCODE_FILE: exitFile });
+      (dependencies.fileSystem.pathExists as Mock).mockResolvedValue(false);
+
+      await connectionHandlers.onTerminated?.({});
+
+      const events = dapEvents();
+      expect(events.map(e => e.event)).toEqual(['terminated']);
+    });
+
+    it('keeps a real exited event authoritative and never double-fires', async () => {
+      wireHandlers({ MCP_DEBUGGER_EXITCODE_FILE: exitFile });
+      (dependencies.fileSystem.pathExists as Mock).mockResolvedValue(true);
+      (dependencies.fileSystem.readFile as Mock).mockResolvedValue('3');
+
+      await connectionHandlers.onExited?.({ exitCode: 5 });
+      await connectionHandlers.onTerminated?.({});
+
+      const events = dapEvents();
+      const exitedEvents = events.filter(e => e.event === 'exited');
+      expect(exitedEvents).toHaveLength(1);
+      expect(exitedEvents[0].body).toEqual({ exitCode: 5 });
+    });
+
+    it('synthesizes at most once across parent and child terminated events', async () => {
+      wireHandlers({ MCP_DEBUGGER_EXITCODE_FILE: exitFile });
+      (dependencies.fileSystem.pathExists as Mock).mockResolvedValue(true);
+      (dependencies.fileSystem.readFile as Mock).mockResolvedValue('2');
+
+      await connectionHandlers.onTerminated?.({});
+      await connectionHandlers.onTerminated?.({});
+
+      const exitedEvents = dapEvents().filter(e => e.event === 'exited');
+      expect(exitedEvents).toHaveLength(1);
+    });
+
+    it('skips synthesis on unparseable file content', async () => {
+      wireHandlers({ MCP_DEBUGGER_EXITCODE_FILE: exitFile });
+      (dependencies.fileSystem.pathExists as Mock).mockResolvedValue(true);
+      (dependencies.fileSystem.readFile as Mock).mockResolvedValue('garbage');
+
+      await connectionHandlers.onTerminated?.({});
+
+      const events = dapEvents();
+      expect(events.map(e => e.event)).toEqual(['terminated']);
+    });
+
+    it('skips synthesis for sessions without the env marker (non-js adapters)', async () => {
+      wireHandlers();
+
+      await connectionHandlers.onTerminated?.({});
+
+      const events = dapEvents();
+      expect(events.map(e => e.event)).toEqual(['terminated']);
+      expect(dependencies.fileSystem.pathExists).not.toHaveBeenCalled();
     });
   });
 });

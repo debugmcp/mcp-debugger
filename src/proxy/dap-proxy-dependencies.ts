@@ -37,7 +37,9 @@ export function createProductionDependencies(
     
     fileSystem: {
       ensureDir: (path: string) => fs.ensureDir(path),
-      pathExists: (path: string) => fs.pathExists(path)
+      pathExists: (path: string) => fs.pathExists(path),
+      readFile: (path: string, encoding: 'utf8') => fs.readFile(path, encoding),
+      remove: (path: string) => fs.remove(path)
     },
     
     processSpawner: {

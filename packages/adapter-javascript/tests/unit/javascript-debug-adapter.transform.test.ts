@@ -256,4 +256,78 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(env.CUSTOM_ENV).toBe('1');
     expect(process.env.CUSTOM_ENV).toBe(before.CUSTOM_ENV);
   });
+
+  describe('exit code shim injection (issue #247)', () => {
+    // The shim resolution consults dependencies.fileSystem.existsSync (same
+    // pattern as buildAdapterCommand's vendor lookup)
+    const depsWithFs = {
+      ...deps,
+      fileSystem: { existsSync: () => true }
+    } as unknown as import('@debugmcp/shared').AdapterDependencies;
+
+    it('injects MCP_DEBUGGER_EXITCODE_FILE and a NODE_OPTIONS --require of the shim', async () => {
+      const withFs = new JavascriptDebugAdapter(depsWithFs);
+      const cfg = await withFs.transformLaunchConfig({
+        program: path.resolve('/proj/app.js')
+      } as any);
+
+      const env = cfg.env as Record<string, string>;
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).toMatch(/mcp-exitcode-[0-9a-f-]+\.txt$/);
+      expect(env.NODE_OPTIONS ?? '').toMatch(/--require "[^"]*exitcode-shim\.cjs"/);
+      // Forward slashes only: backslash escaping in NODE_OPTIONS is ambiguous on Windows
+      const requireArg = /--require "([^"]*)"/.exec(env.NODE_OPTIONS)![1];
+      expect(requireArg).not.toContain('\\');
+    });
+
+    it('preserves pre-existing NODE_OPTIONS content', async () => {
+      const withFs = new JavascriptDebugAdapter(depsWithFs);
+      const cfg = await withFs.transformLaunchConfig({
+        program: path.resolve('/proj/app.js'),
+        env: { NODE_OPTIONS: '--max-old-space-size=2048' }
+      } as any);
+
+      const env = cfg.env as Record<string, string>;
+      expect(env.NODE_OPTIONS).toContain('--max-old-space-size=2048');
+      expect(env.NODE_OPTIONS).toMatch(/--require "[^"]*exitcode-shim\.cjs"/);
+    });
+
+    it('does not double-append when NODE_OPTIONS already carries the shim', async () => {
+      const withFs = new JavascriptDebugAdapter(depsWithFs);
+      const cfg = await withFs.transformLaunchConfig({
+        program: path.resolve('/proj/app.js'),
+        env: { NODE_OPTIONS: '--require "/prior/exitcode-shim.cjs"' }
+      } as any);
+
+      const env = cfg.env as Record<string, string>;
+      const occurrences = env.NODE_OPTIONS.match(/exitcode-shim\.cjs/g) ?? [];
+      expect(occurrences.length).toBe(1);
+    });
+
+    it('skips injection cleanly when the shim asset cannot be resolved', async () => {
+      const depsNoShim = {
+        ...deps,
+        fileSystem: { existsSync: () => false }
+      } as unknown as import('@debugmcp/shared').AdapterDependencies;
+      const withoutShim = new JavascriptDebugAdapter(depsNoShim);
+
+      const cfg = await withoutShim.transformLaunchConfig({
+        program: path.resolve('/proj/app.js')
+      } as any);
+
+      const env = cfg.env as Record<string, string>;
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).toBeUndefined();
+      expect(env.NODE_OPTIONS ?? '').not.toContain('exitcode-shim');
+    });
+
+    it('leaves attach configs untouched', async () => {
+      const withFs = new JavascriptDebugAdapter(depsWithFs);
+      const cfg = await withFs.transformAttachConfig({
+        port: 9229
+      } as any);
+
+      const env = (cfg.env ?? {}) as Record<string, string>;
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).toBeUndefined();
+      expect(env.NODE_OPTIONS ?? '').not.toContain('exitcode-shim');
+    });
+  });
 });

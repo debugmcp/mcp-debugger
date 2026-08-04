@@ -26,6 +26,7 @@ const ROOT = path.resolve(__dirname, '../..');
 
 const CRASHING_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'with-errors.py');
 const JS_CRASHING_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'js-throws.js');
+const JS_CLEAN_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'js-clean-exit.js');
 const ATTACH_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'python', 'attach_then_raise.py');
 const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 
@@ -321,6 +322,32 @@ describe('Break-on-exception (issue #220)', () => {
       expect(stopped, 'js session should terminate promptly instead of hanging (issue #242)').toBeDefined();
       // No user-visible stop was recorded on the way down
       expect(stopped!.lastStop?.reason).not.toBe('exception');
+      // Crash vs clean exit is distinguishable (issue #247): the exit-code
+      // shim records the debuggee's code and the worker replays it, matching
+      // the contract the python twin asserts above
+      expect(stopped!.exitCode).toBeDefined();
+      expect(stopped!.exitCode).not.toBe(0);
+    }, 60000);
+
+    it('reports exit code 0 for a clean run (issue #247)', async () => {
+      sessionId = await createSession('javascript', 'js-clean-exit-code');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: JS_CLEAN_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false }
+        }
+      }));
+      expect(startRes.success).toBe(true);
+
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 20000);
+      expect(stopped, 'js session should run to completion').toBeDefined();
+      expect(stopped!.exitCode).toBe(0);
     }, 60000);
   });
 

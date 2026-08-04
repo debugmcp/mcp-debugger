@@ -219,6 +219,11 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
 - Remote debugging requires manual configuration
 - Some advanced DAP features may not be exposed through MCP tools
+- Debuggee exit codes are captured via an injected preload (js-debug itself
+  never emits a DAP `exited` event), so `exitCode` is unavailable in two
+  cases: attach mode (the target's environment is not under mcp-debugger's
+  control) and signal-killed debuggees (`process.on('exit')` never runs).
+  A missing `exitCode` is never replaced with a guessed value.
 
 ## Examples
 
