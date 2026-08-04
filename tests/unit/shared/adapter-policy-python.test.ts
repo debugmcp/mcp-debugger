@@ -76,7 +76,8 @@ describe('PythonAdapterPolicy', () => {
       exceptionFilters: {
         uncaught: ['uncaught'],
         all: ['raised', 'uncaught']
-      }
+      },
+      defaultExceptionBreakMode: 'uncaught'
     });
   });
 

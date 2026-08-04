@@ -6,9 +6,11 @@
  *   with the gated exception simulation, including exit-code surfacing
  * - Python launch: uncaught ZeroDivisionError pauses at the crash site with
  *   stack + locals live instead of terminating the session
- * - Python launch without the option: unchanged behavior (terminates), with
- *   the debuggee exit code surfaced
- * - Python attach: filters armed during the attach init sequence
+ * - Launch default (issue #244): with the option unset, launch sessions pause
+ *   at uncaught exceptions; explicit "none" opts out and restores
+ *   run-to-termination with the debuggee exit code surfaced
+ * - Python attach: filters armed during the attach init sequence (attach
+ *   itself never applies a default)
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
@@ -171,14 +173,35 @@ describe('Break-on-exception (issue #220)', () => {
       expect(stopped!.exitCode).toBe(1);
     }, 30000);
 
-    it('runs to completion with exit code 0 when breakOnExceptions is not set (regression guard)', async () => {
-      sessionId = await createSession('mock', 'mock-no-break-on-exceptions');
+    it('pauses at the simulated uncaught exception by default when breakOnExceptions is not set (issue #244)', async () => {
+      sessionId = await createSession('mock', 'mock-default-break-on-exceptions');
 
       const startRes = parseSdkToolResult(await mcpClient!.callTool({
         name: 'start_debugging',
         arguments: {
           sessionId,
           scriptPath: CRASHING_SCRIPT
+        }
+      }));
+      expect(startRes.success).toBe(true);
+
+      const paused = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'paused' && snap.lastStop?.reason === 'exception' ? snap : undefined;
+      }, 10000);
+      expect(paused, 'launch default uncaught should pause at the exception').toBeDefined();
+      expect(paused!.lastStop!.description).toBe('MockError');
+    }, 30000);
+
+    it("runs to completion with exit code 0 with explicit breakOnExceptions 'none' (opt-out, issues #220/#244)", async () => {
+      sessionId = await createSession('mock', 'mock-no-break-on-exceptions');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: CRASHING_SCRIPT,
+          breakOnExceptions: 'none'
         }
       }));
       expect(startRes.success).toBe(true);
@@ -268,8 +291,8 @@ describe('Break-on-exception (issue #220)', () => {
       expect(stopped, 'session should terminate after continuing past the exception').toBeDefined();
     }, 60000);
 
-    it('terminates without pausing when breakOnExceptions is not set (regression guard)', async () => {
-      sessionId = await createSession('python', 'py-no-break-on-exceptions');
+    it('pauses at the uncaught exception by default when breakOnExceptions is not set (issue #244)', async () => {
+      sessionId = await createSession('python', 'py-default-break-on-exceptions');
 
       const startRes = parseSdkToolResult(await mcpClient!.callTool({
         name: 'start_debugging',
@@ -281,11 +304,42 @@ describe('Break-on-exception (issue #220)', () => {
       }));
       expect(startRes.success).toBe(true);
 
+      const paused = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'paused' && snap.lastStop?.reason === 'exception' ? snap : undefined;
+      }, 15000);
+      expect(paused, 'launch default uncaught should pause at the crash site').toBeDefined();
+      const detail = `${paused!.lastStop!.description ?? ''} ${paused!.lastStop!.text ?? ''}`;
+      expect(detail).toMatch(/ZeroDivisionError|division/i);
+
+      // Continue: debugpy re-raises and the session terminates
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       const stopped = await pollUntil(async () => {
         const snap = await getSessionSnapshot(mcpClient!, sessionId!);
         return snap?.state === 'stopped' ? snap : undefined;
       }, 15000);
-      expect(stopped, 'session should terminate (pre-#220 behavior preserved)').toBeDefined();
+      expect(stopped, 'session should terminate after continuing past the exception').toBeDefined();
+    }, 60000);
+
+    it("terminates without pausing with explicit breakOnExceptions 'none' (opt-out, issues #220/#244)", async () => {
+      sessionId = await createSession('python', 'py-no-break-on-exceptions');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: CRASHING_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false },
+          breakOnExceptions: 'none'
+        }
+      }));
+      expect(startRes.success).toBe(true);
+
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 15000);
+      expect(stopped, 'session should terminate (opt-out preserves pre-#220 behavior)').toBeDefined();
       // No user-visible stop was recorded on the way down
       expect(stopped!.lastStop?.reason).not.toBe('exception');
       // The crash is distinguishable from a clean exit via the exit code
@@ -327,11 +381,8 @@ describe('Break-on-exception (issue #220)', () => {
       expect(frames.length).toBeGreaterThan(0);
     }, 60000);
 
-    // Regression guard for issue #242: launching a fast-crashing js script
-    // WITHOUT breakOnExceptions used to hang start_debugging (the js-debug
-    // launch barrier was disposed unsettled when the debuggee died mid-launch).
-    it('terminates without pausing when breakOnExceptions is not set (regression guard, issue #242)', async () => {
-      sessionId = await createSession('javascript', 'js-no-break-on-exceptions');
+    it('pauses at the uncaught Error by default when breakOnExceptions is not set (issue #244)', async () => {
+      sessionId = await createSession('javascript', 'js-default-break-on-exceptions');
 
       const startRes = parseSdkToolResult(await mcpClient!.callTool({
         name: 'start_debugging',
@@ -339,6 +390,31 @@ describe('Break-on-exception (issue #220)', () => {
           sessionId,
           scriptPath: JS_CRASHING_SCRIPT,
           dapLaunchArgs: { stopOnEntry: false }
+        }
+      }));
+      expect(startRes.success).toBe(true);
+
+      const paused = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'paused' && snap.lastStop?.reason === 'exception' ? snap : undefined;
+      }, 20000);
+      expect(paused, 'launch default uncaught should pause the js session at the exception').toBeDefined();
+    }, 60000);
+
+    // Regression guard for issue #242: launching a fast-crashing js script
+    // that terminates (now via explicit opt-out) must not hang
+    // start_debugging (the js-debug launch barrier used to be disposed
+    // unsettled when the debuggee died mid-launch).
+    it("terminates without pausing with explicit breakOnExceptions 'none' (opt-out; regression guard, issue #242)", async () => {
+      sessionId = await createSession('javascript', 'js-no-break-on-exceptions');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: JS_CRASHING_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false },
+          breakOnExceptions: 'none'
         }
       }));
       expect(startRes.success).toBe(true);

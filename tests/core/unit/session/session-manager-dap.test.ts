@@ -412,7 +412,7 @@ describe('SessionManager - DAP Operations', () => {
       expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBe('uncaught');
     });
 
-    it('leaves breakOnExceptions undefined in the ProxyConfig when not requested', async () => {
+    it("applies the policy launch default 'uncaught' to the ProxyConfig when not requested (issue #244)", async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
         executablePath: 'python'
@@ -421,7 +421,67 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
+      expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBe('uncaught');
+      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBe('uncaught');
+    });
+
+    it("user-provided 'none' wins over the policy launch default (issue #244)", async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py', undefined, undefined, undefined, undefined, 'none');
+      await vi.runAllTimersAsync();
+
+      expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBe('none');
+      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBe('none');
+    });
+
+    it("user-provided 'all' wins over the policy launch default (issue #244)", async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py', undefined, undefined, undefined, undefined, 'all');
+      await vi.runAllTimersAsync();
+
+      expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBe('all');
+    });
+
+    it('applies no default to attach-shaped launch args (issue #244)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(
+        session.id,
+        'attach://remote',
+        undefined,
+        { request: 'attach', __attachMode: true } as never,
+        undefined,
+        undefined,
+        undefined
+      );
+      await vi.runAllTimersAsync();
+
       expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBeUndefined();
+      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBeUndefined();
+    });
+
+    it('applies no default to languages without one (ruby, issue #244)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.RUBY,
+        executablePath: 'ruby'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.rb');
+      await vi.runAllTimersAsync();
+
+      expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBeUndefined();
+      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBeUndefined();
     });
 
     it('records description and text from the stopped event body on lastStop', async () => {

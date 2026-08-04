@@ -531,8 +531,28 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       }
 
       // Normal (non-dry-run) flow
+      // Resolve the effective breakOnExceptions mode (issue #244): when the
+      // user did not specify one, launch sessions take the adapter policy's
+      // default. Attach-shaped configs are excluded — pausing a process you
+      // attached to on exceptions is surprising — as are dry runs (above).
+      const launchArgsShape = dapLaunchArgs as Record<string, unknown> | undefined;
+      const isAttachShaped =
+        launchArgsShape?.request === 'attach' || launchArgsShape?.__attachMode === true;
+      let effectiveBreakOnExceptions = breakOnExceptions;
+      if (effectiveBreakOnExceptions === undefined && !isAttachShaped) {
+        const policyDefault = this.selectPolicy(session.language)
+          .getInitializationBehavior?.().defaultExceptionBreakMode;
+        if (policyDefault) {
+          effectiveBreakOnExceptions = policyDefault;
+          this.logger.info(
+            `[SessionManager] Applying policy default breakOnExceptions='${policyDefault}' for ${session.language} launch session ${sessionId}`
+          );
+        }
+      }
+      session.effectiveBreakOnExceptions = effectiveBreakOnExceptions;
+
       // Start the proxy manager
-      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig, breakOnExceptions);
+      const launchConfigData = await this.startProxyManager(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig, effectiveBreakOnExceptions);
       this.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
@@ -547,7 +567,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             scriptArgs,
             breakpoints: session.breakpoints,
             launchConfig: launchConfigData,
-            breakOnExceptions
+            breakOnExceptions: effectiveBreakOnExceptions
           });
         } catch (handshakeErr) {
           this.logger.warn(
@@ -1708,6 +1728,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         request: 'attach',
         __attachMode: true  // Internal flag to signal attach mode
       };
+
+      // Attach never receives a policy default (issue #244) — record the
+      // user's value (possibly undefined) for read-back symmetry.
+      session.effectiveBreakOnExceptions = breakOnExceptions;
 
       const attachConfigData = await this.startProxyManager(
         session,

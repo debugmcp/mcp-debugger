@@ -177,7 +177,7 @@ Starts debugging a script.
   - `justMyCode` (boolean): Debug only user code
 - `adapterLaunchConfig` (object, optional): Adapter-specific launch configuration overrides. Use this for language-specific settings that go beyond standard DAP arguments (e.g., `mainClass` and `classpath` for Java, `buildCommand` for Rust).
 - `dryRunSpawn` (boolean, optional): Test spawn without actually starting
-- `breakOnExceptions` (string, optional): `"uncaught"` pauses at uncaught exceptions at the crash site (stack and locals inspectable) instead of terminating the session; `"all"` also pauses on caught/raised exceptions (language-dependent). Default `"none"`. The abstract mode maps to per-language debugger filters (e.g. Python `uncaught`/`raised`, JavaScript `uncaught`/`all`, Java `uncaught`/`caught`, .NET `user-unhandled`/`all`, Go `panic`+`fatal`, Rust `rust_panic`). Ruby supports only `"all"` (rdbg has no uncaught-only filter); `"uncaught"` is skipped with a warning there.
+- `breakOnExceptions` (string, optional): `"uncaught"` pauses at uncaught exceptions at the crash site (stack and locals inspectable) instead of terminating the session; `"all"` also pauses on caught/raised exceptions (language-dependent). **Launch sessions default to `"uncaught"`** (issue #244) — a crashing script pauses with `lastStop.reason: "exception"` instead of terminating; pass `"none"` to opt out and let it run to termination. Ruby is the exception: rdbg has no uncaught-only filter, so Ruby launches stay `"none"` by default (only explicit `"all"` is available). Attach sessions never apply a language default. The abstract mode maps to per-language debugger filters (e.g. Python `uncaught`/`raised`, JavaScript `uncaught`/`all`, Java `uncaught`/`caught`, .NET `user-unhandled`/`all`, Go `unrecovered-panic`+`runtime-fatal-throw`, Rust `rust_panic`); an explicitly requested unsupported mode is skipped with a warning. Python edge: debugpy treats `sys.exit(n)` with a **non-zero** code as an unhandled `SystemExit` and pauses there (`sys.exit(0)` runs to completion normally) — pass `"none"` if a script legitimately exits non-zero via `sys.exit`.
 
 **Response:**
 ```json
@@ -196,7 +196,7 @@ Starts debugging a script.
 - `"breakpoint"`: Stopped at a breakpoint
 - `"step"`: Stopped after a step operation
 - `"entry"`: Stopped on entry (if configured)
-- `"exception"`: Stopped at an exception (requires `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them. Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
+- `"exception"`: Stopped at an exception (the launch default for most languages; see `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them. Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
 
 **Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions`, so a crash (non-zero) is distinguishable from a clean exit.
 
@@ -747,7 +747,7 @@ Each session also exposes its captured output as an MCP resource:
 The following tools are also available but are not fully documented with examples here:
 
 - **list_supported_languages**: Lists all supported debugging languages with metadata (installed status, display name, default executable). Takes no parameters.
-- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, adapter-specific attach configuration, and optionally `breakOnExceptions` (same semantics as on `start_debugging`).
+- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, adapter-specific attach configuration, and optionally `breakOnExceptions` (same mode semantics as on `start_debugging`, but attach never applies a language default — it stays `"none"` unless requested).
 - **detach_from_process**: Detaches the debugger from an attached process. Parameters include `sessionId` and optional `terminateProcess` flag.
 - **list_threads**: Lists all threads in the debug session. Parameters include `sessionId`.
 

@@ -660,7 +660,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       exceptionFilters: {
         uncaught: ['uncaught'],
         all: ['all']
-      }
+      },
+      // Launch sessions pause at uncaught exceptions by default (issue #244)
+      defaultExceptionBreakMode: 'uncaught'
     };
   },
 
