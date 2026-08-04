@@ -227,6 +227,78 @@ describe('GenericAdapterManager', () => {
     });
   });
 
+  describe('stdio forwarding to onStdioLine (issue #222)', () => {
+    const REDACTED = '[REDACTED — line contained sensitive data]';
+    let onStdioLine: ReturnType<typeof vi.fn>;
+
+    beforeEach(async () => {
+      onStdioLine = vi.fn();
+      await manager.spawn({ command: 'rdbg', args: ['--open'], logDir: '/logs', onStdioLine });
+    });
+
+    it('forwards stdout lines to the callback and still logs them', () => {
+      mockProcess.stdout.emit('data', Buffer.from('6: Fizz\n'));
+
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', '6: Fizz');
+      expect(logger.debug).toHaveBeenCalledWith('[AdapterManager STDOUT] 6: Fizz');
+    });
+
+    it('forwards stderr lines to the callback and still logs them at error level', () => {
+      mockProcess.stderr.emit('data', Buffer.from('some warning\n'));
+
+      expect(onStdioLine).toHaveBeenCalledWith('stderr', 'some warning');
+      expect(logger.error).toHaveBeenCalledWith('[AdapterManager STDERR] some warning');
+    });
+
+    it('forwards blank lines (program output) without logging them', () => {
+      mockProcess.stdout.emit('data', Buffer.from('\n\n'));
+
+      expect(onStdioLine).toHaveBeenCalledTimes(2);
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', '');
+      expect(logger.debug).not.toHaveBeenCalledWith('[AdapterManager STDOUT] ');
+    });
+
+    it('forwards secret-bearing lines raw while the log copy is redacted', () => {
+      // The forwarded copy is the debuggee's own output as the debugging
+      // client must see it (parity with debugpy redirectOutput); only the
+      // persisted log line goes through whole-line redaction.
+      mockProcess.stdout.emit('data', Buffer.from('API_KEY=zzz-secret-value\n'));
+
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', 'API_KEY=zzz-secret-value');
+      expect(logger.debug).toHaveBeenCalledWith(`[AdapterManager STDOUT] ${REDACTED}`);
+    });
+
+    it('joins a line that straddles two chunks into a single callback call', () => {
+      mockProcess.stdout.emit('data', Buffer.from('Hello, '));
+      mockProcess.stdout.emit('data', Buffer.from('World!\n'));
+
+      expect(onStdioLine).toHaveBeenCalledTimes(1);
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', 'Hello, World!');
+    });
+
+    it('flushes a trailing partial line exactly once when end is followed by close', () => {
+      mockProcess.stdout.emit('data', Buffer.from('no newline yet'));
+      expect(onStdioLine).not.toHaveBeenCalled();
+
+      mockProcess.stdout.emit('end');
+      mockProcess.stdout.emit('close');
+
+      const matches = onStdioLine.mock.calls.filter(call => call[1] === 'no newline yet');
+      expect(matches).toHaveLength(1);
+    });
+
+    it('changes nothing when no callback is configured', async () => {
+      const plainProcess = createMockProcess(777);
+      (spawner.spawn as any).mockReturnValue(plainProcess);
+      await manager.spawn({ command: 'python', args: [], logDir: '/logs' });
+
+      plainProcess.stdout.emit('data', Buffer.from('diag line\n'));
+
+      expect(onStdioLine).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith('[AdapterManager STDOUT] diag line');
+    });
+  });
+
   describe('shutdown', () => {
     it('returns early for null process', async () => {
       await manager.shutdown(null);

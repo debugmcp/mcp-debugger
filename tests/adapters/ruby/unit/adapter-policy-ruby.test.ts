@@ -93,8 +93,38 @@ describe('RubyAdapterPolicy.getAdapterSpawnConfig', () => {
       host: '127.0.0.1',
       port: 4711,
       logDir: '/tmp/logs',
-      env: { FOO: 'bar' }
+      env: { FOO: 'bar' },
+      forwardStdio: { excludeStderrLinePattern: /^DEBUGGER: / }
     });
+  });
+
+  it('opts launch mode into stdio forwarding with an rdbg banner exclusion (issue #222)', () => {
+    const config = RubyAdapterPolicy.getAdapterSpawnConfig!({
+      ...basePayload,
+      launchConfig: { request: 'launch' },
+      adapterCommand: { command: '/usr/bin/rdbg', args: ['--open'] }
+    });
+
+    expect(config.mode).toBe('spawn');
+    const pattern = (config as { forwardStdio?: { excludeStderrLinePattern?: RegExp } })
+      .forwardStdio?.excludeStderrLinePattern;
+    expect(pattern).toBeInstanceOf(RegExp);
+    // rdbg's own banners are excluded...
+    expect(pattern!.test('DEBUGGER: Debugger can attach via TCP/IP (127.0.0.1:4711)')).toBe(true);
+    expect(pattern!.test('DEBUGGER: wait for debugger connection...')).toBe(true);
+    // ...but program output is not, even when it mentions the prefix mid-line
+    expect(pattern!.test('6: Fizz')).toBe(false);
+    expect(pattern!.test('log: DEBUGGER: mentioned mid-line')).toBe(false);
+  });
+
+  it('does not enable stdio forwarding for attach (no adapter process exists)', () => {
+    const config = RubyAdapterPolicy.getAdapterSpawnConfig!({
+      ...basePayload,
+      launchConfig: { request: 'attach', port: 9229 }
+    });
+
+    expect(config.mode).toBe('connect');
+    expect('forwardStdio' in config).toBe(false);
   });
 
   it('throws for launch without an adapter command (no silent fallback)', () => {

@@ -70,7 +70,7 @@ For containers/pods, use the **debuggee's** filesystem paths in `set_breakpoint`
 ## Quirks
 
 - **Launch always stops at load.** rdbg suspends the script before the first line so breakpoints bind even for scripts that finish in milliseconds. With `stopOnEntry: false` (default) that entry pause is released automatically; with `dapLaunchArgs: { "stopOnEntry": true }` you get control at the first line.
-- **KNOWN ISSUE — `get_output` captures nothing for Ruby (issue #222).** rdbg routes debuggee stdout/stderr to the adapter process, so no output entries are recorded. Do not diagnose by reading stdout. Instead: have the script write results to a file you can read, or pause at a breakpoint and use `evaluate_expression` / `get_local_variables` to inspect state directly.
+- **Debuggee output is captured in launch mode.** rdbg hands the debuggee the adapter process's stdio; the proxy forwards it as `get_output` entries (categories `stdout`/`stderr`, rdbg's own `DEBUGGER:` banners excluded). **Attach mode captures nothing** — the target's stdio stays wherever the process was started; inspect state via `evaluate_expression` / `get_local_variables` there instead.
 - **evaluate_expression runs in rdbg's `repl` context** — expressions can read *and modify* program state (`x = 5` works). Useful for testing fixes live.
 - **Scope name is `Local variables`** (not "Locals"); `get_local_variables` handles this for you. Locals are only reported while stopped.
 - **Windows `.bat` shim bypass is automatic** — if spawn fails anyway, set `RDBG_PATH` to the rdbg script inside your Ruby installation's `bin` directory.
@@ -85,4 +85,4 @@ For containers/pods, use the **debuggee's** filesystem paths in `set_breakpoint`
 | Connect refused on attach | Target not listening | Start it with `rdbg --open --host <h> --port <p>`; rdbg prints `Debugger can attach via TCP/IP` when ready; verify port-forwarding |
 | Breakpoint not verified on attach | Host path used for a remote/container target | Use the path as the debuggee sees it (e.g. `/app/app.rb` from `get_stack_trace`) |
 | Locals empty | Session not paused | Hit a breakpoint or `pause_execution` first — rdbg reports locals only while stopped |
-| `get_output` returns no entries | Issue #222 — Ruby debuggee stdio is not captured | Write to a file from the script, or inspect via `evaluate_expression` at a breakpoint |
+| `get_output` returns no entries on attach | Attached target's stdio stays on its own terminal/pod | Read the target's own logs, or inspect via `evaluate_expression` at a breakpoint |

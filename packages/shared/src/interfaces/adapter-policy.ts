@@ -383,6 +383,22 @@ export type AdapterSpawnConfig =
       logDir: string;
       cwd?: string;
       env?: NodeJS.ProcessEnv;
+      /**
+       * Forward the adapter process's stdio as synthesized DAP 'output'
+       * events (issue #222). Opt-in for adapters whose launch-mode debuggee
+       * inherits the adapter process's stdio instead of having it converted
+       * to DAP output events — e.g. rdbg -c (all platforms) and CodeLLDB's
+       * console mode on Windows. Policies that leave this unset keep the
+       * existing behavior: adapter stdio is drained to logs only.
+       */
+      forwardStdio?: {
+        /**
+         * stderr lines matching this pattern are adapter diagnostics (e.g.
+         * rdbg's `DEBUGGER: ` banners): still logged, never forwarded as
+         * debuggee output.
+         */
+        excludeStderrLinePattern?: RegExp;
+      };
     }
   | {
       mode: 'connect';

@@ -20,3 +20,4 @@ def main
 end
 
 main
+warn 'fizzbuzz complete'

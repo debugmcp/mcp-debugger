@@ -209,7 +209,13 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       host: payload.adapterHost,
       port: payload.adapterPort,
       logDir: payload.logDir,
-      env: payload.adapterCommand.env
+      env: payload.adapterCommand.env,
+      // rdbg -c runs the debuggee as a child of the adapter process with
+      // inherited stdio while DAP travels over TCP — the program's output
+      // only ever appears on the adapter's pipes (issue #222). rdbg's own
+      // stderr banners ("DEBUGGER: wait for debugger connection...") are
+      // excluded from forwarding but still logged.
+      forwardStdio: { excludeStderrLinePattern: /^DEBUGGER: / }
     };
   }
 };
