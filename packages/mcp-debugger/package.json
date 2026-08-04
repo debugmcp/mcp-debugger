@@ -31,15 +31,15 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@debugmcp/adapter-dotnet": "0.22.0",
-    "@debugmcp/adapter-go": "0.22.0",
-    "@debugmcp/adapter-java": "0.22.0",
-    "@debugmcp/adapter-javascript": "0.22.0",
-    "@debugmcp/adapter-python": "0.22.0",
-    "@debugmcp/adapter-mock": "0.22.0",
-    "@debugmcp/adapter-ruby": "0.22.0",
-    "@debugmcp/adapter-rust": "0.22.0",
-    "@debugmcp/shared": "0.22.0"
+    "@debugmcp/adapter-dotnet": "workspace:*",
+    "@debugmcp/adapter-go": "workspace:*",
+    "@debugmcp/adapter-java": "workspace:*",
+    "@debugmcp/adapter-javascript": "workspace:*",
+    "@debugmcp/adapter-python": "workspace:*",
+    "@debugmcp/adapter-mock": "workspace:*",
+    "@debugmcp/adapter-ruby": "workspace:*",
+    "@debugmcp/adapter-rust": "workspace:*",
+    "@debugmcp/shared": "workspace:*"
   },
   "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
 }
