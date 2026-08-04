@@ -116,6 +116,9 @@ describe('Rust adapter - session smoke (integration)', () => {
     expect(transformed.cwd).toBe(projectRoot);
     expect(transformed.args).toEqual(['--sample']);
     expect(transformed.sourceLanguages).toEqual(['rust']);
-    expect(transformed.console).toBe('internalConsole');
+    // CodeLLDB's schema key is `terminal`; 'console' captures the debuggee's
+    // stdio as DAP output events (issue #223).
+    expect(transformed.terminal).toBe('console');
+    expect(transformed.console).toBeUndefined();
   });
 });

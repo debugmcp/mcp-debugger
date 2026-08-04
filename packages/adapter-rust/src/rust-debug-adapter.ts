@@ -86,8 +86,28 @@ interface RustLaunchConfig extends LanguageSpecificLaunchConfig {
   initCommands?: string[];              // LLDB commands to run on init
   preRunCommands?: string[];            // LLDB commands before running
   postRunCommands?: string[];           // LLDB commands after running
-  console?: 'internalConsole' | 'integratedTerminal' | 'externalTerminal';
+  terminal?: 'console' | 'integrated' | 'external';  // CodeLLDB's canonical attribute
+  console?: 'internalConsole' | 'integratedTerminal' | 'externalTerminal';  // legacy alias, accepted as input
   [key: string]: unknown;               // Required by LanguageSpecificLaunchConfig
+}
+
+/**
+ * CodeLLDB's launch schema takes `terminal`; `console` is a legacy alias
+ * carried over from the debugpy/js-debug convention (issue #223). Accept
+ * either as input but always emit the canonical `terminal` key.
+ */
+function resolveTerminalKind(rustConfig: RustLaunchConfig): NonNullable<RustLaunchConfig['terminal']> {
+  if (rustConfig.terminal) {
+    return rustConfig.terminal;
+  }
+  switch (rustConfig.console) {
+    case 'integratedTerminal': return 'integrated';
+    case 'externalTerminal': return 'external';
+    case 'internalConsole':
+    default:
+      // 'console' captures the debuggee's stdio as DAP output events
+      return 'console';
+  }
 }
 
 /**
@@ -803,8 +823,8 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       // Critical: Enable Rust language support for proper pretty-printing
       sourceLanguages: ['rust'],
       
-      // Console configuration
-      console: rustConfig.console || 'internalConsole',
+      // Console configuration — CodeLLDB's key is `terminal`, not `console`
+      terminal: resolveTerminalKind(rustConfig),
       
       // Source mapping for debugging std library (optional)
       sourceMap: rustConfig.sourceMap || {},
