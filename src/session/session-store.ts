@@ -27,6 +27,7 @@ export interface CreateSessionParams {
   executablePath?: string;  // Language-agnostic executable path
 }
 
+import type { DebugProtocol } from '@vscode/debugprotocol';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { OutputRingBuffer } from './output-buffer.js';
 
@@ -63,6 +64,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // Debuggee output captured from DAP 'output' events (issue #218).
   // Created fresh on each launch/attach; readable until the session is closed.
   outputBuffer?: OutputRingBuffer;
+  // Live capabilities from the adapter's DAP initialize response (issue #243).
+  // Reset on each launch; gates best-effort requests like exceptionInfo and
+  // lets tooling validate static policy tables against the real adapter.
+  adapterCapabilities?: DebugProtocol.Capabilities;
 }
 
 /**

@@ -64,6 +64,8 @@ export class DapProxyWorker {
   private currentInitPayload: ProxyInitPayload | null = null;
   private state: ProxyState = ProxyState.UNINITIALIZED;
   private isAttachMode: boolean = false;
+  /** Once-per-session guard for the adapter_capabilities status message (issue #243). */
+  private adapterCapabilitiesSent: boolean = false;
   // Exit-code synthesis bookkeeping (issue #247): a real DAP exited event
   // wins over synthesis, and parent+child terminated events synthesize once
   private exitedEventSeen: boolean = false;
@@ -449,11 +451,14 @@ export class DapProxyWorker {
         }
 
         // Initialize DAP session with correct adapterId
-        await this.connectionManager!.initializeSession(
+        const capabilities = await this.connectionManager!.initializeSession(
           this.dapClient,
           payload.sessionId,
           this.adapterPolicy.getDapAdapterConfiguration().type
         );
+        if (capabilities) {
+          this.captureAdapterCapabilities(capabilities);
+        }
 
         if (isAttachMode && initBehavior.sendAttachBeforeInitialized) {
           // ATTACH-FIRST MODE: Send attach immediately, then wait for initialized.
@@ -855,6 +860,19 @@ export class DapProxyWorker {
         (this.adapterState as AdapterSpecificState & { initializeResponded?: boolean }).initializeResponded = true;
       }
 
+      // Command-queueing policies (js-debug) initialize through this path
+      // instead of initializeSession, so capture capabilities here (#243).
+      // If a queueing policy ever queued 'initialize', drainCommandQueue would
+      // bypass this sniff — no policy does today.
+      if (payload.dapCommand === 'initialize') {
+        const body = (response as DebugProtocol.Response | undefined)?.body as
+          | DebugProtocol.Capabilities
+          | undefined;
+        if (body) {
+          this.captureAdapterCapabilities(body);
+        }
+      }
+
       // Complete tracking
       this.requestTracker.complete(payload.requestId);
 
@@ -1089,6 +1107,20 @@ export class DapProxyWorker {
   }
 
   // Message sending helpers
+
+  /**
+   * Forward the adapter's advertised initialize capabilities to the parent
+   * once per session (issue #243). Called from both initialize paths: the
+   * standard initializeSession flow and the command-queueing (js-debug)
+   * handleDapCommand flow.
+   */
+  private captureAdapterCapabilities(capabilities: DebugProtocol.Capabilities): void {
+    if (this.adapterCapabilitiesSent) {
+      return;
+    }
+    this.adapterCapabilitiesSent = true;
+    this.sendStatus('adapter_capabilities', { capabilities });
+  }
 
   private sendStatus(status: string, extra: Record<string, unknown> = {}): void {
     const message: StatusMessage = {

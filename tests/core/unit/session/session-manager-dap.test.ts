@@ -480,4 +480,184 @@ describe('SessionManager - DAP Operations', () => {
       expect(managedSession?.state).toBe(SessionState.STOPPED);
     });
   });
+
+  describe('Adapter Capabilities and exceptionInfo Enrichment (issue #243)', () => {
+    const capsWithExceptionInfo = {
+      supportsExceptionInfoRequest: true,
+      exceptionBreakpointFilters: [
+        { filter: 'uncaught', label: 'Uncaught Exceptions' },
+        { filter: 'all', label: 'All Exceptions' }
+      ]
+    };
+
+    function exceptionInfoCalls() {
+      return dependencies.mockProxyManager.dapRequestCalls.filter(c => c.command === 'exceptionInfo');
+    }
+
+    it('stores adapter capabilities from the adapter-capabilities event', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+
+      expect(sessionManager.getSession(session.id)?.adapterCapabilities).toEqual(capsWithExceptionInfo);
+    });
+
+    it('requests exceptionInfo on exception stops and merges the result into lastStop', async () => {
+      const session = await createPausedSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
+        if (command === 'exceptionInfo') {
+          return {
+            success: true,
+            body: {
+              exceptionId: 'MockError',
+              breakMode: 'unhandled',
+              description: 'Mock uncaught exception',
+              details: { message: 'Mock uncaught exception', typeName: 'MockError' }
+            }
+          };
+        }
+        return { success: true };
+      });
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'MockError'
+      });
+      await vi.runAllTimersAsync();
+
+      expect(exceptionInfoCalls()).toHaveLength(1);
+      expect(exceptionInfoCalls()[0].args).toEqual({ threadId: 1 });
+
+      const lastStop = sessionManager.getSession(session.id)?.lastStop;
+      expect(lastStop?.exceptionInfo).toEqual({
+        exceptionId: 'MockError',
+        breakMode: 'unhandled',
+        description: 'Mock uncaught exception',
+        details: { message: 'Mock uncaught exception', typeName: 'MockError' }
+      });
+    });
+
+    it('does not request exceptionInfo when the adapter lacks the capability', async () => {
+      await createPausedSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', {
+        supportsExceptionInfoRequest: false
+      });
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception');
+      await vi.runAllTimersAsync();
+
+      expect(exceptionInfoCalls()).toHaveLength(0);
+    });
+
+    it('does not request exceptionInfo when no capabilities were captured', async () => {
+      await createPausedSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception');
+      await vi.runAllTimersAsync();
+
+      expect(exceptionInfoCalls()).toHaveLength(0);
+    });
+
+    it('does not request exceptionInfo when the stop has no threadId', async () => {
+      await createPausedSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+
+      dependencies.mockProxyManager.simulateEvent('stopped', undefined, 'exception', undefined);
+      await vi.runAllTimersAsync();
+
+      expect(exceptionInfoCalls()).toHaveLength(0);
+    });
+
+    it('swallows exceptionInfo failures and leaves lastStop intact', async () => {
+      const session = await createPausedSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+      dependencies.mockProxyManager.shouldFailDapRequests = true;
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'MockError'
+      });
+      await vi.runAllTimersAsync();
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.state).toBe(SessionState.PAUSED);
+      expect(managedSession?.lastStop?.reason).toBe('exception');
+      expect(managedSession?.lastStop?.exceptionInfo).toBeUndefined();
+    });
+
+    it('does not merge a late exceptionInfo response onto a newer stop (stale-guard)', async () => {
+      const session = await createPausedSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+
+      let releaseExceptionInfo: (() => void) | undefined;
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
+        if (command === 'exceptionInfo') {
+          await new Promise<void>((resolve) => {
+            releaseExceptionInfo = resolve;
+          });
+          return {
+            success: true,
+            body: { exceptionId: 'StaleError', breakMode: 'unhandled' }
+          };
+        }
+        return { success: true };
+      });
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception');
+      // A newer stop replaces lastStop while exceptionInfo is still in flight
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+      releaseExceptionInfo?.();
+      await vi.runAllTimersAsync();
+
+      const lastStop = sessionManager.getSession(session.id)?.lastStop;
+      expect(lastStop?.reason).toBe('breakpoint');
+      expect(lastStop?.exceptionInfo).toBeUndefined();
+    });
+
+    it('warns when the policy filter table declares IDs the adapter does not advertise', async () => {
+      await createPausedSession();
+
+      // Mock policy declares uncaught: ['uncaught'] and all: ['all'];
+      // advertise only 'uncaught' so 'all' is drift.
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', {
+        exceptionBreakpointFilters: [{ filter: 'uncaught', label: 'Uncaught Exceptions' }]
+      });
+
+      expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Exception filter drift')
+      );
+      expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('all')
+      );
+    });
+
+    it('does not warn when the adapter advertises every declared filter', async () => {
+      await createPausedSession();
+
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+
+      const warnCalls = (dependencies.mockLogger.warn as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('filter'));
+      expect(warnCalls).toHaveLength(0);
+    });
+
+    it('exposes capabilities-driven enrichment through getAllSessions lastStop projection', async () => {
+      const session = await createPausedSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) =>
+        command === 'exceptionInfo'
+          ? { success: true, body: { exceptionId: 'MockError', breakMode: 'unhandled' } }
+          : { success: true }
+      );
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception');
+      await vi.runAllTimersAsync();
+
+      const info = sessionManager.getAllSessions().find(s => s.id === session.id);
+      expect(info?.lastStop?.exceptionInfo?.exceptionId).toBe('MockError');
+    });
+  });
 });

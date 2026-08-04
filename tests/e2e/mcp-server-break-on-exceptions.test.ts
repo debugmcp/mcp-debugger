@@ -32,7 +32,17 @@ const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 
 interface SessionSnapshot {
   state?: string;
-  lastStop?: { reason?: string; description?: string; text?: string };
+  lastStop?: {
+    reason?: string;
+    description?: string;
+    text?: string;
+    exceptionInfo?: {
+      exceptionId?: string;
+      breakMode?: string;
+      description?: string;
+      details?: { message?: string; typeName?: string; fullTypeName?: string; stackTrace?: string };
+    };
+  };
   exitCode?: number;
 }
 
@@ -134,6 +144,16 @@ describe('Break-on-exception (issue #220)', () => {
       expect(paused!.lastStop!.description).toBe('MockError');
       expect(paused!.lastStop!.text).toBe('Mock uncaught exception');
 
+      // Best-effort exceptionInfo enrichment lands asynchronously (issue #243)
+      const enriched = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.lastStop?.exceptionInfo ? snap : undefined;
+      }, 5000);
+      expect(enriched, 'lastStop should gain exceptionInfo from the mock adapter').toBeDefined();
+      expect(enriched!.lastStop!.exceptionInfo!.exceptionId).toBe('MockError');
+      expect(enriched!.lastStop!.exceptionInfo!.breakMode).toBe('unhandled');
+      expect(enriched!.lastStop!.exceptionInfo!.details?.typeName).toBe('MockError');
+
       // get_stack_trace surfaces the stop reason (issue #214 surface)
       const stack = parseSdkToolResult(await mcpClient!.callTool({
         name: 'get_stack_trace',
@@ -209,6 +229,14 @@ describe('Break-on-exception (issue #220)', () => {
       // debugpy puts the exception class/message in description/text
       const detail = `${paused!.lastStop!.description ?? ''} ${paused!.lastStop!.text ?? ''}`;
       expect(detail).toMatch(/ZeroDivisionError|division/i);
+
+      // debugpy supports exceptionInfo: the enrichment should land (issue #243)
+      const enriched = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.lastStop?.exceptionInfo ? snap : undefined;
+      }, 5000);
+      expect(enriched, 'lastStop should gain exceptionInfo from debugpy').toBeDefined();
+      expect(enriched!.lastStop!.exceptionInfo!.exceptionId).toMatch(/ZeroDivisionError/i);
 
       // Stack trace: top frame at the crash site (divide, line 5)
       const stack = parseSdkToolResult(await mcpClient!.callTool({

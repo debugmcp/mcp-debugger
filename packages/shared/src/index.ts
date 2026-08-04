@@ -139,6 +139,7 @@ export type {
   DebugSession,
   DebugSessionInfo,
   SessionStopInfo,
+  SessionStopExceptionInfo,
   ExceptionBreakMode,
   SessionOutputEntry,
 

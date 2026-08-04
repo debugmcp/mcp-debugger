@@ -631,6 +631,143 @@ describe('DapProxyWorker', () => {
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
     });
 
+    it('sends adapter_capabilities when initializeSession returns a body (issue #243)', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'py-caps-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.py',
+        scriptArgs: [],
+        stopOnEntry: true,
+        justMyCode: true
+      };
+
+      const capabilities = {
+        supportsExceptionInfoRequest: true,
+        exceptionBreakpointFilters: [{ filter: 'uncaught', label: 'Uncaught' }]
+      };
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({
+          process: new EventEmitter() as unknown as ChildProcess,
+          pid: 655
+        }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn().mockResolvedValue(capabilities),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      const capsCalls = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_capabilities'
+      );
+      expect(capsCalls).toHaveLength(1);
+      expect(capsCalls[0][0].capabilities).toEqual(capabilities);
+    });
+
+    it('sends no adapter_capabilities when initializeSession resolves undefined (issue #243)', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'py-nocaps-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.py',
+        scriptArgs: [],
+        stopOnEntry: true,
+        justMyCode: true
+      };
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({
+          process: new EventEmitter() as unknown as ChildProcess,
+          pid: 656
+        }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn().mockResolvedValue(undefined),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      const capsCalls = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_capabilities'
+      );
+      expect(capsCalls).toHaveLength(0);
+    });
+
+    it('captures capabilities from an initialize DAP command response exactly once (js path, issue #243)', async () => {
+      mockMessageSender.send.mockClear();
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).adapterPolicy = JsDebugAdapterPolicy;
+      (worker as any).adapterState = JsDebugAdapterPolicy.createInitialState();
+      (worker as any).logger = mockLogger;
+      (worker as any).currentSessionId = 'js-session';
+
+      const capabilities = { supportsExceptionInfoRequest: true };
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ success: true, body: capabilities });
+
+      const initializePayload: DapCommandPayload = {
+        cmd: 'dap',
+        sessionId: 'js-session',
+        requestId: 'req-init-caps',
+        dapCommand: 'initialize',
+        dapArgs: { adapterID: 'pwa-node' }
+      };
+
+      await worker.handleCommand(initializePayload);
+      // A second initialize must not re-send (once-per-session guard)
+      await worker.handleCommand({ ...initializePayload, requestId: 'req-init-caps-2' });
+
+      const capsCalls = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_capabilities'
+      );
+      expect(capsCalls).toHaveLength(1);
+      expect(capsCalls[0][0].capabilities).toEqual(capabilities);
+
+      mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+    });
+
     it('startAdapterAndConnect should connect directly for Ruby attach sessions', async () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',

@@ -717,6 +717,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
         'scopes',
         'variables',
         'evaluate',
+        'exceptionInfo',
         'loadedSources',
         'source',
         'setVariable',

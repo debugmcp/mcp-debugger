@@ -45,9 +45,9 @@ describe('SessionManager - Memory Leak Prevention', () => {
       const mockProxy = dependencies.mockProxyManager;
       
       // Get listener counts after setup
-      const eventNames = ['stopped', 'continued', 'terminated', 'exited', 
-                         'initialized', 'error', 'exit', 'adapter-configured', 
-                         'dry-run-complete'];
+      const eventNames = ['stopped', 'continued', 'terminated', 'exited',
+                         'initialized', 'error', 'exit', 'adapter-configured',
+                         'adapter-capabilities', 'dry-run-complete'];
       
       const listenerCountsBefore: Record<string, number> = {};
       eventNames.forEach(event => {

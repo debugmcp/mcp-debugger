@@ -74,6 +74,31 @@ describe('ProxyManager Message Handling', () => {
       expect(adapterConfiguredEmitted).toBe(true);
     });
 
+    it('emits adapter-capabilities exactly once per status message (issue #243)', () => {
+      // Status messages run through BOTH the imperative handler and the
+      // functional core; adapter_capabilities must only be emitted by the
+      // former or the payload would be clobbered by an empty-args re-emit.
+      const capabilities = {
+        supportsExceptionInfoRequest: true,
+        exceptionBreakpointFilters: [{ filter: 'uncaught', label: 'Uncaught' }]
+      };
+
+      const received: unknown[] = [];
+      proxyManager.on('adapter-capabilities', (caps) => {
+        received.push(caps);
+      });
+
+      proxyManager.simulateMessage({
+        type: 'status',
+        sessionId: 'test-session',
+        status: 'adapter_capabilities',
+        capabilities
+      });
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual(capabilities);
+    });
+
     it('should handle dry-run complete status messages', () => {
       const dryRunMessage = {
         type: 'status',

@@ -72,6 +72,8 @@ export interface StatusMessage extends ProxyMessage {
   signal?: NodeJS.Signals | null;
   command?: string;
   script?: string;
+  /** Adapter initialize response body, on 'adapter_capabilities' (issue #243) */
+  capabilities?: DebugProtocol.Capabilities;
 }
 
 export interface DapResponseMessage extends ProxyMessage {

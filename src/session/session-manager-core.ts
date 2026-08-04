@@ -225,6 +225,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.firstStopHandled = false;
     session.lastStop = undefined;
     session.exitCode = undefined;
+    session.adapterCapabilities = undefined;
     // Each launch/attach starts with a fresh output buffer (issue #218).
     session.outputBuffer = new OutputRingBuffer();
 
@@ -308,6 +309,56 @@ export abstract class SessionManagerCore extends EventEmitter {
           ...(body?.text ? { text: body.text } : {})
         };
         this._updateSessionState(session, SessionState.PAUSED);
+
+        // Best-effort exceptionInfo enrichment (issue #243): fire-and-forget
+        // after the synchronous PAUSED transition (step/continue barriers rely
+        // on it). Gated on the live adapter capability; failures are swallowed
+        // — the .catch also absorbs the rejection when the proxy exits with
+        // the request in flight.
+        if (
+          reason === 'exception' &&
+          typeof threadId === 'number' &&
+          session.adapterCapabilities?.supportsExceptionInfoRequest
+        ) {
+          const stopRef = session.lastStop;
+          proxyManager
+            .sendDapRequest<DebugProtocol.ExceptionInfoResponse>(
+              'exceptionInfo',
+              { threadId },
+              { timeoutMs: 3000 }
+            )
+            .then((resp) => {
+              const info = resp?.body;
+              // Stale-guard: only merge while this stop is still current.
+              if (!info || session.lastStop !== stopRef || session.state !== SessionState.PAUSED) {
+                return;
+              }
+              const details = info.details;
+              stopRef.exceptionInfo = {
+                exceptionId: info.exceptionId,
+                breakMode: info.breakMode,
+                ...(info.description ? { description: info.description } : {}),
+                ...(details
+                  ? {
+                      details: {
+                        ...(details.message ? { message: details.message } : {}),
+                        ...(details.typeName ? { typeName: details.typeName } : {}),
+                        ...(details.fullTypeName ? { fullTypeName: details.fullTypeName } : {}),
+                        ...(details.stackTrace ? { stackTrace: details.stackTrace } : {})
+                      }
+                    }
+                  : {})
+              };
+              this.logger.debug(
+                `[SessionManager ${sessionId}] exceptionInfo enrichment merged (exceptionId=${info.exceptionId})`
+              );
+            })
+            .catch((err) => {
+              this.logger.debug(
+                `[SessionManager ${sessionId}] Best-effort exceptionInfo failed: ${err instanceof Error ? err.message : String(err)}`
+              );
+            });
+        }
       }
 
       session.firstStopHandled = true;
@@ -410,6 +461,46 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('adapter-configured', handleAdapterConfigured);
     handlers.set('adapter-configured', handleAdapterConfigured);
+
+    // Named function for adapter capabilities (issue #243): store the live
+    // initialize response body and warn when the static policy exception
+    // filter table drifted from what the adapter actually advertises.
+    const handleAdapterCapabilities = (capabilities: DebugProtocol.Capabilities) => {
+      session.adapterCapabilities = capabilities;
+      this.logger.debug(
+        `[SessionManager ${sessionId}] Adapter capabilities captured (supportsExceptionInfoRequest=${capabilities.supportsExceptionInfoRequest === true})`
+      );
+      try {
+        const table = this.sessionStore
+          .selectPolicy(session.language)
+          .getInitializationBehavior?.().exceptionFilters;
+        // Empty per-mode arrays mean "mode unsupported", not drift — the
+        // union naturally drops them (e.g. Ruby's uncaught: []).
+        const declared = [...new Set([...(table?.uncaught ?? []), ...(table?.all ?? [])])];
+        if (declared.length > 0) {
+          const advertisedFilters = capabilities.exceptionBreakpointFilters;
+          if (!advertisedFilters || advertisedFilters.length === 0) {
+            this.logger.warn(
+              `[SessionManager ${sessionId}] Adapter advertises no exceptionBreakpointFilters, but the '${session.language}' policy declares [${declared.join(', ')}]`
+            );
+          } else {
+            const advertised = new Set(advertisedFilters.map((f) => f.filter));
+            const missing = declared.filter((id) => !advertised.has(id));
+            if (missing.length > 0) {
+              this.logger.warn(
+                `[SessionManager ${sessionId}] Exception filter drift: '${session.language}' policy declares [${missing.join(', ')}] not advertised by the adapter (advertised: [${[...advertised].join(', ')}])`
+              );
+            }
+          }
+        }
+      } catch (err) {
+        this.logger.debug(
+          `[SessionManager ${sessionId}] Exception filter drift check skipped: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    };
+    proxyManager.on('adapter-capabilities', handleAdapterCapabilities);
+    handlers.set('adapter-capabilities', handleAdapterCapabilities);
 
     // Named function for dry run complete event
     const handleDryRunComplete = (command: string, script: string) => {

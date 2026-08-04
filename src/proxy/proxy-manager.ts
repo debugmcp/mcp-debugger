@@ -56,6 +56,8 @@ export interface ProxyManagerEvents {
   // Status events
   'dry-run-complete': (command: string, script: string) => void;
   'adapter-configured': () => void;
+  /** Adapter initialize response body captured by the worker (issue #243) */
+  'adapter-capabilities': (capabilities: DebugProtocol.Capabilities) => void;
   'dap-event': (event: string, body: unknown) => void;
 }
 
@@ -1060,6 +1062,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           this.isInitialized = true;
           this.emit('initialized');
         }
+        break;
+
+      case 'adapter_capabilities':
+        // Emitted here only: the functional core (dap-core/handlers.ts) has
+        // no case for this status, so unlike adapter_configured_and_launched
+        // it is not double-processed (issue #243).
+        this.logger.info(`[ProxyManager] Adapter capabilities received`);
+        this.emit('adapter-capabilities', message.capabilities);
         break;
       
       case 'adapter_exited':

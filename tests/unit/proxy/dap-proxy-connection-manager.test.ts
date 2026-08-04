@@ -266,6 +266,26 @@ describe('DapConnectionManager', () => {
         connectionManager.initializeSession(mockDapClient as any, 'test-session')
       ).rejects.toThrow('Initialize failed');
     });
+
+    it('returns the initialize response body (adapter capabilities, issue #243)', async () => {
+      const capabilities = {
+        supportsExceptionInfoRequest: true,
+        exceptionBreakpointFilters: [{ filter: 'uncaught', label: 'Uncaught' }]
+      };
+      mockDapClient.sendRequest.mockResolvedValue({ success: true, body: capabilities });
+
+      const result = await connectionManager.initializeSession(mockDapClient as any, 'test-session');
+
+      expect(result).toEqual(capabilities);
+    });
+
+    it('returns undefined when the initialize response has no body', async () => {
+      mockDapClient.sendRequest.mockResolvedValue({ success: true });
+
+      const result = await connectionManager.initializeSession(mockDapClient as any, 'test-session');
+
+      expect(result).toBeUndefined();
+    });
   });
 
   describe('setupEventHandlers', () => {
