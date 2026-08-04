@@ -230,7 +230,9 @@ export const RustAdapterPolicy: AdapterPolicy = {
       exceptionFilters: {
         uncaught: ['rust_panic'],
         all: ['rust_panic', 'cpp_throw']
-      }
+      },
+      // Launch sessions pause at panics by default (issue #244)
+      defaultExceptionBreakMode: 'uncaught'
     };
   },
 

@@ -244,7 +244,9 @@ export const PythonAdapterPolicy: AdapterPolicy = {
       exceptionFilters: {
         uncaught: ['uncaught'],
         all: ['raised', 'uncaught']
-      }
+      },
+      // Launch sessions pause at uncaught exceptions by default (issue #244)
+      defaultExceptionBreakMode: 'uncaught'
     };
   },
 

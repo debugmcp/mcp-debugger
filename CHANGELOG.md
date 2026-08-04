@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING (behavioral): launch sessions now default to `breakOnExceptions: "uncaught"`** — a crashing script pauses at the uncaught exception (`lastStop.reason: "exception"`, stack/locals inspectable, `exceptionInfo` where supported) instead of running to termination. Applies uniformly to Python, JavaScript, Java, Go (panics), .NET, Rust (panics), and the mock adapter; Ruby keeps the old run-to-termination behavior (rdbg has no uncaught-only filter). Pass `breakOnExceptions: "none"` to restore the old behavior per session. Attach sessions are unchanged — no default is ever applied on attach (fixes #244)
+
 ### Added
 - **Break-on-exception support** — new `breakOnExceptions` option (`"uncaught"` | `"all"` | `"none"`, default `"none"`) on `start_debugging` and `attach_to_process`: an uncaught exception now pauses at the crash site with the stack and locals inspectable instead of terminating the session. The abstract mode is resolved to per-language debugger filter IDs by the adapter policy (Python `uncaught`/`raised`+`uncaught`, JavaScript `uncaught`/`all` — runtime-verified against js-debug, Java `uncaught`/`caught`+`uncaught`, .NET `user-unhandled`/`all`, Go `fatal`+`panic`, Rust `rust_panic`/`+cpp_throw`, Ruby `all`-only via `any`); an unsupported mode is skipped with a warning and never aborts the launch (fixes #220)
 - **Exception detail on stops** — `lastStop` now records the DAP stopped event's `description` and `text` (e.g. exception class and message), surfaced via `list_debug_sessions`, `get_stack_trace`, and the `start_debugging` response (#220)

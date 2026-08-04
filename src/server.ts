@@ -628,7 +628,7 @@ export class DebugMcpServer {
                   additionalProperties: true
                 },
                 dryRunSpawn: { type: 'boolean' },
-                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site instead of terminating the session; "all" also pauses on caught/raised exceptions (language-dependent). Default "none"' },
+                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site instead of terminating the session; "all" also pauses on caught/raised exceptions (language-dependent). Launch sessions default to "uncaught" (Ruby is the exception — rdbg has no uncaught-only filter, so it stays "none"); pass "none" to opt out and let crashing scripts run to termination' },
                 adapterLaunchConfig: {
                   type: 'object',
                   description: 'Optional adapter-specific launch configuration overrides',
@@ -650,7 +650,7 @@ export class DebugMcpServer {
                 sourcePaths: { type: 'array', items: { type: 'string' }, description: 'Source paths for code mapping' },
                 stopOnEntry: { type: 'boolean', description: 'Stop on entry after attaching' },
                 justMyCode: { type: 'boolean', description: 'Only debug user code (skip library code)' },
-                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site; "all" also pauses on caught/raised exceptions (language-dependent). Default "none"' }
+                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site; "all" also pauses on caught/raised exceptions (language-dependent). Default "none" — attach sessions never apply a language default (unlike launch)' }
               },
               required: ['sessionId']
             }

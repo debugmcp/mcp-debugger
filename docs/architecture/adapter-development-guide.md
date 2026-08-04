@@ -360,6 +360,8 @@ The policy implements the `AdapterPolicy` interface (from `adapter-policy.ts`). 
 | `childSessionStrategy` | Whether the debugger spawns child DAP sessions | `'none'` for most adapters |
 | `defaultStopOnEntry` | Whether to pause at program entry | `false` for Go (Delve quirk) |
 | `requiresCommandQueueing` | Whether commands need sequential queueing | `false` for most adapters |
+| `exceptionFilters` | Per-mode DAP exception filter IDs (#220) | `{ uncaught: ['uncaught'], all: ['raised','uncaught'] }` for Python |
+| `defaultExceptionBreakMode` | Launch-session default when the user didn't pass `breakOnExceptions` (#244) | `'uncaught'` for every adapter with a usable uncaught filter; omit for Ruby |
 
 See `packages/shared/src/interfaces/adapter-policy-go.ts` for a minimal, clean policy example.
 

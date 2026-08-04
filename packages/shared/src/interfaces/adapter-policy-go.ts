@@ -237,6 +237,8 @@ export const GoAdapterPolicy: AdapterPolicy = {
         uncaught: ['fatal', 'panic'],
         all: ['fatal', 'panic']
       },
+      // Launch sessions pause at panics by default (issue #244)
+      defaultExceptionBreakMode: 'uncaught',
     };
   },
 

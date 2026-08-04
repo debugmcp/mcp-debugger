@@ -70,7 +70,7 @@ attach_to_process {sessionId, host: "localhost", port: 5678, localRoot: "<local 
 
 ## Crash diagnosis
 
-- Pass `breakOnExceptions: "uncaught"` to `start_debugging` (or `attach_to_process`) to pause at an uncaught exception with the stack and locals live instead of losing the session; `"all"` also stops on caught raises (language-dependent; Ruby supports only `"all"`).
+- Launch sessions pause at uncaught exceptions **by default** (`breakOnExceptions: "uncaught"`) with the stack and locals live instead of losing the session — pass `"none"` to opt out, or `"all"` to also stop on caught raises (language-dependent). Ruby is the exception: rdbg has no uncaught-only filter, so Ruby crashes still run to termination unless you pass `"all"`. Attach sessions apply no default — pass the mode explicitly.
 - On an exception stop, `lastStop.description`/`lastStop.text` carry the exception class and message; where the adapter supports it (Python, JS, .NET), `lastStop.exceptionInfo` adds `exceptionId`, `breakMode`, and details (it lands a moment after the pause — re-query if absent). After termination, `exitCode` in `list_debug_sessions` distinguishes a crash (non-zero) from a clean exit.
 
 ## Current limitations (be honest with yourself)

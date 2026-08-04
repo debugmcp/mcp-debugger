@@ -316,6 +316,12 @@ export interface AdapterPolicy {
       uncaught: string[];
       all: string[];
     };
+    /** Default breakOnExceptions mode applied to LAUNCH sessions when the user
+     *  did not specify one (issue #244). Attach sessions never receive a
+     *  default — pausing a process you attached to is surprising. Omit for
+     *  adapters without a usable uncaught filter (e.g. Ruby) so crashing
+     *  scripts keep running to termination. Mirrors defaultStopOnEntry. */
+    defaultExceptionBreakMode?: ExceptionBreakMode;
   };
 
   /**
