@@ -1326,6 +1326,63 @@ describe('MinimalDapClient', () => {
       expect(responseSpy).toHaveBeenCalledWith(request, {});
     });
 
+    it('allows a re-sent startDebugging to retry adoption after a failed child creation (issue #249)', async () => {
+      const childSessionManager = createChildSessionManagerStub();
+      childSessionManager.createChildSession.mockRejectedValueOnce(new Error('adoption failed'));
+
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => childSessionManager
+      });
+      (client as any).socket = {
+        destroyed: false,
+        write: vi.fn().mockReturnValue(true),
+        end: vi.fn(),
+        destroy: vi.fn()
+      } as unknown as net.Socket;
+
+      const startDebugging = (seq: number) => ({
+        seq,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: { configuration: { __pendingTargetId: 'retry-me', type: 'pwa-node' } }
+      } as DebugProtocol.Request);
+
+      await (client as any).handleProtocolMessage(startDebugging(1));
+      expect(childSessionManager.createChildSession).toHaveBeenCalledTimes(1);
+
+      // js-debug re-sends startDebugging for the same pending target; the
+      // failed adoption must not leave the target permanently deduped
+      await (client as any).handleProtocolMessage(startDebugging(2));
+      expect(childSessionManager.createChildSession).toHaveBeenCalledTimes(2);
+
+      client.shutdown();
+    });
+
+    it('clears adoptedTargets on shutdown (issue #249 hygiene)', async () => {
+      const childSessionManager = createChildSessionManagerStub();
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => childSessionManager
+      });
+      (client as any).socket = {
+        destroyed: false,
+        write: vi.fn().mockReturnValue(true),
+        end: vi.fn(),
+        destroy: vi.fn()
+      } as unknown as net.Socket;
+
+      await (client as any).handleProtocolMessage({
+        seq: 1,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: { configuration: { __pendingTargetId: 'stale-target', type: 'pwa-node' } }
+      } as DebugProtocol.Request);
+      expect((client as any).adoptedTargets.size).toBeGreaterThan(0);
+
+      client.shutdown();
+
+      expect((client as any).adoptedTargets.size).toBe(0);
+    });
+
     it('logs child session creation errors without throwing', async () => {
       const childSessionManager = createChildSessionManagerStub();
       childSessionManager.createChildSession.mockRejectedValue(new Error('no child'));

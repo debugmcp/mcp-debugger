@@ -288,6 +288,14 @@ export class MinimalDapClient extends EventEmitter {
               } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 logger.error(`[MinimalDapClient] Failed to create child session: ${msg}`);
+                // The policy adds the pending target to adoptedTargets before
+                // adoption runs; roll that back so a re-sent startDebugging
+                // for the same target can retry instead of silently no-oping
+                // against a session with no debuggable child (issue #249)
+                const failedPendingId = result.childConfig.pendingId;
+                if (typeof failedPendingId === 'string') {
+                  this.adoptedTargets.delete(failedPendingId);
+                }
               }
             }
             return;
@@ -694,6 +702,7 @@ export class MinimalDapClient extends EventEmitter {
     } finally {
       this.childSessions.clear();
       this.activeChild = null;
+      this.adoptedTargets.clear();
     }
 
     // Also shut down the manager's own registry: it tracks children from the
