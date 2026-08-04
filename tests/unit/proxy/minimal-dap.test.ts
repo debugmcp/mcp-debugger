@@ -898,67 +898,6 @@ describe('MinimalDapClient', () => {
     });
   });
 
-  describe('Configuration deferral', () => {
-    it('should defer configurationDone when deferral is active and flush on timeout', async () => {
-      client.shutdown();
-
-      const realSetTimeout = global.setTimeout;
-      const fakeSetTimeout: typeof setTimeout = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
-        const actualDelay = delay ?? 0;
-        if (actualDelay === 1500) {
-          return realSetTimeout(() => {
-            callback(...args);
-          }, 0);
-        }
-        return realSetTimeout(callback as (...cbArgs: unknown[]) => void, actualDelay, ...args);
-      }) as typeof setTimeout;
-      const fakeClearTimeout: typeof clearTimeout = ((timer: NodeJS.Timeout) => {
-        clearTimeout(timer);
-      }) as typeof clearTimeout;
-
-      client = new MinimalDapClient('localhost', 5678, undefined, {
-        timers: {
-          setTimeout: fakeSetTimeout,
-          clearTimeout: fakeClearTimeout
-        }
-      });
-
-      const requests: DebugProtocol.Request[] = [];
-      const fakeSocket = Object.assign(new EventEmitter(), {
-        destroyed: false,
-        write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
-          const [, body] = raw.split('\r\n\r\n');
-          const request = JSON.parse(body) as DebugProtocol.Request;
-          requests.push(request);
-          cb?.(null);
-          setImmediate(() => {
-            void (client as any).handleProtocolMessage({
-              seq: request.seq,
-              type: 'response',
-              request_seq: request.seq,
-              command: request.command,
-              success: true
-            } satisfies DebugProtocol.Response);
-          });
-          return true;
-        }),
-        end: vi.fn(),
-        destroy: vi.fn()
-      }) as unknown as net.Socket;
-
-      (client as any).socket = fakeSocket;
-      (client as any).deferParentConfigDoneActive = true;
-
-      const result = await client.sendRequest<DebugProtocol.Response>('configurationDone', { foo: 'bar' });
-
-      expect(result.command).toBe('configurationDone');
-      expect(fakeSocket.write).toHaveBeenCalledTimes(1);
-      expect(requests[0]?.command).toBe('configurationDone');
-      expect((client as any).parentConfigDoneDeferred).toBeNull();
-      expect((client as any).suppressNextConfigDoneDeferral).toBe(false);
-    });
-  });
-
   describe('Child session integration', () => {
     it('tracks child lifecycle events reported by ChildSessionManager', () => {
       const stubManager = createChildSessionManagerStub();
@@ -1285,7 +1224,7 @@ describe('MinimalDapClient', () => {
       expect((client as any).sendResponse).not.toHaveBeenCalled();
     });
 
-    it('invokes child creation and defers configuration when policy demands', async () => {
+    it('invokes child creation when policy demands', async () => {
       const child = Object.assign(new EventEmitter(), {
         sendRequest: vi.fn().mockResolvedValue({})
       }) as unknown as MinimalDapClient;
@@ -1293,18 +1232,17 @@ describe('MinimalDapClient', () => {
       const childSessionManager = createChildSessionManagerStub();
       childSessionManager.getActiveChild.mockReturnValue(child);
 
-      const deferBehavior: DapClientBehavior = {
+      const adoptionBehavior: DapClientBehavior = {
         handleReverseRequest: vi.fn().mockResolvedValue({
           handled: true,
           createChildSession: true,
           childConfig: { pendingId: 'child-1', parentConfig: { __pendingTargetId: 'child-1' } }
-        } as ReverseRequestResult),
-        deferParentConfigDone: true
+        } as ReverseRequestResult)
       };
 
       const client = new MinimalDapClient('localhost', 5678);
 
-      (client as any).dapBehavior = deferBehavior;
+      (client as any).dapBehavior = adoptionBehavior;
       (client as any).socket = { destroyed: false, write: vi.fn() } as unknown as net.Socket;
       (client as any).childSessionManager = childSessionManager;
 
@@ -1321,7 +1259,6 @@ describe('MinimalDapClient', () => {
         pendingId: 'child-1',
         parentConfig: { __pendingTargetId: 'child-1' }
       });
-      expect((client as any).deferParentConfigDoneActive).toBe(true);
       expect((client as any).activeChild).toBe(child);
     });
 
@@ -1384,8 +1321,7 @@ describe('MinimalDapClient', () => {
           handled: true,
           createChildSession: true,
           childConfig: { pendingId: 'child-err', parentConfig: {} }
-        } as ReverseRequestResult),
-        deferParentConfigDone: true
+        } as ReverseRequestResult)
       };
 
       const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
@@ -1408,7 +1344,6 @@ describe('MinimalDapClient', () => {
         pendingId: 'child-err',
         parentConfig: {}
       });
-      expect((client as any).deferParentConfigDoneActive).toBe(false);
       expect(behavior.handleReverseRequest).toHaveBeenCalled();
     });
   });
@@ -1715,62 +1650,6 @@ describe('MinimalDapClient', () => {
       ).rejects.toThrow('adapter blew up');
 
       routedClient.shutdown();
-    });
-  });
-
-  describe('Configuration deferral edge cases', () => {
-    it('replaces an in-flight deferred configurationDone with a fresh deferral', () => {
-      client.shutdown();
-
-      let timerCounter = 0;
-      const setTimeoutSpy = vi.fn(
-        () => ({ id: ++timerCounter }) as unknown as NodeJS.Timeout
-      );
-      const clearTimeoutSpy = vi.fn();
-
-      client = new MinimalDapClient('localhost', 5678, undefined, {
-        timers: {
-          setTimeout: setTimeoutSpy as unknown as typeof setTimeout,
-          clearTimeout: clearTimeoutSpy as unknown as typeof clearTimeout
-        }
-      });
-      (client as any).socket = {
-        destroyed: false,
-        end: vi.fn(),
-        destroy: vi.fn(),
-        write: vi.fn()
-      } as unknown as net.Socket;
-      (client as any).deferParentConfigDoneActive = true;
-
-      const promise1 = client.sendRequest('configurationDone', { first: true });
-      promise1.catch(() => undefined);
-      const firstDeferred = (client as any).parentConfigDoneDeferred;
-      expect(firstDeferred).not.toBeNull();
-      expect(firstDeferred.timer).toEqual({ id: 1 });
-
-      const promise2 = client.sendRequest('configurationDone', { second: true });
-      promise2.catch(() => undefined);
-
-      expect(clearTimeoutSpy).toHaveBeenCalledWith({ id: 1 });
-      expect((client as any).parentConfigDoneDeferred).not.toBe(firstDeferred);
-      expect((client as any).parentConfigDoneDeferred.timer).toEqual({ id: 2 });
-
-      // Clean up dangling deferred to avoid lingering state.
-      (client as any).parentConfigDoneDeferred?.reject(new Error('test cleanup'));
-    });
-
-    it('passes configurationDone through immediately when suppressNextConfigDoneDeferral is set', async () => {
-      const captured: DebugProtocol.Request[] = [];
-      (client as any).socket = echoSocket(captured);
-      (client as any).deferParentConfigDoneActive = true;
-      (client as any).suppressNextConfigDoneDeferral = true;
-
-      await client.sendRequest('configurationDone', { go: true });
-
-      expect(captured).toHaveLength(1);
-      expect(captured[0].command).toBe('configurationDone');
-      expect((client as any).suppressNextConfigDoneDeferral).toBe(false);
-      expect((client as any).parentConfigDoneDeferred).toBeNull();
     });
   });
 

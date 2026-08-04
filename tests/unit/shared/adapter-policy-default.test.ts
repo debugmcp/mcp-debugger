@@ -6,7 +6,6 @@ describe('DefaultAdapterPolicy', () => {
     expect(DefaultAdapterPolicy.name).toBe('default');
     expect(DefaultAdapterPolicy.supportsReverseStartDebugging).toBe(false);
     expect(DefaultAdapterPolicy.childSessionStrategy).toBe('none');
-    expect(DefaultAdapterPolicy.shouldDeferParentConfigDone({})).toBe(false);
     expect(() => DefaultAdapterPolicy.buildChildStartArgs('pending', {})).toThrow();
     expect(DefaultAdapterPolicy.isChildReadyEvent({ event: 'initialized' } as any)).toBe(false);
     expect(DefaultAdapterPolicy.getDapAdapterConfiguration().type).toBe('default');

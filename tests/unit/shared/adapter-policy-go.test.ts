@@ -40,10 +40,6 @@ describe('GoAdapterPolicy', () => {
     expect(() => GoAdapterPolicy.buildChildStartArgs('', {})).toThrow(/does not support child sessions/);
   });
 
-  it('shouldDeferParentConfigDone returns false', () => {
-    expect(GoAdapterPolicy.shouldDeferParentConfigDone()).toBe(false);
-  });
-
   it('isChildReadyEvent returns true for initialized event', () => {
     expect(GoAdapterPolicy.isChildReadyEvent({ event: 'initialized', seq: 1, type: 'event' } as any)).toBe(true);
   });
@@ -319,7 +315,6 @@ describe('GoAdapterPolicy', () => {
   it('getDapClientBehavior returns expected defaults', () => {
     const behavior = GoAdapterPolicy.getDapClientBehavior();
     expect(behavior.mirrorBreakpointsToChild).toBe(false);
-    expect(behavior.deferParentConfigDone).toBe(false);
     expect(behavior.pauseAfterChildAttach).toBe(false);
     expect(behavior.suppressPostAttachConfigDone).toBe(false);
     expect(behavior.childInitTimeout).toBe(5000);

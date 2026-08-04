@@ -8,7 +8,6 @@ export const RubyAdapterPolicy: AdapterPolicy = {
   name: 'ruby',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: () => {
     throw new Error('RubyAdapterPolicy does not support child sessions');
   },
@@ -152,7 +151,6 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       },
       childRoutedCommands: undefined,
       mirrorBreakpointsToChild: false,
-      deferParentConfigDone: false,
       pauseAfterChildAttach: false,
       normalizeAdapterId: undefined,
       childInitTimeout: 5000,

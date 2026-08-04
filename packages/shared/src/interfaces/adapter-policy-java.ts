@@ -15,7 +15,6 @@ export const JavaAdapterPolicy: AdapterPolicy = {
   name: 'java',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
-  shouldDeferParentConfigDone: () => false,
   buildChildStartArgs: () => {
     throw new Error('JavaAdapterPolicy does not support child sessions');
   },
@@ -191,7 +190,6 @@ export const JavaAdapterPolicy: AdapterPolicy = {
 
       childRoutedCommands: undefined,
       mirrorBreakpointsToChild: false,
-      deferParentConfigDone: false,
       pauseAfterChildAttach: false,
       normalizeAdapterId: undefined,
       childInitTimeout: 5000,

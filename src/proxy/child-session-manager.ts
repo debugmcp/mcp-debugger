@@ -31,14 +31,12 @@ function createChildSafePolicy(policy: AdapterPolicy): AdapterPolicy {
     ...policy,
     supportsReverseStartDebugging: false,
     childSessionStrategy: 'none',
-    shouldDeferParentConfigDone: () => false,
     getDapClientBehavior: (): DapClientBehavior => {
       const baseBehavior = policy.getDapClientBehavior();
       const behavior: DapClientBehavior = {
         ...baseBehavior,
         childRoutedCommands: new Set<string>(),
         mirrorBreakpointsToChild: false,
-        deferParentConfigDone: false,
         pauseAfterChildAttach: false,
         stackTraceRequiresChild: false,
       };

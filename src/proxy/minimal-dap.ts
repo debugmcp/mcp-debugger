@@ -60,19 +60,6 @@ export class MinimalDapClient extends EventEmitter {
   private dapBehavior: DapClientBehavior;
   private childSessionManager?: ChildSessionManager;
 
-  // When true, we defer parent's configurationDone (policy-driven, e.g. js-debug)
-  private deferParentConfigDoneActive = false;
-
-  // Defers parent's configurationDone to keep process paused until child is configured
-  private parentConfigDoneDeferred: {
-    resolve: (resp: DebugProtocol.Response) => void;
-    reject: (err: Error) => void;
-    args: unknown;
-    timer: NodeJS.Timeout;
-  } | null = null;
-
-  // When set, the very next configurationDone send will not be deferred
-  private suppressNextConfigDoneDeferral = false;
   private readonly timers: {
     setTimeout: typeof setTimeout;
     clearTimeout: typeof clearTimeout;
@@ -295,12 +282,7 @@ export class MinimalDapClient extends EventEmitter {
               logger.info(`[MinimalDapClient] Creating child session via ChildSessionManager`);
               try {
                 await this.childSessionManager.createChildSession(this.enrichChildConfig(result.childConfig));
-                
-                // Set up deferred config if needed
-                if (this.dapBehavior.deferParentConfigDone) {
-                  this.deferParentConfigDoneActive = true;
-                }
-                
+
                 // Update active child reference from manager
                 this.activeChild = this.childSessionManager.getActiveChild();
               } catch (err) {
@@ -454,40 +436,6 @@ export class MinimalDapClient extends EventEmitter {
       };
     }
 
-    // Defer parent's configurationDone briefly to allow child session to configure,
-    // avoiding immediate resume of the target before adoption completes.
-    if (command === 'configurationDone' && this.deferParentConfigDoneActive) {
-      if (this.suppressNextConfigDoneDeferral) {
-        // Consume the suppression for a single pass-through
-        this.suppressNextConfigDoneDeferral = false;
-      } else {
-        // Create a promise we will resolve once we actually send the deferred configDone
-        return new Promise<T>((resolve, reject) => {
-          // Clear any prior deferral
-          if (this.parentConfigDoneDeferred) {
-            this.timers.clearTimeout(this.parentConfigDoneDeferred.timer);
-            this.parentConfigDoneDeferred = null;
-          }
-          const timer = this.timers.setTimeout(() => {
-            // Time-bound deferral: if no child completed in time, send now
-            this.suppressNextConfigDoneDeferral = true;
-            void this.sendRequest<DebugProtocol.Response>('configurationDone', args)
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .then(resolve as any)
-              .catch(reject);
-            this.parentConfigDoneDeferred = null;
-          }, 1500);
-          this.parentConfigDoneDeferred = {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            resolve: resolve as any,
-            reject,
-            args,
-            timer
-          };
-        });
-      }
-    }
-    
     // Route debuggee-scoped requests to active child session when present using policy
     const manager = this.childSessionManager;
     const shouldRouteToChild = manager?.shouldRouteToChild(command) ?? false;
