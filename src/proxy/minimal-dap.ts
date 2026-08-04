@@ -696,6 +696,15 @@ export class MinimalDapClient extends EventEmitter {
       this.activeChild = null;
     }
 
+    // Also shut down the manager's own registry: it tracks children from the
+    // moment adoption starts, so this reaches mid-adoption sockets that were
+    // never promoted into this.childSessions via childCreated (issue #248)
+    try {
+      void this.childSessionManager?.shutdown().catch(() => {});
+    } catch (e) {
+      logger.warn('[MinimalDapClient] Error shutting down child session manager:', getErrorMessage(e));
+    }
+
     // Use immediate cleanup when explicitly shutting down
     this.cleanup(true);
     

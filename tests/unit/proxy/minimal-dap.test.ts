@@ -46,6 +46,7 @@ describe('MinimalDapClient', () => {
     shouldRouteToChild: ReturnType<typeof vi.fn>;
     storeBreakpoints: ReturnType<typeof vi.fn>;
     isAdoptionInProgress: ReturnType<typeof vi.fn>;
+    shutdown: ReturnType<typeof vi.fn>;
   };
 
   const createChildSessionManagerStub = (): ChildSessionManagerStub => {
@@ -56,6 +57,7 @@ describe('MinimalDapClient', () => {
     emitter.shouldRouteToChild = vi.fn().mockReturnValue(false);
     emitter.storeBreakpoints = vi.fn();
     emitter.isAdoptionInProgress = vi.fn().mockReturnValue(false);
+    emitter.shutdown = vi.fn().mockResolvedValue(undefined);
     return emitter;
   };
 
@@ -885,6 +887,17 @@ describe('MinimalDapClient', () => {
       );
       expect((client as unknown as { childSessions: Map<string, MinimalDapClient> }).childSessions.size).toBe(0);
       expect((client as unknown as { activeChild: MinimalDapClient | null }).activeChild).toBeNull();
+    });
+
+    it('shuts down the ChildSessionManager so mid-adoption children are not orphaned (issue #248)', () => {
+      const childSessionManager = createChildSessionManagerStub();
+      const managed = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => childSessionManager
+      });
+
+      managed.shutdown('test');
+
+      expect(childSessionManager.shutdown).toHaveBeenCalled();
     });
 
     it('logs debug when shutdown is invoked after disconnect has begun', () => {
