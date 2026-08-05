@@ -1014,13 +1014,28 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         response.body.breakpoints
       ) {
         const responseBps = response.body.breakpoints;
+        // For child-mirroring adapters (js-debug), setBreakpoints responses
+        // come from the parent session, which owns no runtime: its verified
+        // flags are pessimistic and its ids belong to a different id space
+        // than the child events that carry the real verification. Treat the
+        // child as authoritative — never let a parent response downgrade
+        // verified state or clobber child adapter ids.
+        const childAuthoritative =
+          !!this.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
         // Update ALL breakpoints from response (positional match)
         for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
           const bpInfo = responseBps[i];
-          allBpsForFile[i].verified = bpInfo.verified;
+          const keepChildState = childAuthoritative && allBpsForFile[i].verified === true;
+          if (childAuthoritative) {
+            allBpsForFile[i].verified = allBpsForFile[i].verified || bpInfo.verified;
+          } else {
+            allBpsForFile[i].verified = bpInfo.verified;
+            allBpsForFile[i].adapterId = bpInfo.id ?? allBpsForFile[i].adapterId;
+          }
           allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
-          allBpsForFile[i].message = bpInfo.message;
-          allBpsForFile[i].adapterId = bpInfo.id ?? allBpsForFile[i].adapterId;
+          if (!keepChildState) {
+            allBpsForFile[i].message = bpInfo.message;
+          }
           // Enhance "no symbols" message for .NET with PDB format guidance
           if (bpInfo.message && session.language === 'dotnet' &&
               bpInfo.message.toLowerCase().includes('no symbols')) {

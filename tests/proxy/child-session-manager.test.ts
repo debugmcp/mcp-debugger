@@ -15,6 +15,9 @@ class MockMinimalDapClient extends EventEmitter {
   static hangCommands = new Set<string>();
   static failCommands = new Map<string, Error>();
   static suppressInitialized = false;
+  // When set, returned verbatim for setBreakpoints; otherwise a verified
+  // breakpoint per requested line with child-space ids (100, 101, ...)
+  static setBreakpointsResponse: unknown | undefined = undefined;
 
   host: string;
   port: number;
@@ -56,6 +59,21 @@ class MockMinimalDapClient extends EventEmitter {
     if (command === 'threads') {
       return { body: { threads: [{ id: 1, name: 'main' }] } };
     }
+    if (command === 'setBreakpoints') {
+      if (MockMinimalDapClient.setBreakpointsResponse !== undefined) {
+        return MockMinimalDapClient.setBreakpointsResponse;
+      }
+      const a = args as { breakpoints?: DebugProtocol.SourceBreakpoint[] };
+      return {
+        body: {
+          breakpoints: (a?.breakpoints ?? []).map((bp, i) => ({
+            id: 100 + i,
+            verified: true,
+            line: bp.line
+          }))
+        }
+      };
+    }
     return {};
   }
 
@@ -82,6 +100,7 @@ describe('ChildSessionManager', () => {
     MockMinimalDapClient.hangCommands.clear();
     MockMinimalDapClient.failCommands.clear();
     MockMinimalDapClient.suppressInitialized = false;
+    MockMinimalDapClient.setBreakpointsResponse = undefined;
   });
 
   describe('JavaScript policy (multi-session)', () => {
@@ -243,6 +262,102 @@ describe('ChildSessionManager', () => {
         manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 42 }]);
 
         expect(child.requests.some(req => req.command === 'setBreakpoints')).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('synthesizes breakpoint events from mid-session mirror responses (issue: verified never reaches store)', async () => {
+      vi.useFakeTimers();
+      try {
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-events',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const events: DebugProtocol.Event[] = [];
+        manager.on('childEvent', (evt: DebugProtocol.Event) => {
+          if (evt.event === 'breakpoint') events.push(evt);
+        });
+
+        manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 9 }, { line: 15 }]);
+        // The mirror send is fire-and-forget; flush its promise chain
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(events).toHaveLength(2);
+        const bodies = events.map(e => (e as DebugProtocol.BreakpointEvent).body);
+        expect(bodies[0].reason).toBe('changed');
+        expect(bodies[0].breakpoint).toMatchObject({
+          id: 100,
+          verified: true,
+          line: 9,
+          source: { path: '/absolute/path/to/file.js' }
+        });
+        expect(bodies[1].breakpoint).toMatchObject({ id: 101, verified: true, line: 15 });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('synthesizes breakpoint events when pre-stored breakpoints are mirrored during child creation', async () => {
+      vi.useFakeTimers();
+      try {
+        manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 7 }]);
+
+        const events: DebugProtocol.Event[] = [];
+        manager.on('childEvent', (evt: DebugProtocol.Event) => {
+          if (evt.event === 'breakpoint') events.push(evt);
+        });
+
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-configure',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        expect(events.length).toBeGreaterThan(0);
+        const body = (events[0] as DebugProtocol.BreakpointEvent).body;
+        expect(body.reason).toBe('changed');
+        expect(body.breakpoint).toMatchObject({
+          verified: true,
+          line: 7,
+          source: { path: '/absolute/path/to/file.js' }
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('emits no breakpoint events when the mirror response has no breakpoints body', async () => {
+      vi.useFakeTimers();
+      try {
+        MockMinimalDapClient.setBreakpointsResponse = {};
+
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-empty',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const events: DebugProtocol.Event[] = [];
+        manager.on('childEvent', (evt: DebugProtocol.Event) => {
+          if (evt.event === 'breakpoint') events.push(evt);
+        });
+
+        manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 3 }]);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(events).toHaveLength(0);
       } finally {
         vi.useRealTimers();
       }
@@ -490,9 +605,21 @@ describe('ChildSessionManager', () => {
       ];
       
       manager.storeBreakpoints('/path/to/file.py', breakpoints);
-      
+
       // Python doesn't mirror breakpoints
       expect((manager as any).storedBreakpoints.size).toBe(0);
+    });
+
+    it('synthesizes no breakpoint events for non-mirroring policies', async () => {
+      const events: unknown[] = [];
+      manager.on('childEvent', (evt: DebugProtocol.Event) => {
+        if (evt.event === 'breakpoint') events.push(evt);
+      });
+
+      manager.storeBreakpoints('/path/to/file.py', [{ line: 10 }]);
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(events).toHaveLength(0);
     });
   });
   

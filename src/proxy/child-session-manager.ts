@@ -230,13 +230,51 @@ export class ChildSessionManager extends EventEmitter {
     
     // Mirror to active child if present
     if (this.activeChild) {
-      void this.activeChild.sendRequest('setBreakpoints', {
+      void this.activeChild.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
         source: { path: absolutePath },
         breakpoints
+      }).then(resp => {
+        this.emitBreakpointResults(absolutePath, breakpoints, resp);
       }).catch(() => {
         // Ignore errors when mirroring
       });
     }
+  }
+
+  /**
+   * Forward a child setBreakpoints response as synthesized DAP breakpoint
+   * events. The child session owns the runtime, so its responses carry the
+   * authoritative verified state and breakpoint ids — but the SessionManager
+   * store only ever sees the parent session's responses. Without this, a
+   * breakpoint that the child verifies in the response (no subsequent
+   * 'breakpoint' event) would stay verified:false forever.
+   */
+  private emitBreakpointResults(
+    sourcePath: string,
+    requested: DebugProtocol.SourceBreakpoint[],
+    response: DebugProtocol.SetBreakpointsResponse | undefined
+  ): void {
+    const bps = response?.body?.breakpoints;
+    if (!Array.isArray(bps)) {
+      return;
+    }
+    bps.forEach((bp, i) => {
+      const event: DebugProtocol.BreakpointEvent = {
+        seq: 0,
+        type: 'event',
+        event: 'breakpoint',
+        body: {
+          reason: 'changed',
+          breakpoint: {
+            ...bp,
+            // DAP responses may omit source/line; fall back to the request
+            source: bp.source ?? { path: sourcePath },
+            line: bp.line ?? requested[i]?.line
+          }
+        }
+      };
+      this.emit('childEvent', event);
+    });
   }
 
   /**
@@ -389,10 +427,11 @@ export class ChildSessionManager extends EventEmitter {
       for (const [srcPath, bps] of this.storedBreakpoints) {
         logger.info(`[child:${pendingId}] setBreakpoints -> ${srcPath} (${bps.length})`);
         try {
-          await child.sendRequest('setBreakpoints', {
+          const resp = await child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
             source: { path: srcPath },
             breakpoints: bps
           });
+          this.emitBreakpointResults(srcPath, bps, resp);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           logger.warn(`[child:${pendingId}] setBreakpoints failed: ${msg}`);
@@ -500,10 +539,11 @@ export class ChildSessionManager extends EventEmitter {
       
       for (const [srcPath, bps] of this.storedBreakpoints) {
         try {
-          await child.sendRequest('setBreakpoints', {
+          const resp = await child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
             source: { path: srcPath },
             breakpoints: bps
           });
+          this.emitBreakpointResults(srcPath, bps, resp);
         } catch {}
       }
     }

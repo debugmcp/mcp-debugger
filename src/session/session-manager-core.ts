@@ -450,6 +450,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       let target = typeof eventBp.id === 'number'
         ? all.find(bp => bp.adapterId === eventBp.id)
         : undefined;
+      const matchedByAdapterId = target !== undefined;
       if (!target && eventBp.source?.path !== undefined && typeof eventBp.line === 'number') {
         const eventPath = eventBp.source.path;
         target = all.find(bp => samePath(bp.file, eventPath) && bp.line === eventBp.line);
@@ -459,6 +460,26 @@ export abstract class SessionManagerCore extends EventEmitter {
           `[SessionManager ${sessionId}] Breakpoint event matched no stored breakpoint (id=${eventBp.id}, ${eventBp.source?.path}:${eventBp.line})`
         );
         return;
+      }
+      // Child-mirroring adapters (js-debug): the parent session emits its own
+      // breakpoint events with pessimistic verified:false and parent-space ids.
+      // Only stored adapterIds are child ids, so a (file,line)-fallback match
+      // carrying a downgrade is the parent contradicting the authoritative
+      // child — ignore it. Id-matched downgrades (real child unbinding) apply.
+      if (!matchedByAdapterId && target.verified === true && eventBp.verified === false) {
+        let mirrorsToChild = false;
+        try {
+          mirrorsToChild =
+            !!this.sessionStore.selectPolicy(session.language).getDapClientBehavior().mirrorBreakpointsToChild;
+        } catch {
+          // Unknown policy: fall through to the default handling below
+        }
+        if (mirrorsToChild) {
+          this.logger.debug(
+            `[SessionManager ${sessionId}] Ignoring non-authoritative breakpoint downgrade for ${target.file}:${target.line}`
+          );
+          return;
+        }
       }
       target.verified = eventBp.verified;
       if (typeof eventBp.line === 'number') {
