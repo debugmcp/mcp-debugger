@@ -9,18 +9,18 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import fs, { existsSync } from 'fs';
+import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
-import { prepareJavaExample } from './java-example-utils.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ROOT = path.resolve(__dirname, '../..');
+import {
+  ROOT,
+  PYTHON_SCRIPT, JS_SCRIPT, RUST_SCRIPT, GO_SCRIPT, DOTNET_SCRIPT, JAVA_SCRIPT, JAVA_CLASS_DIR, RUBY_SCRIPT,
+  PYTHON_BP_LINE, JS_BP_LINE, RUST_BP_LINE, GO_BP_LINE, DOTNET_BP_LINE, JAVA_BP_LINE, RUBY_BP_LINE,
+  hasRust, hasGo, hasRuby, hasDotnet, hasJava,
+  ensureGoBuild, ensureDotnetBuild, ensureJavaBuild
+} from './language-matrix-utils.js';
 
 /* ---------- result tracking ---------- */
 
@@ -40,79 +40,6 @@ function record(tool: string, language: string, status: ToolStatus, detail: stri
   results.push({ tool, language, status, detail, duration });
   const icon = status === 'PASS' ? '✓' : status === 'FAIL' ? '✗' : status === 'SKIP' ? '⊘' : '…';
   console.log(`  [${icon}] ${tool} (${language}): ${detail}${duration ? ` [${duration}ms]` : ''}`);
-}
-
-/* ---------- example file paths ---------- */
-
-const PYTHON_SCRIPT = path.resolve(ROOT, 'examples', 'python', 'simple_test.py');
-const JS_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'simple_test.js');
-const RUST_SCRIPT = path.resolve(ROOT, 'examples', 'rust', 'hello_world', 'src', 'main.rs');
-const GO_SCRIPT = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
-const DOTNET_SCRIPT = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');
-const JAVA_SCRIPT = path.resolve(ROOT, 'examples', 'java', 'HelloWorld.java');
-const JAVA_CLASS_DIR = path.resolve(ROOT, 'examples', 'java');
-const RUBY_SCRIPT = path.resolve(ROOT, 'examples', 'ruby', 'fizzbuzz.rb');
-
-// Breakpoint lines (executable lines in each script — must be AFTER variable assignments
-// so that get_variables returns populated locals)
-const PYTHON_BP_LINE = 10;  // print(f"Before swap: a={a}, b={b}")  — a=1, b=2 in scope
-const JS_BP_LINE = 9;       // let a = 1;
-const RUST_BP_LINE = 19;    // println!("Sum of 5 and 10 is: {}", result)  — name, version, is_awesome, result in scope
-const GO_BP_LINE = 13;      // fmt.Println(message)  — message in scope
-const DOTNET_BP_LINE = 15;  // int y = 20;  — x=10 in scope
-const JAVA_BP_LINE = 24;    // int sum = add(x, y);  — x=10, y=20 in scope
-const RUBY_BP_LINE = 15;    // value = fizzbuzz_for(i)  — i, results in scope (first loop iteration)
-
-/* ---------- toolchain detection ---------- */
-
-function hasCommand(cmd: string): boolean {
-  try {
-    execSync(cmd, { stdio: 'ignore', timeout: 5000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const hasRust = hasCommand('rustc --version');
-const hasGo = hasCommand('go version') && hasCommand('dlv version');
-const hasRuby = hasCommand('ruby --version') && hasCommand('rdbg --version');
-const hasDotnet = (() => {
-  if (!hasCommand('dotnet --version')) return false;
-  if (process.env.NETCOREDBG_PATH && existsSync(process.env.NETCOREDBG_PATH)) return true;
-  return hasCommand('netcoredbg --version');
-})();
-const hasJava = hasCommand('java -version') && hasCommand('javac -version');
-
-/* ---------- pre-compilation helpers ---------- */
-
-function ensureGoBuild(): string {
-  const ext = process.platform === 'win32' ? '.exe' : '';
-  const binary = path.resolve(ROOT, 'examples', 'go', `hello_world_test${ext}`);
-  execSync(`go build -gcflags="all=-N -l" -o "${binary}" "${GO_SCRIPT}"`, {
-    cwd: path.dirname(GO_SCRIPT),
-    stdio: 'pipe',
-  });
-  return binary;
-}
-
-function ensureDotnetBuild(): string {
-  const projectDir = path.resolve(ROOT, 'examples', 'dotnet');
-  const possibleTfms = ['net10.0', 'net9.0', 'net8.0', 'net7.0', 'net6.0'];
-  for (const tfm of possibleTfms) {
-    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'dotnet.dll');
-    if (existsSync(dllPath)) return dllPath;
-  }
-  execSync('dotnet build -c Debug', { cwd: projectDir, stdio: 'pipe', timeout: 60000 });
-  for (const tfm of possibleTfms) {
-    const dllPath = path.join(projectDir, 'bin', 'Debug', tfm, 'dotnet.dll');
-    if (existsSync(dllPath)) return dllPath;
-  }
-  throw new Error('Failed to find built dotnet.dll');
-}
-
-function ensureJavaBuild(): void {
-  prepareJavaExample('HelloWorld');
 }
 
 // Module-level variables set by beforeAll build steps
@@ -148,13 +75,16 @@ const LANGUAGES: LangDef[] = [
     dapLaunchArgs: { mainClass: 'HelloWorld', classpath: JAVA_CLASS_DIR, cwd: JAVA_CLASS_DIR } },
 ];
 
-/* ---------- all 21 tools ---------- */
+/* ---------- all 24 tools ---------- */
 
 const ALL_TOOLS = [
   'list_supported_languages',
   'create_debug_session',
   'list_debug_sessions',
   'set_breakpoint',
+  'list_breakpoints',
+  'remove_breakpoint',
+  'clear_breakpoints',
   'get_source_context',
   'start_debugging',
   'get_stack_trace',
@@ -176,7 +106,7 @@ const ALL_TOOLS = [
 
 /* ---------- test suite ---------- */
 
-describe(`Comprehensive MCP Debugger Test — 21 Tools × ${LANGUAGES.length} Languages`, () => {
+describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LANGUAGES.length} Languages`, () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
 
@@ -380,6 +310,57 @@ describe(`Comprehensive MCP Debugger Test — 21 Tools × ${LANGUAGES.length} La
           record('set_breakpoint', lang.language, 'PASS', detail, Date.now() - t0);
         } catch (err: any) {
           record('set_breakpoint', lang.language, 'FAIL', err.message, Date.now() - t0);
+          throw err;
+        }
+      }, 15_000);
+
+      /* ---- Tool 4b: list_breakpoints / 4c: remove_breakpoint / 4d: clear_breakpoints ---- */
+
+      it(`Tool 4b-4d: list/remove/clear breakpoints (${lang.language})`, async () => {
+        // Each tool test owns its session (afterEach closes it)
+        const createRes = await mcpClient!.callTool({
+          name: 'create_debug_session',
+          arguments: { language: lang.language, name: `bp-mgmt-${lang.language}` },
+        });
+        currentSessionId = parseSdkToolResult(createRes).sessionId as string;
+        await callToolSafely(mcpClient!, 'set_breakpoint', {
+          sessionId: currentSessionId,
+          file: lang.script,
+          line: lang.bpLine,
+        });
+        const t0 = Date.now();
+
+        try {
+          const listRes = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId: currentSessionId });
+          const bps = (listRes as any).breakpoints as Array<{ id: string; file: string; line: number }>;
+          expect((listRes as any).success).toBe(true);
+          expect((listRes as any).count).toBeGreaterThanOrEqual(1);
+          record('list_breakpoints', lang.language, 'PASS', `count=${(listRes as any).count}`, Date.now() - t0);
+
+          // remove by id
+          const t1 = Date.now();
+          const removeRes = await callToolSafely(mcpClient!, 'remove_breakpoint', {
+            sessionId: currentSessionId,
+            breakpointId: bps[0].id,
+          });
+          expect((removeRes as any).success).toBe(true);
+          record('remove_breakpoint', lang.language, 'PASS', `removed=${(removeRes as any).removed?.length}`, Date.now() - t1);
+
+          // set again, then clear all and verify empty
+          const t2 = Date.now();
+          await callToolSafely(mcpClient!, 'set_breakpoint', {
+            sessionId: currentSessionId,
+            file: lang.script,
+            line: lang.bpLine,
+          });
+          const clearRes = await callToolSafely(mcpClient!, 'clear_breakpoints', { sessionId: currentSessionId });
+          expect((clearRes as any).success).toBe(true);
+          expect((clearRes as any).cleared).toBeGreaterThanOrEqual(1);
+          const finalList = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId: currentSessionId });
+          expect((finalList as any).count).toBe(0);
+          record('clear_breakpoints', lang.language, 'PASS', `cleared=${(clearRes as any).cleared}`, Date.now() - t2);
+        } catch (err: any) {
+          record('list_breakpoints', lang.language, 'FAIL', err.message, Date.now() - t0);
           throw err;
         }
       }, 15_000);

@@ -16,6 +16,7 @@ Key rules:
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
 - Breakpoints may report unverified until the module/class loads — that is normal.
+- list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass nextCursor back to read only new output.
 - attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward.
 - Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.
@@ -40,7 +41,7 @@ Prefer the debugger over print-debugging whenever you would need more than one e
 
 ## Root-cause discipline
 - State a hypothesis before setting breakpoints.
-- Set two breakpoints: last-known-good and first-known-bad; run, inspect, halve the interval (bisection beats line-by-line stepping).
+- Set two breakpoints: last-known-good and first-known-bad; run, inspect, halve the interval (bisection beats line-by-line stepping). Use remove_breakpoint / clear_breakpoints to move the window mid-session, and list_breakpoints to see what is set.
 - At each pause record what you learned, not just where you are.
 - When you find the diverging line, inspect every operand before concluding.
 - After fixing, re-run the same recipe to confirm the state changed as predicted.
@@ -70,8 +71,5 @@ detach_from_process leaves the target running.
 ## Crash diagnosis
 - Launch sessions pause at uncaught exceptions by default with stack + locals live ("none" opts out; "all" also stops on caught raises; Ruby has no uncaught filter so its crashes still terminate). Attach applies no default.
 - lastStop.description/text carry the exception class and message; where supported (Python/JS/Java/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
-
-## Current limitations
-- No breakpoint list/remove tools yet: track what you set.
 
 The full skill (with per-language reference files) lives in skills/debugging/ of the mcp-debugger repo.`;

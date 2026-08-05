@@ -700,6 +700,19 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       const finalSession = this._getSessionById(sessionId);
       const finalState = finalSession.state;
 
+      // The worker applies initialBreakpoints itself, but its setBreakpoints
+      // responses never reach this store — without a re-sync, pre-launch
+      // breakpoints would stay verified:false forever on adapters that don't
+      // push breakpoint events (issue #236). Replace-all with the identical
+      // set is idempotent; syncBreakpointsForFile no-ops unless live.
+      if (finalSession.breakpoints.size > 0 &&
+          (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED)) {
+        const files = [...new Set(Array.from(finalSession.breakpoints.values()).map(bp => bp.file))];
+        for (const file of files) {
+          await this.syncBreakpointsForFile(finalSession, file);
+        }
+      }
+
       this.logger.info(
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
       );

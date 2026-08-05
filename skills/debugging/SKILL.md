@@ -45,7 +45,7 @@ Rules that prevent 90% of failed sessions:
 ## Root-cause discipline
 
 1. State a hypothesis about where reality diverges from expectation *before* setting breakpoints.
-2. Set at most two breakpoints: last-known-good and first-known-bad. Run, inspect, halve the interval. Bisection beats stepping line-by-line from the top.
+2. Set at most two breakpoints: last-known-good and first-known-bad. Run, inspect, halve the interval. Bisection beats stepping line-by-line from the top. Move the window mid-session with `remove_breakpoint` / `clear_breakpoints`; `list_breakpoints` shows what is currently set (with verified state and adapter ids).
 3. At each pause, record what you *learned* (variable values, actual control flow), not just where you are.
 4. When the diverging line is found, inspect every input to that line before concluding — the bug is usually an operand, not the operator.
 5. Fix, then re-run the same session recipe to confirm the observed state changed as predicted.
@@ -75,7 +75,6 @@ attach_to_process {sessionId, host: "localhost", port: 5678, localRoot: "<local 
 
 ## Current limitations (be honest with yourself)
 
-- No breakpoint listing/removal tools yet: track what you set; re-creating the session resets breakpoints.
 - `pause_execution` support varies by adapter; prefer breakpoints over pausing a free-running program.
 
 ## Language specifics

@@ -381,7 +381,9 @@ You can also evaluate arbitrary expressions in the current debug context:
 
 ## Fully Implemented Features
 
-All 22 tools are fully implemented, including:
+All 25 tools are fully implemented, including:
+
+- **list_breakpoints / remove_breakpoint / clear_breakpoints**: Full breakpoint lifecycle management. Listing shows each breakpoint's verified state and adapter-assigned id; removal (by id, or file+line) and clearing take effect immediately while the program is running or paused, and still work after the program exits so breakpoints can be adjusted before a relaunch.
 
 - **pause_execution**: Sends a DAP pause request and returns immediately; paused state is updated asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
 - **get_output**: Returns the debuggee's stdout/stderr/console output, buffered per launch from DAP output events. Cursor-based (`since`/`nextSince`) for incremental polling; output stays readable after the program exits until the session is closed. The same data is exposed as a subscribable MCP resource (`debug://sessions/{id}/output`).
@@ -397,4 +399,4 @@ All 22 tools are fully implemented, including:
 
 ---
 
-*Last updated: 2026-08-02 - All 22 tools including get_output (debuggee output capture, issue #218) are fully implemented*
+*Last updated: 2026-08-05 - All 25 tools including breakpoint management (list/remove/clear, issue #236) are fully implemented*

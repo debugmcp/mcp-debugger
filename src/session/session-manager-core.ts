@@ -395,8 +395,14 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Deferred breakpoint verification/relocation pushed by the adapter after
     // the setBreakpoints response (e.g. debugpy verifying once the module
-    // loads). Match by adapter-assigned id first; fall back to (file, line)
-    // with the same exact-path semantics as the per-file re-send (issue #236).
+    // loads). Match by adapter-assigned id first; fall back to (file, line).
+    // The path fallback tolerates case differences between Windows-style
+    // paths: adapters canonicalize differently (js-debug lowercases the
+    // drive letter) and Windows paths are case-insensitive anyway (#236).
+    const windowsPathish = /^[a-z]:[\\/]/i;
+    const samePath = (a: string, b: string): boolean =>
+      a === b ||
+      (windowsPathish.test(a) && windowsPathish.test(b) && a.toLowerCase() === b.toLowerCase());
     const handleBreakpoint = (body: DebugProtocol.BreakpointEvent['body']) => {
       const eventBp = body?.breakpoint;
       if (!eventBp) {
@@ -407,7 +413,8 @@ export abstract class SessionManagerCore extends EventEmitter {
         ? all.find(bp => bp.adapterId === eventBp.id)
         : undefined;
       if (!target && eventBp.source?.path !== undefined && typeof eventBp.line === 'number') {
-        target = all.find(bp => bp.file === eventBp.source?.path && bp.line === eventBp.line);
+        const eventPath = eventBp.source.path;
+        target = all.find(bp => samePath(bp.file, eventPath) && bp.line === eventBp.line);
       }
       if (!target) {
         this.logger.debug(

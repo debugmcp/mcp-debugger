@@ -152,6 +152,28 @@ describe('SessionManager - DAP Operations', () => {
     });
   });
 
+  describe('launch-time breakpoint verification sync', () => {
+    // Breakpoints queued before start_debugging are sent by the proxy worker
+    // as initialBreakpoints, but that path's setBreakpoints responses never
+    // reach the session store. After a successful launch the SessionManager
+    // re-syncs each breakpoint file so the store learns verified/adapterId.
+    it('marks pre-launch breakpoints verified in the store once the launch completes', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      expect(bp.verified).toBe(false);
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+    });
+  });
+
   describe('listBreakpoints', () => {
     it('lists queued breakpoints sorted by file then line before launch', async () => {
       const session = await sessionManager.createSession({
@@ -468,6 +490,41 @@ describe('SessionManager - DAP Operations', () => {
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
       expect(stored.adapterId).toBe(77);
+    });
+
+    it('matches Windows paths case-insensitively (js-debug lowercases drive letters)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'C:\\proj\\app.js');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }) => ({
+                verified: false,
+                line: bp.line
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+      const bp = await sessionManager.setBreakpoint(session.id, 'C:\\proj\\app.js', 9);
+      expect(bp.verified).toBe(false);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 1, verified: true, line: 9, source: { path: 'c:\\proj\\app.js' } }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(1);
     });
 
     it('ignores breakpoint events that match no stored breakpoint', async () => {
