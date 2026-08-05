@@ -10,6 +10,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/** Keep in sync with the CODELLDB_VERSION default in scripts/vendor-codelldb.js */
+export const DEFAULT_CODELLDB_VERSION = '1.11.8';
+
 /**
  * Resolve the CodeLLDB executable path based on platform
  */
@@ -100,11 +103,11 @@ export async function getCodeLLDBVersion(): Promise<string | null> {
     try {
       const versionData = await fs.readFile(versionFile, 'utf-8');
       const parsed = JSON.parse(versionData);
-      return parsed.version || '1.11.0';
+      return parsed.version || DEFAULT_CODELLDB_VERSION;
     } catch {
       // Continue to next candidate
     }
   }
   
-  return '1.11.0'; // Default version fallback
+  return DEFAULT_CODELLDB_VERSION; // Default version fallback
 }
