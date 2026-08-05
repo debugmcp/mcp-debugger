@@ -138,6 +138,12 @@ export class MessageParser {
         if (bpObj.condition !== undefined && typeof bpObj.condition !== 'string') {
           throw new Error(`Breakpoint 'condition' must be a string if provided`);
         }
+        if (bpObj.logMessage !== undefined && typeof bpObj.logMessage !== 'string') {
+          throw new Error(`Breakpoint 'logMessage' must be a string if provided`);
+        }
+        if (bpObj.suspendPolicy !== undefined && bpObj.suspendPolicy !== 'all' && bpObj.suspendPolicy !== 'thread') {
+          throw new Error(`Breakpoint 'suspendPolicy' must be 'all' or 'thread' if provided`);
+        }
       }
     }
 

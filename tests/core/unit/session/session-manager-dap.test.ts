@@ -152,6 +152,74 @@ describe('SessionManager - DAP Operations', () => {
     });
   });
 
+  describe('logpoints (logMessage)', () => {
+    it('stores logMessage and sends it on the live setBreakpoints path', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      const bp = await sessionManager.setBreakpoint(
+        session.id, 'test.py', 20, undefined, undefined, 'value is {x}'
+      );
+
+      expect(bp.logMessage).toBe('value is {x}');
+      expect(dependencies.mockProxyManager.dapRequestCalls[0].args.breakpoints[0]).toMatchObject({
+        line: 20,
+        logMessage: 'value is {x}'
+      });
+      const [listed] = sessionManager.listBreakpoints(session.id);
+      expect(listed.logMessage).toBe('value is {x}');
+    });
+
+    it('carries logMessage and suspendPolicy into the launch-time initialBreakpoints snapshot', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.setBreakpoint(
+        session.id, 'test.py', 20, 'x > 1', 'thread', 'value is {x}'
+      );
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const startConfig = dependencies.mockProxyManager.startCalls[0];
+      expect(startConfig.initialBreakpoints).toEqual([
+        expect.objectContaining({
+          file: 'test.py',
+          line: 20,
+          condition: 'x > 1',
+          suspendPolicy: 'thread',
+          logMessage: 'value is {x}'
+        })
+      ]);
+    });
+
+    it('allows condition and logMessage together', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      await sessionManager.setBreakpoint(
+        session.id, 'test.py', 21, 'x > 5', undefined, 'big x: {x}'
+      );
+
+      expect(dependencies.mockProxyManager.dapRequestCalls[0].args.breakpoints[0]).toMatchObject({
+        line: 21,
+        condition: 'x > 5',
+        logMessage: 'big x: {x}'
+      });
+    });
+  });
+
   describe('launch-time breakpoint verification sync', () => {
     // Breakpoints queued before start_debugging are sent by the proxy worker
     // as initialBreakpoints, but that path's setBreakpoints responses never
@@ -980,6 +1048,31 @@ describe('SessionManager - DAP Operations', () => {
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
 
       expect(sessionManager.getSession(session.id)?.adapterCapabilities).toEqual(capsWithExceptionInfo);
+    });
+
+    it('annotates stored logpoints when live capabilities do not advertise logpoint support (issue #235)', async () => {
+      const session = await createPausedSession();
+      const bp = await sessionManager.setBreakpoint(
+        session.id, 'test.py', 20, undefined, undefined, 'x is {x}'
+      );
+
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', { supportsLogPoints: false });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.id).toBe(bp.id);
+      expect(stored.message).toMatch(/logpoint/i);
+    });
+
+    it('leaves logpoints unannotated when live capabilities advertise support', async () => {
+      const session = await createPausedSession();
+      await sessionManager.setBreakpoint(
+        session.id, 'test.py', 20, undefined, undefined, 'x is {x}'
+      );
+
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', { supportsLogPoints: true });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.message).toBeUndefined();
     });
 
     it('requests exceptionInfo on exception stops and merges the result into lastStop', async () => {

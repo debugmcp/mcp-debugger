@@ -57,6 +57,7 @@ attach_to_process     {"sessionId": "<id>", "processId": 12345, "sourcePaths": [
 - Compiler-generated noise is filtered from variables automatically: `<>c__DisplayClass*` closures, `CS$<>*` temporaries, `<>t__`/`<>s__` async state-machine fields, `$VB$*`.
 - Stack traces show user code only by default — frames without source and `System.*`/`Microsoft.*` frames are hidden. Pass `includeInternals: true` to `get_stack_trace` to see everything.
 - Supports .NET Core / .NET 5+ and .NET Framework 4.8 (CoreCLR and Desktop CLR).
+- Logpoints are NOT supported by netcoredbg: `set_breakpoint` with `logMessage` fails fast with a clear error.
 
 ## Troubleshooting
 

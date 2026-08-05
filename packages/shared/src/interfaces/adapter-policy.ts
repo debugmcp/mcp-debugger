@@ -54,6 +54,15 @@ export interface AdapterPolicy {
   supportsReverseStartDebugging: boolean;
 
   /**
+   * Static pre-launch knowledge of DAP logpoint (SourceBreakpoint.logMessage)
+   * support (issue #235). `true`/`false` gate set_breakpoint synchronously
+   * before live capabilities exist; `undefined` means unknown — the request
+   * is accepted with a warning and re-checked against the adapter's real
+   * capabilities at launch.
+   */
+  supportsLogPoints?: boolean;
+
+  /**
    * Strategy for how to create/attach to the child session when reverse startDebugging occurs
    */
   childSessionStrategy: ChildSessionStrategy;

@@ -8,6 +8,7 @@ import {
   SessionState,
   SessionLifecycleState,
   sanitizePayloadForLogging,
+  toSourceBreakpoint,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ManagedSession, ToolchainValidationState } from './session-store.js';
@@ -128,11 +129,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     const adapterPort = await this.findFreePort();
 
     const initialBreakpoints = Array.from(session.breakpoints.values()).map((bp) => {
-      // Breakpoint file path has been validated by server.ts before reaching here
+      // Breakpoint file path has been validated by server.ts before reaching here.
+      // Carry every per-breakpoint field (condition, logMessage, suspendPolicy) —
+      // dropping one here silently loses it for the whole launch (#235).
       return {
         file: bp.file, // Use the validated path
         line: bp.line,
         condition: bp.condition,
+        logMessage: bp.logMessage,
+        suspendPolicy: bp.suspendPolicy,
       };
     });
 
@@ -843,7 +848,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     file: string,
     line: number,
     condition?: string,
-    suspendPolicy?: 'all' | 'thread'
+    suspendPolicy?: 'all' | 'thread',
+    logMessage?: string
   ): Promise<Breakpoint> {
     const session = this._getSessionById(sessionId);
 
@@ -859,7 +865,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `[SessionManager setBreakpoint] Using validated file path "${file}" for session ${sessionId}`
     );
 
-    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, suspendPolicy, verified: false };
+    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, suspendPolicy, logMessage, verified: false };
 
     if (!session.breakpoints) session.breakpoints = new Map();
     session.breakpoints.set(bpId, newBreakpoint);
@@ -905,11 +911,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           'setBreakpoints',
           {
             source: { path: file },
-            breakpoints: allBpsForFile.map(bp => ({
-              line: bp.line,
-              condition: bp.condition,
-              ...(bp.suspendPolicy ? { suspendPolicy: bp.suspendPolicy } : {}),
-            })),
+            breakpoints: allBpsForFile.map(toSourceBreakpoint),
           }
         );
       if (

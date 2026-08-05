@@ -91,6 +91,25 @@ export class UnsupportedLanguageError extends McpError {
 }
 
 /**
+ * A debug feature was requested that the session's adapter does not support
+ * (e.g. a logpoint on an adapter without SourceBreakpoint.logMessage support).
+ */
+export class UnsupportedFeatureError extends McpError {
+  public readonly feature: string;
+  public readonly language: string;
+
+  constructor(feature: string, language: string, detail?: string) {
+    super(
+      McpErrorCode.InvalidParams,
+      `${feature} not supported by the ${language} adapter${detail ? `: ${detail}` : ''}`,
+      { feature, language }
+    );
+    this.feature = feature;
+    this.language = language;
+  }
+}
+
+/**
  * Proxy not running error
  */
 export class ProxyNotRunningError extends McpError {

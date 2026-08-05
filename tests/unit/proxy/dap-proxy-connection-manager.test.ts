@@ -570,9 +570,32 @@ describe('DapConnectionManager', () => {
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
         source: { path: sourcePath, name: 'source.py' },
-        breakpoints: [{ line: 10, condition: undefined }]
+        breakpoints: [{ line: 10 }]
       });
       expect(result).toBe(response);
+    });
+
+    it('forwards logMessage and suspendPolicy fields (issue #235)', async () => {
+      const response: DebugProtocol.SetBreakpointsResponse = {
+        seq: 1,
+        type: 'response',
+        request_seq: 1,
+        command: 'setBreakpoints',
+        success: true,
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      };
+      mockDapClient.sendRequest.mockResolvedValue(response);
+
+      await connectionManager.setBreakpoints(
+        mockDapClient as any,
+        sourcePath,
+        [{ line: 10, condition: 'x > 1', logMessage: 'x is {x}', suspendPolicy: 'thread' }]
+      );
+
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
+        source: { path: sourcePath, name: 'source.py' },
+        breakpoints: [{ line: 10, condition: 'x > 1', logMessage: 'x is {x}', suspendPolicy: 'thread' }]
+      });
     });
 
     it('should set multiple breakpoints', async () => {
@@ -607,9 +630,9 @@ describe('DapConnectionManager', () => {
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
         source: { path: sourcePath, name: 'source.py' },
         breakpoints: [
-          { line: 10, condition: undefined },
-          { line: 20, condition: undefined },
-          { line: 30, condition: undefined }
+          { line: 10 },
+          { line: 20 },
+          { line: 30 }
         ]
       });
       expect(result.body.breakpoints).toHaveLength(3);

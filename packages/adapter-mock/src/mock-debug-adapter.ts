@@ -131,7 +131,9 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
         DebugFeature.CONDITIONAL_BREAKPOINTS,
         DebugFeature.FUNCTION_BREAKPOINTS,
         DebugFeature.VARIABLE_PAGING,
-        DebugFeature.SET_VARIABLE
+        DebugFeature.SET_VARIABLE,
+        // Matches mock-adapter-process's initialize response (issue #235)
+        DebugFeature.LOG_POINTS
       ],
     };
   }

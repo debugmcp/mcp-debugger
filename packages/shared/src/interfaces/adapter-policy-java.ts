@@ -1,4 +1,4 @@
-/**
+﻿/**
  * JavaAdapterPolicy - policy for Java Debug Adapter (JDI bridge / JdiDapServer)
  *
  * JdiDapServer speaks DAP over TCP natively using JDI. It uses a non-standard
@@ -13,6 +13,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const JavaAdapterPolicy: AdapterPolicy = {
   name: 'java',
+  supportsLogPoints: false,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

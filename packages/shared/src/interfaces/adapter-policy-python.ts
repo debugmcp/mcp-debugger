@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PythonAdapterPolicy - policy for Python Debug Adapter (debugpy)
  *
  * Encodes debugpy specific behaviors and variable handling logic.
@@ -11,6 +11,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const PythonAdapterPolicy: AdapterPolicy = {
   name: 'python',
+  supportsLogPoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {
@@ -294,7 +295,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
 
     // Attach: debugpy is already listening as a DAP server next to the target
     // (python -m debugpy --listen host:port), so there is no adapter process
-    // to spawn — connect directly.
+    // to spawn â€” connect directly.
     if (launchConfig.request === 'attach') {
       const connect = launchConfig.connect as { host?: string; port?: number } | undefined;
       const host = connect?.host

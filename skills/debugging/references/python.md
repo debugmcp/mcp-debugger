@@ -59,6 +59,7 @@ Shorthand: `create_debug_session { "language": "python", "host": "127.0.0.1", "p
 - **Set breakpoints on executable lines** (assignments, calls, returns). Comments, blank lines, and bare `def`/`class` lines misbehave.
 - **evaluate_expression** runs in debugpy's `variables` (watch-style) context by default. Reads and arithmetic are reliable; whether mutations like `x = 5` take effect depends on debugpy — verify with a follow-up evaluate before relying on one. Collections are truncated at 300 items.
 - **Output capture works for Python** (`redirectOutput`): `print()` and stderr land in `get_output` entries, readable during and after the run until the session closes.
+- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing.
 
 ## Troubleshooting
 

@@ -17,6 +17,7 @@ Key rules:
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
 - Breakpoints may report unverified until the module/class loads — that is normal.
 - list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.
+- Logpoints: set_breakpoint with logMessage ("order={orderId}") logs the interpolated message to get_output WITHOUT pausing — the prod-safe way to watch values on a hot path (Python/JS/Go/Rust; not Java/.NET).
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass nextCursor back to read only new output.
 - attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward.
 - Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.
@@ -42,6 +43,7 @@ Prefer the debugger over print-debugging whenever you would need more than one e
 ## Root-cause discipline
 - State a hypothesis before setting breakpoints.
 - Set two breakpoints: last-known-good and first-known-bad; run, inspect, halve the interval (bisection beats line-by-line stepping). Use remove_breakpoint / clear_breakpoints to move the window mid-session, and list_breakpoints to see what is set.
+- When pausing is too disruptive (hot loops, live/attached processes), use a logpoint instead: set_breakpoint with logMessage "x={x}" streams interpolated values into get_output at full speed (Python/JS/Go/Rust).
 - At each pause record what you learned, not just where you are.
 - When you find the diverging line, inspect every operand before concluding.
 - After fixing, re-run the same recipe to confirm the state changed as predicted.

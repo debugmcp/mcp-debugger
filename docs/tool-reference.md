@@ -135,7 +135,8 @@ Sets a breakpoint in a source file.
 - `sessionId` (string, required): The ID of the debug session.
 - `file` (string, required): Path to the source file (absolute or relative to project root).
 - `line` (number, required): Line number where to set breakpoint (1-indexed).
-- `condition` (string, optional): Conditional expression for the breakpoint *(not verified to work)*.
+- `condition` (string, optional): Conditional expression — only break (or log) when it evaluates truthy.
+- `logMessage` (string, optional): Create a **logpoint** instead of a pausing breakpoint — see [Logpoints](#logpoints) below.
 - `suspendPolicy` (string, optional): Suspend policy when the breakpoint is hit — `"all"` suspends all threads (default), `"thread"` suspends only the event thread. Only supported by the Java/JDI adapter.
 
 **Response:**
@@ -165,6 +166,20 @@ Sets a breakpoint in a source file.
 - The response includes the absolute path even if you provide a relative path
 - Setting breakpoints on non-executable lines (comments, blank lines, declarations) may cause unexpected behavior
 - Executable lines that work well: assignments, function calls, conditionals, returns
+
+#### Logpoints
+
+Passing `logMessage` turns the breakpoint into a DAP logpoint: when the line is hit the program does **not** pause — the message is logged and execution continues at full speed. Expressions in `{curly braces}` are interpolated with live values (e.g. `"order={orderId} total={total}"`), and the messages arrive in the session output, readable via [`get_output`](#get_output) and the `debug://sessions/{id}/output` resource. `condition` may be combined with `logMessage` — the message is only logged when the condition holds.
+
+This is the prod-safe just-in-time diagnostics primitive: attach to a live process, plant logpoints at suspect lines, read interpolated values from `get_output` — no pauses, no pre-instrumented logging.
+
+Support is adapter-dependent:
+
+| Adapters | Behavior |
+|---|---|
+| Python, JavaScript/TypeScript, Go, Rust, mock | Supported — logs without pausing |
+| Java, .NET | Not supported — `set_breakpoint` with `logMessage` fails fast with a clear error |
+| Ruby | Unknown — accepted with a warning; validated against the adapter's capabilities at launch |
 
 ---
 

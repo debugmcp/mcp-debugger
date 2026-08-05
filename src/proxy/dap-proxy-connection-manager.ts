@@ -11,7 +11,7 @@ import {
   ExtendedInitializeArgs
 } from './dap-proxy-interfaces.js';
 import type { AdapterPolicy } from '@debugmcp/shared';
-import { sanitizePayloadForLogging } from '@debugmcp/shared';
+import { sanitizePayloadForLogging, toSourceBreakpoint, type BreakpointFields } from '@debugmcp/shared';
 
 export class DapConnectionManager {
   // Increased initial delay to give debugpy more time to start
@@ -273,12 +273,9 @@ export class DapConnectionManager {
   async setBreakpoints(
     client: IDapClient,
     sourcePath: string,
-    breakpoints: { line: number; condition?: string }[]
+    breakpoints: BreakpointFields[]
   ): Promise<DebugProtocol.SetBreakpointsResponse> {
-    const sourceBreakpoints: DebugProtocol.SourceBreakpoint[] = breakpoints.map(bp => ({
-      line: bp.line,
-      condition: bp.condition
-    }));
+    const sourceBreakpoints: DebugProtocol.SourceBreakpoint[] = breakpoints.map(toSourceBreakpoint);
 
     const setBreakpointsArgs: DebugProtocol.SetBreakpointsArguments = {
       source: { path: sourcePath, name: path.basename(sourcePath) },

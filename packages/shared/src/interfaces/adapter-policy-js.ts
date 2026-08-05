@@ -10,6 +10,7 @@ import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './ada
 import { resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
+import { toSourceBreakpoint, type BreakpointFields } from '../utils/to-source-breakpoint.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
 /**
@@ -23,6 +24,7 @@ export interface JsAdapterState extends AdapterSpecificState {
 
 export const JsDebugAdapterPolicy: AdapterPolicy = {
   name: 'js-debug',
+  supportsLogPoints: true,
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',
   buildChildStartArgs: (pendingId: string, parentConfig: Record<string, unknown>) => {
@@ -279,13 +281,14 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     }
     
     try {
-      // Group queued breakpoints by file
-      const grouped: Map<string, Array<{ line: number; condition?: string }>> = new Map();
+      // Group queued breakpoints by file, mapping via the shared
+      // toSourceBreakpoint so no per-breakpoint field is dropped (#235)
+      const grouped: Map<string, DebugProtocol.SourceBreakpoint[]> = new Map();
       for (const bp of breakpoints.values()) {
         // Type assertion for bp since it's 'unknown' in the interface
-        const breakpoint = bp as { file: string; line: number; condition?: string };
+        const breakpoint = bp as { file: string } & BreakpointFields;
         const arr = grouped.get(breakpoint.file) || [];
-        arr.push({ line: breakpoint.line, condition: breakpoint.condition });
+        arr.push(toSourceBreakpoint(breakpoint));
         grouped.set(breakpoint.file, arr);
       }
       for (const [file, bps] of grouped) {

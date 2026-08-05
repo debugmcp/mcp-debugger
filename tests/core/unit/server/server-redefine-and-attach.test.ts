@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tests for redefine_classes tool and attach stopOnEntry behavior
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -79,7 +79,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.success).toBe(true);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'attach-session', '/app/app.rb', 18, undefined, undefined
+        'attach-session', '/app/app.rb', 18, undefined, undefined, undefined
       );
     });
   });

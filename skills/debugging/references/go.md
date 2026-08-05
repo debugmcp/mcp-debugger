@@ -52,6 +52,7 @@ Not supported. The Go adapter implements launch mode only — `attach_to_process
 - Exception breakpoints `panic` and `fatal` are enabled by default — panics stop the debugger without any setup (`get_stack_trace` reports `stopReason`).
 - Delve's variable rendering auto-dereferences pointers, shows slices with len/cap, and maps as key-value pairs.
 - Use absolute paths for `file` and `scriptPath`; breakpoints must be on executable statements.
+- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing (Delve).
 
 ## Troubleshooting
 
