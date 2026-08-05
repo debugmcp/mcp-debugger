@@ -223,6 +223,27 @@ describe('MessageParser', () => {
       });
     });
 
+    it('accepts logMessage and suspendPolicy on initial breakpoints (issue #235)', () => {
+      const payload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        executablePath: '/usr/bin/python3',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/home/user/script.py',
+        initialBreakpoints: [
+          { file: 'test.py', line: 10, logMessage: 'x is {x}', suspendPolicy: 'thread' }
+        ]
+      };
+
+      const result = MessageParser.validateInitPayload(payload);
+      expect(result.initialBreakpoints?.[0]).toMatchObject({
+        logMessage: 'x is {x}',
+        suspendPolicy: 'thread'
+      });
+    });
+
     it('should throw on invalid breakpoints', () => {
       const invalidBreakpoints = [
         [{}], // Missing file and line
@@ -230,7 +251,9 @@ describe('MessageParser', () => {
         [{ line: 10 }], // Missing file
         [{ file: 123, line: 10 }], // Invalid file type
         [{ file: 'test.py', line: 'abc' }], // Non-numeric line string still fails
-        [{ file: 'test.py', line: 10, condition: 123 }] // Invalid condition type
+        [{ file: 'test.py', line: 10, condition: 123 }], // Invalid condition type
+        [{ file: 'test.py', line: 10, logMessage: 123 }], // Invalid logMessage type
+        [{ file: 'test.py', line: 10, suspendPolicy: 'sometimes' }] // Invalid suspendPolicy value
       ];
 
       invalidBreakpoints.forEach(breakpoints => {

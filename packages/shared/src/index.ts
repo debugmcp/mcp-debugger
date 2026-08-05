@@ -215,3 +215,4 @@ export {
   sanitizeStderrTail
 } from './utils/env-sanitizer.js';
 export { LineBuffer } from './utils/line-buffer.js';
+export { toSourceBreakpoint, type BreakpointFields } from './utils/to-source-breakpoint.js';

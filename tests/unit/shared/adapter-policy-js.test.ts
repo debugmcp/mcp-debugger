@@ -177,11 +177,47 @@ describe('JsDebugAdapterPolicy', () => {
         'setBreakpoints',
         expect.objectContaining({
           source: { path: '/workspace/app.js' },
-          breakpoints: [{ line: 12, condition: undefined }]
+          breakpoints: [{ line: 12 }]
         })
       );
       expect(sendDapRequest).toHaveBeenCalledWith('configurationDone', {});
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(true);
+    });
+
+    it('forwards logMessage on handshake breakpoints (issue #235)', async () => {
+      vi.useFakeTimers();
+      const events = new EventEmitter();
+      const sendDapRequest = vi.fn().mockResolvedValue({});
+
+      const proxyManager = Object.assign(events, {
+        isRunning: () => true,
+        sendDapRequest,
+        removeListener: events.removeListener.bind(events)
+      });
+
+      const context = {
+        proxyManager,
+        sessionId: 'session-1',
+        dapLaunchArgs: { stopOnEntry: false },
+        scriptPath: '/workspace/app.js',
+        breakpoints: new Map([
+          ['bp1', { file: '/workspace/app.js', line: 12, logMessage: 'x is {x}' }]
+        ])
+      };
+
+      const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
+      await Promise.resolve();
+      events.emit('dap-event', { event: 'initialized' });
+      await vi.advanceTimersByTimeAsync(0);
+      await handshakePromise;
+      vi.useRealTimers();
+
+      expect(sendDapRequest).toHaveBeenCalledWith(
+        'setBreakpoints',
+        expect.objectContaining({
+          breakpoints: [{ line: 12, logMessage: 'x is {x}' }]
+        })
+      );
     });
 
     it('does not miss an initialized event emitted before the initialize response settles (issue #242)', async () => {

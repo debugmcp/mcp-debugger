@@ -551,6 +551,20 @@ export abstract class SessionManagerCore extends EventEmitter {
           `[SessionManager ${sessionId}] Exception filter drift check skipped: ${err instanceof Error ? err.message : String(err)}`
         );
       }
+
+      // Logpoint drift check (issue #235): a logpoint was accepted pre-launch
+      // (policy support true or unknown), but the live adapter does not
+      // advertise supportsLogPoints — it will likely pause instead of log.
+      if (capabilities.supportsLogPoints !== true) {
+        for (const bp of session.breakpoints.values()) {
+          if (bp.logMessage !== undefined) {
+            this.logger.warn(
+              `[SessionManager ${sessionId}] Logpoint at ${bp.file}:${bp.line} but the adapter does not advertise supportsLogPoints — it may pause instead of logging`
+            );
+            bp.message = 'Adapter does not advertise logpoint support — this may pause instead of logging';
+          }
+        }
+      }
     };
     proxyManager.on('adapter-capabilities', handleAdapterCapabilities);
     handlers.set('adapter-capabilities', handleAdapterCapabilities);

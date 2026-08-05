@@ -61,6 +61,7 @@ Not supported. The Rust adapter implements launch mode only — `attach_to_proce
 - Debug builds only: release builds need `debug = true` in `[profile.release]` and still inline/optimize away variables. Prefer `opt-level = 0`.
 - GNU builds of crates that import Windows DLLs (`tokio`, `windows-sys`, `parking_lot_core`, ...) need full MinGW binutils — rustup's self-contained toolchain lacks `as.exe`, so `dlltool` fails. Install via MSYS2 (`mingw-w64-x86_64-binutils`, `-gcc`) and prepend `C:\msys64\mingw64\bin` to PATH.
 - Macro-generated and generic code can behave oddly: step targets may land in expansions, and generic fns need a concrete instantiation for breakpoints. For async (tokio), set breakpoints inside async blocks, not on the `async fn` line.
+- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing (CodeLLDB).
 
 ## Troubleshooting
 

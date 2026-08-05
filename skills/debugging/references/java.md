@@ -59,6 +59,7 @@ continue_execution    {"sessionId": "<id>"}   // required with suspend=y to let 
 - Breakpoints must sit on executable lines (assignments, calls, conditionals) — not blank lines, comments, imports, or bare declarations. Conditional breakpoints (`condition`) and exception breakpoints are supported. Exception stops carry `lastStop.description` ("FQCN: message") and, a moment after the pause, best-effort `lastStop.exceptionInfo` (exceptionId, breakMode, message, adapter-side stack trace).
 - `set_breakpoint` accepts a Java-only `suspendPolicy`: `"all"` (default) suspends every thread; `"thread"` suspends only the hitting thread.
 - Debuggee stdout/stderr is forwarded — `get_output {"sessionId": "<id>", "since": 0}` works for Java; poll with the returned `nextSince`.
+- Logpoints are NOT supported by the JDI bridge: `set_breakpoint` with `logMessage` fails fast with a clear error.
 
 ## Troubleshooting
 

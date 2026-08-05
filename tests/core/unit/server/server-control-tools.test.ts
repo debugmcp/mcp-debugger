@@ -83,6 +83,7 @@ describe('Server Control Tools Tests', () => {
         expect.stringContaining('/path/to/test.py'),
         10,
         undefined,
+        undefined,
         undefined
       );
       
@@ -126,6 +127,7 @@ describe('Server Control Tools Tests', () => {
         expect.stringContaining('/path/to/test.py'),
         20,
         'x > 10',
+        undefined,
         undefined
       );
     });
@@ -163,7 +165,8 @@ describe('Server Control Tools Tests', () => {
         expect.stringContaining('/path/to/test.py'),
         30,
         undefined,
-        'thread'
+        'thread',
+        undefined
       );
     });
 

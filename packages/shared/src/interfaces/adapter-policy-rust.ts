@@ -1,4 +1,4 @@
-/**
+﻿/**
  * RustAdapterPolicy - policy for Rust Debug Adapter (CodeLLDB)
  *
  * Encodes CodeLLDB specific behaviors and variable handling logic.
@@ -12,6 +12,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const RustAdapterPolicy: AdapterPolicy = {
   name: 'rust',
+  supportsLogPoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

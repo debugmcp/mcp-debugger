@@ -64,6 +64,7 @@ Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1"
 - **Child processes are not auto-attached.** `autoAttachChildProcesses` defaults to `false`; pass it as `true` in `dapLaunchArgs` to debug `spawn`-ed Node children.
 - **Output capture works** (`outputCapture: 'std'`): stdout/stderr appear as `get_output` entries; entries without a category default to `console`.
 - **Frame IDs are adapter-assigned.** Use the `id` field from `get_stack_trace` frames for `get_scopes` — not the array index, not 0. Locals scopes are named `Local`/`Block`, and values come back as strings.
+- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing.
 
 ## Troubleshooting
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * GoAdapterPolicy - policy for Go Debug Adapter (Delve/dlv)
  *
  * Encodes Delve-specific behaviors and variable handling logic.
@@ -12,6 +12,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const GoAdapterPolicy: AdapterPolicy = {
   name: 'go',
+  supportsLogPoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {
@@ -234,7 +235,7 @@ export const GoAdapterPolicy: AdapterPolicy = {
       sendLaunchBeforeConfig: true,
       // Delve has no caught/uncaught distinction; both modes arm the same
       // filters. IDs are Delve's real ones ('unrecovered-panic',
-      // 'runtime-fatal-throw', dlv 1.26) — the shorthand 'panic'/'fatal'
+      // 'runtime-fatal-throw', dlv 1.26) â€” the shorthand 'panic'/'fatal'
       // shipped in #220 was silently accepted-and-ignored by Delve, caught
       // live by the #243 capability drift warning during #244 validation.
       exceptionFilters: {

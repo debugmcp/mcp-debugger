@@ -27,7 +27,7 @@ import {
 } from '../utils/type-guards.js';
 import { SilentDapCommandPayload } from './dap-extensions.js';
 // Import adapter policies from shared package
-import type { AdapterPolicy, AdapterSpecificState } from '@debugmcp/shared';
+import type { AdapterPolicy, AdapterSpecificState, BreakpointFields } from '@debugmcp/shared';
 import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -746,16 +746,20 @@ export class DapProxyWorker {
       // Set initial breakpoints if provided
       if (this.currentInitPayload.initialBreakpoints?.length) {
         this.logger!.info('[Worker] Initial breakpoints payload:', this.currentInitPayload.initialBreakpoints);
-        const groupedBreakpoints = new Map<string, { line: number; condition?: string }[]>();
+        const groupedBreakpoints = new Map<string, BreakpointFields[]>();
 
         for (const breakpoint of this.currentInitPayload.initialBreakpoints) {
           const filePath = path.resolve(breakpoint.file);
           if (!groupedBreakpoints.has(filePath)) {
             groupedBreakpoints.set(filePath, []);
           }
+          // Full per-breakpoint fields — the connection manager maps them via
+          // the shared toSourceBreakpoint, so nothing is dropped here (#235)
           groupedBreakpoints.get(filePath)!.push({
             line: breakpoint.line,
-            condition: breakpoint.condition
+            condition: breakpoint.condition,
+            logMessage: breakpoint.logMessage,
+            suspendPolicy: breakpoint.suspendPolicy
           });
         }
 

@@ -21,6 +21,7 @@ import {
   SessionNotFoundError,
   SessionTerminatedError,
   UnsupportedLanguageError,
+  UnsupportedFeatureError,
   ProxyNotRunningError
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
@@ -86,6 +87,7 @@ interface ToolArguments {
   file?: string;
   line?: number;
   condition?: string;
+  logMessage?: string;
   breakpointId?: string;
   scriptPath?: string;
   args?: string[];
@@ -308,6 +310,37 @@ export class DebugMcpServer {
   }
 
   /**
+   * Hybrid logpoint gating (issue #235): a known-unsupported adapter — the
+   * live DAP capabilities (post-launch) or the static policy table says
+   * supportsLogPoints is false — is a hard error; known-supported passes;
+   * unknown support passes with a warning and is re-checked against the
+   * adapter's real capabilities at launch (drift warning).
+   */
+  private validateLogPointSupport(sessionId: string): { warning?: string } {
+    const session = this.sessionManager.getSession(sessionId);
+    const liveCaps = session?.adapterCapabilities;
+    const policy = this.sessionManager.getSessionPolicy(sessionId);
+    const language = session?.language ?? policy.name;
+
+    if (liveCaps) {
+      if (liveCaps.supportsLogPoints === true) {
+        return {};
+      }
+      throw new UnsupportedFeatureError('Logpoints (logMessage)', String(language),
+        'the adapter did not advertise supportsLogPoints');
+    }
+    if (policy.supportsLogPoints === false) {
+      throw new UnsupportedFeatureError('Logpoints (logMessage)', String(language));
+    }
+    if (policy.supportsLogPoints === true) {
+      return {};
+    }
+    return {
+      warning: `Logpoint support for ${String(language)} is unknown; it will be validated against the adapter's capabilities at launch`
+    };
+  }
+
+  /**
    * Shared catch for the breakpoint management tools: session-lifecycle
    * failures become {success: false} results (same contract as
    * set_breakpoint's catch); everything else re-throws.
@@ -444,11 +477,11 @@ export class DebugMcpServer {
     return fileCheck.effectivePath;
   }
 
-  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string, suspendPolicy?: 'all' | 'thread'): Promise<Breakpoint> {
+  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string, suspendPolicy?: 'all' | 'thread', logMessage?: string): Promise<Breakpoint> {
     this.validateSession(sessionId);
 
     const effectiveFile = await this.resolveBreakpointFile(sessionId, file, { requireExists: true });
-    return this.sessionManager.setBreakpoint(sessionId, effectiveFile, line, condition, suspendPolicy);
+    return this.sessionManager.setBreakpoint(sessionId, effectiveFile, line, condition, suspendPolicy, logMessage);
   }
 
   // The breakpoint management tools below deliberately skip validateSession's
@@ -667,7 +700,7 @@ export class DebugMcpServer {
           { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000)' } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: {} } },
-          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string', description: 'Optional expression: only break (or log) when it evaluates truthy' }, logMessage: { type: 'string', description: 'Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. "order={orderId} total={total}"). Messages arrive in get_output while the program runs at full speed. Supported by Python, JavaScript, Go, and Rust adapters; not by Java or .NET' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: ['sessionId', 'file', 'line'] } },
           { name: 'list_breakpoints', description: 'List all breakpoints in a session with their verified state and adapter-assigned ids. Works before launch (queued, verified=false), while running or paused, and after the program exits', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only list breakpoints in this file' } }, required: ['sessionId'] } },
           { name: 'remove_breakpoint', description: 'Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, breakpointId: { type: 'string', description: 'Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line' }, file: { type: 'string', description: 'Alternative addressing: source file path (use together with line)' }, line: { type: 'number', description: 'Alternative addressing: line number (use together with file)' } }, required: ['sessionId'] } },
           { name: 'clear_breakpoints', description: 'Remove all breakpoints in a session, or all breakpoints in one file. Clearing zero breakpoints is success. Takes effect immediately while the program is running or paused', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only clear breakpoints in this file' } }, required: ['sessionId'] } },
@@ -853,8 +886,14 @@ export class DebugMcpServer {
               }
               
               try {
-                const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition, args.suspendPolicy);
-                
+                // Logpoint gating (issue #235): hard error for known-unsupported
+                // adapters; a warning when support is unknown pre-launch.
+                const logPointGate = args.logMessage !== undefined
+                  ? this.validateLogPointSupport(args.sessionId)
+                  : {};
+
+                const breakpoint = await this.setBreakpoint(args.sessionId, args.file, args.line, args.condition, args.suspendPolicy, args.logMessage);
+
                 // Log breakpoint event
                 this.logger.info('debug:breakpoint', {
                   event: 'set',
@@ -891,15 +930,17 @@ export class DebugMcpServer {
                   });
                 }
                 
-                result = { content: [{ type: 'text', text: JSON.stringify({ 
-                  success: true, 
-                  breakpointId: breakpoint.id, 
-                  file: breakpoint.file, 
-                  line: breakpoint.line, 
-                  verified: breakpoint.verified, 
-                  message: breakpoint.message || `Breakpoint set at ${breakpoint.file}:${breakpoint.line}`,
-                  // Only add warning if there's a message from debugpy (indicating a problem)
-                  warning: breakpoint.message || undefined,
+                const warnings = [breakpoint.message, logPointGate.warning].filter(Boolean);
+                result = { content: [{ type: 'text', text: JSON.stringify({
+                  success: true,
+                  breakpointId: breakpoint.id,
+                  file: breakpoint.file,
+                  line: breakpoint.line,
+                  verified: breakpoint.verified,
+                  logMessage: breakpoint.logMessage,
+                  message: breakpoint.message || `${breakpoint.logMessage !== undefined ? 'Logpoint' : 'Breakpoint'} set at ${breakpoint.file}:${breakpoint.line}`,
+                  // Warn on adapter validation messages and unknown logpoint support
+                  warning: warnings.length > 0 ? warnings.join('; ') : undefined,
                   // Include context if available
                   context: context || undefined
                 }) }] };

@@ -146,6 +146,8 @@ const child = spawn('node', ['child.js']);
 
 ### Log Points
 
+A `logMessage` turns the breakpoint into a logpoint: execution does not pause — the interpolated message (expressions in `{curly braces}`) arrives in the session output, readable via `get_output`.
+
 ```json
 {
   "tool": "set_breakpoint",

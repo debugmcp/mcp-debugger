@@ -97,7 +97,9 @@ function createConnection(input?: Readable, output?: Writable): DAPConnection {
 class MockDebugAdapterProcess {
   private connection?: DAPConnection;
   private server?: net.Server;
-  private breakpoints = new Map<string, DebugProtocol.Breakpoint[]>();
+  // Stored breakpoints carry logMessage so the run simulation can treat
+  // logpoints as non-stopping (issue #235)
+  private breakpoints = new Map<string, Array<DebugProtocol.Breakpoint & { logMessage?: string }>>();
   private variableHandles = new Map<number, { variables: Array<{ name: string; value: string; type: string }> }>();
   private nextVariableReference = 1000;
   private currentLine = 1;
@@ -305,7 +307,7 @@ class MockDebugAdapterProcess {
         supportSuspendDebuggee: false,
         supportsDelayedStackTraceLoading: false,
         supportsLoadedSourcesRequest: false,
-        supportsLogPoints: false,
+        supportsLogPoints: true,
         supportsTerminateThreadsRequest: false,
         supportsSetExpression: false,
         supportsTerminateRequest: true,
@@ -406,6 +408,35 @@ class MockDebugAdapterProcess {
     } as DebugProtocol.StoppedEvent);
   }
 
+  /**
+   * Walk the sorted breakpoint list from a line: logpoint lines emit an
+   * output event (naive {expr} interpolation) and do NOT stop; the first
+   * plain breakpoint after the line is the next stop (issue #235).
+   */
+  private findNextStop(fromLine: number): (DebugProtocol.Breakpoint & { logMessage?: string }) | undefined {
+    const allBreakpoints = Array.from(this.breakpoints.values())
+      .flat()
+      .filter(bp => bp.line !== undefined)
+      .sort((a, b) => (a.line || 0) - (b.line || 0));
+
+    for (const bp of allBreakpoints) {
+      if ((bp.line || 0) <= fromLine) continue;
+      if (bp.logMessage !== undefined) {
+        const interpolated = bp.logMessage.replace(/\{[^}]*\}/g, '42');
+        this.log(`Logpoint at line ${bp.line}: ${interpolated}`);
+        this.sendEvent({
+          seq: 0,
+          type: 'event',
+          event: 'output',
+          body: { category: 'console', output: `${interpolated}\n` }
+        } as DebugProtocol.OutputEvent);
+        continue;
+      }
+      return bp;
+    }
+    return undefined;
+  }
+
   private handleLaunch(request: DebugProtocol.LaunchRequest): void {
     const args = request.arguments as DebugProtocol.LaunchRequestArguments & { stopOnEntry?: boolean; program?: string };
     this.log(`Launching with args: ${JSON.stringify(args)}`);
@@ -437,16 +468,13 @@ class MockDebugAdapterProcess {
       }, 100);
     } else {
       this.log(`Running without stopOnEntry, will hit first breakpoint`);
-      // Simulate running to first breakpoint
+      // Simulate running to the first stopping breakpoint (logpoints log
+      // without stopping — see findNextStop)
       setTimeout(() => {
-        const allBreakpoints = Array.from(this.breakpoints.entries())
-          .flatMap(([filePath, bps]) => bps.map(bp => ({ filePath, ...bp })))
-          .filter(bp => bp.line !== undefined)
-          .sort((a, b) => (a.line || 0) - (b.line || 0));
+        const firstStop = this.findNextStop(0);
 
-        if (allBreakpoints.length > 0) {
-          const firstBreakpoint = allBreakpoints[0];
-          this.currentLine = firstBreakpoint.line || 1;
+        if (firstStop) {
+          this.currentLine = firstStop.line || 1;
           this.log(`Hit first breakpoint at line ${this.currentLine}`);
           this.sendEvent({
             seq: 0,
@@ -493,11 +521,13 @@ class MockDebugAdapterProcess {
           id: Math.floor(Math.random() * 100000),
           verified: true,
           line: bp.line,
-          source: args.source
-        });
+          source: args.source,
+          // Retained for the run simulation: logpoint lines log instead of stopping
+          ...(bp.logMessage !== undefined ? { logMessage: bp.logMessage } : {})
+        } as DebugProtocol.Breakpoint & { logMessage?: string });
       }
     }
-    
+
     this.breakpoints.set(args.source?.path || 'unknown', breakpoints);
     
     this.sendResponse({
@@ -650,20 +680,13 @@ class MockDebugAdapterProcess {
       }
     });
     
-    // Simulate hitting a breakpoint or terminating
+    // Simulate hitting a breakpoint or terminating (logpoints log without
+    // stopping — see findNextStop)
     setTimeout(() => {
-      const allBreakpoints = Array.from(this.breakpoints.entries())
-        .flatMap(([filePath, bps]) => bps.map(bp => ({ filePath, ...bp })))
-        .filter(bp => bp.line !== undefined)
-        .sort((a, b) => (a.line || 0) - (b.line || 0));
+      const nextBreakpoint = this.findNextStop(this.currentLine);
 
-      this.log(`Continue from line ${this.currentLine}. All breakpoints: ${allBreakpoints.map(bp => bp.line).join(', ')}`);
+      this.log(`Next stopping breakpoint after line ${this.currentLine}: ${nextBreakpoint ? nextBreakpoint.line : 'none'}`);
 
-      // Find next breakpoint after current line
-      const nextBreakpoint = allBreakpoints.find(bp => (bp.line || 0) > this.currentLine);
-      
-      this.log(`Next breakpoint after line ${this.currentLine}: ${nextBreakpoint ? nextBreakpoint.line : 'none'}`);
-      
       if (nextBreakpoint && nextBreakpoint.line) {
         // Hit the next breakpoint
         this.currentLine = nextBreakpoint.line;

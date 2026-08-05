@@ -17,7 +17,7 @@ export interface ProxyConfig {
   scriptArgs?: string[];
   stopOnEntry?: boolean;
   justMyCode?: boolean;
-  initialBreakpoints?: Array<{ file: string; line: number; condition?: string }>;
+  initialBreakpoints?: Array<{ file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
   dryRunSpawn?: boolean;
   breakOnExceptions?: ExceptionBreakMode;
   launchConfig?: LanguageSpecificLaunchConfig;

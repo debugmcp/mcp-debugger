@@ -215,6 +215,8 @@ export interface Breakpoint {
   line: number;
   /** Conditional expression (if any) */
   condition?: string;
+  /** Logpoint: log this interpolated message instead of pausing (DAP logMessage) */
+  logMessage?: string;
   /** Suspend policy: 'all' suspends all threads (default), 'thread' only suspends the event thread */
   suspendPolicy?: 'all' | 'thread';
   /** Whether the breakpoint is verified */

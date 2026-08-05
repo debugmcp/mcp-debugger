@@ -46,9 +46,10 @@ Rules that prevent 90% of failed sessions:
 
 1. State a hypothesis about where reality diverges from expectation *before* setting breakpoints.
 2. Set at most two breakpoints: last-known-good and first-known-bad. Run, inspect, halve the interval. Bisection beats stepping line-by-line from the top. Move the window mid-session with `remove_breakpoint` / `clear_breakpoints`; `list_breakpoints` shows what is currently set (with verified state and adapter ids).
-3. At each pause, record what you *learned* (variable values, actual control flow), not just where you are.
-4. When the diverging line is found, inspect every input to that line before concluding — the bug is usually an operand, not the operator.
-5. Fix, then re-run the same session recipe to confirm the observed state changed as predicted.
+3. When pausing is too disruptive (hot loops, live or attached processes), use a **logpoint**: `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without stopping the program (Python/JS/Go/Rust; Java and .NET reject it with a clear error).
+4. At each pause, record what you *learned* (variable values, actual control flow), not just where you are.
+5. When the diverging line is found, inspect every input to that line before concluding — the bug is usually an operand, not the operator.
+6. Fix, then re-run the same session recipe to confirm the observed state changed as predicted.
 
 ## Program output
 

@@ -504,6 +504,41 @@ describe('DapProxyWorker', () => {
       }
     });
     
+    it('forwards logMessage and suspendPolicy on initial breakpoints (issue #235)', async () => {
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockResolvedValue({ body: { breakpoints: [] } }),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn()
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'lp-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'lp-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/app.py',
+        initialBreakpoints: [
+          { file: '/work/app.py', line: 5, logMessage: 'x is {x}', suspendPolicy: 'thread' }
+        ]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      expect(connectionStub.setBreakpoints).toHaveBeenCalledTimes(1);
+      const [, , sentBreakpoints] = connectionStub.setBreakpoints.mock.calls[0];
+      expect(sentBreakpoints).toEqual([
+        expect.objectContaining({ line: 5, logMessage: 'x is {x}', suspendPolicy: 'thread' })
+      ]);
+    });
+
     it('forwards DAP breakpoint events to the parent (issue #236)', () => {
       const connectionStub = {
         setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {

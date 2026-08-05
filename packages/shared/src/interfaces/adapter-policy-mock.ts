@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MockAdapterPolicy - policy for Mock Debug Adapter (testing)
  *
  * Encodes mock adapter behaviors for testing purposes.
@@ -10,6 +10,7 @@ import type { DapClientBehavior } from './dap-client-behavior.js';
 
 export const MockAdapterPolicy: AdapterPolicy = {
   name: 'mock',
+  supportsLogPoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

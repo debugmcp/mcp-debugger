@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DotnetAdapterPolicy - DAP proxy policy for the .NET debug adapter (netcoredbg)
  *
  * This policy encodes all netcoredbg-specific behaviors that the DAP proxy worker
@@ -13,7 +13,7 @@
  * ## DAP sequence
  *
  * netcoredbg follows the standard DAP sequence:
- *   initialize → response → initialized event → attach/launch → configurationDone
+ *   initialize â†’ response â†’ initialized event â†’ attach/launch â†’ configurationDone
  *
  * ## Adapter ID
  *
@@ -41,6 +41,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const DotnetAdapterPolicy: AdapterPolicy = {
   name: 'dotnet',
+  supportsLogPoints: false,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {
@@ -226,7 +227,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   getInitializationBehavior: () => {
     return {
       // netcoredbg sends the `initialized` event immediately after the
-      // `initialize` response — before any launch/attach request.
+      // `initialize` response â€” before any launch/attach request.
       // We must defer configurationDone handling and send launch first,
       // because netcoredbg requires launch before configurationDone.
       sendLaunchBeforeConfig: true,

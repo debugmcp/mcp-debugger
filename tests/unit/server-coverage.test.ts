@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Targeted tests to improve coverage for server.ts
  * Focus on error paths and edge cases
  */
@@ -159,7 +159,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         .rejects.toThrow('Cannot get stack trace: no active proxy');
     });
 
-    it('should handle getStackTrace without current thread — falls back to threads request', async () => {
+    it('should handle getStackTrace without current thread â€” falls back to threads request', async () => {
       const mockProxy = {
         getCurrentThreadId: () => null,
         isRunning: () => true,
@@ -359,7 +359,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       expect(result.verified).toBe(true);
       expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
-      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', 'com.example.MyClass', 42, undefined, undefined);
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', 'com.example.MyClass', 42, undefined, undefined, undefined);
     });
 
     it('should skip file existence check for inner class notation via policy', async () => {
@@ -484,7 +484,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
 
-      // Non-Java policy (no isNonFileSourceIdentifier) — even "MyClass" gets file-checked
+      // Non-Java policy (no isNonFileSourceIdentifier) â€” even "MyClass" gets file-checked
       mockSessionManager.getSessionPolicy.mockReturnValue({});
 
       (server as any).fileChecker = {
@@ -709,10 +709,10 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       // Both calls should have been made
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.example.Foo', 10, undefined, undefined
+        'test-session', 'com.example.Foo', 10, undefined, undefined, undefined
       );
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.example.Foo', 20, undefined, undefined
+        'test-session', 'com.example.Foo', 20, undefined, undefined, undefined
       );
     });
 
@@ -761,10 +761,10 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       // Both should be set independently
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.a.Foo', 10, undefined, undefined
+        'test-session', 'com.a.Foo', 10, undefined, undefined, undefined
       );
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.b.Foo', 15, undefined, undefined
+        'test-session', 'com.b.Foo', 15, undefined, undefined, undefined
       );
     });
   });

@@ -85,7 +85,7 @@ Total pause time: a few hundred milliseconds around one request. No redeploy, no
 
 - **Never expose a debug port through a Service, Ingress, or LoadBalancer.** debugpy/rdbg listeners are unauthenticated and allow code execution. `kubectl port-forward` keeps the connection inside your kubeconfig's auth.
 - Prefer **on-demand listeners** over always-on ones: add the debug flag to a single quarantined pod when diagnosing (e.g. remove the pod from the Service selector, then `kubectl debug`/patch it), rather than baking it into the deployment as this tutorial image does for convenience.
-- Target **staging, canaries, or quarantined sick pods** — pausing a pod that's in a live serving rotation stops its traffic for the duration of the pause. Logpoint-style non-breaking inspection is tracked in [#235](https://github.com/debugmcp/mcp-debugger/issues/235).
+- Target **staging, canaries, or quarantined sick pods** — pausing a pod that's in a live serving rotation stops its traffic for the duration of the pause. For non-breaking inspection, pass `logMessage` to `set_breakpoint` (a logpoint, [#235](https://github.com/debugmcp/mcp-debugger/issues/235)): the pod keeps serving at full speed while interpolated values stream into `get_output`.
 - The same flow works for **Ruby** (`rdbg --open --port`) — see [docs/ruby/README.md](../ruby/README.md) — and **Java** (JDWP agent), covering three of the most common backend runtimes.
 
 ## Cleanup
