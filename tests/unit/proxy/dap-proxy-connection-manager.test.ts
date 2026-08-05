@@ -298,6 +298,7 @@ describe('DapConnectionManager', () => {
         onThread: vi.fn(),
         onExited: vi.fn(),
         onTerminated: vi.fn(),
+        onBreakpoint: vi.fn(),
         onError: vi.fn(),
         onClose: vi.fn()
       };
@@ -311,6 +312,7 @@ describe('DapConnectionManager', () => {
       expect(mockDapClient.on).toHaveBeenCalledWith('thread', handlers.onThread);
       expect(mockDapClient.on).toHaveBeenCalledWith('exited', handlers.onExited);
       expect(mockDapClient.on).toHaveBeenCalledWith('terminated', handlers.onTerminated);
+      expect(mockDapClient.on).toHaveBeenCalledWith('breakpoint', handlers.onBreakpoint);
       expect(mockDapClient.on).toHaveBeenCalledWith('error', handlers.onError);
       expect(mockDapClient.on).toHaveBeenCalledWith('close', handlers.onClose);
     });

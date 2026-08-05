@@ -450,11 +450,14 @@ After adding the MCP server:
 - **Status Check**: After restart, type `/mcp` in Claude Code to see connected servers
 
 ### Available Tools After Integration
-Once connected, the following 22 MCP tools become available:
+Once connected, the following 25 MCP tools become available:
 - `create_debug_session` - Start a new debug session
 - `list_debug_sessions` - List active debug sessions
 - `list_supported_languages` - Show available language adapters
 - `set_breakpoint` - Set breakpoints in code
+- `list_breakpoints` - List a session's breakpoints with verified state and adapter ids
+- `remove_breakpoint` - Remove a breakpoint by id or file+line (works live)
+- `clear_breakpoints` - Remove all breakpoints, optionally scoped to one file
 - `start_debugging` - Begin debugging a script
 - `attach_to_process` - Attach debugger to a running process
 - `detach_from_process` - Detach debugger from a process

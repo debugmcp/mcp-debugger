@@ -504,6 +504,32 @@ describe('DapProxyWorker', () => {
       }
     });
     
+    it('forwards DAP breakpoint events to the parent (issue #236)', () => {
+      const connectionStub = {
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+          if (handlers.onBreakpoint) client.on('breakpoint', handlers.onBreakpoint);
+        })
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'bp-event-session';
+
+      (worker as any).setupDapEventHandlers();
+
+      const body = { reason: 'changed', breakpoint: { id: 7, verified: true, line: 12 } };
+      (mockDapClient as unknown as EventEmitter).emit('breakpoint', body);
+
+      const forwarded = mockMessageSender.send.mock.calls
+        .map(([m]) => m)
+        .filter((m) => m.type === 'dapEvent' && m.event === 'breakpoint');
+      expect(forwarded).toHaveLength(1);
+      expect(forwarded[0].body).toEqual(body);
+    });
+
     it('startAdapterAndConnect should emit adapter_connected for queueing policy', async () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',

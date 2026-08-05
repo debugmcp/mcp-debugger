@@ -8,7 +8,8 @@ import {
   SessionState,
   AdapterPolicy,
   getPolicyForLanguage,
-  DebugLanguage
+  DebugLanguage,
+  Breakpoint
 } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -22,6 +23,22 @@ export abstract class SessionManagerData extends SessionManagerCore {
    */
   protected selectPolicy(language: string | DebugLanguage): AdapterPolicy {
     return getPolicyForLanguage(language);
+  }
+
+  /**
+   * List the session's breakpoints, optionally filtered to one file (exact
+   * path match, same semantics as the per-file DAP re-send). Works in every
+   * lifecycle state — including after the debuggee exits — since breakpoints
+   * are session state, not debuggee state.
+   */
+  listBreakpoints(sessionId: string, file?: string): Breakpoint[] {
+    const session = this._getSessionById(sessionId);
+    const breakpoints = Array.from(session.breakpoints.values())
+      .filter(bp => file === undefined || bp.file === file);
+    breakpoints.sort((a, b) =>
+      a.file === b.file ? a.line - b.line : a.file.localeCompare(b.file)
+    );
+    return breakpoints;
   }
 
   async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {

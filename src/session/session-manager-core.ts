@@ -393,6 +393,59 @@ export abstract class SessionManagerCore extends EventEmitter {
     proxyManager.on('continued', handleContinued);
     handlers.set('continued', handleContinued);
 
+    // Deferred breakpoint verification/relocation pushed by the adapter after
+    // the setBreakpoints response (e.g. debugpy verifying once the module
+    // loads). Match by adapter-assigned id first; fall back to (file, line).
+    // The path fallback tolerates case differences between Windows-style
+    // paths: adapters canonicalize differently (js-debug lowercases the
+    // drive letter) and Windows paths are case-insensitive anyway (#236).
+    const windowsPathish = /^[a-z]:[\\/]/i;
+    const samePath = (a: string, b: string): boolean =>
+      a === b ||
+      (windowsPathish.test(a) && windowsPathish.test(b) && a.toLowerCase() === b.toLowerCase());
+    const handleBreakpoint = (body: DebugProtocol.BreakpointEvent['body']) => {
+      const eventBp = body?.breakpoint;
+      if (!eventBp) {
+        return;
+      }
+      const all = Array.from(session.breakpoints.values());
+      let target = typeof eventBp.id === 'number'
+        ? all.find(bp => bp.adapterId === eventBp.id)
+        : undefined;
+      if (!target && eventBp.source?.path !== undefined && typeof eventBp.line === 'number') {
+        const eventPath = eventBp.source.path;
+        target = all.find(bp => samePath(bp.file, eventPath) && bp.line === eventBp.line);
+      }
+      if (!target) {
+        this.logger.debug(
+          `[SessionManager ${sessionId}] Breakpoint event matched no stored breakpoint (id=${eventBp.id}, ${eventBp.source?.path}:${eventBp.line})`
+        );
+        return;
+      }
+      target.verified = eventBp.verified;
+      if (typeof eventBp.line === 'number') {
+        target.line = eventBp.line;
+      }
+      if (eventBp.message !== undefined) {
+        target.message = eventBp.message;
+      }
+      if (typeof eventBp.id === 'number') {
+        target.adapterId = eventBp.id;
+      }
+      this.logger.info('debug:breakpoint', {
+        event: 'changed',
+        sessionId,
+        sessionName: session.name,
+        breakpointId: target.id,
+        file: target.file,
+        line: target.line,
+        verified: target.verified,
+        timestamp: Date.now(),
+      });
+    };
+    proxyManager.on('breakpoint', handleBreakpoint);
+    handlers.set('breakpoint', handleBreakpoint);
+
     // Named function for terminated event
     const handleTerminated = () => {
       this.logger.debug(`[SessionManager] handleTerminated: session=${sessionId} currentState=${session.state}`);

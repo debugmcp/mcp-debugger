@@ -221,6 +221,8 @@ export interface Breakpoint {
   verified: boolean;
   /** Validation message from DAP adapter */
   message?: string;
+  /** Breakpoint id assigned by the debug adapter (from setBreakpoints responses / breakpoint events) */
+  adapterId?: number;
 }
 
 /**

@@ -163,6 +163,9 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `list_debug_sessions` | List all active sessions | ✅ Implemented |
 | `list_supported_languages` | Show available language adapters | ✅ Implemented |
 | `set_breakpoint` | Set a breakpoint in a file | ✅ Implemented |
+| `list_breakpoints` | List a session's breakpoints with verified state | ✅ Implemented |
+| `remove_breakpoint` | Remove a breakpoint by id or file+line | ✅ Implemented |
+| `clear_breakpoints` | Remove all breakpoints (optionally per file) | ✅ Implemented |
 | `start_debugging` | Start debugging a script | ✅ Implemented |
 | `attach_to_process` | Attach debugger to a running process | ✅ Implemented |
 | `detach_from_process` | Detach debugger from a process | ✅ Implemented |

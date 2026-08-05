@@ -2028,27 +2028,24 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
       }
 
-      // Remove first BP (line 10) by deleting from session.breakpoints
+      // Remove first BP (line 10) via the real API — removal itself re-syncs
       const firstBpId = Array.from(mockSession.breakpoints.entries())
         .find(([_, bp]: [string, any]) => bp.line === 10)?.[0];
       expect(firstBpId).toBeDefined();
-      mockSession.breakpoints.delete(firstBpId!);
-
-      // Set another BP to trigger a new DAP request (simulates re-sync)
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
           breakpoints: [
             { verified: true, line: 20 },
             { verified: true, line: 30 },
-            { verified: true, line: 40 },
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 40);
+      const result = await operations.removeBreakpoint('test-session', firstBpId!);
 
+      expect(result.removed?.line).toBe(10);
       const lastBps = getLastDapBreakpoints();
-      expect(lastBps).toHaveLength(3);
-      expect(lastBps.map(bp => bp.line)).toEqual([20, 30, 40]);
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps.map(bp => bp.line)).toEqual([20, 30]);
     });
 
     it('should remove middle BP: remaining 2 BPs are sent correctly', async () => {
@@ -2065,27 +2062,24 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
       }
 
-      // Remove middle BP (line 20)
+      // Remove middle BP (line 20) via the real API
       const middleBpId = Array.from(mockSession.breakpoints.entries())
         .find(([_, bp]: [string, any]) => bp.line === 20)?.[0];
       expect(middleBpId).toBeDefined();
-      mockSession.breakpoints.delete(middleBpId!);
-
-      // Trigger new DAP request
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
           breakpoints: [
             { verified: true, line: 10 },
             { verified: true, line: 30 },
-            { verified: true, line: 40 },
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 40);
+      const result = await operations.removeBreakpoint('test-session', middleBpId!);
 
+      expect(result.removed?.line).toBe(20);
       const lastBps = getLastDapBreakpoints();
-      expect(lastBps).toHaveLength(3);
-      expect(lastBps.map(bp => bp.line)).toEqual([10, 30, 40]);
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps.map(bp => bp.line)).toEqual([10, 30]);
     });
 
     it('should remove last BP: remaining 2 BPs are sent correctly', async () => {
@@ -2102,27 +2096,24 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
       }
 
-      // Remove last BP (line 30)
+      // Remove last BP (line 30) via the real API
       const lastBpId = Array.from(mockSession.breakpoints.entries())
         .find(([_, bp]: [string, any]) => bp.line === 30)?.[0];
       expect(lastBpId).toBeDefined();
-      mockSession.breakpoints.delete(lastBpId!);
-
-      // Trigger new DAP request
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
           breakpoints: [
             { verified: true, line: 10 },
             { verified: true, line: 20 },
-            { verified: true, line: 40 },
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 40);
+      const result = await operations.removeBreakpoint('test-session', lastBpId!);
 
+      expect(result.removed?.line).toBe(30);
       const lastBps = getLastDapBreakpoints();
-      expect(lastBps).toHaveLength(3);
-      expect(lastBps.map(bp => bp.line)).toEqual([10, 20, 40]);
+      expect(lastBps).toHaveLength(2);
+      expect(lastBps.map(bp => bp.line)).toEqual([10, 20]);
     });
 
     it('should not include BPs from different files in the DAP request', async () => {

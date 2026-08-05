@@ -86,6 +86,7 @@ interface ToolArguments {
   file?: string;
   line?: number;
   condition?: string;
+  breakpointId?: string;
   scriptPath?: string;
   args?: string[];
   dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments>;
@@ -306,6 +307,21 @@ export class DebugMcpServer {
     }
   }
 
+  /**
+   * Shared catch for the breakpoint management tools: session-lifecycle
+   * failures become {success: false} results (same contract as
+   * set_breakpoint's catch); everything else re-throws.
+   */
+  private handleBreakpointToolError(error: unknown): { content: [{ type: 'text'; text: string }] } {
+    if (error instanceof McpError &&
+        (error.message.includes('terminated') ||
+         error.message.includes('closed') ||
+         (error.message.includes('not found') && error.message.includes('Session')))) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+    }
+    throw error;
+  }
+
   private validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
     if (value === undefined) {
       return undefined;
@@ -390,34 +406,73 @@ export class DebugMcpServer {
     return this.sessionManager.closeSession(sessionId);
   }
 
-  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string, suspendPolicy?: 'all' | 'thread'): Promise<Breakpoint> {
-    this.validateSession(sessionId);
-
+  /**
+   * Resolve a breakpoint file argument the same way for every breakpoint
+   * tool: Java FQCNs and attach-session paths pass through verbatim; host
+   * paths are resolved (and container-translated) via the file checker so
+   * they string-match the effective paths stored on the session.
+   * With requireExists, a missing file throws (set_breakpoint's behavior);
+   * without it the resolved path is returned regardless, so breakpoints on
+   * files deleted since being set can still be removed.
+   */
+  private async resolveBreakpointFile(
+    sessionId: string,
+    file: string,
+    options?: { requireExists?: boolean }
+  ): Promise<string> {
     // Check if the adapter handles non-file source identifiers (e.g. Java FQCNs)
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     if (policy.isNonFileSourceIdentifier?.(file)) {
-      this.logger.info(`[DebugMcpServer.setBreakpoint] Non-file source identifier detected: ${file}`);
-      return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
+      this.logger.info(`[DebugMcpServer.resolveBreakpointFile] Non-file source identifier detected: ${file}`);
+      return file;
     }
 
     // Attach sessions may debug a target on a remote filesystem (container,
     // pod, another machine); host-side existence checks don't apply. Pass the
     // path through as-is — the debugger knows its own filesystem best.
     if (this.sessionManager.getSession(sessionId)?.attachMode) {
-      this.logger.info(`[DebugMcpServer.setBreakpoint] Attach session: skipping host file check for ${file}`);
-      return this.sessionManager.setBreakpoint(sessionId, file, line, condition, suspendPolicy);
+      this.logger.info(`[DebugMcpServer.resolveBreakpointFile] Attach session: skipping host file check for ${file}`);
+      return file;
     }
 
-    // Check file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(file);
-    if (!fileCheck.exists) {
+    if (options?.requireExists && !fileCheck.exists) {
       throw this.fileNotFoundError('Breakpoint file', file, fileCheck);
     }
 
-    this.logger.info(`[DebugMcpServer.setBreakpoint] File exists: ${fileCheck.effectivePath} (original: ${file})`);
+    this.logger.info(`[DebugMcpServer.resolveBreakpointFile] Resolved ${file} -> ${fileCheck.effectivePath} (exists: ${fileCheck.exists})`);
+    return fileCheck.effectivePath;
+  }
 
-    // Pass the effective path (which has been resolved for container) to session manager
-    return this.sessionManager.setBreakpoint(sessionId, fileCheck.effectivePath, line, condition, suspendPolicy);
+  public async setBreakpoint(sessionId: string, file: string, line: number, condition?: string, suspendPolicy?: 'all' | 'thread'): Promise<Breakpoint> {
+    this.validateSession(sessionId);
+
+    const effectiveFile = await this.resolveBreakpointFile(sessionId, file, { requireExists: true });
+    return this.sessionManager.setBreakpoint(sessionId, effectiveFile, line, condition, suspendPolicy);
+  }
+
+  // The breakpoint management tools below deliberately skip validateSession's
+  // TERMINATED rejection (cf. handleGetOutput): a terminated-but-unclosed
+  // session keeps its breakpoints so they can be listed and adjusted between
+  // launches. Session existence is still enforced by the SessionManager.
+  public listBreakpoints(sessionId: string, file?: string): Breakpoint[] {
+    return this.sessionManager.listBreakpoints(sessionId, file);
+  }
+
+  public async removeBreakpoint(sessionId: string, breakpointId: string): Promise<{ removed?: Breakpoint; warning?: string }> {
+    return this.sessionManager.removeBreakpoint(sessionId, breakpointId);
+  }
+
+  public async removeBreakpointsByLocation(sessionId: string, file: string, line: number): Promise<{ removed: Breakpoint[]; warning?: string }> {
+    const effectiveFile = await this.resolveBreakpointFile(sessionId, file);
+    return this.sessionManager.removeBreakpointsByLocation(sessionId, effectiveFile, line);
+  }
+
+  public async clearBreakpoints(sessionId: string, file?: string): Promise<{ cleared: number; files: string[]; warning?: string }> {
+    const effectiveFile = file !== undefined
+      ? await this.resolveBreakpointFile(sessionId, file)
+      : undefined;
+    return this.sessionManager.clearBreakpoints(sessionId, effectiveFile);
   }
 
   public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
@@ -613,7 +668,10 @@ export class DebugMcpServer {
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, condition: { type: 'string' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: ['sessionId', 'file', 'line'] } },
-          { name: 'start_debugging', description: 'Start debugging a script', inputSchema: { 
+          { name: 'list_breakpoints', description: 'List all breakpoints in a session with their verified state and adapter-assigned ids. Works before launch (queued, verified=false), while running or paused, and after the program exits', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only list breakpoints in this file' } }, required: ['sessionId'] } },
+          { name: 'remove_breakpoint', description: 'Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, breakpointId: { type: 'string', description: 'Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line' }, file: { type: 'string', description: 'Alternative addressing: source file path (use together with line)' }, line: { type: 'number', description: 'Alternative addressing: line number (use together with file)' } }, required: ['sessionId'] } },
+          { name: 'clear_breakpoints', description: 'Remove all breakpoints in a session, or all breakpoints in one file. Clearing zero breakpoints is success. Takes effect immediately while the program is running or paused', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only clear breakpoints in this file' } }, required: ['sessionId'] } },
+          { name: 'start_debugging', description: 'Start debugging a script', inputSchema: {
               type: 'object', 
               properties: { 
                 sessionId: { type: 'string' }, 
@@ -872,6 +930,87 @@ export class DebugMcpServer {
                   // Re-throw all other errors (including file validation errors)
                   throw error;
                 }
+              }
+              break;
+            }
+            case 'list_breakpoints': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
+              }
+              try {
+                const breakpoints = this.listBreakpoints(args.sessionId, args.file);
+                result = { content: [{ type: 'text', text: JSON.stringify({
+                  success: true,
+                  breakpoints,
+                  count: breakpoints.length
+                }) }] };
+              } catch (error) {
+                result = this.handleBreakpointToolError(error);
+              }
+              break;
+            }
+            case 'remove_breakpoint': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
+              }
+              if (!args.breakpointId && (!args.file || args.line === undefined)) {
+                throw new McpError(
+                  McpErrorCode.InvalidParams,
+                  'Provide either breakpointId, or file and line together'
+                );
+              }
+              try {
+                let removed: Breakpoint[];
+                let warning: string | undefined;
+                if (args.breakpointId) {
+                  const res = await this.removeBreakpoint(args.sessionId, args.breakpointId);
+                  removed = res.removed ? [res.removed] : [];
+                  warning = res.warning;
+                  if (removed.length === 0) {
+                    result = { content: [{ type: 'text', text: JSON.stringify({
+                      success: false,
+                      error: `No breakpoint found with id ${args.breakpointId}`
+                    }) }] };
+                    break;
+                  }
+                } else {
+                  const res = await this.removeBreakpointsByLocation(args.sessionId, args.file!, args.line!);
+                  removed = res.removed;
+                  warning = res.warning;
+                  if (removed.length === 0) {
+                    result = { content: [{ type: 'text', text: JSON.stringify({
+                      success: false,
+                      error: `No breakpoint found at ${args.file}:${args.line}`
+                    }) }] };
+                    break;
+                  }
+                }
+                result = { content: [{ type: 'text', text: JSON.stringify({
+                  success: true,
+                  removed,
+                  message: `Removed ${removed.length} breakpoint(s)`,
+                  warning
+                }) }] };
+              } catch (error) {
+                result = this.handleBreakpointToolError(error);
+              }
+              break;
+            }
+            case 'clear_breakpoints': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
+              }
+              try {
+                const res = await this.clearBreakpoints(args.sessionId, args.file);
+                result = { content: [{ type: 'text', text: JSON.stringify({
+                  success: true,
+                  cleared: res.cleared,
+                  files: res.files,
+                  message: `Cleared ${res.cleared} breakpoint(s)`,
+                  warning: res.warning
+                }) }] };
+              } catch (error) {
+                result = this.handleBreakpointToolError(error);
               }
               break;
             }

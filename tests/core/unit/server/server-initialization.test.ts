@@ -129,6 +129,9 @@ describe('Server Initialization Tests', () => {
       expect(toolNames).toContain('create_debug_session');
       expect(toolNames).toContain('list_debug_sessions');
       expect(toolNames).toContain('set_breakpoint');
+      expect(toolNames).toContain('list_breakpoints');
+      expect(toolNames).toContain('remove_breakpoint');
+      expect(toolNames).toContain('clear_breakpoints');
       expect(toolNames).toContain('start_debugging');
       expect(toolNames).toContain('close_debug_session');
       expect(toolNames).toContain('step_over');

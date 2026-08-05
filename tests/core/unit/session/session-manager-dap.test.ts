@@ -119,6 +119,426 @@ describe('SessionManager - DAP Operations', () => {
         condition: 'x > 10'
       });
     });
+
+    it('captures the adapter-assigned breakpoint id from the setBreakpoints response', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }, i: number) => ({
+                id: 55 + i,
+                verified: true,
+                line: bp.line
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+
+      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 15);
+
+      expect(bp.verified).toBe(true);
+      expect(bp.adapterId).toBe(55);
+    });
+  });
+
+  describe('launch-time breakpoint verification sync', () => {
+    // Breakpoints queued before start_debugging are sent by the proxy worker
+    // as initialBreakpoints, but that path's setBreakpoints responses never
+    // reach the session store. After a successful launch the SessionManager
+    // re-syncs each breakpoint file so the store learns verified/adapterId.
+    it('marks pre-launch breakpoints verified in the store once the launch completes', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      expect(bp.verified).toBe(false);
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+    });
+  });
+
+  describe('listBreakpoints', () => {
+    it('lists queued breakpoints sorted by file then line before launch', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.setBreakpoint(session.id, 'b.py', 20);
+      await sessionManager.setBreakpoint(session.id, 'a.py', 30);
+      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
+
+      const breakpoints = sessionManager.listBreakpoints(session.id);
+
+      expect(breakpoints.map(bp => `${bp.file}:${bp.line}`)).toEqual([
+        'a.py:10',
+        'a.py:30',
+        'b.py:20'
+      ]);
+      expect(breakpoints.every(bp => bp.verified === false)).toBe(true);
+      expect(breakpoints.every(bp => typeof bp.id === 'string')).toBe(true);
+    });
+
+    it('filters by file when one is given', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
+      await sessionManager.setBreakpoint(session.id, 'b.py', 20);
+
+      const breakpoints = sessionManager.listBreakpoints(session.id, 'b.py');
+
+      expect(breakpoints).toHaveLength(1);
+      expect(breakpoints[0].file).toBe('b.py');
+    });
+  });
+
+  describe('removeBreakpoint', () => {
+    it('removes a queued breakpoint without any DAP traffic', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+
+      const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
+
+      expect(result.removed?.id).toBe(bp1.id);
+      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
+      expect(dependencies.mockProxyManager.dapRequestCalls).toHaveLength(0);
+    });
+
+    it('re-sends the remaining per-file set when removing while live', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
+
+      expect(result.removed?.id).toBe(bp1.id);
+      expect(dependencies.mockProxyManager.dapRequestCalls).toHaveLength(1);
+      expect(dependencies.mockProxyManager.dapRequestCalls[0]).toMatchObject({
+        command: 'setBreakpoints',
+        args: expect.objectContaining({
+          breakpoints: [expect.objectContaining({ line: 20 })]
+        })
+      });
+    });
+
+    it('sends an empty array when the last breakpoint in a file is removed', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      await sessionManager.removeBreakpoint(session.id, bp.id);
+
+      expect(dependencies.mockProxyManager.dapRequestCalls[0]).toMatchObject({
+        command: 'setBreakpoints',
+        args: expect.objectContaining({ breakpoints: [] })
+      });
+      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(0);
+    });
+
+    it('returns no removed breakpoint for an unknown id', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      const result = await sessionManager.removeBreakpoint(session.id, 'no-such-id');
+
+      expect(result.removed).toBeUndefined();
+    });
+  });
+
+  describe('removeBreakpointsByLocation', () => {
+    it('removes every breakpoint at the given file and line', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.setBreakpoint(session.id, 'test.py', 10, 'x > 1');
+      await sessionManager.setBreakpoint(session.id, 'test.py', 10, 'x > 2');
+      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+
+      const result = await sessionManager.removeBreakpointsByLocation(session.id, 'test.py', 10);
+
+      expect(result.removed).toHaveLength(2);
+      expect(sessionManager.listBreakpoints(session.id).map(bp => bp.line)).toEqual([20]);
+    });
+
+    it('removes nothing when no breakpoint exists at the location', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+
+      const result = await sessionManager.removeBreakpointsByLocation(session.id, 'test.py', 99);
+
+      expect(result.removed).toHaveLength(0);
+      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
+    });
+  });
+
+  describe('clearBreakpoints', () => {
+    it('clears only the given file and re-sends its (now empty) set while live', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
+      await sessionManager.setBreakpoint(session.id, 'a.py', 20);
+      await sessionManager.setBreakpoint(session.id, 'b.py', 30);
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      const result = await sessionManager.clearBreakpoints(session.id, 'a.py');
+
+      expect(result.cleared).toBe(2);
+      expect(result.files).toEqual(['a.py']);
+      expect(dependencies.mockProxyManager.dapRequestCalls).toHaveLength(1);
+      expect(dependencies.mockProxyManager.dapRequestCalls[0]).toMatchObject({
+        command: 'setBreakpoints',
+        args: expect.objectContaining({
+          source: { path: 'a.py' },
+          breakpoints: []
+        })
+      });
+      expect(sessionManager.listBreakpoints(session.id).map(bp => bp.file)).toEqual(['b.py']);
+    });
+
+    it('clears every file when no file is given', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
+      await sessionManager.setBreakpoint(session.id, 'b.py', 20);
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      const result = await sessionManager.clearBreakpoints(session.id);
+
+      expect(result.cleared).toBe(2);
+      expect(result.files.sort()).toEqual(['a.py', 'b.py']);
+      expect(dependencies.mockProxyManager.dapRequestCalls).toHaveLength(2);
+      expect(
+        dependencies.mockProxyManager.dapRequestCalls.every(
+          call => call.command === 'setBreakpoints' && call.args.breakpoints.length === 0
+        )
+      ).toBe(true);
+      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(0);
+    });
+
+    it('reports zero cleared as success with no DAP traffic', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      const result = await sessionManager.clearBreakpoints(session.id);
+
+      expect(result.cleared).toBe(0);
+      expect(result.files).toEqual([]);
+      expect(dependencies.mockProxyManager.dapRequestCalls).toHaveLength(0);
+    });
+  });
+
+  describe('breakpoint management after the debuggee exits', () => {
+    // Unlike setBreakpoint, list/remove/clear deliberately work in TERMINATED
+    // lifecycle: a terminated-but-unclosed session keeps its queued breakpoints
+    // so they can be adjusted before a relaunch (restart workflow, issue #238).
+    it('lists, removes, and clears store-only once the session is terminated', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(session.id)?.sessionLifecycle).toBe('terminated');
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(2);
+
+      const removeResult = await sessionManager.removeBreakpoint(session.id, bp1.id);
+      expect(removeResult.removed?.id).toBe(bp1.id);
+
+      const clearResult = await sessionManager.clearBreakpoints(session.id);
+      expect(clearResult.cleared).toBe(1);
+
+      expect(dependencies.mockProxyManager.dapRequestCalls).toHaveLength(0);
+    });
+
+    it('keeps the store mutation and reports a warning when the live sync fails', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      dependencies.mockProxyManager.shouldFailDapRequests = true;
+
+      const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
+
+      expect(result.removed?.id).toBe(bp1.id);
+      expect(result.warning).toContain('live sync failed');
+      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
+    });
+  });
+
+  describe('DAP breakpoint events', () => {
+    async function createSessionWithUnverifiedBp(adapterId?: number) {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }) => ({
+                ...(adapterId !== undefined ? { id: adapterId } : {}),
+                verified: false,
+                line: bp.line
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+
+      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      expect(bp.verified).toBe(false);
+      return { session, bp };
+    }
+
+    it('applies deferred verification to the stored breakpoint by adapter id', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 55, verified: true, line: 16 }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.line).toBe(16);
+    });
+
+    it('falls back to file and line matching and adopts the adapter id', async () => {
+      const { session } = await createSessionWithUnverifiedBp(undefined);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 77, verified: true, line: 10, source: { path: 'test.py' } }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(77);
+    });
+
+    it('matches Windows paths case-insensitively (js-debug lowercases drive letters)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'C:\\proj\\app.js');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }) => ({
+                verified: false,
+                line: bp.line
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+      const bp = await sessionManager.setBreakpoint(session.id, 'C:\\proj\\app.js', 9);
+      expect(bp.verified).toBe(false);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 1, verified: true, line: 9, source: { path: 'c:\\proj\\app.js' } }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(1);
+    });
+
+    it('ignores breakpoint events that match no stored breakpoint', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 999, verified: true, line: 40, source: { path: 'other.py' } }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(false);
+      expect(stored.line).toBe(10);
+    });
   });
 
   describe('Step Operations', () => {

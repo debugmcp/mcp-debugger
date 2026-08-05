@@ -10,6 +10,9 @@ This document provides a complete reference for all tools available in mcp-debug
    - [close_debug_session](#close_debug_session)
 2. [Breakpoint Management](#breakpoint-management)
    - [set_breakpoint](#set_breakpoint)
+   - [list_breakpoints](#list_breakpoints)
+   - [remove_breakpoint](#remove_breakpoint)
+   - [clear_breakpoints](#clear_breakpoints)
 3. [Execution Control](#execution-control)
    - [start_debugging](#start_debugging)
    - [step_over](#step_over)
@@ -25,6 +28,9 @@ This document provides a complete reference for all tools available in mcp-debug
    - [evaluate_expression](#evaluate_expression)
    - [get_source_context](#get_source_context)
    - [get_output](#get_output)
+5. [Additional Tools](#additional-tools) — list_supported_languages, attach_to_process, detach_from_process, list_threads
+6. [Language-Specific Tools](#language-specific-tools)
+   - [redefine_classes](#redefine_classes)
 
 ---
 
@@ -159,6 +165,85 @@ Sets a breakpoint in a source file.
 - The response includes the absolute path even if you provide a relative path
 - Setting breakpoints on non-executable lines (comments, blank lines, declarations) may cause unexpected behavior
 - Executable lines that work well: assignments, function calls, conditionals, returns
+
+---
+
+### list_breakpoints
+
+Lists all breakpoints in a session with their current verified state and adapter-assigned ids. Works before launch (queued breakpoints, `verified: false`), while running or paused, and after the program exits.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `file` (string, optional): Only list breakpoints in this file.
+
+**Response:**
+```json
+{
+  "success": true,
+  "breakpoints": [
+    {
+      "id": "28e06119-619e-43c0-b029-339cec2615df",
+      "file": "C:\\path\\to\\project\\app.py",
+      "line": 10,
+      "verified": true,
+      "adapterId": 3
+    }
+  ],
+  "count": 1
+}
+```
+
+**Notes:**
+- The array is sorted by file, then line. Conditional breakpoints include their `condition`; Java suspend policies appear as `suspendPolicy`.
+- `adapterId` is the debug adapter's own numeric id for the breakpoint, captured from setBreakpoints responses and breakpoint events. It is absent until the adapter has seen the breakpoint.
+- Verification is eventually consistent: some adapters (js-debug, JDI, netcoredbg) bind breakpoints asynchronously and confirm via DAP breakpoint events shortly after launch or class load.
+
+---
+
+### remove_breakpoint
+
+Removes one breakpoint by id, or every breakpoint at a `file` + `line` location. Takes effect immediately while the program is running or paused (the file's remaining breakpoint set is re-sent to the adapter); also works after the program exits, so breakpoints can be adjusted before a relaunch.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `breakpointId` (string, optional): Breakpoint id from `set_breakpoint` or `list_breakpoints`. Takes precedence over `file` + `line`.
+- `file` (string, optional): Alternative addressing — source file path (use together with `line`). Removes **all** breakpoints at that location.
+- `line` (number, optional): Alternative addressing — line number (use together with `file`).
+
+**Response:**
+```json
+{
+  "success": true,
+  "removed": [
+    { "id": "28e06119-619e-43c0-b029-339cec2615df", "file": "C:\\path\\to\\project\\app.py", "line": 10, "verified": true }
+  ],
+  "message": "Removed 1 breakpoint(s)"
+}
+```
+
+**Notes:**
+- An unknown `breakpointId` (or an empty location) returns `success: false` with an explanatory error.
+- If the live re-send to the adapter fails, the breakpoint is still removed from the session (it will not be re-applied on the next launch) and the response carries a `warning`.
+
+---
+
+### clear_breakpoints
+
+Removes all breakpoints in a session, or all breakpoints in one file. Clearing zero breakpoints is success, not an error.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `file` (string, optional): Only clear breakpoints in this file.
+
+**Response:**
+```json
+{
+  "success": true,
+  "cleared": 2,
+  "files": ["C:\\path\\to\\project\\app.py"],
+  "message": "Cleared 2 breakpoint(s)"
+}
+```
 
 ---
 
