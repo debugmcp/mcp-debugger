@@ -11,6 +11,9 @@ import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
+/** Package prefixes identifying JDK-internal classes in frame names or FQCNs. */
+const JDK_INTERNAL_PREFIXES = ['java.', 'javax.', 'sun.', 'jdk.', 'com.sun.'];
+
 export const JavaAdapterPolicy: AdapterPolicy = {
   name: 'java',
   supportsLogPoints: false,
@@ -205,25 +208,29 @@ export const JavaAdapterPolicy: AdapterPolicy = {
       return frames;
     }
 
-    return frames.filter(frame => {
-      const filePath = frame.file || '';
-      const frameName = frame.name || '';
-
-      // Filter out JDK internal frames
-      if (frameName.startsWith('java.') || frameName.startsWith('javax.') || frameName.startsWith('sun.')) {
-        return false;
-      }
-      if (filePath.includes('/jdk/') || filePath.includes('/rt.jar/')) {
-        return false;
-      }
-
-      return true;
-    });
+    const filtered = frames.filter(frame => !JavaAdapterPolicy.isInternalFrame!(frame));
+    // Never hide the entire stack: a thread parked deep in JDK code (e.g. a
+    // pause inside Thread.sleep on a pure-JDK stack) must still show frames.
+    return filtered.length > 0 ? filtered : frames;
   },
 
   isInternalFrame: (frame: StackFrame): boolean => {
     const frameName = frame.name || '';
-    return frameName.startsWith('java.') || frameName.startsWith('javax.') || frameName.startsWith('sun.');
+    const filePath = frame.file || '';
+
+    if (JDK_INTERNAL_PREFIXES.some(p => frameName.startsWith(p))) {
+      return true;
+    }
+    // When a class has no debug info (AbsentInformationException), the JDI
+    // bridge emits only source.name = declaring type FQCN and no path, which
+    // session-manager maps into `file`. Treat it as a class name only when it
+    // doesn't look like a real file path.
+    const looksLikeFqcn =
+      filePath.length > 0 && JavaAdapterPolicy.isNonFileSourceIdentifier!(filePath);
+    if (looksLikeFqcn && JDK_INTERNAL_PREFIXES.some(p => filePath.startsWith(p))) {
+      return true;
+    }
+    return filePath.includes('/jdk/') || filePath.includes('/rt.jar/');
   },
 
   getAdapterSpawnConfig: (payload) => {
