@@ -1082,6 +1082,38 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(payload.message).toContain('The Locals scope is empty');
     });
 
+    it('surfaces a warning when the scope name carries an adapter warning (optimized Go binary)', async () => {
+      mockSessionManager.getLocalVariables.mockResolvedValue({
+        variables: [],
+        frame: { name: 'main.main', file: 'main.go', line: 10 },
+        scopeName: 'Locals (warning: optimized function)'
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.scopeName).toBe('Locals (warning: optimized function)');
+      expect(payload.warning).toContain('optimizations');
+      expect(payload.warning).toContain('-gcflags');
+    });
+
+    it('does not add a warning for a plain scope name', async () => {
+      mockSessionManager.getLocalVariables.mockResolvedValue({
+        variables: [{ name: 'x', value: '42' }],
+        frame: { name: 'main', file: 'test.py', line: 10 },
+        scopeName: 'Locals'
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.warning).toBeUndefined();
+    });
+
     it('returns graceful JSON for McpError with "not paused"', async () => {
       (server as any).validateSession = vi.fn().mockImplementation(() => {
         throw new McpError(McpErrorCode.InvalidRequest, 'Session is not paused');

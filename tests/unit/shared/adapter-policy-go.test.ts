@@ -88,6 +88,31 @@ describe('GoAdapterPolicy', () => {
     expect(locals).toEqual([{ name: 'x', value: '1' }]);
   });
 
+  it('extracts locals when Delve appends the optimized-function warning to the scope name', () => {
+    const frames = [{ id: 1 }];
+    const scopes = {
+      1: [{ name: 'Locals (warning: optimized function)', variablesReference: 10 }]
+    };
+    const variables = {
+      10: [{ name: 'counter', value: '7' }]
+    };
+
+    const locals = GoAdapterPolicy.extractLocalVariables(
+      frames as any, scopes as any, variables as any
+    );
+
+    expect(locals).toEqual([{ name: 'counter', value: '7' }]);
+  });
+
+  it('does not match unrelated scope names that merely start with "Local"', () => {
+    const locals = GoAdapterPolicy.extractLocalVariables(
+      [{ id: 1 }] as any,
+      { 1: [{ name: 'Localization', variablesReference: 10 }] } as any,
+      { 10: [{ name: 'x', value: '1' }] } as any
+    );
+    expect(locals).toEqual([]);
+  });
+
   it('filters underscore-prefixed variables but keeps blank identifier _', () => {
     const frames = [{ id: 1 }];
     const scopes = {

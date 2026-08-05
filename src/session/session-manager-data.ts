@@ -231,12 +231,19 @@ export abstract class SessionManagerData extends SessionManagerCore {
       
       if (policy.extractLocalVariables) {
         localVars = policy.extractLocalVariables(stackFrames, scopesMap, variablesMap, includeSpecial);
-        
-        // Get the scope name for reporting
-        if (policy.getLocalScopeName) {
-          const scopeNames = policy.getLocalScopeName();
-          scopeName = Array.isArray(scopeNames) ? scopeNames[0] : scopeNames;
-        }
+
+        // Report the ACTUAL scope name the adapter returned, not the policy's
+        // canonical name — adapters may annotate it (e.g. Delve's "Locals
+        // (warning: optimized function)") and that annotation matters to the
+        // caller. Fall back to the canonical name when no scope matches.
+        const canonicalNames = policy.getLocalScopeName
+          ? ([] as string[]).concat(policy.getLocalScopeName())
+          : [];
+        const topFrameScopes = scopesMap[topFrame.id] || [];
+        const matchedScope = topFrameScopes.find(s =>
+          canonicalNames.some(c => s.name === c || s.name.startsWith(c + ' '))
+        );
+        scopeName = matchedScope?.name ?? canonicalNames[0] ?? null;
       } else {
         // Fallback: use first non-global scope from top frame
         const topFrameScopes = scopesMap[topFrame.id] || [];

@@ -863,6 +863,67 @@ describe('SessionManager - DAP Operations', () => {
         ])
       );
     });
+
+    it('extracts Go locals and reports the real scope name when Delve appends the optimized-function warning', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.GO,
+        executablePath: 'dlv'
+      });
+      // Explicit stopOnEntry: Go's policy defaults it to false, which would
+      // leave the mock proxy without an entry stop to emit.
+      await sessionManager.startDebugging(session.id, 'main.go', undefined, { stopOnEntry: true });
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+        switch (command) {
+          case 'stackTrace':
+            return {
+              success: true,
+              body: {
+                stackFrames: [{
+                  id: 1,
+                  name: 'main.main',
+                  source: { path: '/app/main.go' },
+                  line: 12,
+                  column: 0
+                }]
+              }
+            };
+          case 'scopes':
+            return {
+              success: true,
+              body: {
+                scopes: [{
+                  name: 'Locals (warning: optimized function)',
+                  variablesReference: 300,
+                  expensive: false
+                }]
+              }
+            };
+          case 'variables':
+            return {
+              success: true,
+              body: {
+                variables: [
+                  { name: 'counter', value: '7', type: 'int', variablesReference: 0 }
+                ]
+              }
+            };
+          default:
+            return { success: true };
+        }
+      });
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables).toEqual([
+        expect.objectContaining({ name: 'counter', value: '7' })
+      ]);
+      // The ACTUAL adapter scope name (with the warning) must surface, not the
+      // policy's canonical 'Locals'.
+      expect(result.scopeName).toBe('Locals (warning: optimized function)');
+    });
   });
 
   describe('Variable and Stack Inspection', () => {

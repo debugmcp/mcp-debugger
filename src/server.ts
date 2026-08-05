@@ -1927,7 +1927,18 @@ export class DebugMcpServer {
       if (result.scopeName) {
         response.scopeName = result.scopeName;
       }
-      
+
+      // Surface adapter warnings embedded in the scope name — e.g. Delve
+      // reports "Locals (warning: optimized function)" when the debuggee was
+      // built with optimizations, which typically means missing variables.
+      const warningMatch = result.scopeName?.match(/\(warning:[^)]*\)/i);
+      if (warningMatch) {
+        response.warning =
+          `The debug adapter reported the locals scope as "${result.scopeName}". ` +
+          'This usually means the target was compiled with optimizations, so variables may be missing or unreadable. ' +
+          'For Go, rebuild the binary with -gcflags="all=-N -l" (exec mode) or launch the .go source directly (debug mode).';
+      }
+
       // Add helpful messages for edge cases
       if (result.variables.length === 0) {
         if (!result.frame) {

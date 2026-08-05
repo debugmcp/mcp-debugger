@@ -63,14 +63,34 @@ A classic example with recursive, iterative, and memoized implementations:
 
 ## Debug Configurations
 
-Each project can be debugged with custom Delve launch settings:
+Each project can be debugged with custom Delve launch settings.
+
+**Debug mode (recommended)** — point at the `.go` source; Delve compiles it
+itself with `-gcflags "all=-N -l"`, so variables are always inspectable:
+
+```json
+{
+  "mode": "debug",
+  "program": "./hello_world.go",
+  "stopOnEntry": false,
+  "hideSystemGoroutines": true
+}
+```
+
+**Exec mode** — debug a pre-compiled binary. Note that `buildFlags` has **no
+effect** in exec mode (Delve never builds anything); you must build the binary
+with optimizations disabled yourself, or locals will be reported under
+`"Locals (warning: optimized function)"` and may be empty:
+
+```bash
+go build -gcflags="all=-N -l" -o hello_world_bin hello_world.go
+```
 
 ```json
 {
   "mode": "exec",
-  "program": "./hello_world",
+  "program": "./hello_world_bin",
   "stopOnEntry": false,
-  "buildFlags": "-gcflags='all=-N -l'",
   "hideSystemGoroutines": true,
   "substitutePath": []
 }
