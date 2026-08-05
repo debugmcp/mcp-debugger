@@ -672,6 +672,12 @@ export class DapProxyWorker {
         this.logger!.debug('[Worker] DAP event: thread', body);
         this.sendDapEvent('thread', body);
       },
+      onBreakpoint: (body) => {
+        // Deferred verification/relocation pushed by the adapter after the
+        // setBreakpoints response (issue #236).
+        this.logger!.debug('[Worker] DAP event: breakpoint', body);
+        this.sendDapEvent('breakpoint', body);
+      },
       onExited: (body) => {
         this.logger!.info(`[Worker] DAP event: exited exitCode=${body.exitCode}`);
         // A real exited event stays authoritative - suppress synthesis (issue #247).

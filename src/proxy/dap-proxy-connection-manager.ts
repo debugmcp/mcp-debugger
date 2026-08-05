@@ -119,6 +119,7 @@ export class DapConnectionManager {
       onThread?: (body: DebugProtocol.ThreadEvent['body']) => void;
       onExited?: (body: DebugProtocol.ExitedEvent['body']) => void;
       onTerminated?: (body: DebugProtocol.TerminatedEvent['body']) => void;
+      onBreakpoint?: (body: DebugProtocol.BreakpointEvent['body']) => void;
       onError?: (err: Error) => void;
       onClose?: () => void;
     }
@@ -150,7 +151,11 @@ export class DapConnectionManager {
     if (handlers.onTerminated) {
       client.on('terminated', handlers.onTerminated);
     }
-    
+
+    if (handlers.onBreakpoint) {
+      client.on('breakpoint', handlers.onBreakpoint);
+    }
+
     if (handlers.onError) {
       client.on('error', handlers.onError);
     }

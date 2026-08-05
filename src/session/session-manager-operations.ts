@@ -854,77 +854,211 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `[SessionManager] Breakpoint ${bpId} queued for ${file}:${line} in session ${sessionId}.`
     );
 
+    await this.syncBreakpointsForFile(session, file);
+    return newBreakpoint;
+  }
+
+  /**
+   * Re-send the session's full breakpoint set for one file to the adapter
+   * (DAP setBreakpoints is replace-all per file) and merge the response back
+   * into the stored breakpoints (positional match). No-op unless the proxy is
+   * live and the session is RUNNING or PAUSED. Never throws: a DAP failure is
+   * logged and reported via `warning` — the store remains the source of truth
+   * and the set is re-applied on the next launch.
+   */
+  protected async syncBreakpointsForFile(
+    session: ManagedSession,
+    file: string
+  ): Promise<{ synced: boolean; warning?: string }> {
+    const sessionId = session.id;
     if (
-      session.proxyManager &&
-      session.proxyManager.isRunning() &&
-      (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
+      !session.proxyManager ||
+      !session.proxyManager.isRunning() ||
+      (session.state !== SessionState.RUNNING && session.state !== SessionState.PAUSED)
     ) {
-      try {
-        // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
-        const allBpsForFile = Array.from(session.breakpoints.values())
-          .filter(bp => bp.file === file);
+      return { synced: false };
+    }
 
-        this.logger.info(
-          `[SessionManager] Active proxy for session ${sessionId}, sending ${allBpsForFile.length} breakpoint(s) for ${file}.`
+    // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
+    const allBpsForFile = Array.from(session.breakpoints.values())
+      .filter(bp => bp.file === file);
+
+    try {
+      this.logger.info(
+        `[SessionManager] Active proxy for session ${sessionId}, sending ${allBpsForFile.length} breakpoint(s) for ${file}.`
+      );
+      const response =
+        await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>(
+          'setBreakpoints',
+          {
+            source: { path: file },
+            breakpoints: allBpsForFile.map(bp => ({
+              line: bp.line,
+              condition: bp.condition,
+              ...(bp.suspendPolicy ? { suspendPolicy: bp.suspendPolicy } : {}),
+            })),
+          }
         );
-        const response =
-          await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>(
-            'setBreakpoints',
-            {
-              source: { path: file },
-              breakpoints: allBpsForFile.map(bp => ({
-                line: bp.line,
-                condition: bp.condition,
-                ...(bp.suspendPolicy ? { suspendPolicy: bp.suspendPolicy } : {}),
-              })),
-            }
+      if (
+        response &&
+        response.body &&
+        response.body.breakpoints
+      ) {
+        const responseBps = response.body.breakpoints;
+        // Update ALL breakpoints from response (positional match)
+        for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
+          const bpInfo = responseBps[i];
+          allBpsForFile[i].verified = bpInfo.verified;
+          allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
+          allBpsForFile[i].message = bpInfo.message;
+          allBpsForFile[i].adapterId = bpInfo.id ?? allBpsForFile[i].adapterId;
+          // Enhance "no symbols" message for .NET with PDB format guidance
+          if (bpInfo.message && session.language === 'dotnet' &&
+              bpInfo.message.toLowerCase().includes('no symbols')) {
+            allBpsForFile[i].message += ' (Hint: netcoredbg requires Portable PDB format. Compile with /debug:portable or convert with Pdb2Pdb.)';
+          }
+          this.logger.info(
+            `[SessionManager] Breakpoint ${allBpsForFile[i].id} response received. Verified: ${allBpsForFile[i].verified}${
+              bpInfo.message ? `, Message: ${bpInfo.message}` : ''
+            }`
           );
-        if (
-          response &&
-          response.body &&
-          response.body.breakpoints
-        ) {
-          const responseBps = response.body.breakpoints;
-          // Update ALL breakpoints from response (positional match)
-          for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
-            const bpInfo = responseBps[i];
-            allBpsForFile[i].verified = bpInfo.verified;
-            allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
-            allBpsForFile[i].message = bpInfo.message;
-            // Enhance "no symbols" message for .NET with PDB format guidance
-            if (bpInfo.message && session.language === 'dotnet' &&
-                bpInfo.message.toLowerCase().includes('no symbols')) {
-              allBpsForFile[i].message += ' (Hint: netcoredbg requires Portable PDB format. Compile with /debug:portable or convert with Pdb2Pdb.)';
-            }
-            this.logger.info(
-              `[SessionManager] Breakpoint ${allBpsForFile[i].id} response received. Verified: ${allBpsForFile[i].verified}${
-                bpInfo.message ? `, Message: ${bpInfo.message}` : ''
-              }`
-            );
 
-            // Log breakpoint verification with structured logging
-            if (allBpsForFile[i].verified) {
-              this.logger.info('debug:breakpoint', {
-                event: 'verified',
-                sessionId: sessionId,
-                sessionName: session.name,
-                breakpointId: allBpsForFile[i].id,
-                file: allBpsForFile[i].file,
-                line: allBpsForFile[i].line,
-                verified: true,
-                timestamp: Date.now(),
-              });
-            }
+          // Log breakpoint verification with structured logging
+          if (allBpsForFile[i].verified) {
+            this.logger.info('debug:breakpoint', {
+              event: 'verified',
+              sessionId: sessionId,
+              sessionName: session.name,
+              breakpointId: allBpsForFile[i].id,
+              file: allBpsForFile[i].file,
+              line: allBpsForFile[i].line,
+              verified: true,
+              timestamp: Date.now(),
+            });
           }
         }
-      } catch (error) {
-        this.logger.error(
-          `[SessionManager] Error sending setBreakpoint to proxy for session ${sessionId}:`,
-          error
-        );
       }
+      return { synced: true };
+    } catch (error) {
+      this.logger.error(
+        `[SessionManager] Error sending setBreakpoints to proxy for session ${sessionId}:`,
+        error
+      );
+      const message = error instanceof Error ? error.message : String(error);
+      return { synced: false, warning: `Breakpoint state updated, but live sync failed: ${message}` };
     }
-    return newBreakpoint;
+  }
+
+  /**
+   * Remove one breakpoint by its id (the id returned by setBreakpoint).
+   * The removal always takes effect in the session's breakpoint store; if the
+   * debuggee is live the file's remaining set is re-sent immediately.
+   * Deliberately works after the debuggee exits — the surviving set is
+   * re-applied on the next launch.
+   */
+  async removeBreakpoint(
+    sessionId: string,
+    breakpointId: string
+  ): Promise<{ removed?: Breakpoint; warning?: string }> {
+    const session = this._getSessionById(sessionId);
+
+    const breakpoint = session.breakpoints.get(breakpointId);
+    if (!breakpoint) {
+      return { removed: undefined };
+    }
+
+    session.breakpoints.delete(breakpointId);
+    this.logger.info('debug:breakpoint', {
+      event: 'removed',
+      sessionId,
+      sessionName: session.name,
+      breakpointId,
+      file: breakpoint.file,
+      line: breakpoint.line,
+      timestamp: Date.now(),
+    });
+
+    const { warning } = await this.syncBreakpointsForFile(session, breakpoint.file);
+    return { removed: breakpoint, warning };
+  }
+
+  /**
+   * Remove ALL breakpoints at a file:line location (duplicates at one line —
+   * e.g. with different conditions — are removed together; DAP replace-all
+   * semantics cannot distinguish them anyway). Same lifecycle behavior as
+   * removeBreakpoint.
+   */
+  async removeBreakpointsByLocation(
+    sessionId: string,
+    file: string,
+    line: number
+  ): Promise<{ removed: Breakpoint[]; warning?: string }> {
+    const session = this._getSessionById(sessionId);
+
+    const removed = Array.from(session.breakpoints.values())
+      .filter(bp => bp.file === file && bp.line === line);
+    if (removed.length === 0) {
+      return { removed: [] };
+    }
+
+    for (const bp of removed) {
+      session.breakpoints.delete(bp.id);
+      this.logger.info('debug:breakpoint', {
+        event: 'removed',
+        sessionId,
+        sessionName: session.name,
+        breakpointId: bp.id,
+        file: bp.file,
+        line: bp.line,
+        timestamp: Date.now(),
+      });
+    }
+
+    const { warning } = await this.syncBreakpointsForFile(session, file);
+    return { removed, warning };
+  }
+
+  /**
+   * Remove all of the session's breakpoints, or all breakpoints in one file.
+   * Clearing zero breakpoints is success, not an error. Works in every
+   * lifecycle state; live sessions get one empty/remaining setBreakpoints
+   * re-send per affected file.
+   */
+  async clearBreakpoints(
+    sessionId: string,
+    file?: string
+  ): Promise<{ cleared: number; files: string[]; warning?: string }> {
+    const session = this._getSessionById(sessionId);
+
+    const toClear = Array.from(session.breakpoints.values())
+      .filter(bp => file === undefined || bp.file === file);
+    const files = [...new Set(toClear.map(bp => bp.file))];
+
+    for (const bp of toClear) {
+      session.breakpoints.delete(bp.id);
+    }
+    if (toClear.length > 0) {
+      this.logger.info('debug:breakpoint', {
+        event: 'cleared',
+        sessionId,
+        sessionName: session.name,
+        cleared: toClear.length,
+        files,
+        timestamp: Date.now(),
+      });
+    }
+
+    const warnings: string[] = [];
+    for (const clearedFile of files) {
+      const { warning } = await this.syncBreakpointsForFile(session, clearedFile);
+      if (warning) warnings.push(warning);
+    }
+
+    return {
+      cleared: toClear.length,
+      files,
+      ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {})
+    };
   }
 
   async stepOver(sessionId: string): Promise<DebugResult> {

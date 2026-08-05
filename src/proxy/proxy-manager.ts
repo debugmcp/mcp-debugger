@@ -46,6 +46,8 @@ export interface ProxyManagerEvents {
   'terminated': () => void;
   'exited': (exitCode?: number) => void;
   'output': (body: DebugProtocol.OutputEvent['body']) => void;
+  /** Deferred breakpoint verification / relocation pushed by the adapter (issue #236) */
+  'breakpoint': (body: DebugProtocol.BreakpointEvent['body']) => void;
 
   // Proxy lifecycle events
   'initialized': () => void;
@@ -1020,6 +1022,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       case 'output':
         this.emit('output', message.body as DebugProtocol.OutputEvent['body']);
+        break;
+
+      case 'breakpoint':
+        this.emit('breakpoint', message.body as DebugProtocol.BreakpointEvent['body']);
         break;
 
       // Forward other events as generic DAP events

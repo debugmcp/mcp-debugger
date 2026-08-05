@@ -223,6 +223,28 @@ describe('ProxyManager Message Handling', () => {
       expect(capturedCode).toBe(0);
     });
 
+    it('emits a typed breakpoint event for breakpoint DAP events (issue #236)', () => {
+      const breakpointBody = {
+        reason: 'changed',
+        breakpoint: { id: 12, verified: true, line: 30 }
+      };
+
+      const received: unknown[] = [];
+      proxyManager.on('breakpoint', (body) => {
+        received.push(body);
+      });
+
+      proxyManager.simulateMessage({
+        type: 'dapEvent',
+        sessionId: 'test-session',
+        event: 'breakpoint',
+        body: breakpointBody
+      });
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual(breakpointBody);
+    });
+
     it('should handle DAP response messages', async () => {
       const mockResponse = {
         success: true,
