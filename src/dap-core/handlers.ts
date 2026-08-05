@@ -122,10 +122,13 @@ function handleStatusMessage(
     case 'terminated':
       commands.push(
         { type: 'log', level: 'info', message: `[ProxyManager] Status: ${message.status}` },
-        { 
-          type: 'emitEvent', 
-          event: 'exit', 
-          args: [message.code || 1, message.signal || undefined] 
+        {
+          type: 'emitEvent',
+          event: 'exit',
+          // Pass the code through untouched (issue #258): only adapter_exited
+          // carries one, and fabricating 1 for the codeless closure statuses
+          // turned every clean rdbg run into a session error.
+          args: [message.code ?? null, message.signal || undefined, message.expected]
         }
       );
       break;

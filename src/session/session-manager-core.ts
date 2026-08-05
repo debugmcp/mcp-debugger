@@ -537,18 +537,37 @@ export abstract class SessionManagerCore extends EventEmitter {
     handlers.set('error', handleError);
 
     // Named function for exit event
-    const handleExit = (code: number | null, signal?: string) => {
-      this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal}`);
-      this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}`);
+    const handleExit = (code: number | null, signal?: string, expected?: boolean) => {
+      this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal} expected=${expected}`);
+      this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}, expected=${expected}`);
       if (session.state !== SessionState.STOPPED && session.state !== SessionState.ERROR) {
-        // Clean exit (code 0 or null with no signal) is normal termination, not an error
-        if (code === 0 || (code === null && !signal)) {
+        if (expected === true) {
+          // Orderly debuggee termination (issue #258): the worker saw a
+          // terminated/exited DAP event or was already shutting down. A
+          // non-zero code here is the debuggee's own exit status (rdbg -c
+          // propagates it) — a normal debugging outcome, not an error.
+          if (typeof code === 'number' && session.exitCode === undefined) {
+            session.exitCode = code;
+          }
           this._updateSessionState(session, SessionState.STOPPED);
+        } else if (expected === false) {
+          // The adapter died or dropped the socket with no preceding
+          // terminal DAP event. Only a clean code 0 counts as normal.
+          this._updateSessionState(
+            session,
+            code === 0 ? SessionState.STOPPED : SessionState.ERROR
+          );
         } else {
-          this._updateSessionState(session, SessionState.ERROR);
+          // Legacy path (real proxy-process exit): clean exit is code 0 or
+          // null with no signal; anything else is an infrastructure error.
+          if (code === 0 || (code === null && !signal)) {
+            this._updateSessionState(session, SessionState.STOPPED);
+          } else {
+            this._updateSessionState(session, SessionState.ERROR);
+          }
         }
       }
-      
+
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
       session.proxyManager = undefined;

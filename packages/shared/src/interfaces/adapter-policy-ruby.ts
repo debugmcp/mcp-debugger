@@ -215,7 +215,11 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       // only ever appears on the adapter's pipes (issue #222). rdbg's own
       // stderr banners ("DEBUGGER: wait for debugger connection...") are
       // excluded from forwarding but still logged.
-      forwardStdio: { excludeStderrLinePattern: /^DEBUGGER: / }
+      forwardStdio: { excludeStderrLinePattern: /^DEBUGGER: / },
+      // For the same reason the adapter process's exit status is the
+      // debuggee's, and rdbg never sends a DAP exited event — let the
+      // worker synthesize one (issue #258).
+      adapterExitCodeIsDebuggeeExitCode: true
     };
   }
 };

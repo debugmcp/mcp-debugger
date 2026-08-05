@@ -72,6 +72,21 @@ export class DapProxyWorker {
   private exitSynthesisAttempted: boolean = false;
   /** Armed when adapter stdio forwarding is active (issue #222): resolves once both stdio streams close. */
   private adapterStdioDrained: Promise<void> | null = null;
+  // Terminal signals (exited/terminated DAP events, socket close, adapter
+  // process exit) all await the stdio drain barrier; without a queue their
+  // continuations resume in an order set by await counts, not arrival — a
+  // codeless dap_connection_closed outrunning terminated makes the parent
+  // end the session as an error (issue #258).
+  private terminalSignalQueue: Promise<void> = Promise.resolve();
+  /** True once an exited/terminated DAP event was forwarded to the parent (issue #258). */
+  private terminalDapEventForwarded: boolean = false;
+  // Adapter-exit exitCode synthesis (issue #258): armed by policies whose
+  // adapter process exit status IS the debuggee's (rdbg -c). The exit is
+  // recorded synchronously so the terminated slot can synthesize a DAP
+  // exited event even though rdbg never sends one.
+  private adapterExitCodeIsDebuggeeExitCode: boolean = false;
+  private adapterExitCode: number | null | undefined = undefined;
+  private adapterExitSynthesisAttempted: boolean = false;
   private initializedEventPending: boolean = false;
   private deferInitializedHandling: boolean = false;
   private initializedEventHandled: boolean = false;
@@ -386,6 +401,7 @@ export class DapProxyWorker {
       if (spawnConfig.forwardStdio) {
         this.adapterStdioDrained = this.createStdioDrainBarrier(spawnResult.process);
       }
+      this.adapterExitCodeIsDebuggeeExitCode = spawnConfig.adapterExitCodeIsDebuggeeExitCode === true;
       this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
 
       this.adapterProcess.on('error', (err) => {
@@ -395,7 +411,13 @@ export class DapProxyWorker {
 
       this.adapterProcess.on('exit', (code, signal) => {
         this.logger!.info(`[Worker] Adapter process exited. Code: ${code}, Signal: ${signal}`);
-        this.sendStatus('adapter_exited', { code, signal });
+        // Recorded synchronously: the terminated slot's synthesis wait may
+        // resolve on this very event (issue #258)
+        this.adapterExitCode = code;
+        this.enqueueTerminalSignal('adapter_exited', async () => {
+          await this.waitForAdapterStdioDrain();
+          this.sendStatus('adapter_exited', { code, signal, expected: this.isTerminationExpected() });
+        });
       });
     } else {
       // connect mode: an external DAP server is already listening (e.g. remote
@@ -650,42 +672,51 @@ export class DapProxyWorker {
         this.logger!.debug('[Worker] DAP event: thread', body);
         this.sendDapEvent('thread', body);
       },
-      onExited: async (body) => {
+      onExited: (body) => {
         this.logger!.info(`[Worker] DAP event: exited exitCode=${body.exitCode}`);
         // A real exited event stays authoritative - suppress synthesis (issue #247).
         // Set synchronously, before any await, so a racing terminated sees it.
         this.exitedEventSeen = true;
-        await this.waitForAdapterStdioDrain();
-        this.sendDapEvent('exited', body);
+        return this.enqueueTerminalSignal('exited', async () => {
+          await this.waitForAdapterStdioDrain();
+          this.terminalDapEventForwarded = true;
+          this.sendDapEvent('exited', body);
+        });
       },
-      onTerminated: async (body) => {
+      onTerminated: (body) => {
         this.logger!.info(`[Worker] DAP event: terminated body=${JSON.stringify(body)}`);
         // When adapter stdio is forwarded as debuggee output, the exit-time
         // flush of a block-buffered pipe arrives milliseconds AFTER the DAP
         // terminated event — but the SessionManager reacts to terminated by
         // stopping the proxy, which drops late messages. Hold terminated
         // until the streams have drained so the output wins the race.
-        await this.waitForAdapterStdioDrain();
-        // Must complete before terminated is forwarded: whichever of
-        // exited/terminated reaches the SessionManager first strips the
-        // other's handler, and shutdown() below tears down the client
-        await this.maybeSynthesizeExitedEvent();
-        this.sendDapEvent('terminated', body);
-        this.shutdown();
+        return this.enqueueTerminalSignal('terminated', async () => {
+          await this.waitForAdapterStdioDrain();
+          // Must complete before terminated is forwarded: whichever of
+          // exited/terminated reaches the SessionManager first strips the
+          // other's handler, and shutdown() below tears down the client
+          await this.maybeSynthesizeExitedEvent();
+          await this.maybeSynthesizeExitedFromAdapterExit();
+          this.terminalDapEventForwarded = true;
+          this.sendDapEvent('terminated', body);
+          this.shutdown();
+        });
       },
       onError: (err) => {
         this.logger!.error('[Worker] DAP client error:', err);
         this.sendError(`DAP client error: ${err.message}`);
       },
-      onClose: async () => {
+      onClose: () => {
         this.logger!.info('[Worker] DAP client connection closed.');
         // Adapters that close the DAP socket at debuggee exit (rdbg) race the
         // exit-time stdio flush exactly like terminated does — the parent
         // reacts to dap_connection_closed by tearing down its listeners, so
         // hold this path behind the same drain barrier (issue #222).
-        await this.waitForAdapterStdioDrain();
-        this.sendStatus('dap_connection_closed');
-        this.shutdown();
+        return this.enqueueTerminalSignal('dap_connection_closed', async () => {
+          await this.waitForAdapterStdioDrain();
+          this.sendStatus('dap_connection_closed', { expected: this.isTerminationExpected() });
+          this.shutdown();
+        });
       }
     });
   }
@@ -1042,7 +1073,7 @@ export class DapProxyWorker {
     }
 
     await this.shutdown();
-    this.sendStatus('terminated');
+    this.sendStatus('terminated', { expected: true });
   }
 
   /**
@@ -1192,6 +1223,60 @@ export class DapProxyWorker {
   }
 
   /**
+   * Synthesize a DAP 'exited' event from the adapter process's exit status
+   * (issue #258). Only for policies that declare
+   * adapterExitCodeIsDebuggeeExitCode — rdbg -c runs the debuggee under the
+   * adapter process, so its exit status propagates, and rdbg never sends an
+   * exited event of its own. The process usually dies moments after the
+   * terminated event, so wait briefly for its exit if it hasn't landed yet.
+   * On signal kill there is no code and the exitCode simply stays unknown,
+   * matching the js synthesis path.
+   */
+  private async maybeSynthesizeExitedFromAdapterExit(): Promise<void> {
+    if (
+      this.exitedEventSeen ||
+      this.adapterExitSynthesisAttempted ||
+      !this.adapterExitCodeIsDebuggeeExitCode ||
+      !this.adapterProcess
+    ) {
+      return;
+    }
+    this.adapterExitSynthesisAttempted = true;
+
+    if (this.adapterExitCode === undefined) {
+      const proc = this.adapterProcess;
+      if (typeof proc.exitCode === 'number') {
+        this.adapterExitCode = proc.exitCode;
+      } else if (proc.signalCode) {
+        this.adapterExitCode = null;
+      } else {
+        await new Promise<void>((resolve) => {
+          const onExit = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(() => {
+            proc.removeListener('exit', onExit);
+            resolve();
+          }, 500);
+          // The recording 'exit' listener was registered first, so
+          // adapterExitCode is already set when this one resolves
+          proc.once('exit', onExit);
+        });
+      }
+    }
+
+    const exitCode = this.adapterExitCode;
+    if (typeof exitCode === 'number') {
+      this.exitedEventSeen = true;
+      this.logger?.info?.(`[Worker] Synthesizing 'exited' from adapter process exit code ${exitCode} (issue #258)`);
+      this.sendDapEvent('exited', { exitCode });
+    } else {
+      this.logger?.info?.('[Worker] Adapter exit code unavailable (signal kill or still running); exitCode stays unknown');
+    }
+  }
+
+  /**
    * Resolves when both adapter stdio streams have closed — i.e. every byte
    * the debuggee flushed on exit has been read and forwarded (issue #222).
    * Only armed when stdio forwarding is active.
@@ -1231,6 +1316,35 @@ export class DapProxyWorker {
         clearTimeout(timer);
       }
     }
+  }
+
+  /**
+   * Chain a terminal signal onto the FIFO forwarding queue (issue #258).
+   * Every producer awaits the drain barrier, so without serialization the
+   * signal with the fewest awaits after the barrier wins — not the one that
+   * arrived first. Each slot is bounded (drain backstop 2s), and the chain
+   * swallows rejections so one failed slot cannot block the next.
+   */
+  private enqueueTerminalSignal(label: string, task: () => Promise<void>): Promise<void> {
+    const tail = this.terminalSignalQueue.then(task).catch((err) => {
+      this.logger?.error(`[Worker] Terminal signal '${label}' failed:`, err);
+    });
+    this.terminalSignalQueue = tail;
+    return tail;
+  }
+
+  /**
+   * Whether a terminal status sent now reflects orderly debuggee termination
+   * (issue #258): a terminated/exited DAP event was already forwarded, or the
+   * worker itself initiated shutdown. False means the adapter died or dropped
+   * the socket mid-run — the parent maps that to a session error.
+   */
+  private isTerminationExpected(): boolean {
+    return (
+      this.terminalDapEventForwarded ||
+      this.state === ProxyState.SHUTTING_DOWN ||
+      this.state === ProxyState.TERMINATED
+    );
   }
 
   /**

@@ -1151,7 +1151,7 @@ describe('ProxyManager.start', () => {
       signal: 'SIGTERM'
     });
 
-    expect(exit).toHaveBeenCalledWith(9, 'SIGTERM');
+    expect(exit).toHaveBeenCalledWith(9, 'SIGTERM', undefined);
   });
 
   it('resolves DAP responses and captures thread ids', async () => {

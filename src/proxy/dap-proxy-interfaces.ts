@@ -74,6 +74,13 @@ export interface StatusMessage extends ProxyMessage {
   script?: string;
   /** Adapter initialize response body, on 'adapter_capabilities' (issue #243) */
   capabilities?: DebugProtocol.Capabilities;
+  /**
+   * On terminal statuses (issue #258): true when the worker had already seen
+   * orderly debuggee termination (a terminated/exited DAP event was forwarded
+   * or shutdown was underway), so the parent can distinguish a normal
+   * teardown from an adapter dying or dropping the socket mid-run.
+   */
+  expected?: boolean;
 }
 
 export interface DapResponseMessage extends ProxyMessage {

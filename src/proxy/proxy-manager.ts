@@ -51,7 +51,13 @@ export interface ProxyManagerEvents {
   'initialized': () => void;
   'init-received': () => void;
   'error': (error: Error) => void;
-  'exit': (code: number | null, signal?: string) => void;
+  /**
+   * Proxy or adapter teardown. `expected` is set on status-driven exits
+   * (issue #258): true = the worker saw orderly debuggee termination first;
+   * false = the adapter died or dropped the socket mid-run; undefined = the
+   * proxy process itself exited (legacy path).
+   */
+  'exit': (code: number | null, signal?: string, expected?: boolean) => void;
 
   // Status events
   'dry-run-complete': (command: string, script: string) => void;
@@ -888,6 +894,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
               // Skip emitEvent commands for DAP events — they are already handled
               // by the fast-path handleDapEvent() call above to avoid double emission.
               if (message.type === 'dapEvent') break;
+              // Terminal statuses are emitted (and latched) by
+              // handleStatusMessage above — suppress the duplicate (issue #258).
+              if (command.event === 'exit' && this.exitEmitted) break;
               const args = (command.args as unknown[]) ?? [];
               this.emit(command.event as keyof ProxyManagerEvents, ...(args as never[]));
             }
@@ -1078,7 +1087,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.logger.info(`[ProxyManager] Status: ${message.status}`);
         if (!this.exitEmitted) {
           this.exitEmitted = true;
-          this.emit('exit', message.code ?? 1, message.signal || undefined);
+          // No fabricated code (issue #258): the closure statuses are
+          // codeless, and inventing 1 made every clean rdbg run an error.
+          this.emit('exit', message.code ?? null, message.signal || undefined, message.expected);
         }
         break;
     }
