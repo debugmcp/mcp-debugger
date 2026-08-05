@@ -167,6 +167,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `remove_breakpoint` | Remove a breakpoint by id or file+line | ✅ Implemented |
 | `clear_breakpoints` | Remove all breakpoints (optionally per file) | ✅ Implemented |
 | `start_debugging` | Start debugging a script | ✅ Implemented |
+| `restart_debugging` | Relaunch with the same config, breakpoints re-applied | ✅ Implemented |
 | `attach_to_process` | Attach debugger to a running process | ✅ Implemented |
 | `detach_from_process` | Detach debugger from a process | ✅ Implemented |
 | `get_stack_trace` | Get the current stack trace | ✅ Implemented |

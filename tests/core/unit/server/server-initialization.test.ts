@@ -133,6 +133,7 @@ describe('Server Initialization Tests', () => {
       expect(toolNames).toContain('remove_breakpoint');
       expect(toolNames).toContain('clear_breakpoints');
       expect(toolNames).toContain('start_debugging');
+      expect(toolNames).toContain('restart_debugging');
       expect(toolNames).toContain('close_debug_session');
       expect(toolNames).toContain('step_over');
       expect(toolNames).toContain('step_into');

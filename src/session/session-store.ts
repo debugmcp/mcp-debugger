@@ -42,6 +42,21 @@ export interface ToolchainValidationState {
 }
 
 /**
+ * The most recent real (non-dry-run) launch, captured as SessionManager
+ * received it — scriptPath is the server-layer-resolved effective path, so a
+ * replay needs no re-translation. breakOnExceptions is the RAW user value;
+ * policy-default resolution re-runs identically on replay (issue #238).
+ */
+export interface LastLaunchSpec {
+  scriptPath: string;
+  scriptArgs?: string[];
+  dapLaunchArgs?: Partial<DebugProtocol.LaunchRequestArguments> & Record<string, unknown>;
+  adapterLaunchConfig?: Record<string, unknown>;
+  breakOnExceptions?: ExceptionBreakMode;
+  launchedAt: number;
+}
+
+/**
  * Internal session representation with full details
  */
 export interface ManagedSession extends DebugSessionInfo {
@@ -73,6 +88,8 @@ export interface ManagedSession extends DebugSessionInfo {
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.
   effectiveBreakOnExceptions?: ExceptionBreakMode;
+  // The most recent real launch, replayed by restart_debugging (issue #238).
+  lastLaunch?: LastLaunchSpec;
 }
 
 /**

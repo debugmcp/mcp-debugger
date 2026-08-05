@@ -262,6 +262,17 @@ describe('MCP Server Python Attach-Mode Smoke Test @requires-python', () => {
       expect(attachResponse.state).toBe('paused');
       console.log('[Python Attach Test] Attached successfully, state:', attachResponse.state);
 
+      // restart_debugging must refuse attach sessions with a clear error —
+      // there is no launch configuration to replay (issue #238).
+      const restartResponse = parseSdkToolResult(
+        await mcpClient!.callTool({
+          name: 'restart_debugging',
+          arguments: { sessionId }
+        })
+      );
+      expect(restartResponse.success).toBe(false);
+      expect(String(restartResponse.error ?? restartResponse.message)).toMatch(/attach/i);
+
       // 4. Continue execution — the post-attach pause left the target stopped.
       console.log('[Python Attach Test] Continuing execution...');
       const continueResult = parseSdkToolResult(

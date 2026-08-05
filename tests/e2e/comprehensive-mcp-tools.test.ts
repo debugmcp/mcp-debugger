@@ -75,7 +75,7 @@ const LANGUAGES: LangDef[] = [
     dapLaunchArgs: { mainClass: 'HelloWorld', classpath: JAVA_CLASS_DIR, cwd: JAVA_CLASS_DIR } },
 ];
 
-/* ---------- all 24 tools ---------- */
+/* ---------- all 25 tools ---------- */
 
 const ALL_TOOLS = [
   'list_supported_languages',
@@ -87,6 +87,7 @@ const ALL_TOOLS = [
   'clear_breakpoints',
   'get_source_context',
   'start_debugging',
+  'restart_debugging',
   'get_stack_trace',
   'get_scopes',
   'get_variables',

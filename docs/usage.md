@@ -381,8 +381,9 @@ You can also evaluate arbitrary expressions in the current debug context:
 
 ## Fully Implemented Features
 
-All 25 tools are fully implemented, including:
+All 26 tools are fully implemented, including:
 
+- **restart_debugging**: One call terminates the current debuggee (if any) and relaunches with the same configuration; breakpoints re-apply automatically and the output buffer starts fresh (read from `since: 0`). Works while running, paused, or after the program exited; attach sessions are rejected with a clear error.
 - **list_breakpoints / remove_breakpoint / clear_breakpoints**: Full breakpoint lifecycle management. Listing shows each breakpoint's verified state and adapter-assigned id; removal (by id, or file+line) and clearing take effect immediately while the program is running or paused, and still work after the program exits so breakpoints can be adjusted before a relaunch.
 
 - **pause_execution**: Sends a DAP pause request and returns immediately; paused state is updated asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
@@ -399,4 +400,4 @@ All 25 tools are fully implemented, including:
 
 ---
 
-*Last updated: 2026-08-05 - All 25 tools including breakpoint management (list/remove/clear, issue #236) are fully implemented*
+*Last updated: 2026-08-05 - All 26 tools including breakpoint management (#236), logpoints (#235), and restart_debugging (#238) are fully implemented*

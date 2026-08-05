@@ -94,6 +94,7 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     removeBreakpointsByLocation: vi.fn().mockResolvedValue({ removed: [] }),
     clearBreakpoints: vi.fn().mockResolvedValue({ cleared: 0, files: [] }),
     startDebugging: vi.fn(),
+    restartDebugging: vi.fn().mockResolvedValue({ success: false, state: 'created', error: 'not stubbed' }),
     stepOver: vi.fn(),
     stepInto: vi.fn(),
     stepOut: vi.fn(),
