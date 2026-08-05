@@ -195,6 +195,15 @@ describe('JavaAdapterPolicy', () => {
       expect(behavior.deferConfigDone).toBeUndefined();
       expect(behavior.defaultStopOnEntry).toBeUndefined();
     });
+
+    it('should declare the exception filters the JDI bridge honors (issue #259)', () => {
+      const behavior = JavaAdapterPolicy.getInitializationBehavior();
+      expect(behavior.exceptionFilters).toEqual({
+        uncaught: ['uncaught'],
+        all: ['caught', 'uncaught']
+      });
+      expect(behavior.defaultExceptionBreakMode).toBe('uncaught');
+    });
   });
 
   describe('buildChildStartArgs', () => {

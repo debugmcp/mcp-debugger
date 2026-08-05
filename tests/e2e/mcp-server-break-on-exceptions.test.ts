@@ -9,6 +9,9 @@
  * - Launch default (issue #244): with the option unset, launch sessions pause
  *   at uncaught exceptions; explicit "none" opts out and restores
  *   run-to-termination with the debuggee exit code surfaced
+ * - Java launch (issue #259): JDI bridge advertises the exception filters and
+ *   answers exceptionInfo — uncaught RuntimeException pauses with enrichment,
+ *   'all' also pauses at the caught raise with breakMode 'always'
  * - Python attach: filters armed during the attach init sequence (attach
  *   itself never applies a default)
  */
@@ -16,11 +19,12 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, execSync, type ChildProcess } from 'child_process';
 import net from 'net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { prepareJavaExample } from './java-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -453,6 +457,148 @@ describe('Break-on-exception (issue #220)', () => {
       expect(stopped, 'js session should run to completion').toBeDefined();
       expect(stopped!.exitCode).toBe(0);
     }, 60000);
+  });
+
+  describe('Java launch (JDI bridge) @requires-java', () => {
+    function hasJdk(): boolean {
+      try {
+        execSync('java -version', { stdio: 'ignore' });
+        execSync('javac -version', { stdio: 'ignore' });
+        return true;
+      } catch {
+        console.log('[break-on-exceptions] Skipping — JDK not installed');
+        return false;
+      }
+    }
+
+    /** Poll until paused at an exception or terminated; undefined on timeout. */
+    async function pollExceptionPauseOrExit(): Promise<SessionSnapshot | undefined> {
+      return pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        if (!snap) return undefined;
+        if (snap.state === 'stopped') return snap;
+        return snap.state === 'paused' && snap.lastStop?.reason === 'exception' ? snap : undefined;
+      }, 15000);
+    }
+
+    it('pauses at the uncaught RuntimeException with exceptionInfo enrichment (issue #259)', async () => {
+      if (!hasJdk()) return;
+      const { sourcePath, classDir, mainClass } = prepareJavaExample('ThrowsTest');
+
+      sessionId = await createSession('java', 'java-break-on-exceptions');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: sourcePath,
+          dapLaunchArgs: { mainClass, classpath: classDir, cwd: classDir, stopOnEntry: false },
+          breakOnExceptions: 'uncaught'
+        }
+      }));
+      expect(startRes.success).toBe(true);
+
+      const paused = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'paused' && snap.lastStop?.reason === 'exception' ? snap : undefined;
+      }, 15000);
+      expect(paused, 'session should pause at the uncaught exception instead of terminating').toBeDefined();
+      expect(paused!.lastStop!.text).toBe('java.lang.RuntimeException');
+      expect(paused!.lastStop!.description).toMatch(/java\.lang\.RuntimeException: uncaught on purpose/);
+
+      // Enrichment proves both halves of #259: the bridge advertised
+      // supportsExceptionInfoRequest (SessionManager's live gate) AND answered
+      // the exceptionInfo request.
+      const enriched = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.lastStop?.exceptionInfo ? snap : undefined;
+      }, 5000);
+      expect(enriched, 'lastStop should gain exceptionInfo from the JDI bridge').toBeDefined();
+      const info = enriched!.lastStop!.exceptionInfo!;
+      expect(info.exceptionId).toBe('java.lang.RuntimeException');
+      expect(info.breakMode).toBe('unhandled');
+      expect(info.details?.message).toBe('uncaught on purpose');
+      expect(info.details?.fullTypeName).toBe('java.lang.RuntimeException');
+      expect(info.details?.stackTrace).toContain('at ThrowsTest.main');
+
+      // Stack trace: top frame at the throw site in main
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      }));
+      expect(stack.stopReason).toBe('exception');
+      const frames = stack.stackFrames as Array<{ name: string; line: number }>;
+      expect(frames.length).toBeGreaterThan(0);
+      expect(frames[0].name).toContain('main');
+
+      // Continue: the JVM re-throws and terminates. The bridge emits
+      // terminated without an exited event, so no exitCode assertion.
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 15000);
+      expect(stopped, 'session should terminate after continuing past the exception').toBeDefined();
+    }, 60000);
+
+    it("pauses at the caught IllegalStateException with breakMode 'always' when breakOnExceptions is 'all'", async () => {
+      if (!hasJdk()) return;
+      const { sourcePath, classDir, mainClass } = prepareJavaExample('ThrowsTest');
+
+      sessionId = await createSession('java', 'java-break-on-caught');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: sourcePath,
+          dapLaunchArgs: { mainClass, classpath: classDir, cwd: classDir, stopOnEntry: false },
+          breakOnExceptions: 'all'
+        }
+      }));
+      expect(startRes.success).toBe(true);
+
+      // The unfiltered caught-exception request can also fire on JDK-internal
+      // exceptions during startup — continue past those (bounded) until the
+      // fixture's IllegalStateException.
+      let target: SessionSnapshot | undefined;
+      for (let i = 0; i < 15; i++) {
+        const snap = await pollExceptionPauseOrExit();
+        if (!snap || snap.state === 'stopped') break;
+        if (snap.lastStop?.text === 'java.lang.IllegalStateException') {
+          target = snap;
+          break;
+        }
+        await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sessionId! });
+      }
+      expect(target, 'session should pause at the caught IllegalStateException').toBeDefined();
+      expect(target!.lastStop!.description).toMatch(/java\.lang\.IllegalStateException: caught on purpose/);
+
+      const enriched = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.lastStop?.exceptionInfo ? snap : undefined;
+      }, 5000);
+      expect(enriched, 'caught stop should gain exceptionInfo').toBeDefined();
+      expect(enriched!.lastStop!.exceptionInfo!.exceptionId).toBe('java.lang.IllegalStateException');
+      expect(enriched!.lastStop!.exceptionInfo!.breakMode).toBe('always');
+
+      // Continue on: expect the uncaught RuntimeException stop on the way out
+      // (internal caught stops may intervene), then termination.
+      let sawUncaught = false;
+      let finalSnap: SessionSnapshot | undefined;
+      for (let i = 0; i < 15; i++) {
+        await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sessionId! });
+        const snap = await pollExceptionPauseOrExit();
+        if (!snap) break;
+        if (snap.state === 'stopped') {
+          finalSnap = snap;
+          break;
+        }
+        if (snap.lastStop?.text === 'java.lang.RuntimeException') sawUncaught = true;
+      }
+      expect(sawUncaught, 'should pause at the uncaught RuntimeException on the way out').toBe(true);
+      expect(finalSnap?.state, 'session should terminate').toBe('stopped');
+    }, 90000);
   });
 
   describe('Python attach', () => {

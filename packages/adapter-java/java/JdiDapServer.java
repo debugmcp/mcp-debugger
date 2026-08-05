@@ -60,6 +60,21 @@ public class JdiDapServer {
     private volatile boolean stopOnEntry = true; // whether to stop on entry in launch mode
     private volatile boolean lastStopAllThreads = true; // tracks whether last stop suspended all threads
 
+    // --- Exception stop state (retained for DAP exceptionInfo) ---
+    // Written by the JDI event-loop thread, read by the socket-reader thread.
+    // A single volatile reference to an immutable tuple avoids torn reads.
+    private static final class ExceptionStop {
+        final ObjectReference exception;
+        final long threadId;
+        final boolean caught; // catchLocation != null
+        ExceptionStop(ObjectReference exception, long threadId, boolean caught) {
+            this.exception = exception;
+            this.threadId = threadId;
+            this.caught = caught;
+        }
+    }
+    private volatile ExceptionStop lastException;
+
     // --- Logging ---
     private static boolean debug = false;
 
@@ -236,6 +251,7 @@ public class JdiDapServer {
                 case "terminate": handleTerminate(reqSeq, args); break;
                 case "evaluate": handleEvaluate(reqSeq, args); break;
                 case "setExceptionBreakpoints": handleSetExceptionBreakpoints(reqSeq, args); break;
+                case "exceptionInfo": handleExceptionInfo(reqSeq, args); break;
                 case "source": sendResponse(reqSeq, command, true, mapOf("content", "")); break;
                 case "redefineClasses": handleRedefineClasses(reqSeq, args); break;
                 default:
@@ -262,9 +278,27 @@ public class JdiDapServer {
         caps.put("supportsCompletionsRequest", false);
         caps.put("supportsTerminateRequest", true);
         caps.put("supportsDelayedStackTraceLoading", false);
-        caps.put("supportsExceptionInfoRequest", false);
+        caps.put("supportsExceptionInfoRequest", true);
         caps.put("supportsHitConditionalBreakpoints", false);
         caps.put("supportsLogPoints", false);
+        // Must mirror the metadata in java-debug-adapter.ts getCapabilities():
+        // handleSetExceptionBreakpoints honors exactly these two filter ids.
+        List<Map<String, Object>> exFilters = new ArrayList<>();
+        Map<String, Object> caughtFilter = new HashMap<>();
+        caughtFilter.put("filter", "caught");
+        caughtFilter.put("label", "Caught Exceptions");
+        caughtFilter.put("description", "Break on caught exceptions");
+        caughtFilter.put("default", false);
+        caughtFilter.put("supportsCondition", false);
+        exFilters.add(caughtFilter);
+        Map<String, Object> uncaughtFilter = new HashMap<>();
+        uncaughtFilter.put("filter", "uncaught");
+        uncaughtFilter.put("label", "Uncaught Exceptions");
+        uncaughtFilter.put("description", "Break on uncaught exceptions");
+        uncaughtFilter.put("default", true);
+        uncaughtFilter.put("supportsCondition", false);
+        exFilters.add(uncaughtFilter);
+        caps.put("exceptionBreakpointFilters", exFilters);
         sendResponse(reqSeq, "initialize", true, caps);
         sendEvent("initialized", new HashMap<>());
     }
@@ -1149,6 +1183,93 @@ public class JdiDapServer {
         sendResponse(reqSeq, "setExceptionBreakpoints", true, new HashMap<>());
     }
 
+    private void handleExceptionInfo(int reqSeq, Map<String, Object> args) {
+        ExceptionStop ex = lastException;
+        if (vm == null || ex == null) {
+            sendErrorResponse(reqSeq, "exceptionInfo", "No exception is currently being reported");
+            return;
+        }
+        long threadId = longVal(args, "threadId");
+        if (threadId > 0 && threadId != ex.threadId) {
+            sendErrorResponse(reqSeq, "exceptionInfo", "No exception for thread " + threadId);
+            return;
+        }
+        try {
+            String fqcn = ex.exception.referenceType().name();
+            String message = throwableMessage(ex.exception);
+            String simpleName = fqcn.substring(fqcn.lastIndexOf('.') + 1);
+
+            Map<String, Object> details = new HashMap<>();
+            if (message != null) details.put("message", message);
+            details.put("typeName", simpleName);
+            details.put("fullTypeName", fqcn);
+            String stackTrace = formatExceptionStackTrace(fqcn, message, ex.threadId);
+            if (stackTrace != null) details.put("stackTrace", stackTrace);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("exceptionId", fqcn);
+            body.put("breakMode", ex.caught ? "always" : "unhandled");
+            body.put("description", message != null ? fqcn + ": " + message : fqcn);
+            body.put("details", details);
+            sendResponse(reqSeq, "exceptionInfo", true, body);
+        } catch (ObjectCollectedException e) {
+            sendErrorResponse(reqSeq, "exceptionInfo", "Exception object was garbage collected");
+        } catch (VMDisconnectedException e) {
+            sendErrorResponse(reqSeq, "exceptionInfo", "VM disconnected");
+        }
+    }
+
+    /**
+     * Read Throwable.detailMessage via JDI field access — no thread invocation,
+     * so the suspended debuggee is never resumed. The field is private on
+     * java.lang.Throwable, so it must be resolved on the Throwable ClassType
+     * (walking up from the subclass), not via fieldByName on the exception's own
+     * type. Trade-off: getMessage() overrides are not reflected.
+     */
+    private String throwableMessage(ObjectReference exception) {
+        try {
+            ReferenceType rt = exception.referenceType();
+            ClassType ct = (rt instanceof ClassType) ? (ClassType) rt : null;
+            while (ct != null && !"java.lang.Throwable".equals(ct.name())) {
+                ct = ct.superclass();
+            }
+            if (ct == null) return null;
+            Field f = ct.fieldByName("detailMessage");
+            if (f == null) return null;
+            Value v = exception.getValue(f);
+            return (v instanceof StringReference) ? ((StringReference) v).value() : null;
+        } catch (RuntimeException e) { // ObjectCollectedException, VMDisconnectedException, ...
+            return null;
+        }
+    }
+
+    /** Format the suspended thread's frames in printStackTrace style; null if unavailable. */
+    private String formatExceptionStackTrace(String fqcn, String message, long threadId) {
+        ThreadReference thread = findThread(threadId);
+        if (thread == null) return null;
+        try {
+            StringBuilder sb = new StringBuilder(message != null ? fqcn + ": " + message : fqcn);
+            List<StackFrame> frames = thread.frames();
+            int limit = Math.min(frames.size(), 50);
+            for (int i = 0; i < limit; i++) {
+                Location loc = frames.get(i).location();
+                String source;
+                try {
+                    source = loc.sourceName() + ":" + loc.lineNumber();
+                } catch (AbsentInformationException e) {
+                    source = "Unknown Source";
+                }
+                sb.append("\n\tat ").append(loc.declaringType().name()).append('.')
+                  .append(loc.method().name()).append('(').append(source).append(')');
+            }
+            return sb.toString();
+        } catch (IncompatibleThreadStateException e) {
+            return null; // thread resumed between stop and request — omit stackTrace
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     // ========== Hot Reload (redefineClasses) ==========
 
     private void handleRedefineClasses(int reqSeq, Map<String, Object> args) {
@@ -1326,11 +1447,17 @@ public class JdiDapServer {
 
                         } else if (event instanceof ExceptionEvent) {
                             ExceptionEvent ee = (ExceptionEvent) event;
-                            log("Exception: " + ee.exception().referenceType().name() + " at " + ee.location());
+                            ObjectReference exObj = ee.exception();
+                            String fqcn = exObj.referenceType().name();
+                            log("Exception: " + fqcn + " at " + ee.location());
+                            lastException = new ExceptionStop(exObj, ee.thread().uniqueID(), ee.catchLocation() != null);
+                            String message = throwableMessage(exObj);
+                            lastStopAllThreads = true; // exception requests are SUSPEND_ALL
                             Map<String, Object> body = new HashMap<>();
                             body.put("reason", "exception");
                             body.put("threadId", ee.thread().uniqueID());
-                            body.put("text", ee.exception().referenceType().name());
+                            body.put("text", fqcn);
+                            body.put("description", message != null ? fqcn + ": " + message : fqcn);
                             body.put("allThreadsStopped", true);
                             sendEvent("stopped", body);
                             resume = false;
@@ -1503,11 +1630,13 @@ public class JdiDapServer {
             frameIdMap.clear();
             nextFrameId.set(1);
         }
+        lastException = null;
     }
 
     // synchronized so the shutdown-hook thread and the disconnect/terminate
     // handlers can't race when the proxy is shutting down rapidly.
     private synchronized void cleanup() {
+        lastException = null;
         if (vm != null) {
             try {
                 vm.dispose();

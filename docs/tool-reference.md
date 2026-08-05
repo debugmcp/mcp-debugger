@@ -196,7 +196,7 @@ Starts debugging a script.
 - `"breakpoint"`: Stopped at a breakpoint
 - `"step"`: Stopped after a step operation
 - `"entry"`: Stopped on entry (if configured)
-- `"exception"`: Stopped at an exception (the launch default for most languages; see `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them. Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
+- `"exception"`: Stopped at an exception (the launch default for most languages; see `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them. Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, Java, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
 
 **Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions`, so a crash (non-zero) is distinguishable from a clean exit.
 

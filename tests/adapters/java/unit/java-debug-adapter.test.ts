@@ -269,6 +269,7 @@ describe('JavaDebugAdapter', () => {
       expect(caps.supportsTerminateRequest).toBe(true);
       expect(caps.supportsStepBack).toBe(false);
       expect(caps.supportsLogPoints).toBe(false);
+      expect(caps.supportsExceptionInfoRequest).toBe(true);
     });
 
     it('should include caught and uncaught exception filters', () => {
@@ -277,7 +278,9 @@ describe('JavaDebugAdapter', () => {
       expect(caps.exceptionBreakpointFilters).toBeDefined();
       expect(caps.exceptionBreakpointFilters?.length).toBe(2);
       expect(caps.exceptionBreakpointFilters?.[0].filter).toBe('caught');
+      expect(caps.exceptionBreakpointFilters?.[0].default).toBe(false);
       expect(caps.exceptionBreakpointFilters?.[1].filter).toBe('uncaught');
+      expect(caps.exceptionBreakpointFilters?.[1].default).toBe(true);
     });
   });
 

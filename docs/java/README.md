@@ -122,7 +122,7 @@ use_mcp_tool(
 
 ### 2. Set Breakpoints
 
-Set breakpoints before starting/attaching. Breakpoints must be on executable lines (assignments, method calls, conditionals) — not on blank lines, comments, or declarations. Conditional breakpoints (with a `condition` expression) and exception breakpoints are also supported by the JDI bridge.
+Set breakpoints before starting/attaching. Breakpoints must be on executable lines (assignments, method calls, conditionals) — not on blank lines, comments, or declarations. Conditional breakpoints (with a `condition` expression) and exception breakpoints are also supported by the JDI bridge. On an exception stop the bridge answers the DAP `exceptionInfo` request, so `lastStop.exceptionInfo` (exception class, break mode, message, stack trace) is populated shortly after the pause.
 
 ```
 use_mcp_tool(

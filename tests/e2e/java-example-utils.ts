@@ -24,7 +24,8 @@ export type JavaExampleName =
   | 'EventRaceTest'
   | 'InnerClassTest'
   | 'ExprTest'
-  | 'InfiniteWait';
+  | 'InfiniteWait'
+  | 'ThrowsTest';
 
 export interface JavaExamplePaths {
   /** Absolute path to the main .java source file. */
@@ -49,6 +50,7 @@ const EXAMPLES: Record<JavaExampleName, JavaExampleSpec> = {
   InnerClassTest: { mainClass: 'InnerClassTest' },
   ExprTest:       { mainClass: 'ExprTest' },
   InfiniteWait:   { mainClass: 'InfiniteWait' },
+  ThrowsTest:     { mainClass: 'ThrowsTest' },
 };
 
 const prepared = new Map<JavaExampleName, JavaExamplePaths>();
