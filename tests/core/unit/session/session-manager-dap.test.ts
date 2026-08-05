@@ -1123,6 +1123,86 @@ describe('SessionManager - DAP Operations', () => {
     });
   });
 
+  describe('Stop-reason normalization (policy hook)', () => {
+    async function createPausedRustSession() {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.RUST,
+        executablePath: 'cargo'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.rs');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'entry');
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      return session;
+    }
+
+    it('normalizes a CodeLLDB SIGSTOP exception stop to pause and keeps the raw reason', async () => {
+      const session = await createPausedRustSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSTOP'
+      });
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop?.reason).toBe('pause');
+      expect(managedSession?.lastStop?.rawReason).toBe('exception');
+      expect(managedSession?.state).toBe(SessionState.PAUSED);
+      expect(managedSession?.pausePending).toBe(false);
+    });
+
+    it('leaves a real rust exception stop unnormalized (no rawReason)', async () => {
+      const session = await createPausedRustSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSEGV'
+      });
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop?.reason).toBe('exception');
+      expect(managedSession?.lastStop?.rawReason).toBeUndefined();
+    });
+
+    it('does not request exceptionInfo for a stop normalized to pause', async () => {
+      const session = await createPausedRustSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', {
+        supportsExceptionInfoRequest: true
+      });
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSTOP'
+      });
+      await vi.runAllTimersAsync();
+
+      const exceptionInfoCalls = dependencies.mockProxyManager.dapRequestCalls
+        .filter(c => c.command === 'exceptionInfo');
+      expect(exceptionInfoCalls).toHaveLength(0);
+      expect(sessionManager.getSession(session.id)?.lastStop?.reason).toBe('pause');
+    });
+
+    it('does not affect adapters without a normalizer (mock)', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSTOP'
+      });
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop?.reason).toBe('exception');
+      expect(managedSession?.lastStop?.rawReason).toBeUndefined();
+    });
+  });
+
   describe('Adapter Capabilities and exceptionInfo Enrichment (issue #243)', () => {
     const capsWithExceptionInfo = {
       supportsExceptionInfoRequest: true,

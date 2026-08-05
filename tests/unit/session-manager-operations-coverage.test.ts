@@ -2754,6 +2754,78 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.PAUSED);
     });
 
+    it('surfaces the recorded stop reason (and raw reason) in the pause result', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const promise = operations.pause('test-session', 1);
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
+      });
+      // Emulate core handleStopped recording a normalized stop before the
+      // operations-level listener observes the event.
+      mockSession.lastStop = { reason: 'pause', rawReason: 'exception', threadId: 1, timestamp: Date.now() };
+      emitStopped();
+      const result = await promise;
+
+      const data = result.data as { stopReason?: string; rawStopReason?: string };
+      expect(data.stopReason).toBe('pause');
+      expect(data.rawStopReason).toBe('exception');
+    });
+
+    it('does not echo a stale stop recorded before the pause was requested', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.lastStop = { reason: 'breakpoint', threadId: 1, timestamp: Date.now() - 1000 };
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const promise = operations.pause('test-session', 1);
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
+      });
+      // State flips but no new lastStop is recorded for this pause
+      emitStopped();
+      const result = await promise;
+
+      const data = result.data as { stopReason?: string };
+      expect(data.stopReason).toBeUndefined();
+    });
+
+    it('flags the in-flight pause for stop-reason normalization (pausePending)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+      const promise = operations.pause('test-session', 1);
+      await vi.waitFor(() => {
+        expect(mockSession.pausePending).toBe(true);
+      });
+      emitStopped();
+      await promise;
+    });
+
+    it('clears pausePending when the pause request fails', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'pause') {
+          return Promise.reject(new Error('pause not supported'));
+        }
+        return Promise.resolve({ body: { threads: [{ id: 1, name: 'Main' }] } });
+      });
+
+      await expect(operations.pause('test-session', 1)).rejects.toThrow('pause not supported');
+      expect(mockSession.pausePending).toBe(false);
+    });
+
+    it('includes the last stop reason when already paused', async () => {
+      mockSession.state = SessionState.PAUSED;
+      mockSession.lastStop = { reason: 'breakpoint', threadId: 1, timestamp: Date.now() };
+
+      const result = await operations.pause('test-session');
+
+      const data = result.data as { message?: string; stopReason?: string };
+      expect(data.message).toBe('Already paused');
+      expect(data.stopReason).toBe('breakpoint');
+    });
+
     it('reports state PAUSED when stopped arrives before the pause response resolves (netcoredbg ordering)', async () => {
       mockSession.state = SessionState.RUNNING;
       // Emit 'stopped' from inside the pause request, before its promise resolves

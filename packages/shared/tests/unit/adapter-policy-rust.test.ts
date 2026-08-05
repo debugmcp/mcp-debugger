@@ -64,6 +64,43 @@ describe('RustAdapterPolicy', () => {
     });
   });
 
+  describe('normalizeStopReason', () => {
+    const normalize = RustAdapterPolicy.normalizeStopReason!;
+
+    it('maps SIGSTOP exception in description to pause', () => {
+      expect(
+        normalize('exception', { reason: 'exception', description: 'signal SIGSTOP' }, { pausePending: false })
+      ).toBe('pause');
+    });
+
+    it('maps SIGSTOP exception in text to pause', () => {
+      expect(
+        normalize('exception', { reason: 'exception', text: 'Process stopped by SIGSTOP' }, { pausePending: false })
+      ).toBe('pause');
+    });
+
+    it('leaves real exceptions untouched even while a pause is pending', () => {
+      expect(
+        normalize('exception', { reason: 'exception', description: 'signal SIGSEGV' }, { pausePending: true })
+      ).toBeUndefined();
+      expect(
+        normalize('exception', { reason: 'exception', text: 'panicked at src/main.rs:3' }, { pausePending: true })
+      ).toBeUndefined();
+    });
+
+    it('maps a detail-less exception to pause only when a pause is pending', () => {
+      expect(normalize('exception', { reason: 'exception' }, { pausePending: true })).toBe('pause');
+      expect(normalize('exception', undefined, { pausePending: true })).toBe('pause');
+      expect(normalize('exception', { reason: 'exception' }, { pausePending: false })).toBeUndefined();
+    });
+
+    it('never touches non-exception reasons', () => {
+      expect(normalize('breakpoint', { reason: 'breakpoint' }, { pausePending: true })).toBeUndefined();
+      expect(normalize('step', { reason: 'step' }, { pausePending: false })).toBeUndefined();
+      expect(normalize('pause', { reason: 'pause' }, { pausePending: true })).toBeUndefined();
+    });
+  });
+
   it('resolves executable path using inputs and env', () => {
     expect(RustAdapterPolicy.resolveExecutablePath!('/custom/bin')).toBe('/custom/bin');
 

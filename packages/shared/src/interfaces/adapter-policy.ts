@@ -103,6 +103,29 @@ export interface AdapterPolicy {
   isInternalFrame?(frame: StackFrame): boolean;
 
   /**
+   * Normalize an adapter-specific DAP stop reason into a canonical reason
+   * ('pause', 'breakpoint', 'step', 'exception', ...). Some adapters report
+   * misleading raw reasons — e.g. CodeLLDB surfaces a user-initiated pause as
+   * reason 'exception' with a SIGSTOP description.
+   *
+   * Called from the session-manager stopped handler BEFORE the auto-continue
+   * decision and before the stop is recorded, so the normalized reason drives
+   * both. A policy that also sets pauseAfterChildAttach must therefore be
+   * careful not to normalize a first stop into a user-break reason.
+   *
+   * @param reason The raw DAP stop reason from the adapter
+   * @param body The full stopped-event body, if available
+   * @param context context.pausePending is true while a user-initiated
+   *   pause request is in flight for this session
+   * @returns The canonical reason, or undefined to keep the raw reason
+   */
+  normalizeStopReason?(
+    reason: string,
+    body: DebugProtocol.StoppedEvent['body'] | undefined,
+    context: { pausePending: boolean }
+  ): string | undefined;
+
+  /**
    * Extract local variables from the raw DAP data based on language-specific logic.
    * This allows each language adapter to define what constitutes "local variables".
    * 

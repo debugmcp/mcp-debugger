@@ -284,7 +284,28 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
 
     // Named function for stopped event
-    const handleStopped = (threadId: number | undefined, reason: string, body?: DebugProtocol.StoppedEvent['body']) => {
+    const handleStopped = (threadId: number | undefined, rawReason: string, body?: DebugProtocol.StoppedEvent['body']) => {
+      // Give the adapter policy a chance to normalize misleading raw reasons
+      // (e.g. CodeLLDB reports a SIGSTOP-delivered pause as 'exception')
+      // before the reason drives auto-continue, lastStop, and exceptionInfo.
+      let reason = rawReason;
+      try {
+        const policy = this.sessionStore.selectPolicy(session.language);
+        const normalized = policy.normalizeStopReason?.(rawReason, body, {
+          pausePending: session.pausePending === true
+        });
+        if (normalized && normalized !== rawReason) {
+          this.logger.info(
+            `[SessionManager ${sessionId}] Stop reason normalized: '${rawReason}' -> '${normalized}'`
+          );
+          reason = normalized;
+        }
+      } catch (err) {
+        this.logger.debug(
+          `[SessionManager ${sessionId}] Stop-reason normalization failed; keeping raw reason '${rawReason}': ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+      session.pausePending = false;
       this.logger.debug(`[SessionManager] handleStopped: session=${sessionId} currentState=${session.state} reason=${reason} threadId=${threadId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
 
@@ -341,6 +362,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         // description/text carry e.g. the exception class/message (issue #220).
         session.lastStop = {
           reason,
+          ...(reason !== rawReason ? { rawReason } : {}),
           threadId,
           timestamp: Date.now(),
           ...(body?.description ? { description: body.description } : {}),

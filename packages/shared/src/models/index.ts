@@ -265,6 +265,12 @@ export interface DebugSession {
 export interface SessionStopInfo {
   /** DAP stop reason, e.g. 'breakpoint', 'exception', 'step', 'pause', 'entry' */
   reason: string;
+  /**
+   * The adapter-reported reason before policy normalization (e.g. CodeLLDB's
+   * 'exception' for a SIGSTOP-delivered pause). Present only when
+   * normalization changed the reason.
+   */
+  rawReason?: string;
   threadId?: number;
   /** Epoch milliseconds when the stop was observed */
   timestamp: number;
