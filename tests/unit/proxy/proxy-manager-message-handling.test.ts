@@ -1106,7 +1106,87 @@ describe('ProxyManager Message Handling', () => {
         signal: 'SIGTERM'
       });
 
-      expect(exitSpy).toHaveBeenCalledWith(7, 'SIGTERM');
+      expect(exitSpy).toHaveBeenCalledWith(7, 'SIGTERM', undefined);
+    });
+
+    it('does not fabricate exit code 1 for a codeless dap_connection_closed (issue #258)', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const exitSpy = vi.fn();
+      proxyManager.on('exit', exitSpy);
+
+      (proxyManager as unknown as {
+        handleStatusMessage: (status: any) => void;
+      }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'dap_connection_closed'
+      });
+
+      expect(exitSpy).toHaveBeenCalledWith(null, undefined, undefined);
+    });
+
+    it('passes the expected flag through to exit listeners (issue #258)', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+
+      const exitSpy = vi.fn();
+      proxyManager.on('exit', exitSpy);
+
+      (proxyManager as unknown as {
+        handleStatusMessage: (status: any) => void;
+      }).handleStatusMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'dap_connection_closed',
+        expected: true
+      });
+
+      expect(exitSpy).toHaveBeenCalledWith(null, undefined, true);
+    });
+
+    it('emits exit exactly once when a terminal status flows through the full message path (issue #258)', () => {
+      const logger = createMockLogger();
+      const fileSystem = createMockFileSystem();
+
+      const proxyManager = new ProxyManager(
+        null,
+        { launchProxy: vi.fn() } as never,
+        fileSystem as never,
+        logger
+      );
+      // Arm the functional core so both the imperative handler and the
+      // dap-core executor see the message — the duplicate-emit path.
+      (proxyManager as unknown as { dapState: unknown }).dapState =
+        createInitialState('status-session');
+
+      const exitSpy = vi.fn();
+      proxyManager.on('exit', exitSpy);
+
+      (proxyManager as unknown as {
+        handleProxyMessage: (message: any) => void;
+      }).handleProxyMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'dap_connection_closed'
+      });
+
+      expect(exitSpy).toHaveBeenCalledTimes(1);
     });
 
     it('rejects pending requests when proxy exits', () => {

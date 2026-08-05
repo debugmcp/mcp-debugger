@@ -972,10 +972,11 @@ describe('DapProxyWorker', () => {
       expect(sentMessages().some(m => m.type === 'dapEvent' && m.event === 'terminated')).toBe(false);
       expect(sentMessages().some(m => m.type === 'status' && m.status === 'dap_connection_closed')).toBe(false);
 
-      // The exit-time flush arrives, then the streams close
+      // The exit-time flush arrives, then the streams close and rdbg dies
       spawnConfig.onStdioLine('stdout', '15: FizzBuzz');
       adapterProcess.stdout.emit('close');
       adapterProcess.stderr.emit('close');
+      adapterProcess.emit('exit', 0, null);
       await flush();
 
       const messages = sentMessages();
@@ -986,6 +987,426 @@ describe('DapProxyWorker', () => {
       expect(terminatedIdx).toBeGreaterThanOrEqual(0);
       // The flushed output must reach the parent before the teardown signal
       expect(outputIdx).toBeLessThan(terminatedIdx);
+    });
+
+    it('forwards terminated before dap_connection_closed in arrival order (issue #258)', async () => {
+      // rdbg sends terminated and then closes the socket. Both handlers await
+      // the same stdio drain barrier; whichever continuation runs first wins.
+      // The parent maps dap_connection_closed to a session exit, stripping
+      // the terminated handler — so terminated must always be forwarded
+      // first, matching arrival order.
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'ruby-order-session',
+        language: 'ruby',
+        executablePath: 'ruby',
+        adapterHost: '127.0.0.1',
+        adapterPort: 8126,
+        logDir: '/logs',
+        scriptPath: '/path/to/fizzbuzz.rb',
+        launchConfig: { request: 'launch', type: 'rdbg' },
+        adapterCommand: { command: 'rdbg', args: ['--open', '-c', '--', 'ruby', '/path/to/fizzbuzz.rb'] }
+      };
+
+      const adapterProcess = new EventEmitter() as any;
+      adapterProcess.pid = 4245;
+      adapterProcess.stdout = new EventEmitter();
+      adapterProcess.stderr = new EventEmitter();
+      adapterProcess.kill = vi.fn();
+      adapterProcess.unref = vi.fn();
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 4245 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+          if (handlers.onClose) client.on('close', handlers.onClose);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = RubyAdapterPolicy;
+      (worker as any).adapterState = RubyAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).currentSessionId = payload.sessionId;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      const sentMessages = () => mockMessageSender.send.mock.calls.map(([m]) => m);
+      const flush = () => new Promise(resolve => setImmediate(resolve));
+
+      // Terminated arrives first, then the socket closes, then stdio drains
+      // and rdbg's process dies
+      (mockDapClient as EventEmitter).emit('terminated', {});
+      (mockDapClient as EventEmitter).emit('close');
+      await flush();
+      adapterProcess.stdout.emit('close');
+      adapterProcess.stderr.emit('close');
+      adapterProcess.emit('exit', 0, null);
+      await flush();
+      await flush();
+
+      const messages = sentMessages();
+      const terminatedIdx = messages.findIndex(m => m.type === 'dapEvent' && m.event === 'terminated');
+      const closedIdx = messages.findIndex(m => m.type === 'status' && m.status === 'dap_connection_closed');
+      expect(terminatedIdx).toBeGreaterThanOrEqual(0);
+      expect(closedIdx).toBeGreaterThanOrEqual(0);
+      // Arrival order must be preserved: terminated was first
+      expect(terminatedIdx).toBeLessThan(closedIdx);
+      // Terminated was forwarded first, so the closure is an expected teardown
+      expect(messages[closedIdx].expected).toBe(true);
+    });
+
+    it('marks dap_connection_closed unexpected when the socket drops mid-run (issue #258)', async () => {
+      // No terminated/exited event and no shutdown underway: the adapter
+      // dropped the DAP socket while the debuggee was still running. The
+      // parent must be able to tell this apart from a normal teardown.
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'ruby-abnormal-close-session',
+        language: 'ruby',
+        executablePath: 'ruby',
+        adapterHost: '127.0.0.1',
+        adapterPort: 8128,
+        logDir: '/logs',
+        scriptPath: '/path/to/fizzbuzz.rb',
+        launchConfig: { request: 'launch', type: 'rdbg' },
+        adapterCommand: { command: 'rdbg', args: ['--open', '-c', '--', 'ruby', '/path/to/fizzbuzz.rb'] }
+      };
+
+      const adapterProcess = new EventEmitter() as any;
+      adapterProcess.pid = 4247;
+      adapterProcess.stdout = new EventEmitter();
+      adapterProcess.stderr = new EventEmitter();
+      adapterProcess.kill = vi.fn();
+      adapterProcess.unref = vi.fn();
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 4247 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+          if (handlers.onClose) client.on('close', handlers.onClose);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = RubyAdapterPolicy;
+      (worker as any).adapterState = RubyAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).currentSessionId = payload.sessionId;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      const sentMessages = () => mockMessageSender.send.mock.calls.map(([m]) => m);
+      const flush = () => new Promise(resolve => setImmediate(resolve));
+
+      (mockDapClient as EventEmitter).emit('close');
+      adapterProcess.stdout.emit('close');
+      adapterProcess.stderr.emit('close');
+      await flush();
+      await flush();
+
+      const closed = sentMessages().find(m => m.type === 'status' && m.status === 'dap_connection_closed');
+      expect(closed).toBeDefined();
+      expect(closed.expected).toBe(false);
+    });
+
+    describe('adapter-exit exitCode synthesis (issue #258)', () => {
+      // rdbg never sends a DAP exited event, but rdbg -c makes the adapter
+      // process's exit status the debuggee's. Policies that declare
+      // adapterExitCodeIsDebuggeeExitCode get a synthesized exited event so
+      // the session records the debuggee exit code like Python/js do.
+      const makeRubyHarness = async (sessionId: string, port: number) => {
+        const payload: ProxyInitPayload = {
+          cmd: 'init',
+          sessionId,
+          language: 'ruby',
+          executablePath: 'ruby',
+          adapterHost: '127.0.0.1',
+          adapterPort: port,
+          logDir: '/logs',
+          scriptPath: '/path/to/script.rb',
+          launchConfig: { request: 'launch', type: 'rdbg' },
+          adapterCommand: { command: 'rdbg', args: ['--open', '-c', '--', 'ruby', '/path/to/script.rb'] }
+        };
+
+        const adapterProcess = new EventEmitter() as any;
+        adapterProcess.pid = 5000 + port;
+        adapterProcess.stdout = new EventEmitter();
+        adapterProcess.stderr = new EventEmitter();
+        adapterProcess.kill = vi.fn();
+        adapterProcess.unref = vi.fn();
+        adapterProcess.exitCode = null;
+
+        const processStub = {
+          spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: adapterProcess.pid }),
+          shutdown: vi.fn().mockResolvedValue(undefined)
+        };
+
+        const connectionStub = {
+          connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+          setAdapterPolicy: vi.fn(),
+          setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+            if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+            if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+            if (handlers.onClose) client.on('close', handlers.onClose);
+          }),
+          initializeSession: vi.fn().mockImplementation(async () => {
+            setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          }),
+          sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+          setBreakpoints: vi.fn().mockResolvedValue(undefined),
+          sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+          disconnect: vi.fn().mockResolvedValue(undefined)
+        };
+
+        (worker as any).logger = mockLogger;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterPolicy = RubyAdapterPolicy;
+        (worker as any).adapterState = RubyAdapterPolicy.createInitialState();
+        (worker as any).currentInitPayload = payload;
+        (worker as any).currentSessionId = payload.sessionId;
+        (worker as any).state = ProxyState.INITIALIZING;
+
+        await (worker as any).startAdapterAndConnect(payload);
+        return { adapterProcess };
+      };
+
+      const sentMessages = () => mockMessageSender.send.mock.calls.map(([m]: [any]) => m);
+      const flush = () => new Promise(resolve => setImmediate(resolve));
+
+      it('synthesizes exited from the adapter exit code before terminated (crash, code 1)', async () => {
+        const { adapterProcess } = await makeRubyHarness('ruby-synth-crash', 8130);
+
+        (mockDapClient as EventEmitter).emit('terminated', {});
+        adapterProcess.stdout.emit('close');
+        adapterProcess.stderr.emit('close');
+        await flush();
+        // The adapter process dies moments after terminated (rdbg -c: exit
+        // status is the debuggee's)
+        adapterProcess.emit('exit', 1, null);
+        await flush();
+        await flush();
+
+        const messages = sentMessages();
+        const exitedIdx = messages.findIndex((m: any) => m.type === 'dapEvent' && m.event === 'exited');
+        const terminatedIdx = messages.findIndex((m: any) => m.type === 'dapEvent' && m.event === 'terminated');
+        expect(exitedIdx).toBeGreaterThanOrEqual(0);
+        expect(messages[exitedIdx].body).toEqual({ exitCode: 1 });
+        expect(terminatedIdx).toBeGreaterThanOrEqual(0);
+        expect(exitedIdx).toBeLessThan(terminatedIdx);
+      });
+
+      it('synthesizes exited with code 0 for a clean run', async () => {
+        const { adapterProcess } = await makeRubyHarness('ruby-synth-clean', 8131);
+
+        (mockDapClient as EventEmitter).emit('terminated', {});
+        adapterProcess.stdout.emit('close');
+        adapterProcess.stderr.emit('close');
+        await flush();
+        adapterProcess.emit('exit', 0, null);
+        await flush();
+        await flush();
+
+        const messages = sentMessages();
+        const exited = messages.find((m: any) => m.type === 'dapEvent' && m.event === 'exited');
+        expect(exited).toBeDefined();
+        expect(exited.body).toEqual({ exitCode: 0 });
+      });
+
+      it('skips synthesis on signal kill (no exit code)', async () => {
+        const { adapterProcess } = await makeRubyHarness('ruby-synth-signal', 8132);
+
+        (mockDapClient as EventEmitter).emit('terminated', {});
+        adapterProcess.stdout.emit('close');
+        adapterProcess.stderr.emit('close');
+        await flush();
+        adapterProcess.emit('exit', null, 'SIGKILL');
+        await flush();
+        await flush();
+
+        const messages = sentMessages();
+        expect(messages.some((m: any) => m.type === 'dapEvent' && m.event === 'exited')).toBe(false);
+        expect(messages.some((m: any) => m.type === 'dapEvent' && m.event === 'terminated')).toBe(true);
+      });
+
+      it('skips synthesis for policies that do not opt in (python)', async () => {
+        const payload: ProxyInitPayload = {
+          cmd: 'init',
+          sessionId: 'py-no-synth-session',
+          executablePath: 'python',
+          adapterHost: 'localhost',
+          adapterPort: 8133,
+          logDir: '/logs',
+          scriptPath: '/path/to/script.py'
+        };
+
+        const adapterProcess = new EventEmitter() as any;
+        adapterProcess.pid = 6133;
+        adapterProcess.stdout = new EventEmitter();
+        adapterProcess.stderr = new EventEmitter();
+        adapterProcess.kill = vi.fn();
+        adapterProcess.unref = vi.fn();
+        adapterProcess.exitCode = null;
+
+        const processStub = {
+          spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 6133 }),
+          shutdown: vi.fn().mockResolvedValue(undefined)
+        };
+
+        const connectionStub = {
+          connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+          setAdapterPolicy: vi.fn(),
+          setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+            if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+            if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+            if (handlers.onClose) client.on('close', handlers.onClose);
+          }),
+          initializeSession: vi.fn().mockImplementation(async () => {
+            setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          }),
+          sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+          setBreakpoints: vi.fn().mockResolvedValue(undefined),
+          sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+          disconnect: vi.fn().mockResolvedValue(undefined)
+        };
+
+        (worker as any).logger = mockLogger;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterPolicy = PythonAdapterPolicy;
+        (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+        (worker as any).currentInitPayload = payload;
+        (worker as any).currentSessionId = payload.sessionId;
+        (worker as any).state = ProxyState.INITIALIZING;
+
+        await (worker as any).startAdapterAndConnect(payload);
+
+        adapterProcess.emit('exit', 1, null);
+        (mockDapClient as EventEmitter).emit('terminated', {});
+        await flush();
+        await flush();
+
+        const messages = sentMessages();
+        expect(messages.some((m: any) => m.type === 'dapEvent' && m.event === 'exited')).toBe(false);
+        expect(messages.some((m: any) => m.type === 'dapEvent' && m.event === 'terminated')).toBe(true);
+      });
+    });
+
+    it('adapter_exited never overtakes a terminal DAP event (issue #258)', async () => {
+      // The adapter process's 'exit' fires while terminated is held behind
+      // the stdio drain barrier. If adapter_exited reaches the parent first,
+      // its exit code (the debuggee's, via rdbg -c) — or a fabricated one —
+      // ends the session before terminated can mark it stopped.
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'ruby-adapter-exit-order-session',
+        language: 'ruby',
+        executablePath: 'ruby',
+        adapterHost: '127.0.0.1',
+        adapterPort: 8127,
+        logDir: '/logs',
+        scriptPath: '/path/to/crash.rb',
+        launchConfig: { request: 'launch', type: 'rdbg' },
+        adapterCommand: { command: 'rdbg', args: ['--open', '-c', '--', 'ruby', '/path/to/crash.rb'] }
+      };
+
+      const adapterProcess = new EventEmitter() as any;
+      adapterProcess.pid = 4246;
+      adapterProcess.stdout = new EventEmitter();
+      adapterProcess.stderr = new EventEmitter();
+      adapterProcess.kill = vi.fn();
+      adapterProcess.unref = vi.fn();
+
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 4246 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+          if (handlers.onClose) client.on('close', handlers.onClose);
+        }),
+        initializeSession: vi.fn().mockImplementation(async () => {
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+        }),
+        sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+        setBreakpoints: vi.fn().mockResolvedValue(undefined),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = RubyAdapterPolicy;
+      (worker as any).adapterState = RubyAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).currentSessionId = payload.sessionId;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      const sentMessages = () => mockMessageSender.send.mock.calls.map(([m]) => m);
+      const flush = () => new Promise(resolve => setImmediate(resolve));
+
+      // Terminated arrives, then the adapter process dies (code 1 = the
+      // debuggee's own exit status under rdbg -c), then stdio drains
+      (mockDapClient as EventEmitter).emit('terminated', {});
+      adapterProcess.emit('exit', 1, null);
+      await flush();
+      adapterProcess.stdout.emit('close');
+      adapterProcess.stderr.emit('close');
+      await flush();
+      await flush();
+
+      const messages = sentMessages();
+      const terminatedIdx = messages.findIndex(m => m.type === 'dapEvent' && m.event === 'terminated');
+      const adapterExitedIdx = messages.findIndex(m => m.type === 'status' && m.status === 'adapter_exited');
+      expect(terminatedIdx).toBeGreaterThanOrEqual(0);
+      expect(adapterExitedIdx).toBeGreaterThanOrEqual(0);
+      // The terminal DAP event arrived first and must be forwarded first
+      expect(terminatedIdx).toBeLessThan(adapterExitedIdx);
+      // The real exit code must survive the reordering
+      expect(messages[adapterExitedIdx].code).toBe(1);
     });
 
     it('startAdapterAndConnect passes no stdio forwarder for policies that do not opt in', async () => {
@@ -1272,6 +1693,8 @@ describe('DapProxyWorker', () => {
       );
 
       adapterEmitter.emit('exit', 0, null);
+      // adapter_exited now rides the terminal-signal queue (issue #258)
+      await new Promise(resolve => setImmediate(resolve));
       expect(mockMessageSender.send).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'status',

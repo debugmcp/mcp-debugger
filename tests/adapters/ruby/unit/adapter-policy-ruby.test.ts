@@ -94,7 +94,8 @@ describe('RubyAdapterPolicy.getAdapterSpawnConfig', () => {
       port: 4711,
       logDir: '/tmp/logs',
       env: { FOO: 'bar' },
-      forwardStdio: { excludeStderrLinePattern: /^DEBUGGER: / }
+      forwardStdio: { excludeStderrLinePattern: /^DEBUGGER: / },
+      adapterExitCodeIsDebuggeeExitCode: true
     });
   });
 

@@ -162,24 +162,58 @@ describe('DAP Core Handlers', () => {
           expect(result.commands[1]).toEqual({
             type: 'emitEvent',
             event: 'exit',
-            args: [1, 'SIGTERM']
+            args: [1, 'SIGTERM', undefined]
           });
         });
       });
 
-      it('should use default code when missing', () => {
+      it('should pass null code through when missing instead of fabricating 1 (issue #258)', () => {
         const message: ProxyStatusMessage = {
           type: 'status',
           sessionId: 'test-session-123',
-          status: 'adapter_exited'
+          status: 'dap_connection_closed'
         };
-        
+
         const result = handleProxyMessage(state, message);
-        
+
         expect(result.commands[1]).toEqual({
           type: 'emitEvent',
           event: 'exit',
-          args: [1, undefined]
+          args: [null, undefined, undefined]
+        });
+      });
+
+      it('should preserve a real exit code of 0 (issue #258)', () => {
+        const message: ProxyStatusMessage = {
+          type: 'status',
+          sessionId: 'test-session-123',
+          status: 'adapter_exited',
+          code: 0
+        };
+
+        const result = handleProxyMessage(state, message);
+
+        expect(result.commands[1]).toEqual({
+          type: 'emitEvent',
+          event: 'exit',
+          args: [0, undefined, undefined]
+        });
+      });
+
+      it('should pass the expected flag through (issue #258)', () => {
+        const message: ProxyStatusMessage = {
+          type: 'status',
+          sessionId: 'test-session-123',
+          status: 'dap_connection_closed',
+          expected: true
+        };
+
+        const result = handleProxyMessage(state, message);
+
+        expect(result.commands[1]).toEqual({
+          type: 'emitEvent',
+          event: 'exit',
+          args: [null, undefined, true]
         });
       });
     });

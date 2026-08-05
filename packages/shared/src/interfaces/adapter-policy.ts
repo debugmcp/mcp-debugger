@@ -405,6 +405,16 @@ export type AdapterSpawnConfig =
          */
         excludeStderrLinePattern?: RegExp;
       };
+      /**
+       * The adapter process's exit code IS the debuggee's exit code (issue
+       * #258): rdbg -c runs the debuggee under the adapter process, so its
+       * exit status propagates. Lets the worker synthesize a DAP 'exited'
+       * event for adapters that never send one, giving the session a
+       * recorded debuggee exit code like Python/js. Deliberately separate
+       * from forwardStdio: CodeLLDB forwards stdio too, but its exit code
+       * is its own, not the debuggee's.
+       */
+      adapterExitCodeIsDebuggeeExitCode?: boolean;
     }
   | {
       mode: 'connect';
