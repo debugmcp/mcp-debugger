@@ -432,20 +432,40 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     );
 
     if (session.proxyManager) {
+      // Session-preserving teardown: closeSession here used to REMOVE the
+      // session from the store, so the state update below threw
+      // SessionNotFoundError and the session was silently destroyed (#238).
       this.logger.warn(
         `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`
       );
-      await this.closeSession(sessionId);
+      await this.stopProxyPreservingSession(session);
     }
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this._updateSessionState(session, SessionState.INITIALIZING);
 
-    // Explicitly set lifecycle state to ACTIVE when starting debugging
+    // Explicitly set lifecycle state to ACTIVE when starting debugging.
+    // attachMode is cleared: a launch supersedes any prior attach, and a
+    // sticky flag would wrongly refuse restart_debugging forever (#238).
     this.sessionStore.update(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
+      attachMode: false,
     });
     this.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
+
+    // Record the launch spec for restart_debugging BEFORE attempting the
+    // launch — a start that dies mid-way is still meaningfully replayable.
+    // Dry runs are not recorded: lastLaunch means "most recent real launch".
+    if (!dryRunSpawn) {
+      session.lastLaunch = {
+        scriptPath,
+        scriptArgs,
+        dapLaunchArgs,
+        adapterLaunchConfig,
+        breakOnExceptions,
+        launchedAt: Date.now(),
+      };
+    }
 
     try {
       // For dry run, start the proxy and wait for completion
@@ -842,6 +862,80 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
+
+  /** Sessions with a restart currently in flight (reentrancy guard, #238) */
+  private restartingSessions = new Set<string>();
+
+  /**
+   * Restart the debuggee: terminate the current program (if any) and replay
+   * the last real launch with the same configuration. Breakpoints re-apply
+   * automatically via the initialBreakpoints snapshot; the output buffer
+   * starts fresh (read from since=0). Terminate+relaunch is used uniformly —
+   * no adapter advertises native DAP restart, and the spec blesses the
+   * emulation — so every launch-mode language works with no per-adapter
+   * wiring (issue #238).
+   */
+  async restartDebugging(sessionId: string): Promise<DebugResult> {
+    const session = this._getSessionById(sessionId);
+
+    if (session.attachMode) {
+      return {
+        success: false,
+        state: session.state,
+        error: 'Cannot restart an attach session: there is no launch configuration to replay. Detach and re-attach instead.'
+      };
+    }
+    if (!session.lastLaunch) {
+      return {
+        success: false,
+        state: session.state,
+        error: 'Nothing to restart: this session has not been launched (start_debugging has not run, or only a dry run was performed).'
+      };
+    }
+    if (this.restartingSessions.has(sessionId)) {
+      return {
+        success: false,
+        state: session.state,
+        error: 'A restart is already in progress for this session.'
+      };
+    }
+    if (session.state === SessionState.INITIALIZING) {
+      return {
+        success: false,
+        state: session.state,
+        error: 'Session is still initializing; wait for the current start to complete before restarting.'
+      };
+    }
+
+    this.restartingSessions.add(sessionId);
+    try {
+      const spec = session.lastLaunch;
+      this.logger.info(
+        `[SessionManager] Restarting session ${sessionId}: replaying launch of ${spec.scriptPath}`
+      );
+      const result = await this.startDebugging(
+        sessionId,
+        spec.scriptPath,
+        spec.scriptArgs,
+        spec.dapLaunchArgs,
+        false, // never replay as a dry run
+        spec.adapterLaunchConfig,
+        spec.breakOnExceptions
+      );
+      if (result.success) {
+        result.data = {
+          ...((result.data as object) ?? {}),
+          breakpointsReapplied: this._getSessionById(sessionId).breakpoints.size,
+          // Each launch starts a fresh output buffer: tell the caller to
+          // reset its get_output cursor to since=0.
+          outputReset: true,
+        };
+      }
+      return result;
+    } finally {
+      this.restartingSessions.delete(sessionId);
+    }
+  }
 
   async setBreakpoint(
     sessionId: string,
@@ -1856,7 +1950,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       this.logger.warn(
         `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`
       );
-      await this.closeSession(sessionId);
+      // Session-preserving teardown (same landmine as startDebugging, #238)
+      await this.stopProxyPreservingSession(session);
     }
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE

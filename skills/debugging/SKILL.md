@@ -49,7 +49,7 @@ Rules that prevent 90% of failed sessions:
 3. When pausing is too disruptive (hot loops, live or attached processes), use a **logpoint**: `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without stopping the program (Python/JS/Go/Rust; Java and .NET reject it with a clear error).
 4. At each pause, record what you *learned* (variable values, actual control flow), not just where you are.
 5. When the diverging line is found, inspect every input to that line before concluding — the bug is usually an operand, not the operator.
-6. Fix, then re-run the same session recipe to confirm the observed state changed as predicted.
+6. Fix, then `restart_debugging {sessionId}` — one call relaunches with the same configuration and re-applies every breakpoint (the output buffer resets; read `get_output` from `since: 0`). Confirm the observed state changed as predicted. Works even after the program exited; attach sessions are rejected (detach and re-attach instead).
 
 ## Program output
 

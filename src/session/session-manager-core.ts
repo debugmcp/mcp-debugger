@@ -204,6 +204,37 @@ export abstract class SessionManagerCore extends EventEmitter {
     return true;
   }
 
+  /**
+   * Tear down the session's proxy (listeners, worker process, adapter slot)
+   * while PRESERVING the session record — breakpoints, output buffer, launch
+   * spec and lifecycle state survive for a relaunch. Contrast closeSession,
+   * which removes the session from the store entirely. stop() runs cleanup()
+   * even without a live proxy process, so the adapter registry slot is
+   * always released (issue #238).
+   */
+  protected async stopProxyPreservingSession(session: ManagedSession): Promise<void> {
+    const proxyManager = session.proxyManager;
+    if (!proxyManager) {
+      return;
+    }
+    try {
+      this.cleanupProxyEventHandlers(session, proxyManager);
+    } catch (cleanupError) {
+      this.logger.error(
+        `[SessionManager] Error during listener cleanup for session ${session.id}:`,
+        cleanupError
+      );
+    }
+    try {
+      await proxyManager.stop();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[SessionManager] Error stopping proxy for session ${session.id}:`, message);
+    } finally {
+      session.proxyManager = undefined;
+    }
+  }
+
   async closeAllSessions(): Promise<void> {
     this.logger.info(`Closing all debug sessions (${this.sessionStore.size()} active)`);
     const sessions = this.sessionStore.getAllManaged();
@@ -228,6 +259,13 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.adapterCapabilities = undefined;
     // Each launch/attach starts with a fresh output buffer (issue #218).
     session.outputBuffer = new OutputRingBuffer();
+    // A new adapter instance has verified nothing yet: clear per-launch
+    // breakpoint state so a relaunch reports honest verification (#238).
+    for (const bp of session.breakpoints.values()) {
+      bp.verified = false;
+      bp.message = undefined;
+      bp.adapterId = undefined;
+    }
 
     // Adapters whose first stopped event after launch may not carry
     // reason='entry' (e.g., js-debug emits 'pause'/'breakpoint' from

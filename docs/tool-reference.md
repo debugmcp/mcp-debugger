@@ -15,6 +15,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [clear_breakpoints](#clear_breakpoints)
 3. [Execution Control](#execution-control)
    - [start_debugging](#start_debugging)
+   - [restart_debugging](#restart_debugging)
    - [step_over](#step_over)
    - [step_into](#step_into)
    - [step_out](#step_out)
@@ -299,6 +300,36 @@ Starts debugging a script.
 - `"exception"`: Stopped at an exception (the launch default for most languages; see `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them. Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, Java, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
 
 **Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions`, so a crash (non-zero) is distinguishable from a clean exit.
+
+---
+
+### restart_debugging
+
+Restarts the debuggee in one call: terminates the current program (if still running) and relaunches it with the same configuration as the last `start_debugging`. All current breakpoints are re-applied automatically — the core edit-rerun loop (`fix a line → restart → confirm at the same breakpoints`) becomes a single tool call instead of close/create/re-set/start.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+
+**Response:** mirrors `start_debugging`, plus:
+```json
+{
+  "success": true,
+  "state": "paused",
+  "message": "Debugging started for /path/app.py. Current state: paused",
+  "data": {
+    "reason": "breakpoint",
+    "breakpointsReapplied": 2,
+    "outputReset": true
+  }
+}
+```
+
+**Notes:**
+- Works while the program is running, paused, **or after it has exited** (the primary use case — a finished session can be restarted without recreating it).
+- Restart is implemented uniformly as terminate + relaunch (the DAP-spec-blessed emulation; no adapter advertises native restart), so every launch-mode language works identically. Native DAP `restart` is a possible future optimization.
+- The launch configuration is replayed verbatim (script, args, `dapLaunchArgs`, `adapterLaunchConfig`, `breakOnExceptions`); there are no per-restart overrides — call `start_debugging` for a different configuration.
+- **The output buffer starts fresh**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`.
+- Not available for **attach sessions** (no launch configuration to replay — detach and re-attach instead) or for sessions that were never launched (including dry-run-only sessions).
 
 ---
 

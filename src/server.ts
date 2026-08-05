@@ -435,6 +435,16 @@ export class DebugMcpServer {
     return result;
   }
 
+  public async restartDebugging(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown }> {
+    // Deliberately no validateSession(): a finished debuggee is
+    // lifecycle-TERMINATED, and restarting after exit is the primary use
+    // case (cf. handleGetOutput). Session existence is still enforced.
+    if (!this.sessionManager.getSession(sessionId)) {
+      throw new SessionNotFoundError(sessionId);
+    }
+    return this.sessionManager.restartDebugging(sessionId);
+  }
+
   public async closeDebugSession(sessionId: string): Promise<boolean> {
     return this.sessionManager.closeSession(sessionId);
   }
@@ -726,9 +736,10 @@ export class DebugMcpServer {
                   additionalProperties: true
                 }
               },
-              required: ['sessionId', 'scriptPath'] 
-            } 
+              required: ['sessionId', 'scriptPath']
+            }
           },
+          { name: 'restart_debugging', description: 'Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'attach_to_process', description: 'Attach to a running process for debugging. After the attach handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~5s default) the attach fails and the debug proxy is torn down', inputSchema: {
               type: 'object',
               properties: {
@@ -1097,6 +1108,31 @@ export class DebugMcpServer {
                   // Re-throw all other errors (including file validation errors)
                   throw error;
                 }
+              }
+              break;
+            }
+            case 'restart_debugging': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
+              }
+              try {
+                const debugResult = await this.restartDebugging(args.sessionId);
+                const responsePayload: Record<string, unknown> = {
+                  success: debugResult.success,
+                  state: debugResult.state,
+                  message: debugResult.error
+                    ? debugResult.error
+                    : (debugResult.data as Record<string, unknown>)?.message || 'Debugging restarted',
+                };
+                if (debugResult.error) {
+                  responsePayload.error = debugResult.error;
+                }
+                if (debugResult.data) {
+                  responsePayload.data = debugResult.data;
+                }
+                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+              } catch (error) {
+                result = this.handleBreakpointToolError(error);
               }
               break;
             }

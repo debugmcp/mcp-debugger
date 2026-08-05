@@ -917,9 +917,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('should handle startDebugging when already debugging', async () => {
       // Session already has proxy manager
       mockSession.proxyManager = mockProxyManager;
-      
-      // Mock closeSession method
-      (operations as any).closeSession = vi.fn().mockResolvedValue(true);
+
+      // The old proxy is torn down with the SESSION-PRESERVING helper —
+      // closeSession here used to remove the session from the store and
+      // destroy it mid-relaunch (issue #238)
+      const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession');
+      const closeSpy = vi.spyOn(operations as any, 'closeSession');
 
       // Make the "adapter-configured" event fire immediately to avoid 30s wait
       mockProxyManager.once.mockImplementation((event: string, callback: Function) => {
@@ -928,10 +931,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      const result = await operations.startDebugging('test-session', 'test.py');
-      
-      // Should close existing session and start new one
-      expect((operations as any).closeSession).toHaveBeenCalledWith('test-session');
+      await operations.startDebugging('test-session', 'test.py');
+
+      expect(stopSpy).toHaveBeenCalledWith(mockSession);
+      expect(closeSpy).not.toHaveBeenCalled();
     });
   });
 
