@@ -56,7 +56,7 @@ continue_execution    {"sessionId": "<id>"}   // required with suspend=y to let 
 
 - **`redefine_classes` hot-swap (Java only):** edit → recompile with `javac -g` → call `redefine_classes {"sessionId": "<id>", "classesDir": "/proj/build/classes/java/main", "sinceTimestamp": 0}`. Pass the returned `newestTimestamp` as `sinceTimestamp` next time for incremental swaps. Limits: no schema changes (adding/removing methods/fields fails per class, others still succeed), only already-loaded classes (others land in `skippedNotLoaded`), works paused or running.
 - Empty variables almost always mean the class was compiled without `-g`, or the source no longer matches the compiled class — recompile.
-- Breakpoints must sit on executable lines (assignments, calls, conditionals) — not blank lines, comments, imports, or bare declarations. Conditional breakpoints (`condition`) and exception breakpoints are supported.
+- Breakpoints must sit on executable lines (assignments, calls, conditionals) — not blank lines, comments, imports, or bare declarations. Conditional breakpoints (`condition`) and exception breakpoints are supported. Exception stops carry `lastStop.description` ("FQCN: message") and, a moment after the pause, best-effort `lastStop.exceptionInfo` (exceptionId, breakMode, message, adapter-side stack trace).
 - `set_breakpoint` accepts a Java-only `suspendPolicy`: `"all"` (default) suspends every thread; `"thread"` suspends only the hitting thread.
 - Debuggee stdout/stderr is forwarded — `get_output {"sessionId": "<id>", "since": 0}` works for Java; poll with the returned `nextSince`.
 

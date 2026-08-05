@@ -69,7 +69,7 @@ detach_from_process leaves the target running.
 
 ## Crash diagnosis
 - Launch sessions pause at uncaught exceptions by default with stack + locals live ("none" opts out; "all" also stops on caught raises; Ruby has no uncaught filter so its crashes still terminate). Attach applies no default.
-- lastStop.description/text carry the exception class and message; where supported (Python/JS/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
+- lastStop.description/text carry the exception class and message; where supported (Python/JS/Java/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
 
 ## Current limitations
 - No breakpoint list/remove tools yet: track what you set.
