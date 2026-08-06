@@ -19,7 +19,12 @@ vi.mock('fs/promises', () => ({
 import {
   resolveCodeLLDBExecutable,
   getCodeLLDBVersion,
-  DEFAULT_CODELLDB_VERSION
+  DEFAULT_CODELLDB_VERSION,
+  getCodeLLDBPlatformDir,
+  getCodeLLDBExecutableName,
+  SUPPORTED_CODELLDB_PLATFORM_DIRS,
+  buildVendorCandidatePaths,
+  resolveCodeLLDBExecutableSyncImpl
 } from '../src/utils/codelldb-resolver.js';
 
 const realProcess = process;
@@ -179,6 +184,148 @@ describe('codelldb-resolver', () => {
 
       expect(match).not.toBeNull();
       expect(match![1]).toBe(DEFAULT_CODELLDB_VERSION);
+    });
+  });
+
+  describe('getCodeLLDBPlatformDir', () => {
+    it.each([
+      ['win32', 'x64', 'win32-x64'],
+      ['win32', 'arm64', 'win32-x64'], // win32 always maps to x64 (no arm64 vendor build)
+      ['darwin', 'x64', 'darwin-x64'],
+      ['darwin', 'arm64', 'darwin-arm64'],
+      ['linux', 'x64', 'linux-x64'],
+      ['linux', 'arm64', 'linux-arm64']
+    ])('maps %s/%s to %s', (platform, arch, expected) => {
+      expect(getCodeLLDBPlatformDir(platform as NodeJS.Platform, arch)).toBe(expected);
+    });
+
+    it('returns null for unsupported platforms', () => {
+      expect(getCodeLLDBPlatformDir('freebsd' as NodeJS.Platform, 'x64')).toBeNull();
+      expect(getCodeLLDBPlatformDir('aix' as NodeJS.Platform, 'ppc64')).toBeNull();
+    });
+  });
+
+  describe('getCodeLLDBExecutableName', () => {
+    it('appends .exe on Windows only', () => {
+      expect(getCodeLLDBExecutableName('win32')).toBe('codelldb.exe');
+      expect(getCodeLLDBExecutableName('linux')).toBe('codelldb');
+      expect(getCodeLLDBExecutableName('darwin')).toBe('codelldb');
+    });
+  });
+
+  describe('buildVendorCandidatePaths', () => {
+    it('produces the four vendored candidates in precedence order', () => {
+      const pkgRoot = path.resolve('/repo/packages/adapter-rust');
+      const candidates = buildVendorCandidatePaths(pkgRoot, 'linux-x64', 'adapter', 'codelldb');
+
+      expect(candidates).toEqual([
+        path.join(pkgRoot, 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb'),
+        path.join(pkgRoot, 'dist', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb'),
+        path.resolve(pkgRoot, '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb'),
+        path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb')
+      ]);
+    });
+
+    it('supports arbitrary suffix segments (version.json)', () => {
+      const candidates = buildVendorCandidatePaths(path.resolve('/pkg'), 'win32-x64', 'version.json');
+
+      expect(candidates).toHaveLength(4);
+      for (const candidate of candidates) {
+        expect(candidate.endsWith(path.join('codelldb', 'win32-x64', 'version.json'))).toBe(true);
+      }
+    });
+  });
+
+  describe('resolveCodeLLDBExecutableSyncImpl', () => {
+    it('returns null on unsupported platforms without probing', () => {
+      const exists = vi.fn();
+
+      expect(
+        resolveCodeLLDBExecutableSyncImpl({ platform: 'freebsd' as NodeJS.Platform, exists })
+      ).toBeNull();
+      expect(exists).not.toHaveBeenCalled();
+    });
+
+    it('returns the first existing candidate', () => {
+      const pkgRoot = path.resolve('/pkg');
+      const expected = buildVendorCandidatePaths(pkgRoot, 'linux-x64', 'adapter', 'codelldb');
+      const exists = vi.fn((p: string) => p === expected[1]);
+
+      const result = resolveCodeLLDBExecutableSyncImpl({
+        platform: 'linux',
+        arch: 'x64',
+        packageRoot: pkgRoot,
+        exists
+      });
+
+      expect(result).toBe(expected[1]);
+      expect(exists).toHaveBeenCalledTimes(2);
+    });
+
+    it('probes candidates rooted at the provided packageRoot', () => {
+      const pkgRoot = path.resolve('/elsewhere/adapter-rust');
+      const exists = vi.fn().mockReturnValue(false);
+
+      resolveCodeLLDBExecutableSyncImpl({ platform: 'linux', arch: 'arm64', packageRoot: pkgRoot, exists });
+
+      const probed = exists.mock.calls.map((c) => c[0] as string);
+      expect(probed[0]).toBe(path.join(pkgRoot, 'vendor', 'codelldb', 'linux-arm64', 'adapter', 'codelldb'));
+      expect(probed[1]).toBe(path.join(pkgRoot, 'dist', 'vendor', 'codelldb', 'linux-arm64', 'adapter', 'codelldb'));
+    });
+
+    it('probes codelldb.exe when the injected platform is win32', () => {
+      const exists = vi.fn().mockReturnValue(true);
+
+      const result = resolveCodeLLDBExecutableSyncImpl({ platform: 'win32', arch: 'x64', exists });
+
+      expect(result?.endsWith(path.join('win32-x64', 'adapter', 'codelldb.exe'))).toBe(true);
+    });
+
+    it('falls back to CODELLDB_PATH only after all four candidates miss', () => {
+      vi.stubEnv('CODELLDB_PATH', '/custom/sync/codelldb');
+      const exists = vi.fn((p: string) => p === '/custom/sync/codelldb');
+
+      const result = resolveCodeLLDBExecutableSyncImpl({ platform: 'linux', arch: 'x64', exists });
+
+      expect(result).toBe('/custom/sync/codelldb');
+      expect(exists).toHaveBeenCalledTimes(5);
+    });
+
+    it('returns null when no candidate nor CODELLDB_PATH exists', () => {
+      vi.stubEnv('CODELLDB_PATH', '/missing/codelldb');
+      const exists = vi.fn().mockReturnValue(false);
+
+      expect(resolveCodeLLDBExecutableSyncImpl({ platform: 'linux', arch: 'x64', exists })).toBeNull();
+      expect(exists).toHaveBeenCalledTimes(5);
+    });
+
+    it('defaults platform and arch from process at call time', () => {
+      stubPlatform('darwin', 'arm64');
+      const exists = vi.fn().mockReturnValue(true);
+
+      const result = resolveCodeLLDBExecutableSyncImpl({ exists });
+
+      expect(result).toContain('darwin-arm64');
+    });
+  });
+
+  describe('platform table drift guards', () => {
+    it('matches the PLATFORMS keys in scripts/vendor-codelldb.js', () => {
+      const source = readFileSync(new URL('../scripts/vendor-codelldb.js', import.meta.url), 'utf-8');
+      const block = source.match(/const PLATFORMS = \{([\s\S]*?)\n\};/);
+
+      expect(block).not.toBeNull();
+      const keys = [...block![1].matchAll(/'([a-z0-9-]+)':\s*\{/g)].map((m) => m[1]);
+      expect([...keys].sort()).toEqual([...SUPPORTED_CODELLDB_PLATFORM_DIRS].sort());
+    });
+
+    it('matches the Rust platforms list in scripts/check-adapters.js', () => {
+      const source = readFileSync(new URL('../../../scripts/check-adapters.js', import.meta.url), 'utf-8');
+      const match = source.match(/platforms:\s*\[([^\]]+)\]/);
+
+      expect(match).not.toBeNull();
+      const keys = match![1].split(',').map((s) => s.trim().replace(/['"]/g, ''));
+      expect([...keys].sort()).toEqual([...SUPPORTED_CODELLDB_PLATFORM_DIRS].sort());
     });
   });
 });
