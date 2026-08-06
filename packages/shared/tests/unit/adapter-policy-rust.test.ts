@@ -94,10 +94,83 @@ describe('RustAdapterPolicy', () => {
       expect(normalize('exception', { reason: 'exception' }, { pausePending: false })).toBeUndefined();
     });
 
-    it('never touches non-exception reasons', () => {
-      expect(normalize('breakpoint', { reason: 'breakpoint' }, { pausePending: true })).toBeUndefined();
+    it('never touches step or pause reasons', () => {
       expect(normalize('step', { reason: 'step' }, { pausePending: false })).toBeUndefined();
       expect(normalize('pause', { reason: 'pause' }, { pausePending: true })).toBeUndefined();
+    });
+
+    // Panic stops arrive as reason 'breakpoint' because CodeLLDB implements
+    // the rust_panic filter as an internal breakpoint (issue #260). Live
+    // capture (Windows/GNU, CodeLLDB 1.11.8): the stopped body carries only
+    // {allThreadsStopped, hitBreakpointIds, reason, threadId} — no
+    // description/text — so the discriminator is hitBreakpointIds disjoint
+    // from the session's known user-breakpoint adapter ids.
+    describe('panic breakpoint stops (issue #260)', () => {
+      it('maps a breakpoint stop with no user breakpoints to exception', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [1] },
+            { pausePending: false, userBreakpointIds: new Set<number>() }
+          )
+        ).toBe('exception');
+      });
+
+      it('maps a breakpoint stop with ids disjoint from user breakpoints to exception', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [2] },
+            { pausePending: false, userBreakpointIds: new Set([1]) }
+          )
+        ).toBe('exception');
+      });
+
+      it('keeps a genuine user breakpoint hit as breakpoint', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [1] },
+            { pausePending: false, userBreakpointIds: new Set([1]) }
+          )
+        ).toBeUndefined();
+      });
+
+      it('keeps the stop when any hit id matches a user breakpoint', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [2, 1] },
+            { pausePending: false, userBreakpointIds: new Set([1]) }
+          )
+        ).toBeUndefined();
+      });
+
+      it('keeps breakpoint stops without hitBreakpointIds (mislabeled step guard, issue #255)', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint' },
+            { pausePending: false, userBreakpointIds: new Set<number>() }
+          )
+        ).toBeUndefined();
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [] },
+            { pausePending: false, userBreakpointIds: new Set<number>() }
+          )
+        ).toBeUndefined();
+        expect(normalize('breakpoint', undefined, { pausePending: false, userBreakpointIds: new Set<number>() })).toBeUndefined();
+      });
+
+      it('keeps breakpoint stops when user breakpoint ids are unknown', () => {
+        // No userBreakpointIds in context = the session's breakpoint
+        // bookkeeping is incomplete; the disjoint inference is unsafe.
+        expect(
+          normalize('breakpoint', { reason: 'breakpoint', hitBreakpointIds: [2] }, { pausePending: false })
+        ).toBeUndefined();
+      });
     });
   });
 
