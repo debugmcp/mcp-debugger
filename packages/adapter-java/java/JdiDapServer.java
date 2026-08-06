@@ -800,7 +800,10 @@ public class JdiDapServer {
 
                         Map<String, Object> frame = new HashMap<>();
                         frame.put("id", frameId);
-                        frame.put("name", loc.method().name());
+                        // Fully qualified names (java.lang.Thread.sleep0, not sleep0)
+                        // match JDWP/IDE conventions and let clients recognize
+                        // JDK-internal frames by name.
+                        frame.put("name", loc.declaringType().name() + "." + loc.method().name());
                         frame.put("line", loc.lineNumber());
                         frame.put("column", 0);
 

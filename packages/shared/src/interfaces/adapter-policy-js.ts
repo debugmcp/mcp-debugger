@@ -44,7 +44,25 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     // Waiting on these ensures threads() will not be empty.
     return evt?.event === 'thread' || evt?.event === 'stopped';
   },
-  
+
+  /**
+   * js-debug reports an explicit pause as reason 'step' with description
+   * 'Paused' — the exact same body a genuine step produces, so the body alone
+   * cannot distinguish them. Normalize to 'pause' only while a user-initiated
+   * pause request is in flight. A step that happens to complete inside that
+   * window is reported as 'pause', which matches what the user asked for.
+   */
+  normalizeStopReason: (
+    reason: string,
+    _body: DebugProtocol.StoppedEvent['body'] | undefined,
+    context: { pausePending: boolean }
+  ): string | undefined => {
+    if (reason === 'step' && context.pausePending) {
+      return 'pause';
+    }
+    return undefined;
+  },
+
   /**
    * Check if a stack frame is a Node.js internal frame
    */

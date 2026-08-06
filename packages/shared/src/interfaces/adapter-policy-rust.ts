@@ -21,7 +21,31 @@ export const RustAdapterPolicy: AdapterPolicy = {
   isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
     return evt?.event === 'initialized';
   },
-  
+
+  /**
+   * CodeLLDB reports a user-initiated pause as reason 'exception' because the
+   * pause is delivered via SIGSTOP. Map that back to 'pause'. Real exceptions
+   * (SIGSEGV, panics) carry a non-SIGSTOP description and are left untouched,
+   * even while a pause request is in flight.
+   */
+  normalizeStopReason: (
+    reason: string,
+    body: DebugProtocol.StoppedEvent['body'] | undefined,
+    context: { pausePending: boolean }
+  ): string | undefined => {
+    if (reason !== 'exception') {
+      return undefined;
+    }
+    const detail = `${body?.description ?? ''} ${body?.text ?? ''}`;
+    if (/SIGSTOP/i.test(detail)) {
+      return 'pause';
+    }
+    if (context.pausePending && detail.trim() === '') {
+      return 'pause';
+    }
+    return undefined;
+  },
+
   /**
    * Extract local variables for Rust, filtering out special variables by default
    */

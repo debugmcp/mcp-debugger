@@ -609,6 +609,100 @@ describe('SessionManager - DAP Operations', () => {
     });
   });
 
+  describe('child-authoritative verified state (js-debug parent/child sessions)', () => {
+    // For mirroring policies (javascript), setBreakpoints responses come from
+    // the parent session (pessimistic verified:false, parent-space ids) while
+    // real verification arrives as breakpoint events carrying child-space ids.
+    async function createJsSessionWithChildVerifiedBp() {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.JAVASCRIPT,
+        executablePath: 'node'
+      });
+
+      // The js handshake waits (10s) for a DAP 'initialized' event; satisfy it
+      // synchronously. setBreakpoints gets parent-style responses: never
+      // verified, parent id space (7, 8, ...)
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'initialize') {
+          dependencies.mockProxyManager.simulateEvent('dap-event', { event: 'initialized' });
+        }
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }, i: number) => ({
+                id: 7 + i,
+                verified: false,
+                line: bp.line
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+
+      await sessionManager.startDebugging(session.id, 'app.js');
+      await vi.runAllTimersAsync();
+
+      const bp = await sessionManager.setBreakpoint(session.id, 'app.js', 10);
+      expect(bp.verified).toBe(false);
+      // Parent response ids must not be adopted for mirroring policies
+      expect(bp.adapterId).toBeUndefined();
+
+      // Child verifies via (synthesized or real) breakpoint event, child id 100
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 100, verified: true, line: 10, source: { path: 'app.js' } }
+      });
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(100);
+
+      return session;
+    }
+
+    it('does not let a parent setBreakpoints response downgrade child-verified state', async () => {
+      const session = await createJsSessionWithChildVerifiedBp();
+
+      // Adding a second breakpoint re-syncs the whole file; the parent
+      // response reports verified:false for both positions
+      await sessionManager.setBreakpoint(session.id, 'app.js', 20);
+
+      const stored = sessionManager.listBreakpoints(session.id);
+      const bp1 = stored.find(bp => bp.line === 10)!;
+      const bp2 = stored.find(bp => bp.line === 20)!;
+      expect(bp1.verified).toBe(true);
+      expect(bp1.adapterId).toBe(100);
+      expect(bp2.verified).toBe(false);
+    });
+
+    it('ignores a (file,line)-fallback breakpoint event downgrade from the parent', async () => {
+      const session = await createJsSessionWithChildVerifiedBp();
+
+      // Parent event: unmatched id, falls back to (file,line), downgrade
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 7, verified: false, line: 10, source: { path: 'app.js' } }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(100);
+    });
+
+    it('still applies an id-matched downgrade (real child unbinding)', async () => {
+      const session = await createJsSessionWithChildVerifiedBp();
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 100, verified: false, line: 10 }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(false);
+    });
+  });
+
   describe('Step Operations', () => {
     it('should handle step over correctly', async () => {
       const session = await createPausedSession();
@@ -768,6 +862,67 @@ describe('SessionManager - DAP Operations', () => {
           expect.objectContaining({ name: 'sum', value: '15' })
         ])
       );
+    });
+
+    it('extracts Go locals and reports the real scope name when Delve appends the optimized-function warning', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.GO,
+        executablePath: 'dlv'
+      });
+      // Explicit stopOnEntry: Go's policy defaults it to false, which would
+      // leave the mock proxy without an entry stop to emit.
+      await sessionManager.startDebugging(session.id, 'main.go', undefined, { stopOnEntry: true });
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+        switch (command) {
+          case 'stackTrace':
+            return {
+              success: true,
+              body: {
+                stackFrames: [{
+                  id: 1,
+                  name: 'main.main',
+                  source: { path: '/app/main.go' },
+                  line: 12,
+                  column: 0
+                }]
+              }
+            };
+          case 'scopes':
+            return {
+              success: true,
+              body: {
+                scopes: [{
+                  name: 'Locals (warning: optimized function)',
+                  variablesReference: 300,
+                  expensive: false
+                }]
+              }
+            };
+          case 'variables':
+            return {
+              success: true,
+              body: {
+                variables: [
+                  { name: 'counter', value: '7', type: 'int', variablesReference: 0 }
+                ]
+              }
+            };
+          default:
+            return { success: true };
+        }
+      });
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables).toEqual([
+        expect.objectContaining({ name: 'counter', value: '7' })
+      ]);
+      // The ACTUAL adapter scope name (with the warning) must surface, not the
+      // policy's canonical 'Locals'.
+      expect(result.scopeName).toBe('Locals (warning: optimized function)');
     });
   });
 
@@ -1026,6 +1181,86 @@ describe('SessionManager - DAP Operations', () => {
       const managedSession = sessionManager.getSession(session.id);
       expect(managedSession?.exitCode).toBeUndefined();
       expect(managedSession?.state).toBe(SessionState.STOPPED);
+    });
+  });
+
+  describe('Stop-reason normalization (policy hook)', () => {
+    async function createPausedRustSession() {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.RUST,
+        executablePath: 'cargo'
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.rs');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'entry');
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      return session;
+    }
+
+    it('normalizes a CodeLLDB SIGSTOP exception stop to pause and keeps the raw reason', async () => {
+      const session = await createPausedRustSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSTOP'
+      });
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop?.reason).toBe('pause');
+      expect(managedSession?.lastStop?.rawReason).toBe('exception');
+      expect(managedSession?.state).toBe(SessionState.PAUSED);
+      expect(managedSession?.pausePending).toBe(false);
+    });
+
+    it('leaves a real rust exception stop unnormalized (no rawReason)', async () => {
+      const session = await createPausedRustSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSEGV'
+      });
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop?.reason).toBe('exception');
+      expect(managedSession?.lastStop?.rawReason).toBeUndefined();
+    });
+
+    it('does not request exceptionInfo for a stop normalized to pause', async () => {
+      const session = await createPausedRustSession();
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', {
+        supportsExceptionInfoRequest: true
+      });
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSTOP'
+      });
+      await vi.runAllTimersAsync();
+
+      const exceptionInfoCalls = dependencies.mockProxyManager.dapRequestCalls
+        .filter(c => c.command === 'exceptionInfo');
+      expect(exceptionInfoCalls).toHaveLength(0);
+      expect(sessionManager.getSession(session.id)?.lastStop?.reason).toBe('pause');
+    });
+
+    it('does not affect adapters without a normalizer (mock)', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'signal SIGSTOP'
+      });
+
+      const managedSession = sessionManager.getSession(session.id);
+      expect(managedSession?.lastStop?.reason).toBe('exception');
+      expect(managedSession?.lastStop?.rawReason).toBeUndefined();
     });
   });
 

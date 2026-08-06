@@ -1927,7 +1927,18 @@ export class DebugMcpServer {
       if (result.scopeName) {
         response.scopeName = result.scopeName;
       }
-      
+
+      // Surface adapter warnings embedded in the scope name — e.g. Delve
+      // reports "Locals (warning: optimized function)" when the debuggee was
+      // built with optimizations, which typically means missing variables.
+      const warningMatch = result.scopeName?.match(/\(warning:[^)]*\)/i);
+      if (warningMatch) {
+        response.warning =
+          `The debug adapter reported the locals scope as "${result.scopeName}". ` +
+          'This usually means the target was compiled with optimizations, so variables may be missing or unreadable. ' +
+          'For Go, rebuild the binary with -gcflags="all=-N -l" (exec mode) or launch the .go source directly (debug mode).';
+      }
+
       // Add helpful messages for edge cases
       if (result.variables.length === 0) {
         if (!result.frame) {
@@ -1956,15 +1967,20 @@ export class DebugMcpServer {
       });
       
       // Handle session state errors specifically
-      if (error instanceof McpError && 
-          (error.message.includes('terminated') || 
-           error.message.includes('closed') || 
+      if (error instanceof McpError &&
+          (error.message.includes('terminated') ||
+           error.message.includes('closed') ||
            error.message.includes('not found') ||
            error.message.includes('not paused'))) {
-        return { content: [{ type: 'text', text: JSON.stringify({ 
-          success: false, 
+        // A terminated session is a normal end state (e.g. a step_out ran the
+        // program to completion) — explain that instead of implying misuse.
+        const message = error.message.includes('terminated')
+          ? 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
+          : 'Cannot get local variables. The session must be paused at a breakpoint.';
+        return { content: [{ type: 'text', text: JSON.stringify({
+          success: false,
           error: error.message,
-          message: 'Cannot get local variables. The session must be paused at a breakpoint.'
+          message
         }) }] };
       } else if (error instanceof McpError) {
         throw error;

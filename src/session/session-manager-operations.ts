@@ -1014,13 +1014,28 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         response.body.breakpoints
       ) {
         const responseBps = response.body.breakpoints;
+        // For child-mirroring adapters (js-debug), setBreakpoints responses
+        // come from the parent session, which owns no runtime: its verified
+        // flags are pessimistic and its ids belong to a different id space
+        // than the child events that carry the real verification. Treat the
+        // child as authoritative — never let a parent response downgrade
+        // verified state or clobber child adapter ids.
+        const childAuthoritative =
+          !!this.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
         // Update ALL breakpoints from response (positional match)
         for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
           const bpInfo = responseBps[i];
-          allBpsForFile[i].verified = bpInfo.verified;
+          const keepChildState = childAuthoritative && allBpsForFile[i].verified === true;
+          if (childAuthoritative) {
+            allBpsForFile[i].verified = allBpsForFile[i].verified || bpInfo.verified;
+          } else {
+            allBpsForFile[i].verified = bpInfo.verified;
+            allBpsForFile[i].adapterId = bpInfo.id ?? allBpsForFile[i].adapterId;
+          }
           allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
-          allBpsForFile[i].message = bpInfo.message;
-          allBpsForFile[i].adapterId = bpInfo.id ?? allBpsForFile[i].adapterId;
+          if (!keepChildState) {
+            allBpsForFile[i].message = bpInfo.message;
+          }
           // Enhance "no symbols" message for .NET with PDB format guidance
           if (bpInfo.message && session.language === 'dotnet' &&
               bpInfo.message.toLowerCase().includes('no symbols')) {
@@ -1489,7 +1504,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
 
     if (session.state === SessionState.PAUSED) {
-      return { success: true, state: session.state, data: { message: 'Already paused' } };
+      return {
+        success: true,
+        state: session.state,
+        data: {
+          message: 'Already paused',
+          ...(session.lastStop?.reason ? { stopReason: session.lastStop.reason } : {}),
+          ...(session.lastStop?.rawReason ? { rawStopReason: session.lastStop.rawReason } : {})
+        }
+      };
     }
 
     if (session.state !== SessionState.RUNNING) {
@@ -1515,6 +1538,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
 
     const proxyManager = session.proxyManager;
+
+    // Snapshot the current lastStop so result paths can tell whether the stop
+    // they observe belongs to THIS pause (handleStopped replaces the object)
+    // rather than reporting a stale earlier stop.
+    const lastStopBefore = session.lastStop;
+    // Flag the in-flight pause so policy stop-reason normalization can use it
+    // (e.g. CodeLLDB reports pauses as 'exception'/SIGSTOP). handleStopped
+    // clears it on every stop; clear it here too on error/terminate paths.
+    session.pausePending = true;
 
     // The pause response only acknowledges the request; the state transition
     // to PAUSED happens when the asynchronous 'stopped' event is handled by
@@ -1565,18 +1597,34 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.logger.info(
           `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
         );
-        const data: { message: string; location?: { file: string; line: number; column?: number } } = { message: 'Paused' };
+        const data: {
+          message: string;
+          stopReason?: string;
+          rawStopReason?: string;
+          location?: { file: string; line: number; column?: number };
+        } = { message: 'Paused' };
+        // Only report the stop reason when handleStopped recorded a NEW stop
+        // for this pause — never echo a stale earlier stop.
+        if (session.lastStop && session.lastStop !== lastStopBefore) {
+          data.stopReason = session.lastStop.reason;
+          if (session.lastStop.rawReason) {
+            data.rawStopReason = session.lastStop.rawReason;
+          }
+        }
         if (location) {
           data.location = location;
         }
         settle({ success: true, state: session.state, data });
       };
 
-      const onEnded = () => settle({
-        success: true,
-        state: session.state,
-        data: { message: 'Session ended before pause took effect' }
-      });
+      const onEnded = () => {
+        session.pausePending = false;
+        settle({
+          success: true,
+          state: session.state,
+          data: { message: 'Session ended before pause took effect' }
+        });
+      };
 
       const timeout = setTimeout(() => {
         this.logger.info(
@@ -1607,10 +1655,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           // registered (e.g. during the threads-discovery await), the state is
           // already PAUSED and no further event will arrive.
           if (session.state === SessionState.PAUSED && !stopEventSeen) {
-            settle({ success: true, state: session.state, data: { message: 'Paused' } });
+            const raceData: { message: string; stopReason?: string; rawStopReason?: string } = { message: 'Paused' };
+            if (session.lastStop && session.lastStop !== lastStopBefore) {
+              raceData.stopReason = session.lastStop.reason;
+              if (session.lastStop.rawReason) {
+                raceData.rawStopReason = session.lastStop.rawReason;
+              }
+            }
+            settle({ success: true, state: session.state, data: raceData });
           }
         })
         .catch((error: unknown) => {
+          session.pausePending = false;
           const errorMessage = error instanceof Error ? error.message : String(error);
           this.logger.error(
             `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`

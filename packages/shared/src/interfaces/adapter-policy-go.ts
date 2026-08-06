@@ -43,10 +43,10 @@ export const GoAdapterPolicy: AdapterPolicy = {
       return [];
     }
     
-    // Find the "Locals" scope (Delve uses "Locals")
-    const localScope = frameScopes.find(scope => 
-      scope.name === 'Locals' || scope.name === 'Local'
-    );
+    // Find the "Locals" scope. Delve uses "Locals", but appends a warning
+    // suffix for optimized frames — e.g. "Locals (warning: optimized
+    // function)" — so match on the leading word, not exact equality.
+    const localScope = frameScopes.find(scope => /^Locals?\b/.test(scope.name.trim()));
     
     if (!localScope) {
       return [];

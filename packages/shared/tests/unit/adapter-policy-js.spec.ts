@@ -25,6 +25,31 @@ describe('JsDebugAdapterPolicy', () => {
     });
   });
 
+  describe('normalizeStopReason', () => {
+    const normalize = JsDebugAdapterPolicy.normalizeStopReason!;
+    // js-debug uses the same body for explicit pauses and genuine steps
+    const jsDebugPauseBody = {
+      reason: 'step',
+      description: 'Paused',
+      threadId: 0,
+      allThreadsStopped: false
+    } as DebugProtocol.StoppedEvent['body'];
+
+    it("maps a 'step' stop to 'pause' while a pause request is in flight", () => {
+      expect(normalize('step', jsDebugPauseBody, { pausePending: true })).toBe('pause');
+    });
+
+    it("leaves a genuine 'step' stop untouched when no pause is pending", () => {
+      expect(normalize('step', jsDebugPauseBody, { pausePending: false })).toBeUndefined();
+    });
+
+    it('never touches other reasons, even while a pause is pending', () => {
+      expect(normalize('breakpoint', { reason: 'breakpoint' }, { pausePending: true })).toBeUndefined();
+      expect(normalize('pause', { reason: 'pause' }, { pausePending: true })).toBeUndefined();
+      expect(normalize('exception', { reason: 'exception' }, { pausePending: true })).toBeUndefined();
+    });
+  });
+
   describe('filterStackFrames', () => {
     it('filters out internal frames but keeps first when all removed', () => {
       const frames = [

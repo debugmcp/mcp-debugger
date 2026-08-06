@@ -168,6 +168,31 @@ describe('JavaAdapterPolicy', () => {
       const filtered = JavaAdapterPolicy.filterStackFrames!(frames, true);
       expect(filtered).toHaveLength(2);
     });
+
+    it('filters bare-name JDK frames whose file carries the declaring-type FQCN (no debug info)', () => {
+      // JdiDapServer emits bare method names; on AbsentInformationException
+      // the declaring type FQCN lands in the file slot. A pause inside
+      // Thread.sleep must surface the user frame, not sleep0.
+      const frames = [
+        { id: 1, name: 'sleep0', file: 'java.lang.Thread', line: 0 },
+        { id: 2, name: 'sleep', file: 'java.lang.Thread', line: 0 },
+        { id: 3, name: 'main', file: '/app/PauseTest.java', line: 12 },
+      ];
+
+      const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].name).toBe('main');
+    });
+
+    it('returns the original frames when every frame is JDK-internal', () => {
+      const frames = [
+        { id: 1, name: 'sleep0', file: 'java.lang.Thread', line: 0 },
+        { id: 2, name: 'run', file: 'java.lang.Thread', line: 0 },
+      ];
+
+      const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);
+      expect(filtered).toHaveLength(2);
+    });
   });
 
   describe('isInternalFrame', () => {
@@ -185,6 +210,32 @@ describe('JavaAdapterPolicy', () => {
 
     it('should not identify user frames as internal', () => {
       expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'com.example.Main.main', file: '/app/Main.java', line: 10 })).toBe(false);
+    });
+
+    it('should identify jdk.* and com.sun.* frames as internal', () => {
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'jdk.internal.misc.Unsafe.park', file: '', line: 0 })).toBe(true);
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'com.sun.proxy.$Proxy0.invoke', file: '', line: 0 })).toBe(true);
+    });
+
+    it('should identify a bare-name frame with a JDK FQCN in the file slot as internal', () => {
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'sleep0', file: 'java.lang.Thread', line: 0 })).toBe(true);
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'park', file: 'jdk.internal.misc.Unsafe', line: 0 })).toBe(true);
+    });
+
+    it('should not treat real file paths as FQCNs even when they start with a JDK prefix', () => {
+      // Contains a path separator — not an FQCN
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'main', file: 'java.config/Loader.java', line: 3 })).toBe(false);
+      // Ends with .java — a source file, not a class name
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'main', file: 'java.util.Helper.java', line: 3 })).toBe(false);
+    });
+
+    it('should not treat a user FQCN in the file slot as internal', () => {
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'work', file: 'com.example.Worker', line: 0 })).toBe(false);
+    });
+
+    it('should still identify frames by /jdk/ and /rt.jar/ path fragments', () => {
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'run', file: '/usr/lib/jdk/Thread.java', line: 0 })).toBe(true);
+      expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'run', file: '/opt/rt.jar/Thread.java', line: 0 })).toBe(true);
     });
   });
 
