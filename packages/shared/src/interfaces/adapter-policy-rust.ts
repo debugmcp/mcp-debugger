@@ -23,16 +23,38 @@ export const RustAdapterPolicy: AdapterPolicy = {
   },
 
   /**
-   * CodeLLDB reports a user-initiated pause as reason 'exception' because the
-   * pause is delivered via SIGSTOP. Map that back to 'pause'. Real exceptions
-   * (SIGSEGV, panics) carry a non-SIGSTOP description and are left untouched,
-   * even while a pause request is in flight.
+   * Two CodeLLDB quirks are normalized here:
+   *
+   * 1. A user-initiated pause is reported as reason 'exception' because the
+   *    pause is delivered via SIGSTOP. Map that back to 'pause'. Real
+   *    exceptions (SIGSEGV, panics) carry a non-SIGSTOP description and are
+   *    left untouched, even while a pause request is in flight.
+   *
+   * 2. A rust_panic filter hit is reported as reason 'breakpoint' because
+   *    CodeLLDB implements the filter as an internal breakpoint (issue
+   *    #260). Live capture (CodeLLDB 1.11.8): the stopped body is only
+   *    {allThreadsStopped, hitBreakpointIds, reason, threadId} — no
+   *    description/text to match on — so the discriminator is that the hit
+   *    ids are disjoint from every user-set breakpoint id. Both sides must
+   *    be known: no hitBreakpointIds (e.g. a step completion mislabeled as
+   *    'breakpoint', the issue #255 trace) or no userBreakpointIds
+   *    (incomplete bookkeeping) means keep the raw reason. The asymmetry is
+   *    deliberate — a missed panic merely keeps the cosmetic 'breakpoint'
+   *    label, while a false 'exception' would mislead callers.
    */
   normalizeStopReason: (
     reason: string,
     body: DebugProtocol.StoppedEvent['body'] | undefined,
-    context: { pausePending: boolean }
+    context: { pausePending: boolean; userBreakpointIds?: ReadonlySet<number> }
   ): string | undefined => {
+    if (reason === 'breakpoint') {
+      const hitIds = body?.hitBreakpointIds;
+      if (!Array.isArray(hitIds) || hitIds.length === 0 || !context.userBreakpointIds) {
+        return undefined;
+      }
+      const hitsUserBreakpoint = hitIds.some((id) => context.userBreakpointIds!.has(id));
+      return hitsUserBreakpoint ? undefined : 'exception';
+    }
     if (reason !== 'exception') {
       return undefined;
     }
@@ -251,7 +273,12 @@ export const RustAdapterPolicy: AdapterPolicy = {
    */
   getInitializationBehavior: () => {
     return {
-      // CodeLLDB filter IDs
+      // CodeLLDB filter IDs. Note (issue #260): CodeLLDB 1.11.8 advertises
+      // only cpp_throw/cpp_catch in exceptionBreakpointFilters, yet
+      // setExceptionBreakpoints with rust_panic still succeeds and fires
+      // (legacy acceptance, confirmed live). Keep rust_panic; the capability
+      // drift warning in session-manager-core is the early alarm if a future
+      // CodeLLDB drops the legacy id.
       exceptionFilters: {
         uncaught: ['rust_panic'],
         all: ['rust_panic', 'cpp_throw']

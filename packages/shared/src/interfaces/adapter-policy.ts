@@ -116,13 +116,17 @@ export interface AdapterPolicy {
    * @param reason The raw DAP stop reason from the adapter
    * @param body The full stopped-event body, if available
    * @param context context.pausePending is true while a user-initiated
-   *   pause request is in flight for this session
+   *   pause request is in flight for this session. context.userBreakpointIds
+   *   holds the adapter-assigned ids of every user-set breakpoint, and is
+   *   only present when that bookkeeping is complete (every breakpoint has a
+   *   known id) — policies must not infer anything from hitBreakpointIds
+   *   when it is absent.
    * @returns The canonical reason, or undefined to keep the raw reason
    */
   normalizeStopReason?(
     reason: string,
     body: DebugProtocol.StoppedEvent['body'] | undefined,
-    context: { pausePending: boolean }
+    context: { pausePending: boolean; userBreakpointIds?: ReadonlySet<number> }
   ): string | undefined;
 
   /**

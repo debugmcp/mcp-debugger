@@ -12,6 +12,9 @@
  * - Java launch (issue #259): JDI bridge advertises the exception filters and
  *   answers exceptionInfo — uncaught RuntimeException pauses with enrichment,
  *   'all' also pauses at the caught raise with breakMode 'always'
+ * - Rust launch (issue #260): CodeLLDB's rust_panic filter hit arrives as an
+ *   internal-breakpoint stop; the policy normalizes it to 'exception';
+ *   explicit 'none' runs the panicking program to termination (exit 101)
  * - Python attach: filters armed during the attach init sequence (attach
  *   itself never applies a default)
  */
@@ -25,6 +28,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { prepareJavaExample } from './java-example-utils.js';
+import { prepareRustExample } from './rust-example-utils.js';
+import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -599,6 +604,136 @@ describe('Break-on-exception (issue #220)', () => {
       expect(sawUncaught, 'should pause at the uncaught RuntimeException on the way out').toBe(true);
       expect(finalSnap?.state, 'session should terminate').toBe('stopped');
     }, 90000);
+  });
+
+  describe('Rust launch (CodeLLDB) @requires-rust', () => {
+    function hasRustToolchain(): boolean {
+      try {
+        execSync('rustc --version', { stdio: 'ignore' });
+        return true;
+      } catch {
+        console.log('[break-on-exceptions] Skipping — Rust toolchain not installed');
+        return false;
+      }
+    }
+
+    // CodeLLDB implements the rust_panic filter as an internal breakpoint and
+    // reports the panic stop as reason 'breakpoint'; RustAdapterPolicy
+    // normalizes it to 'exception' via hitBreakpointIds (issue #260). The
+    // stopped body carries no exception text, so the panic message is
+    // asserted from the captured output instead of lastStop.description.
+    it('pauses at a panic with reason exception by default and exits 101 after continue', async (ctx) => {
+      if (!hasRustToolchain()) return;
+      const { binaryPath } = await prepareRustExample('panic_example');
+
+      sessionId = await createSession('rust', 'rust-panic-default');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: binaryPath,
+          dapLaunchArgs: { stopOnEntry: false },
+          adapterLaunchConfig: { sourceLanguages: ['rust'] }
+        }
+      }));
+      skipIfSpawnBlocked(ctx, startRes, 'Rust');
+      expect(startRes.success).toBe(true);
+
+      const paused = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'paused' && snap.lastStop?.reason === 'exception' ? snap : undefined;
+      }, 30000);
+      expect(paused, 'session should pause at the panic with reason exception').toBeDefined();
+
+      // The panic site must be visible in the stack (frames above are std
+      // panicking machinery).
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      }));
+      expect(stack.stopReason).toBe('exception');
+      const frames = stack.stackFrames as Array<{ name: string; file?: string; line?: number }>;
+      const panicFrame = frames.find(f => f.file?.replace(/\\/g, '/').endsWith('panic_example/src/main.rs'));
+      expect(panicFrame, 'stack should contain the panic_example source frame').toBeDefined();
+
+      // Panic message arrives on stderr before the rust_panic stop
+      const output = await pollUntil(async () => {
+        const res = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'get_output',
+          arguments: { sessionId }
+        }));
+        const entries = (res.entries ?? []) as Array<{ category?: string; output?: string }>;
+        const text = entries.map(e => e.output ?? '').join('');
+        return /intentional panic for mcp-debugger tests/.test(text) ? text : undefined;
+      }, 10000);
+      expect(output, 'captured output should contain the panic message').toBeDefined();
+      expect(output!).toMatch(/panicked at/);
+
+      // Continue past the panic: clean termination with the panic exit code
+      // (verified live on Windows/GNU — no issue #255 interplay here).
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 20000);
+      expect(stopped, 'session should terminate after continuing past the panic').toBeDefined();
+      expect(stopped!.exitCode).toBe(101);
+    }, 120000);
+
+    it("pauses at the panic when breakOnExceptions is explicitly 'uncaught'", async (ctx) => {
+      if (!hasRustToolchain()) return;
+      const { binaryPath } = await prepareRustExample('panic_example');
+
+      sessionId = await createSession('rust', 'rust-panic-uncaught');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: binaryPath,
+          dapLaunchArgs: { stopOnEntry: false },
+          adapterLaunchConfig: { sourceLanguages: ['rust'] },
+          breakOnExceptions: 'uncaught'
+        }
+      }));
+      skipIfSpawnBlocked(ctx, startRes, 'Rust');
+      expect(startRes.success).toBe(true);
+
+      const paused = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'paused' && snap.lastStop?.reason === 'exception' ? snap : undefined;
+      }, 30000);
+      expect(paused, 'session should pause at the panic with reason exception').toBeDefined();
+    }, 60000);
+
+    it("runs the panicking program to termination when breakOnExceptions is 'none'", async (ctx) => {
+      if (!hasRustToolchain()) return;
+      const { binaryPath } = await prepareRustExample('panic_example');
+
+      sessionId = await createSession('rust', 'rust-panic-none');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: binaryPath,
+          dapLaunchArgs: { stopOnEntry: false },
+          adapterLaunchConfig: { sourceLanguages: ['rust'] },
+          breakOnExceptions: 'none'
+        }
+      }));
+      skipIfSpawnBlocked(ctx, startRes, 'Rust');
+      expect(startRes.success).toBe(true);
+
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 30000);
+      expect(stopped, 'panicking program should run to termination').toBeDefined();
+      expect(stopped!.exitCode).toBe(101);
+      expect(stopped!.lastStop?.reason).not.toBe('exception');
+    }, 60000);
   });
 
   describe('Python attach', () => {
