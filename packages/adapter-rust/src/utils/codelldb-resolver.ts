@@ -1,9 +1,13 @@
 /**
  * CodeLLDB executable resolver
+ *
+ * Single home for the platform-dir mapping and vendor candidate-path walk
+ * (issue #265). The sync entry point exists for callers that cannot await
+ * (adapter command construction); both share the same candidate list.
  */
 
 import * as fs from 'fs/promises';
-import { constants as fsConstants } from 'fs';
+import { constants as fsConstants, existsSync } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -14,36 +18,140 @@ const __dirname = path.dirname(__filename);
 export const DEFAULT_CODELLDB_VERSION = '1.11.8';
 
 /**
+ * The vendor directory names produced by scripts/vendor-codelldb.js.
+ * Drift-guarded against the script's PLATFORMS table (and the root
+ * scripts/check-adapters.js list) in codelldb-resolver.test.ts.
+ */
+export const SUPPORTED_CODELLDB_PLATFORM_DIRS = [
+  'win32-x64',
+  'darwin-x64',
+  'darwin-arm64',
+  'linux-x64',
+  'linux-arm64'
+] as const;
+
+export type CodeLLDBPlatformDir = (typeof SUPPORTED_CODELLDB_PLATFORM_DIRS)[number];
+
+/**
+ * Map platform/arch to the vendored CodeLLDB directory name.
+ * Windows always maps to x64 — there is no win32-arm64 vendor build.
+ */
+export function getCodeLLDBPlatformDir(
+  platform: NodeJS.Platform,
+  arch: string
+): CodeLLDBPlatformDir | null {
+  if (platform === 'win32') {
+    return 'win32-x64';
+  }
+  if (platform === 'darwin') {
+    return arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+  }
+  if (platform === 'linux') {
+    return arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
+  }
+  return null;
+}
+
+export function getCodeLLDBExecutableName(platform: NodeJS.Platform): string {
+  return platform === 'win32' ? 'codelldb.exe' : 'codelldb';
+}
+
+/**
+ * Build the ordered candidate paths for a file under the vendored CodeLLDB
+ * tree. `packageRoot` must be the adapter-rust package root — callers compute
+ * it from their own module location (source files sit at different depths, so
+ * a shared __dirname-relative walk would resolve differently per caller).
+ */
+export function buildVendorCandidatePaths(
+  packageRoot: string,
+  platformDir: string,
+  ...suffix: string[]
+): string[] {
+  return [
+    // Package root (production install: vendor/ ships next to dist/)
+    path.resolve(packageRoot, 'vendor', 'codelldb', platformDir, ...suffix),
+    // Backward compatibility for older builds that expected vendor under dist/
+    path.resolve(packageRoot, 'dist', 'vendor', 'codelldb', platformDir, ...suffix),
+    // Monorepo source tree fallbacks
+    path.resolve(packageRoot, '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, ...suffix),
+    path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, ...suffix)
+  ];
+}
+
+/** Package root as seen from this compiled file (dist/utils → two hops up). */
+function defaultPackageRoot(): string {
+  return path.resolve(__dirname, '..', '..');
+}
+
+/**
+ * Synchronous resolver core. Platform/arch default to the live process values
+ * READ AT CALL TIME (tests stub the process global; RustDebugAdapter injects
+ * its constructor platform override, issue #186). The existence probe is
+ * injectable so tests stay hermetic without mocking `fs`.
+ */
+export function resolveCodeLLDBExecutableSyncImpl(options?: {
+  platform?: NodeJS.Platform;
+  arch?: string;
+  packageRoot?: string;
+  exists?: (p: string) => boolean;
+}): string | null {
+  const platform = options?.platform ?? process.platform;
+  const arch = options?.arch ?? process.arch;
+  const packageRoot = options?.packageRoot ?? defaultPackageRoot();
+  const exists = options?.exists ?? existsSync;
+
+  const platformDir = getCodeLLDBPlatformDir(platform, arch);
+  if (!platformDir) {
+    return null;
+  }
+
+  const candidatePaths = buildVendorCandidatePaths(
+    packageRoot,
+    platformDir,
+    'adapter',
+    getCodeLLDBExecutableName(platform)
+  );
+
+  for (const candidate of candidatePaths) {
+    try {
+      if (exists(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // Try next candidate
+    }
+  }
+
+  // Check environment variable as fallback (after vendored candidates)
+  if (process.env.CODELLDB_PATH) {
+    try {
+      if (exists(process.env.CODELLDB_PATH)) {
+        return process.env.CODELLDB_PATH;
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  return null;
+}
+
+/**
  * Resolve the CodeLLDB executable path based on platform
  */
 export async function resolveCodeLLDBExecutable(): Promise<string | null> {
-  const platform = process.platform;
-  const arch = process.arch;
-  
-  // Determine platform directory
-  let platformDir = '';
-  if (platform === 'win32') {
-    platformDir = 'win32-x64';
-  } else if (platform === 'darwin') {
-    platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-  } else if (platform === 'linux') {
-    platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
-  } else {
+  const platformDir = getCodeLLDBPlatformDir(process.platform, process.arch);
+  if (!platformDir) {
     return null;
   }
-  
-  // Build path to vendored CodeLLDB
-  const executableName = platform === 'win32' ? 'codelldb.exe' : 'codelldb';
-  const candidatePaths = [
-    // Package root (production install)
-    path.resolve(__dirname, '..', '..', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
-    // Backward compatibility for older builds that expected vendor under dist/
-    path.resolve(__dirname, '..', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
-    // Monorepo source tree fallbacks
-    path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
-    path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName)
-  ];
-  
+
+  const candidatePaths = buildVendorCandidatePaths(
+    defaultPackageRoot(),
+    platformDir,
+    'adapter',
+    getCodeLLDBExecutableName(process.platform)
+  );
+
   for (const candidate of candidatePaths) {
     try {
       await fs.access(candidate, fsConstants.F_OK);
@@ -52,7 +160,7 @@ export async function resolveCodeLLDBExecutable(): Promise<string | null> {
       // Try next candidate
     }
   }
-  
+
   // Check environment variable as fallback
   if (process.env.CODELLDB_PATH) {
     try {
@@ -62,7 +170,7 @@ export async function resolveCodeLLDBExecutable(): Promise<string | null> {
       // Fall through
     }
   }
-  
+
   return null;
 }
 
@@ -71,34 +179,22 @@ export async function resolveCodeLLDBExecutable(): Promise<string | null> {
  */
 export async function getCodeLLDBVersion(): Promise<string | null> {
   const codelldbPath = await resolveCodeLLDBExecutable();
-  
+
   if (!codelldbPath) {
     return null;
   }
-  
-  // Try to get version from manifest file
-  // NOTE: Platform detection is intentionally duplicated from resolveCodeLLDBExecutable()
-  // because the two functions may be called independently, and extracting a shared helper
-  // would add coupling without meaningful benefit for this small mapping.
-  const platform = process.platform;
-  const arch = process.arch;
 
-  let platformDir = '';
-  if (platform === 'win32') {
-    platformDir = 'win32-x64';
-  } else if (platform === 'darwin') {
-    platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-  } else if (platform === 'linux') {
-    platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
+  const platformDir = getCodeLLDBPlatformDir(process.platform, process.arch);
+  if (!platformDir) {
+    return DEFAULT_CODELLDB_VERSION;
   }
-  
-  const versionFileCandidates = [
-    path.resolve(__dirname, '..', '..', 'vendor', 'codelldb', platformDir, 'version.json'),
-    path.resolve(__dirname, '..', 'vendor', 'codelldb', platformDir, 'version.json'),
-    path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'version.json'),
-    path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'version.json')
-  ];
-  
+
+  const versionFileCandidates = buildVendorCandidatePaths(
+    defaultPackageRoot(),
+    platformDir,
+    'version.json'
+  );
+
   for (const versionFile of versionFileCandidates) {
     try {
       const versionData = await fs.readFile(versionFile, 'utf-8');
@@ -108,6 +204,6 @@ export async function getCodeLLDBVersion(): Promise<string | null> {
       // Continue to next candidate
     }
   }
-  
+
   return DEFAULT_CODELLDB_VERSION; // Default version fallback
 }

@@ -38,7 +38,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { resolveCodeLLDBExecutable } from './utils/codelldb-resolver.js';
+import { resolveCodeLLDBExecutable, resolveCodeLLDBExecutableSyncImpl } from './utils/codelldb-resolver.js';
 import {
   checkCargoInstallation,
   checkRustInstallation,
@@ -747,53 +747,12 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
   
   private resolveCodeLLDBExecutableSync(): string | null {
-    // Determine platform directory (same logic as async resolver)
-    const platform = this.platform;
-    const arch = process.arch;
-    
-    let platformDir = '';
-    if (platform === 'win32') {
-      platformDir = 'win32-x64';
-    } else if (platform === 'darwin') {
-      platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-    } else if (platform === 'linux') {
-      platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
-    } else {
-      return null;
-    }
-    
-    const executableName = platform === 'win32' ? 'codelldb.exe' : 'codelldb';
-    const candidatePaths = [
-      // When executing via ts-node/ts-node-esm within the package
-      path.resolve(__dirname, '..', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
-      // When executing from the compiled workspace distribution (dist/packages/adapter-rust/src)
-      path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName),
-      // Fallback to workspace-relative resolution from CWD (handles unusual launchers)
-      path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', platformDir, 'adapter', executableName)
-    ];
-    
-    for (const candidate of candidatePaths) {
-      try {
-        if (existsSync(candidate)) {
-          return candidate;
-        }
-      } catch {
-        // Try next candidate
-      }
-    }
-    
-    // Check environment variable as fallback
-    if (process.env.CODELLDB_PATH) {
-      try {
-        if (existsSync(process.env.CODELLDB_PATH)) {
-          return process.env.CODELLDB_PATH;
-        }
-      } catch {
-        // Fall through
-      }
-    }
-    
-    return null;
+    // Shared candidate walk (issue #265). This file compiles one directory
+    // shallower than the resolver, so the package root is one hop up.
+    return resolveCodeLLDBExecutableSyncImpl({
+      platform: this.platform,
+      packageRoot: path.resolve(__dirname, '..')
+    });
   }
   
   getAdapterModuleName(): string {
