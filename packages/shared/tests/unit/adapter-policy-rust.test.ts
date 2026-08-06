@@ -94,6 +94,29 @@ describe('RustAdapterPolicy', () => {
       expect(normalize('exception', { reason: 'exception' }, { pausePending: false })).toBeUndefined();
     });
 
+    // Windows delivers a user-initiated pause via DebugBreakProcess: the
+    // injected break-in thread raises EXCEPTION_BREAKPOINT (0x80000003),
+    // reported by CodeLLDB as an exception stop (issue #275).
+    it('maps the Windows break-in exception to pause while a pause is pending', () => {
+      expect(
+        normalize(
+          'exception',
+          { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x7ffe8b4dd7bd' },
+          { pausePending: true }
+        )
+      ).toBe('pause');
+    });
+
+    it('keeps a break-in exception when no pause is in flight (__debugbreak in user code)', () => {
+      expect(
+        normalize(
+          'exception',
+          { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x7ffe8b4dd7bd' },
+          { pausePending: false }
+        )
+      ).toBeUndefined();
+    });
+
     it('never touches step or pause reasons', () => {
       expect(normalize('step', { reason: 'step' }, { pausePending: false })).toBeUndefined();
       expect(normalize('pause', { reason: 'pause' }, { pausePending: true })).toBeUndefined();

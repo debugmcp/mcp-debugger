@@ -25,10 +25,13 @@ export const RustAdapterPolicy: AdapterPolicy = {
   /**
    * Two CodeLLDB quirks are normalized here:
    *
-   * 1. A user-initiated pause is reported as reason 'exception' because the
-   *    pause is delivered via SIGSTOP. Map that back to 'pause'. Real
-   *    exceptions (SIGSEGV, panics) carry a non-SIGSTOP description and are
-   *    left untouched, even while a pause request is in flight.
+   * 1. A user-initiated pause is reported as reason 'exception': POSIX
+   *    delivers it via SIGSTOP; Windows via DebugBreakProcess, whose
+   *    injected break-in thread raises EXCEPTION_BREAKPOINT 0x80000003
+   *    (issue #275). Map both back to 'pause' — the Windows form only
+   *    while a pause request is actually in flight. Real exceptions
+   *    (SIGSEGV, panics) carry other descriptions and are left untouched,
+   *    even while a pause request is in flight.
    *
    * 2. A rust_panic filter hit is reported as reason 'breakpoint' because
    *    CodeLLDB implements the filter as an internal breakpoint (issue
@@ -60,6 +63,15 @@ export const RustAdapterPolicy: AdapterPolicy = {
     }
     const detail = `${body?.description ?? ''} ${body?.text ?? ''}`;
     if (/SIGSTOP/i.test(detail)) {
+      return 'pause';
+    }
+    // Windows delivers a user-initiated pause via DebugBreakProcess: the
+    // injected break-in thread raises EXCEPTION_BREAKPOINT (0x80000003),
+    // which CodeLLDB reports as an exception stop (issue #275; captured
+    // description: "Exception 0x80000003 encountered at address 0x…").
+    // Gated on pausePending so a genuine __debugbreak()/int3 in user code
+    // with no pause in flight stays an exception stop.
+    if (context.pausePending && /0x80000003/i.test(detail)) {
       return 'pause';
     }
     if (context.pausePending && detail.trim() === '') {
