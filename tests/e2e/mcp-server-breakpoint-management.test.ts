@@ -138,8 +138,9 @@ describe('Breakpoint management e2e (list/remove/clear)', () => {
       expect(finalList.count).toBe(0);
 
       // 6. continue → nothing left to stop at → program runs to completion.
-      // (#255: on Windows, CodeLLDB re-stops at the just-hit breakpoint on
-      // continue; a step_over first is the documented workaround.)
+      // (#255: a macro line resolves to several breakpoint locations, so a
+      // continue can re-stop on it; the breakpoints were cleared above, but
+      // the step_over keeps the Windows leg robust if one survives.)
       if (lang.language === 'rust' && process.platform === 'win32') {
         await callToolSafely(mcpClient!, 'step_over', { sessionId: currentSessionId });
         await waitForState(currentSessionId, ['paused']);

@@ -336,126 +336,141 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
     60000
   );
 
-  // Issue #255 reproducer: on non-Windows a single continue from a breakpoint
-  // must run the program to completion. On Windows CodeLLDB has been observed
-  // re-stopping at the just-hit breakpoint on continue (MSVC/PDB confirmed;
-  // GNU/DWARF repro status unknown), so the Windows leg probes: it accepts
-  // either outcome, leaves a loud breadcrumb, and drives to completion with
-  // the documented step_over workaround when the re-stop occurs. No product
-  // workaround exists by design — a same-line re-stop inside a loop is
-  // indistinguishable from a legitimate re-hit.
-  it(
-    'continues from a breakpoint to completion (issue #255 reproducer)',
-    async (ctx) => {
-      const { sourcePath, binaryPath } = await prepareRustExample('hello_world');
+  // Shared driver for the continue-to-completion tests below: sets one
+  // breakpoint, launches, and returns once the user frame at `line` is live.
+  async function launchAndReachBreakpoint(
+    ctx: Parameters<Parameters<typeof it>[1]>[0],
+    line: number,
+    name: string
+  ): Promise<{
+    getSession: () => Promise<{ state?: string; exitCode?: number } | undefined>;
+    topUserFrameLine: () => Promise<number | undefined>;
+    wait: (ms: number) => Promise<unknown>;
+    reached: boolean;
+  }> {
+    const { sourcePath, binaryPath } = await prepareRustExample('hello_world');
 
-      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
-        name: 'create_debug_session',
-        arguments: { language: 'rust', name: 'rust-continue-reproducer' }
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'rust', name }
+    }));
+    expect(createResponse.success).toBe(true);
+    sessionId = createResponse.sessionId as string;
+
+    const breakpointResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: sourcePath, line }
+    }));
+    expect(breakpointResponse.success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: binaryPath,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { sourceLanguages: ['rust'] }
+      }
+    }));
+    skipIfSpawnBlocked(ctx, startResponse, 'Rust');
+    expect(startResponse.success).toBe(true);
+
+    const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    async function getSession(): Promise<{ state?: string; exitCode?: number } | undefined> {
+      const res = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_debug_sessions',
+        arguments: {}
       }));
-      expect(createResponse.success).toBe(true);
-      sessionId = createResponse.sessionId as string;
+      const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; exitCode?: number }>;
+      return sessions.find(s => s.id === sessionId);
+    }
 
-      const breakpointResponse = parseSdkToolResult(await mcpClient!.callTool({
-        name: 'set_breakpoint',
-        arguments: { sessionId, file: sourcePath, line: 26 }
-      }));
-      expect(breakpointResponse.success).toBe(true);
-
-      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
-        name: 'start_debugging',
-        arguments: {
-          sessionId,
-          scriptPath: binaryPath,
-          dapLaunchArgs: { stopOnEntry: false },
-          adapterLaunchConfig: { sourceLanguages: ['rust'] }
-        }
-      }));
-      skipIfSpawnBlocked(ctx, startResponse, 'Rust');
-      expect(startResponse.success).toBe(true);
-
-      const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-      async function getSession(): Promise<{ state?: string; exitCode?: number; lastStop?: { reason?: string } } | undefined> {
-        const res = parseSdkToolResult(await mcpClient!.callTool({
-          name: 'list_debug_sessions',
-          arguments: {}
-        }));
-        const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; exitCode?: number; lastStop?: { reason?: string } }>;
-        return sessions.find(s => s.id === sessionId);
-      }
-
-      async function topUserFrameLine(): Promise<number | undefined> {
-        const stack = parseSdkToolResult(await mcpClient!.callTool({
-          name: 'get_stack_trace',
-          arguments: { sessionId }
-        })) as { stackFrames?: Array<{ file?: string; line?: number }> };
-        const frame = stack.stackFrames?.find(
-          f => f.file?.replace(/\\/g, '/').includes('/examples/rust/hello_world/src/')
-        );
-        return frame?.line;
-      }
-
-      // Reach the breakpoint. The first stop may be a launch-time system stop
-      // (platform-dependent); issue bounded continues until the user frame at
-      // line 26 is live.
-      let atBreakpoint = false;
-      for (let attempt = 0; attempt < 10 && !atBreakpoint; attempt++) {
-        const snap = await getSession();
-        if (snap?.state === 'paused') {
-          if ((await topUserFrameLine()) === 26) {
-            atBreakpoint = true;
-            break;
-          }
-          await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-        }
-        await wait(500);
-      }
-      expect(atBreakpoint, 'session should pause at the line-26 breakpoint').toBe(true);
-
-      if (process.platform !== 'win32') {
-        // Strict reproducer: exactly one continue must reach completion.
-        await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-        const stopped = await pollStopped(getSession, wait, 20000);
-        expect(stopped, 'a single continue from the breakpoint should run to completion').toBeDefined();
-        expect(stopped!.exitCode).toBe(0);
-        return;
-      }
-
-      // Windows probe: one plain continue, then observe.
-      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-      await wait(1500);
-      let snap = await getSession();
-      if (snap?.state !== 'paused') {
-        const stopped = await pollStopped(getSession, wait, 20000);
-        expect(stopped, 'continue should terminate when it does not re-stop').toBeDefined();
-        expect(stopped!.exitCode).toBe(0);
-        console.warn(
-          '[issue #255] Plain continue advanced to completion on win32 — either upstream fixed the ' +
-          're-stop or this build (GNU/DWARF) does not reproduce it. Consider tightening this test ' +
-          'and removing the step_over workarounds.'
-        );
-        return;
-      }
-
-      const lineAfterContinue = await topUserFrameLine();
-      console.warn(
-        `[issue #255] Reproduced on win32: continue re-stopped at line ${lineAfterContinue} ` +
-        '(breakpoint line 26). Driving to completion with the step_over workaround.'
+    async function topUserFrameLine(): Promise<number | undefined> {
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      })) as { stackFrames?: Array<{ file?: string; line?: number }> };
+      const frame = stack.stackFrames?.find(
+        f => f.file?.replace(/\\/g, '/').includes('/examples/rust/hello_world/src/')
       );
-      // Documented workaround: step_over once, then continue (bounded).
-      let completed = false;
-      for (let i = 0; i < 10 && !completed; i++) {
-        await callToolSafely(mcpClient!, 'step_over', { sessionId });
-        await wait(500);
-        await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-        const stopped = await pollStopped(getSession, wait, 5000);
-        if (stopped) {
-          expect(stopped.exitCode).toBe(0);
-          completed = true;
+      return frame?.line;
+    }
+
+    // The first stop may be a launch-time system stop (platform-dependent);
+    // issue bounded continues until the user frame at `line` is live.
+    let reached = false;
+    for (let attempt = 0; attempt < 10 && !reached; attempt++) {
+      const snap = await getSession();
+      if (snap?.state === 'paused') {
+        if ((await topUserFrameLine()) === line) {
+          reached = true;
+          break;
         }
+        await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       }
-      expect(completed, 'step_over + continue workaround should reach completion').toBe(true);
+      await wait(500);
+    }
+
+    return { getSession, topUserFrameLine, wait, reached };
+  }
+
+  // The suite never continued past a user breakpoint to completion — the gap
+  // that let issue #255 survive it. Line 42 (`let sum = a + b;`) is a plain
+  // statement that compiles to a single breakpoint location, so exactly one
+  // continue must finish the program on every platform.
+  it(
+    'continues from a single-location breakpoint to completion in one call',
+    async (ctx) => {
+      const { getSession, wait, reached } = await launchAndReachBreakpoint(ctx, 42, 'rust-continue-single-location');
+      expect(reached, 'session should pause at the line-42 breakpoint').toBe(true);
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      const stopped = await pollStopped(getSession, wait, 20000);
+      expect(stopped, 'a single continue from a single-location breakpoint should run to completion').toBeDefined();
+      expect(stopped!.exitCode).toBe(0);
+    },
+    90000
+  );
+
+  // Issue #255 was reported as "continue re-stops at the same breakpoint and
+  // never advances". Root cause (confirmed with a raw DAP client driving
+  // CodeLLDB directly, so mcp-debugger is not in the loop): line 26 is a
+  // `format!` macro whose expansion inlines several call sites onto that one
+  // source line, and LLDB plants a breakpoint location at each. Every stop is
+  // a genuine, distinct hit of the same breakpoint id at a different program
+  // counter, so continue advances location-by-location before leaving the
+  // line. Not platform-specific and not a defect — this test pins the
+  // behavior so a future change in resolution is visible.
+  it(
+    'drains every location of a multi-location (macro) breakpoint line, then completes',
+    async (ctx) => {
+      const { getSession, topUserFrameLine, wait, reached } =
+        await launchAndReachBreakpoint(ctx, 26, 'rust-continue-multi-location');
+      expect(reached, 'session should pause at the line-26 breakpoint').toBe(true);
+
+      const MAX_CONTINUES = 8;
+      let continues = 0;
+      let stopped: { state?: string; exitCode?: number } | undefined;
+
+      while (continues < MAX_CONTINUES && !stopped) {
+        continues++;
+        await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+        stopped = await pollStopped(getSession, wait, 5000);
+        if (stopped) break;
+
+        // Still paused: every intermediate stop belongs to the same macro line.
+        const snap = await getSession();
+        expect(snap?.state, 'session should be paused between macro-line locations').toBe('paused');
+        expect(
+          await topUserFrameLine(),
+          'intermediate stops should stay on the macro line until its locations are drained'
+        ).toBe(26);
+      }
+
+      expect(stopped, `program should complete within ${MAX_CONTINUES} continues`).toBeDefined();
+      expect(stopped!.exitCode).toBe(0);
+      expect(continues, 'a macro line should need more than one continue to leave').toBeGreaterThan(1);
     },
     90000
   );
