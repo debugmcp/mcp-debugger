@@ -69,7 +69,12 @@ describe('restart_debugging e2e', () => {
     throw new Error(`Timed out waiting for state in [${states.join(', ')}]; last state: ${lastState}`);
   }
 
-  /** Continue (with the rust/win32 #255 step_over workaround) until the program exits. */
+  /**
+   * Continue until the program exits. The loop is what makes this robust: a
+   * breakpoint on a macro line resolves to several locations, so leaving that
+   * line takes one continue per location (issue #255). The rust/win32
+   * step_over just gets there in fewer round trips.
+   */
   async function driveToCompletion(sessionId: string, language: string): Promise<void> {
     for (let i = 0; i < 25; i++) {
       if (language === 'rust' && process.platform === 'win32') {
