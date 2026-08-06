@@ -1262,6 +1262,122 @@ describe('SessionManager - DAP Operations', () => {
       expect(managedSession?.lastStop?.reason).toBe('exception');
       expect(managedSession?.lastStop?.rawReason).toBeUndefined();
     });
+
+    // Issue #260: CodeLLDB delivers rust_panic filter hits as internal
+    // breakpoint stops. The session manager passes the known user-breakpoint
+    // adapter ids to the policy so it can tell those apart.
+    describe('rust panic breakpoint stops (issue #260)', () => {
+      function respondToSetBreakpointsWithIds(startId: number) {
+        dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+          if (command === 'setBreakpoints') {
+            const typedArgs = args as { breakpoints?: Array<{ line: number }> } | undefined;
+            return {
+              success: true,
+              body: {
+                breakpoints: typedArgs?.breakpoints?.map((bp, i) => ({
+                  id: startId + i,
+                  verified: true,
+                  line: bp.line
+                })) ?? []
+              }
+            };
+          }
+          return { success: true };
+        });
+      }
+
+      it('normalizes a panic breakpoint stop (no user breakpoints) to exception', async () => {
+        const session = await createPausedRustSession();
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          allThreadsStopped: true,
+          hitBreakpointIds: [1]
+        });
+
+        const managedSession = sessionManager.getSession(session.id);
+        expect(managedSession?.lastStop?.reason).toBe('exception');
+        expect(managedSession?.lastStop?.rawReason).toBe('breakpoint');
+        expect(managedSession?.state).toBe(SessionState.PAUSED);
+      });
+
+      it('keeps a stop matching a user breakpoint adapter id as breakpoint', async () => {
+        const session = await createPausedRustSession();
+        respondToSetBreakpointsWithIds(1);
+        await sessionManager.setBreakpoint(session.id, 'main.rs', 17);
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          allThreadsStopped: true,
+          hitBreakpointIds: [1]
+        });
+
+        const managedSession = sessionManager.getSession(session.id);
+        expect(managedSession?.lastStop?.reason).toBe('breakpoint');
+        expect(managedSession?.lastStop?.rawReason).toBeUndefined();
+      });
+
+      it('normalizes a panic stop whose id is disjoint from user breakpoints', async () => {
+        const session = await createPausedRustSession();
+        respondToSetBreakpointsWithIds(1);
+        await sessionManager.setBreakpoint(session.id, 'main.rs', 17);
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          allThreadsStopped: true,
+          hitBreakpointIds: [2]
+        });
+
+        const managedSession = sessionManager.getSession(session.id);
+        expect(managedSession?.lastStop?.reason).toBe('exception');
+        expect(managedSession?.lastStop?.rawReason).toBe('breakpoint');
+      });
+
+      it('does not request exceptionInfo for a normalized panic stop', async () => {
+        // CodeLLDB treats the stop as a breakpoint stop, so its exceptionInfo
+        // answer is about the internal breakpoint ("Breakpoint"/"breakpoint
+        // 1.1", confirmed live) — misleading, not enriching. Enrichment stays
+        // gated on the adapter itself reporting reason 'exception'.
+        const session = await createPausedRustSession();
+        dependencies.mockProxyManager.simulateEvent('adapter-capabilities', {
+          supportsExceptionInfoRequest: true
+        });
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          allThreadsStopped: true,
+          hitBreakpointIds: [1]
+        });
+        await vi.runAllTimersAsync();
+
+        const exceptionInfoCalls = dependencies.mockProxyManager.dapRequestCalls
+          .filter(c => c.command === 'exceptionInfo');
+        expect(exceptionInfoCalls).toHaveLength(0);
+        expect(sessionManager.getSession(session.id)?.lastStop?.reason).toBe('exception');
+      });
+
+      it('does not normalize when a user breakpoint lacks an adapter id', async () => {
+        const session = await createPausedRustSession();
+        // Default mock setBreakpoints response carries no ids -> bookkeeping
+        // incomplete -> the disjoint inference must be disabled.
+        await sessionManager.setBreakpoint(session.id, 'main.rs', 17);
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          allThreadsStopped: true,
+          hitBreakpointIds: [2]
+        });
+
+        const managedSession = sessionManager.getSession(session.id);
+        expect(managedSession?.lastStop?.reason).toBe('breakpoint');
+        expect(managedSession?.lastStop?.rawReason).toBeUndefined();
+      });
+    });
   });
 
   describe('Adapter Capabilities and exceptionInfo Enrichment (issue #243)', () => {

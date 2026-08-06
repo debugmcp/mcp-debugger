@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import { spawn } from 'child_process';
 import { findDlltoolExecutable } from '../../packages/adapter-rust/src/utils/rust-utils.js';
 
-export type RustExampleName = 'hello_world' | 'async_example';
+export type RustExampleName = 'hello_world' | 'async_example' | 'panic_example';
 
 const WINDOWS_GNU_TARGET = 'x86_64-pc-windows-gnu';
 const ROOT = path.resolve(process.cwd(), '.');

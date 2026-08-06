@@ -291,8 +291,30 @@ export abstract class SessionManagerCore extends EventEmitter {
       let reason = rawReason;
       try {
         const policy = this.sessionStore.selectPolicy(session.language);
+        // Collect the adapter-assigned ids of all user breakpoints so the
+        // policy can distinguish internal adapter breakpoints (e.g.
+        // CodeLLDB's rust_panic filter, issue #260) from user ones. Only
+        // pass the set when the bookkeeping is complete — a breakpoint with
+        // an unknown id makes the disjointness inference unsafe.
+        let userBreakpointIds: ReadonlySet<number> | undefined;
+        {
+          const ids = new Set<number>();
+          let complete = true;
+          for (const bp of session.breakpoints.values()) {
+            if (typeof bp.adapterId === 'number') {
+              ids.add(bp.adapterId);
+            } else {
+              complete = false;
+              break;
+            }
+          }
+          if (complete) {
+            userBreakpointIds = ids;
+          }
+        }
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
-          pausePending: session.pausePending === true
+          pausePending: session.pausePending === true,
+          userBreakpointIds
         });
         if (normalized && normalized !== rawReason) {
           this.logger.info(
@@ -374,9 +396,15 @@ export abstract class SessionManagerCore extends EventEmitter {
         // after the synchronous PAUSED transition (step/continue barriers rely
         // on it). Gated on the live adapter capability; failures are swallowed
         // — the .catch also absorbs the rejection when the proxy exits with
-        // the request in flight.
+        // the request in flight. Also gated on the ADAPTER's raw reason being
+        // 'exception': for a policy-normalized stop (e.g. a Rust panic
+        // delivered as CodeLLDB's internal breakpoint, issue #260) the
+        // adapter would answer about the breakpoint, not the panic —
+        // confirmed live: {exceptionId: 'Breakpoint', description:
+        // 'breakpoint 1.1'} — which is misleading, not enriching.
         if (
           reason === 'exception' &&
+          rawReason === 'exception' &&
           typeof threadId === 'number' &&
           session.adapterCapabilities?.supportsExceptionInfoRequest
         ) {
