@@ -749,11 +749,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           message: `Debugging started for ${scriptPath}. Current state: ${finalState}`,
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any
-          // breakpoint is hit). Fall back to the historical heuristic.
+          // breakpoint is hit). handleStopped records lastStop synchronously
+          // before every user-visible PAUSED transition, so PAUSED without
+          // lastStop is only the auto-continue transient (an entry stop being
+          // auto-continued); report 'unknown' rather than fabricating
+          // 'breakpoint' there (issue #255 residual).
           reason:
             finalState === SessionState.PAUSED
               ? finalSession.lastStop?.reason ??
-                (dapLaunchArgs?.stopOnEntry ? 'entry' : 'breakpoint')
+                (dapLaunchArgs?.stopOnEntry ? 'entry' : 'unknown')
               : undefined,
           stopOnEntrySuccessful: !!dapLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
         },

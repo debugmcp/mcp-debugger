@@ -335,4 +335,142 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
     },
     60000
   );
+
+  // Issue #255 reproducer: on non-Windows a single continue from a breakpoint
+  // must run the program to completion. On Windows CodeLLDB has been observed
+  // re-stopping at the just-hit breakpoint on continue (MSVC/PDB confirmed;
+  // GNU/DWARF repro status unknown), so the Windows leg probes: it accepts
+  // either outcome, leaves a loud breadcrumb, and drives to completion with
+  // the documented step_over workaround when the re-stop occurs. No product
+  // workaround exists by design — a same-line re-stop inside a loop is
+  // indistinguishable from a legitimate re-hit.
+  it(
+    'continues from a breakpoint to completion (issue #255 reproducer)',
+    async (ctx) => {
+      const { sourcePath, binaryPath } = await prepareRustExample('hello_world');
+
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'rust', name: 'rust-continue-reproducer' }
+      }));
+      expect(createResponse.success).toBe(true);
+      sessionId = createResponse.sessionId as string;
+
+      const breakpointResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: sourcePath, line: 26 }
+      }));
+      expect(breakpointResponse.success).toBe(true);
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: binaryPath,
+          dapLaunchArgs: { stopOnEntry: false },
+          adapterLaunchConfig: { sourceLanguages: ['rust'] }
+        }
+      }));
+      skipIfSpawnBlocked(ctx, startResponse, 'Rust');
+      expect(startResponse.success).toBe(true);
+
+      const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+      async function getSession(): Promise<{ state?: string; exitCode?: number; lastStop?: { reason?: string } } | undefined> {
+        const res = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'list_debug_sessions',
+          arguments: {}
+        }));
+        const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; exitCode?: number; lastStop?: { reason?: string } }>;
+        return sessions.find(s => s.id === sessionId);
+      }
+
+      async function topUserFrameLine(): Promise<number | undefined> {
+        const stack = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'get_stack_trace',
+          arguments: { sessionId }
+        })) as { stackFrames?: Array<{ file?: string; line?: number }> };
+        const frame = stack.stackFrames?.find(
+          f => f.file?.replace(/\\/g, '/').includes('/examples/rust/hello_world/src/')
+        );
+        return frame?.line;
+      }
+
+      // Reach the breakpoint. The first stop may be a launch-time system stop
+      // (platform-dependent); issue bounded continues until the user frame at
+      // line 26 is live.
+      let atBreakpoint = false;
+      for (let attempt = 0; attempt < 10 && !atBreakpoint; attempt++) {
+        const snap = await getSession();
+        if (snap?.state === 'paused') {
+          if ((await topUserFrameLine()) === 26) {
+            atBreakpoint = true;
+            break;
+          }
+          await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+        }
+        await wait(500);
+      }
+      expect(atBreakpoint, 'session should pause at the line-26 breakpoint').toBe(true);
+
+      if (process.platform !== 'win32') {
+        // Strict reproducer: exactly one continue must reach completion.
+        await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+        const stopped = await pollStopped(getSession, wait, 20000);
+        expect(stopped, 'a single continue from the breakpoint should run to completion').toBeDefined();
+        expect(stopped!.exitCode).toBe(0);
+        return;
+      }
+
+      // Windows probe: one plain continue, then observe.
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      await wait(1500);
+      let snap = await getSession();
+      if (snap?.state !== 'paused') {
+        const stopped = await pollStopped(getSession, wait, 20000);
+        expect(stopped, 'continue should terminate when it does not re-stop').toBeDefined();
+        expect(stopped!.exitCode).toBe(0);
+        console.warn(
+          '[issue #255] Plain continue advanced to completion on win32 — either upstream fixed the ' +
+          're-stop or this build (GNU/DWARF) does not reproduce it. Consider tightening this test ' +
+          'and removing the step_over workarounds.'
+        );
+        return;
+      }
+
+      const lineAfterContinue = await topUserFrameLine();
+      console.warn(
+        `[issue #255] Reproduced on win32: continue re-stopped at line ${lineAfterContinue} ` +
+        '(breakpoint line 26). Driving to completion with the step_over workaround.'
+      );
+      // Documented workaround: step_over once, then continue (bounded).
+      let completed = false;
+      for (let i = 0; i < 10 && !completed; i++) {
+        await callToolSafely(mcpClient!, 'step_over', { sessionId });
+        await wait(500);
+        await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+        const stopped = await pollStopped(getSession, wait, 5000);
+        if (stopped) {
+          expect(stopped.exitCode).toBe(0);
+          completed = true;
+        }
+      }
+      expect(completed, 'step_over + continue workaround should reach completion').toBe(true);
+    },
+    90000
+  );
 });
+
+async function pollStopped(
+  getSession: () => Promise<{ state?: string; exitCode?: number } | undefined>,
+  wait: (ms: number) => Promise<unknown>,
+  timeoutMs: number
+): Promise<{ state?: string; exitCode?: number } | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const snap = await getSession();
+    if (snap?.state === 'stopped') return snap;
+    await wait(300);
+  }
+  return undefined;
+}
