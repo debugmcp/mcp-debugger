@@ -195,7 +195,9 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
       // Debuggee output must be retrievable (issue #223): POSIX gets it via
       // CodeLLDB's own DAP output events, Windows via the proxy's adapter-stdio
       // forwarding. Both markers print before the line-26 breakpoint, so no
-      // continue is needed (Windows re-hits the breakpoint on continue).
+      // continue is needed (line 26 is a multi-location macro line — further
+      // continues would just start draining its locations, see the
+      // multi-location test below).
       const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
       expect(outputResult.success).toBe(true);
       const outputEntries = outputResult.entries as Array<{ category: string; output: string }>;
