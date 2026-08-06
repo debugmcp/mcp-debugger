@@ -994,6 +994,95 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result?.data?.reason).toBe('entry');
     });
 
+    // Issue #255 residual: PAUSED with lastStop unset is the auto-continue
+    // transient (an entry stop being auto-continued) — the old fallback
+    // fabricated 'breakpoint' there, which is actively wrong.
+    it("reports reason 'unknown' when paused without a recorded stop and stopOnEntry is false", async () => {
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
+
+      const proxyStub: any = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        isRunning: vi.fn().mockReturnValue(true)
+      };
+      proxyStub.on.mockReturnValue(proxyStub);
+      proxyStub.off.mockReturnValue(proxyStub);
+      proxyStub.removeListener.mockReturnValue(proxyStub);
+      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
+        if (event === 'stopped') {
+          // PAUSED but no lastStop recorded — the auto-continue window
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = undefined;
+          handler();
+        }
+        return proxyStub;
+      });
+
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+      });
+
+      let result: any;
+      try {
+        result = await operations.startDebugging('test-session', 'main.py', undefined, { stopOnEntry: false });
+      } finally {
+        startProxySpy.mockRestore();
+      }
+
+      expect(result?.success).toBe(true);
+      expect(result?.state).toBe(SessionState.PAUSED);
+      expect(result?.data?.reason).toBe('unknown');
+    });
+
+    it('reports the recorded lastStop reason when paused at a real breakpoint', async () => {
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
+
+      const proxyStub: any = {
+        hasDryRunCompleted: vi.fn().mockReturnValue(false),
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        isRunning: vi.fn().mockReturnValue(true)
+      };
+      proxyStub.on.mockReturnValue(proxyStub);
+      proxyStub.off.mockReturnValue(proxyStub);
+      proxyStub.removeListener.mockReturnValue(proxyStub);
+      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
+        if (event === 'stopped') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'breakpoint', threadId: 1, timestamp: Date.now() };
+          handler();
+        }
+        return proxyStub;
+      });
+
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+      });
+
+      let result: any;
+      try {
+        result = await operations.startDebugging('test-session', 'main.py', undefined, { stopOnEntry: false });
+      } finally {
+        startProxySpy.mockRestore();
+      }
+
+      expect(result?.success).toBe(true);
+      expect(result?.data?.reason).toBe('breakpoint');
+    });
+
     it('handles dry run completion after waiting', async () => {
       vi.stubEnv('CI', 'true');
       vi.stubEnv('GITHUB_ACTIONS', undefined);
