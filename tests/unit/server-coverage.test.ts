@@ -1129,6 +1129,21 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(payload.message).toContain('Cannot get local variables');
     });
 
+    it('explains a terminated session as a normal end state (program finished)', async () => {
+      (server as any).validateSession = vi.fn().mockImplementation(() => {
+        throw new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: test-session');
+      });
+
+      const result = await (server as any).handleGetLocalVariables({
+        sessionId: 'test-session'
+      });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.message).toContain('program has terminated');
+      expect(payload.message).toContain('restart_debugging');
+    });
+
     it('wraps generic errors as McpError', async () => {
       mockSessionManager.getLocalVariables.mockRejectedValue(new Error('unexpected'));
 

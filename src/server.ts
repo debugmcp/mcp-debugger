@@ -1967,15 +1967,20 @@ export class DebugMcpServer {
       });
       
       // Handle session state errors specifically
-      if (error instanceof McpError && 
-          (error.message.includes('terminated') || 
-           error.message.includes('closed') || 
+      if (error instanceof McpError &&
+          (error.message.includes('terminated') ||
+           error.message.includes('closed') ||
            error.message.includes('not found') ||
            error.message.includes('not paused'))) {
-        return { content: [{ type: 'text', text: JSON.stringify({ 
-          success: false, 
+        // A terminated session is a normal end state (e.g. a step_out ran the
+        // program to completion) — explain that instead of implying misuse.
+        const message = error.message.includes('terminated')
+          ? 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
+          : 'Cannot get local variables. The session must be paused at a breakpoint.';
+        return { content: [{ type: 'text', text: JSON.stringify({
+          success: false,
           error: error.message,
-          message: 'Cannot get local variables. The session must be paused at a breakpoint.'
+          message
         }) }] };
       } else if (error instanceof McpError) {
         throw error;
