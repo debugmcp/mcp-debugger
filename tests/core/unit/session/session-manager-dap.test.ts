@@ -1216,6 +1216,22 @@ describe('SessionManager - DAP Operations', () => {
       expect(managedSession?.pausePending).toBe(false);
     });
 
+    it('normalizes the Windows break-in pause (0x80000003) while a pause is pending (issue #275)', async () => {
+      const session = await createPausedRustSession();
+      const managed = sessionManager.getSession(session.id)!;
+      managed.pausePending = true;
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'Exception 0x80000003 encountered at address 0x7ffe8b4dd7bd'
+      });
+
+      expect(managed.lastStop?.reason).toBe('pause');
+      expect(managed.lastStop?.rawReason).toBe('exception');
+      expect(managed.pausePending).toBe(false);
+    });
+
     it('leaves a real rust exception stop unnormalized (no rawReason)', async () => {
       const session = await createPausedRustSession();
 
