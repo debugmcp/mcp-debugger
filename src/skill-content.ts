@@ -6,9 +6,25 @@
  * `debugging-workflow` prompt. Both are condensed views of the full agent
  * skill in skills/debugging/ — when editing one, check the other and the
  * skill for drift.
+ *
+ * Both texts are built per addressing mode (issue #271): the
+ * DEBUG_MCP_BP_ADDRESSING flag must hide content-addressing features from
+ * every surface a client can learn from, instructions included.
  */
+import {
+  BpAddressingMode,
+  DEFAULT_BP_ADDRESSING,
+  supportsExpectedContent
+} from './utils/bp-addressing.js';
 
-export const SERVER_INSTRUCTIONS = `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET) as MCP tools.
+export function buildServerInstructions(
+  mode: BpAddressingMode = DEFAULT_BP_ADDRESSING
+): string {
+  const expectedContentRule = supportsExpectedContent(mode)
+    ? `\n- set_breakpoint accepts expectedContent — pass the exact text of the target line (whitespace-trimmed); a mismatch fails fast and shows the actual nearby lines, catching off-by-one line numbers before they cause a confusing session. A response reporting "requested line N, bound to line M" means the adapter moved your breakpoint — trust the bound line.`
+    : '';
+
+  return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET) as MCP tools.
 
 Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution -> get_output -> close_debug_session (always, even on failure).
 
@@ -16,7 +32,7 @@ Key rules:
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
 - Breakpoints may report unverified until the module/class loads — that is normal.
-- list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.
+- list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.${expectedContentRule}
 - Logpoints: set_breakpoint with logMessage ("order={orderId}") logs the interpolated message to get_output WITHOUT pausing — the prod-safe way to watch values on a hot path (Python/JS/Go/Rust; not Java/.NET).
 - restart_debugging {sessionId} relaunches with the same config in one call — breakpoints re-apply automatically, output buffer resets (read get_output from since=0). Works after the program exits; not for attach sessions.
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass nextCursor back to read only new output.
@@ -24,14 +40,24 @@ Key rules:
 - Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.
 
 For the full debugging workflow (root-cause discipline, per-language quirks), request the "debugging-workflow" prompt or install the agent skill from skills/debugging/ in the repo.`;
+}
 
-export const DEBUGGING_WORKFLOW_PROMPT = `# Debugging workflow (mcp-debugger)
+export const SERVER_INSTRUCTIONS = buildServerInstructions();
+
+export function buildDebuggingWorkflowPrompt(
+  mode: BpAddressingMode = DEFAULT_BP_ADDRESSING
+): string {
+  const expectedContentStep = supportsExpectedContent(mode)
+    ? ' — add expectedContent: "<exact line text>" so a stale or off-by-one line number fails fast instead of binding somewhere surprising'
+    : '';
+
+  return `# Debugging workflow (mcp-debugger)
 
 Prefer the debugger over print-debugging whenever you would need more than one edit-run cycle to see program state.
 
 ## Golden path (launch)
 1. create_debug_session {language} -> sessionId
-2. set_breakpoint {sessionId, file: ABSOLUTE path, line}
+2. set_breakpoint {sessionId, file: ABSOLUTE path, line}${expectedContentStep}
 3. start_debugging {sessionId, scriptPath: ABSOLUTE path}
 4. get_stack_trace {sessionId} — use each frame's "id" field; it is adapter-assigned, never assume 0
 5. get_scopes {sessionId, frameId} -> variablesReference per scope
@@ -76,3 +102,6 @@ detach_from_process leaves the target running.
 - lastStop.description/text carry the exception class and message; where supported (Python/JS/Java/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
 
 The full skill (with per-language reference files) lives in skills/debugging/ of the mcp-debugger repo.`;
+}
+
+export const DEBUGGING_WORKFLOW_PROMPT = buildDebuggingWorkflowPrompt();

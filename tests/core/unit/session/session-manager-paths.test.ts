@@ -45,7 +45,7 @@ describe('SessionManager - Path Resolution', () => {
       ];
       
       for (const { path: testPath, expectedFile } of windowsPaths) {
-        const bp = await sessionManager.setBreakpoint(session.id, testPath, 10);
+        const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: testPath, line: 10 });
         
         // SessionManager passes through paths without modification
         // So the breakpoint file should match the input path
@@ -60,10 +60,9 @@ describe('SessionManager - Path Resolution', () => {
         pythonPath: 'python'
       });
       
-      const bp = await sessionManager.setBreakpoint(
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(
         session.id,
-        'src\\debug\\file.py',
-        20
+        { file: 'src\\debug\\file.py', line: 20 }
       );
       
       // Check that path contains expected components
@@ -79,10 +78,9 @@ describe('SessionManager - Path Resolution', () => {
       });
       
       const testPath = 'test/file.py';
-      const bp = await sessionManager.setBreakpoint(
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(
         session.id,
-        testPath,
-        30
+        { file: testPath, line: 30 }
       );
       
       // SessionManager should pass through the path as-is
@@ -99,7 +97,7 @@ describe('SessionManager - Path Resolution', () => {
       });
       
       const relativePath = 'src/test.py';
-      const bp = await sessionManager.setBreakpoint(session.id, relativePath, 42);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: relativePath, line: 42 });
       
       // SessionManager no longer converts paths - just passes through
       expect(bp.file).toBe(relativePath);
@@ -112,7 +110,7 @@ describe('SessionManager - Path Resolution', () => {
       });
       
       const absolutePath = '/home/user/project/test.py';
-      const bp = await sessionManager.setBreakpoint(session.id, absolutePath, 50);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: absolutePath, line: 50 });
       
       // SessionManager passes through paths without normalization
       expect(bp.file).toBe(absolutePath);
@@ -126,7 +124,7 @@ describe('SessionManager - Path Resolution', () => {
       
       // Mix of path separators
       const mixedPath = 'src\\components/test.py';
-      const bp = await sessionManager.setBreakpoint(session.id, mixedPath, 60);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: mixedPath, line: 60 });
       
       // Should contain expected path components
       expect(bp.file.toLowerCase()).toContain('src');

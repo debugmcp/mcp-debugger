@@ -61,11 +61,10 @@ describe('Rust Adapter Integration', () => {
     
     // Skip if test file doesn't exist
     try {
-      const breakpoint = await sessionManager.setBreakpoint(
-        sessionId,
-        testFile,
-        5 // Line number in main function
-      );
+      const { breakpoint } = await sessionManager.setBreakpoint(sessionId, {
+        file: testFile,
+        line: 5 // Line number in main function
+      });
       
       expect(breakpoint).toBeDefined();
       // Breakpoint may not be verified without a running debug session with a compiled binary

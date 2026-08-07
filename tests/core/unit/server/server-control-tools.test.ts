@@ -64,7 +64,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
-      mockSessionManager.setBreakpoint.mockResolvedValue(mockBreakpoint);
+      mockSessionManager.setBreakpoint.mockResolvedValue({ breakpoint: mockBreakpoint });
       
       const result = await callToolHandler({
         method: 'tools/call',
@@ -80,11 +80,10 @@ describe('Server Control Tools Tests', () => {
       
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
         'test-session',
-        expect.stringContaining('/path/to/test.py'),
-        10,
-        undefined,
-        undefined,
-        undefined
+        expect.objectContaining({
+          file: expect.stringContaining('/path/to/test.py'),
+          line: 10
+        })
       );
       
       const content = JSON.parse(result.content[0].text);
@@ -107,7 +106,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
-      mockSessionManager.setBreakpoint.mockResolvedValue(mockBreakpoint);
+      mockSessionManager.setBreakpoint.mockResolvedValue({ breakpoint: mockBreakpoint });
       
       const result = await callToolHandler({
         method: 'tools/call',
@@ -124,11 +123,11 @@ describe('Server Control Tools Tests', () => {
       
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
         'test-session',
-        expect.stringContaining('/path/to/test.py'),
-        20,
-        'x > 10',
-        undefined,
-        undefined
+        expect.objectContaining({
+          file: expect.stringContaining('/path/to/test.py'),
+          line: 20,
+          condition: 'x > 10'
+        })
       );
     });
 
@@ -145,7 +144,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
-      mockSessionManager.setBreakpoint.mockResolvedValue(mockBreakpoint);
+      mockSessionManager.setBreakpoint.mockResolvedValue({ breakpoint: mockBreakpoint });
 
       await callToolHandler({
         method: 'tools/call',
@@ -162,11 +161,11 @@ describe('Server Control Tools Tests', () => {
 
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
         'test-session',
-        expect.stringContaining('/path/to/test.py'),
-        30,
-        undefined,
-        'thread',
-        undefined
+        expect.objectContaining({
+          file: expect.stringContaining('/path/to/test.py'),
+          line: 30,
+          suspendPolicy: 'thread'
+        })
       );
     });
 

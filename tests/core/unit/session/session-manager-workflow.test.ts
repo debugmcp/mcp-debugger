@@ -62,7 +62,7 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(startResult.state).toBe(SessionState.PAUSED);
       
       // Set a breakpoint
-      const breakpoint = await sessionManager.setBreakpoint(session.id, 'test.py', 15);
+      const { breakpoint } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 15 });
       expect(breakpoint.verified).toBe(true);
       expect(dependencies.mockProxyManager.dapRequestCalls).toContainEqual({
         command: 'setBreakpoints',
