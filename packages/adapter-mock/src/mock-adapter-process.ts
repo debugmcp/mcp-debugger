@@ -511,16 +511,33 @@ class MockDebugAdapterProcess {
     }
   }
   
+  /**
+   * Breakpoint snap simulation (issue #271): when the launched program path
+   * contains "snap", odd requested lines bind one line down (odd -> next
+   * even is idempotent, so replace-all re-syncs of already-snapped lines
+   * don't drift). "snap-event" additionally defers: the response echoes the
+   * requested line unverified, then a DAP breakpoint(changed) event delivers
+   * the relocation + verification asynchronously.
+   */
+  private snapLine(line: number | undefined): number | undefined {
+    if (line === undefined) return line;
+    return line % 2 === 1 ? line + 1 : line;
+  }
+
   private handleSetBreakpoints(request: DebugProtocol.SetBreakpointsRequest): void {
     const args = request.arguments;
     const breakpoints: DebugProtocol.Breakpoint[] = [];
-    
+    const simulateSnapEvent = /snap-event/i.test(this.programPath);
+    const simulateSnap = !simulateSnapEvent && /snap/i.test(this.programPath);
+
     if (args.breakpoints) {
       for (const bp of args.breakpoints) {
+        const id = Math.floor(Math.random() * 100000);
+        const boundLine = simulateSnap ? this.snapLine(bp.line) : bp.line;
         breakpoints.push({
-          id: Math.floor(Math.random() * 100000),
-          verified: true,
-          line: bp.line,
+          id,
+          verified: !simulateSnapEvent,
+          line: boundLine,
           source: args.source,
           // Retained for the run simulation: logpoint lines log instead of stopping
           ...(bp.logMessage !== undefined ? { logMessage: bp.logMessage } : {})
@@ -529,7 +546,7 @@ class MockDebugAdapterProcess {
     }
 
     this.breakpoints.set(args.source?.path || 'unknown', breakpoints);
-    
+
     this.sendResponse({
       seq: 0,
       type: 'response',
@@ -540,6 +557,22 @@ class MockDebugAdapterProcess {
         breakpoints
       }
     });
+
+    if (simulateSnapEvent) {
+      for (const bp of breakpoints) {
+        setTimeout(() => {
+          const relocated = { ...bp, verified: true, line: this.snapLine(bp.line) };
+          bp.verified = true;
+          bp.line = relocated.line;
+          this.sendEvent({
+            seq: 0,
+            type: 'event',
+            event: 'breakpoint',
+            body: { reason: 'changed', breakpoint: relocated }
+          } as DebugProtocol.BreakpointEvent);
+        }, 100);
+      }
+    }
   }
   
   private handleThreads(request: DebugProtocol.ThreadsRequest): void {

@@ -322,10 +322,10 @@ Starts debugging for a session.
 
 **Returns**: Debug result with success status
 
-#### `setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint>`
-Sets a breakpoint in a file. Internally sends a DAP `setBreakpoints` request for all breakpoints in the same source file.
+#### `setBreakpoint(sessionId: string, bp: { file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread'; requestedLine?: number }): Promise<{ breakpoint: Breakpoint; warning?: string }>`
+Sets a breakpoint in a file. Internally sends a DAP `setBreakpoints` request for all breakpoints in the same source file. `requestedLine` records the originally requested line for loud snapping (issue #271); `warning` carries live-sync failures.
 
-**Returns**: Breakpoint information
+**Returns**: Breakpoint information plus an optional sync warning
 
 #### `continue(sessionId: string, threadId?: number): Promise<DebugResult>`
 Resumes execution from a breakpoint.

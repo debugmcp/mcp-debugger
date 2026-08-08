@@ -72,7 +72,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     it('should handle session not found error', async () => {
       mockSessionManager.getSession.mockReturnValue(null);
 
-      await expect(server.setBreakpoint('invalid-session', 'test.py', 10))
+      await expect(server.setBreakpoint({ sessionId: 'invalid-session', file: 'test.py', line: 10 }))
         .rejects.toThrow(McpError);
     });
 
@@ -308,7 +308,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         })
       };
 
-      await expect(server.setBreakpoint('test-session', '/nonexistent/file.py', 10))
+      await expect(server.setBreakpoint({ sessionId: 'test-session', file: '/nonexistent/file.py', line: 10 }))
         .rejects.toThrow('Breakpoint file not found');
     });
 
@@ -327,7 +327,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       mockSessionManager.setBreakpoint.mockRejectedValue(new Error('Invalid line number'));
 
-      await expect(server.setBreakpoint('test-session', '/path/to/file.py', -1))
+      await expect(server.setBreakpoint({ sessionId: 'test-session', file: '/path/to/file.py', line: -1 }))
         .rejects.toThrow('Invalid line number');
     });
 
@@ -349,17 +349,25 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       (server as any).fileChecker = mockFileChecker;
 
       mockSessionManager.setBreakpoint.mockResolvedValue({
-        id: 'bp-1',
-        file: 'com.example.MyClass',
-        line: 42,
-        verified: true
+        breakpoint: {
+          id: 'bp-1',
+          file: 'com.example.MyClass',
+          line: 42,
+          verified: true
+        }
       });
 
-      const result = await server.setBreakpoint('test-session', 'com.example.MyClass', 42);
+      const { breakpoint: result } = await server.setBreakpoint({ sessionId: 'test-session', file: 'com.example.MyClass', line: 42 });
 
       expect(result.verified).toBe(true);
       expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
-      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', 'com.example.MyClass', 42, undefined, undefined, undefined);
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', expect.objectContaining({
+        file: 'com.example.MyClass',
+        line: 42,
+        condition: undefined,
+        suspendPolicy: undefined,
+        logMessage: undefined
+      }));
     });
 
     it('should skip file existence check for inner class notation via policy', async () => {
@@ -379,13 +387,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       (server as any).fileChecker = mockFileChecker;
 
       mockSessionManager.setBreakpoint.mockResolvedValue({
-        id: 'bp-1',
-        file: 'com.example.Outer$Inner',
-        line: 10,
-        verified: true
+        breakpoint: {
+          id: 'bp-1',
+          file: 'com.example.Outer$Inner',
+          line: 10,
+          verified: true
+        }
       });
 
-      const result = await server.setBreakpoint('test-session', 'com.example.Outer$Inner', 10);
+      const { breakpoint: result } = await server.setBreakpoint({ sessionId: 'test-session', file: 'com.example.Outer$Inner', line: 10 });
 
       expect(result.verified).toBe(true);
       expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
@@ -408,13 +418,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       (server as any).fileChecker = mockFileChecker;
 
       mockSessionManager.setBreakpoint.mockResolvedValue({
-        id: 'bp-1',
-        file: 'MyClass',
-        line: 5,
-        verified: true
+        breakpoint: {
+          id: 'bp-1',
+          file: 'MyClass',
+          line: 5,
+          verified: true
+        }
       });
 
-      const result = await server.setBreakpoint('test-session', 'MyClass', 5);
+      const { breakpoint: result } = await server.setBreakpoint({ sessionId: 'test-session', file: 'MyClass', line: 5 });
 
       expect(result.verified).toBe(true);
       expect(mockFileChecker.checkExists).not.toHaveBeenCalled();
@@ -439,13 +451,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       };
 
       mockSessionManager.setBreakpoint.mockResolvedValue({
-        id: 'bp-1',
-        file: '/path/to/MyClass.java',
-        line: 10,
-        verified: true
+        breakpoint: {
+          id: 'bp-1',
+          file: '/path/to/MyClass.java',
+          line: 10,
+          verified: true
+        }
       });
 
-      await server.setBreakpoint('test-session', '/path/to/MyClass.java', 10);
+      await server.setBreakpoint({ sessionId: 'test-session', file: '/path/to/MyClass.java', line: 10 });
 
       expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('/path/to/MyClass.java');
     });
@@ -467,13 +481,15 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       };
 
       mockSessionManager.setBreakpoint.mockResolvedValue({
-        id: 'bp-1',
-        file: '/path/to/script.py',
-        line: 10,
-        verified: true
+        breakpoint: {
+          id: 'bp-1',
+          file: '/path/to/script.py',
+          line: 10,
+          verified: true
+        }
       });
 
-      await server.setBreakpoint('test-session', '/path/to/script.py', 10);
+      await server.setBreakpoint({ sessionId: 'test-session', file: '/path/to/script.py', line: 10 });
 
       expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('/path/to/script.py');
     });
@@ -495,7 +511,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         })
       };
 
-      await expect(server.setBreakpoint('test-session', 'MyClass', 5))
+      await expect(server.setBreakpoint({ sessionId: 'test-session', file: 'MyClass', line: 5 }))
         .rejects.toThrow('Breakpoint file not found');
 
       expect((server as any).fileChecker.checkExists).toHaveBeenCalledWith('MyClass');
@@ -688,31 +704,41 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       // First breakpoint
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({
-        id: 'bp-1',
-        file: 'com.example.Foo',
-        line: 10,
-        verified: true,
+        breakpoint: {
+          id: 'bp-1',
+          file: 'com.example.Foo',
+          line: 10,
+          verified: true,
+        }
       });
 
-      await server.setBreakpoint('test-session', 'com.example.Foo', 10);
+      await server.setBreakpoint({ sessionId: 'test-session', file: 'com.example.Foo', line: 10 });
 
       // Second breakpoint on same file
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({
-        id: 'bp-2',
-        file: 'com.example.Foo',
-        line: 20,
-        verified: true,
+        breakpoint: {
+          id: 'bp-2',
+          file: 'com.example.Foo',
+          line: 20,
+          verified: true,
+        }
       });
 
-      await server.setBreakpoint('test-session', 'com.example.Foo', 20);
+      await server.setBreakpoint({ sessionId: 'test-session', file: 'com.example.Foo', line: 20 });
 
       // Both calls should have been made
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.example.Foo', 10, undefined, undefined, undefined
+        'test-session', expect.objectContaining({
+          file: 'com.example.Foo', line: 10,
+          condition: undefined, suspendPolicy: undefined, logMessage: undefined
+        })
       );
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.example.Foo', 20, undefined, undefined, undefined
+        'test-session', expect.objectContaining({
+          file: 'com.example.Foo', line: 20,
+          condition: undefined, suspendPolicy: undefined, logMessage: undefined
+        })
       );
     });
 
@@ -722,14 +748,16 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       // Simulate setBreakpoint returning updated breakpoint info
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({
-        id: 'bp-1',
-        file: 'com.example.Foo',
-        line: 10,
-        verified: true,
-        message: 'Breakpoint set',
+        breakpoint: {
+          id: 'bp-1',
+          file: 'com.example.Foo',
+          line: 10,
+          verified: true,
+          message: 'Breakpoint set',
+        }
       });
 
-      const result = await server.setBreakpoint('test-session', 'com.example.Foo', 10);
+      const { breakpoint: result } = await server.setBreakpoint({ sessionId: 'test-session', file: 'com.example.Foo', line: 10 });
       expect(result.id).toBe('bp-1');
       expect(result.verified).toBe(true);
       expect(result.line).toBe(10);
@@ -742,29 +770,39 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       // BP on com.a.Foo
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({
-        id: 'bp-1',
-        file: 'com.a.Foo',
-        line: 10,
-        verified: true,
+        breakpoint: {
+          id: 'bp-1',
+          file: 'com.a.Foo',
+          line: 10,
+          verified: true,
+        }
       });
-      await server.setBreakpoint('test-session', 'com.a.Foo', 10);
+      await server.setBreakpoint({ sessionId: 'test-session', file: 'com.a.Foo', line: 10 });
 
       // BP on com.b.Foo (different package, same simple name)
       mockSessionManager.setBreakpoint.mockResolvedValueOnce({
-        id: 'bp-2',
-        file: 'com.b.Foo',
-        line: 15,
-        verified: true,
+        breakpoint: {
+          id: 'bp-2',
+          file: 'com.b.Foo',
+          line: 15,
+          verified: true,
+        }
       });
-      await server.setBreakpoint('test-session', 'com.b.Foo', 15);
+      await server.setBreakpoint({ sessionId: 'test-session', file: 'com.b.Foo', line: 15 });
 
       // Both should be set independently
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(2);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.a.Foo', 10, undefined, undefined, undefined
+        'test-session', expect.objectContaining({
+          file: 'com.a.Foo', line: 10,
+          condition: undefined, suspendPolicy: undefined, logMessage: undefined
+        })
       );
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'test-session', 'com.b.Foo', 15, undefined, undefined, undefined
+        'test-session', expect.objectContaining({
+          file: 'com.b.Foo', line: 15,
+          condition: undefined, suspendPolicy: undefined, logMessage: undefined
+        })
       );
     });
   });

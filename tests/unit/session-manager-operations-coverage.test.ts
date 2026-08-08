@@ -410,7 +410,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('should handle setBreakpoint with no proxy', async () => {
       mockSession.proxyManager = null;
 
-      const result = await operations.setBreakpoint('test-session', 'test.py', 10);
+      const { breakpoint: result } = await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
       
       // Without proxy, breakpoint is queued but not verified
       expect(result.verified).toBe(false);
@@ -430,7 +430,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      const result = await operations.setBreakpoint('test-session', 'test.py', 10);
+      const { breakpoint: result } = await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
       
       expect(result.verified).toBe(false);
       expect(result.message).toContain('Invalid line number');
@@ -443,7 +443,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      const result = await operations.setBreakpoint('test-session', 'test.py', 10);
+      const { breakpoint: result } = await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
       
       expect(result.verified).toBe(false);
     });
@@ -453,7 +453,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockRejectedValue(new Error('Connection lost'));
 
       // Error is caught and logged, breakpoint is still created but unverified
-      const result = await operations.setBreakpoint('test-session', 'test.py', 10);
+      const { breakpoint: result } = await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
       
       expect(result.verified).toBe(false);
       expect(mockLogger.error).toHaveBeenCalled();
@@ -1403,7 +1403,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       await expect(() => operations.continue('test-session'))
         .rejects.toThrow(SessionTerminatedError);
 
-      await expect(() => operations.setBreakpoint('test-session', 'test.py', 10))
+      await expect(() => operations.setBreakpoint('test-session', { file: 'test.py', line: 10 }))
         .rejects.toThrow(SessionTerminatedError);
     });
   });
@@ -2096,7 +2096,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
             }))
           }
         });
-        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+        await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: i * 10 });
       }
 
       // The last DAP call should have all 3 BPs
@@ -2117,7 +2117,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
             }))
           }
         });
-        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+        await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: i * 10 });
       }
 
       // Remove first BP (line 10) via the real API — removal itself re-syncs
@@ -2151,7 +2151,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
             }))
           }
         });
-        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+        await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: i * 10 });
       }
 
       // Remove middle BP (line 20) via the real API
@@ -2185,7 +2185,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
             }))
           }
         });
-        await operations.setBreakpoint('test-session', 'com.example.Foo', i * 10);
+        await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: i * 10 });
       }
 
       // Remove last BP (line 30) via the real API
@@ -2213,13 +2213,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.a.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.a.Foo', line: 10 });
 
       // Set BP on file B (different package, same simple name)
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 20 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.b.Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.b.Foo', line: 20 });
 
       // Last DAP request should only contain the BP for com.b.Foo
       const lastBps = getLastDapBreakpoints();
@@ -2233,7 +2233,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 10 });
 
       // Second BP: both returned, second unverified
       mockProxyManager.sendDapRequest.mockResolvedValue({
@@ -2244,7 +2244,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 20 });
 
       const bps = Array.from(mockSession.breakpoints.values());
       const bp10 = bps.find((bp: any) => bp.line === 10);
@@ -2262,7 +2262,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           breakpoints: [{ verified: true, line: 12 }] // adjusted from 10 to 12
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 10 });
 
       const bps = Array.from(mockSession.breakpoints.values());
       expect(bps).toHaveLength(1);
@@ -2279,7 +2279,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           }]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 10 });
 
       const bp = Array.from(mockSession.breakpoints.values())[0] as any;
       expect(bp.message).toBe('Breakpoint bound to com.example.Foo:10');
@@ -2289,7 +2289,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 10, 'x > 5');
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 10, condition: 'x > 5' });
 
       const lastBps = getLastDapBreakpoints();
       expect(lastBps).toHaveLength(1);
@@ -2301,7 +2301,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 10, 'x > 5');
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 10, condition: 'x > 5' });
 
       // Second BP without condition — DAP request should contain both
       mockProxyManager.sendDapRequest.mockResolvedValue({
@@ -2312,7 +2312,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 20 });
 
       const lastBps = getLastDapBreakpoints();
       expect(lastBps).toHaveLength(2);
@@ -2327,7 +2327,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 10 });
 
       // DAP only returns 1 BP in response (e.g. adapter bug or limit)
       mockProxyManager.sendDapRequest.mockResolvedValue({
@@ -2336,7 +2336,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           // missing second BP
         }
       });
-      await operations.setBreakpoint('test-session', 'com.example.Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 20 });
 
       // First BP updated, second remains unverified (default)
       const bps = Array.from(mockSession.breakpoints.values());
@@ -2351,13 +2351,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.a.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.a.Foo', line: 10 });
 
       // Set BP on com.b.Foo
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 20 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.b.Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.b.Foo', line: 20 });
 
       // Both BPs exist
       expect(mockSession.breakpoints.size).toBe(2);
@@ -2377,7 +2377,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.b.Foo', 30);
+      await operations.setBreakpoint('test-session', { file: 'com.b.Foo', line: 30 });
 
       // DAP request should only contain com.b.Foo BPs (20, 30), not com.a.Foo
       const lastBps = getLastDapBreakpoints();
@@ -2397,7 +2397,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.b.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.b.Foo', line: 10 });
 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
@@ -2407,13 +2407,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.b.Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.b.Foo', line: 20 });
 
       // Set BP on com.a.Foo
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 50 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.a.Foo', 50);
+      await operations.setBreakpoint('test-session', { file: 'com.a.Foo', line: 50 });
 
       expect(mockSession.breakpoints.size).toBe(3);
 
@@ -2432,7 +2432,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.b.Foo', 30);
+      await operations.setBreakpoint('test-session', { file: 'com.b.Foo', line: 30 });
 
       // DAP request for com.b.Foo should contain remaining + new (20, 30)
       const lastBps = getLastDapBreakpoints();
@@ -2453,13 +2453,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.A.Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.A.Foo', line: 10 });
 
       // com.A$Foo = inner class Foo of class A in default package
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 20 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.A$Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.A$Foo', line: 20 });
 
       expect(mockSession.breakpoints.size).toBe(2);
 
@@ -2478,7 +2478,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.A$Foo', 30);
+      await operations.setBreakpoint('test-session', { file: 'com.A$Foo', line: 30 });
 
       // DAP request should only contain com.A$Foo BPs
       const lastBps = getLastDapBreakpoints();
@@ -2498,13 +2498,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 10 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.A$Foo', 10);
+      await operations.setBreakpoint('test-session', { file: 'com.A$Foo', line: 10 });
 
       // com.A.Foo (regular class)
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: { breakpoints: [{ verified: true, line: 20 }] }
       });
-      await operations.setBreakpoint('test-session', 'com.A.Foo', 20);
+      await operations.setBreakpoint('test-session', { file: 'com.A.Foo', line: 20 });
 
       // Add second BP to com.A.Foo
       mockProxyManager.sendDapRequest.mockResolvedValue({
@@ -2515,7 +2515,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           ]
         }
       });
-      await operations.setBreakpoint('test-session', 'com.A.Foo', 30);
+      await operations.setBreakpoint('test-session', { file: 'com.A.Foo', line: 30 });
 
       // DAP request should only contain com.A.Foo BPs (20, 30)
       const lastBps = getLastDapBreakpoints();
@@ -3009,7 +3009,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      await operations.setBreakpoint('test-session', 'test.py', 10, undefined, 'thread');
+      await operations.setBreakpoint('test-session', { file: 'test.py', line: 10, suspendPolicy: 'thread' });
 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
         'setBreakpoints',
@@ -3029,7 +3029,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      await operations.setBreakpoint('test-session', 'test.py', 10);
+      await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
 
       const call = mockProxyManager.sendDapRequest.mock.calls.find(
         (c: any[]) => c[0] === 'setBreakpoints'

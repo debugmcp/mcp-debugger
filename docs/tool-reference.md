@@ -136,6 +136,7 @@ Sets a breakpoint in a source file.
 - `sessionId` (string, required): The ID of the debug session.
 - `file` (string, required): Path to the source file (absolute or relative to project root).
 - `line` (number, required): Line number where to set breakpoint (1-indexed).
+- `expectedContent` (string, optional): Assert the exact text of the target line (leading/trailing whitespace ignored) before setting. On a mismatch the breakpoint is **not** set and the error shows the actual content of that line and its neighbors — a fast, self-explanatory failure instead of a breakpoint that silently lands on the wrong line. See [Content assertions and loud snapping](#content-assertions-and-loud-snapping).
 - `condition` (string, optional): Conditional expression — only break (or log) when it evaluates truthy.
 - `logMessage` (string, optional): Create a **logpoint** instead of a pausing breakpoint — see [Logpoints](#logpoints) below.
 - `suspendPolicy` (string, optional): Suspend policy when the breakpoint is hit — `"all"` suspends all threads (default), `"thread"` suspends only the event thread. Only supported by the Java/JDI adapter.
@@ -167,6 +168,28 @@ Sets a breakpoint in a source file.
 - The response includes the absolute path even if you provide a relative path
 - Setting breakpoints on non-executable lines (comments, blank lines, declarations) may cause unexpected behavior
 - Executable lines that work well: assignments, function calls, conditionals, returns
+- The top-level `content` field echoes the bound line's text (same as `context.lineContent`)
+
+#### Content assertions and loud snapping
+
+`expectedContent` is a checksum on intent: agents that compute line numbers from a code listing routinely land one line off, and a breakpoint on a blank line or brace produces confusing session behavior much later. With `expectedContent`, the mismatch fails at set time:
+
+```
+Breakpoint not set: line 12 of /abs/app.py does not match expectedContent.
+Expected: "total = sum(prices)"
+Actual:   "return total"
+Context:
+   10 |     prices = load()
+   11 |     total = sum(prices)
+>  12 |     return total
+   13 |
+   14 | def main():
+The file may have changed since you last read it. Pick the correct line from the context above.
+```
+
+Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a different line (adapters snap requests on non-executable lines to the nearest valid one), the response reports it prominently instead of silently mutating the line: `message` and `warning` carry `"requested line 12, bound to line 13: \`...\`"`, and the response includes `requestedLine` alongside the bound `line`. Adapters that relocate breakpoints asynchronously (after the response) surface the move in `list_breakpoints`, where `line` ≠ `requestedLine` marks a snapped breakpoint.
+
+`expectedContent` requires a source file the server can read: it is rejected for Java FQCN breakpoints and attach-mode sessions (remote filesystems). Both addressing aids can be restricted with the `DEBUG_MCP_BP_ADDRESSING` environment variable (`line` = pre-existing behavior, `assert` = + expectedContent/loud snapping, `content` = all features; default `content`) — useful for controlled comparisons of agent behavior.
 
 #### Logpoints
 

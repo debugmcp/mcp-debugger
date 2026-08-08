@@ -58,8 +58,8 @@ describe('SessionManager - DAP Operations', () => {
         executablePath: 'python'
       });
       
-      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
-      const bp2 = await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      const { breakpoint: bp1 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      const { breakpoint: bp2 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
       
       expect(bp1.verified).toBe(false);
       expect(bp2.verified).toBe(false);
@@ -82,7 +82,7 @@ describe('SessionManager - DAP Operations', () => {
       dependencies.mockProxyManager.dapRequestCalls = [];
       
       // Set breakpoint on active session
-      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 15);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 15 });
       
       // Should be verified immediately
       expect(bp.verified).toBe(true);
@@ -106,11 +106,9 @@ describe('SessionManager - DAP Operations', () => {
       
       dependencies.mockProxyManager.dapRequestCalls = [];
       
-      const bp = await sessionManager.setBreakpoint(
-        session.id, 
-        'test.py', 
-        25, 
-        'x > 10'
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(
+        session.id,
+        { file: 'test.py', line: 25, condition: 'x > 10' }
       );
       
       expect(bp.condition).toBe('x > 10');
@@ -145,7 +143,7 @@ describe('SessionManager - DAP Operations', () => {
         return { success: true };
       });
 
-      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 15);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 15 });
 
       expect(bp.verified).toBe(true);
       expect(bp.adapterId).toBe(55);
@@ -162,8 +160,8 @@ describe('SessionManager - DAP Operations', () => {
       await vi.runAllTimersAsync();
       dependencies.mockProxyManager.dapRequestCalls = [];
 
-      const bp = await sessionManager.setBreakpoint(
-        session.id, 'test.py', 20, undefined, undefined, 'value is {x}'
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(
+        session.id, { file: 'test.py', line: 20, logMessage: 'value is {x}' }
       );
 
       expect(bp.logMessage).toBe('value is {x}');
@@ -182,7 +180,8 @@ describe('SessionManager - DAP Operations', () => {
       });
 
       await sessionManager.setBreakpoint(
-        session.id, 'test.py', 20, 'x > 1', 'thread', 'value is {x}'
+        session.id,
+        { file: 'test.py', line: 20, condition: 'x > 1', suspendPolicy: 'thread', logMessage: 'value is {x}' }
       );
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
@@ -209,7 +208,7 @@ describe('SessionManager - DAP Operations', () => {
       dependencies.mockProxyManager.dapRequestCalls = [];
 
       await sessionManager.setBreakpoint(
-        session.id, 'test.py', 21, 'x > 5', undefined, 'big x: {x}'
+        session.id, { file: 'test.py', line: 21, condition: 'x > 5', logMessage: 'big x: {x}' }
       );
 
       expect(dependencies.mockProxyManager.dapRequestCalls[0].args.breakpoints[0]).toMatchObject({
@@ -231,7 +230,7 @@ describe('SessionManager - DAP Operations', () => {
         executablePath: 'python'
       });
 
-      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
       expect(bp.verified).toBe(false);
 
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -249,9 +248,9 @@ describe('SessionManager - DAP Operations', () => {
         executablePath: 'python'
       });
 
-      await sessionManager.setBreakpoint(session.id, 'b.py', 20);
-      await sessionManager.setBreakpoint(session.id, 'a.py', 30);
-      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
+      await sessionManager.setBreakpoint(session.id, { file: 'b.py', line: 20 });
+      await sessionManager.setBreakpoint(session.id, { file: 'a.py', line: 30 });
+      await sessionManager.setBreakpoint(session.id, { file: 'a.py', line: 10 });
 
       const breakpoints = sessionManager.listBreakpoints(session.id);
 
@@ -270,8 +269,8 @@ describe('SessionManager - DAP Operations', () => {
         executablePath: 'python'
       });
 
-      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
-      await sessionManager.setBreakpoint(session.id, 'b.py', 20);
+      await sessionManager.setBreakpoint(session.id, { file: 'a.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'b.py', line: 20 });
 
       const breakpoints = sessionManager.listBreakpoints(session.id, 'b.py');
 
@@ -287,8 +286,8 @@ describe('SessionManager - DAP Operations', () => {
         executablePath: 'python'
       });
 
-      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
-      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      const { breakpoint: bp1 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
 
       const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
 
@@ -305,8 +304,8 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
-      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
-      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      const { breakpoint: bp1 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
       dependencies.mockProxyManager.dapRequestCalls = [];
 
       const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
@@ -329,7 +328,7 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
-      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
       dependencies.mockProxyManager.dapRequestCalls = [];
 
       await sessionManager.removeBreakpoint(session.id, bp.id);
@@ -360,9 +359,9 @@ describe('SessionManager - DAP Operations', () => {
         executablePath: 'python'
       });
 
-      await sessionManager.setBreakpoint(session.id, 'test.py', 10, 'x > 1');
-      await sessionManager.setBreakpoint(session.id, 'test.py', 10, 'x > 2');
-      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10, condition: 'x > 1' });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10, condition: 'x > 2' });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
 
       const result = await sessionManager.removeBreakpointsByLocation(session.id, 'test.py', 10);
 
@@ -376,7 +375,7 @@ describe('SessionManager - DAP Operations', () => {
         executablePath: 'python'
       });
 
-      await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
 
       const result = await sessionManager.removeBreakpointsByLocation(session.id, 'test.py', 99);
 
@@ -394,9 +393,9 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
-      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
-      await sessionManager.setBreakpoint(session.id, 'a.py', 20);
-      await sessionManager.setBreakpoint(session.id, 'b.py', 30);
+      await sessionManager.setBreakpoint(session.id, { file: 'a.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'a.py', line: 20 });
+      await sessionManager.setBreakpoint(session.id, { file: 'b.py', line: 30 });
       dependencies.mockProxyManager.dapRequestCalls = [];
 
       const result = await sessionManager.clearBreakpoints(session.id, 'a.py');
@@ -422,8 +421,8 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
-      await sessionManager.setBreakpoint(session.id, 'a.py', 10);
-      await sessionManager.setBreakpoint(session.id, 'b.py', 20);
+      await sessionManager.setBreakpoint(session.id, { file: 'a.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'b.py', line: 20 });
       dependencies.mockProxyManager.dapRequestCalls = [];
 
       const result = await sessionManager.clearBreakpoints(session.id);
@@ -465,8 +464,8 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
-      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
-      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      const { breakpoint: bp1 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
 
       dependencies.mockProxyManager.simulateEvent('terminated');
       await vi.runAllTimersAsync();
@@ -492,8 +491,8 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
-      const bp1 = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
-      await sessionManager.setBreakpoint(session.id, 'test.py', 20);
+      const { breakpoint: bp1 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
       dependencies.mockProxyManager.shouldFailDapRequests = true;
 
       const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
@@ -529,7 +528,7 @@ describe('SessionManager - DAP Operations', () => {
         return { success: true };
       });
 
-      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
       expect(bp.verified).toBe(false);
       return { session, bp };
     }
@@ -582,7 +581,7 @@ describe('SessionManager - DAP Operations', () => {
         }
         return { success: true };
       });
-      const bp = await sessionManager.setBreakpoint(session.id, 'C:\\proj\\app.js', 9);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'C:\\proj\\app.js', line: 9 });
       expect(bp.verified).toBe(false);
 
       dependencies.mockProxyManager.simulateEvent('breakpoint', {
@@ -644,7 +643,7 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'app.js');
       await vi.runAllTimersAsync();
 
-      const bp = await sessionManager.setBreakpoint(session.id, 'app.js', 10);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 10 });
       expect(bp.verified).toBe(false);
       // Parent response ids must not be adopted for mirroring policies
       expect(bp.adapterId).toBeUndefined();
@@ -666,7 +665,7 @@ describe('SessionManager - DAP Operations', () => {
 
       // Adding a second breakpoint re-syncs the whole file; the parent
       // response reports verified:false for both positions
-      await sessionManager.setBreakpoint(session.id, 'app.js', 20);
+      await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 20 });
 
       const stored = sessionManager.listBreakpoints(session.id);
       const bp1 = stored.find(bp => bp.line === 10)!;
@@ -1321,7 +1320,7 @@ describe('SessionManager - DAP Operations', () => {
       it('keeps a stop matching a user breakpoint adapter id as breakpoint', async () => {
         const session = await createPausedRustSession();
         respondToSetBreakpointsWithIds(1);
-        await sessionManager.setBreakpoint(session.id, 'main.rs', 17);
+        await sessionManager.setBreakpoint(session.id, { file: 'main.rs', line: 17 });
 
         dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
           reason: 'breakpoint',
@@ -1338,7 +1337,7 @@ describe('SessionManager - DAP Operations', () => {
       it('normalizes a panic stop whose id is disjoint from user breakpoints', async () => {
         const session = await createPausedRustSession();
         respondToSetBreakpointsWithIds(1);
-        await sessionManager.setBreakpoint(session.id, 'main.rs', 17);
+        await sessionManager.setBreakpoint(session.id, { file: 'main.rs', line: 17 });
 
         dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
           reason: 'breakpoint',
@@ -1380,7 +1379,7 @@ describe('SessionManager - DAP Operations', () => {
         const session = await createPausedRustSession();
         // Default mock setBreakpoints response carries no ids -> bookkeeping
         // incomplete -> the disjoint inference must be disabled.
-        await sessionManager.setBreakpoint(session.id, 'main.rs', 17);
+        await sessionManager.setBreakpoint(session.id, { file: 'main.rs', line: 17 });
 
         dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
           reason: 'breakpoint',
@@ -1419,8 +1418,8 @@ describe('SessionManager - DAP Operations', () => {
 
     it('annotates stored logpoints when live capabilities do not advertise logpoint support (issue #235)', async () => {
       const session = await createPausedSession();
-      const bp = await sessionManager.setBreakpoint(
-        session.id, 'test.py', 20, undefined, undefined, 'x is {x}'
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(
+        session.id, { file: 'test.py', line: 20, logMessage: 'x is {x}' }
       );
 
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', { supportsLogPoints: false });
@@ -1433,7 +1432,7 @@ describe('SessionManager - DAP Operations', () => {
     it('leaves logpoints unannotated when live capabilities advertise support', async () => {
       const session = await createPausedSession();
       await sessionManager.setBreakpoint(
-        session.id, 'test.py', 20, undefined, undefined, 'x is {x}'
+        session.id, { file: 'test.py', line: 20, logMessage: 'x is {x}' }
       );
 
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', { supportsLogPoints: true });

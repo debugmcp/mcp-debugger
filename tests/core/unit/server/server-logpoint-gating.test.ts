@@ -53,11 +53,13 @@ describe('set_breakpoint logMessage gating', () => {
       sessionLifecycle: 'active'
     });
     mockSessionManager.setBreakpoint.mockResolvedValue({
-      id: 'bp-1',
-      file: '/path/to/test.py',
-      line: 10,
-      logMessage: 'x is {x}',
-      verified: false
+      breakpoint: {
+        id: 'bp-1',
+        file: '/path/to/test.py',
+        line: 10,
+        logMessage: 'x is {x}',
+        verified: false
+      }
     });
   });
 
@@ -106,11 +108,11 @@ describe('set_breakpoint logMessage gating', () => {
 
     expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
       'test-session',
-      expect.stringContaining('/path/to/test.py'),
-      10,
-      undefined,
-      undefined,
-      'x is {x}'
+      expect.objectContaining({
+        file: expect.stringContaining('/path/to/test.py'),
+        line: 10,
+        logMessage: 'x is {x}'
+      })
     );
     const content = JSON.parse(result.content[0].text);
     expect(content.success).toBe(true);
@@ -131,7 +133,7 @@ describe('set_breakpoint logMessage gating', () => {
   it('applies no gating when logMessage is absent', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'java', supportsLogPoints: false });
     mockSessionManager.setBreakpoint.mockResolvedValue({
-      id: 'bp-2', file: '/path/to/test.py', line: 10, verified: false
+      breakpoint: { id: 'bp-2', file: '/path/to/test.py', line: 10, verified: false }
     });
 
     const result = await callToolHandler({

@@ -225,6 +225,13 @@ export interface Breakpoint {
   message?: string;
   /** Breakpoint id assigned by the debug adapter (from setBreakpoints responses / breakpoint events) */
   adapterId?: number;
+  /**
+   * The line originally requested by the client, recorded before the adapter
+   * had a chance to bind elsewhere. Present only in assert/content addressing
+   * modes (issue #271); `line` !== `requestedLine` means the adapter snapped
+   * the breakpoint. Never sent to the adapter.
+   */
+  requestedLine?: number;
 }
 
 /**

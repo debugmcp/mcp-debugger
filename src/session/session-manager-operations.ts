@@ -943,12 +943,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
   async setBreakpoint(
     sessionId: string,
-    file: string,
-    line: number,
-    condition?: string,
-    suspendPolicy?: 'all' | 'thread',
-    logMessage?: string
-  ): Promise<Breakpoint> {
+    bp: {
+      /** Validated/translated by server.ts before reaching here */
+      file: string;
+      /** Resolved line (anchors are resolved to a line in the server layer) */
+      line: number;
+      condition?: string;
+      suspendPolicy?: 'all' | 'thread';
+      logMessage?: string;
+      /** Set only in assert/content addressing modes (loud snapping, #271) */
+      requestedLine?: number;
+    }
+  ): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     const session = this._getSessionById(sessionId);
 
     // Check if session is terminated
@@ -958,21 +964,31 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
     const bpId = uuidv4();
 
-    // The file path has been validated and translated by server.ts before reaching here
     this.logger.info(
-      `[SessionManager setBreakpoint] Using validated file path "${file}" for session ${sessionId}`
+      `[SessionManager setBreakpoint] Using validated file path "${bp.file}" for session ${sessionId}`
     );
 
-    const newBreakpoint: Breakpoint = { id: bpId, file, line, condition, suspendPolicy, logMessage, verified: false };
+    const newBreakpoint: Breakpoint = {
+      id: bpId,
+      file: bp.file,
+      line: bp.line,
+      condition: bp.condition,
+      suspendPolicy: bp.suspendPolicy,
+      logMessage: bp.logMessage,
+      verified: false
+    };
+    if (bp.requestedLine !== undefined) {
+      newBreakpoint.requestedLine = bp.requestedLine;
+    }
 
     if (!session.breakpoints) session.breakpoints = new Map();
     session.breakpoints.set(bpId, newBreakpoint);
     this.logger.info(
-      `[SessionManager] Breakpoint ${bpId} queued for ${file}:${line} in session ${sessionId}.`
+      `[SessionManager] Breakpoint ${bpId} queued for ${bp.file}:${bp.line} in session ${sessionId}.`
     );
 
-    await this.syncBreakpointsForFile(session, file);
-    return newBreakpoint;
+    const sync = await this.syncBreakpointsForFile(session, bp.file);
+    return { breakpoint: newBreakpoint, warning: sync.warning };
   }
 
   /**

@@ -62,10 +62,12 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       });
       mockSessionManager.getSessionPolicy.mockReturnValue({});
       mockSessionManager.setBreakpoint.mockResolvedValue({
-        id: 'bp-1',
-        file: '/app/app.rb',
-        line: 18,
-        verified: true
+        breakpoint: {
+          id: 'bp-1',
+          file: '/app/app.rb',
+          line: 18,
+          verified: true
+        }
       });
 
       const result = await callToolHandler({
@@ -79,7 +81,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       const response = JSON.parse(result.content[0].text);
       expect(response.success).toBe(true);
       expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
-        'attach-session', '/app/app.rb', 18, undefined, undefined, undefined
+        'attach-session', expect.objectContaining({ file: '/app/app.rb', line: 18 })
       );
     });
   });

@@ -63,7 +63,7 @@ describe('SessionManager - restart and relaunch', () => {
   describe('per-launch breakpoint state reset', () => {
     it('clears stale verified state when a new launch begins', async () => {
       const session = await createLaunchedSession();
-      const bp = await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
       expect(bp.verified).toBe(true); // mock default verifies live sets
 
       dependencies.mockProxyManager.simulateEvent('terminated');
@@ -88,7 +88,7 @@ describe('SessionManager - restart and relaunch', () => {
         language: DebugLanguage.MOCK,
         executablePath: 'python'
       });
-      await sessionManager.setBreakpoint(session.id, 'test.py', 10);
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
       await sessionManager.startDebugging(
         session.id, 'test.py', ['--flag'], { stopOnEntry: true }, undefined, { custom: 'cfg' }
       );

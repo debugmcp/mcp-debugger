@@ -28,9 +28,18 @@ export interface LineReaderOptions {
 /**
  * Line reader with caching support
  */
+interface CachedFile {
+  lines: string[];
+  mtimeMs: number;
+  size: number;
+}
+
 export class LineReader {
-  // LRU cache for recently read files (max 20 files, max age 5 minutes)
-  private fileCache = new LRUCache<string, string[]>({
+  // LRU cache for recently read files (max 20 files, max age 5 minutes).
+  // Entries are validated against the file's current mtime/size on every hit
+  // so agent edits invalidate immediately (breakpoint content assertions must
+  // never compare against a stale copy).
+  private fileCache = new LRUCache<string, CachedFile>({
     max: 20,
     ttl: 1000 * 60 * 5, // 5 minutes
   });
@@ -69,17 +78,22 @@ export class LineReader {
    * Read all lines from a file with caching
    */
   private async readFileLines(filePath: string, options: LineReaderOptions): Promise<string[] | null> {
-    // Check cache first
     const cacheKey = `${filePath}:${options.encoding || 'utf8'}`;
-    const cached = this.fileCache.get(cacheKey);
-    if (cached) {
-      this.logger?.debug(`[LineReader] Cache hit for: ${filePath}`);
-      return cached;
-    }
 
     try {
-      // Check file size
       const stats = await this.fileSystem.stat(filePath);
+
+      // Serve from cache only while mtime and size still match
+      const cached = this.fileCache.get(cacheKey);
+      if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+        this.logger?.debug(`[LineReader] Cache hit for: ${filePath}`);
+        return cached.lines;
+      }
+      if (cached) {
+        this.fileCache.delete(cacheKey);
+        this.logger?.debug(`[LineReader] Cache invalidated (file changed): ${filePath}`);
+      }
+
       const maxSize = options.maxFileSize || 10 * 1024 * 1024; // 10MB default
       if (stats.size > maxSize) {
         this.logger?.debug(`[LineReader] File too large: ${filePath} (${stats.size} bytes)`);
@@ -88,31 +102,39 @@ export class LineReader {
 
       // Read file content
       const content = await this.fileSystem.readFile(filePath, options.encoding || 'utf8');
-      
+
       // Check if binary
       if (this.isBinaryContent(content)) {
         this.logger?.debug(`[LineReader] Binary file detected: ${filePath}`);
         return null;
       }
-      
+
       // Split into lines, preserving empty lines
       const lines = content.split(/\r?\n/);
-      
+
       // Handle empty file case
       if (lines.length === 1 && lines[0] === '') {
         this.logger?.debug(`[LineReader] Empty file: ${filePath}`);
         return null;
       }
-      
+
       // Cache the result
-      this.fileCache.set(cacheKey, lines);
+      this.fileCache.set(cacheKey, { lines, mtimeMs: stats.mtimeMs, size: stats.size });
       this.logger?.debug(`[LineReader] Cached file: ${filePath} (${lines.length} lines)`);
-      
+
       return lines;
     } catch (error) {
       this.logger?.debug(`[LineReader] Error reading file: ${filePath}`, { error });
       return null;
     }
+  }
+
+  /**
+   * Get all lines of a file (cached, mtime-validated). Returns null for
+   * binary, oversized, empty, or unreadable files.
+   */
+  async getFileLines(filePath: string, options: LineReaderOptions = {}): Promise<string[] | null> {
+    return this.readFileLines(filePath, options);
   }
 
   /**
