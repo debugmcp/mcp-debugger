@@ -75,14 +75,28 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
     expect(schema.required).toEqual(['sessionId', 'file', 'line']);
   });
 
-  it('exposes expectedContent in assert mode', async () => {
+  it('exposes expectedContent but not statement in assert mode', async () => {
     vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'assert');
     const { listToolsHandler } = buildServer();
 
     const schema = await getSetBreakpointSchema(listToolsHandler);
 
     expect(schema.properties.expectedContent).toBeDefined();
+    expect(schema.properties.statement).toBeUndefined();
+    expect(schema.properties.nearLine).toBeUndefined();
     expect(schema.required).toContain('line');
+  });
+
+  it('exposes statement/nearLine in content mode and drops line from required', async () => {
+    vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'content');
+    const { listToolsHandler } = buildServer();
+
+    const schema = await getSetBreakpointSchema(listToolsHandler);
+
+    expect(schema.properties.expectedContent).toBeDefined();
+    expect(schema.properties.statement).toBeDefined();
+    expect(schema.properties.nearLine).toBeDefined();
+    expect(schema.required).toEqual(['sessionId', 'file']);
   });
 
   it('exposes expectedContent by default (env unset -> content mode)', async () => {

@@ -16,6 +16,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { ErrorMessages } from '../utils/error-messages.js';
+import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
@@ -913,6 +914,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
     this.restartingSessions.add(sessionId);
     try {
+      // Content anchors re-resolve BEFORE the relaunch snapshots
+      // initialBreakpoints, so breakpoints survive the edit that was the
+      // point of the session (issue #271).
+      const anchorResolution = await this.reresolveAnchors(session);
+
       const spec = session.lastLaunch;
       this.logger.info(
         `[SessionManager] Restarting session ${sessionId}: replaying launch of ${spec.scriptPath}`
@@ -927,18 +933,128 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         spec.breakOnExceptions
       );
       if (result.success) {
+        const staleCount = anchorResolution?.stale.length ?? 0;
+        // Stamp stale-anchor notes AFTER the relaunch: the per-launch
+        // breakpoint state reset (#238) clears message on every new launch,
+        // and a real adapter message should still win over ours.
+        if (anchorResolution) {
+          const bps = this._getSessionById(sessionId).breakpoints;
+          for (const staleEntry of anchorResolution.stale) {
+            const bp = bps.get(staleEntry.breakpointId);
+            if (bp && !bp.message) {
+              bp.message = `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`;
+            }
+          }
+        }
         result.data = {
           ...((result.data as object) ?? {}),
           breakpointsReapplied: this._getSessionById(sessionId).breakpoints.size,
           // Each launch starts a fresh output buffer: tell the caller to
           // reset its get_output cursor to since=0.
           outputReset: true,
+          ...(anchorResolution ? { anchorResolution } : {}),
+          ...(staleCount > 0
+            ? {
+                warning: `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`,
+              }
+            : {}),
         };
       }
       return result;
     } finally {
       this.restartingSessions.delete(sessionId);
     }
+  }
+
+  /**
+   * Re-resolve statement-anchored breakpoints against the current file
+   * contents (fresh read — deliberately not the server's LineReader cache).
+   * The breakpoint's current line doubles as the nearLine hint so duplicate
+   * statements re-anchor to the nearest occurrence of where the breakpoint
+   * last was. Anchors that no longer match keep their stale line and warn:
+   * failing the restart would block the edit-relaunch loop, and dropping the
+   * breakpoint would destroy user state (issue #271).
+   */
+  private async reresolveAnchors(session: ManagedSession): Promise<
+    | {
+        moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string }>;
+        stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }>;
+      }
+    | undefined
+  > {
+    const anchored = Array.from(session.breakpoints.values()).filter(
+      (bp): bp is Breakpoint & { anchor: { statement: string; nearLine?: number } } => bp.anchor !== undefined
+    );
+    if (anchored.length === 0) {
+      return undefined;
+    }
+
+    const moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string }> = [];
+    const stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }> = [];
+
+    const byFile = new Map<string, typeof anchored>();
+    for (const bp of anchored) {
+      const group = byFile.get(bp.file);
+      if (group) {
+        group.push(bp);
+      } else {
+        byFile.set(bp.file, [bp]);
+      }
+    }
+
+    for (const [file, bps] of byFile) {
+      let lines: string[] | null = null;
+      try {
+        const content = await this.fileSystem.readFile(file, 'utf8');
+        lines = content.split(/\r?\n/);
+      } catch (error) {
+        this.logger.warn(
+          `[SessionManager] Could not re-read ${file} for anchor re-resolution: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+
+      for (const bp of bps) {
+        if (!lines) {
+          stale.push({
+            breakpointId: bp.id,
+            file,
+            line: bp.line,
+            statement: bp.anchor.statement,
+            reason: 'file unreadable',
+          });
+          continue;
+        }
+        const resolution = resolveStatement(lines, bp.anchor.statement, file, bp.line);
+        if (resolution.ok) {
+          if (resolution.line !== bp.line) {
+            moved.push({
+              breakpointId: bp.id,
+              file,
+              from: bp.line,
+              to: resolution.line,
+              statement: bp.anchor.statement,
+            });
+            this.logger.info(
+              `[SessionManager] Anchor re-resolved: breakpoint ${bp.id} moved ${bp.line} -> ${resolution.line} ("${bp.anchor.statement}")`
+            );
+            bp.line = resolution.line;
+            bp.requestedLine = resolution.line;
+          }
+        } else {
+          stale.push({
+            breakpointId: bp.id,
+            file,
+            line: bp.line,
+            statement: bp.anchor.statement,
+            reason: 'statement not found',
+          });
+        }
+      }
+    }
+
+    return { moved, stale };
   }
 
   async setBreakpoint(
@@ -953,6 +1069,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       logMessage?: string;
       /** Set only in assert/content addressing modes (loud snapping, #271) */
       requestedLine?: number;
+      /** Content anchor for restart re-resolution (content mode, #271) */
+      anchor?: { statement: string; nearLine?: number };
     }
   ): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     const session = this._getSessionById(sessionId);
@@ -979,6 +1097,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     };
     if (bp.requestedLine !== undefined) {
       newBreakpoint.requestedLine = bp.requestedLine;
+    }
+    if (bp.anchor !== undefined) {
+      newBreakpoint.anchor = bp.anchor;
     }
 
     if (!session.breakpoints) session.breakpoints = new Map();

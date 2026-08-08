@@ -232,6 +232,16 @@ export interface Breakpoint {
    * the breakpoint. Never sent to the adapter.
    */
   requestedLine?: number;
+  /**
+   * Content anchor this breakpoint was addressed by (issue #271).
+   * restart_debugging re-resolves the anchor against the current file so the
+   * breakpoint survives the edit that was the point of the session. Never
+   * sent to the adapter.
+   */
+  anchor?: {
+    statement: string;
+    nearLine?: number;
+  };
 }
 
 /**
