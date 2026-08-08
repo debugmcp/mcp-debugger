@@ -12,6 +12,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
+import { promises as fs } from 'fs';
+import os from 'os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
@@ -123,6 +125,67 @@ describe('Breakpoint addressing e2e (#271, mock adapter)', () => {
       /requested line 5, bound to line 6/
     );
   }, 30_000);
+
+  it('resolves a statement anchor to its line and stores the anchor', async () => {
+    const sessionId = await createMockSession('statement-anchor');
+
+    const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      file: SNAP_SCRIPT,
+      statement: 'total = c * 2',
+    });
+
+    expect(bpRes.success).toBe(true);
+    expect((bpRes as { line?: number }).line).toBe(5);
+    expect((bpRes as { anchor?: { statement?: string } }).anchor?.statement).toBe('total = c * 2');
+  }, 30_000);
+
+  it('re-resolves statement anchors across restart_debugging after a file edit', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bp-addressing-'));
+    const tempFile = path.join(tempDir, 'anchored.py');
+    await fs.writeFile(tempFile, 'def main():\n    x = 1\n    total = compute(x)\n    print(total)\n');
+
+    try {
+      const sessionId = await createMockSession('anchor-restart');
+
+      const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        file: tempFile,
+        statement: 'total = compute(x)',
+      });
+      expect(bpRes.success).toBe(true);
+      expect((bpRes as { line?: number }).line).toBe(3);
+
+      const startRes = await callToolSafely(mcpClient!, 'start_debugging', {
+        sessionId,
+        scriptPath: tempFile,
+        dapLaunchArgs: { stopOnEntry: true },
+      });
+      expect(startRes.success).toBe(true);
+
+      // The core fix-verify loop: edit the file (anchor moves down two lines),
+      // then relaunch.
+      await fs.writeFile(
+        tempFile,
+        'import sys\n\ndef main():\n    x = 1\n    total = compute(x)\n    print(total)\n'
+      );
+
+      const restartRes = await callToolSafely(mcpClient!, 'restart_debugging', { sessionId });
+      expect(restartRes.success).toBe(true);
+      const data = (restartRes as {
+        data?: { anchorResolution?: { moved?: Array<{ from: number; to: number }> } };
+      }).data;
+      expect(data?.anchorResolution?.moved).toEqual([
+        expect.objectContaining({ from: 3, to: 5 })
+      ]);
+
+      const listRes = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId });
+      const [bp] = (listRes as { breakpoints?: Array<{ line?: number }> }).breakpoints ?? [];
+      expect(bp?.line).toBe(5);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }, 45_000);
 
   it('surfaces an async breakpoint-event relocation in list_breakpoints', async () => {
     const sessionId = await createMockSession('snap-event');

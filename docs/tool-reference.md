@@ -136,7 +136,9 @@ Sets a breakpoint in a source file.
 - `sessionId` (string, required): The ID of the debug session.
 - `file` (string, required): Path to the source file (absolute or relative to project root).
 - `line` (number, required): Line number where to set breakpoint (1-indexed).
-- `expectedContent` (string, optional): Assert the exact text of the target line (leading/trailing whitespace ignored) before setting. On a mismatch the breakpoint is **not** set and the error shows the actual content of that line and its neighbors — a fast, self-explanatory failure instead of a breakpoint that silently lands on the wrong line. See [Content assertions and loud snapping](#content-assertions-and-loud-snapping).
+- `statement` (string, optional): **Content addressing** — instead of `line`, pass the exact text of the target line (leading/trailing whitespace ignored), like an Edit-tool match. Cannot land on the wrong line; if the text appears on multiple lines the error lists every match; anchors re-resolve across `restart_debugging` after file edits. Provide `statement` OR `line`, not both. See [Statement anchors](#statement-anchors).
+- `nearLine` (number, optional): With `statement` only — when the statement text appears on multiple lines, bind to the match closest to this line (ties go to the lower line).
+- `expectedContent` (string, optional): With `line` only — assert the exact text of the target line (leading/trailing whitespace ignored) before setting. On a mismatch the breakpoint is **not** set and the error shows the actual content of that line and its neighbors — a fast, self-explanatory failure instead of a breakpoint that silently lands on the wrong line. See [Content assertions and loud snapping](#content-assertions-and-loud-snapping).
 - `condition` (string, optional): Conditional expression — only break (or log) when it evaluates truthy.
 - `logMessage` (string, optional): Create a **logpoint** instead of a pausing breakpoint — see [Logpoints](#logpoints) below.
 - `suspendPolicy` (string, optional): Suspend policy when the breakpoint is hit — `"all"` suspends all threads (default), `"thread"` suspends only the event thread. Only supported by the Java/JDI adapter.
@@ -190,6 +192,20 @@ The file may have changed since you last read it. Pick the correct line from the
 Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a different line (adapters snap requests on non-executable lines to the nearest valid one), the response reports it prominently instead of silently mutating the line: `message` and `warning` carry `"requested line 12, bound to line 13: \`...\`"`, and the response includes `requestedLine` alongside the bound `line`. Adapters that relocate breakpoints asynchronously (after the response) surface the move in `list_breakpoints`, where `line` ≠ `requestedLine` marks a snapped breakpoint.
 
 `expectedContent` requires a source file the server can read: it is rejected for Java FQCN breakpoints and attach-mode sessions (remote filesystems). Both addressing aids can be restricted with the `DEBUG_MCP_BP_ADDRESSING` environment variable (`line` = pre-existing behavior, `assert` = + expectedContent/loud snapping, `content` = all features; default `content`) — useful for controlled comparisons of agent behavior.
+
+#### Statement anchors
+
+`statement` addresses a breakpoint by content instead of line number — the single most practiced agent skill (Edit-tool `old_string` matching) instead of line arithmetic:
+
+```json
+{ "sessionId": "...", "file": "/abs/app.py", "statement": "total = sum(prices)" }
+```
+
+- **Matching**: whole-line equality after trimming leading/trailing whitespace. Multi-line input is rejected — anchor on the first line of a multi-line construct.
+- **Ambiguity is an error, and the error is the disambiguation UI**: every matching `line: content` pair is listed (capped at 20); add `nearLine` to bind to the closest match.
+- **Blank/comment anchors are rejected** (`#`, `//`, `/*` prefixes) — debuggers cannot break there reliably.
+- **The anchor is stored on the breakpoint record** (visible in `list_breakpoints`) and **re-resolves on `restart_debugging`**: after you edit the file — the whole point of a debug session — the relaunch re-finds each anchored statement in the current file (the breakpoint's previous line breaks ties between duplicates). Moves are reported in the restart response's `data.anchorResolution.moved`; anchors that no longer match keep their previous line and warn (`data.anchorResolution.stale`) rather than failing the restart or dropping state.
+- Same readable-file requirement as `expectedContent` (no Java FQCNs, no attach sessions); composes with `condition`, `logMessage`, and `suspendPolicy` unchanged.
 
 #### Logpoints
 

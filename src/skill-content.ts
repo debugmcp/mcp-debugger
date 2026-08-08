@@ -14,7 +14,8 @@
 import {
   BpAddressingMode,
   DEFAULT_BP_ADDRESSING,
-  supportsExpectedContent
+  supportsExpectedContent,
+  supportsStatementAnchors
 } from './utils/bp-addressing.js';
 
 export function buildServerInstructions(
@@ -22,6 +23,9 @@ export function buildServerInstructions(
 ): string {
   const expectedContentRule = supportsExpectedContent(mode)
     ? `\n- set_breakpoint accepts expectedContent — pass the exact text of the target line (whitespace-trimmed); a mismatch fails fast and shows the actual nearby lines, catching off-by-one line numbers before they cause a confusing session. A response reporting "requested line N, bound to line M" means the adapter moved your breakpoint — trust the bound line.`
+    : '';
+  const statementRule = supportsStatementAnchors(mode)
+    ? `\n- Prefer set_breakpoint {statement: "<exact line text>"} over line numbers: it matches like an Edit-tool old_string (whole line, whitespace-trimmed), cannot land on the wrong line, lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.`
     : '';
 
   return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET) as MCP tools.
@@ -32,7 +36,7 @@ Key rules:
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
 - Breakpoints may report unverified until the module/class loads — that is normal.
-- list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.${expectedContentRule}
+- list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.${statementRule}${expectedContentRule}
 - Logpoints: set_breakpoint with logMessage ("order={orderId}") logs the interpolated message to get_output WITHOUT pausing — the prod-safe way to watch values on a hot path (Python/JS/Go/Rust; not Java/.NET).
 - restart_debugging {sessionId} relaunches with the same config in one call — breakpoints re-apply automatically, output buffer resets (read get_output from since=0). Works after the program exits; not for attach sessions.
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass nextCursor back to read only new output.
@@ -47,9 +51,11 @@ export const SERVER_INSTRUCTIONS = buildServerInstructions();
 export function buildDebuggingWorkflowPrompt(
   mode: BpAddressingMode = DEFAULT_BP_ADDRESSING
 ): string {
-  const expectedContentStep = supportsExpectedContent(mode)
-    ? ' — add expectedContent: "<exact line text>" so a stale or off-by-one line number fails fast instead of binding somewhere surprising'
-    : '';
+  const setBreakpointStep = supportsStatementAnchors(mode)
+    ? '2. set_breakpoint {sessionId, file: ABSOLUTE path, statement: "<exact line text>"} — content addressing beats line numbers (cannot land on the wrong line; nearLine disambiguates repeats; anchors re-resolve across restart_debugging). Line + expectedContent works too'
+    : supportsExpectedContent(mode)
+      ? '2. set_breakpoint {sessionId, file: ABSOLUTE path, line} — add expectedContent: "<exact line text>" so a stale or off-by-one line number fails fast instead of binding somewhere surprising'
+      : '2. set_breakpoint {sessionId, file: ABSOLUTE path, line}';
 
   return `# Debugging workflow (mcp-debugger)
 
@@ -57,7 +63,7 @@ Prefer the debugger over print-debugging whenever you would need more than one e
 
 ## Golden path (launch)
 1. create_debug_session {language} -> sessionId
-2. set_breakpoint {sessionId, file: ABSOLUTE path, line}${expectedContentStep}
+${setBreakpointStep}
 3. start_debugging {sessionId, scriptPath: ABSOLUTE path}
 4. get_stack_trace {sessionId} — use each frame's "id" field; it is adapter-assigned, never assume 0
 5. get_scopes {sessionId, frameId} -> variablesReference per scope

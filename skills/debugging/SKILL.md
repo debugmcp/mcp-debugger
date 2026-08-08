@@ -21,7 +21,7 @@ Do NOT reach for it when a single glance at the code or one log line would answe
 
 ```text
 1. create_debug_session   {language: "python"}                 -> sessionId
-2. set_breakpoint         {sessionId, file: "<ABSOLUTE path>", line: N, expectedContent: "<exact line text>"}
+2. set_breakpoint         {sessionId, file: "<ABSOLUTE path>", statement: "<exact line text>"}   (or line: N + expectedContent)
 3. start_debugging        {sessionId, scriptPath: "<ABSOLUTE path>"}
 4. get_stack_trace        {sessionId}                          -> frames (use frame.id, never assume 0)
 5. get_scopes             {sessionId, frameId: <frame.id>}     -> scope variablesReference
@@ -46,7 +46,7 @@ Rules that prevent 90% of failed sessions:
 
 1. State a hypothesis about where reality diverges from expectation *before* setting breakpoints.
 2. Set at most two breakpoints: last-known-good and first-known-bad. Run, inspect, halve the interval. Bisection beats stepping line-by-line from the top. Move the window mid-session with `remove_breakpoint` / `clear_breakpoints`; `list_breakpoints` shows what is currently set (with verified state and adapter ids).
-   - Pass `expectedContent: "<exact line text>"` with every line-addressed breakpoint: if your line number is stale or off by one, the set fails immediately with the actual nearby lines instead of binding somewhere surprising. A response saying `requested line N, bound to line M` means the adapter moved the breakpoint — trust the bound line.
+   - Prefer `statement: "<exact line text>"` over line numbers: it matches like an Edit-tool `old_string` (whole line, whitespace-trimmed), cannot land on the wrong line, lists every occurrence on ambiguity (add `nearLine` to pick one), and re-resolves across `restart_debugging` after you edit the file. When you do address by line, pass `expectedContent: "<exact line text>"` so a stale or off-by-one line number fails immediately with the actual nearby lines. A response saying `requested line N, bound to line M` means the adapter moved the breakpoint — trust the bound line.
 3. When pausing is too disruptive (hot loops, live or attached processes), use a **logpoint**: `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without stopping the program (Python/JS/Go/Rust; Java and .NET reject it with a clear error).
 4. At each pause, record what you *learned* (variable values, actual control flow), not just where you are.
 5. When the diverging line is found, inspect every input to that line before concluding — the bug is usually an operand, not the operator.

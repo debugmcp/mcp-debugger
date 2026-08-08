@@ -50,7 +50,7 @@ import {
   supportsStatementAnchors,
   supportsLoudSnapping
 } from './utils/bp-addressing.js';
-import { assertLineContent } from './utils/breakpoint-resolver.js';
+import { assertLineContent, resolveStatement } from './utils/breakpoint-resolver.js';
 
 const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
 
@@ -97,6 +97,8 @@ interface ToolArguments {
   condition?: string;
   logMessage?: string;
   expectedContent?: string;
+  statement?: string;
+  nearLine?: number;
   breakpointId?: string;
   scriptPath?: string;
   args?: string[];
@@ -136,10 +138,14 @@ interface ToolArguments {
 export interface SetBreakpointRequest {
   sessionId: string;
   file: string;
-  /** 1-based target line */
-  line: number;
+  /** 1-based target line (required unless statement is given) */
+  line?: number;
   /** Assert the target line's trimmed content before setting (assert/content modes) */
   expectedContent?: string;
+  /** Content anchor: whole-line trimmed-equality match (content mode) */
+  statement?: string;
+  /** Disambiguates a multi-match statement to the closest occurrence */
+  nearLine?: number;
   condition?: string;
   logMessage?: string;
   suspendPolicy?: 'all' | 'thread';
@@ -158,7 +164,7 @@ const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 
   line: 'number', linesContext: 'number', scope: 'number',
   frameId: 'number', port: 'number', timeout: 'number', threadId: 'number',
   verifyTimeout: 'number', since: 'number', limit: 'number',
-  sinceTimestamp: 'number',
+  sinceTimestamp: 'number', nearLine: 'number',
   // booleans
   includeInternals: 'boolean', includeSpecial: 'boolean',
   stopOnEntry: 'boolean', justMyCode: 'boolean',
@@ -514,14 +520,37 @@ export class DebugMcpServer {
   public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     this.validateSession(req.sessionId);
 
+    // Addressing-parameter combinations (issue #271)
+    if (req.statement !== undefined && req.line !== undefined) {
+      throw new McpError(
+        McpErrorCode.InvalidParams,
+        'Provide line or statement, not both. Use nearLine (with statement) to disambiguate repeated statements.'
+      );
+    }
+    if (req.statement !== undefined && req.expectedContent !== undefined) {
+      throw new McpError(
+        McpErrorCode.InvalidParams,
+        'expectedContent applies to line addressing only; a statement anchor is already content-addressed. Provide one or the other.'
+      );
+    }
+    if (req.nearLine !== undefined && req.statement === undefined) {
+      throw new McpError(
+        McpErrorCode.InvalidParams,
+        'nearLine only disambiguates a statement anchor — provide it together with statement.'
+      );
+    }
+    if (req.line === undefined && req.statement === undefined) {
+      throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters: provide line or statement');
+    }
+
     const resolved = await this.resolveBreakpointFile(req.sessionId, req.file, { requireExists: true });
     const mode = getBpAddressingMode(this.environment);
 
-    if (req.expectedContent !== undefined) {
+    const readLinesForContentAddressing = async (feature: string): Promise<string[]> => {
       if (!resolved.contentAddressable) {
         throw new McpError(
           McpErrorCode.InvalidParams,
-          `expectedContent requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path. Use line addressing instead.`
+          `${feature} requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path. Use line addressing instead.`
         );
       }
       const lines = await this.lineReader.getFileLines(resolved.path);
@@ -531,23 +560,45 @@ export class DebugMcpServer {
           `Breakpoint not set: could not read ${resolved.path} to verify content (binary, too large, or unreadable). Use plain line addressing to skip verification.`
         );
       }
-      const check = assertLineContent(lines, req.line, req.expectedContent, resolved.path, {
-        statementHint: supportsStatementAnchors(mode)
-      });
-      if (!check.ok) {
-        throw new McpError(McpErrorCode.InvalidParams, check.message);
+      return lines;
+    };
+
+    let line: number;
+    let anchor: { statement: string; nearLine?: number } | undefined;
+    if (req.statement !== undefined) {
+      const lines = await readLinesForContentAddressing('statement addressing');
+      const resolution = resolveStatement(lines, req.statement, resolved.path, req.nearLine);
+      if (!resolution.ok) {
+        throw new McpError(McpErrorCode.InvalidParams, resolution.message);
+      }
+      line = resolution.line;
+      anchor = {
+        statement: req.statement.trim(),
+        ...(req.nearLine !== undefined ? { nearLine: req.nearLine } : {})
+      };
+    } else {
+      line = req.line!;
+      if (req.expectedContent !== undefined) {
+        const lines = await readLinesForContentAddressing('expectedContent');
+        const check = assertLineContent(lines, line, req.expectedContent, resolved.path, {
+          statementHint: supportsStatementAnchors(mode)
+        });
+        if (!check.ok) {
+          throw new McpError(McpErrorCode.InvalidParams, check.message);
+        }
       }
     }
 
     return this.sessionManager.setBreakpoint(req.sessionId, {
       file: resolved.path,
-      line: req.line,
+      line,
       condition: req.condition,
       suspendPolicy: req.suspendPolicy,
       logMessage: req.logMessage,
       // Loud snapping bookkeeping is absent in line mode so the control arm's
       // breakpoint records stay byte-identical to pre-#271 behavior.
-      ...(supportsLoudSnapping(mode) ? { requestedLine: req.line } : {})
+      ...(supportsLoudSnapping(mode) ? { requestedLine: line } : {}),
+      ...(anchor !== undefined ? { anchor } : {})
     });
   }
 
@@ -768,11 +819,23 @@ export class DebugMcpServer {
       // restricted to line mode must not advertise content-addressing at all.
       const bpMode = getBpAddressingMode(this.environment);
       const setBreakpointExtraProps: Record<string, unknown> = {};
+      let setBreakpointRequired = ['sessionId', 'file', 'line'];
       if (supportsExpectedContent(bpMode)) {
         setBreakpointExtraProps.expectedContent = {
           type: 'string',
           description: 'Optional assertion: the exact text you expect on the target line (leading/trailing whitespace ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior'
         };
+      }
+      if (supportsStatementAnchors(bpMode)) {
+        setBreakpointExtraProps.statement = {
+          type: 'string',
+          description: 'Address by content instead of line number: the exact text of the target line (leading/trailing whitespace ignored), like an Edit-tool match. Preferred over line — it cannot land on the wrong line and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
+        };
+        setBreakpointExtraProps.nearLine = {
+          type: 'number',
+          description: 'With statement only: when the statement text appears on multiple lines, bind to the match closest to this line'
+        };
+        setBreakpointRequired = ['sessionId', 'file'];
       }
 
       return {
@@ -780,7 +843,7 @@ export class DebugMcpServer {
           { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000)' } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: {} } },
-          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, ...setBreakpointExtraProps, condition: { type: 'string', description: 'Optional expression: only break (or log) when it evaluates truthy' }, logMessage: { type: 'string', description: 'Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. "order={orderId} total={total}"). Messages arrive in get_output while the program runs at full speed. Supported by Python, JavaScript, Go, and Rust adapters; not by Java or .NET' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: ['sessionId', 'file', 'line'] } },
+          { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, ...setBreakpointExtraProps, condition: { type: 'string', description: 'Optional expression: only break (or log) when it evaluates truthy' }, logMessage: { type: 'string', description: 'Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. "order={orderId} total={total}"). Messages arrive in get_output while the program runs at full speed. Supported by Python, JavaScript, Go, and Rust adapters; not by Java or .NET' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: setBreakpointRequired } },
           { name: 'list_breakpoints', description: 'List all breakpoints in a session with their verified state and adapter-assigned ids. Works before launch (queued, verified=false), while running or paused, and after the program exits', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only list breakpoints in this file' } }, required: ['sessionId'] } },
           { name: 'remove_breakpoint', description: 'Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, breakpointId: { type: 'string', description: 'Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line' }, file: { type: 'string', description: 'Alternative addressing: source file path (use together with line)' }, line: { type: 'number', description: 'Alternative addressing: line number (use together with file)' } }, required: ['sessionId'] } },
           { name: 'clear_breakpoints', description: 'Remove all breakpoints in a session, or all breakpoints in one file. Clearing zero breakpoints is success. Takes effect immediately while the program is running or paused', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only clear breakpoints in this file' } }, required: ['sessionId'] } },
@@ -962,7 +1025,7 @@ export class DebugMcpServer {
               break;
             }
             case 'set_breakpoint': {
-              if (!args.sessionId || !args.file || args.line === undefined) {
+              if (!args.sessionId || !args.file || (args.line === undefined && args.statement === undefined)) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
               }
 
@@ -978,6 +1041,12 @@ export class DebugMcpServer {
                   `expectedContent is disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use plain line addressing.`
                 );
               }
+              if ((args.statement !== undefined || args.nearLine !== undefined) && !supportsStatementAnchors(bpMode)) {
+                throw new McpError(
+                  McpErrorCode.InvalidParams,
+                  `statement addressing is disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use line addressing.`
+                );
+              }
 
               try {
                 // Logpoint gating (issue #235): hard error for known-unsupported
@@ -991,6 +1060,8 @@ export class DebugMcpServer {
                   file: args.file,
                   line: args.line,
                   expectedContent: args.expectedContent,
+                  statement: args.statement,
+                  nearLine: args.nearLine,
                   condition: args.condition,
                   suspendPolicy: args.suspendPolicy,
                   logMessage: args.logMessage
@@ -1051,6 +1122,7 @@ export class DebugMcpServer {
                   file: breakpoint.file,
                   line: breakpoint.line,
                   requestedLine: breakpoint.requestedLine,
+                  anchor: breakpoint.anchor,
                   content: context?.lineContent,
                   verified: breakpoint.verified,
                   logMessage: breakpoint.logMessage,
