@@ -12,6 +12,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 export const PythonAdapterPolicy: AdapterPolicy = {
   name: 'python',
   supportsLogPoints: true,
+  supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

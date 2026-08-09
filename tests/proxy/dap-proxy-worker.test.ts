@@ -539,6 +539,79 @@ describe('DapProxyWorker', () => {
       ]);
     });
 
+    it('sends initial function breakpoints before configurationDone (issue #271 phase 3)', async () => {
+      const callOrder: string[] = [];
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockResolvedValue({ body: { breakpoints: [] } }),
+        sendConfigurationDone: vi.fn().mockImplementation(async () => {
+          callOrder.push('configurationDone');
+        }),
+        setupEventHandlers: vi.fn()
+      };
+      const sendRequest = vi.fn().mockImplementation(async (command: string) => {
+        callOrder.push(command);
+        return { body: { breakpoints: [] } };
+      });
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = { ...mockDapClient, sendRequest };
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'fnbp-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'fnbp-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/app.py',
+        initialFunctionBreakpoints: [
+          { name: 'compute', condition: 'x > 1' },
+          { name: 'main' }
+        ]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      expect(sendRequest).toHaveBeenCalledWith('setFunctionBreakpoints', {
+        breakpoints: [{ name: 'compute', condition: 'x > 1' }, { name: 'main' }]
+      });
+      expect(callOrder).toEqual(['setFunctionBreakpoints', 'configurationDone']);
+    });
+
+    it('swallows setFunctionBreakpoints failures so unsupported adapters still launch', async () => {
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockResolvedValue({ body: { breakpoints: [] } }),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn()
+      };
+      const sendRequest = vi.fn().mockRejectedValue(new Error('Unhandled command: setFunctionBreakpoints'));
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = { ...mockDapClient, sendRequest };
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'fnbp-fail-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'fnbp-fail-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/app.py',
+        initialFunctionBreakpoints: [{ name: 'compute' }]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      // Launch proceeded: configurationDone still sent despite the failure
+      expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+    });
+
     it('forwards DAP breakpoint events to the parent (issue #236)', () => {
       const connectionStub = {
         setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {

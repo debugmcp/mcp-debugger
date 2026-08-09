@@ -89,6 +89,8 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     closeSession: vi.fn(),
     closeAllSessions: vi.fn(),
     setBreakpoint: vi.fn(),
+    setFunctionBreakpoint: vi.fn(),
+    listFunctionBreakpoints: vi.fn().mockReturnValue([]),
     listBreakpoints: vi.fn().mockReturnValue([]),
     removeBreakpoint: vi.fn().mockResolvedValue({ removed: undefined }),
     removeBreakpointsByLocation: vi.fn().mockResolvedValue({ removed: [] }),

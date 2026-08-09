@@ -42,6 +42,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 export const DotnetAdapterPolicy: AdapterPolicy = {
   name: 'dotnet',
   supportsLogPoints: false,
+  supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

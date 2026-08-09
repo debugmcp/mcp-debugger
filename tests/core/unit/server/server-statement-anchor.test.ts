@@ -163,10 +163,77 @@ describe('set_breakpoint statement anchors (#271)', () => {
     ).rejects.toThrow(/not both/i);
   });
 
-  it('rejects statement combined with expectedContent', async () => {
+  it('accepts a redundant expectedContent that matches the statement (#280)', async () => {
+    const result = await callSetBreakpoint({
+      statement: 'return total',
+      expectedContent: '  return total  '
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ line: 6, anchor: { statement: 'return total' } })
+    );
+  });
+
+  it('rejects statement combined with a DIFFERENT expectedContent (#280)', async () => {
     await expect(
-      callSetBreakpoint({ statement: 'return total', expectedContent: 'return total' })
-    ).rejects.toThrow(/expectedContent/);
+      callSetBreakpoint({ statement: 'return total', expectedContent: 'total = sum(prices)' })
+    ).rejects.toThrow(/disagree/);
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+  });
+
+  it('rejects function combined with file, line, or statement', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'python', supportsFunctionBreakpoints: true });
+
+    await expect(
+      callSetBreakpoint({ function: 'compute' })
+    ).rejects.toThrow(/not file-scoped/);
+
+    await expect(
+      callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'compute', line: 3 }
+        }
+      })
+    ).rejects.toThrow(/cannot be combined/);
+
+    await expect(
+      callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'compute', statement: 'return total' }
+        }
+      })
+    ).rejects.toThrow(/cannot be combined/);
+  });
+
+  it('rejects function combined with logMessage or suspendPolicy', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'python', supportsFunctionBreakpoints: true });
+
+    await expect(
+      callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'compute', logMessage: 'x={x}' }
+        }
+      })
+    ).rejects.toThrow(/logMessage/);
+
+    await expect(
+      callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'compute', suspendPolicy: 'thread' }
+        }
+      })
+    ).rejects.toThrow(/suspendPolicy/);
   });
 
   it('rejects nearLine without statement', async () => {

@@ -274,6 +274,126 @@ describe('SessionManager - breakpoint addressing (#271)', () => {
     expect(stored.requestedLine).toBe(5);
   });
 
+  describe('function breakpoints (#271 phase 3)', () => {
+    function captureFunctionBreakpointRequests() {
+      const payloads: Array<{ breakpoints: Array<Record<string, unknown>> }> = [];
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'setFunctionBreakpoints') {
+          payloads.push(args);
+          return {
+            success: true,
+            body: {
+              breakpoints: (args?.breakpoints ?? []).map((_: unknown, i: number) => ({
+                id: 900 + i,
+                verified: true,
+                line: 42,
+                source: { path: 'test.py' }
+              }))
+            }
+          };
+        }
+        return { success: true, body: { breakpoints: [] } };
+      });
+      return payloads;
+    }
+
+    it('stores the breakpoint and sends the whole session set (replace-all)', async () => {
+      const session = await createLaunchedSession();
+      const payloads = captureFunctionBreakpointRequests();
+
+      const first = await sessionManager.setFunctionBreakpoint(session.id, {
+        functionName: 'compute',
+        condition: 'x > 1'
+      });
+      const second = await sessionManager.setFunctionBreakpoint(session.id, {
+        functionName: 'main'
+      });
+
+      expect(first.breakpoint.functionName).toBe('compute');
+      expect(first.warning).toBeUndefined();
+      expect(payloads[0].breakpoints).toEqual([{ name: 'compute', condition: 'x > 1' }]);
+      // replace-all: the second request carries BOTH function breakpoints
+      expect(payloads[1].breakpoints).toEqual([
+        { name: 'compute', condition: 'x > 1' },
+        { name: 'main' }
+      ]);
+      expect(second.breakpoint.verified).toBe(true);
+    });
+
+    it('merges verified/adapterId/bound location from the response', async () => {
+      const session = await createLaunchedSession();
+      captureFunctionBreakpointRequests();
+
+      const { breakpoint } = await sessionManager.setFunctionBreakpoint(session.id, {
+        functionName: 'compute'
+      });
+
+      expect(breakpoint.verified).toBe(true);
+      expect(breakpoint.adapterId).toBe(900);
+      expect(breakpoint.boundLine).toBe(42);
+      expect(breakpoint.boundFile).toBe('test.py');
+      const [listed] = sessionManager.listFunctionBreakpoints(session.id);
+      expect(listed.functionName).toBe('compute');
+      expect(listed.verified).toBe(true);
+    });
+
+    it('returns a warning when the adapter rejects setFunctionBreakpoints', async () => {
+      const session = await createLaunchedSession();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
+        if (command === 'setFunctionBreakpoints') {
+          throw new Error('unsupported by adapter');
+        }
+        return { success: true, body: { breakpoints: [] } };
+      });
+
+      const result = await sessionManager.setFunctionBreakpoint(session.id, {
+        functionName: 'compute'
+      });
+
+      expect(result.breakpoint).toBeDefined();
+      expect(result.warning).toContain('unsupported by adapter');
+    });
+
+    it('removeBreakpoint by id finds function breakpoints and re-syncs the remainder', async () => {
+      const session = await createLaunchedSession();
+      const payloads = captureFunctionBreakpointRequests();
+
+      const { breakpoint: first } = await sessionManager.setFunctionBreakpoint(session.id, {
+        functionName: 'compute'
+      });
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main' });
+
+      const removal = await sessionManager.removeBreakpoint(session.id, first.id);
+
+      expect(removal.removed?.id).toBe(first.id);
+      expect(payloads.at(-1)!.breakpoints).toEqual([{ name: 'main' }]);
+      expect(sessionManager.listFunctionBreakpoints(session.id)).toHaveLength(1);
+    });
+
+    it('clearBreakpoints without a file clears function breakpoints too (empty replace-all)', async () => {
+      const session = await createLaunchedSession();
+      const payloads = captureFunctionBreakpointRequests();
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'compute' });
+
+      const result = await sessionManager.clearBreakpoints(session.id);
+
+      expect(result.cleared).toBeGreaterThanOrEqual(1);
+      expect(payloads.at(-1)!.breakpoints).toEqual([]);
+      expect(sessionManager.listFunctionBreakpoints(session.id)).toHaveLength(0);
+    });
+
+    it('clearBreakpoints scoped to a file leaves function breakpoints alone', async () => {
+      const session = await createLaunchedSession();
+      captureFunctionBreakpointRequests();
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'compute' });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 3 });
+
+      await sessionManager.clearBreakpoints(session.id, 'test.py');
+
+      expect(sessionManager.listFunctionBreakpoints(session.id)).toHaveLength(1);
+    });
+  });
+
   it('propagates the sync warning when the adapter rejects setBreakpoints', async () => {
     const session = await createLaunchedSession();
     dependencies.mockProxyManager.setDapRequestHandler(async (command) => {

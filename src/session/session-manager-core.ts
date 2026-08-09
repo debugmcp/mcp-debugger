@@ -266,6 +266,13 @@ export abstract class SessionManagerCore extends EventEmitter {
       bp.message = undefined;
       bp.adapterId = undefined;
     }
+    for (const bp of session.functionBreakpoints?.values() ?? []) {
+      bp.verified = false;
+      bp.message = undefined;
+      bp.adapterId = undefined;
+      bp.boundFile = undefined;
+      bp.boundLine = undefined;
+    }
 
     // Adapters whose first stopped event after launch may not carry
     // reason='entry' (e.g., js-debug emits 'pause'/'breakpoint' from
@@ -496,6 +503,38 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (!eventBp) {
         return;
       }
+      // Function breakpoints (issue #271 phase 3) match by adapterId ONLY —
+      // DAP breakpoint events carry no function name, and letting them join
+      // the (file,line) fallback below would let a function breakpoint bound
+      // at some location steal a line breakpoint's event (or vice versa).
+      if (typeof eventBp.id === 'number' && session.functionBreakpoints) {
+        const fnTarget = Array.from(session.functionBreakpoints.values())
+          .find(bp => bp.adapterId === eventBp.id);
+        if (fnTarget) {
+          fnTarget.verified = eventBp.verified;
+          if (typeof eventBp.line === 'number') {
+            fnTarget.boundLine = eventBp.line;
+          }
+          if (eventBp.source?.path) {
+            fnTarget.boundFile = eventBp.source.path;
+          }
+          if (eventBp.message !== undefined) {
+            fnTarget.message = eventBp.message;
+          }
+          this.logger.info('debug:breakpoint', {
+            event: 'changed',
+            sessionId,
+            sessionName: session.name,
+            breakpointId: fnTarget.id,
+            functionName: fnTarget.functionName,
+            line: fnTarget.boundLine,
+            verified: fnTarget.verified,
+            timestamp: Date.now(),
+          });
+          return;
+        }
+      }
+
       const all = Array.from(session.breakpoints.values());
       let target = typeof eventBp.id === 'number'
         ? all.find(bp => bp.adapterId === eventBp.id)
@@ -672,6 +711,18 @@ export abstract class SessionManagerCore extends EventEmitter {
             );
             bp.message = 'Adapter does not advertise logpoint support — this may pause instead of logging';
           }
+        }
+      }
+
+      // Function-breakpoint drift check (issue #271 phase 3): accepted
+      // pre-launch on unknown policy support, but the live adapter does not
+      // advertise supportsFunctionBreakpoints — it will never bind.
+      if (capabilities.supportsFunctionBreakpoints !== true && session.functionBreakpoints) {
+        for (const bp of session.functionBreakpoints.values()) {
+          this.logger.warn(
+            `[SessionManager ${sessionId}] Function breakpoint on ${bp.functionName} but the adapter does not advertise supportsFunctionBreakpoints — it will not bind`
+          );
+          bp.message = 'Adapter does not advertise function-breakpoint support — this breakpoint will not bind';
         }
       }
     };

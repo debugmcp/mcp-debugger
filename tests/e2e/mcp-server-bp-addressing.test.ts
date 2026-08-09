@@ -187,6 +187,78 @@ describe('Breakpoint addressing e2e (#271, mock adapter)', () => {
     }
   }, 45_000);
 
+  it('function breakpoints bind by name, list separately, and stop the run simulation', async () => {
+    const sessionId = await createMockSession('function-bp');
+
+    // Queued pre-launch: no file, no line — just the symbol name.
+    const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      function: 'compute',
+    });
+    expect(bpRes.success).toBe(true);
+    expect((bpRes as { functionName?: string }).functionName).toBe('compute');
+
+    const startRes = await callToolSafely(mcpClient!, 'start_debugging', {
+      sessionId,
+      scriptPath: SNAP_EVENT_SCRIPT.replace('mock-snap-event-fixture', 'mock-snap-fixture'),
+      dapLaunchArgs: { stopOnEntry: true },
+    });
+    expect(startRes.success).toBe(true);
+
+    // Post-launch re-sync brings the bound state into the store: the mock
+    // binds 'compute' at line 10 per its function table.
+    const deadline = Date.now() + 10_000;
+    let fnBp: { verified?: boolean; boundLine?: number; functionName?: string } | undefined;
+    while (Date.now() < deadline) {
+      const listRes = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId });
+      fnBp = ((listRes as { functionBreakpoints?: Array<typeof fnBp> }).functionBreakpoints ?? [])[0];
+      if (fnBp?.verified) break;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    expect(fnBp?.functionName).toBe('compute');
+    expect(fnBp?.verified).toBe(true);
+    expect(fnBp?.boundLine).toBe(10);
+
+    // The run simulation honors the bound line.
+    const contRes = await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+    expect(contRes.success).toBe(true);
+    const stackDeadline = Date.now() + 10_000;
+    let topLine: number | undefined;
+    while (Date.now() < stackDeadline) {
+      const stackRes = await callToolSafely(mcpClient!, 'get_stack_trace', { sessionId });
+      const frames = (stackRes as { stackFrames?: Array<{ line?: number }> }).stackFrames;
+      if (frames?.length) {
+        topLine = frames[0].line;
+        if (topLine === 10) break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    expect(topLine).toBe(10);
+
+    // Remove by function name round-trip.
+    const removeRes = await callToolSafely(mcpClient!, 'remove_breakpoint', {
+      sessionId,
+      function: 'compute',
+    });
+    expect(removeRes.success).toBe(true);
+    const finalList = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId });
+    expect((finalList as { functionBreakpoints?: unknown[] }).functionBreakpoints).toBeUndefined();
+  }, 45_000);
+
+  it('accepts statement with a matching expectedContent (#280)', async () => {
+    const sessionId = await createMockSession('redundant-ec');
+
+    const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      file: SNAP_SCRIPT,
+      statement: 'total = c * 2',
+      expectedContent: 'total = c * 2',
+    });
+
+    expect(bpRes.success).toBe(true);
+    expect((bpRes as { line?: number }).line).toBe(5);
+  }, 30_000);
+
   it('surfaces an async breakpoint-event relocation in list_breakpoints', async () => {
     const sessionId = await createMockSession('snap-event');
 

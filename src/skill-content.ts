@@ -25,7 +25,7 @@ export function buildServerInstructions(
     ? `\n- set_breakpoint accepts expectedContent — pass the exact text of the target line (whitespace-trimmed); a mismatch fails fast and shows the actual nearby lines, catching off-by-one line numbers before they cause a confusing session. A response reporting "requested line N, bound to line M" means the adapter moved your breakpoint — trust the bound line.`
     : '';
   const statementRule = supportsStatementAnchors(mode)
-    ? `\n- Prefer set_breakpoint {statement: "<exact line text>"} over line numbers: it matches like an Edit-tool old_string (whole line, whitespace-trimmed), cannot land on the wrong line, lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.`
+    ? `\n- Prefer set_breakpoint {statement: "<exact line text>"} over line numbers: it matches like an Edit-tool old_string (whole line, whitespace-trimmed), cannot land on the wrong line, lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.\n- set_breakpoint {function: "name"} breaks on entry to a symbol with no file or line at all — names survive edits best (Python/Go/Rust/.NET; not Java or JavaScript).`
     : '';
 
   return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET) as MCP tools.

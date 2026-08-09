@@ -18,6 +18,7 @@ export interface ProxyConfig {
   stopOnEntry?: boolean;
   justMyCode?: boolean;
   initialBreakpoints?: Array<{ file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
+  initialFunctionBreakpoints?: Array<{ name: string; condition?: string }>;
   dryRunSpawn?: boolean;
   breakOnExceptions?: ExceptionBreakMode;
   launchConfig?: LanguageSpecificLaunchConfig;

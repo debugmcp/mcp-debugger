@@ -17,6 +17,7 @@ const JDK_INTERNAL_PREFIXES = ['java.', 'javax.', 'sun.', 'jdk.', 'com.sun.'];
 export const JavaAdapterPolicy: AdapterPolicy = {
   name: 'java',
   supportsLogPoints: false,
+  supportsFunctionBreakpoints: false,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

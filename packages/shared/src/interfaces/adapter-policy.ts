@@ -63,6 +63,17 @@ export interface AdapterPolicy {
   supportsLogPoints?: boolean;
 
   /**
+   * Static pre-launch knowledge of DAP function-breakpoint support
+   * (issue #271 phase 3). Unlike supportsLogPoints, an explicit `false` here
+   * wins over live adapter capabilities: the policy also encodes what OUR
+   * plumbing can deliver (js-debug's adapter advertises the capability, but
+   * function breakpoints sent to the parent session never bind in the child
+   * that owns the runtime). `undefined` means unknown — accepted with a
+   * warning and re-checked against live capabilities.
+   */
+  supportsFunctionBreakpoints?: boolean;
+
+  /**
    * Strategy for how to create/attach to the child session when reverse startDebugging occurs
    */
   childSessionStrategy: ChildSessionStrategy;

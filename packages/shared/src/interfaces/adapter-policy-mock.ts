@@ -11,6 +11,7 @@ import type { DapClientBehavior } from './dap-client-behavior.js';
 export const MockAdapterPolicy: AdapterPolicy = {
   name: 'mock',
   supportsLogPoints: true,
+  supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

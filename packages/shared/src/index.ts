@@ -136,6 +136,7 @@ export type {
   // Session types
   SessionConfig,
   Breakpoint,
+  FunctionBreakpoint,
   DebugSession,
   DebugSessionInfo,
   SessionStopInfo,
@@ -215,4 +216,4 @@ export {
   sanitizeStderrTail
 } from './utils/env-sanitizer.js';
 export { LineBuffer } from './utils/line-buffer.js';
-export { toSourceBreakpoint, type BreakpointFields } from './utils/to-source-breakpoint.js';
+export { toSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';

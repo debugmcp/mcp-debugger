@@ -5,10 +5,12 @@
 import { v4 as uuidv4 } from 'uuid';
 import {
   Breakpoint,
+  FunctionBreakpoint,
   SessionState,
   SessionLifecycleState,
   sanitizePayloadForLogging,
   toSourceBreakpoint,
+  toFunctionBreakpoint,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ManagedSession, ToolchainValidationState } from './session-store.js';
@@ -141,6 +143,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         suspendPolicy: bp.suspendPolicy,
       };
     });
+
+    const initialFunctionBreakpoints = Array.from(session.functionBreakpoints?.values() ?? []).map((bp) => ({
+      name: bp.functionName,
+      condition: bp.condition,
+    }));
 
     // Merge launch args
     const effectiveLaunchArgs = {
@@ -337,6 +344,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       stopOnEntry: stopOnEntryFlag,
       justMyCode: justMyCodeFlag,
       initialBreakpoints,
+      initialFunctionBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
       breakOnExceptions,
       launchConfig: launchConfigData,
@@ -737,6 +745,12 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         for (const file of files) {
           await this.syncBreakpointsForFile(finalSession, file);
         }
+      }
+      // Same re-sync for function breakpoints (issue #271 phase 3): the
+      // worker's initial send's responses never reach this store either.
+      if ((finalSession.functionBreakpoints?.size ?? 0) > 0 &&
+          (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED)) {
+        await this.syncFunctionBreakpoints(finalSession);
       }
 
       this.logger.info(
@@ -1215,17 +1229,136 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
+   * Set a function (symbol-addressed) breakpoint (issue #271 phase 3).
+   * Session-global — no file. Queued like line breakpoints when no debuggee
+   * is live; synced immediately otherwise.
+   */
+  async setFunctionBreakpoint(
+    sessionId: string,
+    bp: {
+      functionName: string;
+      condition?: string;
+    }
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
+    const session = this._getSessionById(sessionId);
+
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+
+    const newBreakpoint: FunctionBreakpoint = {
+      id: uuidv4(),
+      functionName: bp.functionName,
+      condition: bp.condition,
+      verified: false
+    };
+
+    if (!session.functionBreakpoints) session.functionBreakpoints = new Map();
+    session.functionBreakpoints.set(newBreakpoint.id, newBreakpoint);
+    this.logger.info(
+      `[SessionManager] Function breakpoint ${newBreakpoint.id} queued for ${bp.functionName} in session ${sessionId}.`
+    );
+
+    const sync = await this.syncFunctionBreakpoints(session);
+    return { breakpoint: newBreakpoint, warning: sync.warning };
+  }
+
+  /**
+   * Re-send the session's FULL function-breakpoint set to the adapter (DAP
+   * setFunctionBreakpoints is replace-all for the whole session, not per
+   * file). Same live-session guard and never-throws contract as
+   * syncBreakpointsForFile.
+   */
+  protected async syncFunctionBreakpoints(
+    session: ManagedSession
+  ): Promise<{ synced: boolean; warning?: string }> {
+    const sessionId = session.id;
+    if (
+      !session.proxyManager ||
+      !session.proxyManager.isRunning() ||
+      (session.state !== SessionState.RUNNING && session.state !== SessionState.PAUSED)
+    ) {
+      return { synced: false };
+    }
+
+    const allFnBps = Array.from(session.functionBreakpoints.values());
+
+    try {
+      this.logger.info(
+        `[SessionManager] Active proxy for session ${sessionId}, sending ${allFnBps.length} function breakpoint(s).`
+      );
+      const response =
+        await session.proxyManager.sendDapRequest<DebugProtocol.SetFunctionBreakpointsResponse>(
+          'setFunctionBreakpoints',
+          { breakpoints: allFnBps.map(toFunctionBreakpoint) }
+        );
+      const responseBps = response?.body?.breakpoints;
+      if (responseBps) {
+        // Positional match, same DAP guarantee as setBreakpoints
+        for (let i = 0; i < Math.min(responseBps.length, allFnBps.length); i++) {
+          const bpInfo = responseBps[i];
+          allFnBps[i].verified = bpInfo.verified;
+          allFnBps[i].adapterId = bpInfo.id ?? allFnBps[i].adapterId;
+          allFnBps[i].message = bpInfo.message;
+          if (typeof bpInfo.line === 'number') {
+            allFnBps[i].boundLine = bpInfo.line;
+          }
+          if (bpInfo.source?.path) {
+            allFnBps[i].boundFile = bpInfo.source.path;
+          }
+          if (allFnBps[i].verified) {
+            this.logger.info('debug:breakpoint', {
+              event: 'verified',
+              sessionId,
+              sessionName: session.name,
+              breakpointId: allFnBps[i].id,
+              functionName: allFnBps[i].functionName,
+              line: allFnBps[i].boundLine,
+              verified: true,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+      return { synced: true };
+    } catch (error) {
+      this.logger.error(
+        `[SessionManager] Error sending setFunctionBreakpoints to proxy for session ${sessionId}:`,
+        error
+      );
+      const message = error instanceof Error ? error.message : String(error);
+      return { synced: false, warning: `Breakpoint state updated, but live sync failed: ${message}` };
+    }
+  }
+
+  /**
    * Remove one breakpoint by its id (the id returned by setBreakpoint).
    * The removal always takes effect in the session's breakpoint store; if the
    * debuggee is live the file's remaining set is re-sent immediately.
    * Deliberately works after the debuggee exits — the surviving set is
-   * re-applied on the next launch.
+   * re-applied on the next launch. Checks line and function breakpoints
+   * alike (shared UUID namespace).
    */
   async removeBreakpoint(
     sessionId: string,
     breakpointId: string
-  ): Promise<{ removed?: Breakpoint; warning?: string }> {
+  ): Promise<{ removed?: Breakpoint | FunctionBreakpoint; warning?: string }> {
     const session = this._getSessionById(sessionId);
+
+    const functionBreakpoint = session.functionBreakpoints?.get(breakpointId);
+    if (functionBreakpoint) {
+      session.functionBreakpoints.delete(breakpointId);
+      this.logger.info('debug:breakpoint', {
+        event: 'removed',
+        sessionId,
+        sessionName: session.name,
+        breakpointId,
+        functionName: functionBreakpoint.functionName,
+        timestamp: Date.now(),
+      });
+      const { warning } = await this.syncFunctionBreakpoints(session);
+      return { removed: functionBreakpoint, warning };
+    }
 
     const breakpoint = session.breakpoints.get(breakpointId);
     if (!breakpoint) {
@@ -1299,16 +1432,26 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       .filter(bp => file === undefined || bp.file === file);
     const files = [...new Set(toClear.map(bp => bp.file))];
 
+    // Function breakpoints are not file-scoped: only an unscoped clear
+    // touches them (issue #271 phase 3).
+    const fnToClear = file === undefined
+      ? Array.from(session.functionBreakpoints?.values() ?? [])
+      : [];
+
     for (const bp of toClear) {
       session.breakpoints.delete(bp.id);
     }
-    if (toClear.length > 0) {
+    for (const bp of fnToClear) {
+      session.functionBreakpoints.delete(bp.id);
+    }
+    if (toClear.length > 0 || fnToClear.length > 0) {
       this.logger.info('debug:breakpoint', {
         event: 'cleared',
         sessionId,
         sessionName: session.name,
-        cleared: toClear.length,
+        cleared: toClear.length + fnToClear.length,
         files,
+        functionBreakpoints: fnToClear.length,
         timestamp: Date.now(),
       });
     }
@@ -1318,9 +1461,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       const { warning } = await this.syncBreakpointsForFile(session, clearedFile);
       if (warning) warnings.push(warning);
     }
+    if (fnToClear.length > 0) {
+      const { warning } = await this.syncFunctionBreakpoints(session);
+      if (warning) warnings.push(warning);
+    }
 
     return {
-      cleared: toClear.length,
+      cleared: toClear.length + fnToClear.length,
       files,
       ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {})
     };

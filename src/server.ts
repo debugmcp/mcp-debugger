@@ -33,6 +33,7 @@ import {
     StackFrame,
     DebugLanguage,
     Breakpoint,
+    FunctionBreakpoint,
     SessionLifecycleState,
     IEnvironment,
     ExceptionBreakMode
@@ -99,6 +100,7 @@ interface ToolArguments {
   expectedContent?: string;
   statement?: string;
   nearLine?: number;
+  function?: string;
   breakpointId?: string;
   scriptPath?: string;
   args?: string[];
@@ -371,6 +373,41 @@ export class DebugMcpServer {
   }
 
   /**
+   * Function-breakpoint gating (issue #271 phase 3). Same hybrid shape as
+   * validateLogPointSupport with one deliberate difference: the STATIC policy
+   * verdict is checked FIRST. The policy also encodes what our plumbing can
+   * deliver — js-debug's adapter advertises supportsFunctionBreakpoints, but
+   * a parent-session setFunctionBreakpoints never binds in the child that
+   * owns the runtime, so its policy says false and that must beat live caps.
+   */
+  private validateFunctionBreakpointSupport(sessionId: string): { warning?: string } {
+    const session = this.sessionManager.getSession(sessionId);
+    const liveCaps = session?.adapterCapabilities;
+    const policy = this.sessionManager.getSessionPolicy(sessionId);
+    const language = session?.language ?? policy.name;
+
+    if (policy.supportsFunctionBreakpoints === false) {
+      const reason = String(language) === 'javascript'
+        ? 'function breakpoints are not yet wired for js-debug\'s child-session architecture'
+        : undefined;
+      throw new UnsupportedFeatureError('Function breakpoints', String(language), reason);
+    }
+    if (liveCaps) {
+      if (liveCaps.supportsFunctionBreakpoints === true) {
+        return {};
+      }
+      throw new UnsupportedFeatureError('Function breakpoints', String(language),
+        'the adapter did not advertise supportsFunctionBreakpoints');
+    }
+    if (policy.supportsFunctionBreakpoints === true) {
+      return {};
+    }
+    return {
+      warning: `Function breakpoint support for ${String(language)} is unknown; it will be validated against the adapter's capabilities at launch`
+    };
+  }
+
+  /**
    * Shared catch for the breakpoint management tools: session-lifecycle
    * failures become {success: false} results (same contract as
    * set_breakpoint's catch); everything else re-throws.
@@ -517,6 +554,15 @@ export class DebugMcpServer {
     return { path: fileCheck.effectivePath, contentAddressable: true };
   }
 
+  public async setFunctionBreakpoint(
+    sessionId: string,
+    functionName: string,
+    condition?: string
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
+    this.validateSession(sessionId);
+    return this.sessionManager.setFunctionBreakpoint(sessionId, { functionName, condition });
+  }
+
   public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     this.validateSession(req.sessionId);
 
@@ -527,10 +573,17 @@ export class DebugMcpServer {
         'Provide line or statement, not both. Use nearLine (with statement) to disambiguate repeated statements.'
       );
     }
-    if (req.statement !== undefined && req.expectedContent !== undefined) {
+    if (
+      req.statement !== undefined &&
+      req.expectedContent !== undefined &&
+      req.statement.trim() !== req.expectedContent.trim()
+    ) {
+      // A matching expectedContent alongside a statement anchor is redundant
+      // but harmless — agents combine them constantly (issue #280), so only
+      // genuinely contradictory intent is an error.
       throw new McpError(
         McpErrorCode.InvalidParams,
-        'expectedContent applies to line addressing only; a statement anchor is already content-addressed. Provide one or the other.'
+        'statement and expectedContent disagree; a statement anchor is already content-addressed. Provide one or the other (a matching expectedContent is accepted as redundant).'
       );
     }
     if (req.nearLine !== undefined && req.statement === undefined) {
@@ -610,7 +663,7 @@ export class DebugMcpServer {
     return this.sessionManager.listBreakpoints(sessionId, file);
   }
 
-  public async removeBreakpoint(sessionId: string, breakpointId: string): Promise<{ removed?: Breakpoint; warning?: string }> {
+  public async removeBreakpoint(sessionId: string, breakpointId: string): Promise<{ removed?: Breakpoint | FunctionBreakpoint; warning?: string }> {
     return this.sessionManager.removeBreakpoint(sessionId, breakpointId);
   }
 
@@ -835,7 +888,11 @@ export class DebugMcpServer {
           type: 'number',
           description: 'With statement only: when the statement text appears on multiple lines, bind to the match closest to this line'
         };
-        setBreakpointRequired = ['sessionId', 'file'];
+        setBreakpointExtraProps.function = {
+          type: 'string',
+          description: 'Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, and .NET adapters; not Java or JavaScript'
+        };
+        setBreakpointRequired = ['sessionId'];
       }
 
       return {
@@ -844,8 +901,8 @@ export class DebugMcpServer {
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, ...setBreakpointExtraProps, condition: { type: 'string', description: 'Optional expression: only break (or log) when it evaluates truthy' }, logMessage: { type: 'string', description: 'Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. "order={orderId} total={total}"). Messages arrive in get_output while the program runs at full speed. Supported by Python, JavaScript, Go, and Rust adapters; not by Java or .NET' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: setBreakpointRequired } },
-          { name: 'list_breakpoints', description: 'List all breakpoints in a session with their verified state and adapter-assigned ids. Works before launch (queued, verified=false), while running or paused, and after the program exits', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only list breakpoints in this file' } }, required: ['sessionId'] } },
-          { name: 'remove_breakpoint', description: 'Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, breakpointId: { type: 'string', description: 'Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line' }, file: { type: 'string', description: 'Alternative addressing: source file path (use together with line)' }, line: { type: 'number', description: 'Alternative addressing: line number (use together with file)' } }, required: ['sessionId'] } },
+          { name: 'list_breakpoints', description: 'List all breakpoints in a session with their verified state and adapter-assigned ids. Session-global function breakpoints appear separately as functionBreakpoints (omitted when filtering by file). Works before launch (queued, verified=false), while running or paused, and after the program exits', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only list breakpoints in this file' } }, required: ['sessionId'] } },
+          { name: 'remove_breakpoint', description: 'Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), by function name, or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, breakpointId: { type: 'string', description: 'Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line' }, function: { type: 'string', description: 'Alternative addressing: remove all function breakpoints with this symbol name' }, file: { type: 'string', description: 'Alternative addressing: source file path (use together with line)' }, line: { type: 'number', description: 'Alternative addressing: line number (use together with file)' } }, required: ['sessionId'] } },
           { name: 'clear_breakpoints', description: 'Remove all breakpoints in a session, or all breakpoints in one file. Clearing zero breakpoints is success. Takes effect immediately while the program is running or paused', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only clear breakpoints in this file' } }, required: ['sessionId'] } },
           { name: 'start_debugging', description: 'Start debugging a script', inputSchema: {
               type: 'object', 
@@ -1025,7 +1082,8 @@ export class DebugMcpServer {
               break;
             }
             case 'set_breakpoint': {
-              if (!args.sessionId || !args.file || (args.line === undefined && args.statement === undefined)) {
+              const isFunctionBp = args.function !== undefined;
+              if (!args.sessionId || (!isFunctionBp && (!args.file || (args.line === undefined && args.statement === undefined)))) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
               }
 
@@ -1047,6 +1105,68 @@ export class DebugMcpServer {
                   `statement addressing is disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use line addressing.`
                 );
               }
+              if (isFunctionBp && !supportsStatementAnchors(bpMode)) {
+                throw new McpError(
+                  McpErrorCode.InvalidParams,
+                  `function breakpoints are disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use line addressing.`
+                );
+              }
+
+              if (isFunctionBp) {
+                // Function breakpoints are session-global symbols — no file,
+                // no line, no content anchor, no logpoint, no suspend policy
+                // (DAP FunctionBreakpoint supports name + condition only).
+                if (args.file !== undefined) {
+                  throw new McpError(McpErrorCode.InvalidParams,
+                    'Function breakpoints are not file-scoped; omit file. The adapter resolves the symbol name across the whole program.');
+                }
+                if (args.line !== undefined || args.statement !== undefined ||
+                    args.expectedContent !== undefined || args.nearLine !== undefined) {
+                  throw new McpError(McpErrorCode.InvalidParams,
+                    'Provide function alone (optionally with condition) — it cannot be combined with line, statement, expectedContent, or nearLine.');
+                }
+                if (args.logMessage !== undefined) {
+                  throw new McpError(McpErrorCode.InvalidParams,
+                    'logMessage is not supported on function breakpoints (DAP has no logpoint form for them); use a line or statement breakpoint.');
+                }
+                if (args.suspendPolicy !== undefined) {
+                  throw new McpError(McpErrorCode.InvalidParams,
+                    'suspendPolicy is not supported on function breakpoints.');
+                }
+
+                try {
+                  const fnGate = this.validateFunctionBreakpointSupport(args.sessionId);
+                  const { breakpoint, warning: syncWarning } = await this.setFunctionBreakpoint(
+                    args.sessionId, args.function!, args.condition
+                  );
+
+                  this.logger.info('debug:breakpoint', {
+                    event: 'set',
+                    sessionId: args.sessionId,
+                    sessionName: this.getSessionName(args.sessionId),
+                    breakpointId: breakpoint.id,
+                    functionName: breakpoint.functionName,
+                    verified: breakpoint.verified,
+                    timestamp: Date.now()
+                  });
+
+                  const warnings = [breakpoint.message, fnGate.warning, syncWarning].filter(Boolean);
+                  result = { content: [{ type: 'text', text: JSON.stringify({
+                    success: true,
+                    breakpointId: breakpoint.id,
+                    functionName: breakpoint.functionName,
+                    condition: breakpoint.condition,
+                    verified: breakpoint.verified,
+                    boundFile: breakpoint.boundFile,
+                    boundLine: breakpoint.boundLine,
+                    message: breakpoint.message || `Function breakpoint set on ${breakpoint.functionName}`,
+                    warning: warnings.length > 0 ? warnings.join('; ') : undefined
+                  }) }] };
+                } catch (error) {
+                  result = this.handleBreakpointToolError(error);
+                }
+                break;
+              }
 
               try {
                 // Logpoint gating (issue #235): hard error for known-unsupported
@@ -1057,7 +1177,8 @@ export class DebugMcpServer {
 
                 const { breakpoint, warning: syncWarning } = await this.setBreakpoint({
                   sessionId: args.sessionId,
-                  file: args.file,
+                  // Non-function path: the entry guard above ensures file is set
+                  file: args.file!,
                   line: args.line,
                   expectedContent: args.expectedContent,
                   statement: args.statement,
@@ -1169,10 +1290,18 @@ export class DebugMcpServer {
               }
               try {
                 const breakpoints = this.listBreakpoints(args.sessionId, args.file);
+                // Function breakpoints are session-global, so a file filter
+                // deliberately excludes them (issue #271 phase 3).
+                const functionBreakpoints = args.file === undefined
+                  ? this.sessionManager.listFunctionBreakpoints(args.sessionId)
+                  : [];
                 result = { content: [{ type: 'text', text: JSON.stringify({
                   success: true,
                   breakpoints,
-                  count: breakpoints.length
+                  count: breakpoints.length,
+                  ...(functionBreakpoints.length > 0
+                    ? { functionBreakpoints, functionCount: functionBreakpoints.length }
+                    : {})
                 }) }] };
               } catch (error) {
                 result = this.handleBreakpointToolError(error);
@@ -1183,16 +1312,36 @@ export class DebugMcpServer {
               if (!args.sessionId) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
               }
-              if (!args.breakpointId && (!args.file || args.line === undefined)) {
+              if (!args.breakpointId && args.function === undefined && (!args.file || args.line === undefined)) {
                 throw new McpError(
                   McpErrorCode.InvalidParams,
-                  'Provide either breakpointId, or file and line together'
+                  'Provide breakpointId, function, or file and line together'
                 );
               }
               try {
-                let removed: Breakpoint[];
+                let removed: Array<Breakpoint | FunctionBreakpoint>;
                 let warning: string | undefined;
-                if (args.breakpointId) {
+                if (!args.breakpointId && args.function !== undefined) {
+                  // Remove by function name (issue #271 phase 3)
+                  const matches = this.sessionManager
+                    .listFunctionBreakpoints(args.sessionId)
+                    .filter((bp) => bp.functionName === args.function);
+                  removed = [];
+                  const warnings: string[] = [];
+                  for (const bp of matches) {
+                    const res = await this.removeBreakpoint(args.sessionId, bp.id);
+                    if (res.removed) removed.push(res.removed);
+                    if (res.warning) warnings.push(res.warning);
+                  }
+                  warning = warnings.length > 0 ? warnings.join('; ') : undefined;
+                  if (removed.length === 0) {
+                    result = { content: [{ type: 'text', text: JSON.stringify({
+                      success: false,
+                      error: `No function breakpoint found for ${args.function}`
+                    }) }] };
+                    break;
+                  }
+                } else if (args.breakpointId) {
                   const res = await this.removeBreakpoint(args.sessionId, args.breakpointId);
                   removed = res.removed ? [res.removed] : [];
                   warning = res.warning;

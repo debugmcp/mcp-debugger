@@ -13,6 +13,7 @@ import {
   ExecutionState,
   DebugSessionInfo,
   Breakpoint,
+  FunctionBreakpoint,
   AdapterPolicy,
   getPolicyForLanguage
 } from '@debugmcp/shared';
@@ -63,6 +64,9 @@ export interface ManagedSession extends DebugSessionInfo {
   executablePath?: string;  // Language-agnostic executable path
   proxyManager?: IProxyManager;
   breakpoints: Map<string, Breakpoint>;
+  // Function breakpoints (issue #271 phase 3): session-global, name-addressed,
+  // synced via DAP setFunctionBreakpoints (replace-all per request).
+  functionBreakpoints: Map<string, FunctionBreakpoint>;
   // New state model fields
   sessionLifecycle: SessionLifecycleState;
   executionState?: ExecutionState;
@@ -134,7 +138,8 @@ export class SessionStore {
       state: SessionState.CREATED, 
       createdAt: new Date(), 
       updatedAt: new Date(), 
-      breakpoints: new Map<string, Breakpoint>(), 
+      breakpoints: new Map<string, Breakpoint>(),
+      functionBreakpoints: new Map<string, FunctionBreakpoint>(),
       executablePath: effectiveExecutablePath,
       proxyManager: undefined,
       // Initialize new state model

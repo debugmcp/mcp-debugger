@@ -772,6 +772,27 @@ export class DapProxyWorker {
         }
       }
 
+      // Initial function breakpoints (issue #271 phase 3). Like exception
+      // breakpoints below, a failure must not abort the launch — adapters
+      // without support reject the request, and the post-launch re-sync
+      // surfaces the state honestly.
+      if (this.currentInitPayload.initialFunctionBreakpoints?.length) {
+        try {
+          await this.dapClient!.sendRequest('setFunctionBreakpoints', {
+            breakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
+              name: bp.name,
+              ...(bp.condition !== undefined ? { condition: bp.condition } : {})
+            }))
+          });
+        } catch (err) {
+          this.logger!.warn(
+            `[Worker] setFunctionBreakpoints failed (continuing without function breakpoints): ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        }
+      }
+
       // Arm exception breakpoints when requested (issue #220). A failure must
       // not abort the launch — the outer catch tears the session down — so
       // errors are swallowed with a warning.
