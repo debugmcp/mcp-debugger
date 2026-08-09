@@ -214,6 +214,10 @@ class MockDebugAdapterProcess {
         this.handleSetBreakpoints(request as DebugProtocol.SetBreakpointsRequest);
         break;
 
+      case 'setFunctionBreakpoints':
+        this.handleSetFunctionBreakpoints(request as DebugProtocol.SetFunctionBreakpointsRequest);
+        break;
+
       case 'setExceptionBreakpoints':
         this.handleSetExceptionBreakpoints(request as DebugProtocol.SetExceptionBreakpointsRequest);
         break;
@@ -284,7 +288,7 @@ class MockDebugAdapterProcess {
       success: true,
       body: {
         supportsConfigurationDoneRequest: true,
-        supportsFunctionBreakpoints: false,
+        supportsFunctionBreakpoints: true,
         supportsConditionalBreakpoints: true,
         supportsHitConditionalBreakpoints: false,
         supportsEvaluateForHovers: true,
@@ -573,6 +577,55 @@ class MockDebugAdapterProcess {
         }, 100);
       }
     }
+  }
+
+  /**
+   * Function breakpoints (issue #271 phase 3): resolve known symbol names to
+   * deterministic lines and store the bound breakpoints alongside line
+   * breakpoints (under a synthetic source key) so the run simulation's
+   * findNextStop picks them up unchanged. Unknown names respond
+   * verified:false with no line, which findNextStop already filters out.
+   */
+  private static readonly FUNCTION_LINE_TABLE: Record<string, number> = {
+    main: 1,
+    compute: 10,
+    mockFunction: 42,
+  };
+
+  private handleSetFunctionBreakpoints(request: DebugProtocol.SetFunctionBreakpointsRequest): void {
+    const args = request.arguments;
+    const breakpoints: DebugProtocol.Breakpoint[] = [];
+
+    for (const bp of args.breakpoints ?? []) {
+      const line = MockDebugAdapterProcess.FUNCTION_LINE_TABLE[bp.name];
+      if (line !== undefined) {
+        breakpoints.push({
+          id: Math.floor(Math.random() * 100000),
+          verified: true,
+          line,
+          source: { path: this.programPath || 'mock://program' }
+        });
+      } else {
+        breakpoints.push({
+          id: Math.floor(Math.random() * 100000),
+          verified: false,
+          message: `Unknown function: ${bp.name}`
+        });
+      }
+    }
+
+    this.breakpoints.set('<functions>', breakpoints);
+
+    this.sendResponse({
+      seq: 0,
+      type: 'response',
+      request_seq: request.seq,
+      command: request.command,
+      success: true,
+      body: {
+        breakpoints
+      }
+    });
   }
   
   private handleThreads(request: DebugProtocol.ThreadsRequest): void {

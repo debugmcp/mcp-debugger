@@ -25,6 +25,7 @@ export interface ProxyInitPayload {
   stopOnEntry?: boolean;
   justMyCode?: boolean;
   initialBreakpoints?: { file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }[];
+  initialFunctionBreakpoints?: { name: string; condition?: string }[];
   dryRunSpawn?: boolean;
   /** Abstract break-on-exception mode; resolved to concrete DAP filters via the adapter policy (issue #220) */
   breakOnExceptions?: 'uncaught' | 'all' | 'none';

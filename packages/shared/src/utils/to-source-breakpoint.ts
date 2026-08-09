@@ -26,3 +26,20 @@ export function toSourceBreakpoint(bp: BreakpointFields): DebugProtocol.SourceBr
     ...(bp.suspendPolicy !== undefined ? { suspendPolicy: bp.suspendPolicy } : {}),
   };
 }
+
+export interface FunctionBreakpointFields {
+  functionName: string;
+  condition?: string;
+}
+
+/**
+ * The single mapper to a DAP FunctionBreakpoint (issue #271 phase 3) — same
+ * rule as toSourceBreakpoint: every setFunctionBreakpoints construction site
+ * (live sync, worker initial send) maps through here.
+ */
+export function toFunctionBreakpoint(bp: FunctionBreakpointFields): DebugProtocol.FunctionBreakpoint {
+  return {
+    name: bp.functionName,
+    ...(bp.condition !== undefined ? { condition: bp.condition } : {}),
+  };
+}

@@ -137,6 +137,7 @@ Sets a breakpoint in a source file.
 - `file` (string, required): Path to the source file (absolute or relative to project root).
 - `line` (number, required): Line number where to set breakpoint (1-indexed).
 - `statement` (string, optional): **Content addressing** — instead of `line`, pass the exact text of the target line (leading/trailing whitespace ignored), like an Edit-tool match. Cannot land on the wrong line; if the text appears on multiple lines the error lists every match; anchors re-resolve across `restart_debugging` after file edits. Provide `statement` OR `line`, not both. See [Statement anchors](#statement-anchors).
+- `function` (string, optional): **Symbol addressing** — break on entry to a function/method by name (DAP function breakpoint). Session-global: no `file` or `line` at all, and names survive edits better than both. Composes with `condition` only. Supported by Python, Go, Rust, and .NET; Java and JavaScript reject it with a clear error (see [Function breakpoints](#function-breakpoints)).
 - `nearLine` (number, optional): With `statement` only — when the statement text appears on multiple lines, bind to the match closest to this line (ties go to the lower line).
 - `expectedContent` (string, optional): With `line` only — assert the exact text of the target line (leading/trailing whitespace ignored) before setting. On a mismatch the breakpoint is **not** set and the error shows the actual content of that line and its neighbors — a fast, self-explanatory failure instead of a breakpoint that silently lands on the wrong line. See [Content assertions and loud snapping](#content-assertions-and-loud-snapping).
 - `condition` (string, optional): Conditional expression — only break (or log) when it evaluates truthy.
@@ -206,6 +207,16 @@ Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a differe
 - **Blank/comment anchors are rejected** (`#`, `//`, `/*` prefixes) — debuggers cannot break there reliably.
 - **The anchor is stored on the breakpoint record** (visible in `list_breakpoints`) and **re-resolves on `restart_debugging`**: after you edit the file — the whole point of a debug session — the relaunch re-finds each anchored statement in the current file (the breakpoint's previous line breaks ties between duplicates). Moves are reported in the restart response's `data.anchorResolution.moved`; anchors that no longer match keep their previous line and warn (`data.anchorResolution.stale`) rather than failing the restart or dropping state.
 - Same readable-file requirement as `expectedContent` (no Java FQCNs, no attach sessions); composes with `condition`, `logMessage`, and `suspendPolicy` unchanged.
+- A matching `expectedContent` alongside `statement` is accepted as redundant; a *different* one is an error (contradictory intent).
+
+#### Function breakpoints
+
+`set_breakpoint {sessionId, function: "process_order", condition?}` breaks on entry to a symbol, with no file or line:
+
+- Session-global, name-addressed — the adapter resolves the symbol across the whole program, and the name survives any file edit. `restart_debugging` re-applies them natively.
+- Composes with `condition` only (`logMessage` and `suspendPolicy` have no DAP function-breakpoint form; file/line/statement/expectedContent are contradictory and rejected).
+- The response and `list_breakpoints` report the adapter's bound location as `boundFile`/`boundLine` once verified. `list_breakpoints` returns function breakpoints in a separate `functionBreakpoints` array (excluded when filtering by file); `remove_breakpoint` accepts `function: "name"` or the breakpoint id; an unscoped `clear_breakpoints` removes them, a file-scoped clear does not.
+- Support is adapter-gated: Python, Go, Rust, and .NET work; Java (JDI bridge) and JavaScript (js-debug's child-session architecture isn't wired for them yet) fail fast with a clear error; Ruby is accepted with a warning and validated against the adapter's live capabilities at launch.
 
 #### Logpoints
 

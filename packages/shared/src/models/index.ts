@@ -245,6 +245,30 @@ export interface Breakpoint {
 }
 
 /**
+ * Function breakpoint (issue #271, phase 3): addressed by symbol name via DAP
+ * setFunctionBreakpoints. Session-global (not file-scoped); names survive
+ * file edits better than lines or statements.
+ */
+export interface FunctionBreakpoint {
+  /** Unique identifier (same UUID namespace as line breakpoints) */
+  id: string;
+  /** Symbol name the breakpoint is addressed by */
+  functionName: string;
+  /** Conditional expression (if any) */
+  condition?: string;
+  /** Whether the breakpoint is verified */
+  verified: boolean;
+  /** Validation message from DAP adapter */
+  message?: string;
+  /** Breakpoint id assigned by the debug adapter */
+  adapterId?: number;
+  /** Source file the adapter bound the function to (from the DAP response) */
+  boundFile?: string;
+  /** Line the adapter bound the function to (from the DAP response) */
+  boundLine?: number;
+}
+
+/**
  * Debug session information
  */
 export interface DebugSession {

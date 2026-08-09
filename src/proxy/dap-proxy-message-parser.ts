@@ -147,6 +147,25 @@ export class MessageParser {
       }
     }
 
+    // Validate initialFunctionBreakpoints if provided (issue #271 phase 3)
+    if (obj.initialFunctionBreakpoints !== undefined) {
+      if (!Array.isArray(obj.initialFunctionBreakpoints)) {
+        throw new Error(`Init payload 'initialFunctionBreakpoints' must be an array if provided`);
+      }
+      for (const bp of obj.initialFunctionBreakpoints) {
+        if (!bp || typeof bp !== 'object') {
+          throw new Error(`Invalid breakpoint in initialFunctionBreakpoints`);
+        }
+        const bpObj = bp as Record<string, unknown>;
+        if (typeof bpObj.name !== 'string' || bpObj.name.length === 0) {
+          throw new Error(`Function breakpoint must have 'name' (non-empty string)`);
+        }
+        if (bpObj.condition !== undefined && typeof bpObj.condition !== 'string') {
+          throw new Error(`Function breakpoint 'condition' must be a string if provided`);
+        }
+      }
+    }
+
     // Type assertion via unknown to satisfy TypeScript
     return obj as unknown as ProxyInitPayload;
   }

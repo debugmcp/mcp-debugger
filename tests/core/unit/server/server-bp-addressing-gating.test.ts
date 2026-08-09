@@ -96,7 +96,9 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
     expect(schema.properties.expectedContent).toBeDefined();
     expect(schema.properties.statement).toBeDefined();
     expect(schema.properties.nearLine).toBeDefined();
-    expect(schema.required).toEqual(['sessionId', 'file']);
+    expect(schema.properties.function).toBeDefined();
+    // function breakpoints need no file, so only sessionId is universally required
+    expect(schema.required).toEqual(['sessionId']);
   });
 
   it('exposes expectedContent by default (env unset -> content mode)', async () => {

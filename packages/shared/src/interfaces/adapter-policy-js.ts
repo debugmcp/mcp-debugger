@@ -25,6 +25,10 @@ export interface JsAdapterState extends AdapterSpecificState {
 export const JsDebugAdapterPolicy: AdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
+  // Function breakpoints are NOT wired through the js-debug parent/child
+  // mirroring yet; the adapter advertises the capability but a parent-sent
+  // setFunctionBreakpoints never binds in the child that owns the runtime.
+  supportsFunctionBreakpoints: false,
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',
   buildChildStartArgs: (pendingId: string, parentConfig: Record<string, unknown>) => {

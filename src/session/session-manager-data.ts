@@ -9,7 +9,8 @@ import {
   AdapterPolicy,
   getPolicyForLanguage,
   DebugLanguage,
-  Breakpoint
+  Breakpoint,
+  FunctionBreakpoint
 } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -39,6 +40,17 @@ export abstract class SessionManagerData extends SessionManagerCore {
       a.file === b.file ? a.line - b.line : a.file.localeCompare(b.file)
     );
     return breakpoints;
+  }
+
+  /**
+   * List the session's function breakpoints (issue #271 phase 3). Not
+   * file-scoped — a file filter on list_breakpoints deliberately excludes
+   * these; they are session-global.
+   */
+  listFunctionBreakpoints(sessionId: string): FunctionBreakpoint[] {
+    const session = this._getSessionById(sessionId);
+    return Array.from(session.functionBreakpoints?.values() ?? [])
+      .sort((a, b) => a.functionName.localeCompare(b.functionName));
   }
 
   async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
