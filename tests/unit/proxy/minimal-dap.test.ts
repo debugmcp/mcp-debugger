@@ -1811,4 +1811,36 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  describe('setFunctionBreakpoints interception (issue #295)', () => {
+    it('routes setFunctionBreakpoints to the CDP bridge and never writes to any DAP socket', async () => {
+      const stubManager = createChildSessionManagerStub();
+      (stubManager as any).syncFunctionBreakpoints = vi.fn().mockResolvedValue({
+        breakpoints: [{ id: 1_000_000, verified: true }]
+      });
+      const managed = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+      await managed.connect();
+      mockSocket.write.mockClear();
+
+      const resp = await managed.sendRequest('setFunctionBreakpoints', {
+        breakpoints: [{ name: 'greet' }]
+      });
+
+      expect((stubManager as any).syncFunctionBreakpoints).toHaveBeenCalledWith([{ name: 'greet' }]);
+      expect(resp.success).toBe(true);
+      expect(resp.body).toEqual({ breakpoints: [{ id: 1_000_000, verified: true }] });
+      expect(mockSocket.write).not.toHaveBeenCalled();
+      managed.shutdown();
+    });
+
+    it('sends setFunctionBreakpoints to the wire for non-cdp policies', async () => {
+      await client.connect();
+      mockSocket.write.mockClear();
+      const p = client.sendRequest('setFunctionBreakpoints', { breakpoints: [] }, 50).catch(() => undefined);
+      expect(mockSocket.write).toHaveBeenCalled();
+      await p;
+    });
+  });
+
 });

@@ -12,6 +12,10 @@ describe('JavaAdapterPolicy', () => {
       expect(JavaAdapterPolicy.supportsReverseStartDebugging).toBe(false);
     });
 
+    it('should support function breakpoints', () => {
+      expect(JavaAdapterPolicy.supportsFunctionBreakpoints).toBe(true);
+    });
+
     it('should have "none" child session strategy', () => {
       expect(JavaAdapterPolicy.childSessionStrategy).toBe('none');
     });

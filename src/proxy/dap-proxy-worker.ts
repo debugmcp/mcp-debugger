@@ -455,6 +455,12 @@ export class DapProxyWorker {
       // Check if adapter requires command queueing
       if (this.adapterPolicy.requiresCommandQueueing()) {
         this.logger!.info(`[Worker] ${this.adapterPolicy.name} adapter detected; command queueing enabled (attachMode=${isAttachMode})`);
+        // Queueing policies never reach handleInitializedEvent's config
+        // sequence, so seed the pre-launch function breakpoints here — for
+        // cdp-delivery policies (js-debug, issue #295) this lands in the CDP
+        // bridge's desired set BEFORE the handshake's launch can produce the
+        // entry stop the bridge binds at.
+        await this.sendInitialFunctionBreakpoints();
         this.state = ProxyState.CONNECTED;
         this.sendStatus('adapter_connected');
         await this.drainPreConnectQueue();
@@ -776,22 +782,7 @@ export class DapProxyWorker {
       // breakpoints below, a failure must not abort the launch — adapters
       // without support reject the request, and the post-launch re-sync
       // surfaces the state honestly.
-      if (this.currentInitPayload.initialFunctionBreakpoints?.length) {
-        try {
-          await this.dapClient!.sendRequest('setFunctionBreakpoints', {
-            breakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
-              name: bp.name,
-              ...(bp.condition !== undefined ? { condition: bp.condition } : {})
-            }))
-          });
-        } catch (err) {
-          this.logger!.warn(
-            `[Worker] setFunctionBreakpoints failed (continuing without function breakpoints): ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          );
-        }
-      }
+      await this.sendInitialFunctionBreakpoints();
 
       // Arm exception breakpoints when requested (issue #220). A failure must
       // not abort the launch — the outer catch tears the session down — so
@@ -831,6 +822,33 @@ export class DapProxyWorker {
   }
 
   /**
+   * Send the pre-launch function breakpoints (issue #271 phase 3). A failure
+   * must not abort the launch — adapters without support reject the request,
+   * and the post-launch re-sync surfaces the state honestly. For cdp-delivery
+   * policies (js-debug, issue #295) the request never reaches the adapter:
+   * MinimalDapClient routes it to the CDP bridge.
+   */
+  private async sendInitialFunctionBreakpoints(): Promise<void> {
+    if (!this.currentInitPayload?.initialFunctionBreakpoints?.length || !this.dapClient) {
+      return;
+    }
+    try {
+      await this.dapClient.sendRequest('setFunctionBreakpoints', {
+        breakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
+          name: bp.name,
+          ...(bp.condition !== undefined ? { condition: bp.condition } : {})
+        }))
+      });
+    } catch (err) {
+      this.logger?.warn(
+        `[Worker] setFunctionBreakpoints failed (continuing without function breakpoints): ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+  }
+
+  /**
    * Handle DAP commands from the parent process
    */
   private async handleDapCommand(payload: DapCommandPayload): Promise<void> {
@@ -847,6 +865,25 @@ export class DapProxyWorker {
     }
 
     try {
+      // CDP-delivered function breakpoints (issue #295): module-scoped names
+      // only resolve at a pause, so when function breakpoints were queued
+      // pre-launch, make js-debug itself stop on entry. The SessionManager
+      // still holds the user's stopOnEntry=false and auto-continues the entry
+      // stop — after the bridge's held-event binding completes — so the forced
+      // stop is invisible. Mutated here, before the queue decision, so both
+      // the direct send and drainCommandQueue paths carry it.
+      if (
+        payload.dapCommand === 'launch' &&
+        this.adapterPolicy.functionBreakpointsVia === 'cdp' &&
+        (this.currentInitPayload?.initialFunctionBreakpoints?.length ?? 0) > 0
+      ) {
+        const launchArgs = (payload.dapArgs ?? {}) as Record<string, unknown>;
+        if (launchArgs.stopOnEntry !== true) {
+          payload.dapArgs = { ...launchArgs, stopOnEntry: true };
+          this.logger?.info('[Worker] Forcing stopOnEntry=true in the js-debug launch config (pending CDP function breakpoints, issue #295)');
+        }
+      }
+
       // Check if command should be queued based on policy
       const handling = this.adapterPolicy.shouldQueueCommand(payload.dapCommand, this.adapterState);
       this.logger?.info(

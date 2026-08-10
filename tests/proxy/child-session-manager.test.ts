@@ -18,6 +18,9 @@ class MockMinimalDapClient extends EventEmitter {
   // When set, returned verbatim for setBreakpoints; otherwise a verified
   // breakpoint per requested line with child-space ids (100, 101, ...)
   static setBreakpointsResponse: unknown | undefined = undefined;
+  // Emit a stopped event shortly after the attach request (issue #295 —
+  // simulates the entry stop firing while later adoption steps still run)
+  static emitStoppedAfterAttach = false;
 
   host: string;
   port: number;
@@ -47,6 +50,10 @@ class MockMinimalDapClient extends EventEmitter {
     const failure = MockMinimalDapClient.failCommands.get(command);
     if (failure) {
       throw failure;
+    }
+
+    if (command === 'attach' && MockMinimalDapClient.emitStoppedAfterAttach) {
+      setTimeout(() => this.emit('event', { event: 'stopped', body: { reason: 'entry', threadId: 0 } }), 5);
     }
 
     // Simulate responses
@@ -101,6 +108,7 @@ describe('ChildSessionManager', () => {
     MockMinimalDapClient.failCommands.clear();
     MockMinimalDapClient.suppressInitialized = false;
     MockMinimalDapClient.setBreakpointsResponse = undefined;
+    MockMinimalDapClient.emitStoppedAfterAttach = false;
   });
 
   describe('JavaScript policy (multi-session)', () => {
@@ -446,8 +454,11 @@ describe('ChildSessionManager', () => {
 
         const child = manager.getActiveChild();
         if (child) {
-          // Simulate child emitting an event
+          // Simulate child emitting an event. Forwarding for cdp-delivery
+          // policies goes through the serialized event chain (issue #295), so
+          // it lands a microtask later.
           (child as any).emit('event', { event: 'stopped', body: {} });
+          await vi.advanceTimersByTimeAsync(0);
 
           expect(childEventSpy).toHaveBeenCalledWith({ event: 'stopped', body: {} });
         }
@@ -668,6 +679,204 @@ describe('ChildSessionManager', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('CDP function breakpoints (issue #295)', () => {
+    class FakeBridge extends EventEmitter {
+      attachCalls: unknown[] = [];
+      detachCalls = 0;
+      syncCalls: DebugProtocol.FunctionBreakpoint[][] = [];
+      armed = false;
+      holdMs = 0;
+      transform: ((evt: DebugProtocol.Event) => DebugProtocol.Event) | null = null;
+
+      async attachToChild(child: unknown): Promise<void> {
+        this.attachCalls.push(child);
+      }
+
+      detach(): void {
+        this.detachCalls++;
+      }
+
+      hasArmedOrPending(): boolean {
+        return this.armed;
+      }
+
+      async sync(bps: DebugProtocol.FunctionBreakpoint[]): Promise<{ breakpoints: DebugProtocol.Breakpoint[] }> {
+        this.syncCalls.push(bps);
+        return { breakpoints: bps.map((_, i) => ({ id: 1_000_000 + i, verified: true })) };
+      }
+
+      async processStoppedEvent(evt: DebugProtocol.Event): Promise<DebugProtocol.Event> {
+        if (this.holdMs) {
+          await new Promise((r) => setTimeout(r, this.holdMs));
+        }
+        return this.transform ? this.transform(evt) : evt;
+      }
+    }
+
+    let bridge: FakeBridge;
+    let factoryCalls: number;
+
+    function makeManager(policy: AdapterPolicy): ChildSessionManager {
+      return new ChildSessionManager({
+        policy,
+        host: 'localhost',
+        port: 9229,
+        cdpBridgeFactory: () => {
+          factoryCalls++;
+          return bridge as never;
+        }
+      });
+    }
+
+    async function adopt(mgr: ChildSessionManager): Promise<MockMinimalDapClient> {
+      vi.useFakeTimers();
+      try {
+        const childCreatedSpy = vi.fn();
+        mgr.on('childCreated', childCreatedSpy);
+        const createPromise = mgr.createChildSession({
+          pendingId: 'cdp-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'launch' }
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+        return childCreatedSpy.mock.calls[0][1] as MockMinimalDapClient;
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    beforeEach(() => {
+      bridge = new FakeBridge();
+      factoryCalls = 0;
+    });
+
+    it('creates the bridge only for cdp-delivery policies', () => {
+      makeManager(PythonAdapterPolicy);
+      expect(factoryCalls).toBe(0);
+      makeManager(JsDebugAdapterPolicy);
+      expect(factoryCalls).toBe(1);
+    });
+
+    it('syncFunctionBreakpoints delegates to the bridge', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const body = await mgr.syncFunctionBreakpoints([{ name: 'greet' }]);
+      expect(bridge.syncCalls).toEqual([[{ name: 'greet' }]]);
+      expect(body.breakpoints[0]).toMatchObject({ id: 1_000_000, verified: true });
+    });
+
+    it('syncFunctionBreakpoints without a bridge returns an all-pending body', async () => {
+      const mgr = makeManager(PythonAdapterPolicy);
+      const body = await mgr.syncFunctionBreakpoints([{ name: 'a' }, { name: 'b' }]);
+      expect(body.breakpoints).toHaveLength(2);
+      expect(body.breakpoints.every((bp) => bp.verified === false)).toBe(true);
+    });
+
+    it('attaches the bridge to the child during adoption', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const child = await adopt(mgr);
+      expect(bridge.attachCalls).toEqual([child]);
+    });
+
+    it('skips the entry-stop wait when the child already reported a stop during adoption (issue #295)', async () => {
+      MockMinimalDapClient.emitStoppedAfterAttach = true;
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      vi.useFakeTimers();
+      try {
+        const createPromise = mgr.createChildSession({
+          pendingId: 'cdp-early-stop',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'launch', stopOnEntry: true }
+        });
+        await vi.advanceTimersByTimeAsync(40000);
+        await createPromise;
+      } finally {
+        vi.useRealTimers();
+      }
+      // The stop arrived while earlier adoption steps ran; ensureChildStopped
+      // must not fall back to the threads + pause path against a paused target
+      const child = MockMinimalDapClient.lastInstance!;
+      expect(child.requests.map((r) => r.command)).not.toContain('pause');
+    });
+
+    it('keeps skipping the entry pause with stopOnEntry false when no function breakpoints are pending', async () => {
+      bridge.armed = false;
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      vi.useFakeTimers();
+      try {
+        const createPromise = mgr.createChildSession({
+          pendingId: 'cdp-no-entry-pause',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'launch', stopOnEntry: false }
+        });
+        await vi.advanceTimersByTimeAsync(40000);
+        await createPromise;
+      } finally {
+        vi.useRealTimers();
+      }
+      const child = MockMinimalDapClient.lastInstance!;
+      expect(child.requests.map((r) => r.command)).not.toContain('pause');
+    });
+
+    it('routes stopped events through the bridge and preserves order around a held stop', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const child = await adopt(mgr);
+
+      bridge.armed = true;
+      bridge.holdMs = 25;
+      bridge.transform = (evt) => ({
+        ...evt,
+        body: { ...(evt.body as object), reason: 'function breakpoint' }
+      });
+
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+
+      (child as unknown as EventEmitter).emit('event', { event: 'stopped', body: { reason: 'breakpoint' } });
+      (child as unknown as EventEmitter).emit('event', { event: 'output', body: { output: 'later' } });
+
+      await new Promise((r) => setTimeout(r, 80));
+      expect(forwarded.map((e) => e.event)).toEqual(['stopped', 'output']);
+      expect((forwarded[0].body as { reason: string }).reason).toBe('function breakpoint');
+    });
+
+    it('forwards non-stopped events without consulting the bridge when nothing is armed', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const child = await adopt(mgr);
+      bridge.armed = false;
+      bridge.transform = () => {
+        throw new Error('must not be called');
+      };
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+      (child as unknown as EventEmitter).emit('event', { event: 'stopped', body: { reason: 'step' } });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(forwarded).toHaveLength(1);
+      expect((forwarded[0].body as { reason: string }).reason).toBe('step');
+    });
+
+    it('re-emits bridge breakpointEvents as childEvents', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+      const bpEvent = { seq: 0, type: 'event', event: 'breakpoint', body: { reason: 'changed', breakpoint: { id: 1_000_001, verified: true } } };
+      bridge.emit('breakpointEvent', bpEvent);
+      expect(forwarded).toEqual([bpEvent]);
+    });
+
+    it('detaches the bridge on child close and on shutdown', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const child = await adopt(mgr);
+      (child as unknown as EventEmitter).emit('close');
+      expect(bridge.detachCalls).toBe(1);
+      await mgr.shutdown();
+      expect(bridge.detachCalls).toBe(2);
     });
   });
 });
