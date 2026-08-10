@@ -7,6 +7,14 @@ updates:
       day: monday
     commit-message:
       prefix: "ci"
+    groups:
+      # init/autobuild/analyze must move together — CodeQL hard-fails with
+      # "Loaded a configuration file for version 'X', but running version 'Y'"
+      # if the steps in one workflow run different action versions. Separate
+      # per-step PRs are individually unmergeable, so keep them in one PR.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
     # Supply-chain mitigation: only open a PR once a release has been public for a few
     # days, giving the community a window to surface a bad/compromised release first.
     # GitHub Actions supports only `default-days` (no semver-* granularity).
