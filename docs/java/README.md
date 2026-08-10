@@ -191,6 +191,16 @@ JDI bridge handles deferred breakpoints natively via `ClassPrepareRequest`. When
 
 No manual breakpoint re-sends are needed — this works transparently in both launch and attach modes.
 
+## Function Breakpoints
+
+`set_breakpoint {function: "name"}` breaks on entry to a method by name — no file or line (issue #292). The bridge plants a `BreakpointRequest` at each concrete overload's entry location (the same technique jdb's `stop in` uses — full speed, no `MethodEntryRequest` overhead).
+
+- **Name forms**: bare `helper`, class-qualified `Foo.helper` / `com.example.Foo.helper` / `Outer.Inner.helper`, constructors `Foo.<init>`. The rightmost dot always splits class from method (method names cannot contain dots).
+- **Overloads**: every concrete overload binds; abstract and native methods are skipped (no bytecode). The response reports the first bound location as `boundLine`. An inherited method binds at the superclass's bytecode, so it also fires for sibling subclasses.
+- **Deferral**: at launch no user classes are loaded yet, so binding normally happens on `ClassPrepareEvent` — the breakpoint reports pending in the response, then flips to verified via a breakpoint `changed` event. Qualified names register narrow class-prepare filters; bare names share one unfiltered watch that excludes JDK internals (`java.*`, `javax.*`, `sun.*`, `jdk.*`, `com.sun.*`), which also means a bare name cannot target a JDK method — qualify the class if you need that. While any bare-name function breakpoint exists, each non-JDK class load costs one suspend/resume round-trip (same class of overhead as deferred line breakpoints).
+- **Conditions**: `condition` works exactly like line-breakpoint conditions (evaluated on hit; evaluation errors default to breaking).
+- Stops report `reason: "function breakpoint"`.
+
 ## Example: Launch Mode
 
 ```java

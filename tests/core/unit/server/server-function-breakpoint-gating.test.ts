@@ -83,7 +83,9 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
   }
 
   it('rejects when the adapter policy declares no function-breakpoint support', async () => {
-    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'java', supportsFunctionBreakpoints: false });
+    // Synthetic language: real adapters that gate function breakpoints off
+    // (js-debug) carry their own reason string, tested below
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'unsupported-lang', supportsFunctionBreakpoints: false });
 
     await expect(callSetFunctionBreakpoint()).rejects.toThrow(/[Ff]unction breakpoint/);
     expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
