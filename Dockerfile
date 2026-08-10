@@ -93,7 +93,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/
 
 # Stage 2: Create runtime image with full LLDB dependencies
-FROM ubuntu:26.04@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
+FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
 # Disable Go at runtime too — Delve isn't installed in the container
 ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet
 
