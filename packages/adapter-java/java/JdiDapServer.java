@@ -53,6 +53,17 @@ public class JdiDapServer {
     // Track source paths for deferred breakpoint responses
     private final ConcurrentHashMap<String, String> sourcePathMap = new ConcurrentHashMap<>();
 
+    // --- Function breakpoints (issue #292) ---
+    // Records for the current setFunctionBreakpoints generation, in request
+    // order. Guarded by fnBpLock: handleSetFunctionBreakpoints runs on the
+    // socket-reader thread while deferred binding runs on the jdi-event-loop
+    // thread. Each record keeps the id assigned in the response — the client
+    // matches function breakpoints by that id alone, so later breakpoint
+    // events must reuse it (unlike line breakpoints, which tolerate fresh ids
+    // via the client's file/line fallback).
+    private final Object fnBpLock = new Object();
+    private final List<Map<String, Object>> functionBreakpoints = new ArrayList<>();
+
     // --- IO ---
     private volatile OutputStream clientOut;
     private volatile boolean running = true;
@@ -237,6 +248,7 @@ public class JdiDapServer {
                 case "attach": handleAttach(reqSeq, args); break;
                 case "launch": handleLaunch(reqSeq, args); break;
                 case "setBreakpoints": handleSetBreakpoints(reqSeq, args); break;
+                case "setFunctionBreakpoints": handleSetFunctionBreakpoints(reqSeq, args); break;
                 case "configurationDone": handleConfigurationDone(reqSeq, args); break;
                 case "threads": handleThreads(reqSeq, args); break;
                 case "stackTrace": handleStackTrace(reqSeq, args); break;
@@ -270,7 +282,7 @@ public class JdiDapServer {
     private void handleInitialize(int reqSeq, Map<String, Object> args) {
         Map<String, Object> caps = new HashMap<>();
         caps.put("supportsConfigurationDoneRequest", true);
-        caps.put("supportsFunctionBreakpoints", false);
+        caps.put("supportsFunctionBreakpoints", true);
         caps.put("supportsConditionalBreakpoints", true);
         caps.put("supportsEvaluateForHovers", true);
         caps.put("supportsSetVariable", false);
@@ -328,6 +340,7 @@ public class JdiDapServer {
 
         startEventLoop();
         registerPendingBreakpoints();
+        registerPendingFunctionBreakpoints();
         sendResponse(reqSeq, "attach", true, new HashMap<>());
     }
 
@@ -442,6 +455,7 @@ public class JdiDapServer {
 
         startEventLoop();
         registerPendingBreakpoints();
+        registerPendingFunctionBreakpoints();
 
         // If stopOnEntry: VM is already suspended from suspend=y
         // We'll send stopped event after configurationDone
@@ -730,6 +744,300 @@ public class JdiDapServer {
             bp.put("verified", false);
             bp.put("line", line);
             bp.put("message", "No debug info for class (compile with -g)");
+        }
+        return bp;
+    }
+
+    // ========== Function Breakpoints (issue #292) ==========
+
+    /**
+     * DAP setFunctionBreakpoints: break on entry to a named method. Names are
+     * bare ("helper"), class-qualified ("Foo.helper", "com.example.Foo.helper",
+     * "Outer.Inner.helper"), or constructors ("Foo.&lt;init&gt;"). Replace-all
+     * semantics like setBreakpoints, but session-global: every call replaces
+     * the entire set. Binding plants a plain BreakpointRequest at each concrete
+     * overload's entry location (the jdb "stop in" technique — full speed, no
+     * MethodEntryRequest); classes not yet loaded bind later via
+     * ClassPrepareRequests and report through breakpoint "changed" events.
+     */
+    private void handleSetFunctionBreakpoints(int reqSeq, Map<String, Object> args) {
+        List<Object> specs = list(args, "breakpoints");
+        List<Map<String, Object>> results = new ArrayList<>();
+        synchronized (fnBpLock) {
+            clearFunctionBreakpointRequests();
+            if (specs != null) {
+                for (Object specObj : specs) {
+                    Map<String, Object> spec = asMap(specObj);
+                    Map<String, Object> record = new HashMap<>();
+                    record.put("id", nextBreakpointId.getAndIncrement());
+                    record.put("verified", false);
+                    String name = str(spec, "name");
+                    if (name == null || name.trim().isEmpty()) {
+                        record.put("invalid", true);
+                        record.put("message", "Function breakpoint requires a name");
+                    } else {
+                        name = name.trim();
+                        // Rightmost-dot split is unambiguous: method names cannot
+                        // contain dots, so the last segment is always the method
+                        // (including <init>/<clinit>).
+                        int lastDot = name.lastIndexOf('.');
+                        record.put("name", name);
+                        if (lastDot > 0) {
+                            record.put("classPart", name.substring(0, lastDot));
+                        }
+                        record.put("methodName", lastDot > 0 ? name.substring(lastDot + 1) : name);
+                        String condition = str(spec, "condition");
+                        if (condition != null && !condition.isEmpty()) {
+                            record.put("condition", condition);
+                        }
+                    }
+                    functionBreakpoints.add(record);
+                }
+            }
+
+            if (!functionBreakpoints.isEmpty() && vm != null) {
+                bindFunctionBreakpointsOnLoadedClasses();
+                registerFunctionBreakpointWatches();
+            }
+
+            for (Map<String, Object> record : functionBreakpoints) {
+                results.add(functionBreakpointResult(record));
+            }
+        }
+        sendResponse(reqSeq, "setFunctionBreakpoints", true, mapOf("breakpoints", results));
+    }
+
+    /** Replace-all cleanup: delete every request tagged jdi-fnbp-name and the
+     *  record list. The tag key is disjoint from the line-breakpoint
+     *  jdi-bp-source tag, so neither cleanup can touch the other's requests. */
+    private void clearFunctionBreakpointRequests() {
+        functionBreakpoints.clear();
+        if (vm == null) return;
+        EventRequestManager erm = vm.eventRequestManager();
+        List<EventRequest> toRemove = new ArrayList<>();
+        for (BreakpointRequest br : erm.breakpointRequests()) {
+            if (br.getProperty("jdi-fnbp-name") != null) toRemove.add(br);
+        }
+        for (ClassPrepareRequest cpr : erm.classPrepareRequests()) {
+            if (cpr.getProperty("jdi-fnbp-name") != null) toRemove.add(cpr);
+        }
+        for (EventRequest req : toRemove) {
+            erm.deleteEventRequest(req);
+        }
+    }
+
+    /** One pass over loaded classes, binding every matching record. */
+    private void bindFunctionBreakpointsOnLoadedClasses() {
+        for (ReferenceType rt : vm.allClasses()) {
+            for (Map<String, Object> record : functionBreakpoints) {
+                if (record.containsKey("invalid")) continue;
+                if (fnBpClassMatches(str(record, "classPart"), rt)) {
+                    bindFunctionBreakpointOnType(record, rt);
+                }
+            }
+        }
+    }
+
+    /**
+     * Does the prepared/loaded type match a record's class qualifier?
+     * classPart == null (bare method name) matches any non-JDK type — bare
+     * names never target JDK internals (qualified names still can).
+     */
+    private boolean fnBpClassMatches(String classPart, ReferenceType rt) {
+        String rtName = rt.name();
+        if (classPart == null) {
+            return !rtName.startsWith("java.") && !rtName.startsWith("javax.")
+                && !rtName.startsWith("sun.") && !rtName.startsWith("jdk.")
+                && !rtName.startsWith("com.sun.");
+        }
+        if (rtName.equals(classPart) || rtName.endsWith("." + classPart)) return true;
+        // Inner classes: JDI reports Outer$Inner, the DAP name says Outer.Inner
+        String normalized = rtName.replace('$', '.');
+        return normalized.equals(classPart) || normalized.endsWith("." + classPart);
+    }
+
+    /**
+     * Bind one record on one type: a BreakpointRequest at the entry location of
+     * every concrete overload (abstract/native methods have no bytecode).
+     * Idempotent per (name, Location), so the initial scan, racing class
+     * prepares, and repeated prepares from multiple classloaders never
+     * duplicate requests. First successful bind records the reported location.
+     */
+    private void bindFunctionBreakpointOnType(Map<String, Object> record, ReferenceType rt) {
+        String name = str(record, "name");
+        String methodName = str(record, "methodName");
+        EventRequestManager erm = vm.eventRequestManager();
+        try {
+            for (Method m : rt.methodsByName(methodName)) {
+                if (m.isAbstract() || m.isNative()) continue;
+                Location loc = m.location();
+                if (loc == null) continue;
+                if (hasFunctionBreakpointAt(erm, name, loc)) continue;
+                BreakpointRequest bpr = erm.createBreakpointRequest(loc);
+                bpr.putProperty("jdi-fnbp-name", name);
+                bpr.putProperty("jdi-fnbp-id", record.get("id"));
+                String condition = str(record, "condition");
+                if (condition != null && !condition.isEmpty()) {
+                    bpr.putProperty("condition", condition);
+                }
+                bpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+                bpr.enable();
+                if (!Boolean.TRUE.equals(record.get("verified"))) {
+                    record.put("verified", true);
+                    if (loc.lineNumber() > 0) {
+                        record.put("boundLine", loc.lineNumber());
+                    }
+                    try {
+                        record.put("boundSource", loc.sourcePath());
+                    } catch (AbsentInformationException e) {
+                        // no source info — omit
+                    }
+                }
+                log("Function breakpoint '" + name + "' bound at " + rt.name() + "." + m.name() + m.signature());
+            }
+        } catch (ClassNotPreparedException e) {
+            // allClasses() can surface unprepared types — they bind on prepare
+        } catch (ObjectCollectedException e) {
+            // type unloaded mid-scan — nothing to bind
+        }
+    }
+
+    private boolean hasFunctionBreakpointAt(EventRequestManager erm, String name, Location loc) {
+        for (BreakpointRequest br : erm.breakpointRequests()) {
+            if (name != null && name.equals(br.getProperty("jdi-fnbp-name")) && loc.equals(br.location())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Watch future class loads so unbound (and multi-classloader) records keep
+     * binding for the whole session, mirroring the line-breakpoint CPRs.
+     * Qualified names get a narrow filter; bare names share one unfiltered
+     * watch with JDK exclusions (the cost of an unfiltered watch is one
+     * suspend/resume per non-JDK class prepare — same class of overhead as the
+     * per-source line-breakpoint CPRs).
+     */
+    private void registerFunctionBreakpointWatches() {
+        EventRequestManager erm = vm.eventRequestManager();
+        boolean needBareWatch = false;
+        for (Map<String, Object> record : functionBreakpoints) {
+            if (record.containsKey("invalid")) continue;
+            String classPart = str(record, "classPart");
+            if (classPart == null) {
+                needBareWatch = true;
+                continue;
+            }
+            // JDI class filters only allow a leading/trailing '*': over-match on
+            // the last segment and refilter precisely in fnBpClassMatches when
+            // the prepare event arrives (same trick as the line-breakpoint CPRs).
+            String lastSegment = classPart.contains(".")
+                ? classPart.substring(classPart.lastIndexOf('.') + 1) : classPart;
+            ClassPrepareRequest cpr = erm.createClassPrepareRequest();
+            cpr.addClassFilter("*" + lastSegment);
+            cpr.putProperty("jdi-fnbp-name", str(record, "name"));
+            cpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+            cpr.enable();
+        }
+        if (needBareWatch) {
+            ClassPrepareRequest cpr = erm.createClassPrepareRequest();
+            cpr.addClassExclusionFilter("java.*");
+            cpr.addClassExclusionFilter("javax.*");
+            cpr.addClassExclusionFilter("sun.*");
+            cpr.addClassExclusionFilter("jdk.*");
+            cpr.addClassExclusionFilter("com.sun.*");
+            cpr.putProperty("jdi-fnbp-name", "*");
+            cpr.setSuspendPolicy(EventRequest.SUSPEND_ALL);
+            cpr.enable();
+            log("Registered shared bare-name function-breakpoint watch");
+        }
+    }
+
+    /**
+     * Bind function breakpoints that were set before the VM connected
+     * (defensive: in the normal worker flow the VM exists first). Called from
+     * handleAttach/handleLaunch beside registerPendingBreakpoints.
+     */
+    private void registerPendingFunctionBreakpoints() {
+        synchronized (fnBpLock) {
+            if (functionBreakpoints.isEmpty() || vm == null) return;
+            List<Map<String, Object>> unverifiedBefore = new ArrayList<>();
+            for (Map<String, Object> record : functionBreakpoints) {
+                if (!Boolean.TRUE.equals(record.get("verified"))) unverifiedBefore.add(record);
+            }
+            bindFunctionBreakpointsOnLoadedClasses();
+            registerFunctionBreakpointWatches();
+            for (Map<String, Object> record : unverifiedBefore) {
+                if (Boolean.TRUE.equals(record.get("verified"))) {
+                    emitFunctionBreakpointChangedEvent(record);
+                }
+            }
+        }
+    }
+
+    /**
+     * Deferred function-breakpoint binding. Called for EVERY ClassPrepareEvent
+     * regardless of which request fired — one prepare can satisfy line and
+     * function breakpoints at once, and dispatching by request tag would drop
+     * one of them.
+     */
+    private void handleClassPreparedForFunctionBreakpoints(ReferenceType refType) {
+        synchronized (fnBpLock) {
+            if (functionBreakpoints.isEmpty()) return;
+            for (Map<String, Object> record : functionBreakpoints) {
+                if (record.containsKey("invalid")) continue;
+                if (!fnBpClassMatches(str(record, "classPart"), refType)) continue;
+                boolean wasVerified = Boolean.TRUE.equals(record.get("verified"));
+                bindFunctionBreakpointOnType(record, refType);
+                if (!wasVerified && Boolean.TRUE.equals(record.get("verified"))) {
+                    emitFunctionBreakpointChangedEvent(record);
+                }
+            }
+        }
+    }
+
+    /** First-bind notification, reusing the id from the setFunctionBreakpoints
+     *  response — the client matches function breakpoints by that id alone.
+     *  Later overload/classloader binds are silent (no boundLine flapping). */
+    private void emitFunctionBreakpointChangedEvent(Map<String, Object> record) {
+        Map<String, Object> bpEvent = new HashMap<>();
+        bpEvent.put("reason", "changed");
+        Map<String, Object> bpBody = new HashMap<>();
+        bpBody.put("id", record.get("id"));
+        bpBody.put("verified", true);
+        if (record.get("boundLine") != null) {
+            bpBody.put("line", record.get("boundLine"));
+        }
+        if (record.get("boundSource") != null) {
+            bpBody.put("source", mapOf("path", str(record, "boundSource")));
+        }
+        bpEvent.put("breakpoint", bpBody);
+        sendEvent("breakpoint", bpEvent);
+        log("Function breakpoint '" + str(record, "name") + "' verified (deferred bind)");
+    }
+
+    /** Positional response entry for one record. */
+    private Map<String, Object> functionBreakpointResult(Map<String, Object> record) {
+        Map<String, Object> bp = new HashMap<>();
+        bp.put("id", record.get("id"));
+        if (Boolean.TRUE.equals(record.get("verified"))) {
+            bp.put("verified", true);
+            if (record.get("boundLine") != null) {
+                bp.put("line", record.get("boundLine"));
+            }
+            if (record.get("boundSource") != null) {
+                bp.put("source", mapOf("path", str(record, "boundSource")));
+            }
+        } else {
+            bp.put("verified", false);
+            String message = str(record, "message");
+            if (message == null) {
+                message = vm == null
+                    ? "VM not started, function breakpoint pending"
+                    : "Function '" + str(record, "name") + "' not bound yet (class not loaded, breakpoint pending)";
+            }
+            bp.put("message", message);
         }
         return bp;
     }
@@ -1399,7 +1707,9 @@ public class JdiDapServer {
 
                             log("Breakpoint hit: " + bpe.location());
                             boolean allStopped = bpr == null || bpr.suspendPolicy() == EventRequest.SUSPEND_ALL;
-                            sendStoppedEvent("breakpoint", bpe.thread().uniqueID(), allStopped);
+                            // Function breakpoints report their own DAP stop reason
+                            boolean isFnBp = bpr != null && bpr.getProperty("jdi-fnbp-name") != null;
+                            sendStoppedEvent(isFnBp ? "function breakpoint" : "breakpoint", bpe.thread().uniqueID(), allStopped);
                             resume = false;
                             stopped = true;
 
@@ -1417,6 +1727,7 @@ public class JdiDapServer {
                             ReferenceType refType = cpe.referenceType();
                             log("Class prepared: " + refType.name());
                             handleClassPrepared(refType);
+                            handleClassPreparedForFunctionBreakpoints(refType);
                             // Only resume if no stopping event was seen in this EventSet
                             if (!stopped) {
                                 resume = true;

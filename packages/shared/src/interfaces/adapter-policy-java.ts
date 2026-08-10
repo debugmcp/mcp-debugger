@@ -17,7 +17,10 @@ const JDK_INTERNAL_PREFIXES = ['java.', 'javax.', 'sun.', 'jdk.', 'com.sun.'];
 export const JavaAdapterPolicy: AdapterPolicy = {
   name: 'java',
   supportsLogPoints: false,
-  supportsFunctionBreakpoints: false,
+  // JdiDapServer implements setFunctionBreakpoints natively: BreakpointRequests
+  // at each concrete overload's entry location, with ClassPrepareRequest
+  // deferral for classes not yet loaded (issue #292)
+  supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

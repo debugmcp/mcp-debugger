@@ -716,8 +716,18 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Function-breakpoint drift check (issue #271 phase 3): accepted
       // pre-launch on unknown policy support, but the live adapter does not
-      // advertise supportsFunctionBreakpoints — it will never bind.
-      if (capabilities.supportsFunctionBreakpoints !== true && session.functionBreakpoints) {
+      // advertise supportsFunctionBreakpoints — it will never bind. Skipped
+      // for CDP-delivered function breakpoints (issue #295): js-debug's live
+      // capabilities honestly say false, but our proxy bridge binds them out
+      // of band, so the adapter bit carries no signal here.
+      const fnBpViaCdp = (() => {
+        try {
+          return this.sessionStore.selectPolicy(session.language).functionBreakpointsVia === 'cdp';
+        } catch {
+          return false;
+        }
+      })();
+      if (!fnBpViaCdp && capabilities.supportsFunctionBreakpoints !== true && session.functionBreakpoints) {
         for (const bp of session.functionBreakpoints.values()) {
           this.logger.warn(
             `[SessionManager ${sessionId}] Function breakpoint on ${bp.functionName} but the adapter does not advertise supportsFunctionBreakpoints — it will not bind`
