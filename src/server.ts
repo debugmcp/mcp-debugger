@@ -386,10 +386,13 @@ export class DebugMcpServer {
     const language = session?.language ?? policy.name;
 
     if (policy.supportsFunctionBreakpoints === false) {
-      const reason = String(language) === 'javascript'
-        ? 'js-debug does not implement function breakpoints (no setFunctionBreakpoints support upstream)'
-        : undefined;
-      throw new UnsupportedFeatureError('Function breakpoints', String(language), reason);
+      throw new UnsupportedFeatureError('Function breakpoints', String(language));
+    }
+    // CDP-delivered function breakpoints (issue #295): our proxy arms them out
+    // of band, so the adapter's live capability bit is irrelevant — js-debug
+    // will always report supportsFunctionBreakpoints: false.
+    if (policy.supportsFunctionBreakpoints === true && policy.functionBreakpointsVia === 'cdp') {
+      return {};
     }
     if (liveCaps) {
       if (liveCaps.supportsFunctionBreakpoints === true) {
@@ -889,7 +892,7 @@ export class DebugMcpServer {
         };
         setBreakpointExtraProps.function = {
           type: 'string',
-          description: 'Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, .NET, and Java adapters; not JavaScript'
+          description: 'Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, .NET, Java, and JavaScript adapters. JavaScript names are dotted runtime paths (e.g. "handler" or "obj.method") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause'
         };
         setBreakpointRequired = ['sessionId'];
       }

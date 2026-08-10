@@ -771,6 +771,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       case DebugFeature.LOG_POINTS:
       case DebugFeature.EXCEPTION_INFO_REQUEST:
       case DebugFeature.LOADED_SOURCES_REQUEST:
+      case DebugFeature.FUNCTION_BREAKPOINTS:
         return true;
       default:
         return false;
@@ -795,9 +796,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   getCapabilities(): AdapterCapabilities {
     return {
       supportsConfigurationDoneRequest: true,
-      // js-debug does not implement setFunctionBreakpoints — the vendored
-      // bundle declares supportsFunctionBreakpoints: false and has no handler
-      supportsFunctionBreakpoints: false,
+      // js-debug itself implements no setFunctionBreakpoints (its initialize
+      // response says false), but ours are delivered out of band by the
+      // proxy's CDP bridge (issue #295) — the policy's functionBreakpointsVia
+      // 'cdp' marker makes the live capability bit irrelevant to gating
+      supportsFunctionBreakpoints: true,
       supportsConditionalBreakpoints: true,
       supportsEvaluateForHovers: true,
       supportsLoadedSourcesRequest: true,
