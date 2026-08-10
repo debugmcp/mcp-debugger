@@ -216,7 +216,7 @@ Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a differe
 - Session-global, name-addressed — the adapter resolves the symbol across the whole program, and the name survives any file edit. `restart_debugging` re-applies them natively.
 - Composes with `condition` only (`logMessage` and `suspendPolicy` have no DAP function-breakpoint form; file/line/statement/expectedContent are contradictory and rejected).
 - The response and `list_breakpoints` report the adapter's bound location as `boundFile`/`boundLine` once verified. `list_breakpoints` returns function breakpoints in a separate `functionBreakpoints` array (excluded when filtering by file); `remove_breakpoint` accepts `function: "name"` or the breakpoint id; an unscoped `clear_breakpoints` removes them, a file-scoped clear does not.
-- Support is adapter-gated: Python, Go, Rust, and .NET work; Java (JDI bridge) and JavaScript (js-debug's child-session architecture isn't wired for them yet) fail fast with a clear error; Ruby is accepted with a warning and validated against the adapter's live capabilities at launch.
+- Support is adapter-gated: Python, Go, Rust, and .NET work; Java (JDI bridge) and JavaScript (js-debug does not implement function breakpoints upstream) fail fast with a clear error; Ruby is accepted with a warning and validated against the adapter's live capabilities at launch.
 
 #### Logpoints
 

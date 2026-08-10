@@ -26,7 +26,6 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
   it('supportsFeature returns true for expected features', () => {
     const supported: DebugFeature[] = [
       DebugFeature.CONDITIONAL_BREAKPOINTS,
-      DebugFeature.FUNCTION_BREAKPOINTS,
       DebugFeature.EXCEPTION_BREAKPOINTS,
       DebugFeature.EVALUATE_FOR_HOVERS,
       DebugFeature.SET_VARIABLE,
@@ -39,6 +38,9 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
     }
 
     const unsupported: DebugFeature[] = [
+      // js-debug does not implement setFunctionBreakpoints (vendored bundle
+      // declares supportsFunctionBreakpoints: false and has no handler)
+      DebugFeature.FUNCTION_BREAKPOINTS,
       DebugFeature.DATA_BREAKPOINTS,
       DebugFeature.DISASSEMBLE_REQUEST,
       DebugFeature.TERMINATE_THREADS_REQUEST,
@@ -58,7 +60,7 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
   it('getCapabilities exposes expected js-debug flags and filters', () => {
     const caps = adapter.getCapabilities();
     expect(caps.supportsConfigurationDoneRequest).toBe(true);
-    expect(caps.supportsFunctionBreakpoints).toBe(true);
+    expect(caps.supportsFunctionBreakpoints).toBe(false);
     expect(caps.supportsConditionalBreakpoints).toBe(true);
     expect(caps.supportsEvaluateForHovers).toBe(true);
     expect(caps.supportsLoadedSourcesRequest).toBe(true);

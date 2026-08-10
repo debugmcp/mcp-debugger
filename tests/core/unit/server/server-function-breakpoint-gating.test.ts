@@ -3,10 +3,9 @@
  *
  * Hybrid gating with one deliberate difference from logpoint gating: the
  * STATIC policy verdict is checked BEFORE live adapter capabilities. The
- * policy knows what our plumbing can deliver — js-debug's adapter advertises
- * supportsFunctionBreakpoints, but function breakpoints sent to the parent
- * session never reach the child that owns the runtime, so the policy says
- * false and that must win over live caps.
+ * policy encodes what the adapter and our plumbing can actually deliver, so
+ * an explicit policy false must win over whatever live capabilities claim
+ * (they can drift, as js-debug's hand-written TS metadata once did).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -90,7 +89,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
   });
 
-  it('rejects on policy false even when live capabilities advertise support (js-debug)', async () => {
+  it('rejects on policy false even when live capabilities advertise support (policy beats live caps)', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'javascript', supportsFunctionBreakpoints: false });
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
@@ -98,7 +97,8 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
       adapterCapabilities: { supportsFunctionBreakpoints: true }
     });
 
-    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/[Ff]unction breakpoint/);
+    // javascript also carries the js-specific reason: blocked upstream
+    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/does not implement function breakpoints/);
     expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
   });
 
