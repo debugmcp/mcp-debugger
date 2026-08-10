@@ -375,10 +375,9 @@ export class DebugMcpServer {
   /**
    * Function-breakpoint gating (issue #271 phase 3). Same hybrid shape as
    * validateLogPointSupport with one deliberate difference: the STATIC policy
-   * verdict is checked FIRST. The policy also encodes what our plumbing can
-   * deliver — js-debug's adapter advertises supportsFunctionBreakpoints, but
-   * a parent-session setFunctionBreakpoints never binds in the child that
-   * owns the runtime, so its policy says false and that must beat live caps.
+   * verdict is checked FIRST. The policy encodes what the adapter and our
+   * plumbing can actually deliver, so an explicit policy false must beat
+   * whatever the live capabilities claim.
    */
   private validateFunctionBreakpointSupport(sessionId: string): { warning?: string } {
     const session = this.sessionManager.getSession(sessionId);
@@ -388,7 +387,7 @@ export class DebugMcpServer {
 
     if (policy.supportsFunctionBreakpoints === false) {
       const reason = String(language) === 'javascript'
-        ? 'function breakpoints are not yet wired for js-debug\'s child-session architecture'
+        ? 'js-debug does not implement function breakpoints (no setFunctionBreakpoints support upstream)'
         : undefined;
       throw new UnsupportedFeatureError('Function breakpoints', String(language), reason);
     }

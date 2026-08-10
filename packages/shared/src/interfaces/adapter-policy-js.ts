@@ -25,9 +25,10 @@ export interface JsAdapterState extends AdapterSpecificState {
 export const JsDebugAdapterPolicy: AdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
-  // Function breakpoints are NOT wired through the js-debug parent/child
-  // mirroring yet; the adapter advertises the capability but a parent-sent
-  // setFunctionBreakpoints never binds in the child that owns the runtime.
+  // js-debug does not implement DAP function breakpoints: upstream declares
+  // supportsFunctionBreakpoints: false and registers no setFunctionBreakpoints
+  // handler (verified against the vendored bundle and vscode-js-debug main).
+  // Blocked upstream, not a plumbing gap on our side.
   supportsFunctionBreakpoints: false,
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',

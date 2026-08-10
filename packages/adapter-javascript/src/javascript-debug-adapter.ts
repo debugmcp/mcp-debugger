@@ -765,7 +765,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   supportsFeature(feature: DebugFeature): boolean {
     switch (feature) {
       case DebugFeature.CONDITIONAL_BREAKPOINTS:
-      case DebugFeature.FUNCTION_BREAKPOINTS:
       case DebugFeature.EXCEPTION_BREAKPOINTS:
       case DebugFeature.EVALUATE_FOR_HOVERS:
       case DebugFeature.SET_VARIABLE:
@@ -796,7 +795,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   getCapabilities(): AdapterCapabilities {
     return {
       supportsConfigurationDoneRequest: true,
-      supportsFunctionBreakpoints: true,
+      // js-debug does not implement setFunctionBreakpoints — the vendored
+      // bundle declares supportsFunctionBreakpoints: false and has no handler
+      supportsFunctionBreakpoints: false,
       supportsConditionalBreakpoints: true,
       supportsEvaluateForHovers: true,
       supportsLoadedSourcesRequest: true,
