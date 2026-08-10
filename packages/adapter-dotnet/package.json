@@ -22,7 +22,7 @@
     "which": "^7.0.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@types/which": "^3.0.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
