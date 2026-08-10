@@ -92,15 +92,61 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
   });
 
   it('rejects on policy false even when live capabilities advertise support (policy beats live caps)', async () => {
-    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'javascript', supportsFunctionBreakpoints: false });
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'unsupported-lang', supportsFunctionBreakpoints: false });
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: 'active',
       adapterCapabilities: { supportsFunctionBreakpoints: true }
     });
 
-    // javascript also carries the js-specific reason: blocked upstream
-    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/does not implement function breakpoints/);
+    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/[Ff]unction breakpoint/);
+    expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
+  });
+
+  it('rejects on policy false regardless of a cdp delivery marker', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'unsupported-lang',
+      supportsFunctionBreakpoints: false,
+      functionBreakpointsVia: 'cdp'
+    });
+
+    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/[Ff]unction breakpoint/);
+    expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
+  });
+
+  it('accepts policy true + via cdp even when live capabilities deny support (js-debug, issue #295)', async () => {
+    // js-debug's initialize response always reports supportsFunctionBreakpoints
+    // false — irrelevant, because the CDP bridge delivers them out of band.
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'js-debug',
+      supportsFunctionBreakpoints: true,
+      functionBreakpointsVia: 'cdp'
+    });
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'active',
+      language: 'javascript',
+      adapterCapabilities: { supportsFunctionBreakpoints: false }
+    });
+
+    const result = await callSetFunctionBreakpoint();
+    expect(mockSessionManager.setFunctionBreakpoint).toHaveBeenCalled();
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+  });
+
+  it('still rejects policy true + DAP delivery when live capabilities deny support (real adapter regression)', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'python',
+      supportsFunctionBreakpoints: true
+    });
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'active',
+      adapterCapabilities: { supportsFunctionBreakpoints: false }
+    });
+
+    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/did not advertise/);
     expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
   });
 
