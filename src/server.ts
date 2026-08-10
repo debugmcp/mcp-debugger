@@ -889,7 +889,7 @@ export class DebugMcpServer {
         };
         setBreakpointExtraProps.function = {
           type: 'string',
-          description: 'Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, and .NET adapters; not Java or JavaScript'
+          description: 'Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, .NET, and Java adapters; not JavaScript'
         };
         setBreakpointRequired = ['sessionId'];
       }

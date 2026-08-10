@@ -482,6 +482,7 @@ After installation:
   supportsFeature(feature: DebugFeature): boolean {
     const supportedFeatures = [
       DebugFeature.CONDITIONAL_BREAKPOINTS,
+      DebugFeature.FUNCTION_BREAKPOINTS,
       DebugFeature.EXCEPTION_BREAKPOINTS,
       DebugFeature.EVALUATE_FOR_HOVERS,
       DebugFeature.TERMINATE_REQUEST,
@@ -517,7 +518,7 @@ After installation:
   getCapabilities(): AdapterCapabilities {
     return {
       supportsConfigurationDoneRequest: true,
-      supportsFunctionBreakpoints: false,
+      supportsFunctionBreakpoints: true,
       supportsConditionalBreakpoints: true,
       supportsHitConditionalBreakpoints: false,
       supportsEvaluateForHovers: true,

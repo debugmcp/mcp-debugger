@@ -232,8 +232,8 @@ describe('JavaDebugAdapter', () => {
       expect(adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)).toBe(true);
     });
 
-    it('should not support function breakpoints', () => {
-      expect(adapter.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(false);
+    it('should support function breakpoints', () => {
+      expect(adapter.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(true);
     });
 
     it('should support exception breakpoints', () => {
@@ -262,7 +262,7 @@ describe('JavaDebugAdapter', () => {
       const caps = adapter.getCapabilities();
 
       expect(caps.supportsConfigurationDoneRequest).toBe(true);
-      expect(caps.supportsFunctionBreakpoints).toBe(false);
+      expect(caps.supportsFunctionBreakpoints).toBe(true);
       expect(caps.supportsConditionalBreakpoints).toBe(true);
       expect(caps.supportsEvaluateForHovers).toBe(true);
       expect(caps.supportsSetVariable).toBe(false);
