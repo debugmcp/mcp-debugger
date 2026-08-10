@@ -26,13 +26,15 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
   it('supportsFeature returns true for expected features', () => {
     const supported: DebugFeature[] = [
       DebugFeature.CONDITIONAL_BREAKPOINTS,
-      DebugFeature.FUNCTION_BREAKPOINTS,
       DebugFeature.EXCEPTION_BREAKPOINTS,
       DebugFeature.EVALUATE_FOR_HOVERS,
       DebugFeature.SET_VARIABLE,
       DebugFeature.LOG_POINTS,
       DebugFeature.EXCEPTION_INFO_REQUEST,
-      DebugFeature.LOADED_SOURCES_REQUEST
+      DebugFeature.LOADED_SOURCES_REQUEST,
+      // Delivered out of band by the proxy's CDP bridge (issue #295) —
+      // js-debug itself still implements no setFunctionBreakpoints
+      DebugFeature.FUNCTION_BREAKPOINTS
     ];
     for (const f of supported) {
       expect(adapter.supportsFeature(f)).toBe(true);
@@ -58,6 +60,8 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
   it('getCapabilities exposes expected js-debug flags and filters', () => {
     const caps = adapter.getCapabilities();
     expect(caps.supportsConfigurationDoneRequest).toBe(true);
+    // CDP-bridge-delivered (issue #295); js-debug's own initialize response
+    // still reports false, which the policy's 'cdp' marker makes irrelevant
     expect(caps.supportsFunctionBreakpoints).toBe(true);
     expect(caps.supportsConditionalBreakpoints).toBe(true);
     expect(caps.supportsEvaluateForHovers).toBe(true);

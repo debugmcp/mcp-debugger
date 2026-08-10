@@ -63,15 +63,26 @@ export interface AdapterPolicy {
   supportsLogPoints?: boolean;
 
   /**
-   * Static pre-launch knowledge of DAP function-breakpoint support
-   * (issue #271 phase 3). Unlike supportsLogPoints, an explicit `false` here
-   * wins over live adapter capabilities: the policy also encodes what OUR
-   * plumbing can deliver (js-debug's adapter advertises the capability, but
-   * function breakpoints sent to the parent session never bind in the child
-   * that owns the runtime). `undefined` means unknown — accepted with a
-   * warning and re-checked against live capabilities.
+   * Static pre-launch knowledge of function-breakpoint support (issue #271
+   * phase 3). Unlike supportsLogPoints, an explicit policy verdict here wins
+   * over live adapter capabilities: the policy also encodes what OUR plumbing
+   * can deliver. `false` rejects even if the adapter advertises the DAP
+   * capability; `true` combined with functionBreakpointsVia 'cdp' accepts even
+   * though the adapter's live capabilities say false (we never send it the DAP
+   * request). `undefined` means unknown — accepted with a warning and
+   * re-checked against live capabilities.
    */
   supportsFunctionBreakpoints?: boolean;
+
+  /**
+   * Delivery mechanism for function breakpoints (issue #295). Absent means
+   * 'dap': the standard setFunctionBreakpoints request goes to the adapter,
+   * and live capabilities matter. 'cdp' means our proxy delivers them out of
+   * band (js-debug: resolved and armed over the requestCDPProxy WebSocket via
+   * Debugger.setBreakpointOnFunctionCall), so the adapter's own capability
+   * bit is irrelevant to gating and capability-drift checks.
+   */
+  functionBreakpointsVia?: 'dap' | 'cdp';
 
   /**
    * Strategy for how to create/attach to the child session when reverse startDebugging occurs

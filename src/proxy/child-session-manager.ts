@@ -14,6 +14,7 @@ import type { DapClientBehavior, ChildSessionConfig } from '@debugmcp/shared';
 import { resolveExceptionFilters } from '@debugmcp/shared';
 import { createLogger } from '../utils/logger.js';
 import type { MinimalDapClient } from './minimal-dap.js';
+import { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
 import path from 'path';
 
 const logger = createLogger('child-session-manager');
@@ -61,6 +62,8 @@ export interface ChildSessionOptions {
   policy: AdapterPolicy;
   host: string;
   port: number;
+  /** DI seam for tests; only consulted when the policy delivers function breakpoints via CDP (issue #295). */
+  cdpBridgeFactory?: () => CdpFunctionBreakpointBridge;
 }
 
 /**
@@ -134,7 +137,15 @@ export class ChildSessionManager extends EventEmitter {
 
   // State tracking
   private adoptionInProgress = false;
+  private sawChildStop = false;
   private readonly instanceId: string;
+
+  // CDP-delivered function breakpoints (issue #295); present only when the
+  // policy declares functionBreakpointsVia 'cdp' (js-debug)
+  private cdpBridge: CdpFunctionBreakpointBridge | null = null;
+  // Serializes child event forwarding so a stopped event held by the bridge
+  // (correlation/bind window) cannot be overtaken by later events
+  private childEventChain: Promise<void> = Promise.resolve();
 
   constructor(options: ChildSessionOptions) {
     super();
@@ -143,7 +154,28 @@ export class ChildSessionManager extends EventEmitter {
     this.host = options.host;
     this.port = options.port;
     this.instanceId = createInstanceId();
+    if (options.policy.functionBreakpointsVia === 'cdp') {
+      this.cdpBridge = options.cdpBridgeFactory?.() ?? new CdpFunctionBreakpointBridge();
+      this.cdpBridge.on('breakpointEvent', (evt: DebugProtocol.Event) => {
+        this.emit('childEvent', evt);
+      });
+    }
     logger.info(`[ChildSessionManager:${this.instanceId}] created`);
+  }
+
+  /**
+   * Replace-all function breakpoint sync, delivered over the CDP bridge
+   * (issue #295). MinimalDapClient intercepts setFunctionBreakpoints for
+   * cdp-delivery policies and lands here; safe before any child exists (the
+   * bridge queues the desired set as pending).
+   */
+  async syncFunctionBreakpoints(
+    breakpoints: DebugProtocol.FunctionBreakpoint[]
+  ): Promise<{ breakpoints: DebugProtocol.Breakpoint[] }> {
+    if (!this.cdpBridge) {
+      return { breakpoints: breakpoints.map(() => ({ verified: false })) };
+    }
+    return this.cdpBridge.sync(breakpoints);
   }
 
   /**
@@ -336,6 +368,19 @@ export class ChildSessionManager extends EventEmitter {
 
       // Handle post-attach initialization if needed
       await death.race(this.handlePostAttachInit(child));
+
+      // Connect the CDP function-breakpoint bridge BEFORE forcing the entry
+      // pause so the proxy's sticky Debugger.paused replay plus a live
+      // subscription cover it either way (issue #295). attachToChild never
+      // throws by design; death.race can, and a dead child fails adoption in
+      // the next step regardless, so log and continue here.
+      if (this.cdpBridge) {
+        try {
+          await death.race(this.cdpBridge.attachToChild(child));
+        } catch (err) {
+          logger.warn(`[ChildSessionManager:${this.instanceId}] CDP bridge attach aborted: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
 
       // Ensure initial stop if policy requires it.
       // Skip when the user explicitly requested stopOnEntry=false: forcing a
@@ -553,6 +598,13 @@ export class ChildSessionManager extends EventEmitter {
    * Ensure child is stopped (for adapters that require it)
    */
   private async ensureChildStopped(child: MinimalDapClient): Promise<void> {
+    // The entry stop may have fired while earlier adoption steps ran (e.g.
+    // during the CDP bridge attach, issue #295) — waiting for a fresh event
+    // would stall the full 15s against a target that is already paused.
+    if (this.sawChildStop) {
+      logger.info(`[ChildSessionManager:${this.instanceId}] child already reported a stop; skipping entry-stop wait`);
+      return;
+    }
     // Wait for stopped event
     const stopped = await this.waitForEvent(child, 'stopped', 15000, false);
     
@@ -590,17 +642,42 @@ export class ChildSessionManager extends EventEmitter {
    */
   private wireChildEvents(child: MinimalDapClient): void {
     child.on('event', (evt: DebugProtocol.Event) => {
-      // Forward child events through parent
-      this.emit('childEvent', evt);
+      if (evt.event === 'stopped') {
+        this.sawChildStop = true;
+      }
+      const bridge = this.cdpBridge;
+      if (!bridge) {
+        // Forward child events through parent
+        this.emit('childEvent', evt);
+        return;
+      }
+      // Serialize through the chain so a stopped event the bridge holds
+      // (bind/correlation window) keeps its place in the event order
+      this.childEventChain = this.childEventChain.then(async () => {
+        let out = evt;
+        if (evt.event === 'stopped') {
+          if (bridge.hasArmedOrPending()) {
+            try {
+              out = await bridge.processStoppedEvent(evt);
+            } catch (err) {
+              logger.warn(`[ChildSessionManager:${this.instanceId}] bridge stop processing failed, forwarding original: ${String(err)}`);
+            }
+          } else {
+            logger.info(`[ChildSessionManager:${this.instanceId}] stopped event bypassed the CDP bridge (no armed or pending function breakpoints)`);
+          }
+        }
+        this.emit('childEvent', out);
+      });
     });
-    
+
     child.on('error', (err: Error) => {
       logger.error('[child] DAP client error:', err);
       this.emit('childError', null, err);
     });
-    
+
     child.on('close', () => {
       logger.info(`[ChildSessionManager:${this.instanceId}] [child] DAP client connection closed (current count=${this.childSessions.size})`);
+      this.cdpBridge?.detach();
       this.emit('childClosed');
       this.childSessions.clear();
       this.activeChild = null;
@@ -666,7 +743,8 @@ export class ChildSessionManager extends EventEmitter {
    */
   async shutdown(): Promise<void> {
     logger.info(`[ChildSessionManager:${this.instanceId}] Shutting down child sessions`);
-    
+    this.cdpBridge?.detach();
+
     for (const [id, child] of this.childSessions) {
       try {
         child.shutdown('parent shutdown');

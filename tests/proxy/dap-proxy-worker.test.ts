@@ -612,6 +612,73 @@ describe('DapProxyWorker', () => {
       expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
     });
 
+    it('forces stopOnEntry=true in the launch config when CDP function breakpoints are pending (issue #295)', async () => {
+      const sendRequest = vi.fn().mockResolvedValue({ success: true });
+      const cdpPolicy = {
+        name: 'js-debug-stub',
+        functionBreakpointsVia: 'cdp' as const,
+        shouldQueueCommand: () => ({ shouldQueue: false }),
+        getInitializationBehavior: () => ({}),
+        createInitialState: () => ({})
+      };
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = { ...mockDapClient, sendRequest };
+      (worker as any).adapterPolicy = cdpPolicy;
+      (worker as any).adapterState = {};
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'js-fnbp-session',
+        initialFunctionBreakpoints: [{ name: 'compute' }]
+      };
+
+      await (worker as any).handleDapCommand({
+        requestId: 'launch-1',
+        cmd: 'dap',
+        sessionId: 'js-fnbp-session',
+        dapCommand: 'launch',
+        dapArgs: { program: 'x.js', stopOnEntry: false }
+      });
+
+      expect(sendRequest).toHaveBeenCalledWith('launch', expect.objectContaining({ stopOnEntry: true }));
+    });
+
+    it('leaves the launch config alone without pending function breakpoints or without cdp delivery', async () => {
+      const sendRequest = vi.fn().mockResolvedValue({ success: true });
+      const basePolicy = {
+        name: 'js-debug-stub',
+        functionBreakpointsVia: 'cdp' as const,
+        shouldQueueCommand: () => ({ shouldQueue: false }),
+        getInitializationBehavior: () => ({}),
+        createInitialState: () => ({})
+      };
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = { ...mockDapClient, sendRequest };
+      (worker as any).adapterPolicy = basePolicy;
+      (worker as any).adapterState = {};
+      (worker as any).currentInitPayload = { cmd: 'init', sessionId: 's', initialFunctionBreakpoints: [] };
+
+      await (worker as any).handleDapCommand({
+        requestId: 'launch-2',
+        cmd: 'dap',
+        sessionId: 's',
+        dapCommand: 'launch',
+        dapArgs: { program: 'x.js', stopOnEntry: false }
+      });
+      expect(sendRequest).toHaveBeenCalledWith('launch', expect.objectContaining({ stopOnEntry: false }));
+
+      // dap-delivered policy with pending fn-bps: also untouched
+      (worker as any).adapterPolicy = { ...basePolicy, functionBreakpointsVia: undefined };
+      (worker as any).currentInitPayload = { cmd: 'init', sessionId: 's', initialFunctionBreakpoints: [{ name: 'f' }] };
+      await (worker as any).handleDapCommand({
+        requestId: 'launch-3',
+        cmd: 'dap',
+        sessionId: 's',
+        dapCommand: 'launch',
+        dapArgs: { program: 'x.js', stopOnEntry: false }
+      });
+      expect(sendRequest).toHaveBeenLastCalledWith('launch', expect.objectContaining({ stopOnEntry: false }));
+    });
+
     it('forwards DAP breakpoint events to the parent (issue #236)', () => {
       const connectionStub = {
         setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
