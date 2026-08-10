@@ -369,7 +369,7 @@ describe('MCP Server JavaScript Function Breakpoints', () => {
     expect(bpRes.success, JSON.stringify(bpRes)).toBe(true);
 
     const fnBp = await waitForVerifiedFunctionBp(sid, 'globalThis.tick');
-    expect(fnBp?.verified).toBe(true);
+    expect(fnBp?.verified, `function breakpoint state: ${JSON.stringify(fnBp)}`).toBe(true);
 
     // The interval calls tick every 100ms — the stop lands promptly.
     const stack = await waitForPausedState(sid);

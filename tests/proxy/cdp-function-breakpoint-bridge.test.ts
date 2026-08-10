@@ -210,6 +210,23 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(cdp.callsFor('Debugger.enable')).toHaveLength(1);
     });
 
+    it('kicks resolution when the bridge attach completes so pre-attach syncs bind without any pause (attach mode)', async () => {
+      // Attach-mode race under load: the live set_breakpoint sync can land
+      // while child adoption is still in flight. The entry pends ("no debug
+      // target yet") — and a free-running attach target never pauses, so the
+      // attach completion itself must trigger resolution via the global path.
+      cdp.globalFunctions.set('globalThis.tick', 'obj-tick-g');
+      const body = await bridge.sync([fnBp('globalThis.tick')]);
+      expect(body.breakpoints[0].verified).toBe(false);
+
+      await attach(); // no pause events at all
+      await bridge.waitForResolution();
+
+      expect(cdp.callsFor('Debugger.setBreakpointOnFunctionCall')).toHaveLength(1);
+      expect(breakpointEvents).toHaveLength(1);
+      expect(breakpointEvents[0].body.breakpoint.verified).toBe(true);
+    });
+
     it('attach failure leaves entries pending with a message and does not throw', async () => {
       await bridge.sync([fnBp('greet')]);
       child.failProxyRequest = true;
@@ -315,6 +332,24 @@ describe('CdpFunctionBreakpointBridge', () => {
       });
       await attach();
       cdp.pause(); // stale by the time sync evaluates
+      const body = await bridge.sync([fnBp('globalThis.tick')]);
+      expect(body.breakpoints[0].verified).toBe(true);
+      expect(cdp.callsFor('Runtime.evaluate').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('retries globally even when the resumed event cleared the record during the failed frame evaluation', async () => {
+      // The other side of the stale-record race: Debugger.resumed lands while
+      // the doomed evaluateOnCallFrame round-trip is still in flight, so the
+      // record is already null when the error arrives. The error itself
+      // proves the frame path was wrong — the retry must not require the
+      // record to still be present.
+      cdp.globalFunctions.set('globalThis.tick', 'obj-tick-g');
+      cdp.handlers.set('Debugger.evaluateOnCallFrame', () => {
+        cdp.resume();
+        throw new Error('Debugger.evaluateOnCallFrame: Can only perform operation while paused.');
+      });
+      await attach();
+      cdp.pause(); // stale by evaluation time
       const body = await bridge.sync([fnBp('globalThis.tick')]);
       expect(body.breakpoints[0].verified).toBe(true);
       expect(cdp.callsFor('Runtime.evaluate').length).toBeGreaterThanOrEqual(1);
