@@ -444,6 +444,24 @@ export class MinimalDapClient extends EventEmitter {
       };
     }
 
+    // CDP-delivered function breakpoints (issue #295): the adapter has no
+    // setFunctionBreakpoints handler at all, so the request must never reach
+    // any DAP socket — the ChildSessionManager's CDP bridge owns the feature
+    // and synthesizes the authoritative response.
+    if (command === 'setFunctionBreakpoints' && this.policy?.functionBreakpointsVia === 'cdp' && this.childSessionManager) {
+      const fnArgs = (args as DebugProtocol.SetFunctionBreakpointsArguments | undefined) ?? { breakpoints: [] };
+      const body = await this.childSessionManager.syncFunctionBreakpoints(fnArgs.breakpoints ?? []);
+      const synthetic: DebugProtocol.Response = {
+        type: 'response',
+        seq: this.nextSeq++,
+        request_seq: -1,
+        command,
+        success: true,
+        body
+      };
+      return synthetic as T;
+    }
+
     // Route debuggee-scoped requests to active child session when present using policy
     const manager = this.childSessionManager;
     const shouldRouteToChild = manager?.shouldRouteToChild(command) ?? false;

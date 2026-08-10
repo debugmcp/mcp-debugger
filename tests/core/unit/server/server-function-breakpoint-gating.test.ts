@@ -3,10 +3,9 @@
  *
  * Hybrid gating with one deliberate difference from logpoint gating: the
  * STATIC policy verdict is checked BEFORE live adapter capabilities. The
- * policy knows what our plumbing can deliver — js-debug's adapter advertises
- * supportsFunctionBreakpoints, but function breakpoints sent to the parent
- * session never reach the child that owns the runtime, so the policy says
- * false and that must win over live caps.
+ * policy encodes what the adapter and our plumbing can actually deliver, so
+ * an explicit policy false must win over whatever live capabilities claim
+ * (they can drift, as js-debug's hand-written TS metadata once did).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -84,14 +83,16 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
   }
 
   it('rejects when the adapter policy declares no function-breakpoint support', async () => {
-    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'java', supportsFunctionBreakpoints: false });
+    // Synthetic language: real adapters that gate function breakpoints off
+    // (js-debug) carry their own reason string, tested below
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'unsupported-lang', supportsFunctionBreakpoints: false });
 
     await expect(callSetFunctionBreakpoint()).rejects.toThrow(/[Ff]unction breakpoint/);
     expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
   });
 
-  it('rejects on policy false even when live capabilities advertise support (js-debug)', async () => {
-    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'javascript', supportsFunctionBreakpoints: false });
+  it('rejects on policy false even when live capabilities advertise support (policy beats live caps)', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'unsupported-lang', supportsFunctionBreakpoints: false });
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: 'active',
@@ -99,6 +100,53 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     });
 
     await expect(callSetFunctionBreakpoint()).rejects.toThrow(/[Ff]unction breakpoint/);
+    expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
+  });
+
+  it('rejects on policy false regardless of a cdp delivery marker', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'unsupported-lang',
+      supportsFunctionBreakpoints: false,
+      functionBreakpointsVia: 'cdp'
+    });
+
+    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/[Ff]unction breakpoint/);
+    expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
+  });
+
+  it('accepts policy true + via cdp even when live capabilities deny support (js-debug, issue #295)', async () => {
+    // js-debug's initialize response always reports supportsFunctionBreakpoints
+    // false — irrelevant, because the CDP bridge delivers them out of band.
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'js-debug',
+      supportsFunctionBreakpoints: true,
+      functionBreakpointsVia: 'cdp'
+    });
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'active',
+      language: 'javascript',
+      adapterCapabilities: { supportsFunctionBreakpoints: false }
+    });
+
+    const result = await callSetFunctionBreakpoint();
+    expect(mockSessionManager.setFunctionBreakpoint).toHaveBeenCalled();
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+  });
+
+  it('still rejects policy true + DAP delivery when live capabilities deny support (real adapter regression)', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'python',
+      supportsFunctionBreakpoints: true
+    });
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'active',
+      adapterCapabilities: { supportsFunctionBreakpoints: false }
+    });
+
+    await expect(callSetFunctionBreakpoint()).rejects.toThrow(/did not advertise/);
     expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
   });
 
