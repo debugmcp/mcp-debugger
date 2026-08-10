@@ -1,4 +1,4 @@
-FROM ruby:4.0-slim@sha256:abd7528c4df35d151e2643d5efb845e442a26e36a4babc6459bee508619137a2
+FROM ruby:4.0-slim@sha256:607bf92fa7ecebb4a0c6654b62cb44c48d94b36b6f5a754611ddbbe3dc5b6135
 # Ruby >= 3.1 bundles the debug gem (rdbg) — no extra install needed,
 # which keeps the slim image free of a C toolchain.
 
