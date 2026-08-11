@@ -175,6 +175,18 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
         });
         return { success: true } as T;
 
+      case 'mirrorExpose':
+        return {
+          success: true,
+          body: { host: '127.0.0.1', port: 43117, token: 'mock-mirror-token' }
+        } as T;
+
+      case 'mirrorUnexpose':
+        return {
+          success: true,
+          body: { closed: true, closedClients: 0 }
+        } as T;
+
       default:
         return { success: true } as T;
     }
