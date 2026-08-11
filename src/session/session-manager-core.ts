@@ -232,6 +232,8 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.error(`[SessionManager] Error stopping proxy for session ${session.id}:`, message);
     } finally {
       session.proxyManager = undefined;
+      // The mirror listener lived in the stopped worker (issue #217).
+      session.exposure = undefined;
     }
   }
 
@@ -257,6 +259,9 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.lastStop = undefined;
     session.exitCode = undefined;
     session.adapterCapabilities = undefined;
+    // Mandatory (issue #217): the relaunch's new proxyManager reports
+    // isRunning()=true, which would resurrect a stale mirror record.
+    session.exposure = undefined;
     // Each launch/attach starts with a fresh output buffer (issue #218).
     session.outputBuffer = new OutputRingBuffer();
     // A new adapter instance has verified nothing yet: clear per-launch

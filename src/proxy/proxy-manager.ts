@@ -858,9 +858,11 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       return;
     }
     this.proxyMessageCounter += 1;
+    // Sanitized: dapResponse payloads can carry secrets (e.g. the mirror
+    // endpoint token from mirrorExpose, issue #217).
     this.logger.debug(
       `[ProxyManager] Received message #${this.proxyMessageCounter}:`,
-      rawMessage
+      sanitizePayloadForLogging(rawMessage)
     );
 
     // Validate message format

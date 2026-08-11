@@ -958,6 +958,8 @@ export class DebugMcpServer {
               required: ['sessionId']
             }
           },
+          { name: 'expose_session', description: 'Expose a debug session as a read-only DAP mirror endpoint on 127.0.0.1 so an IDE (e.g. VS Code) can attach as a second debug client and inspect live state: threads, stack, scopes, variables, evaluate. Returns host, port, and a session token the IDE must include as "mirrorToken" in its attach configuration. The mirror never drives execution — continue/step/pause and breakpoint changes are rejected; control stays with this MCP session. Requires an active session (launched or attached); works while running or paused. Calling it again returns the same endpoint. The endpoint closes on unexpose_session, close_debug_session, restart, or debuggee exit', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
+          { name: 'unexpose_session', description: 'Close a session\'s DAP mirror endpoint and disconnect any attached IDE clients. Succeeds as a no-op if the session is not exposed', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'close_debug_session', description: 'Close a debugging session', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'step_over', description: 'Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state "running" and pending:true — the session becomes "paused" when the step completes (check list_debug_sessions, or call pause_execution to interrupt)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'step_into', description: 'Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state "running" and pending:true — the session becomes "paused" when the step completes', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
@@ -1566,11 +1568,25 @@ export class DebugMcpServer {
               }
               break;
             }
+            case 'expose_session': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
+              }
+              result = await this.handleExposeSession(args.sessionId);
+              break;
+            }
+            case 'unexpose_session': {
+              if (!args.sessionId) {
+                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
+              }
+              result = await this.handleUnexposeSession(args.sessionId);
+              break;
+            }
             case 'close_debug_session': {
               if (!args.sessionId) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
               }
-              
+
               const sessionName = this.getSessionName(args.sessionId);
               const closed = await this.closeDebugSession(args.sessionId);
 
@@ -2018,6 +2034,10 @@ export class DebugMcpServer {
         if (session.exitCode !== undefined) {
             mappedSession.exitCode = session.exitCode;
         }
+        if (session.exposure) {
+            // Mirror endpoint host/port; the token never leaves expose_session.
+            mappedSession.exposure = session.exposure;
+        }
         return mappedSession;
       });
       return { content: [{ type: 'text', text: JSON.stringify({ success: true, sessions: sessionData, count: sessionData.length }) }] };
@@ -2064,6 +2084,79 @@ export class DebugMcpServer {
       }
       if (error instanceof McpError) throw error;
       throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
+    }
+  }
+
+  private async handleExposeSession(sessionId: string): Promise<ServerResult> {
+    try {
+      this.validateSession(sessionId);
+      const result = await this.sessionManager.exposeSession(sessionId);
+      if (!result.success) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          success: false,
+          state: result.state,
+          error: result.error
+        }) }] };
+      }
+      let message =
+        `Session exposed for IDE attach at ${result.host}:${result.port}. ` +
+        `VS Code: add a launch.json config {"name": "Mirror: agent debug session", ` +
+        `"type": "<your language's debug type, e.g. python>", "request": "attach", ` +
+        `"debugServer": ${result.port}, "mirrorToken": "${result.token}"} and start it. ` +
+        `The mirror is inspect-only; execution control stays with this session. ` +
+        `Full guidance: docs/tool-reference.md#expose_session.`;
+      if (isContainerMode(this.environment)) {
+        message +=
+          ' Note: this server runs inside a container — the mirror listens on the ' +
+          "container's loopback and is not reachable from your host IDE without extra " +
+          'networking (e.g. docker run --network host on Linux, or a socat/ssh forward ' +
+          'into the container).';
+      }
+      return { content: [{ type: 'text', text: JSON.stringify({
+        success: true,
+        state: result.state,
+        host: result.host,
+        port: result.port,
+        token: result.token,
+        message
+      }) }] };
+    } catch (error) {
+      this.logger.error('Failed to expose session', { error });
+      if (error instanceof SessionTerminatedError ||
+          error instanceof SessionNotFoundError ||
+          error instanceof ProxyNotRunningError) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+      }
+      if (error instanceof McpError) throw error;
+      throw new McpError(McpErrorCode.InternalError, `Failed to expose session: ${(error as Error).message}`);
+    }
+  }
+
+  private async handleUnexposeSession(sessionId: string): Promise<ServerResult> {
+    try {
+      this.validateSession(sessionId);
+      const result = await this.sessionManager.unexposeSession(sessionId);
+      const message = !result.success
+        ? undefined
+        : result.wasExposed
+          ? `Mirror endpoint closed${typeof result.closedClients === 'number' ? ` (${result.closedClients} client${result.closedClients === 1 ? '' : 's'} disconnected)` : ''}`
+          : 'Session was not exposed — nothing to close';
+      return { content: [{ type: 'text', text: JSON.stringify({
+        success: result.success,
+        state: result.state,
+        ...(result.wasExposed !== undefined ? { wasExposed: result.wasExposed } : {}),
+        ...(message ? { message } : {}),
+        ...(result.error ? { error: result.error } : {})
+      }) }] };
+    } catch (error) {
+      this.logger.error('Failed to unexpose session', { error });
+      if (error instanceof SessionTerminatedError ||
+          error instanceof SessionNotFoundError ||
+          error instanceof ProxyNotRunningError) {
+        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
+      }
+      if (error instanceof McpError) throw error;
+      throw new McpError(McpErrorCode.InternalError, `Failed to unexpose session: ${(error as Error).message}`);
     }
   }
 
