@@ -6,7 +6,12 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    - cron: '0 6 * * 1'  # Monday 6:00 UTC
+    # Monday 18:00 UTC — deliberately AFTER dependabot's Monday ~06:00 batch has been
+    # merged. Auto-merged PRs are pushed with GITHUB_TOKEN, which does not trigger the
+    # `push` event, so this scheduled run is what actually analyses the week's
+    # dependency merges on main.
+    - cron: '0 18 * * 1'
+  workflow_dispatch:  # on-demand re-analysis when main lands commits without a push event
 
 permissions:
   contents: read
