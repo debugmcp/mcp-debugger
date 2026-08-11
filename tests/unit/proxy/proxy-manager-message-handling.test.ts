@@ -140,6 +140,29 @@ describe('ProxyManager Message Handling', () => {
       expect(capturedThreadId).toBe(1);
     });
 
+    it('sanitizes received messages before debug-logging them (issue #217)', () => {
+      // The raw received-message dump previously logged dapResponse payloads
+      // verbatim — the mirrorExpose response carries the mirror attach token.
+      const token = 'super-secret-mirror-token-value';
+      proxyManager.simulateMessage({
+        type: 'dapResponse',
+        sessionId: 'test-session',
+        requestId: 'no-such-request',
+        success: true,
+        body: { host: '127.0.0.1', port: 51234, token },
+        response: { command: 'mirrorExpose', body: { host: '127.0.0.1', port: 51234, token } }
+      });
+
+      const allLogged = JSON.stringify([
+        ...mockLogger.debug.mock.calls,
+        ...mockLogger.info.mock.calls,
+        ...mockLogger.warn.mock.calls,
+        ...mockLogger.error.mock.calls
+      ]);
+      expect(allLogged).not.toContain(token);
+      expect(JSON.stringify(mockLogger.debug.mock.calls)).toContain('[REDACTED]');
+    });
+
     it('should update currentThreadId when stopped event includes threadId', () => {
       // Initially null
       expect(proxyManager.getCurrentThreadId()).toBeNull();

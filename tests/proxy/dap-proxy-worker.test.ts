@@ -3457,17 +3457,64 @@ describe('DapProxyWorker', () => {
         expect(broadcast).toEqual(['module', 'loadedSource']);
       });
 
-      it('records lastStop and broadcasts stopped from the worker choke point', async () => {
+      /**
+       * Drive the REAL onStopped/onContinued handlers (not a hand-rolled
+       * simulation): stub the connection manager to capture the handlers the
+       * worker wires in setupDapEventHandlers, then invoke them.
+       */
+      const wireRealStopHandlers = async () => {
         wireConnectedWorker();
+        const connectionHandlers: Record<string, (arg?: unknown) => unknown> = {};
+        (worker as any).connectionManager = {
+          setupEventHandlers: vi.fn((_client: unknown, handlers: Record<string, () => void>) => {
+            Object.assign(connectionHandlers, handlers);
+          }),
+          disconnect: vi.fn().mockResolvedValue(undefined)
+        };
         await worker.handleCommand(mirrorPayload('mirrorExpose'));
+        (worker as any).setupDapEventHandlers();
+        expect(connectionHandlers.onStopped).toBeDefined();
+        return connectionHandlers;
+      };
 
-        (worker as any).lastStop = null;
-        // Simulate the onStopped handler body (post-backfill state).
-        (worker as any).lastStop = { reason: 'breakpoint', threadId: 5 };
-        (worker as any).mirrorServer?.broadcastEvent('stopped', { reason: 'breakpoint', threadId: 5 });
+      it('the real onStopped handler records lastStop and broadcasts to the mirror', async () => {
+        const handlers = await wireRealStopHandlers();
 
-        expect(fakeMirror.broadcastEvent).toHaveBeenCalledWith('stopped', { reason: 'breakpoint', threadId: 5 });
-        expect((worker as any).lastStop).toEqual({ reason: 'breakpoint', threadId: 5 });
+        await handlers.onStopped?.({ reason: 'breakpoint', threadId: 5, allThreadsStopped: true });
+
+        expect((worker as any).lastStop).toEqual({ reason: 'breakpoint', threadId: 5, allThreadsStopped: true });
+        expect(fakeMirror.broadcastEvent).toHaveBeenCalledWith('stopped', {
+          reason: 'breakpoint',
+          threadId: 5,
+          allThreadsStopped: true
+        });
+      });
+
+      it('mirror clients receive the threadId-backfilled stopped body, not the raw one', async () => {
+        const handlers = await wireRealStopHandlers();
+        // Adapters like Delve/JDI omit threadId; the worker discovers it via
+        // a threads request and mutates the body before fan-out.
+        (mockDapClient.sendRequest as Mock).mockResolvedValueOnce({
+          body: { threads: [{ id: 42, name: 'main' }] }
+        });
+
+        await handlers.onStopped?.({ reason: 'pause' });
+
+        expect(mockDapClient.sendRequest).toHaveBeenCalledWith('threads', {});
+        expect(fakeMirror.broadcastEvent).toHaveBeenCalledWith('stopped',
+          expect.objectContaining({ reason: 'pause', threadId: 42 }));
+        expect((worker as any).lastStop).toEqual(expect.objectContaining({ threadId: 42 }));
+      });
+
+      it('the real onContinued handler clears lastStop and broadcasts continued', async () => {
+        const handlers = await wireRealStopHandlers();
+        await handlers.onStopped?.({ reason: 'breakpoint', threadId: 5 });
+        fakeMirror.broadcastEvent.mockClear();
+
+        handlers.onContinued?.({ threadId: 5 });
+
+        expect((worker as any).lastStop).toBeNull();
+        expect(fakeMirror.broadcastEvent).toHaveBeenCalledWith('continued', { threadId: 5 });
       });
 
       it('a successful continue clears lastStop and synthesizes continued for the mirror', async () => {
