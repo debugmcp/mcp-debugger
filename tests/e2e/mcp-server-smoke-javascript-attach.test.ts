@@ -164,7 +164,12 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
 
     const attachResult = await mcpClient!.callTool({
       name: 'attach_to_process',
-      arguments: { sessionId, host: '127.0.0.1', port, ...extraAttachArgs }
+      // verifyTimeout: js-debug child adoption is load-sensitive; on a
+      // heavily loaded host (e.g. a full-suite run) the default 5s window
+      // hard-fails a healthy attach (issue #143 — this knob exists for
+      // exactly this). The poll exits as soon as threads appear, so a
+      // generous window costs nothing on a responsive machine.
+      arguments: { sessionId, host: '127.0.0.1', port, verifyTimeout: 20000, ...extraAttachArgs }
     });
     return parseSdkToolResult(attachResult);
   }
