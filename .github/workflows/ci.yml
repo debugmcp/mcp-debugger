@@ -5,6 +5,8 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # on-demand run when main lands commits without a push event
+                      # (auto-merge pushes with GITHUB_TOKEN, which suppresses triggers)
 
 permissions:
   contents: read
