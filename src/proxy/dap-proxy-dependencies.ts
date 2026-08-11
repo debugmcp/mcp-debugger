@@ -6,6 +6,7 @@ import { spawn } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
 import { MinimalDapClient } from './minimal-dap.js';
+import { DapMirrorServer } from './dap-mirror-server.js';
 import { createLogger } from '../utils/logger.js';
 import {
   DapProxyDependencies,
@@ -60,6 +61,10 @@ export function createProductionDependencies(
           proc.stdout.write(JSON.stringify(message) + '\n');
         }
       }
+    },
+
+    mirrorServerFactory: {
+      create: (host, options) => new DapMirrorServer(host, options)
     }
   };
 }

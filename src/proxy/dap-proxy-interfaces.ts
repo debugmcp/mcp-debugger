@@ -6,6 +6,7 @@
 import { ChildProcess, SpawnOptions } from 'child_process';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type { IDapMirrorServerFactory } from './dap-mirror-server.js';
 
 // ===== Core Message Types =====
 
@@ -244,7 +245,20 @@ export interface DapProxyDependencies {
   processSpawner: IProcessSpawner;
   dapClientFactory: IDapClientFactory;
   messageSender: IMessageSender;
+  /**
+   * Factory for the per-session DAP mirror listener (issue #217). Optional:
+   * a worker without it answers mirrorExpose with a clean error, and unit
+   * tests that don't exercise the mirror need no fake.
+   */
+  mirrorServerFactory?: IDapMirrorServerFactory;
 }
+
+// ===== DAP mirror pseudo-commands (issue #217) =====
+// Sent by the parent through the normal `dap` envelope and intercepted at
+// the top of DapProxyWorker.handleDapCommand — they never reach the adapter.
+
+export const MIRROR_EXPOSE_COMMAND = 'mirrorExpose';
+export const MIRROR_UNEXPOSE_COMMAND = 'mirrorUnexpose';
 
 // ===== DAP Types Extensions =====
 

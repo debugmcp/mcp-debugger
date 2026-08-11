@@ -3280,4 +3280,271 @@ describe('DapProxyWorker', () => {
       expect(dependencies.fileSystem.pathExists).not.toHaveBeenCalled();
     });
   });
+
+  describe('DAP mirror (issue #217)', () => {
+    interface FakeMirror {
+      start: Mock;
+      stop: Mock;
+      broadcastEvent: Mock;
+      clientCount: Mock;
+    }
+
+    const ENDPOINT = { host: '127.0.0.1', port: 43117, token: 'test-mirror-token' };
+
+    let fakeMirror: FakeMirror;
+    let capturedHost: {
+      forwardRequest: (command: string, args?: unknown) => Promise<unknown>;
+      getCapabilities: () => unknown;
+      getLastStop: () => unknown;
+    } | null;
+    let mirrorFactory: { create: Mock };
+
+    const mirrorPayload = (dapCommand: string, requestId = 'mirror-req-1'): DapCommandPayload => ({
+      cmd: 'dap',
+      sessionId: 'test-session',
+      requestId,
+      dapCommand
+    });
+
+    const dapResponses = () =>
+      mockMessageSender.send.mock.calls
+        .map(([m]) => m as { type?: string; requestId?: string; success?: boolean; body?: unknown; error?: string })
+        .filter(m => m.type === 'dapResponse');
+
+    /** Inject a CONNECTED worker with the fake mirror factory available. */
+    const wireConnectedWorker = () => {
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).logger = mockLogger;
+      (worker as any).currentSessionId = 'test-session';
+    };
+
+    beforeEach(() => {
+      fakeMirror = {
+        start: vi.fn().mockResolvedValue(ENDPOINT),
+        stop: vi.fn().mockResolvedValue(undefined),
+        broadcastEvent: vi.fn(),
+        clientCount: vi.fn().mockReturnValue(2)
+      };
+      capturedHost = null;
+      mirrorFactory = {
+        create: vi.fn((host) => {
+          capturedHost = host;
+          return fakeMirror;
+        })
+      };
+      dependencies.mirrorServerFactory = mirrorFactory;
+      worker = new DapProxyWorker(dependencies, { exit: workerExitSpy });
+    });
+
+    it('rejects mirrorExpose while not connected without queueing or touching the adapter', async () => {
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await worker.handleCommand(mirrorPayload('mirrorExpose'));
+
+      const [response] = dapResponses();
+      expect(response.success).toBe(false);
+      expect(response.error).toContain('connected');
+      expect((worker as any).preConnectQueue).toHaveLength(0);
+      expect(mockDapClient.sendRequest).not.toHaveBeenCalled();
+      expect(mirrorFactory.create).not.toHaveBeenCalled();
+    });
+
+    it('exposes when connected: starts the mirror, subscribes events, returns the endpoint', async () => {
+      wireConnectedWorker();
+
+      await worker.handleCommand(mirrorPayload('mirrorExpose'));
+
+      expect(mirrorFactory.create).toHaveBeenCalledTimes(1);
+      const [response] = dapResponses();
+      expect(response.success).toBe(true);
+      expect(response.body).toEqual(ENDPOINT);
+      expect(mockDapClient.on).toHaveBeenCalledWith('event', expect.any(Function));
+    });
+
+    it('the mirror host reflects live worker state', async () => {
+      wireConnectedWorker();
+      await worker.handleCommand(mirrorPayload('mirrorExpose'));
+
+      expect(capturedHost!.getCapabilities()).toBeUndefined();
+      expect(capturedHost!.getLastStop()).toBeUndefined();
+
+      (worker as any).captureAdapterCapabilities({ supportsEvaluateForHovers: true });
+      (worker as any).lastStop = { reason: 'breakpoint', threadId: 3 };
+      expect(capturedHost!.getCapabilities()).toEqual({ supportsEvaluateForHovers: true });
+      expect(capturedHost!.getLastStop()).toEqual({ reason: 'breakpoint', threadId: 3 });
+
+      // forwardRequest rides the real adapter connection.
+      (mockDapClient.sendRequest as Mock).mockResolvedValueOnce({ body: { threads: [] } });
+      await capturedHost!.forwardRequest('threads', {});
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('threads', {});
+    });
+
+    it('is idempotent: a second expose returns the same endpoint without a second listener', async () => {
+      wireConnectedWorker();
+
+      await worker.handleCommand(mirrorPayload('mirrorExpose', 'req-a'));
+      await worker.handleCommand(mirrorPayload('mirrorExpose', 'req-b'));
+
+      expect(mirrorFactory.create).toHaveBeenCalledTimes(1);
+      const responses = dapResponses();
+      expect(responses).toHaveLength(2);
+      expect(responses[0].body).toEqual(ENDPOINT);
+      expect(responses[1].body).toEqual(ENDPOINT);
+    });
+
+    it('unexposes: stops the mirror with notification and reports closed clients', async () => {
+      wireConnectedWorker();
+      await worker.handleCommand(mirrorPayload('mirrorExpose', 'req-a'));
+
+      await worker.handleCommand(mirrorPayload('mirrorUnexpose', 'req-b'));
+
+      expect(fakeMirror.stop).toHaveBeenCalledWith({ notifyClients: true });
+      expect(mockDapClient.off).toHaveBeenCalledWith('event', expect.any(Function));
+      const unexpose = dapResponses().find(r => r.requestId === 'req-b');
+      expect(unexpose?.success).toBe(true);
+      expect(unexpose?.body).toEqual({ closed: true, closedClients: 2 });
+    });
+
+    it('unexpose when not exposed is a success no-op', async () => {
+      wireConnectedWorker();
+
+      await worker.handleCommand(mirrorPayload('mirrorUnexpose'));
+
+      const [response] = dapResponses();
+      expect(response.success).toBe(true);
+      expect(response.body).toEqual({ closed: false, closedClients: 0 });
+      expect(fakeMirror.stop).not.toHaveBeenCalled();
+    });
+
+    it('a failed listener start yields a clean error and leaves no mirror behind', async () => {
+      wireConnectedWorker();
+      fakeMirror.start.mockRejectedValueOnce(new Error('EADDRINUSE'));
+
+      await worker.handleCommand(mirrorPayload('mirrorExpose'));
+
+      const [response] = dapResponses();
+      expect(response.success).toBe(false);
+      expect(response.error).toContain('EADDRINUSE');
+      expect((worker as any).mirrorServer).toBeNull();
+      // Best-effort cleanup of the failed instance.
+      expect(fakeMirror.stop).toHaveBeenCalled();
+    });
+
+    describe('event feed', () => {
+      const wireStopHandlers = async () => {
+        wireConnectedWorker();
+        await worker.handleCommand(mirrorPayload('mirrorExpose'));
+        // The worker's own stopped/continued handlers are wired by the
+        // connection manager in production; drive them via the private
+        // handler the same way the exit-code suites do.
+        return {
+          emitGeneric: (event: string, body: unknown) =>
+            (mockDapClient as unknown as EventEmitter).emit('event', { seq: 1, type: 'event', event, body })
+        };
+      };
+
+      it('forwards generic adapter events but not stopped/continued/initialized', async () => {
+        const { emitGeneric } = await wireStopHandlers();
+
+        emitGeneric('module', { reason: 'new' });
+        emitGeneric('loadedSource', { reason: 'new' });
+        emitGeneric('stopped', { reason: 'breakpoint' });
+        emitGeneric('continued', {});
+        emitGeneric('initialized', undefined);
+
+        const broadcast = fakeMirror.broadcastEvent.mock.calls.map(([event]) => event);
+        expect(broadcast).toEqual(['module', 'loadedSource']);
+      });
+
+      it('records lastStop and broadcasts stopped from the worker choke point', async () => {
+        wireConnectedWorker();
+        await worker.handleCommand(mirrorPayload('mirrorExpose'));
+
+        (worker as any).lastStop = null;
+        // Simulate the onStopped handler body (post-backfill state).
+        (worker as any).lastStop = { reason: 'breakpoint', threadId: 5 };
+        (worker as any).mirrorServer?.broadcastEvent('stopped', { reason: 'breakpoint', threadId: 5 });
+
+        expect(fakeMirror.broadcastEvent).toHaveBeenCalledWith('stopped', { reason: 'breakpoint', threadId: 5 });
+        expect((worker as any).lastStop).toEqual({ reason: 'breakpoint', threadId: 5 });
+      });
+
+      it('a successful continue clears lastStop and synthesizes continued for the mirror', async () => {
+        wireConnectedWorker();
+        await worker.handleCommand(mirrorPayload('mirrorExpose'));
+        (worker as any).lastStop = { reason: 'breakpoint', threadId: 5 };
+        (mockDapClient.sendRequest as Mock).mockResolvedValueOnce({ body: { allThreadsContinued: false } });
+
+        await worker.handleCommand({
+          cmd: 'dap',
+          sessionId: 'test-session',
+          requestId: 'continue-req',
+          dapCommand: 'continue',
+          dapArgs: { threadId: 5 }
+        });
+
+        expect((worker as any).lastStop).toBeNull();
+        expect(fakeMirror.broadcastEvent).toHaveBeenCalledWith('continued', {
+          threadId: 5,
+          allThreadsContinued: false
+        });
+      });
+
+      it('does not synthesize continued when the session was not paused', async () => {
+        wireConnectedWorker();
+        await worker.handleCommand(mirrorPayload('mirrorExpose'));
+        fakeMirror.broadcastEvent.mockClear();
+
+        await worker.handleCommand({
+          cmd: 'dap',
+          sessionId: 'test-session',
+          requestId: 'continue-req',
+          dapCommand: 'continue',
+          dapArgs: { threadId: 5 }
+        });
+
+        expect(fakeMirror.broadcastEvent).not.toHaveBeenCalled();
+      });
+    });
+
+    it('shutdown closes the mirror with client notification and unsubscribes the event feed', async () => {
+      wireConnectedWorker();
+      const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+      (worker as any).connectionManager = connectionStub;
+      await worker.handleCommand(mirrorPayload('mirrorExpose'));
+
+      await worker.shutdown();
+
+      expect(fakeMirror.stop).toHaveBeenCalledWith({ notifyClients: true });
+      expect(mockDapClient.off).toHaveBeenCalledWith('event', expect.any(Function));
+      expect((worker as any).mirrorServer).toBeNull();
+    });
+
+    it('capabilities are retained for the mirror even after the once-only parent status', async () => {
+      wireConnectedWorker();
+
+      (worker as any).captureAdapterCapabilities({ supportsSetVariable: true });
+      // Second call: status suppressed by the #243 guard, retention still updates.
+      (worker as any).captureAdapterCapabilities({ supportsSetVariable: false });
+
+      expect((worker as any).adapterCapabilities).toEqual({ supportsSetVariable: false });
+      const statusMessages = mockMessageSender.send.mock.calls
+        .map(([m]) => m as { type?: string; status?: string })
+        .filter(m => m.type === 'status' && m.status === 'adapter_capabilities');
+      expect(statusMessages).toHaveLength(1);
+    });
+
+    it('a worker without a mirror factory answers expose with a clean error', async () => {
+      delete dependencies.mirrorServerFactory;
+      worker = new DapProxyWorker(dependencies, { exit: workerExitSpy });
+      wireConnectedWorker();
+
+      await worker.handleCommand(mirrorPayload('mirrorExpose'));
+
+      const [response] = dapResponses();
+      expect(response.success).toBe(false);
+      expect(response.error).toContain('not configured');
+    });
+  });
 });
