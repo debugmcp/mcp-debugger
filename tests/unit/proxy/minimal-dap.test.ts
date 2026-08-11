@@ -297,7 +297,9 @@ describe('MinimalDapClient', () => {
         '[MinimalDapClient] Invalid Content-Length header encountered; discarding payload'
       );
       expect(protocolSpy).not.toHaveBeenCalled();
-      expect((client as unknown as { rawData: Buffer }).rawData.length).toBe(0);
+      expect(
+        (client as unknown as { decoder: { rawData: Buffer } }).decoder.rawData.length
+      ).toBe(0);
       protocolSpy.mockRestore();
     });
 
@@ -321,7 +323,9 @@ describe('MinimalDapClient', () => {
         2,
         '[MinimalDapClient] Invalid Content-Length header encountered; discarding payload'
       );
-      expect((client as unknown as { rawData: Buffer }).rawData.length).toBe(0);
+      expect(
+        (client as unknown as { decoder: { rawData: Buffer } }).decoder.rawData.length
+      ).toBe(0);
     });
 
     it('should handle incomplete message body', async () => {
@@ -354,8 +358,8 @@ describe('MinimalDapClient', () => {
       requestPromise.catch(() => {}); // Prevent unhandled rejection
 
       expect(mockSocket.write).toHaveBeenCalled();
-      const writeCall = mockSocket.write.mock.calls[0][0];
-      
+      const writeCall = mockSocket.write.mock.calls[0][0].toString('utf8');
+
       // Verify header format
       expect(writeCall).toMatch(/^Content-Length: \d+\r\n\r\n/);
       
@@ -952,10 +956,10 @@ describe('MinimalDapClient', () => {
       const client = new MinimalDapClient('localhost', 5678);
       const fakeSocket = {
         destroyed: false,
-        write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+        write: vi.fn((raw: Buffer | string, cb?: (err?: Error | null) => void) => {
           cb?.(null);
           setImmediate(() => {
-            const [, body] = raw.split('\r\n\r\n');
+            const [, body] = raw.toString('utf8').split('\r\n\r\n');
             const request = JSON.parse(body) as DebugProtocol.Request;
             void (client as any).handleProtocolMessage({
               seq: request.seq,
@@ -1477,9 +1481,9 @@ describe('MinimalDapClient', () => {
       destroyed: false,
       end: vi.fn(),
       destroy: vi.fn(),
-      write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+      write: vi.fn((raw: Buffer | string, cb?: (err?: Error | null) => void) => {
         cb?.(null);
-        const [, body] = raw.split('\r\n\r\n');
+        const [, body] = raw.toString('utf8').split('\r\n\r\n');
         const request = JSON.parse(body) as DebugProtocol.Request;
         capturedRequests?.push(request);
         setImmediate(() => {
@@ -1661,9 +1665,9 @@ describe('MinimalDapClient', () => {
         destroyed: false,
         end: vi.fn(),
         destroy: vi.fn(),
-        write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+        write: vi.fn((raw: Buffer | string, cb?: (err?: Error | null) => void) => {
           cb?.(null);
-          const [, body] = raw.split('\r\n\r\n');
+          const [, body] = raw.toString('utf8').split('\r\n\r\n');
           const request = JSON.parse(body) as DebugProtocol.Request;
           captured.push(request);
           setImmediate(() => {
@@ -1736,9 +1740,9 @@ describe('MinimalDapClient', () => {
         destroyed: false,
         end: vi.fn(),
         destroy: vi.fn(),
-        write: vi.fn((raw: string, cb?: (err?: Error | null) => void) => {
+        write: vi.fn((raw: Buffer | string, cb?: (err?: Error | null) => void) => {
           cb?.(null);
-          const [, body] = raw.split('\r\n\r\n');
+          const [, body] = raw.toString('utf8').split('\r\n\r\n');
           const request = JSON.parse(body) as DebugProtocol.Request;
           captured.push(request);
           setImmediate(() => {
