@@ -58,6 +58,20 @@ export interface LastLaunchSpec {
 }
 
 /**
+ * Live DAP mirror endpoint hosted by the session's proxy worker (issue
+ * #217). Valid only while that worker is running — projections must gate
+ * on proxyManager.isRunning(). The token is the IDE-attach capability
+ * (and, via evaluate, a debuggee-execution capability): never log it and
+ * never project it into list_debug_sessions.
+ */
+export interface SessionExposure {
+  host: string;
+  port: number;
+  token: string;
+  exposedAt: number; // epoch ms
+}
+
+/**
  * Internal session representation with full details
  */
 export interface ManagedSession extends DebugSessionInfo {
@@ -98,6 +112,8 @@ export interface ManagedSession extends DebugSessionInfo {
   effectiveBreakOnExceptions?: ExceptionBreakMode;
   // The most recent real launch, replayed by restart_debugging (issue #238).
   lastLaunch?: LastLaunchSpec;
+  // Live DAP mirror endpoint, when exposed via expose_session (issue #217).
+  exposure?: SessionExposure;
 }
 
 /**
@@ -223,7 +239,12 @@ export class SessionStore {
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       lastStop: s.lastStop,
-      exitCode: s.exitCode
+      exitCode: s.exitCode,
+      // Mirror endpoint without the token (issue #217); the isRunning gate
+      // keeps the projection honest on teardown paths that skip cleanup.
+      ...(s.exposure && s.proxyManager?.isRunning()
+        ? { exposure: { host: s.exposure.host, port: s.exposure.port } }
+        : {})
     }));
   }
 

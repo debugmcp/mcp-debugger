@@ -41,6 +41,7 @@ Key rules:
 - restart_debugging {sessionId} relaunches with the same config in one call — breakpoints re-apply automatically, output buffer resets (read get_output from since=0). Works after the program exits; not for attach sessions.
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass nextCursor back to read only new output.
 - attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward.
+- expose_session {sessionId} returns host/port/token for a read-only IDE mirror of the live session (VS Code launch.json: "debugServer": port + "mirrorToken"); relay these to the human, unexpose_session when done. The IDE observes — execution control stays with you.
 - Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.
 
 For the full debugging workflow (root-cause discipline, per-language quirks), request the "debugging-workflow" prompt or install the agent skill from skills/debugging/ in the repo.`;
@@ -93,6 +94,9 @@ attach_to_process {sessionId, host, port, localRoot, remoteRoot}
 - Ruby: target started with "rdbg --open --port N ..." (works via kubectl port-forward)
 - Java: JVM flag -agentlib:jdwp=transport=dt_socket,server=y,address=*:PORT (breakpoints defer until class load)
 detach_from_process leaves the target running.
+
+## IDE mirror (human inspection)
+When a human wants to look around in their IDE, expose_session {sessionId} opens a read-only DAP endpoint (127.0.0.1, token-gated) on the live session — even mid-pause. Relay host/port/token with a VS Code launch.json snippet: {"request": "attach", "debugServer": <port>, "mirrorToken": "<token>", "type": <language's debug type>}. The IDE lands on the paused frame and can walk stacks/variables/evaluate; stepping and breakpoints stay yours. unexpose_session closes it.
 
 ## Per-language quirks (one-liners)
 - Python: expand the "special variables" container; breakpoints verify after module load.

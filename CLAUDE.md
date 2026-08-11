@@ -450,7 +450,7 @@ After adding the MCP server:
 - **Status Check**: After restart, type `/mcp` in Claude Code to see connected servers
 
 ### Available Tools After Integration
-Once connected, the following 26 MCP tools become available:
+Once connected, the following 28 MCP tools become available:
 - `create_debug_session` - Start a new debug session
 - `list_debug_sessions` - List active debug sessions
 - `list_supported_languages` - Show available language adapters
@@ -462,6 +462,8 @@ Once connected, the following 26 MCP tools become available:
 - `restart_debugging` - Relaunch with the same config; breakpoints re-applied (launch sessions only)
 - `attach_to_process` - Attach debugger to a running process
 - `detach_from_process` - Detach debugger from a process
+- `expose_session` - Open a read-only DAP mirror endpoint (loopback + token) so an IDE can attach and inspect the live session
+- `unexpose_session` - Close the mirror endpoint and disconnect IDE clients
 - `close_debug_session` - Clean up sessions
 - `step_over`, `step_into`, `step_out` - Step through code
 - `continue_execution` - Continue running

@@ -111,6 +111,8 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     detachFromProcess: vi.fn(),
     attachToProcess: vi.fn(),
     redefineClasses: vi.fn(),
+    exposeSession: vi.fn(),
+    unexposeSession: vi.fn(),
     getAdapterRegistry: vi.fn().mockReturnValue(mockAdapterRegistry),
     adapterRegistry: mockAdapterRegistry,
     // EventEmitter surface used by DebugMcpServer for output-captured (issue #218)

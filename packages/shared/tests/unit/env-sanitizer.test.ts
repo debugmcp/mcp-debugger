@@ -181,6 +181,30 @@ describe('sanitizePayloadForLogging', () => {
     const result = sanitizePayloadForLogging(payload) as any;
     expect(result.launchConfig.env).toBe('<1 env vars redacted>');
   });
+
+  it('redacts string token/mirrorToken values at any depth (issue #217)', () => {
+    const payload = {
+      type: 'dapResponse',
+      body: { host: '127.0.0.1', port: 43117, token: 'super-secret-mirror-token' },
+      request: { arguments: { mirrorToken: 'client-presented-token' } }
+    };
+    const result = sanitizePayloadForLogging(payload) as any;
+    expect(result.body.token).toBe('[REDACTED]');
+    expect(result.request.arguments.mirrorToken).toBe('[REDACTED]');
+    // Non-secret siblings survive.
+    expect(result.body.host).toBe('127.0.0.1');
+    expect(result.body.port).toBe(43117);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('super-secret-mirror-token');
+    expect(serialized).not.toContain('client-presented-token');
+  });
+
+  it('leaves non-string token values alone', () => {
+    const payload = { token: 42, nested: { token: { kind: 'parser-token' } } };
+    const result = sanitizePayloadForLogging(payload) as any;
+    expect(result.token).toBe(42);
+    expect(result.nested.token).toEqual({ kind: 'parser-token' });
+  });
 });
 
 describe('sanitizeStderr', () => {

@@ -17,8 +17,11 @@ import {
   StatusMessage,
   DapResponseMessage,
   DapEventMessage,
-  ErrorMessage
+  ErrorMessage,
+  MIRROR_EXPOSE_COMMAND,
+  MIRROR_UNEXPOSE_COMMAND
 } from './dap-proxy-interfaces.js';
+import type { IDapMirrorServer, MirrorEndpoint } from './dap-mirror-server.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
 import { GenericAdapterManager, AdapterStdioSource } from './dap-proxy-adapter-manager.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
@@ -101,6 +104,23 @@ export class DapProxyWorker {
   private adapterState: AdapterSpecificState;
   private commandQueue: (DapCommandPayload | SilentDapCommandPayload)[] = [];
   private preConnectQueue: DapCommandPayload[] = [];
+
+  // DAP mirror (issue #217): per-session read-only IDE endpoint.
+  private mirrorServer: IDapMirrorServer | null = null;
+  private mirrorEndpoint: MirrorEndpoint | null = null;
+  /** Adapter capabilities retained for the mirror's initialize response. */
+  private adapterCapabilities: DebugProtocol.Capabilities | null = null;
+  /** Body of the most recent stopped event; null while running. */
+  private lastStop: DebugProtocol.StoppedEvent['body'] | null = null;
+  // stopped/continued reach mirror clients via the worker's own event
+  // handlers (post threadId-backfill); this generic-channel forwarder covers
+  // everything else. initialized is per-client handshake, never replicated.
+  private readonly mirrorEventForwarder = (evt: DebugProtocol.Event): void => {
+    if (evt.event === 'stopped' || evt.event === 'continued' || evt.event === 'initialized') {
+      return;
+    }
+    this.mirrorServer?.broadcastEvent(evt.event, evt.body);
+  };
 
   private readonly exitHook: (code: number) => void;
   private readonly traceFileFactory: (sessionId: string, logDir: string) => string | undefined;
@@ -668,10 +688,16 @@ export class DapProxyWorker {
             this.logger!.warn('[Worker] Failed to pre-fetch threads:', msg);
           }
         }
+        // Mirror clients get the post-backfill body, and a late-joining IDE
+        // replays it as its landing stop (issue #217).
+        this.lastStop = body;
+        this.mirrorServer?.broadcastEvent('stopped', body);
         this.sendDapEvent('stopped', body);
       },
       onContinued: (body) => {
         this.logger!.info('[Worker] DAP event: continued', body);
+        this.lastStop = null;
+        this.mirrorServer?.broadcastEvent('continued', body ?? {});
         this.sendDapEvent('continued', body);
       },
       onThread: (body) => {
@@ -852,6 +878,14 @@ export class DapProxyWorker {
    * Handle DAP commands from the parent process
    */
   private async handleDapCommand(payload: DapCommandPayload): Promise<void> {
+    // Mirror pseudo-commands (issue #217) are intercepted before the
+    // connectivity bail and the policy queue decision: they must never be
+    // queued to the adapter, and their errors should be mirror-specific.
+    if (payload.dapCommand === MIRROR_EXPOSE_COMMAND || payload.dapCommand === MIRROR_UNEXPOSE_COMMAND) {
+      await this.handleMirrorCommand(payload);
+      return;
+    }
+
     // Check if we're connected
     if (!this.dapClient) {
       if (this.state === ProxyState.INITIALIZING) {
@@ -977,7 +1011,8 @@ export class DapProxyWorker {
 
       // Send response
       this.sendDapResponse(payload.requestId, true, response);
-      
+      this.noteResumeCommand(payload.dapCommand, payload.dapArgs, response);
+
       // Ensure initial stop after launch if needed
       if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
         await this.drainCommandQueue();
@@ -1039,7 +1074,8 @@ export class DapProxyWorker {
         
         this.requestTracker.complete(payload.requestId);
         this.sendDapResponse(payload.requestId, true, response);
-        
+        this.noteResumeCommand(payload.dapCommand, payload.dapArgs, response);
+
         const initBehavior = this.adapterPolicy.getInitializationBehavior();
         if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
           this.ensureInitialStop().catch((err) => {
@@ -1159,6 +1195,10 @@ export class DapProxyWorker {
     // Clear request tracking
     this.requestTracker.clear();
 
+    // Close the mirror before the DAP disconnect so mirror clients receive
+    // terminated even if the adapter disconnect eats its 1s cap (#217).
+    await this.closeMirror({ notifyClients: true });
+
     // Graceful DAP disconnect FIRST, while the socket is still alive (#156) —
     // launch-mode adapters only terminate their debuggee when they receive
     // disconnect with terminateDebuggee=true (rdbg keeps it alive and re-arms
@@ -1205,6 +1245,136 @@ export class DapProxyWorker {
     this.logger?.info('[Worker] Shutdown sequence completed.');
   }
 
+  // ===== DAP mirror (issue #217) =====
+
+  /**
+   * Handle the mirrorExpose / mirrorUnexpose pseudo-commands. Expose is
+   * idempotent (returns the stored endpoint, token unrotated) so agent
+   * retries after a lost response cannot invalidate an IDE mid-attach.
+   */
+  private async handleMirrorCommand(payload: DapCommandPayload): Promise<void> {
+    if (payload.dapCommand === MIRROR_UNEXPOSE_COMMAND) {
+      const wasExposed = this.mirrorServer !== null;
+      const closedClients = this.mirrorServer?.clientCount() ?? 0;
+      await this.closeMirror({ notifyClients: true });
+      this.sendDapResponse(payload.requestId, true, {
+        type: 'response',
+        seq: 0,
+        request_seq: 0,
+        command: payload.dapCommand,
+        success: true,
+        body: { closed: wasExposed, closedClients }
+      });
+      return;
+    }
+
+    // Expose requires a live adapter connection — a mirror of a session
+    // that isn't debugging anything has nothing to forward to.
+    if (this.state !== ProxyState.CONNECTED || !this.dapClient) {
+      this.sendDapResponse(
+        payload.requestId,
+        false,
+        undefined,
+        `Mirror requires a connected debug session (state=${this.state})`
+      );
+      return;
+    }
+
+    if (this.mirrorEndpoint) {
+      this.sendMirrorEndpointResponse(payload, this.mirrorEndpoint);
+      return;
+    }
+
+    const factory = this.dependencies.mirrorServerFactory;
+    if (!factory) {
+      this.sendDapResponse(payload.requestId, false, undefined, 'Mirror server not configured in this environment');
+      return;
+    }
+
+    const mirror = factory.create(
+      {
+        forwardRequest: async (command, args) => {
+          // sendRequest throws synchronously on a destroyed socket; the
+          // async wrapper converts that into a rejection for the mirror.
+          const client = this.dapClient;
+          if (!client) {
+            throw new Error('DAP client not connected');
+          }
+          return client.sendRequest<DebugProtocol.Response>(command, args);
+        },
+        getCapabilities: () => this.adapterCapabilities ?? undefined,
+        getLastStop: () => this.lastStop ?? undefined
+      },
+      { logger: this.logger! }
+    );
+
+    try {
+      const endpoint = await mirror.start();
+      this.mirrorServer = mirror;
+      this.mirrorEndpoint = endpoint;
+      this.dapClient.on('event', this.mirrorEventForwarder);
+      this.sendMirrorEndpointResponse(payload, endpoint);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger?.error(`[Worker] Failed to start mirror endpoint: ${message}`);
+      await mirror.stop().catch(() => undefined);
+      this.sendDapResponse(payload.requestId, false, undefined, `Failed to start mirror endpoint: ${message}`);
+    }
+  }
+
+  private sendMirrorEndpointResponse(payload: DapCommandPayload, endpoint: MirrorEndpoint): void {
+    // Response-shaped so the parent's `response.body` extraction applies.
+    this.sendDapResponse(payload.requestId, true, {
+      type: 'response',
+      seq: 0,
+      request_seq: 0,
+      command: payload.dapCommand,
+      success: true,
+      body: { host: endpoint.host, port: endpoint.port, token: endpoint.token }
+    });
+  }
+
+  private async closeMirror(opts?: { notifyClients?: boolean }): Promise<void> {
+    const mirror = this.mirrorServer;
+    this.mirrorServer = null;
+    this.mirrorEndpoint = null;
+    if (!mirror) {
+      return;
+    }
+    this.dapClient?.off('event', this.mirrorEventForwarder);
+    try {
+      await mirror.stop(opts);
+    } catch (error) {
+      this.logger?.warn(
+        `[Worker] Mirror shutdown failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * DAP clients may infer resumption from a successful continue/step
+   * response, and some adapters skip the continued event — without this a
+   * mirror IDE would show stale paused frames after the MCP side resumes.
+   * The lastStop check dedupes against a real continued event that arrived
+   * first; steps produce a fresh stopped moments later regardless.
+   */
+  private noteResumeCommand(command: string, args: unknown, response: unknown): void {
+    if (!['continue', 'next', 'stepIn', 'stepOut', 'goto'].includes(command)) {
+      return;
+    }
+    if (!this.lastStop) {
+      return;
+    }
+    this.lastStop = null;
+    const threadId = (args as { threadId?: number } | undefined)?.threadId;
+    const allThreadsContinued =
+      ((response as DebugProtocol.ContinueResponse | undefined)?.body?.allThreadsContinued) ?? true;
+    this.mirrorServer?.broadcastEvent('continued', {
+      ...(typeof threadId === 'number' ? { threadId } : {}),
+      allThreadsContinued
+    });
+  }
+
   // Message sending helpers
 
   /**
@@ -1214,6 +1384,9 @@ export class DapProxyWorker {
    * handleDapCommand flow.
    */
   private captureAdapterCapabilities(capabilities: DebugProtocol.Capabilities): void {
+    // Retained for the mirror's initialize response (issue #217) — before
+    // the once-only guard, which only gates the parent status message.
+    this.adapterCapabilities = capabilities;
     if (this.adapterCapabilitiesSent) {
       return;
     }

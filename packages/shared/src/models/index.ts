@@ -381,6 +381,11 @@ export interface DebugSessionInfo {
   lastStop?: SessionStopInfo;
   /** Debuggee exit code from the DAP 'exited' event, when the adapter reports one */
   exitCode?: number;
+  /**
+   * Live DAP mirror endpoint from expose_session (issue #217), host/port
+   * only — the attach token is returned solely by the expose_session tool.
+   */
+  exposure?: { host: string; port: number };
 }
 
 

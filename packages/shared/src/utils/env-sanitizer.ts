@@ -64,7 +64,9 @@ export function sanitizeEnvForLogging(env: Record<string, string>): Record<strin
 /**
  * Sanitize a payload (proxy init message, launch/attach config, DAP request)
  * before logging or tracing it: every object-valued `env` property, at any
- * depth, is replaced with a count summary.
+ * depth, is replaced with a count summary, and every string-valued `token` /
+ * `mirrorToken` property is redacted (the DAP mirror attach capability,
+ * issue #217).
  *
  * The env body is replaced with a count rather than a per-key redacted copy:
  * logs never need the values, and keyword redaction cannot anticipate every
@@ -86,7 +88,9 @@ function redactEnvDeep(value: unknown, ancestors: WeakSet<object>): unknown {
     }
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      if (key === 'env' && entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      if ((key === 'token' || key === 'mirrorToken') && typeof entry === 'string') {
+        setOwnProperty(out, key, '[REDACTED]');
+      } else if (key === 'env' && entry && typeof entry === 'object' && !Array.isArray(entry)) {
         setOwnProperty(out, key, `<${Object.keys(entry as Record<string, unknown>).length} env vars redacted>`);
       } else {
         setOwnProperty(out, key, redactEnvDeep(entry, ancestors));

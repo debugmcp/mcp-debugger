@@ -33,7 +33,7 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 | Per-session process isolation | ✅ one proxy process per session | shares the VS Code instance |
 | Java hot-swap (`redefine_classes`) | ✅ | ❌ |
 | Debuggee output as subscribable MCP resource | ✅ | ❌ |
-| In-IDE debugging UX alongside the agent | ❌ (planned: [#217](https://github.com/debugmcp/mcp-debugger/issues/217)) | ✅ native |
+| In-IDE debugging UX alongside the agent | ✅ read-only IDE mirror (`expose_session`, [#217](https://github.com/debugmcp/mcp-debugger/issues/217)) | ✅ native |
 | C/C++, PHP | ❌ | ✅ via VS Code extensions |
 | Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
 
@@ -170,6 +170,8 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 | `restart_debugging` | Relaunch with the same config, breakpoints re-applied | ✅ Implemented |
 | `attach_to_process` | Attach debugger to a running process | ✅ Implemented |
 | `detach_from_process` | Detach debugger from a process | ✅ Implemented |
+| `expose_session` | Open a read-only DAP mirror endpoint so an IDE can attach and inspect | ✅ Implemented |
+| `unexpose_session` | Close the mirror endpoint and disconnect IDE clients | ✅ Implemented |
 | `get_stack_trace` | Get the current stack trace | ✅ Implemented |
 | `list_threads` | List all threads in the debug session | ✅ Implemented |
 | `get_scopes` | Get variable scopes for a frame | ✅ Implemented |

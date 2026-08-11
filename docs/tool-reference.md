@@ -30,7 +30,10 @@ This document provides a complete reference for all tools available in mcp-debug
    - [get_source_context](#get_source_context)
    - [get_output](#get_output)
 5. [Additional Tools](#additional-tools) — list_supported_languages, attach_to_process, detach_from_process, list_threads
-6. [Language-Specific Tools](#language-specific-tools)
+6. [IDE Mirror](#ide-mirror)
+   - [expose_session](#expose_session)
+   - [unexpose_session](#unexpose_session)
+7. [Language-Specific Tools](#language-specific-tools)
    - [redefine_classes](#redefine_classes)
 
 ---
@@ -934,6 +937,89 @@ The following tools are also available but are not fully documented with example
 - **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, adapter-specific attach configuration, and optionally `breakOnExceptions` (same mode semantics as on `start_debugging`, but attach never applies a language default — it stays `"none"` unless requested).
 - **detach_from_process**: Detaches the debugger from an attached process. Parameters include `sessionId` and optional `terminateProcess` flag.
 - **list_threads**: Lists all threads in the debug session. Parameters include `sessionId`.
+
+---
+
+## IDE Mirror
+
+The DAP mirror (issue #217) lets a human attach an IDE — VS Code, nvim-dap, any DAP client — to an agent-owned debug session as a **read-only second client**. The agent debugs a process no IDE launched (CI, a container, a terminal-driven run), parks it at an interesting point, and hands over host/port/token; the human lands on the live paused frame and inspects real state. Execution control stays with the MCP session.
+
+### expose_session
+
+Starts a per-session DAP server endpoint on `127.0.0.1` (ephemeral port) inside the session's debug proxy. Requires an active session (launched or attached); works while running or paused. Idempotent — calling it again returns the same endpoint and token.
+
+**Parameters:**
+- `sessionId` (string, required): The debug session ID
+
+**Response:**
+```json
+{
+  "success": true,
+  "state": "paused",
+  "host": "127.0.0.1",
+  "port": 52341,
+  "token": "kx3P…32-char-random…",
+  "message": "Session exposed for IDE attach at 127.0.0.1:52341. VS Code: add a launch.json config … and start it. …"
+}
+```
+
+The endpoint closes on `unexpose_session`, `close_debug_session`, `restart_debugging`, or debuggee exit. `list_debug_sessions` shows `exposure: {host, port}` for exposed sessions (never the token).
+
+**Connecting VS Code:**
+
+```jsonc
+// .vscode/launch.json
+{
+  "name": "Mirror: agent debug session",
+  "type": "python",            // your language's debug type — see table below
+  "request": "attach",
+  "debugServer": 52341,         // the port from expose_session
+  "mirrorToken": "<token from expose_session>"
+}
+```
+
+`debugServer` points VS Code directly at a running DAP server; extra properties like `mirrorToken` are passed through in the attach request, where the mirror validates them.
+
+| Session language | VS Code `type` |
+|---|---|
+| python | `python` |
+| javascript | `node` |
+| java | `java` |
+| go | `go` |
+| rust | `lldb` |
+| dotnet | `coreclr` |
+| ruby | `rdbg` |
+
+Other DAP clients (nvim-dap, etc.): connect a TCP DAP client to the host/port and include `mirrorToken` in the `attach` request arguments.
+
+**What the mirror serves:**
+- Answered locally: `initialize` (from the adapter's real capabilities, with control affordances masked off), `attach`/`launch` (token check), `configurationDone`, `disconnect` (that client only), `cancel`.
+- Forwarded to the live adapter: `threads`, `stackTrace`, `scopes`, `variables`, `source`, `evaluate`, `exceptionInfo`, `loadedSources`, `modules`.
+- Soft-succeeded so IDE attach flows survive: `setBreakpoints`/`setFunctionBreakpoints` (reported unverified — breakpoints stay agent-owned), `setExceptionBreakpoints`.
+- Rejected with a quiet error: `continue`, `next`, `stepIn`, `stepOut`, `pause`, `setVariable`, `restart`, `terminate`, and every other control or mutation request.
+
+On attach while the session is paused, the mirror replays the last stop as a `stopped` event, so the IDE lands directly on the paused frame.
+
+**Security:** the endpoint binds loopback only and every client must present the per-expose token. Treat the token as a **debuggee-execution capability**, not a view-only credential — `evaluate` is forwarded, and DAP evaluate can run arbitrary code in the debuggee. The token appears only in the `expose_session` result and is redacted from logs. "Read-only" means execution control and breakpoint changes are rejected, not that the debuggee is immutable.
+
+**Container note:** when the server runs inside a container, the mirror listens on the *container's* loopback — a host IDE cannot reach it without extra networking (`docker run --network host` on Linux, or a socat/ssh forward into the container). The same applies to any deployment where the MCP server host is not the IDE host.
+
+### unexpose_session
+
+Closes the mirror endpoint and disconnects any attached IDE clients (they receive a `terminated` event). A no-op success when the session is not exposed.
+
+**Parameters:**
+- `sessionId` (string, required): The debug session ID
+
+**Response:**
+```json
+{
+  "success": true,
+  "state": "paused",
+  "wasExposed": true,
+  "message": "Mirror endpoint closed (1 client disconnected)"
+}
+```
 
 ---
 

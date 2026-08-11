@@ -19,6 +19,7 @@ import {
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
+import { DapFrameDecoder, encodeDapMessage } from './dap-framing.js';
 
 const logger = createLogger('minimal-dap-simple');
 
@@ -30,12 +31,17 @@ type MinimalDapClientOptions = {
   };
 };
 
-const TWO_CRLF = '\r\n\r\n';
-
 export class MinimalDapClient extends EventEmitter {
   private socket: Socket | null = null;
-  private rawData = Buffer.alloc(0);
-  private contentLength = -1;
+  private decoder = new DapFrameDecoder({
+    onError: (error, context) => {
+      if (context === 'header') {
+        logger.warn('[MinimalDapClient] Invalid Content-Length header encountered; discarding payload');
+      } else {
+        logger.error('[MinimalDapClient] Error parsing message:', error);
+      }
+    }
+  });
   private pendingRequests = new Map<number, {
     resolve: (response: DebugProtocol.Response) => void;
     reject: (error: Error) => void;
@@ -123,65 +129,12 @@ export class MinimalDapClient extends EventEmitter {
 
   /**
    * Handle raw data using the same algorithm as vscode's ProtocolServer
-   * This ensures compatibility and proper message boundaries
+   * (extracted to DapFrameDecoder). This ensures compatibility and proper
+   * message boundaries.
    */
   private handleData(data: Buffer): void {
-    this.rawData = Buffer.concat([this.rawData, data]);
-    
-    while (true) {
-      if (this.contentLength >= 0) {
-        // We have a content length, check if we have the full message
-        if (this.rawData.length >= this.contentLength) {
-          const message = this.rawData.toString('utf8', 0, this.contentLength);
-          this.rawData = this.rawData.slice(this.contentLength);
-          this.contentLength = -1;
-          
-          // Parse and handle the message
-          if (message.length > 0) {
-            try {
-              const msg = JSON.parse(message) as DebugProtocol.ProtocolMessage;
-              void this.handleProtocolMessage(msg);
-            } catch (e) {
-              logger.error('[MinimalDapClient] Error parsing message:', e);
-            }
-          }
-          continue;
-        }
-      }
-      
-      // Look for the header
-      const idx = this.rawData.indexOf(TWO_CRLF);
-      if (idx === -1) {
-        // No complete header yet
-        break;
-      }
-      
-      const header = this.rawData.toString('utf8', 0, idx);
-      const lines = header.split('\r\n');
-      let parsedLength: number | null = null;
-
-      for (const line of lines) {
-        if (line.toLowerCase().startsWith('content-length')) {
-          const value = line.split(':')[1]?.trim();
-          const candidate = Number.parseInt(value ?? '', 10);
-          if (!Number.isNaN(candidate)) {
-            parsedLength = candidate;
-          }
-          break;
-        }
-      }
-
-      // Remove header from buffer
-      this.rawData = this.rawData.slice(idx + TWO_CRLF.length);
-
-      if (parsedLength === null || parsedLength <= 0 || !Number.isFinite(parsedLength)) {
-        logger.warn('[MinimalDapClient] Invalid Content-Length header encountered; discarding payload');
-        this.contentLength = -1;
-        this.rawData = Buffer.alloc(0);
-        continue;
-      }
-
-      this.contentLength = parsedLength;
+    for (const msg of this.decoder.push(data)) {
+      void this.handleProtocolMessage(msg);
     }
   }
 
@@ -648,10 +601,8 @@ export class MinimalDapClient extends EventEmitter {
       
       // Send the request
       this.appendTrace('out', request);
-      const json = JSON.stringify(request);
-      const contentLength = Buffer.byteLength(json, 'utf8');
-      const message = `Content-Length: ${contentLength}${TWO_CRLF}${json}`;
-      
+      const message = encodeDapMessage(request);
+
       // Socket was already checked above, but TypeScript needs reassurance
       if (!this.socket) {
         this.timers.clearTimeout(timer);
@@ -671,9 +622,7 @@ export class MinimalDapClient extends EventEmitter {
   }
 
   private writeMessage(message: DebugProtocol.ProtocolMessage): void {
-    const json = JSON.stringify(message);
-    const contentLength = Buffer.byteLength(json, 'utf8');
-    const payload = `Content-Length: ${contentLength}${TWO_CRLF}${json}`;
+    const payload = encodeDapMessage(message);
     this.appendTrace('out', message);
     if (this.socket && !this.socket.destroyed) {
       this.socket.write(payload);
@@ -751,8 +700,7 @@ export class MinimalDapClient extends EventEmitter {
     this.pendingRequests.clear();
     
     // Clear buffer to free memory
-    this.rawData = Buffer.alloc(0);
-    this.contentLength = -1;
+    this.decoder.reset();
     
     // Remove all listeners to prevent memory leaks
     if (immediate) {

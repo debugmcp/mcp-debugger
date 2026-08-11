@@ -71,6 +71,16 @@ attach_to_process {sessionId, host: "localhost", port: 5678, localRoot: "<local 
 
 `detach_from_process` leaves the target running; `close_debug_session` after detach cleans up the session.
 
+## IDE mirror (let a human look around)
+
+When a human wants to inspect your live session in their IDE — CI flake parked at the failing state, a long-running attach session that hit an anomaly — expose it:
+
+```text
+expose_session {sessionId}  ->  {host: "127.0.0.1", port, token}
+```
+
+Relay the endpoint with a ready-to-paste VS Code config: `{"name": "Mirror", "type": "<language's debug type>", "request": "attach", "debugServer": <port>, "mirrorToken": "<token>"}`. Their IDE attaches read-only and lands directly on the paused frame: stacks, scopes, variables, and evaluate all work; stepping, continuing, and breakpoint changes are rejected — execution control stays with you. `unexpose_session {sessionId}` disconnects IDE clients and closes the endpoint (it also closes on session close/restart/exit). Loopback-only; the token is required and should be treated as sensitive.
+
 ## Crash diagnosis
 
 - Launch sessions pause at uncaught exceptions **by default** (`breakOnExceptions: "uncaught"`) with the stack and locals live instead of losing the session — pass `"none"` to opt out, or `"all"` to also stop on caught raises (language-dependent). Ruby is the exception: rdbg has no uncaught-only filter, so Ruby crashes still run to termination unless you pass `"all"`. Attach sessions apply no default — pass the mode explicitly.
