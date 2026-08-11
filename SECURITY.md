@@ -71,6 +71,7 @@ If you want to constrain what the MCP client can reach, constrain the mcp-debugg
 - **Network exposure.** If running in SSE mode, treat the SSE port as a remote shell endpoint — anyone who can reach it inherits the mcp-debugger process's privileges. Bind to loopback or put it behind authenticated network access.
 - **Remote debuggees.** When using `attach_to_process` to debug a process on another host, the MCP client inherits that debuggee's privileges too. Apply the same containment reasoning there.
 - **MCP client trust.** Do not expose mcp-debugger to an MCP client that you trust less than the OS user mcp-debugger runs under.
+- **DAP mirror endpoints.** `expose_session` opens a per-session DAP endpoint bound to `127.0.0.1` and gated by a random per-expose token. The mirror rejects execution control and breakpoint changes, but it forwards `evaluate` — and DAP evaluate can execute arbitrary code in the debuggee — so **treat the mirror token as a debuggee-execution capability, not a view-only credential**. Any local process that obtains the token gets that capability; the token is returned only in the `expose_session` result and is redacted from logs. "Read-only" means control is rejected, not that the debuggee is immutable.
 
 ## Security Design
 

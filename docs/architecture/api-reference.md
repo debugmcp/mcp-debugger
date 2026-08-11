@@ -368,6 +368,12 @@ Detaches the debugger from an attached process.
 #### `redefineClasses(sessionId: string, classesDir: string, sinceTimestamp?: number, timeoutMs?: number): Promise<RedefineClassesResult>`
 Java only. Hot-swaps changed classes into a running JVM via a custom DAP `redefineClasses` request. `sinceTimestamp` (ms) limits the scan to `.class` files modified after that time (0/omitted = all); `timeoutMs` overrides the DAP request timeout. Exposed as the `redefine_classes` MCP tool.
 
+#### `exposeSession(sessionId: string): Promise<ExposeSessionResult>`
+Opens the session's read-only DAP mirror endpoint (issue #217) by sending the `mirrorExpose` pseudo-command to the proxy worker, which hosts a loopback-only, token-gated DAP server multiplexed onto the live adapter connection. Returns `{host, port, token}`; idempotent while exposed (same endpoint, token unrotated). Requires a running proxy. Exposed as the `expose_session` MCP tool.
+
+#### `unexposeSession(sessionId: string): Promise<UnexposeSessionResult>`
+Closes the mirror endpoint via the `mirrorUnexpose` pseudo-command and disconnects mirror clients (they receive a `terminated` event). A no-op success when not exposed; when the proxy is already gone it just clears the stale exposure record. Exposed as the `unexpose_session` MCP tool.
+
 #### `listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>`
 Lists all threads in the debug session.
 

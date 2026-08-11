@@ -381,7 +381,7 @@ You can also evaluate arbitrary expressions in the current debug context:
 
 ## Fully Implemented Features
 
-All 26 tools are fully implemented, including:
+All 28 tools are fully implemented, including:
 
 - **restart_debugging**: One call terminates the current debuggee (if any) and relaunches with the same configuration; breakpoints re-apply automatically and the output buffer starts fresh (read from `since: 0`). Works while running, paused, or after the program exited; attach sessions are rejected with a clear error.
 - **list_breakpoints / remove_breakpoint / clear_breakpoints**: Full breakpoint lifecycle management. Listing shows each breakpoint's verified state and adapter-assigned id; removal (by id, or file+line) and clearing take effect immediately while the program is running or paused, and still work after the program exits so breakpoints can be adjusted before a relaunch.
@@ -389,6 +389,7 @@ All 26 tools are fully implemented, including:
 - **pause_execution**: Sends a DAP pause request and returns immediately; paused state is updated asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
 - **get_output**: Returns the debuggee's stdout/stderr/console output, buffered per launch from DAP output events. Cursor-based (`since`/`nextSince`) for incremental polling; output stays readable after the program exits until the session is closed. The same data is exposed as a subscribable MCP resource (`debug://sessions/{id}/output`).
 - **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. When `frameId` is not specified, the server infers it by fetching the stack trace and using the topmost frame -- this works reliably only when a single frame exists or the top frame is the desired context. Callers should provide `frameId` explicitly when debugging code with multiple stack frames. Expressions with side effects are allowed (can modify program state).
+- **expose_session / unexpose_session**: Opens a read-only DAP mirror endpoint (loopback-only, token-gated) so an IDE such as VS Code can attach to the live session and inspect the paused state — threads, stack, scopes, variables, evaluate — while execution control stays with the MCP session. See [tool-reference.md](tool-reference.md#expose_session) for the VS Code `launch.json` recipe.
 
 ## Best Practices
 
@@ -400,4 +401,4 @@ All 26 tools are fully implemented, including:
 
 ---
 
-*Last updated: 2026-08-05 - All 26 tools including breakpoint management (#236), logpoints (#235), and restart_debugging (#238) are fully implemented*
+*Last updated: 2026-08-11 - All 28 tools including breakpoint management (#236), logpoints (#235), restart_debugging (#238), and the DAP mirror (#217) are fully implemented*
