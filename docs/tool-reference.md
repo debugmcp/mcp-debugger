@@ -260,12 +260,15 @@ Lists all breakpoints in a session with their current verified state and adapter
       "adapterId": 3
     }
   ],
-  "count": 1
+  "count": 1,
+  "functionBreakpoints": [],
+  "functionCount": 0
 }
 ```
 
 **Notes:**
 - The array is sorted by file, then line. Conditional breakpoints include their `condition`; Java suspend policies appear as `suspendPolicy`.
+- `functionBreakpoints`/`functionCount` are always present in the unfiltered response (empty arrays when none exist). When filtering by `file` they are omitted — function breakpoints are session-global, not file-scoped.
 - `adapterId` is the debug adapter's own numeric id for the breakpoint, captured from setBreakpoints responses and breakpoint events. It is absent until the adapter has seen the breakpoint.
 - Verification is eventually consistent: some adapters (js-debug, JDI, netcoredbg) bind breakpoints asynchronously and confirm via DAP breakpoint events shortly after launch or class load.
 
