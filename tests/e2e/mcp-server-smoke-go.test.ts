@@ -353,5 +353,99 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       }
     }
   }, 60000);
+
+  it('surfaces every stage of feedback for a bare fn-bp name that never binds (#308)', async (ctx) => {
+    // The full loop the issue asked for: hint at set time, warning at
+    // launch, and a post-exit explanation in list_breakpoints + get_output.
+    const { execSync } = await import('child_process');
+    try {
+      execSync('go version', { stdio: 'ignore' });
+      execSync('dlv version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Go Smoke Test] Go/Delve not installed, skipping bare-name feedback test');
+      return;
+    }
+
+    const testGoFile = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
+    const testBinary = path.resolve(ROOT, 'examples', 'go', 'hello_world_bare_test');
+    try {
+      execSync(`go build -gcflags="all=-N -l" -o "${testBinary}" "${testGoFile}"`, {
+        cwd: path.dirname(testGoFile),
+        stdio: 'pipe'
+      });
+    } catch {
+      console.log('[Go Smoke Test] Failed to compile test binary, skipping bare-name feedback test');
+      return;
+    }
+
+    try {
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'go', name: 'go-fnbp-bare' }
+      }));
+      sessionId = createResponse.sessionId as string;
+
+      // Stage 1: set-time hint for the bare identifier.
+      const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        function: 'main'
+      });
+      expect(bpResponse.success).toBe(true);
+      expect((bpResponse as { warning?: string }).warning).toMatch(/package-qualified/);
+      expect((bpResponse as { warning?: string }).warning).toContain("'main.main'");
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: testBinary,
+          args: [],
+          dapLaunchArgs: { stopOnEntry: false }
+        }
+      }));
+      if (!startResponse.success) {
+        skipIfSpawnBlocked(ctx, startResponse, 'Go');
+      }
+
+      // Stage 2: launch-time warning (when launch outlives the program the
+      // warning may arrive with state stopped — accept either shape).
+      const startWarning = (startResponse as { warning?: string }).warning;
+      if (startWarning !== undefined) {
+        expect(startWarning).toMatch(/not bound at launch/);
+      }
+
+      // The program runs to completion — no pause ever fires.
+      const deadline = Date.now() + 20000;
+      let snap: { state?: string } | undefined;
+      while (Date.now() < deadline) {
+        const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+        snap = ((res.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+        if (snap?.state === 'stopped') break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(snap?.state, 'program should run to completion without pausing').toBe('stopped');
+
+      // Stage 3: post-exit explanation in list_breakpoints...
+      const listRes = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId });
+      const fnBp = ((listRes as { functionBreakpoints?: Array<{ verified?: boolean; message?: string }> }).functionBreakpoints ?? [])[0];
+      expect(fnBp?.verified).toBe(false);
+      expect(fnBp?.message).toMatch(/Never bound during this run/);
+
+      // ...and in the captured output.
+      const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+      const entries = (outputResult.entries ?? []) as Array<{ category?: string; output?: string }>;
+      const warnEntry = entries.find(e => e.output?.includes('never bound during this run'));
+      expect(warnEntry, 'get_output should carry the never-bound warning').toBeDefined();
+    } finally {
+      try {
+        const fs = await import('fs');
+        if (fs.existsSync(testBinary)) {
+          fs.unlinkSync(testBinary);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }, 60000);
 });
 

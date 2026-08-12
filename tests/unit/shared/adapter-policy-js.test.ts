@@ -3,6 +3,12 @@ import { EventEmitter } from 'events';
 import { JsDebugAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-js.js';
 
 describe('JsDebugAdapterPolicy', () => {
+  it('declares late-binding function breakpoints (issue #308)', () => {
+    // CDP re-resolve at pauses for late-loaded modules: unverified at
+    // launch is by design, so the launch-time unbound warning must skip js.
+    expect(JsDebugAdapterPolicy.functionBreakpointsBindLate).toBe(true);
+  });
+
   it('builds child start args with pending target id and defaults', () => {
     const result = JsDebugAdapterPolicy.buildChildStartArgs('pending-123', {});
     expect(result.command).toBe('attach');

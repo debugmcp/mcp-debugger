@@ -14,6 +14,17 @@ export const GoAdapterPolicy: AdapterPolicy = {
   name: 'go',
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
+  /**
+   * Delve resolves function breakpoints against package-qualified runtime
+   * names; a bare identifier is accepted but never binds (issue #308) — the
+   * program simply runs to completion with no pause and no error.
+   */
+  functionBreakpointNameHint: (name: string): string | undefined => {
+    if (!name.includes('.')) {
+      return `Go function breakpoints use package-qualified names — for func ${name} in package main use 'main.${name}'. A bare identifier like '${name}' will never bind`;
+    }
+    return undefined;
+  },
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

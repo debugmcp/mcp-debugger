@@ -115,6 +115,30 @@ describe('SessionManager - restart and relaunch', () => {
       expect(data.outputReset).toBe(true);
     });
 
+    it('carries a startDebugging warning through the restart data merge (#308 join fix)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      // A function breakpoint the mock never verifies -> startDebugging emits
+      // a data.warning that the restart merge must preserve, not clobber.
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main' });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      const restartPromise = sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
+      const result = await restartPromise;
+
+      expect(result.success).toBe(true);
+      const data = result.data as { warning?: string; breakpointsReapplied?: number };
+      expect(data.warning).toMatch(/not bound at launch/);
+      expect(data.breakpointsReapplied).toBe(0);
+    });
+
     it('refuses when the session has never been launched', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,

@@ -410,6 +410,18 @@ export class DebugMcpServer {
   }
 
   /**
+   * Per-adapter function-breakpoint name advisory (issues #303/#308).
+   * Swallows policy-lookup failures — a hint must never break the set path.
+   */
+  private getFunctionBreakpointNameHint(sessionId: string, functionName: string): string | undefined {
+    try {
+      return this.sessionManager.getSessionPolicy(sessionId).functionBreakpointNameHint?.(functionName);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Shared catch for the breakpoint management tools: session-lifecycle
    * failures become {success: false} results (same contract as
    * set_breakpoint's catch); everything else re-throws.
@@ -1210,6 +1222,11 @@ export class DebugMcpServer {
 
                 try {
                   const fnGate = this.validateFunctionBreakpointSupport(args.sessionId);
+                  // Per-adapter name advisory (issues #303/#308): warn at set
+                  // time about names the adapter is known to mis-resolve
+                  // (rust bare 'main' -> CRT entry) or never bind (go bare
+                  // identifiers). Advisory only — the breakpoint is still set.
+                  const nameHint = this.getFunctionBreakpointNameHint(args.sessionId, args.function!);
                   const { breakpoint, warning: syncWarning } = await this.setFunctionBreakpoint(
                     args.sessionId, args.function!, args.condition
                   );
@@ -1224,7 +1241,7 @@ export class DebugMcpServer {
                     timestamp: Date.now()
                   });
 
-                  const warnings = [breakpoint.message, fnGate.warning, syncWarning].filter(Boolean);
+                  const warnings = [breakpoint.message, fnGate.warning, nameHint, syncWarning].filter(Boolean);
                   result = { content: [{ type: 'text', text: JSON.stringify({
                     success: true,
                     breakpointId: breakpoint.id,
@@ -1498,8 +1515,13 @@ export class DebugMcpServer {
                 if (debugResult.data) {
                   responsePayload.data = debugResult.data;
                 }
-                if (debugResult.success && intake.warnings.length > 0) {
-                  responsePayload.warning = intake.warnings.join('; ');
+                // Top-level warning join (set_breakpoint pattern): intake
+                // normalization notes (issue #305) plus any session-manager
+                // warning (unbound function breakpoints, issue #308).
+                const dataWarning = (debugResult.data as { warning?: string } | undefined)?.warning;
+                const startWarnings = [...intake.warnings, dataWarning].filter(Boolean);
+                if (debugResult.success && startWarnings.length > 0) {
+                  responsePayload.warning = startWarnings.join('; ');
                 }
                 result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
               } catch (error) {
@@ -1534,6 +1556,13 @@ export class DebugMcpServer {
                 }
                 if (debugResult.data) {
                   responsePayload.data = debugResult.data;
+                  // Surface the merged restart warning (stale anchors and/or
+                  // unbound function breakpoints) at the top level too —
+                  // same discoverability as set_breakpoint/start_debugging.
+                  const restartWarning = (debugResult.data as { warning?: string }).warning;
+                  if (debugResult.success && restartWarning) {
+                    responsePayload.warning = restartWarning;
+                  }
                 }
                 result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
               } catch (error) {
