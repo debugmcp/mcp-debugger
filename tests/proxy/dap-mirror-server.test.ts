@@ -9,6 +9,7 @@ import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
   DapMirrorServer,
+  CONFIGURATION_DONE_FALLBACK_MS,
   type DapMirrorHost,
   type MirrorNetServer,
   type MirrorSocket
@@ -302,7 +303,7 @@ describe('DapMirrorServer', () => {
       expect(stopIdx).toBeGreaterThan(cfgIdx);
     });
 
-    it('falls back to a 1s timer for clients that never send configurationDone', async () => {
+    it('falls back to a short timer for clients that never send configurationDone', async () => {
       vi.useFakeTimers();
       const h = await createHarness({ lastStop });
       const socket = h.connect();
@@ -310,8 +311,24 @@ describe('DapMirrorServer', () => {
       send(socket, request('attach', { mirrorToken: h.endpoint.token }));
       await vi.advanceTimersByTimeAsync(0);
 
+      // Never at t=0: protocol-following IDEs must not see a stopped event
+      // before their configuration phase.
       expect(events(socket).map((e) => e.event)).not.toContain('stopped');
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(CONFIGURATION_DONE_FALLBACK_MS);
+      expect(events(socket).filter((e) => e.event === 'stopped')).toHaveLength(1);
+    });
+
+    it('delivers a live stopped broadcast to a client still in the configuration phase', async () => {
+      // The synthesized late-join replay waits for configurationDone, but a
+      // real stop happening mid-handshake is broadcast immediately — the
+      // mirror's ordering tolerance the short fallback relies on.
+      const h = await createHarness();
+      const socket = h.connect();
+      await join(h, socket);
+
+      h.server.broadcastEvent('stopped', { reason: 'breakpoint', threadId: 3 });
+      await flush();
+
       expect(events(socket).filter((e) => e.event === 'stopped')).toHaveLength(1);
     });
 
