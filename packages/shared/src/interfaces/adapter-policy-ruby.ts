@@ -210,6 +210,9 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       port: payload.adapterPort,
       logDir: payload.logDir,
       env: payload.adapterCommand.env,
+      // The debuggee inherits this process's working directory (rdbg -c),
+      // so the user's launch cwd must be applied at spawn (issue #320).
+      cwd: payload.adapterCommand.cwd,
       // rdbg -c runs the debuggee as a child of the adapter process with
       // inherited stdio while DAP travels over TCP — the program's output
       // only ever appears on the adapter's pipes (issue #222). rdbg's own

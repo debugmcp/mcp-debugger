@@ -310,4 +310,49 @@ describe('MCP Server Ruby Debugging Smoke Test @requires-ruby', () => {
     // rdbg inspects results, so a String comes back quoted.
     expect(String(evalResult.result)).toContain('hello-318');
   }, 90000);
+
+  it('applies dapLaunchArgs.cwd to the debuggee (issue #320)', async () => {
+    if (!(await rubyToolchainAvailable())) {
+      console.log('[Ruby Smoke Test] Ruby/rdbg not available, skipping launch cwd test');
+      return;
+    }
+
+    const testRubyFile = path.resolve(ROOT, 'examples', 'ruby', 'fizzbuzz.rb');
+    const targetCwd = path.resolve(ROOT, 'examples', 'ruby');
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'ruby', name: 'ruby-launch-cwd-test' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      file: testRubyFile,
+      line: 15
+    });
+    expect(bpResponse.success).toBe(true);
+
+    // rdbg -c starts the debuggee at spawn time, so cwd can only reach it
+    // through the spawn options — the DAP launch request is an ack.
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: testRubyFile,
+        dapLaunchArgs: { cwd: targetCwd }
+      }
+    })) as { state?: string };
+    expect(startResponse.state).toBe('paused');
+
+    // Evaluate only the tail of the path: the full Dir.pwd is rooted in the
+    // user's home dir, which the #237 redaction (on by default) masks as
+    // <redacted:sensitive-name>, hiding the segments we assert on.
+    const evalResult = await callToolSafely(mcpClient!, 'evaluate_expression', {
+      sessionId,
+      expression: "Dir.pwd.split('/').last(2).join('/')"
+    });
+    expect(String(evalResult.result)).toContain('examples/ruby');
+  }, 90000);
 });

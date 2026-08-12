@@ -167,6 +167,39 @@ describe('RubyDebugAdapter', () => {
     expect(command.env?.RUBY_DEBUG_DAP_SHOW_PROTOCOL).toBe('1');
   });
 
+  it('carries launchConfig.cwd on the adapter command (issue #320)', () => {
+    vi.mocked(ensureRubySyncHelper).mockReturnValue('/tmp/logs/mcp_stdout_sync.rb');
+    const adapter = new RubyDebugAdapter(createDependencies());
+    (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
+      .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
+
+    const withCwd = adapter.buildAdapterCommand({
+      sessionId: 'ruby-session',
+      executablePath: '/usr/bin/ruby',
+      adapterHost: '127.0.0.1',
+      adapterPort: 8123,
+      logDir: '/tmp/logs',
+      scriptPath: '/workspace/app.rb',
+      scriptArgs: [],
+      launchConfig: { cwd: '/workspace/subdir' }
+    });
+    // rdbg -c starts the debuggee at spawn time, so the spawn cwd is the
+    // only channel — the DAP launch request's cwd is an ack.
+    expect(withCwd.cwd).toBe('/workspace/subdir');
+
+    const withoutCwd = adapter.buildAdapterCommand({
+      sessionId: 'ruby-session',
+      executablePath: '/usr/bin/ruby',
+      adapterHost: '127.0.0.1',
+      adapterPort: 8123,
+      logDir: '/tmp/logs',
+      scriptPath: '/workspace/app.rb',
+      scriptArgs: [],
+      launchConfig: {}
+    });
+    expect(withoutCwd.cwd).toBeUndefined();
+  });
+
   it('keeps the default spawn env when no launchConfig.env is given', () => {
     vi.mocked(ensureRubySyncHelper).mockReturnValue('/tmp/logs/mcp_stdout_sync.rb');
     vi.stubEnv('MCP_TEST_INHERITED', 'inherited');
