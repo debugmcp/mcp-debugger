@@ -32,6 +32,7 @@ const createDependencies = () => ({
 describe('RubyDebugAdapter', () => {
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('caches resolveExecutablePath results', async () => {
@@ -131,6 +132,61 @@ describe('RubyDebugAdapter', () => {
       '-r/tmp/logs/mcp_stdout_sync.rb',
       '/workspace/app.rb'
     ]);
+  });
+
+  it('merges launchConfig.env into the spawn env (issue #318)', () => {
+    vi.mocked(ensureRubySyncHelper).mockReturnValue('/tmp/logs/mcp_stdout_sync.rb');
+    vi.stubEnv('MCP_TEST_INHERITED', 'old');
+    const adapter = new RubyDebugAdapter(createDependencies());
+    (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
+      .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
+
+    const command = adapter.buildAdapterCommand({
+      sessionId: 'ruby-session',
+      executablePath: '/usr/bin/ruby',
+      adapterHost: '127.0.0.1',
+      adapterPort: 8123,
+      logDir: '/tmp/logs',
+      scriptPath: '/workspace/app.rb',
+      scriptArgs: [],
+      launchConfig: {
+        env: {
+          RAILS_ENV: 'test',
+          MCP_TEST_INHERITED: 'new',
+          RUBY_DEBUG_DAP_SHOW_PROTOCOL: '1'
+        }
+      }
+    });
+
+    // User-supplied values reach the debuggee (rdbg -c starts it at spawn
+    // time, so the spawn env is the only channel).
+    expect(command.env?.RAILS_ENV).toBe('test');
+    // An explicit user value wins over the inherited process.env value...
+    expect(command.env?.MCP_TEST_INHERITED).toBe('new');
+    // ...and over adapter defaults.
+    expect(command.env?.RUBY_DEBUG_DAP_SHOW_PROTOCOL).toBe('1');
+  });
+
+  it('keeps the default spawn env when no launchConfig.env is given', () => {
+    vi.mocked(ensureRubySyncHelper).mockReturnValue('/tmp/logs/mcp_stdout_sync.rb');
+    vi.stubEnv('MCP_TEST_INHERITED', 'inherited');
+    const adapter = new RubyDebugAdapter(createDependencies());
+    (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
+      .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
+
+    const command = adapter.buildAdapterCommand({
+      sessionId: 'ruby-session',
+      executablePath: '/usr/bin/ruby',
+      adapterHost: '127.0.0.1',
+      adapterPort: 8123,
+      logDir: '/tmp/logs',
+      scriptPath: '/workspace/app.rb',
+      scriptArgs: [],
+      launchConfig: {}
+    });
+
+    expect(command.env?.MCP_TEST_INHERITED).toBe('inherited');
+    expect(command.env?.RUBY_DEBUG_DAP_SHOW_PROTOCOL).toBe('0');
   });
 
   it('launches without the prelude when the sync helper cannot be materialized', () => {
