@@ -236,6 +236,34 @@ describe('Break-on-exception (issue #220)', () => {
         }
       })).rejects.toThrow(/breakOnExceptions/);
     }, 30000);
+
+    it("honors breakOnExceptions 'none' nested inside dapLaunchArgs with a warning (#305)", async () => {
+      sessionId = await createSession('mock', 'mock-nested-break-on-exceptions');
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: CRASHING_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false, breakOnExceptions: 'none' }
+        }
+      }));
+      expect(startRes.success).toBe(true);
+      expect((startRes as { warning?: string }).warning).toMatch(
+        /breakOnExceptions is a top-level start_debugging parameter/
+      );
+
+      // Previously the nested value was silently dropped and the default
+      // 'uncaught' paused at the crash site; now the session runs to
+      // completion exactly like the top-level 'none' case above.
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 10000);
+      expect(stopped, 'session should run to completion').toBeDefined();
+      expect(stopped!.lastStop).toBeUndefined();
+      expect(stopped!.exitCode).toBe(0);
+    }, 30000);
   });
 
   describe('Python launch', () => {
